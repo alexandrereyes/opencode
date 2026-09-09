@@ -65,11 +65,13 @@ test("context tab retains selection across sessions and shows live quota and sub
     durable: { aggregateID: fixture.childID, seq: 2, version: 1 },
     data: { sessionID: fixture.childID },
   })
-  await expect(overview.getByRole("link", { name: /Live child title/ })).toContainText("Running")
-  await expect(overview.getByRole("button", { name: "1 background task running" })).toBeVisible()
-  await overview.getByRole("button", { name: "1 background task running" }).click()
-  await expect(page.locator('[data-component="session-background-list"]')).toContainText("Live child title")
-  await page.keyboard.press("Escape")
+  await expect(overview.getByRole("link", { name: /Live child title.*Running/ })).toBeVisible()
+  await expect(
+    overview.getByRole("region", { name: "Session", exact: true }).locator('[data-component="text-shimmer"]'),
+  ).toHaveCount(0)
+  const background = overview.getByRole("list", { name: "Background tasks" })
+  await expect(background.getByRole("link", { name: /Live child title/ })).toBeVisible()
+  await expect(background.locator('[data-component="text-shimmer"]')).toHaveAttribute("data-active", "true")
   events.push({
     id: "evt_context_done",
     created: Date.now(),
@@ -135,4 +137,30 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
+})
+
+test("shows every background task inline, including tasks beyond the old ten-item limit", async ({ page }) => {
+  const children = Array.from({ length: 12 }, (_, index) => ({
+    ...fixture.sessions[0],
+    id: `ses_background_${index}`,
+    parentID: fixture.sourceID,
+    title: index === 0 ? `Long task ${"command".repeat(40)}` : `Background task ${index + 1}`,
+  }))
+  await mockOpenCodeServer(page, {
+    sessions: [...fixture.sessions, ...children],
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
+    sessionStatus: Object.fromEntries(children.map((child) => [child.id, { type: "busy" }])),
+  })
+  await installStressSessionTabs(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await page.getByRole("button", { name: "View context usage", exact: true }).click()
+  const tasks = page.getByRole("list", { name: "Background tasks" })
+  await expect(tasks.getByRole("listitem")).toHaveCount(12)
+  expect(await tasks.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect(tasks.getByRole("link", { name: "Background task 12 Agent", exact: true })).toBeVisible()
+  await tasks.getByRole("link", { name: "Background task 12 Agent", exact: true }).click()
+  await expect(page).toHaveURL(/ses_background_11$/)
 })

@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createResource, For, Show, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Dynamic } from "solid-js/web"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Switch } from "@opencode/ui/switch"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
-import { BackgroundWorkSummary } from "@/session/timeline/message-timeline"
 import { createSessionBackground } from "@/session/requests/background"
 import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
@@ -18,7 +18,7 @@ import { getFilename } from "@opencode/util/path"
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
   return (
-    <details open class="group border-b border-border-weak-base pb-5">
+    <details open class="group border-b border-border-weak-base pb-3">
       <summary class="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-sm text-14-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active [&::-webkit-details-marker]:hidden">
         <Icon
           name="chevron-down"
@@ -28,7 +28,7 @@ function Section(props: { title: string; count?: JSX.Element; children: JSX.Elem
         <span>{props.title}</span>
         <span class="ms-auto text-12-regular text-v2-text-text-muted tabular-nums">{props.count}</span>
       </summary>
-      <div class="mt-3 flex min-w-0 flex-col gap-3">{props.children}</div>
+      <div class="mt-1 flex min-w-0 flex-col gap-2">{props.children}</div>
     </details>
   )
 }
@@ -144,46 +144,45 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   })
 
   return (
-    <div data-slot="context-overview" class="flex min-w-0 flex-col gap-5 text-13-regular text-text-base">
-      <section
-        class="flex flex-col gap-3 border-b border-border-weak-base pb-5"
-        aria-label={language.t("context.overview.session")}
-      >
-        <h2 class="text-14-medium text-text-strong">{language.t("context.overview.session")}</h2>
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
-          <TextShimmer
-            text={language.t("context.overview.context")}
-            active={!!layout.params.id && data.session.status(layout.params.id) === "running"}
-          />
-          <bdi class="tabular-nums">
-            {props.tokens === undefined
-              ? "—"
-              : new Intl.NumberFormat(language.intl(), { notation: "compact", maximumFractionDigits: 1 }).format(
-                  props.tokens,
-                )}
-            {props.usage != null ? ` (${props.usage}%)` : ""}
-          </bdi>
-        </div>
-        <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
-        <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
-          <span>
-            {language.t("context.overview.costs", { session: money(info()?.cost ?? 0), subagents: money(childCost()) })}
-          </span>
-          <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
-        </div>
-      </section>
-      <section class="flex flex-col gap-3 border-b border-border-weak-base pb-5">
-        <div class="flex flex-wrap justify-between gap-2">
-          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.project")}</h2>
-          <bdi class="min-w-0 break-words">{project()?.name || getFilename(project()?.canonical ?? directory())}</bdi>
-        </div>
-        <div class="flex min-w-0 items-center gap-2 text-v2-text-text-muted">
-          <Icon name="branch" size="small" />
-          <bdi class="min-w-0 break-all">
-            {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
-          </bdi>
-        </div>
-      </section>
+    <div data-slot="context-overview" class="flex min-w-0 flex-col gap-3 text-13-regular text-text-base">
+      <div class="grid min-w-0 grid-cols-1 gap-3 border-b border-border-weak-base pb-3 @[32rem]:grid-cols-2 @[32rem]:gap-6">
+        <section class="flex min-w-0 flex-col gap-2" aria-label={language.t("context.overview.session")}>
+          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.session")}</h2>
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span>{language.t("context.overview.context")}</span>
+            <bdi class="tabular-nums">
+              {props.tokens === undefined
+                ? "—"
+                : new Intl.NumberFormat(language.intl(), { notation: "compact", maximumFractionDigits: 1 }).format(
+                    props.tokens,
+                  )}
+              {props.usage != null ? ` (${props.usage}%)` : ""}
+            </bdi>
+          </div>
+          <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
+          <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
+            <span>
+              {language.t("context.overview.costs", {
+                session: money(info()?.cost ?? 0),
+                subagents: money(childCost()),
+              })}
+            </span>
+            <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
+          </div>
+        </section>
+        <section class="flex min-w-0 flex-col gap-2">
+          <div class="flex flex-wrap justify-between gap-2">
+            <h2 class="text-14-medium text-text-strong">{language.t("context.overview.project")}</h2>
+            <bdi class="min-w-0 break-words">{project()?.name || getFilename(project()?.canonical ?? directory())}</bdi>
+          </div>
+          <div class="flex min-w-0 items-center gap-2 text-v2-text-text-muted">
+            <Icon name="branch" size="small" />
+            <bdi class="min-w-0 break-all">
+              {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
+            </bdi>
+          </div>
+        </section>
+      </div>
       <Section title={language.t("context.overview.subscriptions")} count={language.t("context.overview.remaining")}>
         <div class="flex items-center justify-between gap-2 text-12-regular text-v2-text-text-muted">
           <span>{language.t("context.overview.weekly")}</span>
@@ -218,7 +217,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             >
               <For each={subscriptions.latest?.accounts}>
                 {(account) => (
-                  <div class="flex flex-col gap-2 py-2">
+                  <div class="flex flex-col gap-1.5 py-1">
                     <div class="flex flex-wrap items-baseline justify-between gap-2">
                       <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
                       <bdi class="tabular-nums">{account.remaining === null ? "—" : `${account.remaining}%`}</bdi>
@@ -272,7 +271,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
               {(child) => (
                 <A
                   href={sessionHref(server.key, child.id)}
-                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
                 >
                   <span class="min-w-0 flex-1">
                     <bdi class="block truncate" title={child.title}>
@@ -308,7 +307,39 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           when={background.tasks().length}
           fallback={<p class="text-v2-text-text-muted">{language.t("context.overview.noBackground")}</p>}
         >
-          <BackgroundWorkSummary tasks={background.tasks()} />
+          <ul class="flex min-w-0 flex-col gap-1" aria-label={language.t("context.overview.background")}>
+            <For each={background.tasks()}>
+              {(task) => (
+                <li class="min-w-0">
+                  <Dynamic
+                    component={task.type === "subagent" ? A : "div"}
+                    href={task.type === "subagent" ? sessionHref(server.key, task.id) : undefined}
+                    class="flex min-h-7 min-w-0 items-start gap-2 rounded-md px-2 py-1"
+                    classList={{
+                      "hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active":
+                        task.type === "subagent",
+                    }}
+                  >
+                    <Icon
+                      name={task.type === "shell" ? "console" : "subagent"}
+                      size="small"
+                      class="mt-0.5 shrink-0 text-v2-text-text-muted"
+                    />
+                    <span class="min-w-0 flex-1 break-words">
+                      <TextShimmer
+                        text={task.label}
+                        active
+                        class="w-full [&_[data-slot]]:min-w-0 [&_[data-slot]]:whitespace-pre-wrap! [&_[data-slot]]:[overflow-wrap:anywhere]!"
+                      />
+                    </span>
+                    <span class="shrink-0 text-12-regular text-v2-text-text-muted">
+                      {language.t(task.type === "shell" ? "ui.tool.shell" : "ui.tool.agent.default")}
+                    </span>
+                  </Dynamic>
+                </li>
+              )}
+            </For>
+          </ul>
         </Show>
       </Section>
       <Section
