@@ -485,6 +485,8 @@ if (import.meta.main) {
     const config = Schema.decodeUnknownSync(Schema.fromJsonString(Config))(
       await Bun.file(path.join(home, "config.json")).text(),
     )
+    // Git hooks and package scripts spawn `bun` themselves; pin their PATH as well as direct invocations.
+    process.env.PATH = `${path.dirname(config.bun)}${path.delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`
     await locked(
       path.join(
         home,
