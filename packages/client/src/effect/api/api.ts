@@ -50,8 +50,36 @@ export interface HealthApi<E = never> {
 export type ServerGetOutput = { readonly urls: ReadonlyArray<string> }
 export type ServerGetOperation<E = never> = () => Effect.Effect<ServerGetOutput, E>
 
+export type ServerMaintenanceAcquireOutput = {
+  readonly lease: {
+    readonly identity: string
+    readonly token: string
+    readonly expires: number
+    readonly pid: number
+  } | null
+  readonly reason: string
+}
+export type ServerMaintenanceAcquireOperation<E = never> = () => Effect.Effect<ServerMaintenanceAcquireOutput, E>
+
+export type ServerMaintenanceCancelInput = { readonly token: string }
+export type ServerMaintenanceCancelOutput = { readonly cancelled: boolean }
+export type ServerMaintenanceCancelOperation<E = never> = (
+  input: ServerMaintenanceCancelInput,
+) => Effect.Effect<ServerMaintenanceCancelOutput, E>
+
+export type ServerMaintenanceCommitInput = { readonly token: string; readonly identity: string }
+export type ServerMaintenanceCommitOutput = { readonly committed: boolean }
+export type ServerMaintenanceCommitOperation<E = never> = (
+  input: ServerMaintenanceCommitInput,
+) => Effect.Effect<ServerMaintenanceCommitOutput, E>
+
 export interface ServerApi<E = never> {
   readonly get: ServerGetOperation<E>
+  readonly maintenance: {
+    readonly acquire: ServerMaintenanceAcquireOperation<E>
+    readonly cancel: ServerMaintenanceCancelOperation<E>
+    readonly commit: ServerMaintenanceCommitOperation<E>
+  }
 }
 
 export type LocationGetInput = {

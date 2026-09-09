@@ -2,6 +2,7 @@ export * as SessionRunCoordinator from "./run-coordinator.js"
 
 import { Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
 import type { Promotable } from "./inbox.js"
+import { Maintenance } from "../maintenance.js"
 
 /** Serializes execution for each key while allowing different keys to run concurrently. */
 export interface Coordinator<Key, E, Reason = never> {
@@ -69,6 +70,7 @@ export const make = <Key, E, Reason = never>(options: {
 }): Effect.Effect<Coordinator<Key, E, Reason>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const executions = new Map<Key, Execution<E, Reason>>()
+    yield* Maintenance.process.block(() => executions.size > 0)
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
 
     const loop = (key: Key, execution: Execution<E, Reason>, force: boolean): Effect.Effect<void, E> =>
@@ -178,8 +180,8 @@ export const make = <Key, E, Reason = never>(options: {
     return {
       active: Effect.sync(() => new Set(executions.keys())),
       isActive,
-      run,
-      wake,
+      run: (key) => Maintenance.process.run(run(key)),
+      wake: (key, scope) => Maintenance.process.run(wake(key, scope)),
       interrupt: (key, reason, options) =>
         Effect.suspend(() => {
           const execution = executions.get(key)

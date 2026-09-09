@@ -6,6 +6,7 @@ import { Identifier } from "./id/id.js"
 import { KV } from "./kv.js"
 import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
+import { Maintenance } from "./maintenance.js"
 
 const Background = Schema.Struct({
   id: Schema.String,
@@ -166,6 +167,8 @@ function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: Sessi
  */
 export const make = Effect.gen(function* () {
   const kv = yield* KV.Service
+  const activeScopes = new Set<Scope.Closeable>()
+  yield* Maintenance.process.block(() => activeScopes.size > 0)
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
     scope: yield* Scope.Scope,
@@ -214,7 +217,15 @@ export const make = Effect.gen(function* () {
     )
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info)
     if (result.scope) {
-      yield* Scope.close(result.scope, Exit.void).pipe(Effect.forkIn(state.scope, { startImmediately: true }))
+      const scope = result.scope
+      yield* Scope.close(scope, Exit.void).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            activeScopes.delete(scope)
+          }),
+        ),
+        Effect.forkIn(state.scope, { startImmediately: true }),
+      )
     }
     return result.info
   })
@@ -240,6 +251,7 @@ export const make = Effect.gen(function* () {
               return [{ info: snapshot(existing) }, jobs]
             }
             const scope = yield* Scope.fork(state.scope, "parallel")
+            activeScopes.add(scope)
             const job = {
               info: {
                 id,
@@ -265,6 +277,7 @@ export const make = Effect.gen(function* () {
             Effect.exit,
             Effect.flatMap((exit) => settle(id, result.scope, exit)),
             Effect.asVoid,
+            Maintenance.process.run,
             Effect.forkIn(result.scope, { startImmediately: true }),
           )
         return result.info
@@ -393,7 +406,16 @@ export const make = Effect.gen(function* () {
       }),
     )
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info)
-    if (result.scope) yield* Scope.close(result.scope, Exit.void)
+    if (result.scope) {
+      const scope = result.scope
+      yield* Scope.close(scope, Exit.void).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            activeScopes.delete(scope)
+          }),
+        ),
+      )
+    }
     return result.info
   })
 
@@ -414,7 +436,7 @@ export const make = Effect.gen(function* () {
 
   return Service.of({
     get,
-    start,
+    start: (input) => Maintenance.process.run(start(input)),
     wait,
     block,
     background,

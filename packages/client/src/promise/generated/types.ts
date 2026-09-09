@@ -2579,6 +2579,22 @@ export type HealthGetOutput = ServiceHealth
 
 export type ServerGetOutput = { urls: Array<string> }
 
+export type ServerMaintenanceAcquireOutput = {
+  lease: { identity: string; token: string; expires: number; pid: number } | null
+  reason: string
+}
+
+export type ServerMaintenanceCancelInput = { readonly token: { readonly token: string }["token"] }
+
+export type ServerMaintenanceCancelOutput = { cancelled: boolean }
+
+export type ServerMaintenanceCommitInput = {
+  readonly token: { readonly token: string; readonly identity: string }["token"]
+  readonly identity: { readonly token: string; readonly identity: string }["identity"]
+}
+
+export type ServerMaintenanceCommitOutput = { committed: boolean }
+
 export type LocationGetInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined

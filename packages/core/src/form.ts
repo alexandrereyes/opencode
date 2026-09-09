@@ -4,6 +4,7 @@ import { Form } from "@opencode/schema/form"
 import { Cache, Context, Deferred, Duration, Effect, Exit, Layer, Option, Schema } from "effect"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Bus } from "./bus.js"
+import { Maintenance } from "./maintenance.js"
 
 const RETENTION = Duration.minutes(10)
 
@@ -100,6 +101,8 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
+    const pending = new Set<ID>()
+    yield* Maintenance.process.block(() => pending.size > 0)
     const forms = yield* Cache.makeWith<ID, Entry>(
       () => Effect.die(new Error("Form cache must be used via set/getSuccess, never get")),
       {
@@ -137,6 +140,7 @@ export const layer = Layer.effect(
           }
           yield* Cache.set(forms, id, entry)
           yield* bus.publish(Form.Event.Created, { form }).pipe(Effect.onError(() => Cache.invalidate(forms, id)))
+          pending.add(id)
           return form
         }),
       ),
@@ -185,6 +189,7 @@ export const layer = Layer.effect(
           })
           yield* Cache.set(forms, input.id, { ...entry, state: next })
           yield* Deferred.succeed(entry.deferred, next)
+          pending.delete(input.id)
         }),
       ),
     )
@@ -198,6 +203,7 @@ export const layer = Layer.effect(
           yield* bus.publish(Form.Event.Cancelled, { id, sessionID: entry.form.sessionID })
           yield* Cache.set(forms, id, { ...entry, state: next })
           yield* Deferred.succeed(entry.deferred, next)
+          pending.delete(id)
         }),
       ),
     )
@@ -214,7 +220,15 @@ export const layer = Layer.effect(
       ),
     )
 
-    return Service.of({ create, ask, get, list, state, reply, cancel })
+    return Service.of({
+      create: (input) => Maintenance.process.run(create(input)),
+      ask: (input) => Maintenance.process.run(ask(input)),
+      get,
+      list,
+      state,
+      reply,
+      cancel,
+    })
   }),
 )
 

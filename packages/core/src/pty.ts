@@ -9,6 +9,7 @@ import { Location } from "./location.js"
 import { PtyID } from "./pty/schema.js"
 import { ShellSelect } from "./shell/select.js"
 import { lazy } from "./util/lazy.js"
+import { Maintenance } from "./maintenance.js"
 
 const BUFFER_LIMIT = 1024 * 1024 * 2
 // Exited sessions stay observable (status, exit code, retained output) until removed explicitly.
@@ -97,6 +98,7 @@ const layer = Layer.effect(
     const context = yield* Effect.context()
     const runFork = Effect.runForkWith(context)
     const sessions = new Map<PtyID, Active>()
+    yield* Maintenance.process.block(() => [...sessions.values()].some((session) => session.info.status === "running"))
     const exitOrder: PtyID[] = []
 
     function notifyEnd(session: Active, event: { exitCode?: number }) {
@@ -308,7 +310,15 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, get, create, update, remove, write, attach })
+    return Service.of({
+      list,
+      get,
+      create: (input) => Maintenance.process.run(create(input)),
+      update,
+      remove,
+      write,
+      attach,
+    })
   }),
 )
 

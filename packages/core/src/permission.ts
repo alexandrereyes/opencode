@@ -1,4 +1,5 @@
 export * as Permission from "./permission.js"
+import { Maintenance } from "./maintenance.js"
 
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Context, Deferred, Effect, Layer, Schema } from "effect"
@@ -127,6 +128,7 @@ const layer = Layer.effect(
     const saved = yield* PermissionSaved.Service
     const hooks = yield* PluginHooks.Service
     const pending = new Map<ID, Pending>()
+    yield* Maintenance.process.block(() => pending.size > 0)
 
     yield* Effect.addFinalizer(() =>
       Effect.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new DeclinedError()), {
@@ -321,7 +323,14 @@ const layer = Layer.effect(
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 
-    return Service.of({ ask, assert, reply, get, forSession, list })
+    return Service.of({
+      ask: (input) => Maintenance.process.run(ask(input)),
+      assert: (input) => Maintenance.process.run(assert(input)),
+      reply,
+      get,
+      forSession,
+      list,
+    })
   }),
 )
 

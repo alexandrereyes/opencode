@@ -49,6 +49,7 @@
     "ws": "8.21.0"
   },
   "devDependencies": {
+    "@opencode/core": "workspace:*",
     "@opencode/script": "workspace:*",
     "@opencode/protocol": "workspace:*",
     "@tsconfig/bun": "catalog:",

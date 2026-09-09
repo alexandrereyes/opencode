@@ -21,6 +21,7 @@ import { SessionSchema } from "./session/schema.js"
 import { Config } from "./config.js"
 import { ToolOutput } from "./tool-output.js"
 import { ShellResult } from "./shell/result.js"
+import { Maintenance } from "./maintenance.js"
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Shell.NotFoundError", {
   id: Shell.ID,
@@ -409,14 +410,26 @@ const layer = () =>
               // release (kill) the process before its exit is observed.
               yield* Deferred.await(command.done).pipe(Effect.catch(() => Effect.void))
             }),
-          ).pipe(Effect.catchTag("AppProcessError", (error) => Deferred.fail(ready, error))),
+          ).pipe(
+            Maintenance.process.run,
+            Effect.catchTag("AppProcessError", (error) => Deferred.fail(ready, error)),
+          ),
         )
 
         const command = yield* Deferred.await(ready)
         return command.info
       })
 
-      return Service.of({ create, list, get, wait, result, timeout, output, remove })
+      return Service.of({
+        create: (input, before) => Maintenance.process.run(create(input, before)),
+        list,
+        get,
+        wait,
+        result,
+        timeout,
+        output,
+        remove,
+      })
     }),
   )
 

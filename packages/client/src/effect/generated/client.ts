@@ -7,6 +7,11 @@ import { ClientApi } from "../../contract"
 import type {
   HealthGetOutput,
   ServerGetOutput,
+  ServerMaintenanceAcquireOutput,
+  ServerMaintenanceCancelInput,
+  ServerMaintenanceCancelOutput,
+  ServerMaintenanceCommitInput,
+  ServerMaintenanceCommitOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentListInput,
@@ -297,7 +302,31 @@ const adaptGroupHealth = (raw: RawClient["server.health"]) => ({ get: EndpointHe
 const EndpointServerGet = (raw: RawClient["server.server"]) => () =>
   preserveEffect<ServerGetOutput>()(raw["server.get"]({}).pipe(Effect.mapError(mapClientError)))
 
-const adaptGroupServer = (raw: RawClient["server.server"]) => ({ get: EndpointServerGet(raw) })
+const EndpointServerMaintenanceAcquire = (raw: RawClient["server.server"]) => () =>
+  preserveEffect<ServerMaintenanceAcquireOutput>()(
+    raw["server.maintenance.acquire"]({}).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointServerMaintenanceCancel = (raw: RawClient["server.server"]) => (input: ServerMaintenanceCancelInput) =>
+  preserveEffect<ServerMaintenanceCancelOutput>()(
+    raw["server.maintenance.cancel"]({ payload: { token: input["token"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointServerMaintenanceCommit = (raw: RawClient["server.server"]) => (input: ServerMaintenanceCommitInput) =>
+  preserveEffect<ServerMaintenanceCommitOutput>()(
+    raw["server.maintenance.commit"]({ payload: { token: input["token"], identity: input["identity"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
+const adaptGroupServer = (raw: RawClient["server.server"]) => ({
+  get: EndpointServerGet(raw),
+  maintenance: {
+    acquire: EndpointServerMaintenanceAcquire(raw),
+    cancel: EndpointServerMaintenanceCancel(raw),
+    commit: EndpointServerMaintenanceCommit(raw),
+  },
+})
 
 const EndpointLocationGet = (raw: RawClient["server.location"]) => (input?: LocationGetInput) =>
   preserveEffect<LocationGetOutput>()(

@@ -2,6 +2,7 @@ export * as ServerProcess from "./process"
 
 import { NodeHttpServer } from "@effect/platform-node"
 import { Bus } from "@opencode/core/bus"
+import { Maintenance } from "@opencode/core/maintenance"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { InstallationEvent } from "@opencode/schema/installation-event"
 import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
@@ -100,6 +101,13 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
           const host = address.family === "IPv6" ? `[${address.address}]` : address.address
           return ServerInfo.connectionURLs(`http://${host}:${address.port}`, hostname)
         },
+        [],
+        // The committed barrier is already closed. Let the acknowledgement flush before closing sockets.
+        lifecycle
+          ? () => {
+              setTimeout(() => shutdown.openUnsafe(), 0)
+            }
+          : undefined,
       ).pipe(Layer.provideMerge(NodeHttpServer.layerHttpServices)),
       applicationScope,
     )
@@ -198,7 +206,20 @@ function dispatch(
       !(yield* authorizedRequest(request, auth))
     )
       return unauthorized()
-    if (ready) return yield* app.value
+    if (ready) {
+      if (url.pathname.startsWith("/api/server/maintenance")) return yield* app.value
+      if (Maintenance.process.status().held)
+        return HttpServerResponse.jsonUnsafe(
+          { code: "service_maintenance" },
+          { status: 503, headers: { "retry-after": "5" } },
+        )
+      // Event streams are observers, never admission. All other request handlers, including GET generation,
+      // retain activity until their effect completes; long-lived producers retain their own Core activity.
+      if (url.pathname === "/api/event" || url.pathname.endsWith("/event")) return yield* app.value
+      const release = Maintenance.process.enter()
+      if (!release) return HttpServerResponse.empty({ status: 503 })
+      return yield* app.value.pipe(Effect.ensuring(Effect.sync(release)))
+    }
     return unavailable(state)
   })
 }

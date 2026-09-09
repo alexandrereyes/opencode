@@ -1,6 +1,11 @@
 import type {
   HealthGetOutput,
   ServerGetOutput,
+  ServerMaintenanceAcquireOutput,
+  ServerMaintenanceCancelInput,
+  ServerMaintenanceCancelOutput,
+  ServerMaintenanceCommitInput,
+  ServerMaintenanceCommitOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentListInput,
@@ -421,6 +426,43 @@ export function make(options: ClientOptions) {
           { method: "GET", path: `/api/server`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
           requestOptions,
         ),
+      maintenance: {
+        acquire: (requestOptions?: RequestOptions) =>
+          request<ServerMaintenanceAcquireOutput>(
+            {
+              method: "POST",
+              path: `/api/server/maintenance`,
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        cancel: (input: ServerMaintenanceCancelInput, requestOptions?: RequestOptions) =>
+          request<ServerMaintenanceCancelOutput>(
+            {
+              method: "POST",
+              path: `/api/server/maintenance/cancel`,
+              body: { token: input["token"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        commit: (input: ServerMaintenanceCommitInput, requestOptions?: RequestOptions) =>
+          request<ServerMaintenanceCommitOutput>(
+            {
+              method: "POST",
+              path: `/api/server/maintenance/commit`,
+              body: { token: input["token"], identity: input["identity"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+      },
     },
     location: {
       get: (input?: LocationGetInput, requestOptions?: RequestOptions) =>

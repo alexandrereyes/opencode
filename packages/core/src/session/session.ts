@@ -29,6 +29,7 @@ import { SessionShell } from "./shell.js"
 import { SessionSkill } from "./skill.js"
 import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
+import { Maintenance } from "../maintenance.js"
 
 type PromptRequest = SessionPrompt.Input & {
   id?: SessionMessage.ID
@@ -203,7 +204,7 @@ export const make = Effect.fn("Session.make")(function* () {
         Effect.catchTag("Session.NotFoundError", () => Effect.void),
         Effect.orDie,
       )
-    }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+    }).pipe(Maintenance.process.run, Effect.forkIn(scope, { startImmediately: true }))
     yield* Fiber.join(running)
   })
   const skill = Effect.fn("Session.skill")(function* (
@@ -384,8 +385,8 @@ export const make = Effect.fn("Session.make")(function* () {
       switchAgent,
       switchModel,
       inbox,
-      prompt,
-      synthetic,
+      prompt: (...args: Parameters<typeof prompt>) => Maintenance.process.run(prompt(...args)),
+      synthetic: (...args: Parameters<typeof synthetic>) => Maintenance.process.run(synthetic(...args)),
       shell,
       skill,
       compact,

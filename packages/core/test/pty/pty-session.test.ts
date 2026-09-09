@@ -10,6 +10,7 @@ import { AbsolutePath } from "@opencode/core/schema"
 import { ShellSelect } from "@opencode/core/shell/select"
 import { location } from "../fixture/location"
 import { testEffect } from "../lib/effect"
+import { Maintenance } from "../../src/maintenance"
 
 type PtyEvent = { type: "created" | "exited" | "deleted"; id: PtyID }
 
@@ -87,6 +88,12 @@ const waitForOutput = (output: Queue.Queue<string>, text: string) =>
   )
 
 describe("pty", () => {
+  ptyTest("open idle terminals conservatively block maintenance", () =>
+    Effect.gen(function* () {
+      yield* createPty("/bin/sh")
+      expect(Maintenance.process.lease()).toBeUndefined()
+    }),
+  )
   it.live("returns typed not found errors for missing sessions", () =>
     Effect.gen(function* () {
       const pty = yield* Pty.Service

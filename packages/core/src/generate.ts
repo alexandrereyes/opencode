@@ -6,6 +6,7 @@ import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { llmClient } from "./effect/app-node-platform.js"
 import { ModelResolver } from "./model-resolver.js"
 import { Model } from "./model.js"
+import { Maintenance } from "./maintenance.js"
 
 export interface TextInput {
   readonly prompt: string
@@ -81,7 +82,7 @@ export const layer = Layer.effect(
         ),
       )
 
-    return Service.of({ text })
+    return Service.of({ text: (input) => Maintenance.process.run(text(input)) })
   }),
 )
 
