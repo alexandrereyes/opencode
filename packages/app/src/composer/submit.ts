@@ -8,7 +8,7 @@ import type { ImageAttachmentPart, Prompt } from "./state"
 import { clonePrompt, promptLength } from "./prompt-parts"
 import type { ComposerAdapter, ComposerDelivery, ComposerSelection, ComposerSession } from "./adapter"
 import { createComposerSubmission } from "./submission-state"
-import { buildPromptRequest } from "./request"
+import { buildPromptRequest, formatAppContext } from "./request"
 import { setCursorPosition } from "./editor/dom"
 import { blobDataUrl } from "@/runtime/persistence/drafts"
 import type { ModelSelection } from "@/providers/models/selection"
@@ -157,6 +157,7 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
     })),
     metadata: {
       displayText: value.text,
+      apps: value.prompt.filter((part) => part.type === "app"),
       comments: value.context.flatMap((item) =>
         item.comment?.trim()
           ? [
@@ -326,7 +327,7 @@ async function sendCommand(
   await session.api.command({
     sessionID: session.id,
     command: command.command,
-    text: command.arguments,
+    text: [command.arguments, ...request.apps.map(formatAppContext)].filter(Boolean).join("\n"),
     files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     agents: request.agents,
     skills: request.skills,
@@ -381,6 +382,7 @@ async function sendPrompt(
     skills: request.skills,
     metadata: {
       displayText: request.displayText,
+      apps: request.apps,
       comments: request.comments,
       agent: value.selection.agent,
       model: {

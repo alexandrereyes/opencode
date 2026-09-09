@@ -2,6 +2,7 @@ import { Schema, SchemaGetter } from "effect"
 import { checksum } from "@opencode/util/encode"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Skill } from "@opencode/schema/skill"
+import { Mcp } from "@opencode/schema/mcp"
 import { Persistence } from "@/runtime/persistence/schema"
 import { FileSelection, SelectedLineRange } from "@/workspaces/files/types"
 
@@ -52,6 +53,9 @@ export const SkillPart = Persistence.struct({
 })
 export type SkillPart = typeof SkillPart.Type
 
+export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: Mcp.ComputerUseApp })
+export type AppPart = typeof AppPart.Type
+
 const ImageFields = {
   type: Schema.Literal("image"),
   id: Schema.String,
@@ -94,7 +98,14 @@ export const ImageAttachmentPart = Schema.Struct({
 )
 export type ImageAttachmentPart = typeof ImageAttachmentPart.Type
 
-export const ContentPart = Schema.Union([TextPart, FileAttachmentPart, AgentPart, SkillPart, ImageAttachmentPart])
+export const ContentPart = Schema.Union([
+  TextPart,
+  FileAttachmentPart,
+  AgentPart,
+  SkillPart,
+  AppPart,
+  ImageAttachmentPart,
+])
 export type ContentPart = typeof ContentPart.Type
 export const Prompt = Persistence.array(ContentPart)
 export type Prompt = typeof Prompt.Type

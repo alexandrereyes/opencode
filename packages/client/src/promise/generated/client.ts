@@ -124,6 +124,8 @@ import type {
   IntegrationCommandStatusOutput,
   IntegrationCommandCancelInput,
   IntegrationCommandCancelOutput,
+  McpComputerUseAppsInput,
+  McpComputerUseAppsOutput,
   McpListInput,
   McpListOutput,
   McpAddInput,
@@ -1237,6 +1239,20 @@ export function make(options: ClientOptions) {
       },
     },
     mcp: {
+      computerUse: {
+        apps: (input?: McpComputerUseAppsInput, requestOptions?: RequestOptions) =>
+          request<McpComputerUseAppsOutput>(
+            {
+              method: "GET",
+              path: `/api/mcp/computer-use/app`,
+              query: { location: input?.["location"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ),
+      },
       list: (input?: McpListInput, requestOptions?: RequestOptions) =>
         request<McpListOutput>(
           {

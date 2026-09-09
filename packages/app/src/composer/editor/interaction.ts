@@ -75,7 +75,7 @@ export function createComposerEditor(input: {
   const [state, setState] = input.state ?? createComposerEditorState(draft.state.mode)
   function addPart(part: ComposerPersistedState["prompt"][number]) {
     if (part.type === "image") return false
-    if (part.type === "file" || part.type === "agent") {
+    if (part.type !== "text") {
       draft.addMention(part)
       return true
     }
@@ -117,6 +117,7 @@ export function createComposerEditor(input: {
     skipFilter: (item) => item.kind === "file" && !item.recent,
     groupBy: (item) => {
       if (item.kind === "reference") return "reference"
+      if (item.kind === "app") return "app"
       if (item.kind === "skill") return "skill"
       if (item.kind === "agent") return "agent"
       if (item.kind === "resource") return "resource"
@@ -124,7 +125,7 @@ export function createComposerEditor(input: {
       return "file"
     },
     sortGroupsBy: (a, b) => {
-      const order = ["reference", "skill", "agent", "resource", "recent", "file"]
+      const order = ["app", "reference", "skill", "agent", "resource", "recent", "file"]
       return order.indexOf(a.category) - order.indexOf(b.category)
     },
   })

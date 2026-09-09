@@ -3,6 +3,8 @@ import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { readPromptPresentation } from "./comment-note"
 import { Skill } from "@opencode/schema/skill"
+import { Schema } from "effect"
+import { AppPart } from "./schema"
 
 type Inline =
   | {
@@ -35,6 +37,7 @@ type Inline =
       id: Skill.ID
       name: Skill.Name
     }
+  | (AppPart & { value: string })
 
 function selectionFromFileUrl(url: string): Extract<Inline, { type: "file" }>["selection"] {
   const queryIndex = url.indexOf("?")
@@ -65,6 +68,8 @@ export function extractPromptFromMessage(
     return path
   }
   const inline: Inline[] = []
+  const apps = Schema.decodeUnknownOption(Schema.Struct({ apps: Schema.Array(AppPart) }))(message.metadata)
+  if (apps._tag === "Some") inline.push(...apps.value.apps.map((part) => ({ ...part, value: part.content })))
   const images: ImageAttachmentPart[] = []
   for (const file of message.files ?? []) {
     const mention = file.mention
@@ -205,6 +210,16 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
     if (item.type === "file") pushFile(item)
     if (item.type === "agent") pushAgent(item)
     if (item.type === "skill") pushSkill(item)
+    if (item.type === "app") {
+      result.push({
+        type: "app",
+        app: item.app,
+        content: item.value,
+        start: position,
+        end: position + item.value.length,
+      })
+      position += item.value.length
+    }
 
     cursor = end
   }

@@ -15,6 +15,7 @@ import { AttachmentCard } from "@opencode/session-ui/attachment-card"
 import { CommentCard } from "@opencode/session-ui/comment-card"
 import { typeLabel } from "@opencode/session-ui/message-file"
 import { Skill } from "@opencode/schema/skill"
+import { useLanguage } from "@/runtime/i18n/language"
 import type {
   ComposerAttachment,
   ComposerComment,
@@ -53,6 +54,7 @@ export type ComposerEditorProps = {
 
 export function ComposerEditor(props: ComposerEditorProps) {
   const i18n = useI18n()
+  const language = useLanguage()
   const state = props.controller.state
   const view = props.controller.view
   let editor: HTMLDivElement | undefined
@@ -93,7 +95,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       localInput = false
       return
     }
-    renderComposerEditor(editor, parts)
+    renderComposerEditor(editor, parts, language.t("promptInput.computerUse"))
   })
 
   return (
@@ -345,7 +347,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
 const mentionParts = new WeakMap<HTMLElement, Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>>()
 
-function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt) {
+function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, appLabel: string) {
   const active = document.activeElement === editor
   editor.replaceChildren(
     ...prompt.flatMap<Node>((part) => {
@@ -360,6 +362,11 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt) {
       mention.dataset.mention =
         part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
       if (part.type === "agent") mention.dataset.name = part.name
+      if (part.type === "app") {
+        mention.title = `${part.app.name} — ${part.app.bundleID}\n${part.app.path}`
+        // Generated content keeps the label out of text offsets and the submitted prompt.
+        mention.dataset.label = appLabel
+      }
       if (part.type === "skill") {
         mention.dataset.id = part.id
         mention.dataset.name = part.name
@@ -396,6 +403,11 @@ function parseComposerEditor(editor: HTMLDivElement) {
     flush()
     const content = element.textContent ?? ""
     const original = mentionParts.get(element)
+    if (original?.type === "app") {
+      parts.push({ ...original, content, start: position, end: position + content.length })
+      position += content.length
+      return
+    }
     if (element.dataset.mention === "agent") {
       parts.push({
         ...(original?.type === "agent" ? original : {}),
@@ -720,8 +732,37 @@ export function ComposerEditorPopover(props: {
   onActiveChange: (item: ComposerSuggestion) => void
   onSelect: (item: ComposerSuggestion) => void
 }) {
+  let element: HTMLDivElement | undefined
+  onMount(() => {
+    if (!element) return
+    const popover = element
+    const ancestors: HTMLElement[] = []
+    for (let parent = popover.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
+    const update = () => {
+      const anchor = popover.parentElement?.getBoundingClientRect().top ?? 0
+      const top = Math.max(
+        window.visualViewport?.offsetTop ?? 0,
+        ...ancestors
+          .filter((parent) => getComputedStyle(parent).overflowY !== "visible")
+          .map((parent) => parent.getBoundingClientRect().top),
+      )
+      // The popup opens upward inside clipped page panels, below the title bar.
+      popover.style.maxHeight = `${Math.max(0, Math.min(320, anchor - top - 16))}px`
+    }
+    const observer = new ResizeObserver(update)
+    ancestors.forEach((parent) => observer.observe(parent))
+    window.addEventListener("scroll", update, true)
+    window.visualViewport?.addEventListener("resize", update)
+    update()
+    onCleanup(() => {
+      observer.disconnect()
+      window.removeEventListener("scroll", update, true)
+      window.visualViewport?.removeEventListener("resize", update)
+    })
+  })
   return (
     <div
+      ref={element}
       data-component="composer-suggestions"
       class="absolute inset-x-0 -top-2 z-40 flex max-h-80 -translate-y-full flex-col overflow-auto rounded-xl bg-v2-background-bg-base p-2 shadow-[var(--v2-elevation-raised)] no-scrollbar"
       onMouseDown={(event) => event.preventDefault()}
@@ -752,14 +793,22 @@ export function ComposerEditorPopover(props: {
               type="button"
               data-suggestion-id={item.id}
               data-active={props.activeID === item.id ? "" : undefined}
-              class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
-              classList={{ "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id }}
+              class="flex w-full items-center gap-2 px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
+              classList={{
+                "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id,
+                "rounded-full": item.kind === "app",
+                "rounded-md": item.kind !== "app",
+              }}
               onPointerMove={() => props.onActiveChange(item)}
               onClick={() => props.onSelect(item)}
             >
               <div class="flex min-w-0 flex-1 items-center gap-2">
                 <ComposerSuggestionIcon item={item} />
-                <bdi dir="auto" class="shrink-0 text-v2-text-text-base">
+                <bdi
+                  dir="auto"
+                  class="text-v2-text-text-base"
+                  classList={{ "shrink-0": item.kind !== "app", "min-w-0 truncate": item.kind === "app" }}
+                >
                   {item.label}
                 </bdi>
                 <Show when={item.description}>
@@ -859,6 +908,7 @@ export function ComposerEditorSubmitButton(props: {
 }
 
 function ComposerSuggestionIcon(props: { item: ComposerSuggestion }) {
+  if (props.item.kind === "app") return <Icon name="monitor" size="small" class="shrink-0" />
   if (props.item.kind === "agent") return <Icon name="brain" size="small" class="shrink-0 text-icon-info-active" />
   if (props.item.kind === "skill") return <Icon name="post-skill" size="small" class="shrink-0" />
   if (props.item.kind === "command") return null

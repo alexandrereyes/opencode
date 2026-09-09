@@ -1,4 +1,5 @@
 import { Mcp } from "@opencode/core/mcp/index"
+import { ComputerUse } from "@opencode/core/mcp/computer-use"
 import { McpServerNotFoundError } from "@opencode/protocol/errors"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
@@ -11,6 +12,13 @@ const notFound = <A, R>(effect: Effect.Effect<A, Mcp.NotFoundError, R>) =>
 export const McpHandler = HttpApiBuilder.group(Api, "server.mcp", (handlers) =>
   Effect.gen(function* () {
     return handlers
+      .handle(
+        "mcp.computerUse.apps",
+        Effect.fn(function* () {
+          const service = yield* Mcp.Service
+          return yield* response(ComputerUse.apps(service))
+        }),
+      )
       .handle(
         "mcp.list",
         Effect.fn(function* () {

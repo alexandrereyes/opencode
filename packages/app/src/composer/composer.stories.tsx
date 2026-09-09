@@ -96,6 +96,25 @@ function ComposerStory(props: {
   ]
   const context: ComposerSuggestion[] = [
     {
+      id: "app:codex-computer-use:com.apple.Safari",
+      kind: "app",
+      label: "Safari",
+      description: "Computer use",
+      mention: {
+        type: "app",
+        content: "@Safari",
+        start: 0,
+        end: 0,
+        app: {
+          server: "codex-computer-use",
+          name: "Safari",
+          path: "/Applications/Safari.app/",
+          bundleID: "com.apple.Safari",
+          running: true,
+        },
+      },
+    },
+    {
       id: "file:src/app.tsx",
       kind: "file",
       label: "src/app.tsx",
@@ -182,7 +201,13 @@ function ComposerStory(props: {
           setStory(
             "activity",
             request
-              ? JSON.stringify({ files: request.files, agents: request.agents, skills: request.skills })
+              ? JSON.stringify({
+                  text: request.text,
+                  files: request.files,
+                  agents: request.agents,
+                  skills: request.skills,
+                  apps: request.apps,
+                })
               : `Submitted: ${value}`,
           )
         },
@@ -272,6 +297,11 @@ export const ModelAndVariant = { render: () => <ComposerStory prompt={text("Comp
 export const SlashSuggestions = { render: () => <ComposerStory suggestions="command" /> }
 
 export const ContextSuggestions = { render: () => <ComposerStory suggestions="context" /> }
+
+export const ComputerUseApps = {
+  parameters: { layout: "fullscreen" },
+  render: () => <ComposerStory suggestions="context" inspectRequest label="Fixture: select Safari, then submit" />,
+}
 
 export const RunningAndStopping = { render: () => <ComposerStory working stopping label="Session is running" /> }
 

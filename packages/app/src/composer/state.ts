@@ -16,6 +16,7 @@ import {
 
 export { DEFAULT_PROMPT } from "./schema"
 export type {
+  AppPart,
   AgentPart,
   ComposerStore,
   ContentPart,

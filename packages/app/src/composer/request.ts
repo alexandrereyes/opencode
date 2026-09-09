@@ -12,6 +12,7 @@ type PromptRequest = {
   agents: { name: string; mention?: { start: number; end: number; text: string } }[]
   skills: { id: string; name: string; mention?: { start: number; end: number; text: string } }[]
   comments: PromptComment[]
+  apps: Extract<Prompt[number], { type: "app" }>[]
 }
 
 type ContextFile = {
@@ -58,6 +59,7 @@ const isAgentAttachment = (part: Prompt[number]): part is AgentPart => part.type
 const isSkillAttachment = (part: Prompt[number]): part is SkillPart => part.type === "skill"
 
 export function buildPromptRequest(input: BuildPromptRequestInput): PromptRequest {
+  const apps = input.prompt.filter((part) => part.type === "app")
   const skills = input.prompt.filter(isSkillAttachment).map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -113,11 +115,20 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   }))
 
   return {
-    text: [...(input.text.trim() ? [input.text] : []), ...comments.map(formatCommentNote)].join("\n"),
+    text: [
+      ...(input.text.trim() ? [input.text] : []),
+      ...comments.map(formatCommentNote),
+      ...apps.map(formatAppContext),
+    ].join("\n"),
     displayText: input.text,
     files: [...files, ...context, ...images],
     agents,
     skills,
     comments,
+    apps,
   }
+}
+
+export function formatAppContext(part: Extract<Prompt[number], { type: "app" }>) {
+  return `Computer use app selected by the user: ${JSON.stringify(part.app)}. Use its bundleID or full path as the app argument to ${part.app.server} tools.`
 }

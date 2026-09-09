@@ -1,6 +1,7 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "promptInput.computerUse": "Computer use",
   ...DESKTOP_NATIVE_ENGLISH,
   "ssh.label": "SSH",
   "ssh.offline": "Not connected to {{host}}. Your draft is preserved; remote work may still be running.",

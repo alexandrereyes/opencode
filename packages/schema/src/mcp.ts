@@ -83,6 +83,15 @@ export const Server = Schema.Struct({
   integrationID: optional(IntegrationID),
 }).annotate({ identifier: "Mcp.Server" })
 
+export interface ComputerUseApp extends Schema.Schema.Type<typeof ComputerUseApp> {}
+export const ComputerUseApp = Schema.Struct({
+  server: Schema.String,
+  name: Schema.String,
+  path: Schema.String,
+  bundleID: Schema.String,
+  running: Schema.Boolean,
+}).annotate({ identifier: "Mcp.ComputerUseApp" })
+
 export interface Resource extends Schema.Schema.Type<typeof Resource> {}
 export const Resource = Schema.Struct({
   server: Schema.String,

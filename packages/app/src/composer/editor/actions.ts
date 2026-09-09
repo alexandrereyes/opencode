@@ -2,6 +2,7 @@ import { batch, untrack, type Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
 import type {
   ComposerAgentPart,
+  ComposerAppPart,
   ComposerFilePart,
   ComposerSkillPart,
   ComposerPersistedState,
@@ -70,7 +71,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       clearRetry()
     },
     addMention(
-      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
+      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
       range?: { start: number; end: number },
     ) {
       const text = store()
@@ -114,7 +115,7 @@ function insertMention(
   prompt: ComposerPrompt,
   start: number,
   end: number,
-  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
+  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
 ): ComposerPrompt {
   if (start === 0 && end === 0) {
     return withOffsets([mention, { type: "text", content: " ", start: 0, end: 0 }, ...prompt])

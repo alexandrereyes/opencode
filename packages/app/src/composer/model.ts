@@ -1,7 +1,7 @@
 import { ImagePreview } from "@opencode/ui/image-preview"
 import { useDialog } from "@opencode/ui/context/dialog"
 import type { ReferenceInfo } from "@opencode/client/promise"
-import { createComponent, createEffect, createMemo, on } from "solid-js"
+import { createComponent, createEffect, createMemo, createResource, on } from "solid-js"
 import type { ComposerSuggestion } from "./types"
 import { createComposerEditor, createComposerEditorState, type ComposerEditorModel } from "./editor/interaction"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/workspaces/files/model"
@@ -190,7 +190,27 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     })),
   )
   const skills = createMemo(() => data.location.skill.list({ directory: sdk().directory }) ?? [])
+  const appSource = createMemo(() => {
+    if (interaction[0].popover.type !== "context" || !available()) return false
+    const connected = data.location.mcp.server
+      .list({ directory: sdk().directory })
+      ?.some((server) => server.name === "codex-computer-use" && server.status.status === "connected")
+    return connected ? sdk().directory : false
+  })
+  const [apps] = createResource(appSource, (directory) =>
+    server.ctx.sdk.api.mcp.computerUse
+      .apps({ location: { directory } })
+      .then((result) => result.data)
+      .catch(() => []),
+  )
   const context = createMemo<ComposerSuggestion[]>(() => [
+    ...(appSource() && !apps.loading ? (apps() ?? []) : []).map((app) => ({
+      id: `app:${app.server}:${app.bundleID}`,
+      kind: "app" as const,
+      label: app.name,
+      description: language.t("promptInput.computerUse"),
+      mention: { type: "app" as const, app, content: `@${app.name}`, start: 0, end: 0 },
+    })),
     ...references(),
     ...skills().map((skill) => ({
       id: `skill:${skill.id}`,
