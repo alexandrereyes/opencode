@@ -49,7 +49,7 @@ tail -f "$HOME/.local/share/opencode-custom/logs/daily.log"
 
 1. Fetch de `origin/custom` e `upstream/beta`, com retry de operações de rede (5 e 10 segundos).
 2. Branch `sync-<data>-<id>` em worktree separada baseada no SHA de `custom` observado.
-3. Merge do SHA upstream observado; instalação com lockfile, typechecks Core/Protocol/Client/Server/CLI/App, suíte Core de manutenção/admissão/execução/geração/jobs/shells/terminais e suíte Server completa, build UI e smoke real.
+3. Merge do SHA upstream observado; instalação com lockfile, typechecks de todos os workspaces que declaram esse script (35 atualmente, executados de cada diretório de pacote), suíte Core de manutenção/admissão/execução/geração/jobs/shells/terminais e suíte Server completa, build UI e smoke real.
 4. Merge limpo validado: fetch novamente, comparação com base observada e push **fast-forward comum**, sem force. Concorrência aborta a integração.
 5. Conflito ou erro de código: `opencode run --auto --server <custom>` resolve na worktree e valida novamente. O controlador publica branch e PR com destino **custom**, sem integração automática. O provider precisa estar configurado no servidor custom. Sem agente disponível, conserva a worktree para diagnóstico.
 6. Falha transitória de dependências/rede não pede correção de código ao agente. Worktrees e logs de falha são preservados.
