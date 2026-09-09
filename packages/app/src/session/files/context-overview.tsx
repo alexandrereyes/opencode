@@ -145,44 +145,53 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
 
   return (
     <div data-slot="context-overview" class="flex min-w-0 flex-col gap-3 text-13-regular text-text-base">
-      <div class="grid min-w-0 grid-cols-1 gap-3 border-b border-border-weak-base pb-3 @[32rem]:grid-cols-2 @[32rem]:gap-6">
-        <section class="flex min-w-0 flex-col gap-2" aria-label={language.t("context.overview.session")}>
-          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.session")}</h2>
-          <div class="flex flex-wrap items-baseline justify-between gap-2">
-            <span>{language.t("context.overview.context")}</span>
-            <bdi class="tabular-nums">
-              {props.tokens === undefined
-                ? "—"
-                : new Intl.NumberFormat(language.intl(), { notation: "compact", maximumFractionDigits: 1 }).format(
-                    props.tokens,
-                  )}
-              {props.usage != null ? ` (${props.usage}%)` : ""}
+      <section
+        class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3"
+        aria-label={language.t("context.overview.session")}
+      >
+        <div class="flex min-w-0 flex-col gap-1">
+          <h2 class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.session")}</h2>
+          <bdi class="break-words text-14-medium text-text-strong">{info()?.title || layout.params.id || "—"}</bdi>
+        </div>
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <span>{language.t("context.overview.context")}</span>
+          <bdi class="tabular-nums">
+            {props.tokens === undefined
+              ? "—"
+              : new Intl.NumberFormat(language.intl(), { notation: "compact", maximumFractionDigits: 1 }).format(
+                  props.tokens,
+                )}
+            {props.usage != null ? ` (${props.usage}%)` : ""}
+          </bdi>
+        </div>
+        <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
+        <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
+          <span>
+            {language.t("context.overview.costs", {
+              session: money(info()?.cost ?? 0),
+              subagents: money(childCost()),
+            })}
+          </span>
+          <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
+        </div>
+        <div class="mt-1 flex min-w-0 flex-col gap-1">
+          <h3 class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.project")}</h3>
+          <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <bdi class="min-w-0 break-words text-text-strong">
+              {project()?.name || getFilename(project()?.canonical ?? directory())}
             </bdi>
-          </div>
-          <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
-          <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
-            <span>
-              {language.t("context.overview.costs", {
-                session: money(info()?.cost ?? 0),
-                subagents: money(childCost()),
-              })}
+            <span aria-hidden="true" class="text-v2-text-text-muted">
+              ·
             </span>
-            <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
+            <span class="flex min-w-0 items-center gap-1.5 text-v2-text-text-muted">
+              <Icon name="branch" size="small" class="shrink-0" />
+              <bdi class="min-w-0 break-all">
+                {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
+              </bdi>
+            </span>
           </div>
-        </section>
-        <section class="flex min-w-0 flex-col gap-2">
-          <div class="flex flex-wrap justify-between gap-2">
-            <h2 class="text-14-medium text-text-strong">{language.t("context.overview.project")}</h2>
-            <bdi class="min-w-0 break-words">{project()?.name || getFilename(project()?.canonical ?? directory())}</bdi>
-          </div>
-          <div class="flex min-w-0 items-center gap-2 text-v2-text-text-muted">
-            <Icon name="branch" size="small" />
-            <bdi class="min-w-0 break-all">
-              {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
-            </bdi>
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
       <Section title={language.t("context.overview.subscriptions")} count={language.t("context.overview.remaining")}>
         <div class="flex items-center justify-between gap-2 text-12-regular text-v2-text-text-muted">
           <span>{language.t("context.overview.weekly")}</span>
