@@ -173,7 +173,9 @@ describe("OpenAIPlugin", () => {
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-6-astra"))).enabled).toBe(true)
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.10"))).enabled).toBe(true)
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5"))).enabled).toBe(false)
-      expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.04-astra"))).enabled).toBe(false)
+      expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.04-astra"))).enabled).toBe(
+        false,
+      )
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-4.99"))).enabled).toBe(false)
     }),
   )
@@ -205,6 +207,7 @@ describe("OpenAIPlugin", () => {
       expect(model.enabled).toBe(true)
       expect(model.limit).toEqual({ context: 1_050_000, input: 922_000, output: 128_000 })
       expect(model.capabilities.responsesWebsockets).toBe(true)
+      expect(model.websocket).toBe(true)
       expect(direct.headers).not.toHaveProperty("originator")
       expect(direct.baseURL).toBe("https://api.openai.com/v1")
       expect(provider.headers).not.toHaveProperty("x-codex-beta-features")
@@ -214,7 +217,7 @@ describe("OpenAIPlugin", () => {
     }),
   )
 
-  it.effect("selects Azure WebSocket from capability unless the policy disables it", () =>
+  it.effect("selects WebSocket only from explicit policy", () =>
     Effect.gen(function* () {
       const credentials = yield* Credential.Service
       yield* credentials.create({
@@ -244,22 +247,20 @@ describe("OpenAIPlugin", () => {
             websocket,
           })
           const requests = yield* SessionModelRequest.Service
-          return yield* requests.prepare({
-            kind: "primary",
-            scope: {
-              session: Session.Info.make({
-                id: sessionID,
-                projectID: Project.ID.global,
-                cost: Money.USD.zero,
-                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-                time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
-                location: Location.Ref.make({ directory: AbsolutePath.make("/project") }),
-              }),
-              agentID,
-              model,
-              tools: { definitions: [], execute: () => Effect.die("unused tool execution") },
-            },
-            transcript: { system: [], messages: [] },
+          return yield* requests.primary({
+            session: Session.Info.make({
+              id: sessionID,
+              projectID: Project.ID.global,
+              cost: Money.USD.zero,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+              location: Location.Ref.make({ directory: AbsolutePath.make("/project") }),
+            }),
+            agent: agentID,
+            model,
+            tools: { definitions: [], execute: () => Effect.die("unused tool execution") },
+            system: [],
+            messages: [],
             webSocket: "session",
           })
         }).pipe(
@@ -267,11 +268,13 @@ describe("OpenAIPlugin", () => {
           Effect.provideService(SessionModelTransport.Service, transport),
         )
 
-      const prepared = yield* prepare()
+      const prepared = yield* prepare(true)
+      const defaulted = yield* prepare()
       const disabled = yield* prepare(false)
 
       expect(prepared.options.webSocket).toBe(executor)
       expect(prepared.options.http).toBeUndefined()
+      expect(defaulted.options.webSocket).toBeUndefined()
       expect(disabled.options.webSocket).toBeUndefined()
     }),
   )

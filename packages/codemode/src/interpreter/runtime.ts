@@ -41,7 +41,7 @@ import type {
   YieldExpression,
 } from "acorn"
 import { Cause, Deferred, Effect, Exit } from "effect"
-import { isBlockedMember, ToolRuntimeError, type SafeObject, toProgram } from "../data.js"
+import { ToolRuntimeError, type SafeObject, toProgram } from "../data.js"
 import { ToolReference } from "../tool-runtime.js"
 import {
   type AstNode,
@@ -71,7 +71,13 @@ import { HostFunction, HostNamespace } from "./host.js"
 import { invokeIntrinsic } from "./methods.js"
 import { preserveConsumerError, type Runner } from "./runner.js"
 import { invokePromiseInstanceMethod, PromiseRuntime, resolvePromise, resolvePromiseValue } from "./promises.js"
-import { containsOpaqueReference, isRuntimeReference, rejectCircularInsertion, typeofValue } from "./references.js"
+import {
+  containsOpaqueReference,
+  describeValue,
+  isRuntimeReference,
+  rejectCircularInsertion,
+  typeofValue,
+} from "./references.js"
 import { ScopeStack } from "./scope.js"
 import { arrayMethods, mapMethods, setMethods } from "../stdlib/collections.js"
 import { dateMethods } from "../stdlib/date.js"
@@ -1025,7 +1031,7 @@ class Frame<R> {
       if (pattern.type === "ObjectPattern") {
         if (value === null || typeof value !== "object" || isRuntimeReference(value)) {
           throw new InterpreterRuntimeError(
-            "Object destructuring requires a data object or array value.",
+            `Object destructuring requires a data object or array value, received ${describeValue(value)}.`,
             pattern,
             "InvalidDataValue",
           )
@@ -1036,7 +1042,7 @@ class Frame<R> {
           if (property.type === "RestElement") {
             const rest: SafeObject = Object.create(null) as SafeObject
             for (const [key, item] of Object.entries(value as SafeObject)) {
-              if (!consumed.has(key) && !isBlockedMember(key)) rest[key] = item
+              if (!consumed.has(key)) rest[key] = item
             }
             copyIteratorSymbols(value, rest, consumed)
             yield* self.declarePattern(property.argument, rest, mutable, property, initialize)
@@ -1044,9 +1050,6 @@ class Frame<R> {
           }
 
           const key = yield* self.destructuringPropertyKey(property)
-          if (isBlockedMember(String(key))) {
-            throw new InterpreterRuntimeError(`Property '${String(key)}' is not available.`, property)
-          }
           consumed.add(typeof key === "symbol" ? key : String(key))
           yield* self.declarePattern(
             property.value,
@@ -1091,7 +1094,7 @@ class Frame<R> {
       if (pattern.type === "ObjectPattern") {
         if (value === null || typeof value !== "object" || isRuntimeReference(value)) {
           throw new InterpreterRuntimeError(
-            "Object destructuring requires a data object or array value.",
+            `Object destructuring requires a data object or array value, received ${describeValue(value)}.`,
             pattern,
             "InvalidDataValue",
           )
@@ -1103,16 +1106,13 @@ class Frame<R> {
           if (property.type === "RestElement") {
             const rest: SafeObject = Object.create(null) as SafeObject
             for (const [key, item] of Object.entries(source)) {
-              if (!consumed.has(key) && !isBlockedMember(key)) rest[key] = item
+              if (!consumed.has(key)) rest[key] = item
             }
             copyIteratorSymbols(source, rest, consumed)
             yield* self.assignPattern(property.argument, rest, property)
             continue
           }
           const key = yield* self.destructuringPropertyKey(property)
-          if (isBlockedMember(String(key))) {
-            throw new InterpreterRuntimeError(`Property '${String(key)}' is not available.`, property)
-          }
           consumed.add(typeof key === "symbol" ? key : String(key))
           yield* self.assignPattern(property.value, self.destructuringPropertyValue(source, key), property)
         }
@@ -1264,7 +1264,19 @@ class Frame<R> {
       const callee = yield* self.evaluateExpression(node.callee)
       // Globals are built with this interpreter's R; `instanceof` cannot recover the type argument.
       const construct = callee instanceof HostFunction ? (callee as HostFunction<R>).construct : undefined
-      if (construct === undefined) throw unsupportedSyntax("NewExpression", node)
+      if (construct === undefined) {
+        // `new` itself is supported, so a non-constructible callee is a TypeError like JS rather than
+        // unsupported syntax. Built-ins like Number are real constructors in JS, so do not claim
+        // otherwise; say `new` is unsupported for them and point at the plain call.
+        const name = calleeDescription(node.callee)
+        const message =
+          callee instanceof CodeModeFunction
+            ? `${name} cannot be constructed: user-defined constructors and classes are not supported. Call it as a function that returns a plain object instead.`
+            : callee instanceof HostFunction
+              ? `new ${name}(...) is not supported; call ${name}(...) without new instead.`
+              : `${name} is not a constructor.`
+        throw new InterpreterRuntimeError(message, node).as("TypeError")
+      }
       const args = yield* self.evaluateCallArguments(node.arguments)
       return yield* construct(args, node)
     })
@@ -1884,12 +1896,13 @@ class Frame<R> {
           const spread = yield* self.evaluateExpression(property.argument)
           if (spread === null || spread === undefined || Values.isValue(spread)) continue
           if (typeof spread !== "object" || Array.isArray(spread) || isRuntimeReference(spread)) {
-            throw new InterpreterRuntimeError("Object spread requires a data object.", property, "InvalidDataValue")
+            throw new InterpreterRuntimeError(
+              `Object spread requires a data object, received ${describeValue(spread)}.`,
+              property,
+              "InvalidDataValue",
+            )
           }
-          for (const [key, value] of Object.entries(spread)) {
-            if (isBlockedMember(key)) throw new InterpreterRuntimeError(`Property '${key}' is not available.`, property)
-            objectValue[key] = value
-          }
+          for (const [key, value] of Object.entries(spread)) objectValue[key] = value
           copyIteratorSymbols(spread, objectValue)
           continue
         }
@@ -1912,9 +1925,6 @@ class Frame<R> {
           throw new InterpreterRuntimeError("Unsupported object property key shape.", keyNode)
         }
 
-        if (isBlockedMember(String(key))) {
-          throw new InterpreterRuntimeError(`Property '${String(key)}' is not available.`, keyNode)
-        }
         Reflect.set(objectValue, key, yield* self.evaluateExpression(property.value))
       }
 
@@ -2029,9 +2039,6 @@ class Frame<R> {
       }
 
       if (objectValue instanceof HostFunction || objectValue instanceof HostNamespace) {
-        if (typeof key === "string" && isBlockedMember(key)) {
-          throw new InterpreterRuntimeError(`${objectValue.name}.${key} is not available.`, propertyNode)
-        }
         // Unknown static members read as undefined so feature detection works like native JS.
         return new ComputedValue(objectValue.member(key, propertyNode))
       }
@@ -2114,7 +2121,7 @@ class Frame<R> {
 
       if (isRuntimeReference(objectValue)) {
         throw new InterpreterRuntimeError(
-          "Runtime references are opaque and do not expose properties.",
+          `Cannot read properties of ${describeValue(objectValue)}; only data values expose properties.`,
           objectNode,
           "InvalidDataValue",
         )
@@ -2122,10 +2129,6 @@ class Frame<R> {
 
       if (typeof objectValue !== "object" || objectValue === null) {
         throw new InterpreterRuntimeError("Cannot access a property on a non-object value.", objectNode)
-      }
-
-      if (typeof key === "string" && isBlockedMember(key)) {
-        throw new InterpreterRuntimeError(`Property '${key}' is not available.`, propertyNode)
       }
 
       if (Array.isArray(objectValue)) {
