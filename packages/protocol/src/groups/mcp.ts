@@ -17,7 +17,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
           identifier: "v2.mcp.computerUse.apps",
           summary: "List computer-use apps",
           description:
-            "List Mac apps from the connected codex-computer-use MCP. Returns an empty list when unavailable.",
+            "List Mac apps from the connected open-computer-use MCP, with legacy codex-computer-use support. Returns an empty list when unavailable.",
         }),
       ),
   )

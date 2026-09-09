@@ -6,50 +6,54 @@ import { createComposerEditorActions } from "./editor/actions"
 import { buildPromptRequest } from "./request"
 import { extractPromptFromMessage } from "./prompt"
 
-test("app identity survives insertion, persistence, submission and message editing", () => {
-  const actions = createComposerEditorActions(
-    createStore<ComposerStore>({
-      prompt: [{ type: "text", content: "Use @Saf then check", start: 0, end: 19 }],
-      cursor: 8,
-      context: { items: [] },
-    }),
-  )
-  actions.addMention({
-    type: "app",
-    content: "@Safari",
-    start: 0,
-    end: 0,
-    app: {
-      server: "codex-computer-use",
-      name: "Safari",
-      path: "/Applications/Safari.app/",
-      bundleID: "com.apple.Safari",
-      running: true,
-    },
-  })
-  const persisted = Schema.decodeUnknownSync(ComposerStore)(JSON.parse(JSON.stringify(actions.state)))
-  const text = persisted.prompt.map((part) => ("content" in part ? part.content : "")).join("")
-  expect(text).toBe("Use @Safari  then check")
-  expect(persisted.cursor).toBe(12)
-  const request = buildPromptRequest({
-    prompt: persisted.prompt,
-    context: [],
-    images: [],
-    text,
-    sessionDirectory: "/remote/repo",
-  })
-  expect(request.text).toContain('"bundleID":"com.apple.Safari"')
-  expect(request.text).toContain('"path":"/Applications/Safari.app/"')
-  expect(request.text).toContain("codex-computer-use tools")
-  expect(request.files).toEqual([])
-  expect(request.agents).toEqual([])
-  expect(
-    extractPromptFromMessage({
-      id: "msg_apps",
-      type: "user",
-      text: request.text,
-      metadata: { displayText: request.displayText, comments: [], apps: request.apps },
-      time: { created: 1 },
-    }),
-  ).toEqual(persisted.prompt)
-})
+test.each(["codex-computer-use", "open-computer-use"])(
+  "%s app identity survives insertion, persistence, submission and message editing",
+  (server) => {
+    const actions = createComposerEditorActions(
+      createStore<ComposerStore>({
+        prompt: [{ type: "text", content: "Use @Saf then check", start: 0, end: 19 }],
+        cursor: 8,
+        context: { items: [] },
+      }),
+    )
+    actions.addMention({
+      type: "app",
+      content: "@Safari",
+      start: 0,
+      end: 0,
+      app: {
+        server,
+        name: "Safari",
+        ...(server === "codex-computer-use" ? { path: "/Applications/Safari.app/" } : {}),
+        bundleID: "com.apple.Safari",
+        running: true,
+      },
+    })
+    const persisted = Schema.decodeUnknownSync(ComposerStore)(JSON.parse(JSON.stringify(actions.state)))
+    const text = persisted.prompt.map((part) => ("content" in part ? part.content : "")).join("")
+    expect(text).toBe("Use @Safari  then check")
+    expect(persisted.cursor).toBe(12)
+    const request = buildPromptRequest({
+      prompt: persisted.prompt,
+      context: [],
+      images: [],
+      text,
+      sessionDirectory: "/remote/repo",
+    })
+    expect(request.text).toContain('"bundleID":"com.apple.Safari"')
+    if (server === "codex-computer-use") expect(request.text).toContain('"path":"/Applications/Safari.app/"')
+    if (server === "open-computer-use") expect(request.text).not.toContain('"path":')
+    expect(request.text).toContain(`${server} tools`)
+    expect(request.files).toEqual([])
+    expect(request.agents).toEqual([])
+    expect(
+      extractPromptFromMessage({
+        id: "msg_apps",
+        type: "user",
+        text: request.text,
+        metadata: { displayText: request.displayText, comments: [], apps: request.apps },
+        time: { created: 1 },
+      }),
+    ).toEqual(persisted.prompt)
+  },
+)

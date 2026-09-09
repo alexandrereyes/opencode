@@ -363,7 +363,7 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, ap
         part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
       if (part.type === "agent") mention.dataset.name = part.name
       if (part.type === "app") {
-        mention.title = `${part.app.name} — ${part.app.bundleID}\n${part.app.path}`
+        mention.title = `${part.app.name} — ${part.app.bundleID}${part.app.path ? `\n${part.app.path}` : ""}`
         // Generated content keeps the label out of text offsets and the submitted prompt.
         mention.dataset.label = appLabel
       }

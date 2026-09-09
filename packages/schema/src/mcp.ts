@@ -87,7 +87,7 @@ export interface ComputerUseApp extends Schema.Schema.Type<typeof ComputerUseApp
 export const ComputerUseApp = Schema.Struct({
   server: Schema.String,
   name: Schema.String,
-  path: Schema.String,
+  path: optional(Schema.String),
   bundleID: Schema.String,
   running: Schema.Boolean,
 }).annotate({ identifier: "Mcp.ComputerUseApp" })

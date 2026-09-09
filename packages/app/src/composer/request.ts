@@ -130,5 +130,5 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
 }
 
 export function formatAppContext(part: Extract<Prompt[number], { type: "app" }>) {
-  return `Computer use app selected by the user: ${JSON.stringify(part.app)}. Use its bundleID or full path as the app argument to ${part.app.server} tools.`
+  return `Computer use app selected by the user: ${JSON.stringify(part.app)}. Use its bundleID as the app argument to ${part.app.server} tools.`
 }

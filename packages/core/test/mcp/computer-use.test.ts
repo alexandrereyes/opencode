@@ -1,7 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { ComputerUse } from "../../src/mcp/computer-use"
+import fixture from "./fixtures/open-computer-use-apps.json"
 
 describe("codex-computer-use app catalog", () => {
+  test("parses the captured Open Computer Use result without inventing paths", () => {
+    const apps = ComputerUse.parseApps(fixture.content[0].text, "open-computer-use")
+    expect(apps).toHaveLength(3)
+    expect(apps[0]).toEqual({
+      server: "open-computer-use",
+      name: "Safari",
+      bundleID: "com.apple.Safari",
+      running: true,
+    })
+    expect(apps[1].bundleID).toBe("net.whatsapp.WhatsApp")
+    expect(apps[2].running).toBe(false)
+    expect(apps.every((app) => !("path" in app))).toBe(true)
+  })
   test("parses running and previously used apps from the actual text format", () => {
     const apps = ComputerUse.parseApps(
       [

@@ -194,7 +194,10 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     if (interaction[0].popover.type !== "context" || !available()) return false
     const connected = data.location.mcp.server
       .list({ directory: sdk().directory })
-      ?.some((server) => server.name === "codex-computer-use" && server.status.status === "connected")
+      ?.some(
+        (server) =>
+          ["open-computer-use", "codex-computer-use"].includes(server.name) && server.status.status === "connected",
+      )
     return connected ? sdk().directory : false
   })
   const [apps] = createResource(appSource, (directory) =>

@@ -274,7 +274,7 @@ export type IntegrationCommandAttemptStatus =
       time: { created: number | "Infinity" | "-Infinity" | "NaN"; expires: number | "Infinity" | "-Infinity" | "NaN" }
     }
 
-export type McpComputerUseApp = { server: string; name: string; path: string; bundleID: string; running: boolean }
+export type McpComputerUseApp = { server: string; name: string; path?: string; bundleID: string; running: boolean }
 
 export type McpStatusConnected = { status: "connected" }
 

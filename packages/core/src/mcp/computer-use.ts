@@ -2,18 +2,19 @@ export * as ComputerUse from "./computer-use.js"
 
 import { Effect } from "effect"
 import type { Mcp } from "./index.js"
+import type { ComputerUseApp } from "@opencode/schema/mcp"
 
-// codex-computer-use lists running and previously used apps as one text line per app.
-// Paths refer to the MCP host, which need not be the OpenCode server or browser host.
-export function parseApps(text: string, server: string) {
+// Open Computer Use: name — bundleID [flags]. Legacy Codex also includes an absolute .app path.
+// Missing paths are never inferred from names or from the OpenCode host's filesystem.
+export function parseApps(text: string, server: string): ComputerUseApp[] {
   const apps = text.split(/\r?\n/).flatMap((line) => {
-    const match = line.match(/^(.+?) — (\/.+?\.app\/?) — ([\w.-]+)(?: \[([^\]]*)\])?$/)
+    const match = line.match(/^((?:(?! — ).)+) — (?:(\/.+?\.app\/?) — )?([\w-]+(?:\.[\w-]+)+)(?: \[([^\]]*)\])?$/)
     if (!match) return []
     return [
       {
         server,
         name: match[1],
-        path: match[2],
+        ...(match[2] ? { path: match[2] } : {}),
         bundleID: match[3],
         running: /(?:^|, )running(?:,|$)/.test(match[4] ?? ""),
       },
@@ -24,8 +25,11 @@ export function parseApps(text: string, server: string) {
 
 export const apps = Effect.fn("ComputerUse.apps")(function* (mcp: Mcp.Interface) {
   const servers = yield* mcp.servers()
-  if (!servers.some((server) => server.name === "codex-computer-use" && server.status.status === "connected")) return []
-  const result = yield* mcp.callTool({ server: "codex-computer-use", name: "list_apps", args: {} }).pipe(
+  const server = ["open-computer-use", "codex-computer-use"].find((name) =>
+    servers.some((server) => server.name === name && server.status.status === "connected"),
+  )
+  if (!server) return []
+  const result = yield* mcp.callTool({ server, name: "list_apps", args: {} }).pipe(
     Effect.timeout("5 seconds"),
     Effect.catch(() => Effect.succeed(undefined)),
   )
