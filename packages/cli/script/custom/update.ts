@@ -131,8 +131,13 @@ export async function synchronize(input: {
 async function validate(config: Config, directory: string) {
   // Dependency acquisition is retried separately. Never ask an agent to fix network access.
   await retry(() => requireCommand([config.bun, "install", "--frozen-lockfile"], directory))
-  const manifests = new Bun.Glob("{packages/*,services/*,packages/console/*,packages/stats/*}/package.json")
-  for (const file of Array.from(manifests.scanSync({ cwd: directory })).sort()) {
+  const manifests = [
+    "packages/*/package.json",
+    "services/*/package.json",
+    "packages/console/*/package.json",
+    "packages/stats/*/package.json",
+  ].flatMap((pattern) => Array.from(new Bun.Glob(pattern).scanSync({ cwd: directory })))
+  for (const file of manifests.sort()) {
     const pkg = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
