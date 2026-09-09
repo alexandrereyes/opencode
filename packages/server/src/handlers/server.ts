@@ -7,9 +7,11 @@ import { PersistentPty } from "@opencode/core/persistent-pty"
 import { Job } from "@opencode/core/job"
 import { Database } from "@opencode/core/database/database"
 import { SessionInboxTable } from "@opencode/core/session/sql"
+import { readSubscriptions } from "../subscriptions"
 
 export const ServerHandler = HttpApiBuilder.group(Api, "server.server", (handlers) =>
   handlers
+    .handle("server.subscriptions", () => readSubscriptions())
     .handle("server.get", () =>
       Effect.gen(function* () {
         const info = yield* ServerInfo.Service

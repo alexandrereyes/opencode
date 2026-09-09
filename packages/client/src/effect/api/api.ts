@@ -47,6 +47,21 @@ export interface HealthApi<E = never> {
   readonly get: HealthGetOperation<E>
 }
 
+export type ServerSubscriptionsOutput = {
+  readonly status: "ok" | "unconfigured" | "unavailable"
+  readonly accounts: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly enabled: boolean
+    readonly remaining: number | null
+    readonly resetAt: string | null
+    readonly observedAt: string | null
+    readonly stale: boolean
+    readonly hasCapacity: boolean | null
+  }>
+}
+export type ServerSubscriptionsOperation<E = never> = () => Effect.Effect<ServerSubscriptionsOutput, E>
+
 export type ServerGetOutput = { readonly urls: ReadonlyArray<string> }
 export type ServerGetOperation<E = never> = () => Effect.Effect<ServerGetOutput, E>
 
@@ -74,6 +89,7 @@ export type ServerMaintenanceCommitOperation<E = never> = (
 ) => Effect.Effect<ServerMaintenanceCommitOutput, E>
 
 export interface ServerApi<E = never> {
+  readonly subscriptions: ServerSubscriptionsOperation<E>
   readonly get: ServerGetOperation<E>
   readonly maintenance: {
     readonly acquire: ServerMaintenanceAcquireOperation<E>
