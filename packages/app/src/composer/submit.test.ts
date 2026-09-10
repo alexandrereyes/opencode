@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { ModelSelection } from "@/providers/models/selection"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
 import { AbsolutePath } from "@opencode/schema/schema"
 import type { ActiveComposerAdapter, ComposerControls, ComposerSession, NewSessionComposerAdapter } from "./adapter"
 import { createMemoryComposerState } from "./state"
@@ -763,6 +764,32 @@ describe("Composer submission", () => {
         start: 28,
         end: 35,
       },
+      { type: "text", content: " ", start: 35, end: 36 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 36,
+        end: 43,
+      },
+      { type: "text", content: " ", start: 43, end: 44 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 44,
+        end: 51,
+      },
     ])
     const sent = Promise.withResolvers<Parameters<ComposerSession["api"]["command"]>[0]>()
     const target = session({
@@ -788,6 +815,8 @@ describe("Composer submission", () => {
     expect(request.files).toMatchObject([{ name: "app.ts", mention: { text: "@src/app.ts" } }])
     expect(request.agents).toMatchObject([{ name: "review", mention: { text: "@review" } }])
     expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "@effect" } }])
+    expect(request.text.match(/"sessionID":"ses_referenced_12345678901234567890"/g)).toHaveLength(1)
+    expect(request.text).toContain("tools.opencode.session_read")
     expect(request.delivery).toBe("steer")
   })
 

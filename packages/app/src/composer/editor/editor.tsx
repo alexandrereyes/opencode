@@ -16,6 +16,8 @@ import { AttachmentCard } from "@opencode/session-ui/attachment-card"
 import { CommentCard } from "@opencode/session-ui/comment-card"
 import { typeLabel } from "@opencode/session-ui/message-file"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
+import { Schema } from "effect"
 import { useLanguage } from "@/runtime/i18n/language"
 import type {
   ComposerAttachment,
@@ -29,6 +31,7 @@ import type { ComposerEditorModel, ComposerSelectControl } from "./interaction"
 import { setCursorPosition } from "./dom"
 import "../attachments/attachments.css"
 import "./editor.css"
+import { formatSessionReference } from "../session-reference"
 
 export type {
   ComposerAttachment,
@@ -106,7 +109,13 @@ export function ComposerEditor(props: ComposerEditorProps) {
       localInput = false
       return
     }
-    renderComposerEditor(editor, parts, language.t("promptInput.computerUse"), untrack(props.controller.cursor))
+    renderComposerEditor(
+      editor,
+      parts,
+      language.t("promptInput.computerUse"),
+      language.t("promptInput.session"),
+      untrack(props.controller.cursor),
+    )
   })
 
   return (
@@ -253,6 +262,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
                 if (caret.top < bounds.top + 8) viewport.scrollTop += caret.top - bounds.top - 8
               })
             }}
+            onCopy={copyComposerSelection}
             onFocus={() => props.controller.dispatch({ type: "focus.editor" })}
           />
           <Show when={!props.controller.value()}>
@@ -373,7 +383,13 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
 const mentionParts = new WeakMap<HTMLElement, Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>>()
 
-function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, appLabel: string, cursor: number) {
+function renderComposerEditor(
+  editor: HTMLDivElement,
+  prompt: ComposerPrompt,
+  appLabel: string,
+  sessionLabel: string,
+  cursor: number,
+) {
   const active = document.activeElement === editor
   editor.replaceChildren(
     ...prompt.flatMap<Node>((part) => {
@@ -393,6 +409,15 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, ap
         mention.title = `${part.app.name} — ${part.app.bundleID}${part.app.path ? `\n${part.app.path}` : ""}`
         // Generated content keeps the label out of text offsets and the submitted prompt.
         mention.dataset.label = appLabel
+      }
+      if (part.type === "session") {
+        mention.title = `${part.session.title ?? part.session.id} — ${part.session.id}${part.session.directory ? `\n${part.session.directory}` : ""}`
+        mention.dataset.id = part.session.id
+        mention.dataset.server = part.session.server
+        if (part.session.title) mention.dataset.title = part.session.title
+        if (part.session.directory) mention.dataset.directory = part.session.directory
+        mention.dataset.reference = formatSessionReference(part)
+        mention.dataset.label = sessionLabel
       }
       if (part.type === "skill") {
         mention.dataset.id = part.id
@@ -429,6 +454,27 @@ function parseComposerEditor(editor: HTMLDivElement) {
       parts.push({ ...original, content, start: position, end: position + content.length })
       position += content.length
       return
+    }
+    if (element.dataset.mention === "session") {
+      const id = element.dataset.id
+      const server = element.dataset.server
+      if (original?.type === "session" || (id && server && Schema.is(Session.ID)(id))) {
+        parts.push({
+          ...(original?.type === "session" ? original : {}),
+          type: "session",
+          session: {
+            id: original?.type === "session" ? original.session.id : Session.ID.make(id!),
+            server: original?.type === "session" ? original.session.server : server!,
+            title: original?.type === "session" ? original.session.title : element.dataset.title,
+            directory: original?.type === "session" ? original.session.directory : element.dataset.directory,
+          },
+          content,
+          start: position,
+          end: position + content.length,
+        })
+        position += content.length
+        return
+      }
     }
     if (element.dataset.mention === "agent") {
       parts.push({
@@ -497,6 +543,36 @@ function parseComposerEditor(editor: HTMLDivElement) {
   }
   if (parts.length > 0) return parts
   return [{ type: "text" as const, content: "", start: 0, end: 0 }]
+}
+
+function copyComposerSelection(event: ClipboardEvent) {
+  const selection = window.getSelection()
+  if (!event.clipboardData || !selection?.rangeCount || selection.isCollapsed) return
+  const fragment = selection.getRangeAt(0).cloneContents()
+  const wrapper = document.createElement("div")
+  wrapper.append(fragment)
+  const mentions = wrapper.querySelectorAll<HTMLElement>("[data-mention=session][data-reference]")
+  if (mentions.length === 0) return
+  mentions.forEach((mention) => mention.replaceWith(document.createTextNode(mention.dataset.reference ?? "")))
+  event.preventDefault()
+  event.clipboardData.setData("text/plain", editorText(wrapper))
+}
+
+function editorText(element: HTMLElement) {
+  const visit = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? ""
+    if (!(node instanceof HTMLElement)) return ""
+    if (node.tagName === "BR") return "\n"
+    return Array.from(node.childNodes).map(visit).join("")
+  }
+  return Array.from(element.childNodes)
+    .map((node, index, nodes) => {
+      const value = visit(node)
+      if (!(node instanceof HTMLElement) || !["DIV", "P"].includes(node.tagName) || index === nodes.length - 1)
+        return value
+      return value + "\n"
+    })
+    .join("")
 }
 
 function composerCursor(editor: HTMLDivElement) {
@@ -815,6 +891,11 @@ export function ComposerEditorPopover(props: {
               type="button"
               data-suggestion-id={item.id}
               data-active={props.activeID === item.id ? "" : undefined}
+              aria-label={
+                item.kind === "session"
+                  ? [item.kindLabel, item.label, item.description, item.detail].filter(Boolean).join(", ")
+                  : undefined
+              }
               class="flex w-full items-center gap-2 px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
               classList={{
                 "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id,
@@ -826,17 +907,49 @@ export function ComposerEditorPopover(props: {
             >
               <div class="flex min-w-0 flex-1 items-center gap-2">
                 <ComposerSuggestionIcon item={item} />
-                <bdi
-                  dir="auto"
-                  class="text-v2-text-text-base"
-                  classList={{ "shrink-0": item.kind !== "app", "min-w-0 truncate": item.kind === "app" }}
+                <Show
+                  when={item.kind === "session"}
+                  fallback={
+                    <>
+                      <bdi
+                        dir="auto"
+                        class="text-v2-text-text-base"
+                        classList={{ "shrink-0": item.kind !== "app", "min-w-0 truncate": item.kind === "app" }}
+                      >
+                        {item.label}
+                      </bdi>
+                      <Show when={item.description}>
+                        <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
+                      </Show>
+                    </>
+                  }
                 >
-                  {item.label}
-                </bdi>
-                <Show when={item.description}>
-                  <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
+                  <div class="flex min-w-0 flex-1 flex-col">
+                    <bdi dir="auto" class="truncate text-v2-text-text-base leading-4">
+                      {item.label}
+                    </bdi>
+                    <span
+                      dir="ltr"
+                      class="flex min-w-0 items-center gap-1 text-left text-[12px] leading-4 text-v2-text-text-muted"
+                    >
+                      <span class="min-w-0 truncate" title={item.description}>
+                        {item.description}
+                      </span>
+                      <Show when={item.detail}>
+                        <span class="shrink-0" aria-hidden="true">
+                          ·
+                        </span>
+                        <span class="shrink-0" title={item.detail}>
+                          {item.detail?.slice(-8)}
+                        </span>
+                      </Show>
+                    </span>
+                  </div>
                 </Show>
               </div>
+              <Show when={item.kind === "session"}>
+                <span class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted">{item.kindLabel}</span>
+              </Show>
               <Show when={item.keybind?.length}>
                 <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>
               </Show>
@@ -931,6 +1044,8 @@ export function ComposerEditorSubmitButton(props: {
 
 function ComposerSuggestionIcon(props: { item: ComposerSuggestion }) {
   if (props.item.kind === "snippet") return <Icon name="code" size="small" class="shrink-0 text-v2-icon-icon-accent" />
+  if (props.item.kind === "session")
+    return <Icon name="bubble-5" size="small" class="shrink-0 text-v2-icon-icon-accent" />
   if (props.item.kind === "app") return <Icon name="monitor" size="small" class="shrink-0" />
   if (props.item.kind === "agent") return <Icon name="brain" size="small" class="shrink-0 text-icon-info-active" />
   if (props.item.kind === "skill") return <Icon name="post-skill" size="small" class="shrink-0" />

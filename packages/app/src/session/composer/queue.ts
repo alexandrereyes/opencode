@@ -8,6 +8,8 @@ import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import { clonePrompt, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
+import { extractPromptSessions, extractSessionPrompt } from "@/composer/prompt"
+import { formatSessionContext } from "@/composer/session-reference"
 import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
 import type { ChatQuote } from "@/composer/schema"
 import { blobDataUrl } from "@/runtime/persistence/drafts"
@@ -164,10 +166,11 @@ export function createSessionQueue(input: {
       },
     })
     const text = queuedPromptText(item)
+    const prompt = extractSessionPrompt(text, item.payload.metadata)
     input.draft.mode.set("normal")
     input.draft.quotes.replace(readChatQuotes(item.payload.metadata?.quotes))
-    input.draft.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-    input.restoreFocus(text.length)
+    input.draft.set(prompt, promptLength(prompt))
+    input.restoreFocus(promptLength(prompt))
     return true
   }
   const cancelEdit = () => {
@@ -266,7 +269,7 @@ export function queuedPromptText(item: QueuedPrompt) {
 // review-comment notes appended to the original's model-visible text survive.
 // Ambient composer context (open review comments) stays out: it belongs to
 // the next fresh prompt, not to a queued edit.
-async function editedPromptInput(
+export async function editedPromptInput(
   sessionID: string,
   directory: string,
   item: QueuedPrompt | undefined,
@@ -288,6 +291,11 @@ async function editedPromptInput(
       ? payload.text.slice(0, -previousQuotes.length).trimEnd()
       : payload?.text
   const notes = original?.startsWith(display) ? original.slice(display.length) : ""
+  const retainedNotes = extractPromptSessions(payload?.metadata).reduce(
+    (value, session) =>
+      value.replace(`\n${formatSessionContext(session)}`, "").replace(formatSessionContext(session), ""),
+    notes,
+  )
   const mention = (value: { start: number; end: number; text: string } | undefined) => {
     if (!value) return undefined
     const start = text.indexOf(value.text)
@@ -315,7 +323,7 @@ async function editedPromptInput(
   ]
   return {
     sessionID,
-    text: [request.text + notes, formatChatQuotes(quotes)].filter(Boolean).join("\n"),
+    text: [request.text + retainedNotes, formatChatQuotes(quotes)].filter(Boolean).join("\n"),
     files: [
       ...(payload?.files?.map((file) => ({
         uri: `data:${file.mime};base64,${file.data}`,
@@ -327,6 +335,6 @@ async function editedPromptInput(
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),
     skills: skills.map((skill) => ({ id: skill.id, mention: mention(skill.mention) })),
-    metadata: { ...payload?.metadata, displayText: request.displayText, quotes },
+    metadata: { ...payload?.metadata, displayText: request.displayText, sessions: request.sessions, quotes },
   }
 }

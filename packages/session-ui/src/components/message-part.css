@@ -154,6 +154,12 @@
       unicode-bidi: isolate;
     }
 
+    [data-highlight="session"] {
+      color: var(--v2-text-text-accent);
+      font-weight: 600;
+      unicode-bidi: isolate;
+    }
+
     [data-slot="user-message-mention-prefix"] {
       color: var(--user-message-mention-prefix-color);
     }

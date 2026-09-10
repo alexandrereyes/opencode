@@ -204,10 +204,12 @@ export function CurrentUserMessageDisplay(props: {
   sessionID: string
   message: SessionMessageUser
   text: string
+  copyText?: string
   agent: string
   model: SessionMessageAssistant["model"]
   actions?: SessionUserActions
   comments?: SessionUserComment[]
+  sessions?: Array<{ start: number; end: number }>
 }) {
   const data = useData()
   const dialog = useDialog()
@@ -228,7 +230,7 @@ export function CurrentUserMessageDisplay(props: {
   })
   const stamp = createMemo(() => timefmt().format(props.message.time.created))
   const copy = async () => {
-    if (!props.text || !(await writeClipboard(props.text))) return
+    if (!props.text || !(await writeClipboard(props.copyText ?? props.text))) return
     setState("copied", true)
     setTimeout(() => setState("copied", false), 2000)
   }
@@ -291,7 +293,12 @@ export function CurrentUserMessageDisplay(props: {
       >
         <div data-slot="user-message-body">
           <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />
+            <CurrentHighlightedText
+              text={props.text}
+              files={inlineFiles()}
+              agents={agents()}
+              sessions={props.sessions ?? []}
+            />
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />
             </Show>
@@ -351,6 +358,7 @@ function CurrentHighlightedText(props: {
   text: string
   files: PromptFileAttachment[]
   agents: PromptAgentAttachment[]
+  sessions: Array<{ start: number; end: number }>
 }) {
   const segments = createMemo(() => {
     const references = [
@@ -360,6 +368,7 @@ function CurrentHighlightedText(props: {
       ...props.agents.flatMap((agent) =>
         agent.mention ? [{ start: agent.mention.start, end: agent.mention.end, type: "agent" as const }] : [],
       ),
+      ...props.sessions.map((session) => ({ ...session, type: "session" as const })),
     ].sort((a, b) => a.start - b.start)
     const result: HighlightSegment[] = []
     let last = 0
@@ -377,8 +386,10 @@ function CurrentHighlightedText(props: {
       {(segment) => (
         <span data-highlight={segment.type}>
           <Show when={segment.type && segment.text.startsWith("@")} fallback={segment.text}>
-            <span data-slot="user-message-mention-prefix">@</span>
-            {segment.text.slice(1)}
+            <bdi dir={segment.type === "session" ? "auto" : "ltr"}>
+              <span data-slot="user-message-mention-prefix">@</span>
+              {segment.text.slice(1)}
+            </bdi>
           </Show>
         </span>
       )}
@@ -386,7 +397,7 @@ function CurrentHighlightedText(props: {
   )
 }
 
-type HighlightSegment = { text: string; type?: "file" | "agent" }
+type HighlightSegment = { text: string; type?: "file" | "agent" | "session" }
 
 export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
   const i18n = useI18n()

@@ -3,6 +3,7 @@ import { checksum } from "@opencode/util/encode"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Skill } from "@opencode/schema/skill"
 import { Mcp } from "@opencode/schema/mcp"
+import { Session } from "@opencode/schema/session"
 import { Persistence } from "@/runtime/persistence/schema"
 import { FileSelection, SelectedLineRange } from "@/workspaces/files/types"
 
@@ -65,6 +66,18 @@ export type SnippetPart = typeof SnippetPart.Type
 export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: Mcp.ComputerUseApp })
 export type AppPart = typeof AppPart.Type
 
+export const SessionPart = Persistence.struct({
+  type: Schema.Literal("session"),
+  ...PartBase,
+  session: Persistence.struct({
+    id: Session.ID,
+    server: Schema.String,
+    title: Persistence.optional(Schema.String),
+    directory: Persistence.optional(Schema.String),
+  }),
+})
+export type SessionPart = typeof SessionPart.Type
+
 const ImageFields = {
   type: Schema.Literal("image"),
   id: Schema.String,
@@ -114,6 +127,7 @@ export const ContentPart = Schema.Union([
   SkillPart,
   SnippetPart,
   AppPart,
+  SessionPart,
   ImageAttachmentPart,
 ])
 export type ContentPart = typeof ContentPart.Type

@@ -20,6 +20,8 @@ import {
 } from "../suggestions/machine"
 import { clonePrompt, promptLength } from "../prompt-parts"
 import type { ComposerQueue } from "../adapter"
+import { parseSessionReferences } from "../session-reference"
+import { getSelectionRange } from "./dom"
 
 export type ComposerSelectControl = {
   options: Accessor<ComposerOption[]>
@@ -62,6 +64,7 @@ export function createComposerEditor(input: {
   context: Accessor<ComposerSuggestion[]>
   snippets?: Accessor<ComposerSuggestion[]>
   searchContextFiles: (query: string) => ComposerSuggestion[] | Promise<ComposerSuggestion[]>
+  server?: Accessor<string>
   openAttachment?: (attachment: ComposerAttachment) => void
   openContext?: (key: string) => void
   onContextRemove?: (item: ComposerComment) => void
@@ -114,10 +117,11 @@ export function createComposerEditor(input: {
       return [...fixed, ...recent, ...files]
     },
     key: (item) => item.id,
-    filterKeys: ["label"],
+    filterKeys: ["label", "search"],
     skipFilter: (item) => item.kind === "file" && !item.recent,
     groupBy: (item) => {
       if (item.kind === "reference") return "reference"
+      if (item.kind === "session") return "session"
       if (item.kind === "app") return "app"
       if (item.kind === "skill") return "skill"
       if (item.kind === "agent") return "agent"
@@ -126,7 +130,7 @@ export function createComposerEditor(input: {
       return "file"
     },
     sortGroupsBy: (a, b) => {
-      const order = ["app", "reference", "skill", "agent", "resource", "recent", "file"]
+      const order = ["session", "app", "reference", "skill", "agent", "resource", "recent", "file"]
       return order.indexOf(a.category) - order.indexOf(b.category)
     },
   })
@@ -412,6 +416,15 @@ export function createComposerEditor(input: {
       const text = clipboard?.getData("text/plain").replace(/\r\n?/g, "\n")
       if (!text) return
       event.preventDefault()
+      const references = input.server ? parseSessionReferences(text, input.server()) : undefined
+      if (references) {
+        draft.replaceRange(
+          references,
+          (editor && getSelectionRange(editor)) ?? { start: draft.state.cursor ?? 0, end: draft.state.cursor ?? 0 },
+        )
+        restoreFocus()
+        return
+      }
       // insertText emits input events per line, repeatedly parsing and saving the draft.
       // Escaped HTML inserts multiline text once and preserves native selection and undo.
       const multiline = text.includes("\n")

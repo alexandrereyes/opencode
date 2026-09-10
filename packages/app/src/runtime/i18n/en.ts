@@ -73,6 +73,7 @@ export const dict = {
   "settings.snippets.project": "Project",
   "settings.snippets.actions": "Actions for {{name}}",
   "promptInput.computerUse": "Computer use",
+  "promptInput.session": "Session",
   ...DESKTOP_NATIVE_ENGLISH,
   "ssh.label": "SSH",
   "ssh.offline": "Not connected to {{host}}. Your draft is preserved; remote work may still be running.",
