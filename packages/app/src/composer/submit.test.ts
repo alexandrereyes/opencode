@@ -128,6 +128,54 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  for (const command of [false, true]) {
+    test(`expands snippets for ${command ? "command arguments" : "prompt admission"}`, async () => {
+      const state = createMemoryComposerState().capture()
+      const prefix = command ? "/review " : ""
+      state.set([
+        { type: "text", content: prefix, start: 0, end: prefix.length },
+        {
+          type: "snippet",
+          id: "snippet",
+          name: "review",
+          content: "#review",
+          expansion: "/review is literal\nSecond line",
+          start: prefix.length,
+          end: prefix.length + 7,
+        },
+      ])
+      const completed = Promise.withResolvers<void>()
+      const target = session({
+        calls: [],
+        prompt: async (value) => {
+          expect(command).toBe(false)
+          expect(value.text).toBe("/review is literal\nSecond line")
+          expect(value.metadata?.displayText).toBe(value.text)
+          completed.resolve()
+        },
+        command: async (value) => {
+          expect(command).toBe(true)
+          expect(value.command).toBe("review")
+          expect(value.text).toBe("/review is literal\nSecond line")
+          completed.resolve()
+        },
+      })
+      const adapter: ActiveComposerAdapter = {
+        kind: "active-session",
+        state,
+        ready: () => true,
+        controls,
+        working: () => false,
+        session: () => target,
+        interrupt: async () => undefined,
+        submitted() {},
+        setEditor() {},
+      }
+      await submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+      await completed.promise
+    })
+  }
+
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {
     const state = createMemoryComposerState({ prompt: "/review changes" }).capture()
     const calls: string[] = []

@@ -53,6 +53,15 @@ export const SkillPart = Persistence.struct({
 })
 export type SkillPart = typeof SkillPart.Type
 
+export const SnippetPart = Persistence.struct({
+  type: Schema.Literal("snippet"),
+  ...PartBase,
+  id: Schema.String,
+  name: Schema.String,
+  expansion: Schema.String,
+})
+export type SnippetPart = typeof SnippetPart.Type
+
 export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: Mcp.ComputerUseApp })
 export type AppPart = typeof AppPart.Type
 
@@ -103,6 +112,7 @@ export const ContentPart = Schema.Union([
   FileAttachmentPart,
   AgentPart,
   SkillPart,
+  SnippetPart,
   AppPart,
   ImageAttachmentPart,
 ])

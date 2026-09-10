@@ -6,11 +6,13 @@ import type {
   ImageAttachmentPart,
   Prompt,
   SkillPart,
+  SnippetPart,
 } from "./state"
 
 export type ComposerFilePart = FileAttachmentPart
 export type ComposerAgentPart = AgentPart
 export type ComposerSkillPart = SkillPart
+export type ComposerSnippetPart = SnippetPart
 export type ComposerAppPart = AppPart
 export type ComposerAttachment = ImageAttachmentPart
 export type ComposerPrompt = Prompt
@@ -37,13 +39,14 @@ export type ComposerOption = {
 
 export type ComposerSuggestion = {
   id: string
-  kind: "agent" | "command" | "file" | "reference" | "resource" | "skill" | "app"
+  kind: "agent" | "command" | "file" | "reference" | "resource" | "skill" | "app" | "snippet"
   label: string
   title?: string
   trigger?: string
   description?: string
+  search?: string
   path?: string
   keybind?: string[]
   recent?: boolean
-  mention?: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart
+  mention?: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart | ComposerSnippetPart
 }

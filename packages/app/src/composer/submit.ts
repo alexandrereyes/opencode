@@ -5,7 +5,7 @@ import { Event } from "@opencode/schema/event"
 import type { Accessor } from "solid-js"
 import type { PromptHistoryComment } from "./history/entry"
 import type { ImageAttachmentPart, Prompt } from "./state"
-import { clonePrompt, promptLength } from "./prompt-parts"
+import { clonePrompt, expandSnippets, promptLength } from "./prompt-parts"
 import type { ComposerAdapter, ComposerDelivery, ComposerSelection, ComposerSession } from "./adapter"
 import { createComposerSubmission } from "./submission-state"
 import { buildPromptRequest, formatAppContext } from "./request"
@@ -70,7 +70,10 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
     submitting.add(input.adapter.state)
     const comments = input.comments.capture()
     // Capture command intent before starting a session in a worktree whose catalog has not loaded.
-    const command = value.mode === "normal" ? findCommand(input.commands(), value.text) : undefined
+    const command =
+      value.mode === "normal"
+        ? findCommand(input.commands(), value.prompt.map((part) => ("content" in part ? part.content : "")).join(""))
+        : undefined
     if (value.mode === "normal" && !command) value.prompt = withSlashSkill(value.prompt, input.skills())
 
     try {
@@ -187,7 +190,9 @@ function readSubmission(
   context: ComposerSubmission["context"],
   alternate: boolean,
 ): ComposerSubmission | undefined {
-  const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
+  const text = expandSnippets(prompt)
+    .map((part) => ("content" in part ? part.content : ""))
+    .join("")
   const mode = input.mode()
   if (mode === "shell" && !text.trim()) return
   const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
@@ -327,7 +332,14 @@ async function sendCommand(
   await session.api.command({
     sessionID: session.id,
     command: command.command,
-    text: [command.arguments, ...request.apps.map(formatAppContext)].filter(Boolean).join("\n"),
+    text: [
+      value.prompt.some((part) => part.type === "snippet")
+        ? request.displayText.split(" ").slice(1).join(" ")
+        : command.arguments,
+      ...request.apps.map(formatAppContext),
+    ]
+      .filter(Boolean)
+      .join("\n"),
     files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     agents: request.agents,
     skills: request.skills,

@@ -60,6 +60,7 @@ export function createComposerEditor(input: {
   history?: ComposerHistory
   commands: Accessor<ComposerSuggestion[]>
   context: Accessor<ComposerSuggestion[]>
+  snippets?: Accessor<ComposerSuggestion[]>
   searchContextFiles: (query: string) => ComposerSuggestion[] | Promise<ComposerSuggestion[]>
   openAttachment?: (attachment: ComposerAttachment) => void
   openContext?: (key: string) => void
@@ -134,7 +135,13 @@ export function createComposerEditor(input: {
     key: (item) => item.id,
     filterKeys: ["trigger", "title"],
   })
-  const list = () => (state.popover.type === "context" ? contextList : commandList)
+  const snippetList = useFilteredList<ComposerSuggestion>({
+    items: () => input.snippets?.() ?? [],
+    key: (item) => item.id,
+    filterKeys: ["search", "label"],
+  })
+  const list = () =>
+    state.popover.type === "context" ? contextList : state.popover.type === "snippet" ? snippetList : commandList
   const suggestions = () => list().flat()
 
   const execute = (command: ComposerInteractionCommand) => {
@@ -143,7 +150,7 @@ export function createComposerEditor(input: {
       return
     }
     if (command.type === "draft.addText") {
-      draft.addText(command.value)
+      draft.addText(command.value, command.at)
       return
     }
     if (command.type === "mention.add") {
@@ -151,7 +158,12 @@ export function createComposerEditor(input: {
       return
     }
     if (command.type === "popover.filter") {
-      ;(command.popover === "command" ? commandList : contextList).onInput(command.query)
+      ;(command.popover === "command"
+        ? commandList
+        : command.popover === "snippet"
+          ? snippetList
+          : contextList
+      ).onInput(command.query)
       return
     }
     if (command.type === "suggestion.select") {
@@ -159,7 +171,7 @@ export function createComposerEditor(input: {
       if (item) dispatch({ type: "popover.select", item })
       return
     }
-    if (command.type === "focus.editor") requestAnimationFrame(() => editor?.focus())
+    if (command.type === "focus.editor") editor?.focus()
   }
 
   function dispatch(event: ComposerInteractionEvent) {
@@ -309,6 +321,9 @@ export function createComposerEditor(input: {
     },
     parts() {
       return draft.state.prompt
+    },
+    cursor() {
+      return draft.state.cursor ?? promptLength(draft.state.prompt)
     },
     contextItem(id: string) {
       return draft.state.context.items.find((item) => item.key === id)

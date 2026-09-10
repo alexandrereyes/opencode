@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { FileIcon } from "@opencode/ui/file-icon"
 import { Icon } from "@opencode/ui/icon"
@@ -25,6 +25,7 @@ import type {
   ComposerSuggestion,
 } from "../types"
 import type { ComposerEditorModel, ComposerSelectControl } from "./interaction"
+import { setCursorPosition } from "./dom"
 import "../attachments/attachments.css"
 import "./editor.css"
 
@@ -103,7 +104,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       localInput = false
       return
     }
-    renderComposerEditor(editor, parts, language.t("promptInput.computerUse"))
+    renderComposerEditor(editor, parts, language.t("promptInput.computerUse"), untrack(props.controller.cursor))
   })
 
   return (
@@ -364,7 +365,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
 const mentionParts = new WeakMap<HTMLElement, Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>>()
 
-function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, appLabel: string) {
+function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, appLabel: string, cursor: number) {
   const active = document.activeElement === editor
   editor.replaceChildren(
     ...prompt.flatMap<Node>((part) => {
@@ -379,6 +380,7 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, ap
       mention.dataset.mention =
         part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
       if (part.type === "agent") mention.dataset.name = part.name
+      if (part.type === "snippet") mention.title = part.expansion
       if (part.type === "app") {
         mention.title = `${part.app.name} — ${part.app.bundleID}${part.app.path ? `\n${part.app.path}` : ""}`
         // Generated content keeps the label out of text offsets and the submitted prompt.
@@ -397,12 +399,7 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, ap
     }),
   )
   if (!active) return
-  const selection = window.getSelection()
-  const range = document.createRange()
-  range.selectNodeContents(editor)
-  range.collapse(false)
-  selection?.removeAllRanges()
-  selection?.addRange(range)
+  setCursorPosition(editor, cursor)
 }
 
 function parseComposerEditor(editor: HTMLDivElement) {
@@ -420,7 +417,7 @@ function parseComposerEditor(editor: HTMLDivElement) {
     flush()
     const content = element.textContent ?? ""
     const original = mentionParts.get(element)
-    if (original?.type === "app") {
+    if (original?.type === "app" || original?.type === "snippet") {
       parts.push({ ...original, content, start: position, end: position + content.length })
       position += content.length
       return
@@ -925,6 +922,7 @@ export function ComposerEditorSubmitButton(props: {
 }
 
 function ComposerSuggestionIcon(props: { item: ComposerSuggestion }) {
+  if (props.item.kind === "snippet") return <Icon name="code" size="small" class="shrink-0 text-v2-icon-icon-accent" />
   if (props.item.kind === "app") return <Icon name="monitor" size="small" class="shrink-0" />
   if (props.item.kind === "agent") return <Icon name="brain" size="small" class="shrink-0 text-icon-info-active" />
   if (props.item.kind === "skill") return <Icon name="post-skill" size="small" class="shrink-0" />

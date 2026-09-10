@@ -16,6 +16,15 @@ requires an explicit cold maintenance window: never stop the live service hostin
 The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
 configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
 
+## Prompt snippets
+
+Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
+and content. Snippets are stored in app preferences, globally or scoped to a project and server.
+Project snippets override global snippets with the same name. Type `#` in the composer, search,
+and select with Enter, Tab, or a click. Selected tokens use the theme accent and expand to their
+captured content on submission, including when a command is prefixed from the composer menu.
+Drafts and prompt history retain the structured token. Snippets do not require server config files.
+
 ## Inference footer
 
 Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.

@@ -2,6 +2,10 @@
   content: "\200B";
 }
 
+[data-component="composer-editor"] [data-mention="snippet"] {
+  color: var(--v2-text-text-accent);
+}
+
 [data-component="composer-editor"] [data-mention="app"] {
   display: inline-block;
   border-radius: 999px;

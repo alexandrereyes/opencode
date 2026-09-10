@@ -5,6 +5,7 @@ import type {
   ComposerAppPart,
   ComposerFilePart,
   ComposerSkillPart,
+  ComposerSnippetPart,
   ComposerPersistedState,
   ComposerPrompt,
 } from "../types"
@@ -56,8 +57,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         })),
       )
     },
-    addText(content: string) {
-      const cursor = store().cursor ?? promptLength(store().prompt)
+    addText(content: string, cursor = store().cursor ?? promptLength(store().prompt)) {
       batch(() =>
         setStore()((state) => ({
           prompt: insertText(state.prompt, cursor, content),
@@ -71,17 +71,19 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       clearRetry()
     },
     addMention(
-      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
+      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart | ComposerSnippetPart,
       range?: { start: number; end: number },
     ) {
       const text = store()
         .prompt.map((part) => ("content" in part ? part.content : ""))
         .join("")
       const end = range?.end ?? store().cursor ?? text.length
-      const start = range?.start ?? text.slice(0, end).lastIndexOf("@")
-      setStore()("prompt", insertMention(store().prompt, start < 0 ? end : start, end, mention))
-      setStore()("cursor", (start < 0 ? end : start) + mention.content.length + 1)
-      clearRetry()
+      const start = range?.start ?? text.slice(0, end).lastIndexOf(mention.type === "snippet" ? "#" : "@")
+      setStore()({
+        prompt: insertMention(store().prompt, start < 0 ? end : start, end, mention),
+        cursor: (start < 0 ? end : start) + mention.content.length + 1,
+        retry: undefined,
+      })
     },
     removeAttachment(id: string) {
       setStore()("prompt", (parts) => parts.filter((part) => part.type !== "image" || part.id !== id))
@@ -115,7 +117,7 @@ function insertMention(
   prompt: ComposerPrompt,
   start: number,
   end: number,
-  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
+  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart | ComposerSnippetPart,
 ): ComposerPrompt {
   if (start === 0 && end === 0) {
     return withOffsets([mention, { type: "text", content: " ", start: 0, end: 0 }, ...prompt])

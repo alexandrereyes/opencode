@@ -27,6 +27,7 @@ export type {
   Prompt,
   PromptModel,
   SkillPart,
+  SnippetPart,
   TextPart,
 } from "./schema"
 

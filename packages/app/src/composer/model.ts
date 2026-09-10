@@ -22,6 +22,10 @@ import type { PromptHistoryComment } from "./history/entry"
 import { createComposerHistory } from "./history/store"
 import { composerPlaceholder } from "./placeholder"
 import { createComposerSubmit, withSlashSkill } from "./submit"
+import { useSettings } from "@/settings/model"
+import { snippetSuggestions } from "@/settings/snippets/model"
+import { ScopedKey } from "@/runtime/server/scope"
+import { expandSnippets } from "./prompt-parts"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
@@ -39,6 +43,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
+  const settings = useSettings()
   const prompt = adapter.state
   let editor: HTMLDivElement | undefined
 
@@ -351,6 +356,13 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     },
     commands,
     context,
+    snippets: () => {
+      const project = sdk().current?.project.id
+      return snippetSuggestions(
+        settings.snippets.list(),
+        project ? ScopedKey.from(server.ctx.sdk.scope, project) : undefined,
+      )
+    },
     searchContextFiles: async (query) =>
       (await files.searchFilesAndDirectories(query)).map((path) => ({
         id: `file:${path}`,
@@ -430,7 +442,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
           // the composer value as a new prompt. Enter keeps it queued in
           // place; the alternate action sends it as a steer.
           if (queue?.editing()) {
-            prompt.set(withSlashSkill(prompt.current(), slashSkills()))
+            prompt.set(expandSnippets(withSlashSkill(prompt.current(), slashSkills())))
             queue.confirmEdit(submitOptions?.alternate ? "steer" : "queue")
             return
           }
