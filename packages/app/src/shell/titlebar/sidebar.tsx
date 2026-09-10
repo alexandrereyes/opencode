@@ -1,9 +1,10 @@
-import { createEffect, createMemo, For, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Schema } from "effect"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Tooltip } from "@opencode/ui/tooltip"
+import { TextInput } from "@opencode/ui/text-input"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { useSortable, isSortable } from "@dnd-kit/solid/sortable"
 import { PointerActivationConstraints } from "@dnd-kit/dom"
@@ -29,6 +30,7 @@ import {
   firstAttention,
   projectKey,
   rootSessions,
+  searchSessions,
   sessionKey,
   visibleSessions,
   type SidebarSession,
@@ -56,6 +58,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     now: Date.now(),
     limits: {} as Record<string, number>,
     drag: undefined as string | undefined,
+    query: "",
   })
   const indexes = createMemo(() =>
     global.servers.list().map((connection) => {
@@ -179,6 +182,12 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   )
   const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current))
   const recent = createMemo(() => visibleSessions(sessions().rows, 5, sessions().current))
+  const query = createMemo(() => state.query.trim())
+  const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
+  const loading = () => indexes().some((entry) => entry.index.state.loading)
+  const searchID = createUniqueId()
+  let searchInput: HTMLInputElement | undefined
+  let searchResults: HTMLDivElement | undefined
   const scroll = { attention: 0, projects: 0 }
   let scroller: HTMLDivElement | undefined
   const toggle = () => {
@@ -279,32 +288,76 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         </Tooltip>
       </div>
       {props.children}
+      <div class="shrink-0 pt-4 [app-region:no-drag]">
+        <TextInput
+          ref={searchInput}
+          type="search"
+          dir="auto"
+          class="!w-full"
+          leadingIcon={<Icon name="magnifying-glass" size="small" />}
+          value={state.query}
+          placeholder={language.t("sidebar.search.placeholder")}
+          aria-label={language.t("sidebar.search.label")}
+          aria-controls={query() ? searchID : undefined}
+          aria-describedby={`${searchID}-hint`}
+          showClearButton={!!state.query}
+          clearLabel={language.t("sidebar.search.clear")}
+          onClearClick={() => {
+            setState("query", "")
+            searchInput?.focus()
+          }}
+          onInput={(event) => setState("query", event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+            if (event.key === "Escape" && state.query) {
+              event.preventDefault()
+              event.stopPropagation()
+              setState("query", "")
+              return
+            }
+            if (!query() || (event.key !== "ArrowDown" && event.key !== "Enter")) return
+            const first = searchResults?.querySelector<HTMLAnchorElement>("[data-titlebar-tab-link]")
+            if (!first) return
+            event.preventDefault()
+            event.stopPropagation()
+            first.focus()
+            first.scrollIntoView({ block: "nearest", inline: "nearest" })
+            if (event.key === "Enter") first.click()
+          }}
+        />
+        <span id={`${searchID}-hint`} class="sr-only">
+          {language.t("sidebar.search.hint")}
+        </span>
+      </div>
       <nav
         aria-label={language.t("sidebar.sessions")}
         ref={scroller}
         class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-4 [app-region:no-drag]"
         data-slot="session-sidebar"
-        data-mode={saved.attention ? "attention" : "projects"}
+        data-mode={query() ? "search" : saved.attention ? "attention" : "projects"}
       >
         <Show
           when={tabs.store.some(
             (tab) => tab.type === "draft" || (tab.type === "session" && tabs.pendingSession(tab.server, tab.sessionId)),
           )}
         >
-          <TitlebarTabStrip
-            orientation="vertical"
-            shortcuts={false}
-            tabs={tabs.store.filter(
-              (tab) =>
-                tab.type === "draft" || (tab.type === "session" && tabs.pendingSession(tab.server, tab.sessionId)),
-            )}
-            currentTab={props.currentTab}
-            onNavigate={(tab) => tabs.select(tab)}
-            onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
-            onReorder={(keys) => tabs.reorder(keys)}
-          />
+          {/* Keep numbered tab shortcuts registered while search hides these rows. */}
+          <div hidden={!!query()}>
+            <TitlebarTabStrip
+              orientation="vertical"
+              shortcuts={false}
+              tabs={tabs.store.filter(
+                (tab) =>
+                  tab.type === "draft" || (tab.type === "session" && tabs.pendingSession(tab.server, tab.sessionId)),
+              )}
+              currentTab={props.currentTab}
+              onNavigate={(tab) => tabs.select(tab)}
+              onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
+              onReorder={(keys) => tabs.reorder(keys)}
+            />
+          </div>
         </Show>
-        <Show when={!sessions().rows.length && indexes().some((entry) => entry.index.state.loading)}>
+        <Show when={!query() && !sessions().rows.length && loading()}>
           <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted" role="status">
             {language.t("sidebar.sessions.loading")}
           </p>
@@ -319,155 +372,178 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             </button>
           )}
         </For>
-        <Show
-          when={saved.attention}
-          fallback={
-            <>
-              {section(language.t("sidebar.sessions.recent"), recent())}
-              <div class="mt-4 flex flex-col gap-2">
-                <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
-                  {language.t("sidebar.projects.heading")}
-                </h2>
-                <DragDropProvider
-                  sensors={[
-                    PointerSensor.configure({
-                      activationConstraints: [new PointerActivationConstraints.Distance({ value: 4 })],
-                    }),
-                  ]}
-                  modifiers={[RestrictToVerticalAxis]}
-                  onDragStart={(event) => {
-                    gesture.dragged = true
-                    setState("drag", event.operation.source?.id.toString())
-                  }}
-                  onDragEnd={(event) => {
-                    setState("drag", undefined)
-                    const source = event.operation.source
-                    if (event.canceled || !isSortable(source)) return
-                    setSaved(
-                      "order",
-                      arrayMove(
-                        projects().map((project) => project.key),
-                        source.initialIndex,
-                        source.index,
-                      ),
-                    )
-                  }}
-                >
-                  <For each={projects()}>
-                    {(project, index) => {
-                      const rows = createMemo(() => sessions().rows.filter((row) => row.project === project.key))
-                      const collapsed = () => saved.collapsed[project.key] ?? false
-                      const visible = () =>
-                        visibleSessions(rows(), collapsed() ? 0 : (state.limits[project.key] ?? 5), sessions().current)
-                      return (
-                        <SortableProject id={project.key} index={index()}>
-                          {(handle) => (
-                            <>
-                              <div class="group flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
-                                <button
-                                  ref={handle}
-                                  class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
-                                  classList={{
-                                    "cursor-grab": state.drag !== project.key,
-                                    "cursor-grabbing": state.drag === project.key,
-                                  }}
-                                  title={language.t("sidebar.project.reorderHint")}
-                                  aria-description={language.t("sidebar.project.reorderHint")}
-                                  onPointerDown={() => {
-                                    gesture.dragged = false
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return
-                                    event.preventDefault()
-                                    move(project.key, index() + (event.key === "ArrowUp" ? -1 : 1))
-                                  }}
-                                  aria-expanded={!collapsed()}
-                                  onClick={(event) => {
-                                    if (event.detail > 0 && gesture.dragged) return
-                                    setSaved("collapsed", project.key, !collapsed())
-                                  }}
-                                >
-                                  <Icon
-                                    name={collapsed() ? "chevron-right" : "chevron-down"}
-                                    size="small"
-                                    class={collapsed() ? "rtl:rotate-180" : ""}
-                                  />
-                                  <span dir="auto" class="min-w-0 truncate" title={projectLabel(project.key)}>
-                                    {projectLabel(project.key)}
-                                  </span>
-                                  <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
-                                    <span
-                                      class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
-                                      aria-label={language.t("sidebar.attention.pending")}
-                                    />
-                                  </Show>
-                                </button>
-                              </div>
-                              <div class="flex flex-col gap-1">
-                                <For each={visible()}>{(item) => row(item, true)}</For>
-                              </div>
-                              <Show when={!collapsed() && rows().length > visible().length}>
-                                <button
-                                  class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
-                                  onClick={() => setState("limits", project.key, (value = 5) => value + 5)}
-                                >
-                                  {language.t("sidebar.sessions.more")}
-                                </button>
-                              </Show>
-                            </>
-                          )}
-                        </SortableProject>
+        <Show when={query()}>
+          <div id={searchID} ref={searchResults} aria-busy={loading()}>
+            <p class="mb-2 px-1.5 text-[13px] leading-4 text-v2-text-text-muted" role="status">
+              {loading()
+                ? language.t("sidebar.sessions.loading")
+                : indexes().some((entry) => entry.index.state.error)
+                  ? language.t("sidebar.search.incomplete")
+                  : results().length
+                    ? language.plural("sidebar.search.results", results().length)
+                    : language.t("sidebar.search.empty")}
+            </p>
+            <div class="flex flex-col gap-1">
+              <For each={results()}>{(item) => row(item)}</For>
+            </div>
+          </div>
+        </Show>
+        <Show when={!query()}>
+          <Show
+            when={saved.attention}
+            fallback={
+              <>
+                {section(language.t("sidebar.sessions.recent"), recent())}
+                <div class="mt-4 flex flex-col gap-2">
+                  <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                    {language.t("sidebar.projects.heading")}
+                  </h2>
+                  <DragDropProvider
+                    sensors={[
+                      PointerSensor.configure({
+                        activationConstraints: [new PointerActivationConstraints.Distance({ value: 4 })],
+                      }),
+                    ]}
+                    modifiers={[RestrictToVerticalAxis]}
+                    onDragStart={(event) => {
+                      gesture.dragged = true
+                      setState("drag", event.operation.source?.id.toString())
+                    }}
+                    onDragEnd={(event) => {
+                      setState("drag", undefined)
+                      const source = event.operation.source
+                      if (event.canceled || !isSortable(source)) return
+                      setSaved(
+                        "order",
+                        arrayMove(
+                          projects().map((project) => project.key),
+                          source.initialIndex,
+                          source.index,
+                        ),
                       )
                     }}
-                  </For>
-                </DragDropProvider>
-              </div>
-            </>
-          }
-        >
-          <section class="mt-4 first:mt-0">
-            <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
-              {language.t("sidebar.sessions.priority")}
-            </h2>
-            <Show
-              when={groups().priority.length}
-              fallback={
-                <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
-                  {language.t("sidebar.attention.empty")}
-                </p>
-              }
-            >
-              <div class="flex flex-col gap-1">
-                <For each={groups().priority}>{(item) => row(item)}</For>
-              </div>
-            </Show>
-          </section>
-          <For each={groups().days}>
-            {(day) =>
-              section(
-                day.index === 0
-                  ? language.t("sidebar.sessions.today")
-                  : day.index === 1
-                    ? language.t("sidebar.sessions.yesterday")
-                    : new Intl.DateTimeFormat(language.intl(), {
-                        weekday: "long",
-                        month: "short",
-                        day: "numeric",
-                      }).format(day.start),
-                day.rows,
-              )
-            }
-          </For>
-          {section(language.t("sidebar.sessions.current"), groups().current)}
-          <Show
-            when={
-              !groups().priority.length &&
-              !groups().current.length &&
-              !groups().days.some((day) => day.rows.length) &&
-              !indexes().some((entry) => entry.index.state.loading || entry.index.state.error)
+                  >
+                    <For each={projects()}>
+                      {(project, index) => {
+                        const rows = createMemo(() => sessions().rows.filter((row) => row.project === project.key))
+                        const collapsed = () => saved.collapsed[project.key] ?? false
+                        const visible = () =>
+                          visibleSessions(
+                            rows(),
+                            collapsed() ? 0 : (state.limits[project.key] ?? 5),
+                            sessions().current,
+                          )
+                        return (
+                          <SortableProject id={project.key} index={index()}>
+                            {(handle) => (
+                              <>
+                                <div class="group flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
+                                  <button
+                                    ref={handle}
+                                    class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
+                                    classList={{
+                                      "cursor-grab": state.drag !== project.key,
+                                      "cursor-grabbing": state.drag === project.key,
+                                    }}
+                                    title={language.t("sidebar.project.reorderHint")}
+                                    aria-description={language.t("sidebar.project.reorderHint")}
+                                    onPointerDown={() => {
+                                      gesture.dragged = false
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown"))
+                                        return
+                                      event.preventDefault()
+                                      move(project.key, index() + (event.key === "ArrowUp" ? -1 : 1))
+                                    }}
+                                    aria-expanded={!collapsed()}
+                                    onClick={(event) => {
+                                      if (event.detail > 0 && gesture.dragged) return
+                                      setSaved("collapsed", project.key, !collapsed())
+                                    }}
+                                  >
+                                    <Icon
+                                      name={collapsed() ? "chevron-right" : "chevron-down"}
+                                      size="small"
+                                      class={collapsed() ? "rtl:rotate-180" : ""}
+                                    />
+                                    <span dir="auto" class="min-w-0 truncate" title={projectLabel(project.key)}>
+                                      {projectLabel(project.key)}
+                                    </span>
+                                    <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
+                                      <span
+                                        class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
+                                        aria-label={language.t("sidebar.attention.pending")}
+                                      />
+                                    </Show>
+                                  </button>
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                  <For each={visible()}>{(item) => row(item, true)}</For>
+                                </div>
+                                <Show when={!collapsed() && rows().length > visible().length}>
+                                  <button
+                                    class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
+                                    onClick={() => setState("limits", project.key, (value = 5) => value + 5)}
+                                  >
+                                    {language.t("sidebar.sessions.more")}
+                                  </button>
+                                </Show>
+                              </>
+                            )}
+                          </SortableProject>
+                        )
+                      }}
+                    </For>
+                  </DragDropProvider>
+                </div>
+              </>
             }
           >
-            <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{language.t("sidebar.sessions.empty")}</p>
+            <section class="mt-4 first:mt-0">
+              <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                {language.t("sidebar.sessions.priority")}
+              </h2>
+              <Show
+                when={groups().priority.length}
+                fallback={
+                  <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                    {language.t("sidebar.attention.empty")}
+                  </p>
+                }
+              >
+                <div class="flex flex-col gap-1">
+                  <For each={groups().priority}>{(item) => row(item)}</For>
+                </div>
+              </Show>
+            </section>
+            <For each={groups().days}>
+              {(day) =>
+                section(
+                  day.index === 0
+                    ? language.t("sidebar.sessions.today")
+                    : day.index === 1
+                      ? language.t("sidebar.sessions.yesterday")
+                      : new Intl.DateTimeFormat(language.intl(), {
+                          weekday: "long",
+                          month: "short",
+                          day: "numeric",
+                        }).format(day.start),
+                  day.rows,
+                )
+              }
+            </For>
+            {section(language.t("sidebar.sessions.current"), groups().current)}
+            <Show
+              when={
+                !groups().priority.length &&
+                !groups().current.length &&
+                !groups().days.some((day) => day.rows.length) &&
+                !indexes().some((entry) => entry.index.state.loading || entry.index.state.error)
+              }
+            >
+              <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{language.t("sidebar.sessions.empty")}</p>
+            </Show>
           </Show>
         </Show>
       </nav>

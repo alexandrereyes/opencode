@@ -7,6 +7,7 @@ import {
   localDays,
   projectKey,
   rootSessions,
+  searchSessions,
   sessionKey,
   visibleSessions,
   type SidebarSession,
@@ -112,5 +113,95 @@ describe("sidebar navigation", () => {
     })
     expect(calls).toEqual([undefined, "open"])
     expect(result.map((item) => item.session.id)).toEqual(["open", "closed"])
+  })
+})
+
+describe("sidebar search", () => {
+  test("matches title, full or partial ID, and project names with case and accent folding", () => {
+    const title = row("ses_title", 30)
+    title.session.title = "Revisão do CAFÉ"
+    const project = row("ses_project", 20)
+    project.project = projectKey(server, { id: "other", worktree: "/other" })
+    const untitled = row("ses_A1B2C3", 10)
+    untitled.session.title = undefined
+    const rows = rootSessions([untitled, project, title]).rows
+    const projects = [
+      { key: title.project, name: "Main" },
+      { key: project.project, name: "São Paulo" },
+    ]
+
+    expect(searchSessions(rows, "  REVISAO do cafe  ", projects)).toEqual([title])
+    expect(searchSessions(rows, "cafe\u0301", projects)).toEqual([title])
+    expect(searchSessions(rows, "SES_a1b2c3", projects)).toEqual([untitled])
+    expect(searchSessions(rows, "a1B2", projects)).toEqual([untitled])
+    expect(searchSessions(rows, "sao PAULO", projects)).toEqual([project])
+    expect(searchSessions(rows, "not present", projects)).toEqual([])
+  })
+
+  test("search spans all loaded roots beyond dates, recent and collapsed-project limits, in message order", () => {
+    const now = Date.now()
+    const old = row("match-old", 1)
+    const latest = row("match-latest", now, 100)
+    const priority = row("match-priority", now - 1, 1)
+    const current = row("current", 0)
+    const rows = rootSessions([
+      old,
+      latest,
+      priority,
+      current,
+      ...Array.from({ length: 8 }, (_, i) => row(`match-${i}`, now - 2 - i)),
+    ]).rows
+    expect(visibleSessions(rows, 5)).not.toContain(old)
+    expect(visibleSessions(rows, 0, current.key)).toEqual([current])
+    expect(attentionGroups(rows, now).days.flatMap((day) => day.rows)).not.toContain(old)
+    expect(attentionGroups(rows, now).priority.map((item) => item.key)).toEqual([priority.key, latest.key])
+
+    const results = searchSessions(rows, "match", [])
+    expect(results).toHaveLength(11)
+    expect(results[0]).toEqual(latest)
+    expect(results[1]).toEqual(priority)
+    expect(results.at(-1)).toEqual(old)
+    expect(results).not.toContain(current)
+  })
+
+  test("deduplicates roots while keeping the same session ID on different servers distinct", () => {
+    const parent = row("match-parent", 10)
+    const child = row("match-child", 30, undefined, parent.session.id)
+    const archived = row("match-archived", 40)
+    archived.session.time.archived = 1
+    const remote = {
+      ...parent,
+      server: ServerConnection.Key.make("http://localhost:5678"),
+      key: sessionKey("http://localhost:5678", parent.session.id),
+      project: projectKey("http://localhost:5678", { id: "repo", worktree: "/repo" }),
+      messageAt: 20,
+    }
+    const roots = rootSessions([parent, child, archived, remote, parent], child.key)
+    expect(roots.current).toBe(parent.key)
+    expect(searchSessions(roots.rows, "match", []).map((item) => item.key)).toEqual([remote.key, parent.key])
+    expect(searchSessions(roots.rows, child.session.id, [])).toEqual([])
+    expect(searchSessions(roots.rows, "remote project", [{ key: remote.project, name: "Remote project" }])).toEqual([
+      remote,
+    ])
+  })
+
+  test("clearing restores the original index and leaves normal grouping and limits intact", () => {
+    const now = Date.now()
+    const current = row("current", 1)
+    const rows = rootSessions([current, row("recent", now), row("pending", now - 1, now - 2)]).rows
+    const before = {
+      groups: attentionGroups(rows, now, current.key),
+      recent: visibleSessions(rows, 1, current.key),
+      collapsed: visibleSessions(rows, 0, current.key),
+    }
+    expect(searchSessions(rows, "recent", [])).toHaveLength(1)
+    expect(searchSessions(rows, "missing", [])).toHaveLength(0)
+    expect(searchSessions(rows, "", [])).toBe(rows)
+    expect(searchSessions(rows, "  ", [])).toBe(rows)
+    expect({
+      groups: attentionGroups(rows, now, current.key),
+      recent: visibleSessions(rows, 1, current.key),
+      collapsed: visibleSessions(rows, 0, current.key),
+    }).toEqual(before)
   })
 })

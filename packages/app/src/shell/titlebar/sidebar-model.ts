@@ -45,7 +45,7 @@ export function rootSessions(rows: SidebarSession[], current?: string) {
   })
   return {
     current: currentRoot,
-    rows: rows
+    rows: [...byKey.values()]
       .filter((row) => !row.session.time.archived && (!row.session.parentID || row.key === currentRoot))
       .map((row) => ({ ...row, attention: attention.get(row.key) }))
       .sort((a, b) => (b.messageAt ?? 0) - (a.messageAt ?? 0) || a.key.localeCompare(b.key)),
@@ -78,6 +78,23 @@ export function visibleSessions(rows: SidebarSession[], limit: number, current?:
   const visible = rows.slice(0, limit)
   const active = rows.find((row) => row.key === current)
   return active && !visible.includes(active) ? [...visible, active] : visible
+}
+
+// Filter the complete, message-ordered root index before applying view limits.
+export function searchSessions(rows: SidebarSession[], query: string, projects: { key: string; name: string }[]) {
+  const value = normalizeSearch(query)
+  if (!value) return rows
+  const names = new Map(projects.map((project) => [project.key, normalizeSearch(project.name)]))
+  return rows.filter(
+    (row) =>
+      normalizeSearch(row.session.title ?? "").includes(value) ||
+      normalizeSearch(row.session.id).includes(value) ||
+      names.get(row.project)?.includes(value),
+  )
+}
+
+function normalizeSearch(value: string) {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim()
 }
 
 export async function loadNavigation(
