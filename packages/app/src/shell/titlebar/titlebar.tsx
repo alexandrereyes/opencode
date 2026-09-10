@@ -521,7 +521,7 @@ export function Titlebar(props: {
                         data-action="mobile-titlebar-new-session"
                         class="flex h-7 shrink-0 items-center rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
                         onClick={() => {
-                          if (layout.route().type !== "home") toggleHome()
+                          openNewTab()
                           setMobileTabs("open", false)
                         }}
                       >
