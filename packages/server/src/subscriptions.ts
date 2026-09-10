@@ -10,6 +10,8 @@ const Status = Schema.Struct({
         name: Schema.NullOr(Schema.String),
         email: Schema.String,
         enabled: Schema.Boolean,
+        planType: Schema.NullOr(Schema.String),
+        authenticationState: Schema.String,
       }),
       usage: Schema.NullOr(
         Schema.Struct({
@@ -17,9 +19,11 @@ const Status = Schema.Struct({
           weeklyResetAt: Schema.NullOr(Schema.String),
           observedAt: Schema.String,
           hasCapacity: Schema.Boolean,
+          planType: Schema.NullOr(Schema.String),
         }),
       ),
       usageAgeSeconds: Schema.NullOr(Schema.Finite),
+      cooldownSeconds: Schema.Finite,
     }),
   ),
 })
@@ -38,11 +42,14 @@ export const readSubscriptions = Effect.fn("Subscriptions.read")(function* () {
         id: item.account.id,
         name: item.account.name || item.account.email,
         enabled: item.account.enabled,
+        plan: item.usage?.planType ?? item.account.planType,
+        authenticated: item.account.authenticationState === "Authenticated",
+        cooldownSeconds: item.cooldownSeconds,
         remaining:
           item.usage?.weeklyPercent == null ? null : Math.max(0, Math.min(100, 100 - item.usage.weeklyPercent)),
         resetAt: item.usage?.weeklyResetAt ?? null,
         observedAt: item.usage?.observedAt ?? null,
-        stale: item.usageAgeSeconds === null || item.usageAgeSeconds > 65 * 60,
+        stale: item.usageAgeSeconds === null || item.usageAgeSeconds < 0 || item.usageAgeSeconds > 65 * 60,
         hasCapacity: item.usage?.hasCapacity ?? null,
       })),
     }

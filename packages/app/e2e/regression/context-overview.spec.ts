@@ -19,7 +19,7 @@ test("context tab retains selection across sessions and shows live quota and sub
     pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
     events: () => events.splice(0),
   })
-  const usage = { remaining: 25, requests: 0 }
+  const usage = { remaining: 25, requests: 0, stale: false }
   await page.route("**/api/server/subscriptions", (route) => {
     usage.requests++
     return route.fulfill({
@@ -31,10 +31,26 @@ test("context tab retains selection across sessions and shows live quota and sub
             name: "subscription@example.test",
             remaining: usage.remaining,
             enabled: true,
-            stale: false,
+            plan: "pro",
+            authenticated: true,
+            cooldownSeconds: 0,
+            stale: usage.stale,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
             resetAt: "2026-09-15T02:15:47Z",
+          },
+          {
+            id: "plus-fixture",
+            name: "plus@example.test",
+            remaining: 100,
+            enabled: true,
+            plan: "plus",
+            authenticated: true,
+            cooldownSeconds: 0,
+            stale: false,
+            hasCapacity: true,
+            observedAt: new Date().toISOString(),
+            resetAt: null,
           },
         ],
       },
@@ -44,11 +60,14 @@ test("context tab retains selection across sessions and shows live quota and sub
   await page.goto(stressSessionHref(fixture.sourceID))
   await page.getByRole("button", { name: "View context usage", exact: true }).click()
   const overview = page.locator('[data-slot="context-overview"]')
+  await expect(overview.getByText("subscription@example.test", { exact: true })).toBeHidden()
+  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "25")
+  await overview.locator('[data-slot="subscription-pool"] > summary').click()
   await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
-  await expect(overview.getByRole("meter", { name: "subscription@example.test" })).toHaveAttribute(
-    "aria-valuenow",
-    "25",
-  )
+  await expect(overview.getByText("plus@example.test", { exact: true })).toBeVisible()
+  await expect(overview.getByText("Outside the active Pro pool")).toBeVisible()
+  await overview.locator('[data-slot="subscription-pool"] > summary').press("Enter")
+  await expect(overview.getByText("plus@example.test", { exact: true })).toBeHidden()
   await expect(overview.getByRole("link", { name: /Inspect child navigation/ })).toBeVisible()
   events.push({
     id: "evt_context_renamed",
@@ -98,10 +117,7 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview.getByRole("meter", { name: "Context", exact: true })).toHaveAttribute("aria-valuenow", "20")
   usage.remaining = 24
   await page.clock.fastForward(60_000)
-  await expect(overview.getByRole("meter", { name: "subscription@example.test" })).toHaveAttribute(
-    "aria-valuenow",
-    "24",
-  )
+  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "24")
   await page.getByRole("tab", { name: "Review", exact: true }).click()
   await expect(overview).toBeHidden()
   const requests = usage.requests
@@ -125,16 +141,17 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview).toBeVisible()
   await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.sourceID)}"]`).click()
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
+  await expect(overview.getByRole("meter", { name: "Pro pool" })).toBeVisible()
   usage.remaining = 21
   await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
-  await expect(overview.getByRole("meter", { name: "subscription@example.test" })).toHaveAttribute(
-    "aria-valuenow",
-    "21",
-  )
+  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "21")
   await page.reload()
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
+  await expect(overview.getByRole("meter", { name: "Pro pool" })).toBeVisible()
+  usage.stale = true
+  await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
+  await expect(overview.getByText("Weekly balance unknown")).toBeVisible()
+  await expect(overview.getByText("Current measurements: 0/1")).toBeVisible()
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
 })

@@ -53,6 +53,9 @@ export type ServerSubscriptionsOutput = {
     readonly id: string
     readonly name: string
     readonly enabled: boolean
+    readonly plan: string | null
+    readonly authenticated: boolean
+    readonly cooldownSeconds: number
     readonly remaining: number | null
     readonly resetAt: string | null
     readonly observedAt: string | null

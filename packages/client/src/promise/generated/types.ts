@@ -2583,6 +2583,9 @@ export type ServerSubscriptionsOutput = {
     id: string
     name: string
     enabled: boolean
+    plan: string | null
+    authenticated: boolean
+    cooldownSeconds: number
     remaining: number | null
     resetAt: string | null
     observedAt: string | null

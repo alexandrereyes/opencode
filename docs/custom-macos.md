@@ -22,3 +22,10 @@ Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The 
 metadata. Weekly percentages are shown as remaining quota; dates are quota resets, not subscription
 or OAuth expirations. Missing/stale usage is marked explicitly. No credits balance is displayed.
 Panel tab selection is persisted per server and Session, including across Location changes.
+
+Subscriptions initially shows a collapsed Pro-pool overview. The weekly percentage is the mean
+remaining quota of enabled, authenticated Pro accounts (observed plan wins over the login claim).
+If any participating account lacks a fresh weekly measurement, the balance is unknown rather
+than a partial average. Availability separately requires fresh upstream capacity and no cooldown.
+The update time reflects the oldest measurement included. Expanding reveals every subscription,
+including accounts outside the Pro pool. Banked resets are not added to the balance.
