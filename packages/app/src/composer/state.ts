@@ -85,6 +85,65 @@ function initialComposerStore(initial?: InitialPrompt): ComposerStore {
 
 function createComposerStateValue(store: ComposerStore, setStore: SetStoreFunction<ComposerStore>) {
   const actions = createComposerActions(setStore)
+  const settled = Promise.resolve(true)
+  let pendingRevert: Promise<boolean> | undefined
+  const [revertState, setRevertState] = createStore({
+    boundary: undefined as string | undefined,
+    local: false,
+    pending: false,
+  })
+  const revertProject = new Set<() => void>()
+  const revert = {
+    pending: () => revertState.pending,
+    boundary: (current: string | undefined, available: (messageID: string) => boolean = () => true) => {
+      const server = current && available(current) ? current : undefined
+      if (!revertState.local) return server
+      if (revertState.boundary && !available(revertState.boundary)) {
+        setRevertState("local", false)
+        return server
+      }
+      if (!revertState.pending && current === revertState.boundary) setRevertState("local", false)
+      return revertState.boundary
+    },
+    schedule(boundary: string | undefined, action: () => Promise<boolean>) {
+      setRevertState({ boundary, local: true, pending: true })
+      const operation = (pendingRevert ?? settled).then((ready) => (ready ? action() : false))
+      const tracked = operation.then(
+        (result) => {
+          if (pendingRevert === tracked) {
+            pendingRevert = undefined
+            setRevertState({ pending: false, ...(!result ? { local: false } : {}) })
+          }
+          return result
+        },
+        (error) => {
+          if (pendingRevert === tracked) {
+            pendingRevert = undefined
+            setRevertState({ pending: false, local: false })
+          }
+          throw error
+        },
+      )
+      pendingRevert = tracked
+      return tracked
+    },
+    async wait() {
+      while (pendingRevert) {
+        const operation = pendingRevert
+        if (!(await operation)) return false
+      }
+      return true
+    },
+    prepare() {
+      revertProject.forEach((action) => action())
+    },
+    onProject(action: () => void) {
+      revertProject.add(action)
+      return () => {
+        revertProject.delete(action)
+      }
+    },
+  }
   const clearRetry = () => {
     if (untrack(() => store.retry) !== undefined) setStore("retry", undefined)
   }
@@ -148,6 +207,7 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
     },
     set: (prompt: Prompt, cursorPosition?: number) => actions.set(prompt, cursorPosition),
     reset: () => actions.reset(),
+    revert,
     capture: () => value,
   }
   return value

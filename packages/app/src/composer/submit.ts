@@ -45,6 +45,7 @@ type ComposerSubmitInput = {
   comments: {
     capture: () => PromptHistoryComment[]
     clear: () => void
+    current?: () => object
     restore: (comments: PromptHistoryComment[]) => void
   }
 }
@@ -68,6 +69,7 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
     }
     if (submitting.has(input.adapter.state)) return
     submitting.add(input.adapter.state)
+    const delayed = input.adapter.submissionBarrier?.pending() ?? false
     const comments = input.comments.capture()
     // Capture command intent before starting a session in a worktree whose catalog has not loaded.
     const command =
@@ -75,18 +77,42 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
         ? findCommand(input.commands(), value.prompt.map((part) => ("content" in part ? part.content : "")).join(""))
         : undefined
     if (value.mode === "normal" && !command) value.prompt = withSlashSkill(value.prompt, input.skills())
+    const active = input.adapter.kind === "active-session" ? input.adapter.session() : undefined
+    const ownsView = () => input.adapter.kind !== "active-session" || (input.adapter.active?.() ?? true)
+    const clearedComments = delayed
+      ? (() => {
+          input.addToHistory(value.prompt, value.mode)
+          input.resetHistory()
+          if (value.mode === "normal" && !command) {
+            submission.context
+              .filter((item) => !!item.comment?.trim())
+              .forEach((item) => submission.target().context.remove(item.key))
+            input.comments.clear()
+          }
+          clearSubmission(input, submission)
+          return input.comments.current?.()
+        })()
+      : undefined
 
     try {
-      const started =
-        input.adapter.kind === "active-session"
-          ? { session: input.adapter.session(), cleanupReady: Promise.resolve() }
-          : await input.adapter.start(value.selection, submission, handoffMessage(value))
+      if (input.adapter.submissionBarrier && !(await input.adapter.submissionBarrier.wait())) {
+        if (delayed && (!input.comments.current || input.comments.current() === clearedComments))
+          restoreSubmission(input, submission, value, comments, ownsView)
+        return
+      }
+      const started = active
+        ? { session: active, cleanupReady: Promise.resolve() }
+        : input.adapter.kind === "new-session"
+          ? await input.adapter.start(value.selection, submission, handoffMessage(value))
+          : undefined
       if (!started) return
       const session = started.session
 
-      input.addToHistory(value.prompt, value.mode)
-      input.resetHistory()
-      const restore = () => restoreSubmission(input, submission, value, comments)
+      if (!delayed) {
+        input.addToHistory(value.prompt, value.mode)
+        input.resetHistory()
+      }
+      const restore = () => restoreSubmission(input, submission, value, comments, ownsView)
 
       if (value.mode === "normal" && !command) {
         session.handoff?.set(handoffMessage(value))
@@ -98,12 +124,14 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
         )
         await started.cleanupReady
         await started.complete?.()
-        input.adapter.submitted()
-        submission.context
-          .filter((item) => !!item.comment?.trim())
-          .forEach((item) => submission.target().context.remove(item.key))
-        input.comments.clear()
-        clearSubmission(input, submission)
+        if (ownsView()) input.adapter.submitted()
+        if (!delayed) {
+          submission.context
+            .filter((item) => !!item.comment?.trim())
+            .forEach((item) => submission.target().context.remove(item.key))
+          input.comments.clear()
+          clearSubmission(input, submission)
+        }
         void sending.then((result) => {
           if (!result.ok)
             failSubmission(input, session, "prompt", result.error, restore, value.id, () => {
@@ -115,16 +143,16 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 
       await started.cleanupReady
       await started.complete?.()
-      input.adapter.submitted()
+      if (ownsView()) input.adapter.submitted()
 
       if (value.mode === "shell") {
-        clearSubmission(input, submission)
+        if (!delayed) clearSubmission(input, submission)
         void sendShell(session, value).catch((error) => failSubmission(input, session, "shell", error, restore))
         return
       }
 
       if (command) {
-        clearSubmission(input, submission)
+        if (!delayed) clearSubmission(input, submission)
         // Commands always steer: the server applies a command's configured
         // agent and model immediately at admission, so queueing one would
         // reconfigure the turn it is supposed to wait behind.
@@ -245,6 +273,7 @@ function restoreSubmission(
   submission: ReturnType<typeof createComposerSubmission>,
   value: ComposerSubmission,
   comments: PromptHistoryComment[],
+  ownsView: () => boolean = () => true,
 ) {
   const restored = submission.restore()
   if (!restored) return false
@@ -274,8 +303,8 @@ function restoreSubmission(
     })
   }
   if (!submission.current(input.adapter.state)) return true
-
   input.comments.restore(comments)
+  if (!ownsView()) return true
   input.setMode(value.mode)
   input.closePopover()
   requestAnimationFrame(() => {

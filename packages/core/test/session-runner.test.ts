@@ -62,12 +62,7 @@ import { Document, Info } from "@opencode/schema/config"
 import { ConfigCompaction } from "@opencode/schema/config/compaction"
 import { Tool } from "@opencode/core/tool"
 import type { Info as ToolInfo } from "@opencode/schema/tool"
-import {
-  InstructionStateTable,
-  SessionInboxTable,
-  SessionMessageTable,
-  SessionTable,
-} from "@opencode/core/session/sql"
+import { InstructionStateTable, SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode/core/session/sql"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { SessionStore } from "@opencode/core/session/store"
 import { Instructions } from "@opencode/core/instructions/index"
@@ -4683,6 +4678,28 @@ describe("SessionRunnerLLM", () => {
     yield* s.llm.push([])
     yield* s.resume
     expect(messageRoles(s.requests[0])).toEqual(["user", "assistant", "tool"])
+  })
+
+  scenario("finishes an existing tool continuation while staged without promoting pending input", function* (s) {
+    const boundary = yield* s.admit("Finish A while B is staged")
+    const tools = yield* s.blockTools()
+    yield* s.llm.push(
+      TestLLM.tool("call-before-stage", "echo", { text: "A tool result" }),
+      TestLLM.text("A final response", "a-final"),
+    )
+    const run = yield* s.resume.pipe(Effect.forkChild)
+    yield* tools.started
+    const pending = yield* s.session.prompt({ sessionID, text: "pending B", resume: false })
+    yield* s.bus.publish(SessionEvent.RevertEvent.Staged, {
+      sessionID,
+      revert: { messageID: boundary.id, files: [] },
+    })
+    yield* tools.release
+    yield* Fiber.join(run)
+
+    expect(s.requests).toHaveLength(2)
+    expect(JSON.stringify(yield* s.context)).toContain("A final response")
+    expect((yield* s.inbox).map((item) => item.id)).toEqual([pending.id])
   })
 
   scenario("interrupts a blocked step without local tool execution", function* (s) {

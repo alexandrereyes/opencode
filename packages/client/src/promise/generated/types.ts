@@ -43,6 +43,8 @@ export type FileDiffInfo = {
   status: "added" | "deleted" | "modified"
 }
 
+export type SessionRevertChild = { sessionID: string; messageID?: string; pendingIDs: Array<string> }
+
 export type SessionStatsToolTotals = { calls: number; succeeded: number; failed: number; unfinished: number }
 
 export type SessionStatsToolUsage = {
@@ -473,7 +475,14 @@ export type V2EventServerConnected = {
   data: {}
 }
 
-export type SessionRevert = { messageID: string; partID?: string; snapshot?: string; files?: Array<FileDiffInfo> }
+export type SessionRevert = {
+  messageID: string
+  parentID?: string
+  partID?: string
+  snapshot?: string
+  files?: Array<FileDiffInfo>
+  children?: Array<SessionRevertChild>
+}
 
 export type SessionStatsTools =
   | { mode: "none" }
@@ -840,6 +849,21 @@ export type SessionRevertCommitted = {
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: { sessionID: string; to: string }
+}
+
+export type SessionSubagentInputAssigned = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.subagent.input.assigned"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    childSessionID: string
+    inputID: string
+    origin: { messageID: string; toolCallID: string }
+  }
 }
 
 export type SessionUsageRecorded = {
@@ -2271,6 +2295,7 @@ export type SessionEventDurable =
   | SessionRevertStaged
   | SessionRevertCleared
   | SessionRevertCommitted
+  | SessionSubagentInputAssigned
   | SessionUsageRecorded
   | SessionMessageContentUpdated
 
@@ -2336,6 +2361,7 @@ export type V2Event =
   | SessionRevertStaged
   | SessionRevertCleared
   | SessionRevertCommitted
+  | SessionSubagentInputAssigned
   | FilesystemChanged
   | ReferenceUpdated
   | PermissionAsked
@@ -2925,6 +2951,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -2933,6 +2960,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }
@@ -3230,6 +3262,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -3238,6 +3271,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }
@@ -3535,6 +3573,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -3543,6 +3582,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }

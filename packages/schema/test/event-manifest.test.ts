@@ -152,6 +152,7 @@ describe("public event manifest", () => {
         "session.revert.staged.1",
         "session.revert.cleared.1",
         "session.revert.committed.1",
+        "session.subagent.input.assigned.1",
         "worktree.resolved.1",
       ].toSorted(),
     )

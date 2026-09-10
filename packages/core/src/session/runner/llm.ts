@@ -69,6 +69,8 @@ const layer = Layer.effect(
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
             while (true) {
+              const staged = yield* store.get(sessionID)
+              if (staged?.revert && !continuing) return DrainResult.Complete()
               // Location entry and idle boundaries allow queued controls, not necessarily queued prompts.
               const pending = yield* SessionInbox.serialized(
                 sessionID,

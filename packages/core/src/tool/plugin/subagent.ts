@@ -9,6 +9,7 @@ import { Job } from "../../job.js"
 import { Permission } from "../../permission.js"
 import { Session } from "../../session.js"
 import { SessionSchema } from "../../session/schema.js"
+import { SessionMessage } from "../../session/message.js"
 import { SubagentCompletion } from "../../session/subagent-completion.js"
 import { SubagentJob } from "../../session/subagent-job.js"
 
@@ -165,12 +166,19 @@ export const Plugin = {
 
               const background = input.background === true
               yield* context.progress({ sessionID: child.id, status: "running" })
-
+              const inputID = SessionMessage.ID.create()
+              const origin = {
+                parentSessionID: context.sessionID,
+                messageID: context.messageID,
+                toolCallID: context.id,
+              }
               // Standard prompt admission outside the job: Job.start joining a running child skips
               // its run effect, and the default wake starts an idle child or steers a running one.
               yield* sessions
                 .prompt({
+                  id: inputID,
                   sessionID: child.id,
+                  causal: origin,
                   text:
                     existing === undefined
                       ? ["You are a subagent spawned by another session.", input.prompt].join("\n")
@@ -190,7 +198,9 @@ export const Plugin = {
                 agent: agent.name,
                 description: input.description,
               }
-              yield* subagents.start(recovery)
+              const started = yield* subagents.start(recovery, origin)
+              if (started.status === "cancelled")
+                return yield* new ToolFailure({ message: `Subagent cancelled (sessionID: ${child.id})` })
 
               if (background) {
                 yield* subagents.background(recovery)
@@ -205,7 +215,7 @@ export const Plugin = {
                 ),
               )
               if (result?.type === "backgrounded") {
-                yield* subagents.notify(recovery, result.info.started_at)
+                yield* subagents.notify(recovery, result.info)
                 return backgroundResult(child.id)
               }
               // Failure surfaces keep the sessionID visible so the model can continue the child.

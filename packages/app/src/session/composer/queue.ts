@@ -142,7 +142,7 @@ export function createSessionQueue(input: {
   }
 
   const edit = (id: string) => {
-    if (mutation.isPending) return false
+    if (mutation.isPending || input.draft.revert.pending()) return false
     if (state.editing?.id === id) return true
     const item = queued().find((entry) => entry.id === id)
     if (!item) return false
@@ -176,7 +176,7 @@ export function createSessionQueue(input: {
   }
   const confirmEdit = (delivery: ComposerDelivery) => {
     const editing = state.editing
-    if (!editing || mutation.isPending) return
+    if (!editing || mutation.isPending || input.draft.revert.pending()) return
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
     if (!text.trim() && !prompt.some((part) => part.type === "image")) return cancelEdit()
@@ -194,6 +194,7 @@ export function createSessionQueue(input: {
       delivery,
     })
   }
+  onCleanup(input.draft.revert.onProject(cancelEdit))
   const editFirst = () => {
     const first = queued()[0]
     if (!first) return false
@@ -213,7 +214,7 @@ export function createSessionQueue(input: {
     cancelEdit,
     editFirst,
     rows,
-    busy: () => mutation.isPending,
+    busy: () => mutation.isPending || input.draft.revert.pending(),
     working: input.working,
     steer,
     remove,

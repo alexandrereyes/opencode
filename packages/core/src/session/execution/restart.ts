@@ -112,24 +112,31 @@ export const layer = (options?: Options) =>
                 ? (background.error ?? "Command failed")
                 : "Command cancelled"
 
-        yield* sessions
-          .synthetic({
-            id: background.notificationID,
-            sessionID: recovery.sessionID,
-            description: recovery.command,
-            ...ShellResult.notification({
-              jobID: background.id,
-              shellID: recovery.shellID,
-              command: recovery.command,
-              state,
-              text,
-            }),
-            ...(suspended.has(recovery.sessionID) ? { resume: false } : {}),
-          })
-          .pipe(
-            Effect.catchTag("Session.NotFoundError", () => Effect.void),
-            Effect.orDie,
-          )
+        yield* jobs.guard(
+          {
+            id: background.id,
+            generation: background.generation ?? background.notificationID,
+            origins: background.origins,
+          },
+          sessions
+            .synthetic({
+              id: background.notificationID,
+              sessionID: recovery.sessionID,
+              description: recovery.command,
+              ...ShellResult.notification({
+                jobID: background.id,
+                shellID: recovery.shellID,
+                command: recovery.command,
+                state,
+                text,
+              }),
+              ...(suspended.has(recovery.sessionID) ? { resume: false } : {}),
+            })
+            .pipe(
+              Effect.catchTag("Session.NotFoundError", () => Effect.void),
+              Effect.orDie,
+            ),
+        )
         yield* jobs.completeBackground(background.notificationID)
       })
 
@@ -146,6 +153,9 @@ export const layer = (options?: Options) =>
 
         const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error">) {
           yield* SubagentCompletion.deliver(sessions, jobs, {
+            id: background.id,
+            generation: background.generation ?? background.notificationID,
+            origins: background.origins ?? [],
             ...result,
             recovery,
             notificationID: background.notificationID,
@@ -163,11 +173,12 @@ export const layer = (options?: Options) =>
           return
         }
 
-        yield* jobs.start({
+        const job = yield* jobs.start({
           id: background.id,
           type: "subagent",
           title: recovery.description,
           notificationID: background.notificationID,
+          origins: background.origins,
           recovery,
           run: execution.resume(recovery.childSessionID).pipe(
             Effect.andThen(store.context(recovery.childSessionID)),
@@ -180,8 +191,12 @@ export const layer = (options?: Options) =>
             }),
           ),
         })
+        if (job.status === "cancelled") {
+          yield* jobs.completeBackground(background.notificationID)
+          return
+        }
         yield* jobs.background(background.id)
-        yield* jobs.wait({ id: background.id }).pipe(
+        yield* jobs.wait({ id: job.id, generation: job.generation }).pipe(
           Effect.flatMap((result) => (result.info ? notify(result.info) : Effect.void)),
           Effect.forkIn(scope),
         )

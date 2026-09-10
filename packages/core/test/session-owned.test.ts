@@ -15,6 +15,7 @@ import { Bus } from "../src/bus.js"
 import { Database } from "../src/database/database.js"
 import { EventTable } from "../src/event/sql.js"
 import { Image } from "../src/image.js"
+import { Job } from "../src/job.js"
 import { Instance } from "../src/instance/service.js"
 import { Location } from "../src/location.js"
 import { Plugin } from "../src/plugin.js"
@@ -50,6 +51,7 @@ const it = testEffect(
       SessionStore.node,
       SessionInbox.node,
       FSUtil.node,
+      Job.node,
     ]),
     {
       replacements: [Bus.node.replace(Bus.configured({ persist: true })), Global.node.replace(tempGlobalLayer)],
@@ -157,6 +159,7 @@ const setup = Effect.fnUntraced(function* (options?: {
       | Instance.Service
       | SessionExecution.Service
       | SessionInbox.Service
+      | Job.Service
       | Scope.Scope
     >(),
     Effect.provideService(Instance.Service, instances),
@@ -765,6 +768,278 @@ describe("SessionPrompt preparation", () => {
 })
 
 describe("SessionRevert operations", () => {
+  it.live("serializes clear restoration with a child prompt across the whole staged family", () =>
+    Effect.gen(function* () {
+      const restoring = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* setup({
+        snapshot: () =>
+          Layer.mock(Snapshot.Service, {
+            capture: () => Effect.succeed(Snapshot.ID.make("family-tree")),
+            diff: () => Effect.succeed([]),
+            restore: () => Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          }),
+      })
+      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
+      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
+      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
+      const childInput = SessionMessage.ID.create()
+      yield* fixture.sessions.forSession(otherID).prompt({
+        id: childInput,
+        text: "causal child",
+        resume: false,
+        causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "child" },
+      })
+      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
+      yield* fixture.sessions.forSession(sessionID).revert.stage({ messageID: boundary.id, files: false })
+
+      const clearing = yield* fixture.sessions.forSession(sessionID).revert.clear().pipe(Effect.forkScoped)
+      yield* Deferred.await(restoring)
+      const prompting = yield* fixture.sessions
+        .forSession(otherID)
+        .prompt({ text: "after clear", resume: false })
+        .pipe(Effect.forkScoped)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(clearing)
+      const next = yield* Fiber.join(prompting)
+
+      expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
+      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).toContain(childInput)
+      expect((yield* fixture.sessions.forSession(otherID).inbox()).map((item) => item.id)).toEqual([next.id])
+    }),
+  )
+
+  it.live("suppresses a synthetic wake that races an idle root stage", () =>
+    Effect.gen(function* () {
+      const reading = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const wakes: SessionSchema.ID[] = []
+      const store = yield* SessionStore.Service
+      const admission = yield* SessionInbox.Service
+      let armed = false
+      let admitted = false
+      let gated = false
+      const fixture = yield* setup({
+        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
+        execution: SessionExecution.Service.of({
+          active: Effect.succeed(new Set()),
+          isActive: () => Effect.succeed(false),
+          resume: () => Effect.void,
+          wake: (id) => Effect.sync(() => wakes.push(id)),
+          interrupt: () => Effect.succeed(false),
+          awaitIdle: () => Effect.void,
+        }),
+      }).pipe(
+        Effect.provideService(
+          SessionStore.Service,
+          SessionStore.Service.of({
+            ...store,
+            get: (id) => {
+              if (!armed || !admitted || gated || id !== sessionID) return store.get(id)
+              gated = true
+              return Deferred.succeed(reading, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(store.get(id)),
+              )
+            },
+          }),
+        ),
+        Effect.provideService(
+          SessionInbox.Service,
+          SessionInbox.Service.of({
+            ...admission,
+            admit: (request) =>
+              admission.admit(request).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (armed) admitted = true
+                  }),
+                ),
+              ),
+          }),
+        ),
+      )
+      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
+      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
+      armed = true
+      const completion = yield* fixture.sessions
+        .forSession(sessionID)
+        .synthetic({ text: "guarded completion", resume: true })
+        .pipe(Effect.forkScoped)
+      yield* Deferred.await(reading)
+      const staging = yield* fixture.sessions
+        .forSession(sessionID)
+        .revert.stage({ messageID: boundary.id, files: false })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(completion)
+      yield* Fiber.join(staging)
+
+      expect(wakes).toEqual([])
+      expect((yield* fixture.sessions.forSession(sessionID).get()).revert?.messageID).toBe(boundary.id)
+    }),
+  )
+
+  it.live(
+    "reacquires a grown staged family before concurrent child prompts commit the root",
+    () =>
+      Effect.gen(function* () {
+        const capture = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const fixture = yield* setup({
+          snapshot: () =>
+            Layer.mock(Snapshot.Service, {
+              capture: () =>
+                Deferred.succeed(capture, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.as(undefined),
+                ),
+            }),
+        })
+        const secondChild = SessionSchema.ID.make("ses_owned_second_child")
+        yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
+        yield* fixture.bus.publish(SessionEvent.Created, {
+          sessionID: secondChild,
+          parentID: sessionID,
+          projectID: Project.ID.global,
+          location: source,
+          slug: "second-child",
+          version: "test",
+        })
+        const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
+        yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
+        const firstInput = SessionMessage.ID.create()
+        yield* fixture.sessions.forSession(otherID).prompt({
+          id: firstInput,
+          text: "first causal",
+          resume: false,
+          causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "first" },
+        })
+        yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
+        const secondInput = SessionMessage.ID.create()
+        yield* fixture.sessions.forSession(secondChild).prompt({
+          id: secondInput,
+          text: "second causal",
+          resume: false,
+          causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "second" },
+        })
+        yield* SessionInbox.promote(fixture.db, fixture.bus, secondChild, "steer")
+
+        const staging = yield* fixture.sessions
+          .forSession(sessionID)
+          .revert.stage({ messageID: boundary.id, files: false })
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(capture)
+        const prompts = yield* Effect.all(
+          [
+            fixture.sessions.forSession(otherID).prompt({ text: "first next", resume: false }),
+            fixture.sessions.forSession(secondChild).prompt({ text: "second next", resume: false }),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkScoped)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(staging)
+        yield* Fiber.join(prompts)
+
+        expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
+        expect(
+          (yield* fixture.sessions.forSession(otherID).inbox()).flatMap((item) =>
+            item.type === "user" ? [item.payload.text] : [],
+          ),
+        ).toEqual(["first next"])
+        expect(
+          (yield* fixture.sessions.forSession(secondChild).inbox()).flatMap((item) =>
+            item.type === "user" ? [item.payload.text] : [],
+          ),
+        ).toEqual(["second next"])
+      }),
+    { timeout: 3_000 },
+  )
+
+  it.live(
+    "does not wait for interrupted execution while holding its inbox lock",
+    () =>
+      Effect.gen(function* () {
+        const admitted = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const interruptStarted = yield* Deferred.make<void>()
+        const interrupted = yield* Deferred.make<void>()
+        const blockingID = SessionMessage.ID.create()
+        const admission = yield* SessionInbox.Service
+        const fixture = yield* setup({
+          snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
+          execution: SessionExecution.Service.of({
+            active: Effect.succeed(new Set()),
+            isActive: () => Effect.succeed(false),
+            resume: () => Effect.void,
+            wake: () => Effect.void,
+            interrupt: (id) =>
+              Deferred.succeed(interruptStarted, undefined).pipe(
+                Effect.andThen(SessionInbox.serialized(id, Deferred.succeed(interrupted, undefined))),
+                Effect.as(true),
+              ),
+            awaitIdle: () => Effect.void,
+          }),
+        }).pipe(
+          Effect.provideService(
+            SessionInbox.Service,
+            SessionInbox.Service.of({
+              ...admission,
+              admit: (request) =>
+                admission
+                  .admit(request)
+                  .pipe(
+                    Effect.flatMap((result) =>
+                      request.id === blockingID && request.item.type === "user"
+                        ? Deferred.succeed(admitted, undefined).pipe(
+                            Effect.andThen(Deferred.await(release)),
+                            Effect.as(result),
+                          )
+                        : Effect.succeed(result),
+                    ),
+                  ),
+            }),
+          ),
+        )
+        yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
+        const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
+        yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
+        const inputID = SessionMessage.ID.create()
+        yield* fixture.sessions.forSession(otherID).prompt({
+          id: inputID,
+          text: "causal child",
+          resume: false,
+          causal: {
+            parentSessionID: sessionID,
+            messageID: SessionMessage.ID.create(),
+            toolCallID: "causal-child",
+          },
+        })
+        yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
+        const recording = yield* fixture.sessions
+          .forSession(otherID)
+          .prompt({
+            id: blockingID,
+            text: "concurrent admission",
+            resume: false,
+          })
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(admitted)
+        const staging = yield* fixture.sessions
+          .forSession(sessionID)
+          .revert.stage({ messageID: boundary.id, files: false })
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(interruptStarted)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(recording)
+        yield* Fiber.join(staging)
+
+        expect(yield* Deferred.isDone(interrupted)).toBe(true)
+      }),
+    { timeout: 3_000 },
+  )
+
   it.live("captures snapshots when staging and restores them when clearing", () =>
     Effect.gen(function* () {
       const calls: string[] = []
