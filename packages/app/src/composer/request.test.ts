@@ -331,18 +331,18 @@ describe("buildPromptRequest", () => {
           type: "skill",
           id: Skill.ID.make(skill.id),
           name: Skill.Name.make(skill.name),
-          content: "@review",
+          content: "$review",
           start: 0,
           end: 7,
         },
       ],
       context: [],
       images: [],
-      text: "@review",
+      text: "$review",
       sessionDirectory: "/repo",
     })
 
     expect(result.files).toEqual([])
-    expect(result.skills).toEqual([{ id: skill.id, name: skill.name, mention: { start: 0, end: 7, text: "@review" } }])
+    expect(result.skills).toEqual([{ id: skill.id, name: skill.name, mention: { start: 0, end: 7, text: "$review" } }])
   })
 })

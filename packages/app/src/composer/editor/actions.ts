@@ -78,7 +78,8 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         .prompt.map((part) => ("content" in part ? part.content : ""))
         .join("")
       const end = range?.end ?? store().cursor ?? text.length
-      const start = range?.start ?? text.slice(0, end).lastIndexOf(mention.type === "snippet" ? "#" : "@")
+      const trigger = mention.type === "snippet" ? "#" : mention.type === "skill" ? "$" : "@"
+      const start = range?.start ?? text.slice(0, end).lastIndexOf(trigger)
       setStore()({
         prompt: insertMention(store().prompt, start < 0 ? end : start, end, mention),
         cursor: (start < 0 ? end : start) + mention.content.length + 1,

@@ -759,7 +759,7 @@ describe("Composer submission", () => {
         type: "skill",
         id: Skill.ID.make("effect"),
         name: Skill.Name.make("Effect"),
-        content: "@effect",
+        content: "$effect",
         start: 28,
         end: 35,
       },
@@ -787,7 +787,7 @@ describe("Composer submission", () => {
 
     expect(request.files).toMatchObject([{ name: "app.ts", mention: { text: "@src/app.ts" } }])
     expect(request.agents).toMatchObject([{ name: "review", mention: { text: "@review" } }])
-    expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "@effect" } }])
+    expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "$effect" } }])
     expect(request.delivery).toBe("steer")
   })
 

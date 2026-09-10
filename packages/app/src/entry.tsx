@@ -42,9 +42,9 @@ const clearAuthToken = () => {
   history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash)
 }
 
-const web = createWebPlatform(pkg.version)
+const web = createWebPlatform(import.meta.env.VITE_OPENCODE_DEV_BUILD ?? pkg.version)
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (import.meta.env.PROD && !import.meta.env.VITE_OPENCODE_DEV_BUILD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
 }
 

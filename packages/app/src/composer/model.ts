@@ -230,13 +230,13 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     ...skills().map((skill) => ({
       id: `skill:${skill.id}`,
       kind: "skill" as const,
-      label: `@${skill.id}`,
+      label: `$${skill.id}`,
       description: skill.description,
       mention: {
         type: "skill" as const,
         id: Skill.ID.make(skill.id),
         name: Skill.Name.make(skill.name),
-        content: `@${skill.id}`,
+        content: `$${skill.id}`,
         start: 0,
         end: 0,
       },

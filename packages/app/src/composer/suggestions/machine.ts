@@ -5,6 +5,7 @@ export type ComposerInteractionState = {
   popover:
     | { type: "closed" }
     | { type: "context"; query: string; activeID?: string }
+    | { type: "skill"; query: string; activeID?: string }
     | { type: "snippet"; query: string; activeID?: string }
     | { type: "command-inline"; query: string; activeID?: string }
     | { type: "command-menu"; query: string; activeID?: string }
@@ -37,7 +38,7 @@ export type ComposerInteractionCommand =
   | { type: "draft.setText"; value: string }
   | { type: "draft.addText"; value: string; at?: number }
   | { type: "mention.add"; item: ComposerSuggestion; range?: { start: number; end: number } }
-  | { type: "popover.filter"; popover: "command" | "context" | "snippet"; query: string }
+  | { type: "popover.filter"; popover: "command" | "context" | "skill" | "snippet"; query: string }
   | { type: "suggestion.select"; id: string }
   | { type: "focus.editor" }
   | { type: "focus.command-search" }
@@ -96,6 +97,7 @@ function inputChanged(
     ])
   }
   const context = value.slice(0, cursor ?? value.length).match(/(?:^|\s)@([^\s@]*)$/)
+  const skill = state.mode === "normal" && value.slice(0, cursor ?? value.length).match(/(?:^|\s)\$([^\s$]*)$/)
   const snippet = state.mode === "normal" && value.slice(0, cursor ?? value.length).match(/(?:^|\s)#([^\s#]*)$/)
   if (snippet) {
     const query = snippet[1] ?? ""
@@ -109,6 +111,13 @@ function inputChanged(
     return changed({ ...state, popover: { type: "context", query }, focus: "editor" }, [
       ...setText,
       { type: "popover.filter", popover: "context", query },
+    ])
+  }
+  if (skill) {
+    const query = skill[1] ?? ""
+    return changed({ ...state, popover: { type: "skill", query }, focus: "editor" }, [
+      ...setText,
+      { type: "popover.filter", popover: "skill", query },
     ])
   }
 
@@ -152,7 +161,11 @@ function openContext(state: ComposerInteractionState): ComposerEditorTransition 
 function queryChanged(state: ComposerInteractionState, query: string): ComposerEditorTransition {
   if (state.popover.type === "closed") return unchanged(state)
   const popover =
-    state.popover.type === "context" ? "context" : state.popover.type === "snippet" ? "snippet" : "command"
+    state.popover.type === "context" || state.popover.type === "skill"
+      ? state.popover.type
+      : state.popover.type === "snippet"
+        ? "snippet"
+        : "command"
   return changed({ ...state, popover: { ...state.popover, query, activeID: undefined } }, [
     { type: "popover.filter", popover, query },
   ])

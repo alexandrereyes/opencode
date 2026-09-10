@@ -131,13 +131,13 @@ function ComposerStory(props: {
     {
       id: "skill:effect",
       kind: "skill",
-      label: "@effect",
+      label: "$effect",
       description: "Build Effect applications",
       mention: {
         type: "skill",
         id: Skill.ID.make("effect"),
         name: Skill.Name.make("Effect"),
-        content: "@effect",
+        content: "$effect",
         start: 0,
         end: 0,
       },
@@ -166,7 +166,7 @@ function ComposerStory(props: {
       ]),
     searchContextFiles: () => [],
     view: {
-      placeholder: () => "Ask anything, / for commands, @ for context...",
+      placeholder: () => "Ask anything, / for commands, @ for context, $ for skills...",
       agent: {
         options: () => [
           { id: "build", label: props.longLabels ? "Build agent with an unusually long name" : "build" },
@@ -292,7 +292,7 @@ export const MixedAttachments = {
           type: "skill",
           id: Skill.ID.make("effect"),
           name: Skill.Name.make("Effect"),
-          content: "@effect",
+          content: "$effect",
           start: 37,
           end: 44,
         },
@@ -382,9 +382,9 @@ export const DemoFirstClassSkillIDs = {
   render: () => (
     <DemoFrame
       title="First-class skill IDs"
-      description="Choose @effect, then Send. The output shows the durable skill ID sent to the prompt API."
+      description="Choose $effect, then Send. The output shows the durable skill ID sent to the prompt API."
     >
-      <ComposerStory suggestions="context" inspectRequest label="Select a skill from the context menu" />
+      <ComposerStory inspectRequest label="Type $effect to select the skill" />
     </DemoFrame>
   ),
 }
@@ -408,7 +408,7 @@ export const DemoStructuredCustomCommand = {
             type: "skill",
             id: Skill.ID.make("effect"),
             name: Skill.Name.make("Effect"),
-            content: "@effect",
+            content: "$effect",
             start: 29,
             end: 36,
           },
