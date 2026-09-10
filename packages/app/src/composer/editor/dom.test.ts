@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { getCursorPosition, getNodeLength, getTextLength, setCursorPosition } from "./dom"
+import { getCursorPosition, getNodeLength, getSelectionRange, getTextLength, setCursorPosition } from "./dom"
 
 describe("Composer editor DOM", () => {
   test("length helpers treat breaks as one char and ignore zero-width chars", () => {
@@ -49,6 +49,25 @@ describe("Composer editor DOM", () => {
 
     setCursorPosition(container, 3)
     expect(getCursorPosition(container)).toBe(3)
+
+    container.remove()
+  })
+
+  test("reports a selection spanning text and an atomic mention", () => {
+    const container = document.createElement("div")
+    const before = document.createTextNode("ab")
+    const pill = document.createElement("span")
+    pill.dataset.mention = "session"
+    pill.textContent = "@session"
+    container.append(before, pill, document.createTextNode("cd"))
+    document.body.appendChild(container)
+    const range = document.createRange()
+    range.setStart(before, 1)
+    range.setEndAfter(pill)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+
+    expect(getSelectionRange(container)).toEqual({ start: 1, end: 10 })
 
     container.remove()
   })

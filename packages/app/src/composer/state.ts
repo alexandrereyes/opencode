@@ -28,6 +28,7 @@ export type {
   ImageAttachmentPart,
   Prompt,
   PromptModel,
+  SessionPart,
   SkillPart,
   SnippetPart,
   TextPart,

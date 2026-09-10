@@ -5,6 +5,8 @@ import { SessionUserMessage } from "@opencode/session-ui/message"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { CommentsProvider } from "@/composer/comments"
 import { readPromptPresentation } from "@/composer/comment-note"
+import { extractPromptSessions } from "@/composer/prompt"
+import { formatSessionReferences } from "@/composer/session-reference"
 import { FileProvider } from "@/workspaces/files/model"
 import { LocationProvider } from "@/workspaces/location"
 import { ModelsProvider } from "@/providers/models/models"
@@ -53,6 +55,9 @@ export function TargetSessionRouteContent() {
 function PreparingSession(props: { sessionID: string; pending: PendingSession }) {
   const language = useLanguage()
   const providers = useProviders(() => props.pending.draft.directory)
+  const presentation = createMemo(() => readPromptPresentation(props.pending.message.metadata))
+  const sessions = createMemo(() => extractPromptSessions(props.pending.message.metadata))
+  const displayText = createMemo(() => presentation()?.displayText ?? props.pending.message.text)
   return (
     <SessionStatePanel>
       <DataProvider
@@ -70,7 +75,10 @@ function PreparingSession(props: { sessionID: string; pending: PendingSession })
             <SessionUserMessage
               sessionID={props.sessionID}
               message={props.pending.message}
-              comments={readPromptPresentation(props.pending.message.metadata)?.comments}
+              displayText={displayText()}
+              copyText={formatSessionReferences(displayText(), sessions())}
+              comments={presentation()?.comments}
+              sessions={sessions().map((session) => ({ start: session.start, end: session.end }))}
               historicalAgent={props.pending.selection.agent}
               historicalModel={{
                 id: props.pending.selection.model.modelID,

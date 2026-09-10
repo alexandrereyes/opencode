@@ -30,6 +30,8 @@ import { SessionWorkspaceMenu } from "@/session/timeline/session-workspace-menu"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
 import { displayName, getProjectAvatarSource, projectForSession } from "@/shell/layout/helpers"
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
+import { extractPromptSessions } from "@/composer/prompt"
+import { formatSessionReferences } from "@/composer/session-reference"
 import { useCommand } from "@/shell/commands/command"
 import { useSettings } from "@/settings/model"
 import { SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
@@ -575,11 +577,15 @@ function MessageTimelineView(
     presentation: (message) => {
       const value = readPromptPresentation(message.metadata)
       const parsed = value ? undefined : parseCommentNote(message.text)
+      const sessions = extractPromptSessions(message.metadata)
+      const displayText = value
+        ? [value.displayText, formatChatQuotes(value.quotes)].filter(Boolean).join("\n\n")
+        : undefined
       return {
-        displayText: value
-          ? [value.displayText, formatChatQuotes(value.quotes)].filter(Boolean).join("\n\n")
-          : undefined,
+        displayText,
+        copyText: displayText ? formatSessionReferences(displayText, sessions) : undefined,
         comments: value?.comments ?? (parsed ? [parsed] : []),
+        sessions: sessions.map((session) => ({ start: session.start, end: session.end })),
       }
     },
     actions: props.actions,

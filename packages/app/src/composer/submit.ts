@@ -14,6 +14,7 @@ import { blobDataUrl } from "@/runtime/persistence/drafts"
 import type { ModelSelection } from "@/providers/models/selection"
 import type { ChatQuote } from "./schema"
 import { formatChatQuotes } from "./chat-quote"
+import { formatSessionContexts } from "./session-reference"
 
 const submitting = new WeakSet<object>()
 
@@ -167,6 +168,7 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
       displayText: value.text,
       quotes: value.quotes,
       apps: value.prompt.filter((part) => part.type === "app"),
+      sessions: value.prompt.filter((part) => part.type === "session"),
       comments: value.context.flatMap((item) =>
         item.comment?.trim()
           ? [
@@ -349,6 +351,7 @@ async function sendCommand(
         ? request.displayText.split(" ").slice(1).join(" ")
         : command.arguments,
       ...request.apps.map(formatAppContext),
+      ...formatSessionContexts(request.sessions),
       formatChatQuotes(value.quotes),
     ]
       .filter(Boolean)
@@ -408,6 +411,7 @@ async function sendPrompt(
     metadata: {
       displayText: request.displayText,
       apps: request.apps,
+      sessions: request.sessions,
       comments: request.comments,
       quotes: request.quotes,
       agent: value.selection.agent,

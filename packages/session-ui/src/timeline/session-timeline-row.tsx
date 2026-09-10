@@ -40,7 +40,9 @@ type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, TimelineRow.TurnGap>
 
 export type SessionUserPresentation = {
   displayText?: string
+  copyText?: string
   comments?: SessionUserComment[]
+  sessions?: Array<{ start: number; end: number }>
 }
 
 export function createSessionTimelineRowRenderer(input: {
@@ -590,7 +592,9 @@ export function createSessionTimelineRowRenderer(input: {
                       sessionID={input.sessionID()}
                       message={message()}
                       displayText={presentation()?.displayText}
+                      copyText={presentation()?.copyText}
                       comments={presentation()?.comments}
+                      sessions={presentation()?.sessions}
                       historicalAgent={context()?.agent ?? ""}
                       historicalModel={context()?.model ?? { id: "", providerID: "" }}
                       actions={input.actions}

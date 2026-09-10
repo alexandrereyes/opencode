@@ -6,6 +6,7 @@ import { formatCommentNote, type PromptComment } from "@/composer/comment-note"
 import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { formatChatQuotes } from "./chat-quote"
+import { formatSessionContexts } from "./session-reference"
 
 // Network fields feed both boundaries; display fields keep desktop-only rendering details in the local echo.
 type PromptRequest = {
@@ -16,6 +17,7 @@ type PromptRequest = {
   skills: { id: string; name: string; mention?: { start: number; end: number; text: string } }[]
   comments: PromptComment[]
   apps: Extract<Prompt[number], { type: "app" }>[]
+  sessions: Extract<Prompt[number], { type: "session" }>[]
   quotes: ChatQuote[]
 }
 
@@ -68,6 +70,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   const text =
     prompt === input.prompt ? input.text : prompt.map((part) => ("content" in part ? part.content : "")).join("")
   const apps = prompt.filter((part) => part.type === "app")
+  const sessions = prompt.filter((part) => part.type === "session")
   const skills = prompt.filter(isSkillAttachment).map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -127,6 +130,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       ...(text.trim() ? [text] : []),
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
+      ...formatSessionContexts(sessions),
       ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
     ].join("\n"),
     displayText: text,
@@ -135,6 +139,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     skills,
     comments,
     apps,
+    sessions,
     quotes: input.quotes ?? [],
   }
 }

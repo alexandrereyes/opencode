@@ -53,6 +53,22 @@ regressions and composer/persistence tests also pass. A cold-session entry bench
 measured 307ms first correct / 333ms stable on the base and 236ms / 266ms with the feature
 (one local sample each, not a statistically significant performance comparison).
 
+## Session mentions
+
+Type `@` in the web composer to search recent top-level sessions on the current server by
+title or exact ID. Sessions from other projects are included; the current session, archived
+sessions, and subagents with a parent are excluded. The existing mention query ends at a space.
+Session suggestions show a conversation icon, title, directory, and shortened ID, and selected
+references use a distinct chip alongside Mac app, file, and agent mentions.
+
+References retain their identity through drafts, history, queue edits, and same-server copy/paste.
+Submission adds compact, deduplicated references. The `opencode.session_read` tool retrieves
+text on demand in newest-first pages: 20 messages by default, up to 50, with a 20,000-character
+message-text budget. Tool payloads and reasoning are omitted; truncated messages are marked.
+
+Pending autocomplete searches keep the composer visible and focused. Browser regressions cover
+delayed results, duplicate titles, Mac apps with the same label, and long chips on mobile.
+
 ## Inference footer
 
 Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.
