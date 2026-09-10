@@ -19,7 +19,7 @@ test("context tab retains selection across sessions and shows live quota and sub
     pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
     events: () => events.splice(0),
   })
-  const usage = { remaining: 25, requests: 0, stale: false }
+  const usage = { remaining: 59, requests: 0, stale: false }
   await page.route("**/api/server/subscriptions", (route) => {
     usage.requests++
     return route.fulfill({
@@ -46,6 +46,25 @@ test("context tab retains selection across sessions and shows live quota and sub
             resetAt: "2026-09-15T02:15:47Z",
           },
           {
+            id: "exhausted-fixture",
+            name: "exhausted@example.test",
+            remaining: 0,
+            enabled: true,
+            plan: "pro",
+            authenticated: true,
+            cooldownSeconds: 0,
+            bankedResets: {
+              available: 0,
+              earliestExpiresAt: null,
+              latestExpiresAt: null,
+              nonExpiring: 0,
+            },
+            stale: false,
+            hasCapacity: false,
+            observedAt: new Date().toISOString(),
+            resetAt: null,
+          },
+          {
             id: "plus-fixture",
             name: "plus@example.test",
             remaining: 100,
@@ -54,6 +73,45 @@ test("context tab retains selection across sessions and shows live quota and sub
             authenticated: true,
             cooldownSeconds: 0,
             stale: false,
+            hasCapacity: true,
+            observedAt: new Date().toISOString(),
+            resetAt: null,
+          },
+          {
+            id: "disabled-fixture",
+            name: "disabled@example.test",
+            remaining: 80,
+            enabled: false,
+            plan: "plus",
+            authenticated: true,
+            cooldownSeconds: 0,
+            stale: false,
+            hasCapacity: true,
+            observedAt: new Date().toISOString(),
+            resetAt: null,
+          },
+          {
+            id: "unauthenticated-fixture",
+            name: "reauth@example.test",
+            remaining: null,
+            enabled: true,
+            plan: "plus",
+            authenticated: false,
+            cooldownSeconds: 0,
+            stale: true,
+            hasCapacity: null,
+            observedAt: null,
+            resetAt: null,
+          },
+          {
+            id: "stale-fixture",
+            name: "stale@example.test",
+            remaining: 41,
+            enabled: true,
+            plan: "plus",
+            authenticated: true,
+            cooldownSeconds: 0,
+            stale: true,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
             resetAt: null,
@@ -70,11 +128,30 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview.getByText("Banked resets · Pro", { exact: true })).toBeVisible()
   await expect(overview.getByText(/First expiry:/)).toBeVisible()
   await expect(overview.getByText(/Last expiry:/)).toBeVisible()
-  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "25")
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveAttribute(
+    "aria-valuenow",
+    "59",
+  )
+  await expect(overview.getByText("Available balance · 59% remaining", { exact: true })).toBeVisible()
+  await expect(overview.getByText("Pro accounts available now: 1/2", { exact: true })).toBeVisible()
   await overview.locator('[data-slot="subscription-pool"] > summary').click()
-  await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
-  await expect(overview.getByText("plus@example.test", { exact: true })).toBeVisible()
-  await expect(overview.getByText("Outside the active Pro pool")).toBeVisible()
+  const pro = overview.getByRole("group", { name: "subscription@example.test" })
+  await expect(pro).toContainText("59% remaining · 41% used")
+  await expect(pro).toContainText("Plan: Pro")
+  await expect(pro).toContainText("Capacity confirmed · available")
+  const exhausted = overview.getByRole("group", { name: "exhausted@example.test" })
+  await expect(exhausted).toContainText("0% remaining · 100% used")
+  await expect(exhausted).toContainText("Capacity confirmed · unavailable")
+  await expect(exhausted).toContainText("No capacity available")
+  const plus = overview.getByRole("group", { name: "plus@example.test" })
+  await expect(plus).toContainText("100% remaining · 0% used")
+  await expect(plus).toContainText("Plan: Plus")
+  await expect(plus).toContainText("Outside the active Pro pool")
+  await expect(overview.getByRole("group", { name: "disabled@example.test" })).toContainText("Subscription disabled")
+  await expect(overview.getByRole("group", { name: "reauth@example.test" })).toContainText("Reauthentication required")
+  const stale = overview.getByRole("group", { name: "stale@example.test" })
+  await expect(stale).toContainText("41% remaining · 59% used")
+  await expect(stale).toContainText("Capacity unconfirmed")
   await overview.locator('[data-slot="subscription-pool"] > summary').press("Enter")
   await expect(overview.getByText("plus@example.test", { exact: true })).toBeHidden()
   await expect(overview.getByRole("link", { name: /Inspect child navigation/ })).toBeVisible()
@@ -126,7 +203,10 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview.getByRole("meter", { name: "Context", exact: true })).toHaveAttribute("aria-valuenow", "20")
   usage.remaining = 24
   await page.clock.fastForward(60_000)
-  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "24")
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveAttribute(
+    "aria-valuenow",
+    "24",
+  )
   await page.getByRole("tab", { name: "Review", exact: true }).click()
   await expect(overview).toBeHidden()
   const requests = usage.requests
@@ -150,17 +230,22 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview).toBeVisible()
   await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.sourceID)}"]`).click()
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview.getByRole("meter", { name: "Pro pool" })).toBeVisible()
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toBeVisible()
   usage.remaining = 21
   await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
-  await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "21")
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveAttribute(
+    "aria-valuenow",
+    "21",
+  )
   await page.reload()
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview.getByRole("meter", { name: "Pro pool" })).toBeVisible()
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toBeVisible()
   usage.stale = true
   await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
-  await expect(overview.getByText("Weekly balance unknown")).toBeVisible()
-  await expect(overview.getByText("Current measurements: 0/1")).toBeVisible()
+  await expect(
+    overview.locator('[data-slot="subscription-pool"] > summary').getByText("Weekly balance unknown", { exact: true }),
+  ).toBeVisible()
+  await expect(overview.getByText("Current measurements: 1/2", { exact: true })).toBeVisible()
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
 })
@@ -185,9 +270,10 @@ test("shows every background task inline, including tasks beyond the old ten-ite
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
   const tasks = page.getByRole("list", { name: "Background tasks" })
   await expect(tasks.getByRole("listitem")).toHaveCount(12)
-  expect(await tasks.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   const longTask = tasks.getByRole("button", { name: /Long task/ })
-  expect(await longTask.evaluate((element) => element.getBoundingClientRect().height)).toBe(32)
+  await expect(longTask).toBeVisible()
+  await expect(longTask).toHaveCSS("height", "32px")
+  expect(await tasks.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await longTask.click()
   const dialog = page.getByRole("dialog", { name: "Background task", exact: true })
   await expect(dialog.locator("pre")).toHaveText(`Long task ${"command".repeat(40)}`)

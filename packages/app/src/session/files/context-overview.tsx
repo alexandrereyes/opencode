@@ -4,6 +4,7 @@ import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Switch } from "@opencode/ui/switch"
+import { Spinner } from "@opencode/ui/spinner"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
@@ -16,7 +17,7 @@ import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
-import { subscriptionPool } from "./subscription-pool"
+import { subscriptionCapacity, subscriptionPercentages, subscriptionPool } from "./subscription-pool"
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
   return (
@@ -60,6 +61,16 @@ function Meter(props: { value: number | null; label: string; remaining?: boolean
   )
 }
 
+function Loading() {
+  const language = useLanguage()
+  return (
+    <p role="status" class="flex items-center gap-2 text-v2-text-text-muted">
+      <Spinner class="size-3.5" />
+      {language.t("common.loading")}
+    </p>
+  )
+}
+
 export function ContextOverview(props: { tokens?: number; usage?: number | null; active: boolean }) {
   const language = useLanguage()
   const dialog = useDialog()
@@ -76,7 +87,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     messages: data.session.message.list,
     sessions: data.session.list,
     status: data.session.status,
-    shells: () => data.shell.list({ directory: directory() }),
+    shells: () => (layout.params.id ? data.shell.listBySession(layout.params.id) : []),
   })
   const [clock, setClock] = createStore({ now: Date.now() })
   const [subscriptions, quota] = createResource(
@@ -87,25 +98,44 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         accounts: [],
       })),
   )
+  const familyRequest = createMemo(() => {
+    const id = layout.params.id
+    if (!props.active || !id) return
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    return { id, signal: controller.signal }
+  })
   const [family] = createResource(
-    () => props.active && layout.params.id,
-    async (id) => {
+    familyRequest,
+    async (request) => {
       // Follow pagination and descendants instead of relying on the currently cached session page.
       const visit = async (parentID: string): Promise<void> => {
         const page = async (cursor?: string): Promise<void> => {
+          if (request.signal.aborted) return
           const result = await sdk.api.session.list(cursor ? { cursor } : { parentID, limit: 100 })
+          // Resource cancellation alone cannot protect writes to the shared session cache.
+          if (request.signal.aborted) return
           result.data.forEach((session) => data.session.remember(session))
           await Promise.all(result.data.map((session) => visit(session.id)))
           if (result.cursor.next) await page(result.cursor.next)
         }
         await page()
       }
-      return visit(id)
-        .then(() => true)
-        .catch(() => false)
+      return visit(request.id)
+        .then(() => ({ id: request.id, ok: true }))
+        .catch(() => ({ id: request.id, ok: false }))
     },
   )
-  const pool = createMemo(() => subscriptionPool(subscriptions.latest?.accounts ?? []))
+  // `latest` falls back to the suspending resource read before its first result.
+  // These optional sections must never enlist the enclosing route's Suspense.
+  const subscription = createMemo(() =>
+    subscriptions.state === "ready" || subscriptions.state === "refreshing" ? subscriptions.latest : undefined,
+  )
+  const familyResult = () =>
+    family.state === "ready" || family.state === "refreshing" ? family.latest : undefined
+  const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id
+  const familyFailed = () => !familyPending() && familyResult()?.ok === false
+  const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], clock.now))
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
@@ -138,8 +168,10 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     const id = info()?.projectID
     return id ? data.project.get(id) : undefined
   })
+  const projectName = createMemo(() => project()?.name || getFilename(project()?.canonical ?? directory()))
+  const branch = createMemo(() => data.location.vcs.info({ directory: directory() })?.branch.current ?? "—")
   const mcp = createMemo(() =>
-    (data.location.mcp.server.list({ directory: directory() }) ?? []).toSorted((a, b) => a.name.localeCompare(b.name)),
+    data.location.mcp.server.list({ directory: directory() })?.toSorted((a, b) => a.name.localeCompare(b.name)),
   )
   const resetTime = (value: string) => {
     const minutes = Math.ceil((Date.parse(value) - clock.now) / 60_000)
@@ -165,7 +197,15 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3"
         aria-label={language.t("context.overview.session")}
       >
-        <h2 class="text-14-medium text-text-strong">{language.t("context.overview.session")}</h2>
+        <h2 class="flex min-w-0 items-center gap-2 text-14-medium text-text-strong">
+          <bdi dir="auto" class="min-w-0 max-w-[50%] truncate" title={projectName()}>
+            {projectName()}
+          </bdi>
+          <Icon name="branch" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+          <bdi dir="auto" class="min-w-0 flex-1 truncate" title={branch()}>
+            {branch()}
+          </bdi>
+        </h2>
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <span>{language.t("context.overview.context")}</span>
           <bdi class="tabular-nums">
@@ -182,29 +222,68 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           <span>
             {language.t("context.overview.costs", {
               session: money(info()?.cost ?? 0),
-              subagents: money(childCost()),
+              subagents: familyPending() || familyFailed() ? "—" : money(childCost()),
             })}
           </span>
-          <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
+          <span class="text-text-base">
+            {familyPending() || familyFailed() ? "—" : money((info()?.cost ?? 0) + childCost())}
+          </span>
         </div>
       </section>
-      <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
-        <div class="flex flex-wrap justify-between gap-2">
-          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.project")}</h2>
-          <bdi class="min-w-0 break-words">{project()?.name || getFilename(project()?.canonical ?? directory())}</bdi>
-        </div>
-        <div class="flex min-w-0 items-center gap-2 text-v2-text-text-muted">
-          <Icon name="branch" size="small" class="shrink-0" />
-          <bdi class="min-w-0 break-all">
-            {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
-          </bdi>
-        </div>
-      </section>
+      <Section
+        title={language.t("context.overview.subagents")}
+        count={familyPending() || familyFailed() ? "—" : children().length}
+      >
+        <Show when={familyPending()}>
+          <Loading />
+        </Show>
+        <Show when={familyFailed()}>
+          <p role="status">{language.t("context.overview.childrenFailed")}</p>
+        </Show>
+        <Show
+          when={children().length}
+          fallback={
+            <Show when={!familyPending() && !familyFailed()}>
+              <p class="text-v2-text-text-muted">{language.t("context.overview.noSubagents")}</p>
+            </Show>
+          }
+        >
+          <For each={children()}>
+            {(child) => (
+              <A
+                href={sessionHref(server.key, child.id)}
+                class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+              >
+                <span class="min-w-0 flex-1">
+                  <bdi class="block truncate" title={child.title}>
+                    <TextShimmer text={child.title ?? child.id} active={data.session.status(child.id) === "running"} />
+                  </bdi>
+                  <bdi class="block truncate text-12-regular text-v2-text-text-muted">{child.agent}</bdi>
+                </span>
+                <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
+                  <span class="block">
+                    {language.t(
+                      data.session.status(child.id) === "running"
+                        ? "context.overview.running"
+                        : child.outcome
+                          ? `context.overview.${child.outcome}`
+                          : "context.overview.idle",
+                    )}
+                  </span>
+                  <Show when={child.cost > 0}>
+                    <span class="block tabular-nums">{money(child.cost)}</span>
+                  </Show>
+                </span>
+              </A>
+            )}
+          </For>
+        </Show>
+      </Section>
       <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
         <div class="flex min-h-8 items-center justify-between gap-2">
           <h2 class="text-14-medium text-text-strong">{language.t("context.overview.subscriptions")}</h2>
           <IconButton
-            icon={<Icon name="refresh" size="small" />}
+            icon={subscriptions.loading ? <Spinner class="size-3.5" /> : <Icon name="refresh" size="small" />}
             variant="ghost"
             size="small"
             disabled={subscriptions.loading}
@@ -215,13 +294,13 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             }}
           />
         </div>
-        <Show when={!subscriptions.loading || subscriptions.latest} fallback={<p>{language.t("common.loading")}</p>}>
+        <Show when={subscription()} fallback={<Loading />}>
           <Show
-            when={subscriptions.latest?.status === "ok"}
+            when={subscription()?.status === "ok"}
             fallback={
               <p class="text-v2-text-text-muted" role="status">
                 {language.t(
-                  subscriptions.latest?.status === "unconfigured"
+                  subscription()?.status === "unconfigured"
                     ? "context.overview.unconfigured"
                     : "context.overview.unavailable",
                 )}
@@ -229,7 +308,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             }
           >
             <Show
-              when={subscriptions.latest?.accounts.length}
+              when={subscription()?.accounts.length}
               fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}
             >
               <details class="group" data-slot="subscription-pool">
@@ -240,24 +319,33 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                       size="small"
                       class="-rotate-90 group-open:rotate-0 rtl:rotate-90 rtl:group-open:rotate-0"
                     />
-                    <span class="text-13-medium text-text-strong">{language.t("context.overview.pool")}</span>
+                    <span class="text-13-medium text-text-strong">{language.t("context.overview.availablePool")}</span>
                     <span class="ms-auto text-end tabular-nums">
                       {pool().total === 0
                         ? language.t("context.overview.noPool")
-                        : pool().remaining === null
+                        : pool().balance === "unknown"
                           ? language.t("context.overview.unknownWeekly")
-                          : language.t("context.overview.poolRemaining", {
-                              percent: new Intl.NumberFormat(language.intl(), {
-                                style: "percent",
-                                maximumFractionDigits: 0,
-                              }).format((pool().remaining ?? 0) / 100),
-                            })}
+                          : pool().balance === "unavailable"
+                            ? language.t("context.overview.noAvailableBalance")
+                            : language.t("context.overview.availablePoolRemaining", {
+                                percent: new Intl.NumberFormat(language.intl(), {
+                                  style: "percent",
+                                  maximumFractionDigits: 0,
+                                }).format((pool().availableRemaining ?? 0) / 100),
+                              })}
                     </span>
                   </div>
-                  <Meter value={pool().remaining} remaining label={language.t("context.overview.pool")} />
+                  <Meter
+                    value={pool().availableRemaining}
+                    remaining
+                    label={language.t("context.overview.availablePool")}
+                  />
                   <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
                     <span>
-                      {language.t("context.overview.poolCapacity", { ready: pool().ready, total: pool().total })}
+                      {language.t("context.overview.availablePoolCapacity", {
+                        ready: pool().ready,
+                        total: pool().total,
+                      })}
                     </span>
                     <span>{updated()}</span>
                   </div>
@@ -303,46 +391,84 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                 </summary>
                 <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
                   <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
-                  <For each={subscriptions.latest?.accounts}>
-                    {(account) => (
-                      <div class="flex flex-col gap-1.5 py-1">
-                        <div class="flex flex-wrap items-baseline justify-between gap-2">
-                          <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
-                          <bdi class="tabular-nums">{account.remaining === null ? "—" : `${account.remaining}%`}</bdi>
-                        </div>
-                        <Meter value={account.remaining} remaining label={account.name} />
-                        <Show when={account.resetAt}>
-                          {(reset) => (
-                            <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
-                              <time dir="auto" dateTime={reset()}>
-                                {new Intl.DateTimeFormat(language.intl(), {
-                                  dateStyle: "medium",
-                                  timeStyle: "short",
-                                }).format(new Date(reset()))}
-                              </time>
-                              <span>{resetTime(reset())}</span>
-                            </div>
-                          )}
-                        </Show>
-                        <p class="text-12-regular text-v2-text-text-muted">
-                          {language.t(
-                            !account.enabled
-                              ? "context.overview.disabled"
-                              : !account.authenticated
-                                ? "context.overview.reauthenticate"
-                                : account.plan !== "pro"
+                  <For each={subscription()?.accounts}>
+                    {(account) => {
+                      const capacity = () => subscriptionCapacity(account, clock.now)
+                      const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
+                      return (
+                        <div role="group" aria-label={account.name} class="flex flex-col gap-1.5 py-1">
+                          <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
+                            <bdi class="tabular-nums">
+                              {percentages === null
+                                ? language.t("context.overview.unknownWeekly")
+                                : language.t("context.overview.accountUsage", {
+                                    remaining: new Intl.NumberFormat(language.intl(), {
+                                      style: "percent",
+                                      maximumFractionDigits: 0,
+                                    }).format(percentages.remaining / 100),
+                                    used: new Intl.NumberFormat(language.intl(), {
+                                      style: "percent",
+                                      maximumFractionDigits: 0,
+                                    }).format(percentages.used / 100),
+                                  })}
+                            </bdi>
+                          </div>
+                          <Meter value={account.remaining} remaining label={account.name} />
+                          <div class="flex flex-wrap gap-1.5 text-12-regular text-v2-text-text-muted">
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
+                              {account.plan
+                                ? language.t("context.overview.plan", {
+                                    plan:
+                                      account.plan === "pro" ? "Pro" : account.plan === "plus" ? "Plus" : account.plan,
+                                  })
+                                : language.t("context.overview.planUnknown")}
+                            </span>
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
+                              {language.t(
+                                capacity() === "outside"
                                   ? "context.overview.outsidePool"
+                                  : capacity() === "unconfirmed"
+                                    ? "context.overview.capacityUnconfirmed"
+                                    : capacity() === "available"
+                                      ? "context.overview.capacityAvailable"
+                                      : "context.overview.capacityUnavailable",
+                              )}
+                            </span>
+                          </div>
+                          <Show when={account.resetAt}>
+                            {(reset) => (
+                              <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
+                                <time dir="auto" dateTime={reset()}>
+                                  {new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(new Date(reset()))}
+                                </time>
+                                <span>{resetTime(reset())}</span>
+                              </div>
+                            )}
+                          </Show>
+                          <p class="text-12-regular text-v2-text-text-muted">
+                            {language.t(
+                              !account.enabled
+                                ? "context.overview.disabled"
+                                : !account.authenticated
+                                  ? "context.overview.reauthenticate"
                                   : account.cooldownSeconds > 0
                                     ? "context.overview.cooldown"
-                                    : account.stale
-                                      ? "context.overview.stale"
+                                    : account.stale || capacity() === "unconfirmed"
+                                      ? "context.overview.capacityUnconfirmed"
                                       : account.hasCapacity === false
                                         ? "context.overview.noCapacity"
-                                        : "context.overview.available",
-                          )}
-                        </p>
-                      </div>
-                    )}
+                                        : account.plan !== "pro"
+                                          ? "context.overview.outsidePool"
+                                          : "context.overview.available",
+                            )}
+                          </p>
+                        </div>
+                      )
+                    }}
                   </For>
                 </div>
               </details>
@@ -350,54 +476,6 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           </Show>
         </Show>
       </section>
-      <Section title={language.t("context.overview.subagents")} count={children().length}>
-        <Show
-          when={family.latest !== false}
-          fallback={<p role="status">{language.t("context.overview.childrenFailed")}</p>}
-        >
-          <Show
-            when={children().length}
-            fallback={
-              <p class="text-v2-text-text-muted">
-                {language.t(family.loading ? "common.loading" : "context.overview.noSubagents")}
-              </p>
-            }
-          >
-            <For each={children()}>
-              {(child) => (
-                <A
-                  href={sessionHref(server.key, child.id)}
-                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
-                >
-                  <span class="min-w-0 flex-1">
-                    <bdi class="block truncate" title={child.title}>
-                      <TextShimmer
-                        text={child.title ?? child.id}
-                        active={data.session.status(child.id) === "running"}
-                      />
-                    </bdi>
-                    <bdi class="block truncate text-12-regular text-v2-text-text-muted">{child.agent}</bdi>
-                  </span>
-                  <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
-                    <span class="block">
-                      {language.t(
-                        data.session.status(child.id) === "running"
-                          ? "context.overview.running"
-                          : child.outcome
-                            ? `context.overview.${child.outcome}`
-                            : "context.overview.idle",
-                      )}
-                    </span>
-                    <Show when={child.cost > 0}>
-                      <span class="block tabular-nums">{money(child.cost)}</span>
-                    </Show>
-                  </span>
-                </A>
-              )}
-            </For>
-          </Show>
-        </Show>
-      </Section>
       <Section title={language.t("context.overview.background")} count={background.tasks().length}>
         <Show
           when={background.tasks().length}
@@ -460,28 +538,30 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
       </Section>
       <Section
         title={language.t("status.popover.tab.mcp")}
-        count={`${mcp().filter((item) => item.status.status === "connected").length}/${mcp().length}`}
+        count={mcp() ? `${mcp()?.filter((item) => item.status.status === "connected").length}/${mcp()?.length}` : "—"}
       >
-        <Show when={mcp().length} fallback={<p class="text-v2-text-text-muted">{language.t("dialog.mcp.empty")}</p>}>
-          <For each={mcp()}>
-            {(item) => (
-              <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
-                <span class="min-w-0">
-                  <bdi class="block truncate">{item.name}</bdi>
-                  <span class="text-12-regular text-v2-text-text-muted">
-                    {language.t(`mcp.status.${item.status.status}`)}
+        <Show when={mcp()} fallback={<Loading />}>
+          <Show when={mcp()?.length} fallback={<p class="text-v2-text-text-muted">{language.t("dialog.mcp.empty")}</p>}>
+            <For each={mcp()}>
+              {(item) => (
+                <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
+                  <span class="min-w-0">
+                    <bdi class="block truncate">{item.name}</bdi>
+                    <span class="text-12-regular text-v2-text-text-muted">
+                      {language.t(`mcp.status.${item.status.status}`)}
+                    </span>
                   </span>
-                </span>
-                <Switch
-                  appearance="standard"
-                  aria-label={item.name}
-                  checked={item.status.status === "connected"}
-                  disabled={toggleMcp.isPending || item.status.status === "pending"}
-                  onChange={() => toggleMcp.mutate(item.name)}
-                />
-              </div>
-            )}
-          </For>
+                  <Switch
+                    appearance="standard"
+                    aria-label={item.name}
+                    checked={item.status.status === "connected"}
+                    disabled={toggleMcp.isPending || item.status.status === "pending"}
+                    onChange={() => toggleMcp.mutate(item.name)}
+                  />
+                </div>
+              )}
+            </For>
+          </Show>
         </Show>
       </Section>
     </div>

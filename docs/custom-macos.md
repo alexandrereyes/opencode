@@ -86,8 +86,14 @@ provider-stream timestamps; unavailable metrics are omitted. No API changes are 
 
 The existing Context tab prioritizes context usage, session and descendant costs, project/branch,
 LLM proxy subscriptions, subagent navigation, background tasks, and MCP connection controls above the detailed statistics.
+Project and branch share the context header. Subagents precede Subscriptions, followed by
+background tasks and MCPs; there is no separate Project section.
 Session data follows the live event stream. Subscription snapshots refresh every 60 seconds while
 the tab is visible (and on manual refresh); they are read-only and do not trigger upstream polling.
+Usage renders cached Session information immediately. Pending subscription and subagent requests
+show the shared Spinner locally rather than suspending the whole route or mobile navigation.
+MCP catalogs keep their loading state until a response arrives. Closing Usage or changing Session
+invalidates its family loader before it can publish late results to the shared cache.
 
 Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The authenticated
 `GET /api/server/subscriptions` endpoint reads `/_admin/status` server-side and returns only quota
@@ -100,10 +106,13 @@ width without overwriting the saved preference.
 Entering a desktop Session opens the side panel automatically, selecting Context when no
 previous panel tab is saved. Existing selections are restored; mobile navigation is unchanged.
 
-Subscriptions initially shows a collapsed Pro-pool overview. The weekly percentage is the mean
-remaining quota of enabled, authenticated Pro accounts (observed plan wins over the login claim).
-If any participating account lacks a fresh weekly measurement, the balance is unknown rather
-than a partial average. Availability separately requires fresh upstream capacity and no cooldown.
+Subscriptions initially shows a collapsed available-Pro-pool overview. The weekly percentage is
+the mean remaining quota of enabled, authenticated Pro accounts with fresh capacity and no cooldown
+(observed plan wins over the login claim). Exhausted or cooling-down accounts do not dilute the
+available balance; availability still reports available accounts over total Pro membership.
+Missing or stale participating measurements make the balance unknown rather than zero or a partial
+average. Account details explicitly label remaining/used quota, plan, and confirmed or
+unconfirmed capacity; non-Pro accounts are marked outside the active pool.
 The update time reflects the oldest measurement included. Expanding reveals every subscription,
 including accounts outside the Pro pool. Banked resets are not added to the balance.
 The always-visible summary also shows the fresh banked-reset inventory for the Pro pool, with
@@ -111,3 +120,9 @@ the first and last expiration (or no expiration). Unknown inventory is not repor
 On mobile, Usage and its live context ring occupy the fourth tab; Terminal is in More options.
 Background task rows are single-line previews. Selecting one opens its full text in a dialog,
 with an Open subagent link for agent tasks.
+Background activity follows current runtime state and the selected Session. Historical tool
+metadata saying a task was backgrounded is not evidence that it is still running after completion,
+cancellation, or a server restart.
+Movement messages are queried by type to discover previous Locations after a cold reload, so a
+Session still shows its live shells in the original Location until they exit. Fork-copied history
+does not transfer ownership, and a child reused in foreground is not duplicated in background.
