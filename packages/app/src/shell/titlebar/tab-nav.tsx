@@ -42,6 +42,8 @@ export function TabNavItem(props: {
   projectLabel?: string
   compact?: boolean
   closable?: boolean
+  pinned?: boolean
+  onTogglePin?: () => void
 }) {
   const language = useLanguage()
   const settings = useSettings()
@@ -202,6 +204,11 @@ export function TabNavItem(props: {
   }
   const menuItems = () => (
     <>
+      <Show when={props.onTogglePin}>
+        <Menu.Item disabled={!props.session} onSelect={() => props.onTogglePin?.()}>
+          {language.t(props.pinned ? "sidebar.session.unpin" : "sidebar.session.pin")}
+        </Menu.Item>
+      </Show>
       <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
         {language.t("common.rename")}
       </Menu.Item>
@@ -250,6 +257,17 @@ export function TabNavItem(props: {
         closeTab(event)
       }}
     >
+      <Show when={props.pinned}>
+        <span
+          data-slot="tab-pin"
+          role="img"
+          aria-label={language.t("sidebar.session.pinned")}
+          title={language.t("sidebar.session.pinned")}
+          class="flex shrink-0 items-center text-v2-icon-icon-muted"
+        >
+          <Icon name="pin" size="small" />
+        </span>
+      </Show>
       <Menu.Context.Trigger
         as="a"
         disabled={editing() || props.dragging}

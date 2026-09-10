@@ -28,6 +28,7 @@ import { createSidebarIndex } from "./sidebar-index"
 import {
   attentionGroups,
   firstAttention,
+  pinnedSessions,
   projectKey,
   rootSessions,
   searchSessions,
@@ -40,6 +41,7 @@ const SidebarState = Persistence.struct({
   attention: Schema.Boolean,
   order: Persistence.array(Schema.String),
   collapsed: Persistence.record(Schema.Boolean),
+  pins: Persistence.array(Schema.String),
 })
 
 export function SessionSidebar(props: { header: JSX.Element; children: JSX.Element; currentTab?: Tab }) {
@@ -53,6 +55,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     attention: true,
     order: [],
     collapsed: {},
+    pins: [],
   })
   const [state, setState] = createStore({
     now: Date.now(),
@@ -180,8 +183,17 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       current(),
     ),
   )
-  const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current))
-  const recent = createMemo(() => visibleSessions(sessions().rows, 5, sessions().current))
+  const pins = createMemo(() => new Set(saved.pins))
+  // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
+  const pinned = createMemo(() => pinnedSessions(sessions().rows, saved.pins))
+  const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, saved.pins))
+  const recent = createMemo(() =>
+    visibleSessions(
+      sessions().rows.filter((row) => !pins().has(row.key)),
+      5,
+      sessions().current,
+    ),
+  )
   const query = createMemo(() => state.query.trim())
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
   const loading = () => indexes().some((entry) => entry.index.state.loading)
@@ -222,6 +234,15 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         projectLabel={projectLabel(item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === item.key}
+        pinned={pins().has(item.key)}
+        onTogglePin={
+          ready()
+            ? () =>
+                setSaved("pins", (keys) =>
+                  keys.includes(item.key) ? keys.filter((key) => key !== item.key) : [...keys, item.key],
+                )
+            : undefined
+        }
         onNavigate={() => tabs.select(tabs.addSessionTab({ server: item.server, sessionId: item.session.id }))}
         onClose={() => {
           const index = tabs.store.findIndex((value) => tabKey(value) === tabKey(tab()))
@@ -393,6 +414,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             when={saved.attention}
             fallback={
               <>
+                {section(language.t("sidebar.sessions.pinned"), pinned())}
                 {section(language.t("sidebar.sessions.recent"), recent())}
                 <div class="mt-4 flex flex-col gap-2">
                   <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
@@ -517,6 +539,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                 </div>
               </Show>
             </section>
+            {section(language.t("sidebar.sessions.pinned"), groups().pinned)}
             <For each={groups().days}>
               {(day) =>
                 section(
@@ -537,6 +560,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             <Show
               when={
                 !groups().priority.length &&
+                !groups().pinned.length &&
                 !groups().current.length &&
                 !groups().days.some((day) => day.rows.length) &&
                 !indexes().some((entry) => entry.index.state.loading || entry.index.state.error)

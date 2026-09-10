@@ -5,6 +5,7 @@ import {
   firstAttention,
   loadNavigation,
   localDays,
+  pinnedSessions,
   projectKey,
   rootSessions,
   searchSessions,
@@ -113,6 +114,35 @@ describe("sidebar navigation", () => {
     })
     expect(calls).toEqual([undefined, "open"])
     expect(result.map((item) => item.session.id)).toEqual(["open", "closed"])
+  })
+})
+
+describe("sidebar pins", () => {
+  test("pin order wins over message order, priority wins over pins, and history never repeats either", () => {
+    const now = Date.now()
+    const rows = rootSessions([row("old", 1), row("new", now), row("priority", now, 1), row("history", now)]).rows
+    const pins = ["old", "priority", "new"].map((id) => sessionKey(server, id))
+    const groups = attentionGroups(rows, now, pins[0], pins)
+    expect(pinnedSessions(rows, pins).map((item) => item.session.id)).toEqual(["old", "priority", "new"])
+    expect(groups.priority.map((item) => item.session.id)).toEqual(["priority"])
+    expect(groups.pinned.map((item) => item.session.id)).toEqual(["old", "new"])
+    expect(groups.days.flatMap((day) => day.rows).map((item) => item.session.id)).toEqual(["history"])
+    expect(groups.current).toEqual([])
+    expect(searchSessions(rows, "", [])).toHaveLength(4)
+  })
+
+  test("only eligible keys resolve, keeping server identity and retained unavailable preferences", () => {
+    const local = row("same", 1)
+    const remote = { ...local, server: ServerConnection.Key.make("remote"), key: sessionKey("remote", "same") }
+    const archived = row("archived", 2)
+    archived.session.time.archived = 1
+    const pins = [remote.key, archived.key, sessionKey(server, "deleted"), local.key, local.key]
+    expect(pinnedSessions(rootSessions([local, remote, archived]).rows, pins)).toEqual([remote, local])
+    expect(pinnedSessions([archived], pins)).toEqual([])
+    expect(pinnedSessions([local], pins)).toEqual([local])
+    expect(pinnedSessions([], pins)).toEqual([])
+    expect(pinnedSessions([local, remote], pins)).toEqual([remote, local])
+    expect(pins).toHaveLength(5)
   })
 })
 

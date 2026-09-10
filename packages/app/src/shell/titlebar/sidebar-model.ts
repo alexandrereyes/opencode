@@ -61,17 +61,27 @@ export function localDays(now: number) {
   })
 }
 
-export function attentionGroups(rows: SidebarSession[], now: number, current?: string) {
+export function pinnedSessions(rows: SidebarSession[], pins: readonly string[]) {
+  const byKey = new Map(rows.filter((row) => !row.session.time.archived).map((row) => [row.key, row]))
+  return [...new Set(pins)].flatMap((key) => {
+    const row = byKey.get(key)
+    return row ? [row] : []
+  })
+}
+
+export function attentionGroups(rows: SidebarSession[], now: number, current?: string, pins: readonly string[] = []) {
   const priority = rows
     .filter((row) => row.attention !== undefined)
     .sort((a, b) => a.attention! - b.attention! || a.key.localeCompare(b.key))
-  const history = rows.filter((row) => row.attention === undefined)
+  const pinned = pinnedSessions(rows, pins).filter((row) => row.attention === undefined)
+  const keys = new Set(pinned.map((row) => row.key))
+  const history = rows.filter((row) => row.attention === undefined && !keys.has(row.key))
   const days = localDays(now).map((day) => ({
     ...day,
     rows: history.filter((row) => row.messageAt !== undefined && row.messageAt >= day.start && row.messageAt < day.end),
   }))
   const visible = new Set([...priority, ...days.flatMap((day) => day.rows)].map((row) => row.key))
-  return { priority, days, current: history.filter((row) => row.key === current && !visible.has(row.key)) }
+  return { priority, pinned, days, current: history.filter((row) => row.key === current && !visible.has(row.key)) }
 }
 
 export function visibleSessions(rows: SidebarSession[], limit: number, current?: string) {
