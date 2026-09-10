@@ -17,6 +17,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "./errors"
 import { useSettings } from "@/settings/model"
+import { createServerSnippets } from "@/settings/snippets/server"
 import { timelinePreset } from "@opencode/session-ui/timeline/detail"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
@@ -136,6 +137,7 @@ function createServerController(
   const settings = useSettings()
   const connKey = ServerConnection.key(conn)
   const sdk = createServerSdkContext(conn, scope)
+  const snippets = createServerSnippets(sdk)
   const source = createData({
     api: () => sdk.api,
     initialMessageLimit: () => (timelinePreset(settings.general.timelineDetail())?.id === "compact" ? 40 : 20),
@@ -194,6 +196,7 @@ function createServerController(
   return {
     data,
     sdk,
+    snippets,
     sync,
     isLocal,
     projects: {

@@ -7,6 +7,11 @@ import type {
   ServerMaintenanceCancelOutput,
   ServerMaintenanceCommitInput,
   ServerMaintenanceCommitOutput,
+  SnippetListOutput,
+  SnippetSaveInput,
+  SnippetSaveOutput,
+  SnippetRemoveInput,
+  SnippetRemoveOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentListInput,
@@ -475,6 +480,43 @@ export function make(options: ClientOptions) {
             requestOptions,
           ),
       },
+    },
+    snippet: {
+      list: (requestOptions?: RequestOptions) =>
+        request<SnippetListOutput>(
+          { method: "GET", path: `/api/snippet`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
+          requestOptions,
+        ),
+      save: (input: SnippetSaveInput, requestOptions?: RequestOptions) =>
+        request<SnippetSaveOutput>(
+          {
+            method: "PUT",
+            path: `/api/snippet`,
+            body: {
+              id: input["id"],
+              name: input["name"],
+              description: input["description"],
+              aliases: input["aliases"],
+              content: input["content"],
+              project: input["project"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 409],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remove: (input: SnippetRemoveInput, requestOptions?: RequestOptions) =>
+        request<SnippetRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/snippet/${encodeURIComponent(input.id)}`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
     },
     location: {
       get: (input?: LocationGetInput, requestOptions?: RequestOptions) =>

@@ -29,7 +29,9 @@ mode keep these disabled. Writing assistance follows the input device, not viewp
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
-and content. Snippets are stored in app preferences, globally or scoped to a project and server.
+and content. Snippets are stored persistently in the OpenCode server database, globally or scoped
+to a project. Settings selects the server to manage; all its devices share the same catalog and
+receive live updates. Existing device-local snippets are not migrated.
 Project snippets override global snippets with the same name. Type `#` in the composer, search,
 and select with Enter, Tab, or a click. Selected tokens use the theme accent and expand to their
 captured content on submission, including when a command is prefixed from the composer menu.

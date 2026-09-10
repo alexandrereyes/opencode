@@ -15,6 +15,7 @@ import { PtyTicket } from "@opencode/core/pty/ticket"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { Project } from "@opencode/core/project"
 import { Session } from "@opencode/core/session"
+import { Snippet } from "@opencode/core/snippet"
 import { Instance } from "@opencode/core/instance/service"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { ShellSelect } from "@opencode/core/shell/select"
@@ -56,6 +57,7 @@ const applicationServiceNodes = [
   Job.node,
   Project.node,
   Session.node,
+  Snippet.node,
   Instance.node,
   SessionTransfer.node,
   SdkPlugins.node,
@@ -165,6 +167,7 @@ function makeRoutes<AuthError, AuthServices>(
           Context.pick(
             Database.Service,
             Job.Service,
+            Snippet.Service,
             PersistentPty.Service,
             PermissionSaved.Service,
             PluginUpdate.Service,

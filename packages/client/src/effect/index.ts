@@ -22,6 +22,7 @@ export type {
   WebSearchApi,
   SessionApi,
   SkillApi,
+  SnippetApi,
 } from "./api.js"
 export { Agent } from "@opencode/schema/agent"
 export { Command } from "@opencode/schema/command"
@@ -49,6 +50,7 @@ export { Session } from "@opencode/schema/session"
 export { SessionInbox } from "@opencode/schema/session-inbox"
 export { SessionMessage } from "@opencode/schema/session-message"
 export { Skill } from "@opencode/schema/skill"
+export { Snippet } from "@opencode/schema/snippet"
 export { Prompt } from "@opencode/schema/prompt"
 export { PromptInput } from "@opencode/schema/prompt-input"
 export type { OpenCodeEvent } from "@opencode/protocol/groups/event"

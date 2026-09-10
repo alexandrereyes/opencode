@@ -1,16 +1,7 @@
-import { Schema } from "effect"
-import { Persistence } from "@/runtime/persistence/schema"
+import type { SnippetInfo } from "@opencode/client/promise"
 import type { ComposerSuggestion } from "@/composer/types"
 
-export const Snippet = Persistence.struct({
-  id: Schema.String,
-  name: Schema.String,
-  description: Schema.String,
-  aliases: Persistence.array(Schema.String),
-  content: Schema.String,
-  project: Persistence.optional(Schema.String),
-})
-export type Snippet = typeof Snippet.Type
+export type Snippet = SnippetInfo
 
 export function snippetSuggestions(snippets: Snippet[], project?: string): ComposerSuggestion[] {
   const local = snippets.filter((item) => item.project === project && item.project !== undefined)

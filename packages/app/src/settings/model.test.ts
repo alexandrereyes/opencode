@@ -52,7 +52,6 @@ describe("settings schema", () => {
 
   test("supplies the existing defaults for an empty document", () => {
     expect(decode({})).toEqual({
-      snippets: [],
       general: {
         autoSave: true,
         releaseNotes: true,
