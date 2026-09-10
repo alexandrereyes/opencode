@@ -1512,6 +1512,7 @@ export type FormAnswer = { [x: string]: FormValue }
 
 export type PermissionRequest = {
   id: string
+  created?: number
   sessionID: string
   action: string
   resources: Array<string>
@@ -1529,6 +1530,7 @@ export type PermissionAsked = {
   location?: LocationRef
   data: {
     id: string
+    created?: number
     sessionID: string
     action: string
     resources: Array<string>
@@ -2106,6 +2108,14 @@ export type ConfigEntry =
   | { type: "agents"; path: string }
   | { type: "claude"; path: string }
 
+export type SessionNavigationInfo = {
+  session: SessionInfo
+  messageAt?: number
+  unreadAt?: number
+  permissionAt?: number
+  questionAt?: number
+}
+
 export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
 
 export type SessionInboxUser = {
@@ -2162,6 +2172,8 @@ export type FormFields = [FormField, ...Array<FormField>]
 
 export type FormFields2 = [FormField1, ...Array<FormField1>]
 
+export type SessionNavigationPage = { data: Array<SessionNavigationInfo>; next?: string }
+
 export type SessionInboxInfo = SessionInboxUser | SessionInboxSynthetic | SessionInboxCompaction | SessionInboxMove
 
 export type SessionInboxEnqueued = {
@@ -2201,9 +2213,23 @@ export type IntegrationOAuthMethod = { id: string; type: "oauth"; label: string;
 
 export type IntegrationKeyMethod = { type: "key"; label?: string; form?: FormFields }
 
-export type FormInfo = { id: string; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
+export type FormInfo = {
+  id: string
+  sessionID: string
+  title: string
+  metadata?: FormMetadata
+  created?: number
+  fields: FormFields
+}
 
-export type FormInfo1 = { id: string; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields2 }
+export type FormInfo1 = {
+  id: string
+  sessionID: string
+  title: string
+  metadata?: FormMetadata1
+  created?: number
+  fields: FormFields2
+}
 
 export type SessionMessageInfo =
   | SessionMessageAgentSelected
@@ -2772,6 +2798,26 @@ export type PluginUpdateInput = {
 }
 
 export type PluginUpdateOutput = void
+
+export type SessionNavigationInput = {
+  readonly after?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["after"]
+  readonly sessionID?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["sessionID"]
+  readonly limit?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["limit"]
+}
+
+export type SessionNavigationOutput = SessionNavigationPage
 
 export type SessionListInput = {
   readonly workspace?: {

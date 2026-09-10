@@ -44,7 +44,7 @@ const clearAuthToken = () => {
 
 const web = createWebPlatform(pkg.version)
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (import.meta.env.PROD && !import.meta.env.VITE_OPENCODE_TEST_BUILD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
 }
 
@@ -97,6 +97,14 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
             >
               <KeyboardInsets />
               {standalone && <PwaRoutePersistence />}
+              {import.meta.env.VITE_OPENCODE_TEST_BUILD && (
+                <output
+                  data-testid="test-build"
+                  class="pointer-events-none fixed bottom-1 end-2 z-50 rounded bg-v2-background-bg-deep px-2 text-[11px] leading-4 text-v2-text-text-weak"
+                >
+                  {import.meta.env.VITE_OPENCODE_TEST_BUILD}
+                </output>
+              )}
             </AppInterface>
           </AppBaseProviders>
         </PlatformProvider>

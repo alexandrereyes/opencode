@@ -38,6 +38,9 @@ export function TabNavItem(props: {
   pressed?: boolean
   hidden?: boolean
   orientation?: "horizontal" | "vertical"
+  projectLabel?: string
+  compact?: boolean
+  closable?: boolean
 }) {
   const language = useLanguage()
   const settings = useSettings()
@@ -300,7 +303,13 @@ export function TabNavItem(props: {
             event.preventDefault()
           }}
         />
-        <Show when={props.orientation === "vertical" && settings.appearance.showProjectName() && projectName()}>
+        <Show
+          when={
+            !props.compact &&
+            props.orientation === "vertical" &&
+            (props.projectLabel ?? (settings.appearance.showProjectName() && projectName()))
+          }
+        >
           {(name) => (
             <span data-slot="tab-project" dir="auto">
               {name()}
@@ -309,20 +318,22 @@ export function TabNavItem(props: {
         </Show>
       </Menu.Context.Trigger>
 
-      <div data-slot="tab-close">
-        <IconButton
-          size="small"
-          variant="ghost-muted"
-          class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onClick={closeTab}
-          icon={<Icon name="xmark-small" />}
-          aria-label={language.t("common.closeTab")}
-        />
-      </div>
+      <Show when={props.closable !== false}>
+        <div data-slot="tab-close">
+          <IconButton
+            size="small"
+            variant="ghost-muted"
+            class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={closeTab}
+            icon={<Icon name="xmark-small" />}
+            aria-label={language.t("common.closeTab")}
+          />
+        </div>
+      </Show>
     </div>
   )
 
@@ -360,7 +371,9 @@ export function TabNavItem(props: {
           <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
             {language.t("common.rename")}
           </Menu.Item>
-          <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+          <Show when={props.closable !== false}>
+            <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+          </Show>
         </Menu.Context.Content>
       </Menu.Context.Portal>
     </Menu.Context>
