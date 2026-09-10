@@ -110,8 +110,8 @@ describe("extractPromptFromMessage", () => {
     const message = {
       id: "msg_1",
       type: "user",
-      text: "Use @review",
-      skills: [{ id: "review", name: "Review", mention: { text: "@review", start: 4, end: 11 } }],
+      text: "Use $review",
+      skills: [{ id: "review", name: "Review", mention: { text: "$review", start: 4, end: 11 } }],
       time: { created: 1 },
     } satisfies SessionMessageUser
 
@@ -121,7 +121,7 @@ describe("extractPromptFromMessage", () => {
         type: "skill",
         id: "review",
         name: "Review",
-        content: "@review",
+        content: "$review",
       },
     ])
   })

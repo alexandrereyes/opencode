@@ -42,9 +42,14 @@ const clearAuthToken = () => {
   history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash)
 }
 
-const web = createWebPlatform(pkg.version)
+const web = createWebPlatform(import.meta.env.VITE_OPENCODE_DEV_BUILD ?? pkg.version)
 
-if (import.meta.env.PROD && import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" && "serviceWorker" in navigator) {
+if (
+  import.meta.env.PROD &&
+  !import.meta.env.VITE_OPENCODE_DEV_BUILD &&
+  import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" &&
+  "serviceWorker" in navigator
+) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
 }
 

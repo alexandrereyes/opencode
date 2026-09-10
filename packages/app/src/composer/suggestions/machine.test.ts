@@ -53,6 +53,33 @@ describe("Composer interaction machine", () => {
     expect(result.state.popover).toEqual({ type: "context", query: "sr" })
   })
 
+  test("opens skill completion from a dollar sign at the cursor", () => {
+    const value = "alpha $eff omega"
+    const input = persisted(value)
+    input.cursor = 10
+
+    const result = transitionComposer(
+      createComposerInteractionState(),
+      { type: "input.changed", value, persist: false },
+      input,
+    )
+
+    expect(result.state.popover).toEqual({ type: "skill", query: "eff" })
+    expect(result.commands).toContainEqual({ type: "popover.filter", popover: "skill", query: "eff" })
+  })
+
+  test("does not open skill completion for shell variables", () => {
+    const state = { ...createComposerInteractionState(), mode: "shell" as const }
+    const result = transitionComposer(
+      state,
+      { type: "input.changed", value: "$HOME", persist: false },
+      persisted("$HOME"),
+    )
+
+    expect(result.state.popover).toEqual({ type: "closed" })
+    expect(result.commands).toEqual([])
+  })
+
   test("enters shell mode from an initial exclamation mark", () => {
     const result = transitionComposer(
       createComposerInteractionState(),

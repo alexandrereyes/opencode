@@ -120,4 +120,23 @@ describe("Composer store", () => {
     ])
     expect(prompt.state.cursor).toBe(9)
   })
+
+  test("replaces the dollar trigger when inserting a skill mention", () => {
+    const prompt = createPromptStore()
+    prompt.setPrompt([{ type: "text", content: "Use $eff", start: 0, end: 8 }], 8)
+    prompt.addMention({
+      type: "skill",
+      id: Skill.ID.make("effect"),
+      name: Skill.Name.make("Effect"),
+      content: "$effect",
+      start: 0,
+      end: 0,
+    })
+
+    expect(prompt.state.prompt).toMatchObject([
+      { type: "text", content: "Use ", start: 0, end: 4 },
+      { type: "skill", id: "effect", content: "$effect", start: 4, end: 11 },
+      { type: "text", content: " ", start: 11, end: 12 },
+    ])
+  })
 })

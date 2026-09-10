@@ -277,7 +277,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
               {view.placeholder?.() ??
                 (state.mode === "shell"
                   ? i18n.t("ui.promptInput.placeholder.shell")
-                  : i18n.t("ui.promptInput.placeholder.normal", { slash: "/", at: "@" }))}
+                  : i18n.t("ui.promptInput.placeholder.normal", { slash: "/", at: "@", skill: "$" }))}
             </div>
           </Show>
         </ScrollView>

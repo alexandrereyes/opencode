@@ -74,6 +74,7 @@ async function setup(page: Page, queued = false) {
         location: { directory, project: { id: projectID, directory, canonical: directory } },
         data: [
           { id: "show-me", slash: true, autoinvoke: false },
+          { id: "cache", slash: false },
           { id: "hidden", slash: false },
           { id: "implicit" },
           { id: "review", slash: true },
@@ -127,25 +128,51 @@ for (const selection of ["keyboard", "pointer"]) {
   })
 }
 
-test("respects slash flags and command precedence without hiding context skills", async ({ page }) => {
+test("respects slash flags and keeps skills out of at-sign context", async ({ page }) => {
   const { editor } = await setup(page)
   await editor.fill("/")
   await expect(page.locator('[data-suggestion-id="skill:show-me"]')).toBeVisible()
   await expect(page.locator('[data-suggestion-id="custom.review"]')).toBeVisible()
   await expect(page.locator('[data-suggestion-id="model.choose"]')).toBeVisible()
-  for (const id of ["hidden", "implicit", "review", "model"]) {
+  for (const id of ["cache", "hidden", "implicit", "review", "model"]) {
     await expect(page.locator(`[data-suggestion-id="skill:${id}"]`)).toHaveCount(0)
   }
   await editor.press("Escape")
   await expect(page.locator('[data-suggestion-id="skill:show-me"]')).toHaveCount(0)
   await expect(editor).toBeFocused()
-  await editor.fill("@hidden")
-  const hidden = page.locator('[data-suggestion-id="skill:hidden"]')
-  await expect(hidden).toContainText("@hidden")
-  await hidden.click()
-  await expect(editor).toHaveText("@hidden ")
+  await editor.fill("@cache")
+  await expect(page.locator('[data-suggestion-id="file:src/cache.ts"]')).toContainText("cache.ts")
+  await expect(page.locator('[data-suggestion-id="skill:cache"]')).toHaveCount(0)
+  await editor.press("Escape")
+  await editor.fill("$cache")
+  const cache = page.locator('[data-suggestion-id="skill:cache"]')
+  await expect(cache).toContainText("$cache")
+  await expect(page.locator('[data-suggestion-id="file:src/cache.ts"]')).toHaveCount(0)
+  await cache.click()
+  await expect(editor).toHaveText("$cache ")
   await expect(editor).toBeFocused()
 })
+
+for (const selection of ["keyboard", "pointer"]) {
+  test(`selects and submits a dollar skill with ${selection}`, async ({ page }) => {
+    const { prompts, editor } = await setup(page)
+    await editor.fill("$show")
+    const skill = page.locator('[data-suggestion-id="skill:show-me"]')
+    await expect(skill).toContainText("$show-me")
+    if (selection === "keyboard") await editor.press("Enter")
+    if (selection === "pointer") await skill.click()
+    await expect(editor).toHaveText("$show-me ")
+    await expect(editor).toBeFocused()
+    await editor.pressSequentially("explain caching")
+    await editor.press("Enter")
+    await expect.poll(() => prompts.length).toBe(1)
+    expect(prompts[0]).toMatchObject({
+      text: "$show-me explain caching",
+      skills: [{ id: "show-me", mention: { start: 0, end: 8, text: "$show-me" } }],
+    })
+    await expect(editor).toBeEmpty()
+  })
+}
 
 test("preserves structured attachments when adding a slash skill from the command menu", async ({ page }) => {
   const { prompts, composer, editor } = await setup(page)

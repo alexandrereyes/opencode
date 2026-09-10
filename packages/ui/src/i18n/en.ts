@@ -149,8 +149,10 @@ const source = {
   "ui.promptInput.removeAttachment": "Remove attachment",
   "ui.promptInput.label": "Prompt",
   "ui.promptInput.placeholder.shell": "Enter shell command…",
-  "ui.promptInput.placeholder.normal": "Ask anything, {{slash}} for commands, {{at}} for context…",
-  "ui.promptInput.placeholder.followUp": "Add follow-up, {{slash}} for commands, {{at}} for context…",
+  "ui.promptInput.placeholder.normal":
+    "Ask anything, {{slash}} for commands, {{at}} for context, {{skill}} for skills…",
+  "ui.promptInput.placeholder.followUp":
+    "Add follow-up, {{slash}} for commands, {{at}} for context, {{skill}} for skills…",
   "ui.promptInput.add": "Add images and files",
   "ui.promptInput.attachments": "Images and files",
   "ui.promptInput.context": "Context",

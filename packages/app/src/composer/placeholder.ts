@@ -4,6 +4,6 @@ export function composerPlaceholder(
   followUp?: boolean,
 ) {
   if (mode === "shell") return t("prompt.placeholder.shell", { example: "git status" })
-  if (followUp) return t("ui.promptInput.placeholder.followUp", { slash: "/", at: "@" })
-  return t("ui.promptInput.placeholder.normal", { slash: "/", at: "@" })
+  if (followUp) return t("ui.promptInput.placeholder.followUp", { slash: "/", at: "@", skill: "$" })
+  return t("ui.promptInput.placeholder.normal", { slash: "/", at: "@", skill: "$" })
 }

@@ -60,7 +60,7 @@ describe("composer persistence schemas", () => {
       prompt: [
         text,
         { type: "agent", content: "@build", start: 5, end: 11, name: "build" },
-        { type: "skill", content: "@effect", start: 11, end: 18, id: "effect", name: "Effect" },
+        { type: "skill", content: "$effect", start: 11, end: 18, id: "effect", name: "Effect" },
         { type: "agent", content: "@broken", start: 18, end: 25, name: 42 },
         {
           type: "file",

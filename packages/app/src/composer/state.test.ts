@@ -37,7 +37,7 @@ describe("prompt state initialization", () => {
     )({
       prompt: [
         { type: "text", content: "hello", start: 0, end: 5 },
-        { type: "skill", id: "effect", name: "Effect", content: "@effect", start: 5, end: 12 },
+        { type: "skill", id: "effect", name: "Effect", content: "$effect", start: 5, end: 12 },
         { type: "image", id: "broken", filename: "broken.png", mime: "image/png", blob: { id: 42 } },
         {
           type: "image",
@@ -84,7 +84,7 @@ describe("prompt state initialization", () => {
           type: "skill",
           id: Skill.ID.make("effect"),
           name: Skill.Name.make("Effect"),
-          content: "@effect",
+          content: "$effect",
           start: 5,
           end: 12,
         },

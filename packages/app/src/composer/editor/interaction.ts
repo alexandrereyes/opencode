@@ -109,7 +109,7 @@ export function createComposerEditor(input: {
   }
   const contextList = useFilteredList<ComposerSuggestion>({
     items: async (query) => {
-      const fixed = input.context().filter((item) => item.kind !== "file")
+      const fixed = input.context().filter((item) => item.kind !== "file" && item.kind !== "skill")
       const recent = input.context().filter((item) => item.kind === "file" && item.recent)
       if (!query.trim()) return [...fixed, ...recent]
       const seen = new Set(recent.map((item) => item.id))
@@ -123,16 +123,20 @@ export function createComposerEditor(input: {
       if (item.kind === "reference") return "reference"
       if (item.kind === "session") return "session"
       if (item.kind === "app") return "app"
-      if (item.kind === "skill") return "skill"
       if (item.kind === "agent") return "agent"
       if (item.kind === "resource") return "resource"
       if (item.recent) return "recent"
       return "file"
     },
     sortGroupsBy: (a, b) => {
-      const order = ["session", "app", "reference", "skill", "agent", "resource", "recent", "file"]
+      const order = ["session", "app", "reference", "agent", "resource", "recent", "file"]
       return order.indexOf(a.category) - order.indexOf(b.category)
     },
+  })
+  const skillList = useFilteredList<ComposerSuggestion>({
+    items: () => input.context().filter((item) => item.kind === "skill"),
+    key: (item) => item.id,
+    filterKeys: ["label"],
   })
   const commandList = useFilteredList<ComposerSuggestion>({
     items: () => input.commands(),
@@ -145,7 +149,13 @@ export function createComposerEditor(input: {
     filterKeys: ["search", "label"],
   })
   const list = () =>
-    state.popover.type === "context" ? contextList : state.popover.type === "snippet" ? snippetList : commandList
+    state.popover.type === "context"
+      ? contextList
+      : state.popover.type === "skill"
+        ? skillList
+        : state.popover.type === "snippet"
+          ? snippetList
+          : commandList
   const suggestions = () => list().flat()
 
   const execute = (command: ComposerInteractionCommand) => {
@@ -164,9 +174,11 @@ export function createComposerEditor(input: {
     if (command.type === "popover.filter") {
       ;(command.popover === "command"
         ? commandList
-        : command.popover === "snippet"
-          ? snippetList
-          : contextList
+        : command.popover === "skill"
+          ? skillList
+          : command.popover === "snippet"
+            ? snippetList
+            : contextList
       ).onInput(command.query)
       return
     }
