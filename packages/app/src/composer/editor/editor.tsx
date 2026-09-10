@@ -77,8 +77,16 @@ export function ComposerEditor(props: ComposerEditorProps) {
     onCleanup(() => observer.disconnect())
   })
   let localInput = false
+  let composing = false
+  const syncInput = (element: HTMLDivElement) => {
+    const cursor = composerCursor(element)
+    const prompt = parseComposerEditor(element)
+    const images = props.controller.parts().filter((part) => part.type === "image")
+    localInput = true
+    props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+  }
   const updateCursor = () => {
-    if (!editor || !window.getSelection()?.isCollapsed) return
+    if (composing || !editor || !window.getSelection()?.isCollapsed) return
     props.controller.onCursor(composerCursor(editor))
   }
   const mode = createMemo(() => state.mode)
@@ -90,7 +98,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
   createEffect(() => {
     const parts = props.controller.parts()
-    if (!editor) return
+    if (!editor || composing) return
     if (localInput) {
       localInput = false
       return
@@ -180,9 +188,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
             aria-label={i18n.t("ui.promptInput.label")}
             dir={state.mode === "normal" ? "auto" : "ltr"}
             contenteditable={!props.disabled && !props.readOnly}
-            autocapitalize={state.mode === "normal" ? "sentences" : "off"}
-            autocorrect={state.mode === "normal" ? "on" : "off"}
-            spellcheck={state.mode === "normal"}
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck={false}
             // @ts-expect-error
             autocomplete="off"
             class="relative z-10 block min-h-[60px] w-full whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
@@ -192,13 +200,22 @@ export function ComposerEditor(props: ComposerEditorProps) {
               "text-align": "start",
             }}
             onInput={(event) => {
-              const cursor = composerCursor(event.currentTarget)
-              const prompt = parseComposerEditor(event.currentTarget)
-              const images = props.controller.parts().filter((part) => part.type === "image")
-              localInput = true
-              props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+              if (composing || event.isComposing) return
+              syncInput(event.currentTarget)
+            }}
+            onCompositionStart={() => {
+              composing = true
+            }}
+            onCompositionEnd={(event) => {
+              const element = event.currentTarget
+              // Let the browser finish its final input before publishing the composed text.
+              queueMicrotask(() => {
+                composing = false
+                if (element.isConnected) syncInput(element)
+              })
             }}
             onKeyDown={(event) => {
+              if (composing || event.isComposing || event.keyCode === 229 || event.key === "Dead") return
               if (!view.draftOnly && props.controller.onKeyDown(event)) return
               const mod = event.metaKey || event.ctrlKey
               if (mod && event.key === "ArrowUp" && !event.shiftKey && !event.altKey) {

@@ -392,6 +392,7 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229 || event.key === "Dead") return
       if (suspended() || dialog.active) return
 
       const sig = signatureFromEvent(event)
