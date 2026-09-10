@@ -190,6 +190,7 @@ export function createComposerEditor(input: {
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229 || event.key === "Dead") return true
     if (
       state.mode === "normal" &&
       (event.metaKey || event.ctrlKey) &&
