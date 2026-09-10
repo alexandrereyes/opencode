@@ -4,6 +4,7 @@ import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Switch } from "@opencode/ui/switch"
+import { Spinner } from "@opencode/ui/spinner"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
@@ -60,6 +61,16 @@ function Meter(props: { value: number | null; label: string; remaining?: boolean
   )
 }
 
+function Loading() {
+  const language = useLanguage()
+  return (
+    <p role="status" class="flex items-center gap-2 text-v2-text-text-muted">
+      <Spinner class="size-3.5" />
+      {language.t("common.loading")}
+    </p>
+  )
+}
+
 export function ContextOverview(props: { tokens?: number; usage?: number | null; active: boolean }) {
   const language = useLanguage()
   const dialog = useDialog()
@@ -87,25 +98,44 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         accounts: [],
       })),
   )
+  const familyRequest = createMemo(() => {
+    const id = layout.params.id
+    if (!props.active || !id) return
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    return { id, signal: controller.signal }
+  })
   const [family] = createResource(
-    () => props.active && layout.params.id,
-    async (id) => {
+    familyRequest,
+    async (request) => {
       // Follow pagination and descendants instead of relying on the currently cached session page.
       const visit = async (parentID: string): Promise<void> => {
         const page = async (cursor?: string): Promise<void> => {
+          if (request.signal.aborted) return
           const result = await sdk.api.session.list(cursor ? { cursor } : { parentID, limit: 100 })
+          // Resource cancellation alone cannot protect writes to the shared session cache.
+          if (request.signal.aborted) return
           result.data.forEach((session) => data.session.remember(session))
           await Promise.all(result.data.map((session) => visit(session.id)))
           if (result.cursor.next) await page(result.cursor.next)
         }
         await page()
       }
-      return visit(id)
-        .then(() => true)
-        .catch(() => false)
+      return visit(request.id)
+        .then(() => ({ id: request.id, ok: true }))
+        .catch(() => ({ id: request.id, ok: false }))
     },
   )
-  const pool = createMemo(() => subscriptionPool(subscriptions.latest?.accounts ?? [], clock.now))
+  // `latest` falls back to the suspending resource read before its first result.
+  // These optional sections must never enlist the enclosing route's Suspense.
+  const subscription = createMemo(() =>
+    subscriptions.state === "ready" || subscriptions.state === "refreshing" ? subscriptions.latest : undefined,
+  )
+  const familyResult = () =>
+    family.state === "ready" || family.state === "refreshing" ? family.latest : undefined
+  const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id
+  const familyFailed = () => !familyPending() && familyResult()?.ok === false
+  const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], clock.now))
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
@@ -141,7 +171,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   const projectName = createMemo(() => project()?.name || getFilename(project()?.canonical ?? directory()))
   const branch = createMemo(() => data.location.vcs.info({ directory: directory() })?.branch.current ?? "—")
   const mcp = createMemo(() =>
-    (data.location.mcp.server.list({ directory: directory() }) ?? []).toSorted((a, b) => a.name.localeCompare(b.name)),
+    data.location.mcp.server.list({ directory: directory() })?.toSorted((a, b) => a.name.localeCompare(b.name)),
   )
   const resetTime = (value: string) => {
     const minutes = Math.ceil((Date.parse(value) - clock.now) / 60_000)
@@ -192,65 +222,68 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           <span>
             {language.t("context.overview.costs", {
               session: money(info()?.cost ?? 0),
-              subagents: money(childCost()),
+              subagents: familyPending() || familyFailed() ? "—" : money(childCost()),
             })}
           </span>
-          <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
+          <span class="text-text-base">
+            {familyPending() || familyFailed() ? "—" : money((info()?.cost ?? 0) + childCost())}
+          </span>
         </div>
       </section>
-      <Section title={language.t("context.overview.subagents")} count={children().length}>
+      <Section
+        title={language.t("context.overview.subagents")}
+        count={familyPending() || familyFailed() ? "—" : children().length}
+      >
+        <Show when={familyPending()}>
+          <Loading />
+        </Show>
+        <Show when={familyFailed()}>
+          <p role="status">{language.t("context.overview.childrenFailed")}</p>
+        </Show>
         <Show
-          when={family.latest !== false}
-          fallback={<p role="status">{language.t("context.overview.childrenFailed")}</p>}
+          when={children().length}
+          fallback={
+            <Show when={!familyPending() && !familyFailed()}>
+              <p class="text-v2-text-text-muted">{language.t("context.overview.noSubagents")}</p>
+            </Show>
+          }
         >
-          <Show
-            when={children().length}
-            fallback={
-              <p class="text-v2-text-text-muted">
-                {language.t(family.loading ? "common.loading" : "context.overview.noSubagents")}
-              </p>
-            }
-          >
-            <For each={children()}>
-              {(child) => (
-                <A
-                  href={sessionHref(server.key, child.id)}
-                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
-                >
-                  <span class="min-w-0 flex-1">
-                    <bdi class="block truncate" title={child.title}>
-                      <TextShimmer
-                        text={child.title ?? child.id}
-                        active={data.session.status(child.id) === "running"}
-                      />
-                    </bdi>
-                    <bdi class="block truncate text-12-regular text-v2-text-text-muted">{child.agent}</bdi>
+          <For each={children()}>
+            {(child) => (
+              <A
+                href={sessionHref(server.key, child.id)}
+                class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+              >
+                <span class="min-w-0 flex-1">
+                  <bdi class="block truncate" title={child.title}>
+                    <TextShimmer text={child.title ?? child.id} active={data.session.status(child.id) === "running"} />
+                  </bdi>
+                  <bdi class="block truncate text-12-regular text-v2-text-text-muted">{child.agent}</bdi>
+                </span>
+                <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
+                  <span class="block">
+                    {language.t(
+                      data.session.status(child.id) === "running"
+                        ? "context.overview.running"
+                        : child.outcome
+                          ? `context.overview.${child.outcome}`
+                          : "context.overview.idle",
+                    )}
                   </span>
-                  <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
-                    <span class="block">
-                      {language.t(
-                        data.session.status(child.id) === "running"
-                          ? "context.overview.running"
-                          : child.outcome
-                            ? `context.overview.${child.outcome}`
-                            : "context.overview.idle",
-                      )}
-                    </span>
-                    <Show when={child.cost > 0}>
-                      <span class="block tabular-nums">{money(child.cost)}</span>
-                    </Show>
-                  </span>
-                </A>
-              )}
-            </For>
-          </Show>
+                  <Show when={child.cost > 0}>
+                    <span class="block tabular-nums">{money(child.cost)}</span>
+                  </Show>
+                </span>
+              </A>
+            )}
+          </For>
         </Show>
       </Section>
       <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
         <div class="flex min-h-8 items-center justify-between gap-2">
           <h2 class="text-14-medium text-text-strong">{language.t("context.overview.subscriptions")}</h2>
           <IconButton
-            icon={<Icon name="refresh" size="small" />}
+            icon={subscriptions.loading ? <Spinner class="size-3.5" /> : <Icon name="refresh" size="small" />}
             variant="ghost"
             size="small"
             disabled={subscriptions.loading}
@@ -261,13 +294,13 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             }}
           />
         </div>
-        <Show when={!subscriptions.loading || subscriptions.latest} fallback={<p>{language.t("common.loading")}</p>}>
+        <Show when={subscription()} fallback={<Loading />}>
           <Show
-            when={subscriptions.latest?.status === "ok"}
+            when={subscription()?.status === "ok"}
             fallback={
               <p class="text-v2-text-text-muted" role="status">
                 {language.t(
-                  subscriptions.latest?.status === "unconfigured"
+                  subscription()?.status === "unconfigured"
                     ? "context.overview.unconfigured"
                     : "context.overview.unavailable",
                 )}
@@ -275,7 +308,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             }
           >
             <Show
-              when={subscriptions.latest?.accounts.length}
+              when={subscription()?.accounts.length}
               fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}
             >
               <details class="group" data-slot="subscription-pool">
@@ -358,7 +391,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                 </summary>
                 <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
                   <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
-                  <For each={subscriptions.latest?.accounts}>
+                  <For each={subscription()?.accounts}>
                     {(account) => {
                       const capacity = () => subscriptionCapacity(account, clock.now)
                       const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
@@ -505,28 +538,30 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
       </Section>
       <Section
         title={language.t("status.popover.tab.mcp")}
-        count={`${mcp().filter((item) => item.status.status === "connected").length}/${mcp().length}`}
+        count={mcp() ? `${mcp()?.filter((item) => item.status.status === "connected").length}/${mcp()?.length}` : "—"}
       >
-        <Show when={mcp().length} fallback={<p class="text-v2-text-text-muted">{language.t("dialog.mcp.empty")}</p>}>
-          <For each={mcp()}>
-            {(item) => (
-              <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
-                <span class="min-w-0">
-                  <bdi class="block truncate">{item.name}</bdi>
-                  <span class="text-12-regular text-v2-text-text-muted">
-                    {language.t(`mcp.status.${item.status.status}`)}
+        <Show when={mcp()} fallback={<Loading />}>
+          <Show when={mcp()?.length} fallback={<p class="text-v2-text-text-muted">{language.t("dialog.mcp.empty")}</p>}>
+            <For each={mcp()}>
+              {(item) => (
+                <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
+                  <span class="min-w-0">
+                    <bdi class="block truncate">{item.name}</bdi>
+                    <span class="text-12-regular text-v2-text-text-muted">
+                      {language.t(`mcp.status.${item.status.status}`)}
+                    </span>
                   </span>
-                </span>
-                <Switch
-                  appearance="standard"
-                  aria-label={item.name}
-                  checked={item.status.status === "connected"}
-                  disabled={toggleMcp.isPending || item.status.status === "pending"}
-                  onChange={() => toggleMcp.mutate(item.name)}
-                />
-              </div>
-            )}
-          </For>
+                  <Switch
+                    appearance="standard"
+                    aria-label={item.name}
+                    checked={item.status.status === "connected"}
+                    disabled={toggleMcp.isPending || item.status.status === "pending"}
+                    onChange={() => toggleMcp.mutate(item.name)}
+                  />
+                </div>
+              )}
+            </For>
+          </Show>
         </Show>
       </Section>
     </div>

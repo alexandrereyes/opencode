@@ -84,6 +84,10 @@ Project and branch share the context header. Subagents precede Subscriptions, fo
 background tasks and MCPs; there is no separate Project section.
 Session data follows the live event stream. Subscription snapshots refresh every 60 seconds while
 the tab is visible (and on manual refresh); they are read-only and do not trigger upstream polling.
+Usage renders cached Session information immediately. Pending subscription and subagent requests
+show the shared Spinner locally rather than suspending the whole route or mobile navigation.
+MCP catalogs keep their loading state until a response arrives. Closing Usage or changing Session
+invalidates its family loader before it can publish late results to the shared cache.
 
 Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The authenticated
 `GET /api/server/subscriptions` endpoint reads `/_admin/status` server-side and returns only quota
