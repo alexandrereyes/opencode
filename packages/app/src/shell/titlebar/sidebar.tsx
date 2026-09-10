@@ -4,7 +4,11 @@ import { Schema } from "effect"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Tooltip } from "@opencode/ui/tooltip"
-import { Menu } from "@opencode/ui/menu"
+import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
+import { useSortable, isSortable } from "@dnd-kit/solid/sortable"
+import { PointerActivationConstraints } from "@dnd-kit/dom"
+import { RestrictToVerticalAxis } from "@dnd-kit/abstract/modifiers"
+import { arrayMove } from "@dnd-kit/helpers"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -59,10 +63,11 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       return { connection, ctx, index: createSidebarIndex(ctx) }
     }),
   )
+  const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
-  const projects = createMemo(() => {
-    const groups = indexes().flatMap(({ connection, ctx, index }) => {
+  const projectGroups = createMemo(() =>
+    indexes().flatMap(({ connection, ctx, index }) => {
       const server = ServerConnection.key(connection)
       const known = [...ctx.sync.data.project.filter((project) => project.id !== "global"), ...ctx.projects.list()]
       const entries = [
@@ -93,8 +98,10 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             .reverse(),
         ).values(),
       ]
-    })
-    return groups.sort((a, b) => {
+    }),
+  )
+  const projects = createMemo(() =>
+    projectGroups().toSorted((a, b) => {
       const ai = saved.order.indexOf(a.key)
       const bi = saved.order.indexOf(b.key)
       return (
@@ -102,8 +109,8 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         a.name.localeCompare(b.name) ||
         a.key.localeCompare(b.key)
       )
-    })
-  })
+    }),
+  )
   createEffect(() => {
     if (!ready()) return
     const missing = projects()
@@ -318,100 +325,121 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             <>
               {section(language.t("sidebar.sessions.recent"), recent())}
               <div class="mt-4 flex flex-col gap-2">
-                <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{language.t("sidebar.projects.heading")}</h2>
-                <For each={projects()}>
-                  {(project, index) => {
-                    const rows = createMemo(() => sessions().rows.filter((row) => row.project === project.key))
-                    const collapsed = () => saved.collapsed[project.key] ?? false
-                    const visible = () =>
-                      visibleSessions(rows(), collapsed() ? 0 : (state.limits[project.key] ?? 5), sessions().current)
-                    return (
-                      <section data-project-key={project.key}>
-                        <div
-                          class="group flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02"
-                          draggable
-                          onDragStart={(event) => {
-                            setState("drag", project.key)
-                            event.dataTransfer?.setData("text/plain", project.key)
-                          }}
-                          onDragOver={(event) => {
-                            if (state.drag) event.preventDefault()
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault()
-                            if (state.drag) move(state.drag, index())
-                            setState("drag", undefined)
-                          }}
-                          onDragEnd={() => setState("drag", undefined)}
-                        >
-                          <button
-                            class="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
-                            aria-expanded={!collapsed()}
-                            onClick={() => setSaved("collapsed", project.key, !collapsed())}
-                          >
-                            <Icon
-                              name={collapsed() ? "chevron-right" : "chevron-down"}
-                              size="small"
-                              class={collapsed() ? "rtl:rotate-180" : ""}
-                            />
-                            <span dir="auto" class="min-w-0 truncate" title={projectLabel(project.key)}>
-                              {projectLabel(project.key)}
-                            </span>
-                            <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
-                              <span
-                                class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
-                                aria-label={language.t("sidebar.attention.pending")}
-                              />
-                            </Show>
-                          </button>
-                          <Menu>
-                            <Menu.Trigger
-                              as={IconButton}
-                              icon={<Icon name="dot-grid" />}
-                              size="small"
-                              variant="ghost-muted"
-                              aria-label={language.t("sidebar.project.actions", { project: project.name })}
-                            />
-                            <Menu.Portal>
-                              <Menu.Content>
-                                <Menu.Item disabled={index() === 0} onSelect={() => move(project.key, index() - 1)}>
-                                  {language.t("sidebar.project.moveUp")}
-                                </Menu.Item>
-                                <Menu.Item
-                                  disabled={index() === projects().length - 1}
-                                  onSelect={() => move(project.key, index() + 1)}
-                                >
-                                  {language.t("sidebar.project.moveDown")}
-                                </Menu.Item>
-                              </Menu.Content>
-                            </Menu.Portal>
-                          </Menu>
-                        </div>
-                        <div class="flex flex-col gap-1">
-                          <For each={visible()}>{(item) => row(item, true)}</For>
-                        </div>
-                        <Show when={!collapsed() && rows().length > visible().length}>
-                          <button
-                            class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
-                            onClick={() => setState("limits", project.key, (value = 5) => value + 5)}
-                          >
-                            {language.t("sidebar.sessions.more")}
-                          </button>
-                        </Show>
-                      </section>
+                <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                  {language.t("sidebar.projects.heading")}
+                </h2>
+                <DragDropProvider
+                  sensors={[
+                    PointerSensor.configure({
+                      activationConstraints: [new PointerActivationConstraints.Distance({ value: 4 })],
+                    }),
+                  ]}
+                  modifiers={[RestrictToVerticalAxis]}
+                  onDragStart={(event) => {
+                    gesture.dragged = true
+                    setState("drag", event.operation.source?.id.toString())
+                  }}
+                  onDragEnd={(event) => {
+                    setState("drag", undefined)
+                    const source = event.operation.source
+                    if (event.canceled || !isSortable(source)) return
+                    setSaved(
+                      "order",
+                      arrayMove(
+                        projects().map((project) => project.key),
+                        source.initialIndex,
+                        source.index,
+                      ),
                     )
                   }}
-                </For>
+                >
+                  <For each={projects()}>
+                    {(project, index) => {
+                      const rows = createMemo(() => sessions().rows.filter((row) => row.project === project.key))
+                      const collapsed = () => saved.collapsed[project.key] ?? false
+                      const visible = () =>
+                        visibleSessions(rows(), collapsed() ? 0 : (state.limits[project.key] ?? 5), sessions().current)
+                      return (
+                        <SortableProject id={project.key} index={index()}>
+                          {(handle) => (
+                            <>
+                              <div class="group flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
+                                <button
+                                  ref={handle}
+                                  class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
+                                  classList={{
+                                    "cursor-grab": state.drag !== project.key,
+                                    "cursor-grabbing": state.drag === project.key,
+                                  }}
+                                  title={language.t("sidebar.project.reorderHint")}
+                                  aria-description={language.t("sidebar.project.reorderHint")}
+                                  onPointerDown={() => {
+                                    gesture.dragged = false
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return
+                                    event.preventDefault()
+                                    move(project.key, index() + (event.key === "ArrowUp" ? -1 : 1))
+                                  }}
+                                  aria-expanded={!collapsed()}
+                                  onClick={(event) => {
+                                    if (event.detail > 0 && gesture.dragged) return
+                                    setSaved("collapsed", project.key, !collapsed())
+                                  }}
+                                >
+                                  <Icon
+                                    name={collapsed() ? "chevron-right" : "chevron-down"}
+                                    size="small"
+                                    class={collapsed() ? "rtl:rotate-180" : ""}
+                                  />
+                                  <span dir="auto" class="min-w-0 truncate" title={projectLabel(project.key)}>
+                                    {projectLabel(project.key)}
+                                  </span>
+                                  <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
+                                    <span
+                                      class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
+                                      aria-label={language.t("sidebar.attention.pending")}
+                                    />
+                                  </Show>
+                                </button>
+                              </div>
+                              <div class="flex flex-col gap-1">
+                                <For each={visible()}>{(item) => row(item, true)}</For>
+                              </div>
+                              <Show when={!collapsed() && rows().length > visible().length}>
+                                <button
+                                  class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
+                                  onClick={() => setState("limits", project.key, (value = 5) => value + 5)}
+                                >
+                                  {language.t("sidebar.sessions.more")}
+                                </button>
+                              </Show>
+                            </>
+                          )}
+                        </SortableProject>
+                      )
+                    }}
+                  </For>
+                </DragDropProvider>
               </div>
             </>
           }
         >
           <section class="mt-4 first:mt-0">
-            <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{language.t("sidebar.sessions.priority")}</h2>
-            <Show when={groups().priority.length} fallback={
-              <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{language.t("sidebar.attention.empty")}</p>
-            }>
-              <div class="flex flex-col gap-1"><For each={groups().priority}>{(item) => row(item)}</For></div>
+            <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+              {language.t("sidebar.sessions.priority")}
+            </h2>
+            <Show
+              when={groups().priority.length}
+              fallback={
+                <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                  {language.t("sidebar.attention.empty")}
+                </p>
+              }
+            >
+              <div class="flex flex-col gap-1">
+                <For each={groups().priority}>{(item) => row(item)}</For>
+              </div>
             </Show>
           </section>
           <For each={groups().days}>
@@ -444,5 +472,32 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         </Show>
       </nav>
     </>
+  )
+}
+
+function SortableProject(props: {
+  id: string
+  index: number
+  children: (handle: (element: HTMLButtonElement) => void) => JSX.Element
+}) {
+  const sortable = useSortable({
+    get id() {
+      return props.id
+    },
+    get index() {
+      return props.index
+    },
+  })
+  return (
+    <section
+      ref={sortable.ref}
+      data-project-key={props.id}
+      data-dragging={sortable.isDragSource()}
+      class="relative data-[dragging=true]:z-10 data-[dragging=true]:bg-v2-background-bg-layer-02"
+    >
+      {props.children((element) => {
+        sortable.handleRef(element)
+      })}
+    </section>
   )
 }
