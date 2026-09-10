@@ -21,7 +21,7 @@ export function ChatQuotes(props: { quotes: ComposerState["quotes"]; onDone: () 
   })
   const done = () => {
     flushPersisted()
-    setState("editing", "")
+    setState({ editing: "", open: false })
     props.onDone()
   }
   return (

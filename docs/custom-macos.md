@@ -21,7 +21,8 @@ configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption 
 Select prose or code inside one assistant text part and choose **Comment**. The composer
 keeps the selected passage and an optional editable comment in **Chat quotes** above the
 prompt. Quotes can be removed, collapsed, or sent without additional prompt text.
-Escape or Cmd/Ctrl+Enter finishes comment editing; plain Enter inserts a line break.
+Confirming with the checkmark, Escape, or Cmd/Ctrl+Enter finishes editing and collapses
+the quotes panel; plain Enter inserts a line break. The chip reopens saved quotes.
 
 Drafts are scoped to their Session and server and survive reloads. Submission appends the
 quoted passages, source message/part IDs, and comments to the model-visible text while
