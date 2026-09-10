@@ -22,6 +22,10 @@ On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submit
 composer. Desktop keeps Enter to submit and Shift+Enter for a new line. Mod+Enter
 retains alternate delivery, and Enter still selects an open suggestion before submission.
 
+Touch devices (a coarse primary pointer, including iPhone and iPad) enable autocorrection,
+sentence capitalization, and spellcheck in normal chat mode. Desktop pointer input and shell
+mode keep these disabled. Writing assistance follows the input device, not viewport width.
+
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
