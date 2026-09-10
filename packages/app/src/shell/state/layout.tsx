@@ -70,6 +70,13 @@ export type LayoutRoute =
   | { type: "draft"; draftID: string }
   | { type: "session"; sessionId: string; server: ServerConnection.Key }
 
+// Panel selection belongs to the Session, even while its Location is resolving or moving.
+export function sessionPanelKey(key: string) {
+  const route = SessionStateKey.route(key)
+  const id = route.split("/")[1]
+  return id ? `${SessionStateKey.scope(key)}\u0000/${id}` : key
+}
+
 const sessionPath = (key: string) => {
   const dir = SessionStateKey.route(key).split("/")[0]
   if (!dir) return
@@ -214,7 +221,7 @@ export const layoutPersistence = Persistence.migrate(
         sessionTabs: Object.fromEntries(
           Object.entries(value.sessionTabs)
             .filter(([key]) => SessionStateKey.is(key))
-            .map(([key, tabs]) => [key, normalizeStoredSessionTabs(key, tabs)]),
+            .map(([key, tabs]) => [sessionPanelKey(key), normalizeStoredSessionTabs(key, tabs)]),
         ),
         sessionView: Object.fromEntries(Object.entries(value.sessionView).filter(([key]) => SessionStateKey.is(key))),
       })),
@@ -678,8 +685,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         }
       },
       tabs(sessionKey: string | Accessor<string>) {
-        const key = createSessionKeyReader(sessionKey, ensureKey)
-        const path = createMemo(() => sessionPath(key()))
+        const routeKey = typeof sessionKey === "function" ? sessionKey : () => sessionKey
+        const key = createSessionKeyReader(() => sessionPanelKey(routeKey()), ensureKey)
+        const path = createMemo(() => sessionPath(routeKey()))
         const tabs = createMemo(() => store.sessionTabs[key()] ?? { all: [] })
         const normalize = (tab: string) => normalizeSessionTab(path(), tab)
         const normalizeAll = (all: string[]) => normalizeSessionTabList(path(), all)
