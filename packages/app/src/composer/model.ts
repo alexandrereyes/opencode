@@ -17,14 +17,16 @@ import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
 import { Skill } from "@opencode/schema/skill"
 import type { ComposerAdapter, ComposerControls, ComposerQueue } from "./adapter"
-import type { ImageAttachmentPart } from "./state"
+import type { ComposerState, ImageAttachmentPart } from "./state"
 import type { PromptHistoryComment } from "./history/entry"
 import { createComposerHistory } from "./history/store"
 import { composerPlaceholder } from "./placeholder"
 import { createComposerSubmit, withSlashSkill } from "./submit"
+import type { ChatQuote } from "./schema"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
+  readonly quotes?: ComposerState["quotes"]
 }
 
 export function createComposerModel(adapter: ComposerAdapter, options?: { queue?: ComposerQueue }): ComposerModel {
@@ -83,7 +85,12 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
       .current()
       .map((part) => ("content" in part ? part.content : ""))
       .join("")
-    return text.trim().length === 0 && attachments().length === 0 && commentCount() === 0
+    return (
+      text.trim().length === 0 &&
+      attachments().length === 0 &&
+      commentCount() === 0 &&
+      (mode() === "shell" || prompt.quotes.all().length === 0)
+    )
   })
   const stopping = createMemo(() => adapter.working() && blank())
   const placeholder = () =>
@@ -344,10 +351,26 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     store: prompt.store,
     state: interaction,
     history: {
-      entries: (mode) => history.entries(mode).map((entry) => ({ prompt: entry.prompt, metadata: entry.comments })),
-      add: (value, mode) => history.add(value, mode, mode === "shell" ? [] : historyComments()),
-      capture: historyComments,
-      restore: (metadata) => restoreHistoryComments(metadata as PromptHistoryComment[]),
+      entries: (mode) =>
+        history
+          .entries(mode)
+          .map((entry) => ({
+            prompt: entry.prompt,
+            metadata: { comments: entry.comments, quotes: entry.quotes ?? [] },
+          })),
+      add: (value, mode) =>
+        history.add(
+          value,
+          mode,
+          mode === "shell" ? [] : historyComments(),
+          mode === "shell" ? [] : prompt.quotes.all(),
+        ),
+      capture: () => ({ comments: historyComments(), quotes: prompt.quotes.all().map((quote) => ({ ...quote })) }),
+      restore: (metadata) => {
+        const entry = metadata as { comments: PromptHistoryComment[]; quotes: ChatQuote[] } | undefined
+        restoreHistoryComments(entry?.comments ?? [])
+        prompt.quotes.replace(entry?.quotes ?? [])
+      },
     },
     commands,
     context,
@@ -441,6 +464,15 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     },
   })
   Object.defineProperty(controller, "model", { get: () => adapter.controls().model })
+  Object.defineProperty(controller, "quotes", {
+    value: {
+      ...prompt.quotes,
+      add: (quote: Parameters<typeof prompt.quotes.add>[0]) => {
+        controller.dispatch({ type: "mode.normal" })
+        return prompt.quotes.add(quote)
+      },
+    },
+  })
 
   command.register("composer-editor", () => [
     {

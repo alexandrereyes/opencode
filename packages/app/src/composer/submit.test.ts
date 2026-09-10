@@ -128,6 +128,39 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  test("sends a quote-only prompt and restores its comment after a failed admission", async () => {
+    const state = createMemoryComposerState().capture()
+    const id = state.quotes.add({ messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage" })
+    state.quotes.update(id, "Please explain")
+    const failed = Promise.withResolvers<void>()
+    const requests: Parameters<ComposerSession["data"]["session"]["prompt"]>[0][] = []
+    const target = session({
+      calls: [],
+      prompt: async (value) => {
+        requests.push(value)
+        throw new Error("offline")
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submitted() {},
+      setEditor() {},
+    }
+    await submitInput(adapter, { missingSelection() {}, failed: () => failed.resolve() }).submit(new Event("submit"))
+    await failed.promise
+    expect(requests).toHaveLength(2)
+    expect(requests[0].id).toBe(requests[1].id)
+    expect(requests[0].text).toContain("> Quoted passage\nUser comment: Please explain")
+    expect(state.quotes.all()).toEqual([
+      { id, messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage", comment: "Please explain" },
+    ])
+  })
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {
     const state = createMemoryComposerState({ prompt: "/review changes" }).capture()
     const calls: string[] = []

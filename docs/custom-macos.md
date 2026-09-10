@@ -16,6 +16,27 @@ requires an explicit cold maintenance window: never stop the live service hostin
 The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
 configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
 
+## Chat quotes
+
+Select prose or code inside one assistant text part and choose **Comment**. The composer
+keeps the selected passage and an optional editable comment in **Chat quotes** above the
+prompt. Quotes can be removed, collapsed, or sent without additional prompt text.
+Escape or Cmd/Ctrl+Enter finishes comment editing; plain Enter inserts a line break.
+
+Drafts are scoped to their Session and server and survive reloads. Submission appends the
+quoted passages, source message/part IDs, and comments to the model-visible text while
+keeping structured quote metadata for history, queue editing, and revert. Failed prompt
+admission restores the submitted quotes. Selection cannot span different text parts.
+
+The implementation uses existing prompt APIs; no Protocol or generated client changes.
+This ports the chat-comment workflow, not OpenChamber's separate Notes feature.
+
+Validation: production-build browser scenarios at 1440px and 390px cover selection,
+editing, persistence, quote-only submission, history recall, and removal. Existing queue
+regressions and composer/persistence tests also pass. A cold-session entry benchmark
+measured 307ms first correct / 333ms stable on the base and 236ms / 266ms with the feature
+(one local sample each, not a statistically significant performance comparison).
+
 ## Inference footer
 
 Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.

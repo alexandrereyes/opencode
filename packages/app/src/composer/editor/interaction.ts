@@ -343,6 +343,7 @@ export function createComposerEditor(input: {
         return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
       }
       if (persisted.prompt.some((part) => part.type === "image")) return true
+      if (persisted.quotes?.length) return true
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
       return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
     },

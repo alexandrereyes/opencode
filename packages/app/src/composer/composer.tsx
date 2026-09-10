@@ -11,6 +11,7 @@ import { DialogSelectModelUnpaid } from "@/providers/models/unpaid"
 import { formatKeybind, useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { ComposerModel } from "./model"
+import { ChatQuotes } from "./chat-quotes"
 
 export function Composer(props: { class?: string; model: ComposerModel; borderUnderlay?: boolean }) {
   const dialog = useDialog()
@@ -19,6 +20,9 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
 
   return (
     <div class="flex flex-col gap-3">
+      <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
+        {(quotes) => <ChatQuotes quotes={quotes()} onDone={props.model.restoreFocus} />}
+      </Show>
       <ComposerEditor
         controller={props.model}
         borderUnderlay={props.borderUnderlay}
