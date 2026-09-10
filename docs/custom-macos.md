@@ -9,3 +9,9 @@ and runbook are versioned in [alexandrereyes/my-env](https://github.com/alexandr
 
 Backend source and production UI must come from the same release commit. The MyEnv
 controller owns isolated persistence, idle-leased activation, backups, and process handoff.
+
+Production is the main UI at **4096**; **4177 is ephemeral development only**, started on demand
+from a feature worktree based on `origin/custom`. First adoption of the old managed backend
+requires an explicit cold maintenance window: never stop the live service hosting a session.
+The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
+configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
