@@ -30,10 +30,15 @@ import { SessionWorkspaceMenu } from "@/session/timeline/session-workspace-menu"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
 import { displayName, getProjectAvatarSource, projectForSession } from "@/shell/layout/helpers"
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
+import { extractPromptSessions } from "@/composer/prompt"
+import { formatSessionReferences } from "@/composer/session-reference"
 import { useCommand } from "@/shell/commands/command"
 import { useSettings } from "@/settings/model"
 import { SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeader } from "@/session/header/session-header"
+import { ChatQuoteSelection } from "@/composer/chat-quote-selection"
+import type { ChatQuote } from "@/composer/schema"
+import { formatChatQuotes } from "@/composer/chat-quote"
 
 type BackgroundTask = {
   id: string
@@ -348,6 +353,7 @@ export function SessionSummaryPanel(props: {
 }
 
 type MessageTimelineProps = {
+  onQuote?: (quote: Omit<ChatQuote, "id" | "comment">) => void
   hideHeader?: boolean
   active?: boolean
   session: TimelineSessionSource
@@ -459,6 +465,7 @@ function MessageTimelineView(
   const showHeader = createMemo(() => !props.hideHeader && (props.data.showHeader() || workspaceSession()))
   const pinned = createMemo(() => props.pinned)
   const messageByID = projection.messageByID
+  const [quoteRoot, setQuoteRoot] = createStore<{ element?: HTMLDivElement }>({})
   const virtualized = createTimelineVirtualizer({
     active: () => props.active !== false,
     sessionKey: () => `${server.key}/${props.data.sessionID()}`,
@@ -468,7 +475,10 @@ function MessageTimelineView(
     pinned,
     scroll: () => props.scroll,
     onResumeScroll: props.onResumeScroll,
-    setScrollRef: props.setScrollRef,
+    setScrollRef: (element) => {
+      setQuoteRoot("element", element)
+      props.setScrollRef(element)
+    },
     setContentRef: props.setContentRef,
     onScheduleScrollState: props.onScheduleScrollState,
     onPin: props.onPin,
@@ -567,9 +577,15 @@ function MessageTimelineView(
     presentation: (message) => {
       const value = readPromptPresentation(message.metadata)
       const parsed = value ? undefined : parseCommentNote(message.text)
+      const sessions = extractPromptSessions(message.metadata)
+      const displayText = value
+        ? [value.displayText, formatChatQuotes(value.quotes)].filter(Boolean).join("\n\n")
+        : undefined
       return {
-        displayText: value?.displayText,
+        displayText,
+        copyText: displayText ? formatSessionReferences(displayText, sessions) : undefined,
         comments: value?.comments ?? (parsed ? [parsed] : []),
+        sessions: sessions.map((session) => ({ start: session.start, end: session.end })),
       }
     },
     actions: props.actions,
@@ -642,226 +658,239 @@ function MessageTimelineView(
     })
   })
   return (
-    <VirtualizedTimeline
-      workspaceSession={workspaceSession}
-      bottomSpacer={
-        <Show when={showWorking() || backgroundHintPresence.present()}>
-          <div
-            classList={{
-              "min-w-0 w-full max-w-full": true,
-              "md:max-w-[1000px] md:mx-auto": props.centered,
-            }}
-          >
+    <>
+      <ChatQuoteSelection
+        root={quoteRoot.element}
+        active={props.active !== false && !!props.onQuote}
+        onQuote={(partID, text) => {
+          const row = projection
+            .rows()
+            .find((row) => row._tag === "AssistantPart" && row.group.type === "part" && row.group.ref.partID === partID)
+          if (row?._tag !== "AssistantPart" || row.group.type !== "part") return
+          props.onQuote?.({ messageID: row.group.ref.messageID, partID, text })
+        }}
+      />
+      <VirtualizedTimeline
+        workspaceSession={workspaceSession}
+        bottomSpacer={
+          <Show when={showWorking() || backgroundHintPresence.present()}>
             <div
-              class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}
+              classList={{
+                "min-w-0 w-full max-w-full": true,
+                "md:max-w-[1000px] md:mx-auto": props.centered,
+              }}
             >
-              <Show when={showWorking()}>
-                <div data-component="session-working" role="status">
-                  <TextShimmer text={language.t("session.timeline.working")} active />
-                </div>
-              </Show>
-              <Show when={backgroundHintPresence.present()}>
-                <div
-                  ref={setBackgroundHintRef}
-                  data-component="session-background-hint-row"
-                  class="duration-150 motion-reduce:animate-none"
-                  classList={{
-                    "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
-                    "animate-out fade-out fill-mode-forwards":
-                      backgroundHintPresence.animate() && !backgroundHintPresence.show(),
-                  }}
-                >
-                  <BackgroundMoveHint onMove={props.background.move} />
-                </div>
-              </Show>
-            </div>
-          </div>
-        </Show>
-      }
-      deferred={(row) => {
-        if (row._tag !== "AssistantPart" || row.group.type !== "part") return false
-        const content = Timeline.resolveContent(messageByID().get(row.group.ref.messageID), row.group.ref.partID)
-        return content?.type === "tool" && ["edit", "write"].includes(content.name)
-      }}
-      renderRow={(row, onSizeChange) => <rowRenderer.Row row={row} onSizeChange={onSizeChange} />}
-      header={
-        <Show when={!props.hideHeader}>
-          <SessionTitleHeader>
-            <div class="h-12 w-full flex items-center justify-between gap-2">
-              <div class="flex items-center gap-1 min-w-0 flex-1">
-                <div class="flex items-center gap-0.5 min-w-0 flex-1 w-full">
-                  <SessionProjectMenu
-                    project={avatarProject()}
-                    directory={sessionDirectory()}
-                    workspace={workspaceSession()}
-                    showProjectIcon={showProjectIcon()}
-                  />
-                  <Show when={parentID()}>
-                    <button
-                      type="button"
-                      data-slot="session-title-parent"
-                      class="min-w-0 max-w-[40%] truncate pl-2 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:text-v2-text-text-muted"
-                      onClick={props.action.navigateParent}
-                    >
-                      {parentTitle()}
-                    </button>
-                    <span
-                      data-slot="session-title-separator"
-                      class="-translate-y-[0.5px] pl-2 pr-1 text-[11px] font-medium text-v2-text-text-faint"
-                      aria-hidden="true"
-                    >
-                      /
-                    </span>
-                  </Show>
-                  <Show when={childTitle() || title.editing}>
-                    <Show
-                      when={title.editing}
-                      fallback={
-                        <h1
-                          data-slot="session-title-child"
-                          class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base w-fit rounded-[6px] px-1 py-1 hover:bg-v2-overlay-simple-overlay-hover"
-                          onClick={openTitleEditor}
-                        >
-                          {childTitle()}
-                        </h1>
-                      }
-                    >
-                      <InlineInput
-                        ref={(el) => {
-                          titleRef = el
-                        }}
-                        data-slot="session-title-child"
-                        dir="auto"
-                        value={title.draft}
-                        disabled={props.pending.rename()}
-                        class="block text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base field-sizing-content rounded-[6px] px-1 py-1"
-                        style={{
-                          "--inline-input-shadow": "none",
-                          "text-align": "start",
-                        }}
-                        onInput={(event) => setTitle("draft", event.currentTarget.value)}
-                        onKeyDown={(event) => {
-                          event.stopPropagation()
-                          if (event.isComposing || event.keyCode === 229) return
-                          if (event.key === "Enter") {
-                            event.preventDefault()
-                            void saveTitleEditor()
-                            return
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault()
-                            closeTitleEditor()
-                          }
-                        }}
-                        onBlur={() => void saveTitleEditor()}
-                      />
-                    </Show>
-                  </Show>
-                  <Show when={!parentID() && sessionID()} keyed>
-                    {(id) => (
-                      <Menu
-                        gutter={6}
-                        placement="bottom-start"
-                        open={title.menuOpen}
-                        onOpenChange={(open) => setTitle("menuOpen", open)}
-                      >
-                        <Menu.Trigger
-                          as={IconButton}
-                          icon={<Icon name="outline-dots" />}
-                          variant="ghost-muted"
-                          size="large"
-                          class="shrink-0"
-                          aria-label={language.t("common.moreOptions")}
-                          aria-expanded={title.menuOpen}
-                        />
-                        <Menu.Portal>
-                          <Menu.Content
-                            class="session-options-menu w-max"
-                            style={{ "min-width": "0" }}
-                            onCloseAutoFocus={(event) => {
-                              if (!title.pendingRename) return
-                              event.preventDefault()
-                              setTitle("pendingRename", false)
-                              openTitleEditor()
-                            }}
-                          >
-                            <Show when={!parentID()}>
-                              <Menu.Item
-                                onSelect={() => {
-                                  setTitle("pendingRename", true)
-                                  setTitle("menuOpen", false)
-                                }}
-                              >
-                                {language.t("common.rename")}
-                              </Menu.Item>
-                              <Menu.Item onSelect={() => void props.action.export(id)}>
-                                {language.t("common.export")}…
-                              </Menu.Item>
-                            </Show>
-                            <Show when={!parentID()}>
-                              {/* TODO: Need a session archive API. */}
-                              <Menu.Separator />
-                              <Menu.Item onSelect={() => props.action.showDelete(id)}>
-                                {language.t("common.delete")}…
-                              </Menu.Item>
-                            </Show>
-                          </Menu.Content>
-                        </Menu.Portal>
-                      </Menu>
-                    )}
-                  </Show>
-                </div>
+              <div
+                class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}
+              >
+                <Show when={showWorking()}>
+                  <div data-component="session-working" role="status">
+                    <TextShimmer text={language.t("session.timeline.working")} active />
+                  </div>
+                </Show>
+                <Show when={backgroundHintPresence.present()}>
+                  <div
+                    ref={setBackgroundHintRef}
+                    data-component="session-background-hint-row"
+                    class="duration-150 motion-reduce:animate-none"
+                    classList={{
+                      "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
+                      "animate-out fade-out fill-mode-forwards":
+                        backgroundHintPresence.animate() && !backgroundHintPresence.show(),
+                    }}
+                  >
+                    <BackgroundMoveHint onMove={props.background.move} />
+                  </div>
+                </Show>
               </div>
-              <Show when={sessionID()} keyed>
-                {(id) => (
-                  <div class="shrink-0 flex items-center gap-2">
-                    {props.search}
-                    <SessionContextUsage placement="bottom" />
-                    <Show when={!parentID() && project()}>
-                      {(project) => (
-                        <Popover open={summaryOpen()} placement="bottom-end" gutter={6} onOpenChange={setSummary}>
-                          <Popover.Trigger
+            </div>
+          </Show>
+        }
+        deferred={(row) => {
+          if (row._tag !== "AssistantPart" || row.group.type !== "part") return false
+          const content = Timeline.resolveContent(messageByID().get(row.group.ref.messageID), row.group.ref.partID)
+          return content?.type === "tool" && ["edit", "write"].includes(content.name)
+        }}
+        renderRow={(row, onSizeChange) => <rowRenderer.Row row={row} onSizeChange={onSizeChange} />}
+        header={
+          <Show when={!props.hideHeader}>
+            <SessionTitleHeader>
+              <div class="h-12 w-full flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1 min-w-0 flex-1">
+                  <div class="flex items-center gap-0.5 min-w-0 flex-1 w-full">
+                    <SessionProjectMenu
+                      project={avatarProject()}
+                      directory={sessionDirectory()}
+                      workspace={workspaceSession()}
+                      showProjectIcon={showProjectIcon()}
+                    />
+                    <Show when={parentID()}>
+                      <button
+                        type="button"
+                        data-slot="session-title-parent"
+                        class="min-w-0 max-w-[40%] truncate pl-2 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:text-v2-text-text-muted"
+                        onClick={props.action.navigateParent}
+                      >
+                        {parentTitle()}
+                      </button>
+                      <span
+                        data-slot="session-title-separator"
+                        class="-translate-y-[0.5px] pl-2 pr-1 text-[11px] font-medium text-v2-text-text-faint"
+                        aria-hidden="true"
+                      >
+                        /
+                      </span>
+                    </Show>
+                    <Show when={childTitle() || title.editing}>
+                      <Show
+                        when={title.editing}
+                        fallback={
+                          <h1
+                            data-slot="session-title-child"
+                            class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base w-fit rounded-[6px] px-1 py-1 hover:bg-v2-overlay-simple-overlay-hover"
+                            onClick={openTitleEditor}
+                          >
+                            {childTitle()}
+                          </h1>
+                        }
+                      >
+                        <InlineInput
+                          ref={(el) => {
+                            titleRef = el
+                          }}
+                          data-slot="session-title-child"
+                          dir="auto"
+                          value={title.draft}
+                          disabled={props.pending.rename()}
+                          class="block text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base field-sizing-content rounded-[6px] px-1 py-1"
+                          style={{
+                            "--inline-input-shadow": "none",
+                            "text-align": "start",
+                          }}
+                          onInput={(event) => setTitle("draft", event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.isComposing || event.keyCode === 229) return
+                            if (event.key === "Enter") {
+                              event.preventDefault()
+                              void saveTitleEditor()
+                              return
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault()
+                              closeTitleEditor()
+                            }
+                          }}
+                          onBlur={() => void saveTitleEditor()}
+                        />
+                      </Show>
+                    </Show>
+                    <Show when={!parentID() && sessionID()} keyed>
+                      {(id) => (
+                        <Menu
+                          gutter={6}
+                          placement="bottom-start"
+                          open={title.menuOpen}
+                          onOpenChange={(open) => setTitle("menuOpen", open)}
+                        >
+                          <Menu.Trigger
                             as={IconButton}
-                            icon={<Icon name="window-analytics" />}
+                            icon={<Icon name="outline-dots" />}
                             variant="ghost-muted"
                             size="large"
-                            state={summaryOpen() ? "pressed" : undefined}
-                            aria-label={language.t("session.summary.title")}
-                            aria-expanded={summaryOpen()}
+                            class="shrink-0"
+                            aria-label={language.t("common.moreOptions")}
+                            aria-expanded={title.menuOpen}
                           />
-                          <Popover.Portal>
-                            <Popover.Content class="z-50 border-0 bg-transparent p-0 outline-none">
-                              <SessionSummaryPanel
-                                project={project()}
-                                avatar={showProjectIcon() ? projectAvatar() : undefined}
-                                directory={sessionDirectory()}
-                                local={!workspaceSession()}
-                                branch={data.location.vcs.info({ directory: sdk().directory })?.branch.current}
-                                baseBranch={data.location.vcs.info({ directory: project().worktree })?.branch.current}
-                                diffs={sessionDiffs()}
-                                sessionID={id}
-                                moveEligible={props.workspaceMoveEligible}
-                                moveDismissed={workspaceSuggestionDismissed()}
-                                onMoveDismiss={() => setWorkspaceSuggestionDismissed(true)}
-                                onReview={() => {
-                                  setSummary(false)
-                                  props.onReview()
-                                }}
-                                backgroundTasks={props.background.tasks()}
-                              />
-                            </Popover.Content>
-                          </Popover.Portal>
-                        </Popover>
+                          <Menu.Portal>
+                            <Menu.Content
+                              class="session-options-menu w-max"
+                              style={{ "min-width": "0" }}
+                              onCloseAutoFocus={(event) => {
+                                if (!title.pendingRename) return
+                                event.preventDefault()
+                                setTitle("pendingRename", false)
+                                openTitleEditor()
+                              }}
+                            >
+                              <Show when={!parentID()}>
+                                <Menu.Item
+                                  onSelect={() => {
+                                    setTitle("pendingRename", true)
+                                    setTitle("menuOpen", false)
+                                  }}
+                                >
+                                  {language.t("common.rename")}
+                                </Menu.Item>
+                                <Menu.Item onSelect={() => void props.action.export(id)}>
+                                  {language.t("common.export")}…
+                                </Menu.Item>
+                              </Show>
+                              <Show when={!parentID()}>
+                                {/* TODO: Need a session archive API. */}
+                                <Menu.Separator />
+                                <Menu.Item onSelect={() => props.action.showDelete(id)}>
+                                  {language.t("common.delete")}…
+                                </Menu.Item>
+                              </Show>
+                            </Menu.Content>
+                          </Menu.Portal>
+                        </Menu>
                       )}
                     </Show>
-                    <SessionHeader reserveReviewToggle={props.reserveReviewToggle} />
                   </div>
-                )}
-              </Show>
-            </div>
-          </SessionTitleHeader>
-        </Show>
-      }
-    />
+                </div>
+                <Show when={sessionID()} keyed>
+                  {(id) => (
+                    <div class="shrink-0 flex items-center gap-2">
+                      {props.search}
+                      <SessionContextUsage placement="bottom" />
+                      <Show when={!parentID() && project()}>
+                        {(project) => (
+                          <Popover open={summaryOpen()} placement="bottom-end" gutter={6} onOpenChange={setSummary}>
+                            <Popover.Trigger
+                              as={IconButton}
+                              icon={<Icon name="window-analytics" />}
+                              variant="ghost-muted"
+                              size="large"
+                              state={summaryOpen() ? "pressed" : undefined}
+                              aria-label={language.t("session.summary.title")}
+                              aria-expanded={summaryOpen()}
+                            />
+                            <Popover.Portal>
+                              <Popover.Content class="z-50 border-0 bg-transparent p-0 outline-none">
+                                <SessionSummaryPanel
+                                  project={project()}
+                                  avatar={showProjectIcon() ? projectAvatar() : undefined}
+                                  directory={sessionDirectory()}
+                                  local={!workspaceSession()}
+                                  branch={data.location.vcs.info({ directory: sdk().directory })?.branch.current}
+                                  baseBranch={data.location.vcs.info({ directory: project().worktree })?.branch.current}
+                                  diffs={sessionDiffs()}
+                                  sessionID={id}
+                                  moveEligible={props.workspaceMoveEligible}
+                                  moveDismissed={workspaceSuggestionDismissed()}
+                                  onMoveDismiss={() => setWorkspaceSuggestionDismissed(true)}
+                                  onReview={() => {
+                                    setSummary(false)
+                                    props.onReview()
+                                  }}
+                                  backgroundTasks={props.background.tasks()}
+                                />
+                              </Popover.Content>
+                            </Popover.Portal>
+                          </Popover>
+                        )}
+                      </Show>
+                      <SessionHeader reserveReviewToggle={props.reserveReviewToggle} />
+                    </div>
+                  )}
+                </Show>
+              </div>
+            </SessionTitleHeader>
+          </Show>
+        }
+      />
+    </>
   )
 }

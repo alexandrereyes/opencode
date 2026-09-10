@@ -2,6 +2,10 @@
   content: "\200B";
 }
 
+[data-component="composer-editor"] [data-mention="snippet"] {
+  color: var(--v2-text-text-accent);
+}
+
 [data-component="composer-editor"] [data-mention="app"] {
   display: inline-block;
   border-radius: 999px;
@@ -14,6 +18,26 @@
   content: attr(data-label);
   margin-inline-start: 6px;
   color: var(--v2-text-text-muted);
+}
+
+[data-component="composer-editor"] [data-mention="session"] {
+  display: inline-block;
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  border-radius: 4px;
+  padding-inline: 4px;
+  background: var(--v2-background-bg-layer-02);
+  color: var(--v2-text-text-accent);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+[data-component="composer-editor"] [data-mention="session"]::after {
+  content: attr(data-label);
+  margin-inline-start: 6px;
+  color: var(--v2-text-text-muted);
+  font-weight: 440;
 }
 
 /* Masks only cover hidden content; they do not reserve space in the toolbar. */

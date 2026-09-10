@@ -11,6 +11,7 @@ import { promptLength } from "./prompt-parts"
 import { SessionPreview } from "@/session/story-model"
 import { Skill } from "@opencode/schema/skill"
 import { resolveSessionComposerSelection } from "@/session/composer/selection"
+import { snippetSuggestions } from "@/settings/snippets/model"
 
 const selectedModel = {
   id: STORY_MODEL.id,
@@ -146,6 +147,23 @@ function ComposerStory(props: {
     store: [draft, setDraft],
     commands: () => commands,
     context: () => context,
+    snippets: () =>
+      snippetSuggestions([
+        {
+          id: "review",
+          name: "code-review",
+          description: "Review for correctness and clarity",
+          aliases: ["audit", "quality"],
+          content: "Review this code for correctness.\nSuggest concrete improvements.",
+        },
+        {
+          id: "tests",
+          name: "tests",
+          description: "Run focused tests",
+          aliases: ["verify"],
+          content: "Run the focused tests and report the results.",
+        },
+      ]),
     searchContextFiles: () => [],
     view: {
       placeholder: () => "Ask anything, / for commands, @ for context...",
@@ -247,6 +265,13 @@ export default {
 }
 
 export const EmptyDraft = { render: () => <ComposerStory /> }
+
+export const Snippets = {
+  parameters: { layout: "fullscreen" },
+  render: () => (
+    <ComposerStory inspectRequest label="Type #audit, select a snippet, then send to inspect its expansion." />
+  ),
+}
 
 export const TextDraft = { render: () => <ComposerStory prompt={text("Explain this change")} /> }
 

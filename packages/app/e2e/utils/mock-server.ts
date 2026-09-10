@@ -12,6 +12,8 @@ export interface MockServerConfig {
   directory: string
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
+  mcpServers?: unknown[]
+  computerUseApps?: unknown[]
   pageMessages: (
     sessionId: string,
     limit: number,
@@ -263,7 +265,8 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         command: () => Effect.succeed({ location: location(config), data: [] }),
         skill: () => Effect.succeed({ location: location(config), data: [] }),
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
-        mcp: () => Effect.succeed({ location: location(config), data: [] }),
+        mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
+        mcpComputerUseApps: () => Effect.succeed({ location: location(config), data: config.computerUseApps ?? [] }),
         mcpResource: () => Effect.succeed({ location: location(config), data: { resources: [], templates: [] } }),
         projectList: () => {
           const project = config.project as typeof config.project & { canonical?: string; worktree?: string }

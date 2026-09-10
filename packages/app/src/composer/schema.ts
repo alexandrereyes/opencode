@@ -3,6 +3,7 @@ import { checksum } from "@opencode/util/encode"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Skill } from "@opencode/schema/skill"
 import { Mcp } from "@opencode/schema/mcp"
+import { Session } from "@opencode/schema/session"
 import { Persistence } from "@/runtime/persistence/schema"
 import { FileSelection, SelectedLineRange } from "@/workspaces/files/types"
 
@@ -53,8 +54,29 @@ export const SkillPart = Persistence.struct({
 })
 export type SkillPart = typeof SkillPart.Type
 
+export const SnippetPart = Persistence.struct({
+  type: Schema.Literal("snippet"),
+  ...PartBase,
+  id: Schema.String,
+  name: Schema.String,
+  expansion: Schema.String,
+})
+export type SnippetPart = typeof SnippetPart.Type
+
 export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: Mcp.ComputerUseApp })
 export type AppPart = typeof AppPart.Type
+
+export const SessionPart = Persistence.struct({
+  type: Schema.Literal("session"),
+  ...PartBase,
+  session: Persistence.struct({
+    id: Session.ID,
+    server: Schema.String,
+    title: Persistence.optional(Schema.String),
+    directory: Persistence.optional(Schema.String),
+  }),
+})
+export type SessionPart = typeof SessionPart.Type
 
 const ImageFields = {
   type: Schema.Literal("image"),
@@ -103,7 +125,9 @@ export const ContentPart = Schema.Union([
   FileAttachmentPart,
   AgentPart,
   SkillPart,
+  SnippetPart,
   AppPart,
+  SessionPart,
   ImageAttachmentPart,
 ])
 export type ContentPart = typeof ContentPart.Type
@@ -147,6 +171,15 @@ const ContextEntry = Schema.Struct({ ...FileContextItem.fields, key: Persistence
 
 export const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 
+export const ChatQuote = Persistence.struct({
+  id: Schema.String,
+  messageID: Schema.String,
+  partID: Schema.String,
+  text: Schema.String,
+  comment: Schema.String,
+})
+export type ChatQuote = typeof ChatQuote.Type
+
 export const ComposerStore = Persistence.struct({
   prompt: Prompt.pipe(
     Schema.decode({
@@ -176,6 +209,7 @@ export const ComposerStore = Persistence.struct({
     }),
   ),
   context: Persistence.struct({ items: Persistence.array(ContextEntry) }),
+  quotes: Persistence.optional(Persistence.array(ChatQuote)),
 })
 export type ComposerStore = typeof ComposerStore.Type
 
@@ -211,7 +245,11 @@ const HistoryPrompt = Schema.Array(Persistence.fallback(Schema.UndefinedOr(Conte
     encode: SchemaGetter.transform((parts) => parts),
   }),
 )
-const HistoryEntry = Schema.Struct({ prompt: HistoryPrompt, comments: Persistence.array(PromptHistoryComment) })
+const HistoryEntry = Schema.Struct({
+  prompt: HistoryPrompt,
+  comments: Persistence.array(PromptHistoryComment),
+  quotes: Persistence.optional(Persistence.array(ChatQuote)),
+})
 export const PromptHistoryEntry = Schema.Union([HistoryEntry, HistoryPrompt]).pipe(
   Schema.decodeTo(Schema.toType(HistoryEntry), {
     decode: SchemaGetter.transform((entry) => ("prompt" in entry ? entry : { prompt: entry, comments: [] })),

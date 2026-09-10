@@ -1,0 +1,80 @@
+[data-component="chat-quotes"] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: var(--line-height-base);
+  color: var(--v2-text-text-base);
+
+  [data-slot="chat-quotes-list"] {
+    width: 100%;
+    max-height: min(40vh, 360px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  [data-slot="chat-quote"] {
+    border: 1px solid var(--v2-border-border-base);
+    border-radius: 12px;
+    padding: 12px;
+    background: var(--v2-background-bg-layer-01);
+    overflow-wrap: anywhere;
+  }
+  header,
+  [data-slot="chat-quote-actions"] {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  header {
+    justify-content: space-between;
+    font-weight: 530;
+  }
+  blockquote {
+    margin-block: 8px;
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid var(--v2-border-border-base);
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow: auto;
+  }
+  p {
+    white-space: pre-wrap;
+    margin-block: 8px 0;
+  }
+  label {
+    display: block;
+    margin-block: 12px 4px;
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--v2-border-border-base);
+    border-radius: 6px;
+    background: var(--v2-background-bg-base);
+    color: var(--v2-text-text-base);
+    resize: vertical;
+    min-height: 64px;
+    max-height: 180px;
+    &::placeholder {
+      color: var(--v2-text-text-muted);
+    }
+    &:focus-visible {
+      outline: 2px solid var(--v2-border-border-focus);
+      outline-offset: 2px;
+    }
+  }
+}
+
+[data-component="chat-quote-selection"] {
+  position: fixed;
+  z-index: 90;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--v2-background-bg-layer-01);
+  box-shadow: var(--v2-elevation-floating);
+}

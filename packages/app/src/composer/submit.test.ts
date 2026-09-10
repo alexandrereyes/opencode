@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { ModelSelection } from "@/providers/models/selection"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
 import { AbsolutePath } from "@opencode/schema/schema"
 import type { ActiveComposerAdapter, ComposerControls, ComposerSession, NewSessionComposerAdapter } from "./adapter"
 import { createMemoryComposerState } from "./state"
@@ -128,6 +129,87 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  for (const command of [false, true]) {
+    test(`expands snippets for ${command ? "command arguments" : "prompt admission"}`, async () => {
+      const state = createMemoryComposerState().capture()
+      const prefix = command ? "/review " : ""
+      state.set([
+        { type: "text", content: prefix, start: 0, end: prefix.length },
+        {
+          type: "snippet",
+          id: "snippet",
+          name: "review",
+          content: "#review",
+          expansion: "/review is literal\nSecond line",
+          start: prefix.length,
+          end: prefix.length + 7,
+        },
+      ])
+      const completed = Promise.withResolvers<void>()
+      const target = session({
+        calls: [],
+        prompt: async (value) => {
+          expect(command).toBe(false)
+          expect(value.text).toBe("/review is literal\nSecond line")
+          expect(value.metadata?.displayText).toBe(value.text)
+          completed.resolve()
+        },
+        command: async (value) => {
+          expect(command).toBe(true)
+          expect(value.command).toBe("review")
+          expect(value.text).toBe("/review is literal\nSecond line")
+          completed.resolve()
+        },
+      })
+      const adapter: ActiveComposerAdapter = {
+        kind: "active-session",
+        state,
+        ready: () => true,
+        controls,
+        working: () => false,
+        session: () => target,
+        interrupt: async () => undefined,
+        submitted() {},
+        setEditor() {},
+      }
+      await submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+      await completed.promise
+    })
+  }
+
+  test("sends a quote-only prompt and restores its comment after a failed admission", async () => {
+    const state = createMemoryComposerState().capture()
+    const id = state.quotes.add({ messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage" })
+    state.quotes.update(id, "Please explain")
+    const failed = Promise.withResolvers<void>()
+    const requests: Parameters<ComposerSession["data"]["session"]["prompt"]>[0][] = []
+    const target = session({
+      calls: [],
+      prompt: async (value) => {
+        requests.push(value)
+        throw new Error("offline")
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submitted() {},
+      setEditor() {},
+    }
+    await submitInput(adapter, { missingSelection() {}, failed: () => failed.resolve() }).submit(new Event("submit"))
+    await failed.promise
+    expect(requests).toHaveLength(2)
+    expect(requests[0].id).toBe(requests[1].id)
+    expect(requests[0].text).toContain("> Quoted passage\nUser comment: Please explain")
+    expect(state.quotes.all()).toEqual([
+      { id, messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage", comment: "Please explain" },
+    ])
+  })
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {
     const state = createMemoryComposerState({ prompt: "/review changes" }).capture()
     const calls: string[] = []
@@ -682,6 +764,32 @@ describe("Composer submission", () => {
         start: 28,
         end: 35,
       },
+      { type: "text", content: " ", start: 35, end: 36 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 36,
+        end: 43,
+      },
+      { type: "text", content: " ", start: 43, end: 44 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 44,
+        end: 51,
+      },
     ])
     const sent = Promise.withResolvers<Parameters<ComposerSession["api"]["command"]>[0]>()
     const target = session({
@@ -707,6 +815,8 @@ describe("Composer submission", () => {
     expect(request.files).toMatchObject([{ name: "app.ts", mention: { text: "@src/app.ts" } }])
     expect(request.agents).toMatchObject([{ name: "review", mention: { text: "@review" } }])
     expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "@effect" } }])
+    expect(request.text.match(/"sessionID":"ses_referenced_12345678901234567890"/g)).toHaveLength(1)
+    expect(request.text).toContain("tools.opencode.session_read")
     expect(request.delivery).toBe("steer")
   })
 

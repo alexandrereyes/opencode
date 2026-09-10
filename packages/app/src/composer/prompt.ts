@@ -4,7 +4,7 @@ import type { SessionMessageUser } from "@opencode/client/promise"
 import { readPromptPresentation } from "./comment-note"
 import { Skill } from "@opencode/schema/skill"
 import { Schema } from "effect"
-import { AppPart } from "./schema"
+import { AppPart, SessionPart } from "./schema"
 
 type Inline =
   | {
@@ -38,6 +38,7 @@ type Inline =
       name: Skill.Name
     }
   | (AppPart & { value: string })
+  | (SessionPart & { value: string })
 
 function selectionFromFileUrl(url: string): Extract<Inline, { type: "file" }>["selection"] {
   const queryIndex = url.indexOf("?")
@@ -70,6 +71,7 @@ export function extractPromptFromMessage(
   const inline: Inline[] = []
   const apps = Schema.decodeUnknownOption(Schema.Struct({ apps: Schema.Array(AppPart) }))(message.metadata)
   if (apps._tag === "Some") inline.push(...apps.value.apps.map((part) => ({ ...part, value: part.content })))
+  inline.push(...sessionInline(message.metadata))
   const images: ImageAttachmentPart[] = []
   for (const file of message.files ?? []) {
     const mention = file.mention
@@ -201,6 +203,7 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
     if (!expected) continue
 
     const mismatch = item.end > text.length || item.start < cursor || text.slice(item.start, item.end) !== expected
+    if (item.type === "session" && mismatch) continue
     const start = mismatch ? text.indexOf(expected, cursor) : item.start
     if (start === -1) continue
     const end = mismatch ? start + expected.length : item.end
@@ -220,6 +223,16 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
       })
       position += item.value.length
     }
+    if (item.type === "session") {
+      result.push({
+        type: "session",
+        session: item.session,
+        content: item.value,
+        start: position,
+        end: position + item.value.length,
+      })
+      position += item.value.length
+    }
 
     cursor = end
   }
@@ -232,4 +245,18 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
 
   if (images.length === 0) return result
   return [...result, ...images]
+}
+
+export function extractSessionPrompt(text: string, metadata: unknown) {
+  return buildPrompt(text, sessionInline(metadata), [])
+}
+
+export function extractPromptSessions(metadata: unknown) {
+  return sessionInline(metadata).map(({ value: _, ...part }) => part)
+}
+
+function sessionInline(metadata: unknown): Array<SessionPart & { value: string }> {
+  const sessions = Schema.decodeUnknownOption(Schema.Struct({ sessions: Schema.Array(SessionPart) }))(metadata)
+  if (sessions._tag === "None") return []
+  return sessions.value.sessions.map((part) => ({ ...part, value: part.content }))
 }

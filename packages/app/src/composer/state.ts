@@ -4,6 +4,8 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import { ServerScope } from "@/runtime/server/scope"
 import type { Platform } from "@/runtime/platform/platform"
 import { clonePrompt } from "./prompt-parts"
+import { uuid } from "@/runtime/persistence/uuid"
+import type { ChatQuote } from "./schema"
 import {
   ComposerStore,
   DEFAULT_PROMPT,
@@ -26,7 +28,9 @@ export type {
   ImageAttachmentPart,
   Prompt,
   PromptModel,
+  SessionPart,
   SkillPart,
+  SnippetPart,
   TextPart,
 } from "./schema"
 
@@ -108,6 +112,31 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
     retry: {
       current: () => store.retry,
       set: (retry: NonNullable<ComposerStore["retry"]>) => setStore("retry", retry),
+    },
+    quotes: {
+      all: () => store.quotes ?? [],
+      add(input: Omit<ChatQuote, "id" | "comment">) {
+        const quote = { ...input, id: uuid(), comment: "" }
+        setStore("quotes", (items) => [...(items ?? []), quote])
+        clearRetry()
+        return quote.id
+      },
+      update(id: string, comment: string) {
+        if (!store.quotes) return
+        setStore("quotes", (item) => item.id === id, "comment", comment)
+        clearRetry()
+      },
+      remove(id: string) {
+        setStore("quotes", (items) => (items ?? []).filter((item) => item.id !== id))
+        clearRetry()
+      },
+      replace(items: ChatQuote[]) {
+        setStore(
+          "quotes",
+          items.map((item) => ({ ...item })),
+        )
+        clearRetry()
+      },
     },
     context: {
       items: () => store.context.items,

@@ -17,6 +17,7 @@ import { SettingsWorkspaces } from "./workspaces/workspaces"
 import { SettingsProjects } from "./workspaces/projects"
 import { SettingsExtensions } from "./providers/extensions"
 import { SettingsAbout } from "./about/about"
+import { SettingsSnippets } from "./snippets/snippets"
 import { SettingsServerScope } from "./server-scope"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLayout } from "@/shell/state/layout"
@@ -32,6 +33,7 @@ const sections = [
     { value: "appearance", icon: "appearance", label: "settings.general.section.appearance" },
     { value: "notifications", icon: "notifications", label: "settings.tab.notifications" },
     { value: "shortcuts", icon: "keyboard", label: "settings.tab.shortcuts" },
+    { value: "snippets", icon: "code", label: "settings.snippets.title" },
   ],
   [
     { value: "servers", icon: "server", label: "status.popover.tab.servers" },
@@ -214,6 +216,9 @@ export const SettingsScreen: Component = () => {
         <Tabs.Content value="experimental" class="settings-panel">
           <SettingsExperimental />
         </Tabs.Content>
+        <Tabs.Content value="snippets" class="settings-panel">
+          <SettingsSnippets />
+        </Tabs.Content>
         <Tabs.Content value="servers" class="settings-panel">
           <SettingsServers />
         </Tabs.Content>
@@ -222,10 +227,7 @@ export const SettingsScreen: Component = () => {
         </Tabs.Content>
         <SettingsServerScope directory={directory()}>
           <Tabs.Content value="workspaces" class="settings-panel">
-            <SettingsWorkspaces
-              activeDirectory={directory()}
-              resetProjectFilter={() => state.worktreeFilterReset}
-            />
+            <SettingsWorkspaces activeDirectory={directory()} resetProjectFilter={() => state.worktreeFilterReset} />
           </Tabs.Content>
           <Tabs.Content value="providers" class="settings-panel">
             <SettingsProviders directory={directory()} onBack={showProviders} />

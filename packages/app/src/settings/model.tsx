@@ -6,6 +6,7 @@ import { timelinePresets, type TimelineCategory, type TimelineDetail } from "@op
 import { persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import { ScopedKey, type ServerScope } from "@/runtime/server/scope"
+import { Snippet } from "./snippets/model"
 
 export type Settings = typeof settingsSchema.Type
 export type WorkspaceDefaultDestination = Settings["workspaces"]["defaultDestination"]
@@ -134,6 +135,7 @@ const soundsSchema = Persistence.struct({
 })
 
 export const settingsSchema = Persistence.struct({
+  snippets: Persistence.array(Snippet),
   general: generalSchema,
   appearance: appearanceSchema,
   keybinds: Persistence.record(Schema.String.pipe(Schema.catchDecoding(() => Effect.succeed(Option.none())))),
@@ -237,6 +239,7 @@ export const settingsPersistence = Persistence.migrate(
 )
 
 export const defaultSettings: Settings = {
+  snippets: [],
   general: {
     autoSave: true,
     releaseNotes: true,
@@ -298,6 +301,15 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
 
     return {
       ready,
+      snippets: {
+        list: () => store.snippets ?? [],
+        save(value: Snippet) {
+          setStore("snippets", (items = []) => [...items.filter((item) => item.id !== value.id), value])
+        },
+        remove(id: string) {
+          setStore("snippets", (items = []) => items.filter((item) => item.id !== id))
+        },
+      },
       get current() {
         return store
       },

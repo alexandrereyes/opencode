@@ -6,6 +6,7 @@ import { HttpApiClient } from "effect/unstable/httpapi"
 import { ClientApi } from "../../contract"
 import type {
   HealthGetOutput,
+  ServerSubscriptionsOutput,
   ServerGetOutput,
   ServerMaintenanceAcquireOutput,
   ServerMaintenanceCancelInput,
@@ -299,6 +300,9 @@ const EndpointHealthGet = (raw: RawClient["server.health"]) => () =>
 
 const adaptGroupHealth = (raw: RawClient["server.health"]) => ({ get: EndpointHealthGet(raw) })
 
+const EndpointServerSubscriptions = (raw: RawClient["server.server"]) => () =>
+  preserveEffect<ServerSubscriptionsOutput>()(raw["server.subscriptions"]({}).pipe(Effect.mapError(mapClientError)))
+
 const EndpointServerGet = (raw: RawClient["server.server"]) => () =>
   preserveEffect<ServerGetOutput>()(raw["server.get"]({}).pipe(Effect.mapError(mapClientError)))
 
@@ -320,6 +324,7 @@ const EndpointServerMaintenanceCommit = (raw: RawClient["server.server"]) => (in
   )
 
 const adaptGroupServer = (raw: RawClient["server.server"]) => ({
+  subscriptions: EndpointServerSubscriptions(raw),
   get: EndpointServerGet(raw),
   maintenance: {
     acquire: EndpointServerMaintenanceAcquire(raw),
