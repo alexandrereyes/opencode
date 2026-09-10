@@ -50,6 +50,7 @@ mock.module("@/runtime/i18n/language", () => ({
   useLanguage: () => ({ t: (key: string) => key, plural: (key: string) => key, intl: () => "en" }),
 }))
 mock.module("@opencode/ui/context/dialog", () => ({ useDialog: () => ({ active: false }) }))
+mock.module("@/servers/ssh/authenticate", () => ({ useSshAuthenticate: () => () => false }))
 mock.module("@/runtime/persistence/storage", () => ({
   Persist: { global: (key: string) => key },
   persisted: (_key: string, _schema: unknown, initial: object) => [...createStore(initial), undefined, () => false],

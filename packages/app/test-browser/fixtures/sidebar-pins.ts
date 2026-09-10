@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { I18nProvider } from "@kobalte/core/i18n"
 import type { SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
 import type { Tab } from "@/shell/tabs/tabs"
+import type { Platform } from "@/runtime/platform/platform"
 
 // Real Solid DOM components, including both menu variants, the index and persistence.
 // Only host services and unrelated avatar/preview/drag presentation are substituted.
@@ -33,12 +34,27 @@ mock.module("@dnd-kit/solid/sortable", () => ({
   isSortable: () => false,
   useSortable: () => ({ ref: () => {}, handleRef: () => {}, isDragSource: () => false }),
 }))
-mock.module("@/runtime/platform/platform", () => ({ usePlatform: () => ({ platform: "web" }) }))
+const platform: Pick<Platform, "platform" | "os" | "openPath" | "openAttachmentPickerDialog"> = { platform: "web" }
+mock.module("@/runtime/platform/platform", () => ({ usePlatform: () => platform }))
+mock.module("@/servers/ssh/authenticate", () => ({ useSshAuthenticate: () => () => false }))
+const edited: unknown[] = []
+mock.module("@opencode/ui/context/dialog", () => ({ useDialog: () => ({ show: (render: () => unknown) => render() }) }))
+mock.module("@/settings/workspaces/project-dialog", () => ({
+  DialogEditProject: (props: unknown) => {
+    edited.push(props)
+    return null
+  },
+}))
 mock.module("@/settings/model", () => ({
   useSettings: () => ({ permissions: { autoApprove: () => false }, appearance: { showProjectName: () => false } }),
 }))
 mock.module("@/runtime/i18n/language", () => ({
-  useLanguage: () => ({ t: (key: string) => key, plural: (key: string) => key, intl: () => "en" }),
+  useLanguage: () => ({
+    t: (key: string, params?: Record<string, string>) =>
+      key === "sidebar.project.server" ? `${params?.project} (${params?.server})` : key,
+    plural: (key: string) => key,
+    intl: () => "en",
+  }),
 }))
 mock.module("@/shell/commands/command", () => ({ useCommand: () => ({ register: () => {} }) }))
 mock.module("@/shell/layout/session-tab-avatar", () => ({ SessionTabAvatar: () => null }))
@@ -47,7 +63,10 @@ mock.module("@/shell/titlebar/tab-popover", () => ({
 }))
 mock.module("@opencode/session-ui/v2/session-progress-indicator-v2", () => ({ SessionProgressIndicatorV2: () => null }))
 mock.module("@/composer/persistence", () => ({ createTabComposerState: () => {} }))
-mock.module("@/shell/notifications/toast", () => ({ showToast: () => {} }))
+const toasts: { title: string; description?: string }[] = []
+mock.module("@/shell/notifications/toast", () => ({
+  showToast: (toast: { title: string; description?: string }) => toasts.push(toast),
+}))
 const lifecycle: string[] = []
 mock.module("@/session/lifecycle-actions", () => ({
   useSessionLifecycleActions: () => ({
@@ -62,7 +81,7 @@ const { ServerConnection } = registry
 const { sessionKey, projectKey } = await import("@/shell/titlebar/sidebar-model")
 const connections = [
   { type: "http" as const, http: { url: "http://localhost:1234" } },
-  { type: "http" as const, http: { url: "http://localhost:5678" } },
+  { type: "http" as const, http: { url: "https://remote.example.test" } },
 ]
 const now = Date.now()
 function row(id: string, messageAt: number, permissionAt?: number): SessionNavigationInfo {
@@ -93,12 +112,23 @@ const hosts = connections.map((connection, i) => {
   const [state, setState] = createStore({ connected: true })
   type Listener = (event: { type: string; data: { sessionID: string } }) => void
   const listeners = new Set<Listener>()
+  const opened: string[] = []
+  const touched: string[] = []
+  const imported: unknown[] = []
   const ctx = {
-    sync: { data: { project: [{ id: "repo", worktree: "/repo" }], path: {} } },
-    projects: { list: () => [] },
+    sync: { data: { project: [{ id: "repo", worktree: "/repo", name: "Shared project" }], path: {} } },
+    projects: {
+      list: () => [],
+      open: (directory: string) => opened.push(directory),
+      touch: (directory: string) => touched.push(directory),
+    },
     notification: { session: { unseen: () => [] } },
     data: {
-      session: { get: (id: string) => cache[id], remember: (session: SessionInfo) => setCache(session.id, session) },
+      session: {
+        get: (id: string) => cache[id],
+        remember: (session: SessionInfo) => setCache(session.id, session),
+        message: { sync: async () => {} },
+      },
     },
     sdk: {
       connection: { status: () => (state.connected ? "connected" : "disconnected") },
@@ -110,6 +140,10 @@ const hosts = connections.map((connection, i) => {
       },
       api: {
         session: {
+          import: async (input: unknown) => {
+            imported.push(input)
+            return row("ses_imported", now).session
+          },
           navigation: async (input: { sessionID?: string }) => ({
             data: backend.filter(
               (row) => !row.session.time.archived && (!input.sessionID || row.session.id === input.sessionID),
@@ -119,7 +153,7 @@ const hosts = connections.map((connection, i) => {
       },
     },
   }
-  return { connection, backend, ctx, setState, setCache, listeners }
+  return { connection, backend, ctx, setState, setCache, listeners, opened, touched, imported }
 })
 mock.module("@/runtime/server/registry", () => ({ ...registry, useServers: () => ({ list: connections }) }))
 mock.module("@/runtime/server/runtime", () => ({
@@ -142,10 +176,14 @@ mock.module("@/shell/state/layout", () => ({
 }))
 const tabsModule = await import("@/shell/tabs/tabs")
 const selected: Tab[] = []
+const drafts: { server: ServerConnection.Key; directory?: string }[] = []
 mock.module("@/shell/tabs/tabs", () => ({
   ...tabsModule,
   useTabs: () => ({
     store: [],
+    newDraft: async (input: { server: ServerConnection.Key; directory?: string }) => {
+      drafts.push(input)
+    },
     select: (tab: Tab) => selected.push(tab),
     addSessionTab: (input: { server: ServerConnection.Key; sessionId: string }) => ({ type: "session", ...input }),
   }),
@@ -361,5 +399,231 @@ test("horizontal and Home row consumers have no pin action without opting in", a
   } finally {
     dispose()
     host.remove()
+  }
+})
+
+async function projectMenu(group: HTMLElement, action?: string, keyboard = false) {
+  const trigger = group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-menu"]')!
+  trigger.focus()
+  trigger.dispatchEvent(
+    keyboard
+      ? new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+      : new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
+  )
+  await wait()
+  expect(trigger.getAttribute("aria-expanded")).toBe("true")
+  const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!
+  const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const labels = items.map((item) => item.textContent)
+  if (action) {
+    const item = items.find((item) => item.textContent === action)
+    expect(item).toBeDefined()
+    item!.focus()
+    item!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+  }
+  if (!action) {
+    trigger.dispatchEvent(
+      new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
+    )
+  }
+  await wait()
+  expect(trigger.getAttribute("aria-expanded")).toBe("false")
+  return labels
+}
+
+test("project header actions preserve collapse/order and target canonical projects across servers", async () => {
+  platform.platform = "desktop"
+  platform.os = "macos"
+  const revealed: string[] = []
+  platform.openPath = async (directory) => {
+    revealed.push(directory)
+  }
+  platform.openAttachmentPickerDialog = async (_options, onFile) => {
+    await onFile(new File([JSON.stringify({ info: row("ses_exported", now).session, messages: [] })], "session.json"))
+  }
+  hosts[0].backend.push({
+    ...row("worktree", now),
+    session: { ...row("worktree", now).session, location: { directory: "/repo-worktree" } },
+  })
+  hosts[0].ctx.sync.data.project.push({ id: "global", worktree: "/plain", name: "Plain" })
+  // Global metadata isn't indexed, but a non-Git session supplies its own directory.
+  hosts[0].backend.push({
+    ...row("non-git", now),
+    session: { ...row("non-git", now).session, projectID: "global", location: { directory: "/plain" } },
+  })
+  hosts[0].backend.push({
+    ...row("unknown", now),
+    session: { ...row("unknown", now).session, projectID: "unknown", location: { directory: "/unknown" } },
+  })
+  const key = projectKey(ServerConnection.key(connections[0]), { id: "repo", worktree: "/repo" })
+  localStorage.setItem(storage, JSON.stringify({ attention: false, order: [key], collapsed: { [key]: true }, pins: [] }))
+  setRoute("sessionId", "old")
+  const ui = mount("rtl")
+  try {
+    await wait()
+    const groups = [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")]
+    const local = groups.find((group) => group.dataset.projectKey === key)!
+    const remote = groups.find(
+      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" }),
+    )!
+    const plain = groups.find(
+      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[0]), { id: "global", worktree: "/plain" }),
+    )!
+    const unknown = groups.find(
+      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[0]), { id: "unknown", worktree: "/unknown" }),
+    )!
+    expect(groups).toHaveLength(4)
+    const header = local.querySelector<HTMLButtonElement>("button[aria-expanded]")!
+    const order = groups.map((group) => group.dataset.projectKey)
+    expect(header.getAttribute("aria-expanded")).toBe("false")
+    const shortcut = local.querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!
+    expect(header.contains(shortcut)).toBe(false)
+    expect(shortcut.querySelector("use")?.getAttribute("href")).toContain("edit")
+    shortcut.focus()
+    expect(document.activeElement).toBe(shortcut)
+    shortcut.click()
+    await projectMenu(remote, "command.session.new", true)
+    await projectMenu(plain, "command.session.new")
+    expect(drafts.slice(-3)).toEqual([
+      { server: ServerConnection.key(connections[0]), directory: "/repo" },
+      { server: ServerConnection.key(connections[1]), directory: "/repo" },
+      { server: ServerConnection.key(connections[0]), directory: "/plain" },
+    ])
+    expect(header.getAttribute("aria-expanded")).toBe("false")
+    expect(
+      [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].map((group) => group.dataset.projectKey),
+    ).toEqual(order)
+    expect(await projectMenu(local)).toEqual([
+      "command.session.new",
+      "command.session.import",
+      "dialog.project.edit.title",
+      "session.header.reveal.finder",
+    ])
+    expect(await projectMenu(remote)).not.toContain("session.header.reveal.finder")
+    expect(await projectMenu(plain)).not.toContain("dialog.project.edit.title")
+    expect(await projectMenu(unknown)).not.toContain("dialog.project.edit.title")
+    await projectMenu(remote, "dialog.project.edit.title")
+    expect(edited.at(-1)).toMatchObject({
+      server: connections[1],
+      project: { id: "repo", worktree: "/repo", name: "Shared project" },
+    })
+    await projectMenu(local, "session.header.reveal.finder")
+    expect(revealed).toEqual(["/repo"])
+    await projectMenu(remote, "command.session.import")
+    expect(hosts[1].imported).toHaveLength(1)
+    expect(hosts[0].imported).toHaveLength(0)
+    expect(hosts[1].imported[0]).toMatchObject({ location: { directory: "/repo" } })
+    expect(selected.at(-1)).toMatchObject({ server: ServerConnection.key(connections[1]), sessionId: "ses_imported" })
+    expect(hosts[1].opened).toEqual(["/repo", "/repo"])
+    expect(hosts[1].touched).toEqual(["/repo", "/repo"])
+    platform.openPath = async () => {
+      throw new Error("reveal failed")
+    }
+    await projectMenu(local, "session.header.reveal.finder")
+    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "reveal failed" })
+    platform.openAttachmentPickerDialog = async () => {
+      throw new Error("picker failed")
+    }
+    await projectMenu(local, "command.session.import")
+    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "picker failed" })
+    const count = toasts.length
+    platform.openAttachmentPickerDialog = async (_options, onFile) => {
+      await onFile(new File(["{}"], "invalid.json"))
+    }
+    await projectMenu(local, "command.session.import")
+    expect(toasts).toHaveLength(count + 1)
+    expect(hosts[0].imported).toHaveLength(0)
+    platform.openAttachmentPickerDialog = async (_options, onFile) => {
+      await onFile(new File([JSON.stringify({ info: row("ses_exported", now).session, messages: [] })], "session.json"))
+    }
+    hosts[0].ctx.sdk.api.session.import = async () => {
+      throw new Error("import failed")
+    }
+    await projectMenu(local, "command.session.import")
+    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "import failed" })
+  } finally {
+    ui.dispose()
+    platform.platform = "web"
+    platform.openPath = async () => {}
+    delete platform.openAttachmentPickerDialog
+  }
+  const web = mount()
+  try {
+    await wait()
+    const local = [...web.host.querySelectorAll<HTMLElement>("[data-project-key]")].find(
+      (group) => group.dataset.projectKey === key,
+    )!
+    expect(await projectMenu(local)).toEqual(["command.session.new", "dialog.project.edit.title"])
+  } finally {
+    web.dispose()
+  }
+}, 15_000)
+
+test("project menu and focus survive session refreshes while project data stays current", async () => {
+  const previous = hosts[0].ctx.sync.data
+  const [sync, setSync] = createStore(structuredClone(previous))
+  hosts[0].ctx.sync.data = sync
+  const background = row("ses_background", now)
+  background.session = { ...background.session, projectID: "global", location: { directory: "/background" } }
+  hosts[0].backend.push(background)
+  const key = projectKey(ServerConnection.key(connections[0]), { id: "repo", worktree: "/repo" })
+  localStorage.setItem(storage, JSON.stringify({ attention: false, order: [key], collapsed: {}, pins: [] }))
+  const ui = mount()
+  try {
+    await wait()
+    const group = [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].find(
+      (group) => group.dataset.projectKey === key,
+    )!
+    const trigger = group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-menu"]')!
+    trigger.focus()
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await wait()
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!
+    const item = menu.querySelector<HTMLElement>('[role="menuitem"]')!
+    item.focus()
+    expect(document.activeElement).toBe(item)
+
+    hosts[0].backend[hosts[0].backend.indexOf(background)] = {
+      ...background,
+      session: { ...background.session, time: { ...background.session.time, updated: now + 1 } },
+    }
+    hosts[0].listeners.forEach((listener) =>
+      listener({ type: "session.step.ended", data: { sessionID: background.session.id } }),
+    )
+    await wait()
+    expect(hosts[0].ctx.data.session.get(background.session.id)?.time.updated).toBe(now + 1)
+    expect(trigger.isConnected).toBe(true)
+    expect(trigger.getAttribute("aria-expanded")).toBe("true")
+    expect(document.getElementById(menu.id)).toBe(menu)
+    expect(document.activeElement).toBe(item)
+
+    setSync("project", (project) => project.id === "repo", { name: "Renamed project", worktree: "/renamed" })
+    await wait()
+    expect(trigger.isConnected).toBe(true)
+    expect(trigger.getAttribute("aria-expanded")).toBe("true")
+    expect(document.activeElement).toBe(item)
+    expect(group.querySelector("button[aria-expanded] span[dir=auto]")?.textContent).toContain("Renamed project")
+    item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await wait()
+    expect(drafts.at(-1)).toEqual({ server: ServerConnection.key(connections[0]), directory: "/renamed" })
+    await projectMenu(group, "dialog.project.edit.title", true)
+    expect(edited.at(-1)).toMatchObject({
+      server: connections[0],
+      project: { id: "repo", name: "Renamed project", worktree: "/renamed" },
+    })
+
+    const header = group.querySelector<HTMLButtonElement>("button[aria-expanded]")!
+    header.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true }),
+    )
+    expect([...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")][1]).toBe(group)
+    expect(group.querySelector('[data-action="sidebar-project-menu"]')).toBe(trigger)
+  } finally {
+    ui.dispose()
+    hosts[0].ctx.sync.data = previous
+    hosts[0].backend.splice(
+      hosts[0].backend.findIndex((row) => row.session.id === background.session.id),
+      1,
+    )
   }
 })

@@ -1,6 +1,8 @@
 import type { SessionNavigationInfo, SessionNavigationPage } from "@opencode/client/promise"
 import type { ServerConnection } from "@/runtime/server/registry"
 import { pathKey } from "@/workspaces/path-key"
+import type { LocalProject } from "@/shell/state/layout"
+import { displayName } from "@/shell/layout/helpers"
 
 export type SidebarSession = SessionNavigationInfo & {
   server: ServerConnection.Key
@@ -17,6 +19,34 @@ export function projectKey(server: string, project: { id?: string; worktree: str
 }
 
 export const sessionKey = (server: string, id: string) => JSON.stringify([server, id])
+
+export function sidebarProjects(
+  server: ServerConnection.Key,
+  known: Omit<LocalProject, "expanded">[],
+  sessions: SessionNavigationInfo[],
+) {
+  const entries = [
+    ...known.map((project) => ({
+      project,
+      metadata: project.id && project.id !== "global" ? { ...project, expanded: true } : undefined,
+    })),
+    ...sessions.map((row) => ({
+      project: { id: row.session.projectID, worktree: row.session.location.directory },
+      metadata: undefined,
+    })),
+  ]
+  // The first known entry is canonical; session worktrees must not replace its destination or metadata.
+  return [
+    ...new Map(
+      entries
+        .map(({ project, metadata }) => {
+          const key = projectKey(server, project)
+          return [key, { key, server, directory: project.worktree, name: displayName(project), metadata }] as const
+        })
+        .reverse(),
+    ).values(),
+  ]
+}
 
 export function firstAttention(...times: (number | undefined)[]) {
   const pending = times.filter((time): time is number => time !== undefined)

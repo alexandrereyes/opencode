@@ -17,7 +17,6 @@ import { useLayout } from "@/shell/state/layout"
 import { useSettings } from "@/settings/model"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
-import { displayName } from "@/shell/layout/helpers"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
 import { useCommand } from "@/shell/commands/command"
@@ -25,6 +24,7 @@ import { adjacentTabKey } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
+import { SidebarProjectActions } from "./sidebar-project-actions"
 import {
   attentionGroups,
   firstAttention,
@@ -33,6 +33,7 @@ import {
   rootSessions,
   searchSessions,
   sessionKey,
+  sidebarProjects,
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
@@ -76,34 +77,11 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     indexes().flatMap(({ connection, ctx, index }) => {
       const server = ServerConnection.key(connection)
       const known = [...ctx.sync.data.project.filter((project) => project.id !== "global"), ...ctx.projects.list()]
-      const entries = [
-        ...known,
-        ...Object.values(index.state.rows)
-          .filter(Boolean)
-          .map((row) => ({
-            id: row.session.projectID,
-            worktree: row.session.location.directory,
-          })),
-      ]
-      return [
-        ...new Map(
-          entries
-            .map((project) => {
-              const key = projectKey(server, project)
-              return [
-                key,
-                {
-                  key,
-                  server,
-                  directory: project.worktree,
-                  name: displayName(project),
-                  serverName: serverName(connection),
-                },
-              ] as const
-            })
-            .reverse(),
-        ).values(),
-      ]
+      return sidebarProjects(server, known, Object.values(index.state.rows).filter(Boolean)).map((project) => ({
+        ...project,
+        connection,
+        serverName: serverName(connection),
+      }))
     }),
   )
   const projects = createMemo(() =>
@@ -445,27 +423,34 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                       )
                     }}
                   >
-                    <For each={projects()}>
-                      {(project, index) => {
-                        const rows = createMemo(() => sessions().rows.filter((row) => row.project === project.key))
-                        const collapsed = () => saved.collapsed[project.key] ?? false
+                    {/* Keep headers and open menus mounted across navigation-index and metadata updates. */}
+                    <For each={projects().map((project) => project.key)}>
+                      {(key, index) => {
+                        const initial = projects().find((project) => project.key === key)
+                        if (!initial) return
+                        const project = createMemo<typeof initial>(
+                          (previous) => projects().find((project) => project.key === key) ?? previous,
+                          initial,
+                        )
+                        const rows = createMemo(() => sessions().rows.filter((row) => row.project === key))
+                        const collapsed = () => saved.collapsed[key] ?? false
                         const visible = () =>
                           visibleSessions(
                             rows(),
-                            collapsed() ? 0 : (state.limits[project.key] ?? 5),
+                            collapsed() ? 0 : (state.limits[key] ?? 5),
                             sessions().current,
                           )
                         return (
-                          <SortableProject id={project.key} index={index()}>
+                          <SortableProject id={key} index={index()}>
                             {(handle) => (
                               <>
-                                <div class="group flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
+                                <div class="group/project flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
                                   <button
                                     ref={handle}
                                     class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
                                     classList={{
-                                      "cursor-grab": state.drag !== project.key,
-                                      "cursor-grabbing": state.drag === project.key,
+                                      "cursor-grab": state.drag !== key,
+                                      "cursor-grabbing": state.drag === key,
                                     }}
                                     title={language.t("sidebar.project.reorderHint")}
                                     aria-description={language.t("sidebar.project.reorderHint")}
@@ -476,12 +461,12 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                       if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown"))
                                         return
                                       event.preventDefault()
-                                      move(project.key, index() + (event.key === "ArrowUp" ? -1 : 1))
+                                      move(key, index() + (event.key === "ArrowUp" ? -1 : 1))
                                     }}
                                     aria-expanded={!collapsed()}
                                     onClick={(event) => {
                                       if (event.detail > 0 && gesture.dragged) return
-                                      setSaved("collapsed", project.key, !collapsed())
+                                      setSaved("collapsed", key, !collapsed())
                                     }}
                                   >
                                     <Icon
@@ -489,8 +474,8 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                       size="small"
                                       class={collapsed() ? "rtl:rotate-180" : ""}
                                     />
-                                    <span dir="auto" class="min-w-0 truncate" title={projectLabel(project.key)}>
-                                      {projectLabel(project.key)}
+                                    <span dir="auto" class="min-w-0 truncate" title={projectLabel(key)}>
+                                      {projectLabel(key)}
                                     </span>
                                     <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
                                       <span
@@ -499,6 +484,11 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                       />
                                     </Show>
                                   </button>
+                                  <SidebarProjectActions
+                                    connection={project().connection}
+                                    directory={project().directory}
+                                    metadata={project().metadata}
+                                  />
                                 </div>
                                 <div class="flex flex-col gap-1">
                                   <For each={visible()}>{(item) => row(item, true)}</For>
@@ -506,7 +496,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                 <Show when={!collapsed() && rows().length > visible().length}>
                                   <button
                                     class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
-                                    onClick={() => setState("limits", project.key, (value = 5) => value + 5)}
+                                    onClick={() => setState("limits", key, (value = 5) => value + 5)}
                                   >
                                     {language.t("sidebar.sessions.more")}
                                   </button>

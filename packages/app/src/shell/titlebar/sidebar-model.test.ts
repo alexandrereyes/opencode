@@ -10,6 +10,7 @@ import {
   rootSessions,
   searchSessions,
   sessionKey,
+  sidebarProjects,
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
@@ -36,6 +37,29 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("project groups keep canonical metadata ahead of local and session worktrees", () => {
+    const worktree = row("worktree")
+    worktree.session.location.directory = "/worktree"
+    const known = [
+      { id: "repo", worktree: "/canonical", name: "Canonical", sandboxes: ["/worktree"] },
+      { id: "repo", worktree: "/worktree", name: "Local worktree" },
+      { id: "global", worktree: "/plain" },
+      { worktree: "/unresolved" },
+    ]
+    const groups = sidebarProjects(server, known, [worktree])
+    expect(groups).toHaveLength(3)
+    expect(groups.find((group) => group.metadata?.id === "repo")).toMatchObject({
+      directory: "/canonical",
+      name: "Canonical",
+      metadata: { sandboxes: ["/worktree"] },
+    })
+    expect(groups.filter((group) => !group.metadata).map((group) => group.directory).sort()).toEqual([
+      "/plain",
+      "/unresolved",
+    ])
+    const remote = sidebarProjects(ServerConnection.Key.make("https://remote.test"), known, [worktree])
+    expect(remote.map((group) => group.key)).not.toEqual(groups.map((group) => group.key))
+  })
   test("seven local calendar dates include today, not a rolling 168-hour window", () => {
     const now = new Date(2026, 2, 10, 23, 59).getTime()
     const days = localDays(now)
