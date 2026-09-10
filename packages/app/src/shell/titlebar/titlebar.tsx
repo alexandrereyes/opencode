@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, mapArray, Match, Show, Switch, untrack } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
@@ -28,6 +28,7 @@ import { TitlebarRightMount } from "@/shell/titlebar/right-slot"
 import { MobileDrawer, MobileDrawerContent, MobileDrawerLabel, MobileDrawerTrigger } from "@/shell/mobile-drawer"
 import { sessionTabTitle } from "./tab-title"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
+import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-progress-indicator-v2"
 import { projectForSession } from "@/shell/layout/helpers"
 import { useSettingsDialog } from "@/settings/command"
@@ -412,6 +413,32 @@ export function Titlebar(props: {
             })
 
             const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false })
+            const mobileTabActivity = mapArray(
+              () => (mobile() ? tabsStore : []),
+              (tab) => {
+                if (tab.type === "draft") return () => ({ tab, unread: false, updated: 0 })
+                const state = useSessionTabAvatarState(
+                  () => tab.server,
+                  () => tab.sessionId,
+                  () => true,
+                )
+                return () => {
+                  const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+                  const value = conn ? global.ensureServerCtx(conn).data.session.get(tab.sessionId) : undefined
+                  return {
+                    tab,
+                    unread: state.unread(),
+                    updated: value?.time.updated ?? value?.time.created ?? 0,
+                  }
+                }
+              },
+            )
+            const orderedMobileTabs = createMemo(() =>
+              mobileTabActivity()
+                .map((activity) => activity())
+                .sort((a, b) => Number(b.unread) - Number(a.unread) || b.updated - a.updated)
+                .map((item) => item.tab),
+            )
             const currentProject = createMemo(() => {
               const tab = currentTab()
               const value = session()
@@ -520,7 +547,7 @@ export function Titlebar(props: {
                           <div data-slot="mobile-tabs-drawer-list">
                             <TitlebarTabStrip
                               orientation="vertical"
-                              tabs={tabsStore}
+                              tabs={orderedMobileTabs()}
                               currentTab={currentTab()}
                               onNavigate={(tab) => {
                                 tabs.select(tab)
@@ -530,7 +557,6 @@ export function Titlebar(props: {
                                 const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
                                 if (index !== -1) tabsStoreActions.closeTab(index)
                               }}
-                              onReorder={(keys) => tabsStoreActions.reorder(keys)}
                             />
                           </div>
                           <button

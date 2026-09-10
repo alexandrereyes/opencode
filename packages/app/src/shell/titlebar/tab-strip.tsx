@@ -237,7 +237,7 @@ export function TitlebarTabStrip(props: {
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
   onClose: (tab: Tab) => void
-  onReorder: (keys: string[]) => void
+  onReorder?: (keys: string[]) => void
 }) {
   const global = useGlobal()
   const language = useLanguage()
@@ -294,6 +294,7 @@ export function TitlebarTabStrip(props: {
             PointerSensor.configure({
               activationConstraints: [new PointerActivationConstraints.Distance({ value: 4 })],
               preventActivation: (event) =>
+                !props.onReorder ||
                 !canStartTabDrag(event.pointerType) ||
                 isTabCloseTarget(event.target) ||
                 (event.target instanceof Element && !!event.target.closest('[contenteditable="true"]')),
@@ -323,7 +324,7 @@ export function TitlebarTabStrip(props: {
 
             const { initialIndex, index } = source
             if (initialIndex !== index) {
-              props.onReorder(
+              props.onReorder?.(
                 mergeVisibleTabOrder(
                   props.tabs.map(tabKey),
                   current,
