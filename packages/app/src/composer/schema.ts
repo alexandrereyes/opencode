@@ -157,6 +157,15 @@ const ContextEntry = Schema.Struct({ ...FileContextItem.fields, key: Persistence
 
 export const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 
+export const ChatQuote = Persistence.struct({
+  id: Schema.String,
+  messageID: Schema.String,
+  partID: Schema.String,
+  text: Schema.String,
+  comment: Schema.String,
+})
+export type ChatQuote = typeof ChatQuote.Type
+
 export const ComposerStore = Persistence.struct({
   prompt: Prompt.pipe(
     Schema.decode({
@@ -186,6 +195,7 @@ export const ComposerStore = Persistence.struct({
     }),
   ),
   context: Persistence.struct({ items: Persistence.array(ContextEntry) }),
+  quotes: Persistence.optional(Persistence.array(ChatQuote)),
 })
 export type ComposerStore = typeof ComposerStore.Type
 
@@ -221,7 +231,11 @@ const HistoryPrompt = Schema.Array(Persistence.fallback(Schema.UndefinedOr(Conte
     encode: SchemaGetter.transform((parts) => parts),
   }),
 )
-const HistoryEntry = Schema.Struct({ prompt: HistoryPrompt, comments: Persistence.array(PromptHistoryComment) })
+const HistoryEntry = Schema.Struct({
+  prompt: HistoryPrompt,
+  comments: Persistence.array(PromptHistoryComment),
+  quotes: Persistence.optional(Persistence.array(ChatQuote)),
+})
 export const PromptHistoryEntry = Schema.Union([HistoryEntry, HistoryPrompt]).pipe(
   Schema.decodeTo(Schema.toType(HistoryEntry), {
     decode: SchemaGetter.transform((entry) => ("prompt" in entry ? entry : { prompt: entry, comments: [] })),

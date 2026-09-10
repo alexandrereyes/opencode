@@ -4,6 +4,8 @@ import { encodeFilePath } from "@/workspaces/files/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillPart } from "@/composer/state"
 import { formatCommentNote, type PromptComment } from "@/composer/comment-note"
 import { expandSnippets } from "./prompt-parts"
+import type { ChatQuote } from "./schema"
+import { formatChatQuotes } from "./chat-quote"
 
 // Network fields feed both boundaries; display fields keep desktop-only rendering details in the local echo.
 type PromptRequest = {
@@ -14,6 +16,7 @@ type PromptRequest = {
   skills: { id: string; name: string; mention?: { start: number; end: number; text: string } }[]
   comments: PromptComment[]
   apps: Extract<Prompt[number], { type: "app" }>[]
+  quotes: ChatQuote[]
 }
 
 type ContextFile = {
@@ -33,6 +36,7 @@ type BuildPromptRequestInput = {
   images: (Omit<ImageAttachmentPart, "blob"> & { dataUrl: string })[]
   text: string
   sessionDirectory: string
+  quotes?: ChatQuote[]
 }
 
 const absolute = (directory: string, path: string) => {
@@ -119,15 +123,19 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   }))
 
   return {
-    text: [...(text.trim() ? [text] : []), ...comments.map(formatCommentNote), ...apps.map(formatAppContext)].join(
-      "\n",
-    ),
+    text: [
+      ...(text.trim() ? [text] : []),
+      ...comments.map(formatCommentNote),
+      ...apps.map(formatAppContext),
+      ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
+    ].join("\n"),
     displayText: text,
     files: [...files, ...context, ...images],
     agents,
     skills,
     comments,
     apps,
+    quotes: input.quotes ?? [],
   }
 }
 

@@ -1,6 +1,16 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "chatQuotes.comment": "Comment",
+  "chatQuotes.title.one": "Chat quotes · {{count}}",
+  "chatQuotes.title.other": "Chat quotes · {{count}}",
+  "chatQuotes.source": "Quoted from an earlier message",
+  "chatQuotes.selectedText": "Selected text",
+  "chatQuotes.userComment": "Your comment",
+  "chatQuotes.placeholder": "Add a comment about this passage…",
+  "chatQuotes.edit": "Edit comment",
+  "chatQuotes.remove": "Remove quote",
+  "chatQuotes.done": "Done",
   "context.overview.session": "Session",
   "context.overview.context": "Context",
   "context.overview.costs": "Session {{session}} · Subagents {{subagents}}",

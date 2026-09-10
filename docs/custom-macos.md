@@ -31,6 +31,28 @@ and select with Enter, Tab, or a click. Selected tokens use the theme accent and
 captured content on submission, including when a command is prefixed from the composer menu.
 Drafts and prompt history retain the structured token. Snippets do not require server config files.
 
+## Chat quotes
+
+Select prose or code inside one assistant text part and choose **Comment**. The composer
+keeps the selected passage and an optional editable comment in **Chat quotes** above the
+prompt. Quotes can be removed, collapsed, or sent without additional prompt text.
+Confirming with the checkmark, Escape, or Cmd/Ctrl+Enter finishes editing and collapses
+the quotes panel; plain Enter inserts a line break. The chip reopens saved quotes.
+
+Drafts are scoped to their Session and server and survive reloads. Submission appends the
+quoted passages, source message/part IDs, and comments to the model-visible text while
+keeping structured quote metadata for history, queue editing, and revert. Failed prompt
+admission restores the submitted quotes. Selection cannot span different text parts.
+
+The implementation uses existing prompt APIs; no Protocol or generated client changes.
+This ports the chat-comment workflow, not OpenChamber's separate Notes feature.
+
+Validation: production-build browser scenarios at 1440px and 390px cover selection,
+editing, persistence, quote-only submission, history recall, and removal. Existing queue
+regressions and composer/persistence tests also pass. A cold-session entry benchmark
+measured 307ms first correct / 333ms stable on the base and 236ms / 266ms with the feature
+(one local sample each, not a statistically significant performance comparison).
+
 ## Inference footer
 
 Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.

@@ -1,7 +1,7 @@
 import type { Prompt } from "@/composer/state"
 import type { SelectedLineRange } from "@/workspaces/files/model"
 import { clonePrompt } from "../prompt-parts"
-import type { PromptHistoryComment, PromptHistoryEntry } from "../schema"
+import type { ChatQuote, PromptHistoryComment, PromptHistoryEntry } from "../schema"
 
 export type { PromptHistoryComment, PromptHistoryEntry } from "../schema"
 
@@ -30,6 +30,7 @@ export function prependHistoryEntry(
   prompt: Prompt,
   comments: PromptHistoryComment[] = [],
   max = MAX_HISTORY,
+  quotes: ChatQuote[] = [],
 ) {
   const text = prompt
     .map((part) => ("content" in part ? part.content : ""))
@@ -37,11 +38,12 @@ export function prependHistoryEntry(
     .trim()
   const hasImages = prompt.some((part) => part.type === "image")
   const hasComments = comments.some((comment) => !!comment.comment.trim())
-  if (!text && !hasImages && !hasComments) return entries
+  if (!text && !hasImages && !hasComments && !quotes.length) return entries
 
   const entry = {
     prompt: clonePrompt(prompt),
     comments: clonePromptHistoryComments(comments),
+    ...(quotes.length ? { quotes: quotes.map((quote) => ({ ...quote })) } : {}),
   } satisfies PromptHistoryEntry
   const last = entries[0]
   if (last && isPromptEqual(last, entry)) return entries
@@ -62,6 +64,7 @@ function isCommentEqual(commentA: PromptHistoryComment, commentB: PromptHistoryC
 }
 
 function isPromptEqual(entryA: PromptHistoryStoredEntry, entryB: PromptHistoryStoredEntry) {
+  if (JSON.stringify(entryA.quotes ?? []) !== JSON.stringify(entryB.quotes ?? [])) return false
   if (entryA.prompt.length !== entryB.prompt.length) return false
   for (let i = 0; i < entryA.prompt.length; i++) {
     const partA = entryA.prompt[i]
