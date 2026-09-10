@@ -16,7 +16,7 @@ import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
-import { subscriptionPool } from "./subscription-pool"
+import { subscriptionCapacity, subscriptionPercentages, subscriptionPool } from "./subscription-pool"
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
   return (
@@ -76,7 +76,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     messages: data.session.message.list,
     sessions: data.session.list,
     status: data.session.status,
-    shells: () => data.shell.list({ directory: directory() }),
+    shells: () => (layout.params.id ? data.shell.listBySession(layout.params.id) : []),
   })
   const [clock, setClock] = createStore({ now: Date.now() })
   const [subscriptions, quota] = createResource(
@@ -105,7 +105,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         .catch(() => false)
     },
   )
-  const pool = createMemo(() => subscriptionPool(subscriptions.latest?.accounts ?? []))
+  const pool = createMemo(() => subscriptionPool(subscriptions.latest?.accounts ?? [], clock.now))
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
@@ -138,6 +138,8 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     const id = info()?.projectID
     return id ? data.project.get(id) : undefined
   })
+  const projectName = createMemo(() => project()?.name || getFilename(project()?.canonical ?? directory()))
+  const branch = createMemo(() => data.location.vcs.info({ directory: directory() })?.branch.current ?? "—")
   const mcp = createMemo(() =>
     (data.location.mcp.server.list({ directory: directory() }) ?? []).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
@@ -165,7 +167,15 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3"
         aria-label={language.t("context.overview.session")}
       >
-        <h2 class="text-14-medium text-text-strong">{language.t("context.overview.session")}</h2>
+        <h2 class="flex min-w-0 items-center gap-2 text-14-medium text-text-strong">
+          <bdi dir="auto" class="min-w-0 max-w-[50%] truncate" title={projectName()}>
+            {projectName()}
+          </bdi>
+          <Icon name="branch" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+          <bdi dir="auto" class="min-w-0 flex-1 truncate" title={branch()}>
+            {branch()}
+          </bdi>
+        </h2>
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <span>{language.t("context.overview.context")}</span>
           <bdi class="tabular-nums">
@@ -187,168 +197,6 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           </span>
           <span class="text-text-base">{money((info()?.cost ?? 0) + childCost())}</span>
         </div>
-      </section>
-      <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
-        <div class="flex flex-wrap justify-between gap-2">
-          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.project")}</h2>
-          <bdi class="min-w-0 break-words">{project()?.name || getFilename(project()?.canonical ?? directory())}</bdi>
-        </div>
-        <div class="flex min-w-0 items-center gap-2 text-v2-text-text-muted">
-          <Icon name="branch" size="small" class="shrink-0" />
-          <bdi class="min-w-0 break-all">
-            {data.location.vcs.info({ directory: directory() })?.branch.current ?? "—"}
-          </bdi>
-        </div>
-      </section>
-      <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
-        <div class="flex min-h-8 items-center justify-between gap-2">
-          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.subscriptions")}</h2>
-          <IconButton
-            icon={<Icon name="refresh" size="small" />}
-            variant="ghost"
-            size="small"
-            disabled={subscriptions.loading}
-            aria-label={language.t("context.overview.refresh")}
-            onClick={() => {
-              setClock("now", Date.now())
-              void quota.refetch()
-            }}
-          />
-        </div>
-        <Show when={!subscriptions.loading || subscriptions.latest} fallback={<p>{language.t("common.loading")}</p>}>
-          <Show
-            when={subscriptions.latest?.status === "ok"}
-            fallback={
-              <p class="text-v2-text-text-muted" role="status">
-                {language.t(
-                  subscriptions.latest?.status === "unconfigured"
-                    ? "context.overview.unconfigured"
-                    : "context.overview.unavailable",
-                )}
-              </p>
-            }
-          >
-            <Show
-              when={subscriptions.latest?.accounts.length}
-              fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}
-            >
-              <details class="group" data-slot="subscription-pool">
-                <summary class="flex cursor-pointer list-none flex-col gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-border-active [&::-webkit-details-marker]:hidden">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <Icon
-                      name="chevron-down"
-                      size="small"
-                      class="-rotate-90 group-open:rotate-0 rtl:rotate-90 rtl:group-open:rotate-0"
-                    />
-                    <span class="text-13-medium text-text-strong">{language.t("context.overview.pool")}</span>
-                    <span class="ms-auto text-end tabular-nums">
-                      {pool().total === 0
-                        ? language.t("context.overview.noPool")
-                        : pool().remaining === null
-                          ? language.t("context.overview.unknownWeekly")
-                          : language.t("context.overview.poolRemaining", {
-                              percent: new Intl.NumberFormat(language.intl(), {
-                                style: "percent",
-                                maximumFractionDigits: 0,
-                              }).format((pool().remaining ?? 0) / 100),
-                            })}
-                    </span>
-                  </div>
-                  <Meter value={pool().remaining} remaining label={language.t("context.overview.pool")} />
-                  <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
-                    <span>
-                      {language.t("context.overview.poolCapacity", { ready: pool().ready, total: pool().total })}
-                    </span>
-                    <span>{updated()}</span>
-                  </div>
-                  <Show when={pool().measured < pool().total && pool().observedAt !== null}>
-                    <span class="text-12-regular text-v2-text-text-muted">
-                      {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}
-                    </span>
-                  </Show>
-                  <div class="flex flex-col gap-1 border-t border-border-weak-base pt-2 text-12-regular text-v2-text-text-muted">
-                    <div class="flex flex-wrap justify-between gap-2">
-                      <span>{language.t("context.overview.banked")}</span>
-                      <span class="tabular-nums">
-                        {pool().banked?.available ?? language.t("context.overview.bankedUnknown")}
-                      </span>
-                    </div>
-                    <Show when={pool().banked && (pool().banked?.available ?? 0) > 0}>
-                      <div class="flex flex-wrap justify-between gap-x-3 gap-y-1">
-                        <span>
-                          {language.t("context.overview.expiryMin", {
-                            date:
-                              pool().banked?.earliest === null
-                                ? language.t("context.overview.noExpiry")
-                                : new Intl.DateTimeFormat(language.intl(), {
-                                    dateStyle: "medium",
-                                    timeStyle: "short",
-                                  }).format(pool().banked?.earliest ?? 0),
-                          })}
-                        </span>
-                        <span>
-                          {language.t("context.overview.expiryMax", {
-                            date:
-                              (pool().banked?.nonExpiring ?? 0) > 0
-                                ? language.t("context.overview.noExpiry")
-                                : new Intl.DateTimeFormat(language.intl(), {
-                                    dateStyle: "medium",
-                                    timeStyle: "short",
-                                  }).format(pool().banked?.latest ?? 0),
-                          })}
-                        </span>
-                      </div>
-                    </Show>
-                  </div>
-                </summary>
-                <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
-                  <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
-                  <For each={subscriptions.latest?.accounts}>
-                    {(account) => (
-                      <div class="flex flex-col gap-1.5 py-1">
-                        <div class="flex flex-wrap items-baseline justify-between gap-2">
-                          <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
-                          <bdi class="tabular-nums">{account.remaining === null ? "—" : `${account.remaining}%`}</bdi>
-                        </div>
-                        <Meter value={account.remaining} remaining label={account.name} />
-                        <Show when={account.resetAt}>
-                          {(reset) => (
-                            <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
-                              <time dir="auto" dateTime={reset()}>
-                                {new Intl.DateTimeFormat(language.intl(), {
-                                  dateStyle: "medium",
-                                  timeStyle: "short",
-                                }).format(new Date(reset()))}
-                              </time>
-                              <span>{resetTime(reset())}</span>
-                            </div>
-                          )}
-                        </Show>
-                        <p class="text-12-regular text-v2-text-text-muted">
-                          {language.t(
-                            !account.enabled
-                              ? "context.overview.disabled"
-                              : !account.authenticated
-                                ? "context.overview.reauthenticate"
-                                : account.plan !== "pro"
-                                  ? "context.overview.outsidePool"
-                                  : account.cooldownSeconds > 0
-                                    ? "context.overview.cooldown"
-                                    : account.stale
-                                      ? "context.overview.stale"
-                                      : account.hasCapacity === false
-                                        ? "context.overview.noCapacity"
-                                        : "context.overview.available",
-                          )}
-                        </p>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </details>
-            </Show>
-          </Show>
-        </Show>
       </section>
       <Section title={language.t("context.overview.subagents")} count={children().length}>
         <Show
@@ -398,6 +246,203 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           </Show>
         </Show>
       </Section>
+      <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
+        <div class="flex min-h-8 items-center justify-between gap-2">
+          <h2 class="text-14-medium text-text-strong">{language.t("context.overview.subscriptions")}</h2>
+          <IconButton
+            icon={<Icon name="refresh" size="small" />}
+            variant="ghost"
+            size="small"
+            disabled={subscriptions.loading}
+            aria-label={language.t("context.overview.refresh")}
+            onClick={() => {
+              setClock("now", Date.now())
+              void quota.refetch()
+            }}
+          />
+        </div>
+        <Show when={!subscriptions.loading || subscriptions.latest} fallback={<p>{language.t("common.loading")}</p>}>
+          <Show
+            when={subscriptions.latest?.status === "ok"}
+            fallback={
+              <p class="text-v2-text-text-muted" role="status">
+                {language.t(
+                  subscriptions.latest?.status === "unconfigured"
+                    ? "context.overview.unconfigured"
+                    : "context.overview.unavailable",
+                )}
+              </p>
+            }
+          >
+            <Show
+              when={subscriptions.latest?.accounts.length}
+              fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}
+            >
+              <details class="group" data-slot="subscription-pool">
+                <summary class="flex cursor-pointer list-none flex-col gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-border-active [&::-webkit-details-marker]:hidden">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Icon
+                      name="chevron-down"
+                      size="small"
+                      class="-rotate-90 group-open:rotate-0 rtl:rotate-90 rtl:group-open:rotate-0"
+                    />
+                    <span class="text-13-medium text-text-strong">{language.t("context.overview.availablePool")}</span>
+                    <span class="ms-auto text-end tabular-nums">
+                      {pool().total === 0
+                        ? language.t("context.overview.noPool")
+                        : pool().balance === "unknown"
+                          ? language.t("context.overview.unknownWeekly")
+                          : pool().balance === "unavailable"
+                            ? language.t("context.overview.noAvailableBalance")
+                            : language.t("context.overview.availablePoolRemaining", {
+                                percent: new Intl.NumberFormat(language.intl(), {
+                                  style: "percent",
+                                  maximumFractionDigits: 0,
+                                }).format((pool().availableRemaining ?? 0) / 100),
+                              })}
+                    </span>
+                  </div>
+                  <Meter
+                    value={pool().availableRemaining}
+                    remaining
+                    label={language.t("context.overview.availablePool")}
+                  />
+                  <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
+                    <span>
+                      {language.t("context.overview.availablePoolCapacity", {
+                        ready: pool().ready,
+                        total: pool().total,
+                      })}
+                    </span>
+                    <span>{updated()}</span>
+                  </div>
+                  <Show when={pool().measured < pool().total && pool().observedAt !== null}>
+                    <span class="text-12-regular text-v2-text-text-muted">
+                      {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}
+                    </span>
+                  </Show>
+                  <div class="flex flex-col gap-1 border-t border-border-weak-base pt-2 text-12-regular text-v2-text-text-muted">
+                    <div class="flex flex-wrap justify-between gap-2">
+                      <span>{language.t("context.overview.banked")}</span>
+                      <span class="tabular-nums">
+                        {pool().banked?.available ?? language.t("context.overview.bankedUnknown")}
+                      </span>
+                    </div>
+                    <Show when={pool().banked && (pool().banked?.available ?? 0) > 0}>
+                      <div class="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                        <span>
+                          {language.t("context.overview.expiryMin", {
+                            date:
+                              pool().banked?.earliest === null
+                                ? language.t("context.overview.noExpiry")
+                                : new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(pool().banked?.earliest ?? 0),
+                          })}
+                        </span>
+                        <span>
+                          {language.t("context.overview.expiryMax", {
+                            date:
+                              (pool().banked?.nonExpiring ?? 0) > 0
+                                ? language.t("context.overview.noExpiry")
+                                : new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(pool().banked?.latest ?? 0),
+                          })}
+                        </span>
+                      </div>
+                    </Show>
+                  </div>
+                </summary>
+                <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
+                  <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
+                  <For each={subscriptions.latest?.accounts}>
+                    {(account) => {
+                      const capacity = () => subscriptionCapacity(account, clock.now)
+                      const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
+                      return (
+                        <div role="group" aria-label={account.name} class="flex flex-col gap-1.5 py-1">
+                          <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
+                            <bdi class="tabular-nums">
+                              {percentages === null
+                                ? language.t("context.overview.unknownWeekly")
+                                : language.t("context.overview.accountUsage", {
+                                    remaining: new Intl.NumberFormat(language.intl(), {
+                                      style: "percent",
+                                      maximumFractionDigits: 0,
+                                    }).format(percentages.remaining / 100),
+                                    used: new Intl.NumberFormat(language.intl(), {
+                                      style: "percent",
+                                      maximumFractionDigits: 0,
+                                    }).format(percentages.used / 100),
+                                  })}
+                            </bdi>
+                          </div>
+                          <Meter value={account.remaining} remaining label={account.name} />
+                          <div class="flex flex-wrap gap-1.5 text-12-regular text-v2-text-text-muted">
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
+                              {account.plan
+                                ? language.t("context.overview.plan", {
+                                    plan:
+                                      account.plan === "pro" ? "Pro" : account.plan === "plus" ? "Plus" : account.plan,
+                                  })
+                                : language.t("context.overview.planUnknown")}
+                            </span>
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
+                              {language.t(
+                                capacity() === "outside"
+                                  ? "context.overview.outsidePool"
+                                  : capacity() === "unconfirmed"
+                                    ? "context.overview.capacityUnconfirmed"
+                                    : capacity() === "available"
+                                      ? "context.overview.capacityAvailable"
+                                      : "context.overview.capacityUnavailable",
+                              )}
+                            </span>
+                          </div>
+                          <Show when={account.resetAt}>
+                            {(reset) => (
+                              <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
+                                <time dir="auto" dateTime={reset()}>
+                                  {new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(new Date(reset()))}
+                                </time>
+                                <span>{resetTime(reset())}</span>
+                              </div>
+                            )}
+                          </Show>
+                          <p class="text-12-regular text-v2-text-text-muted">
+                            {language.t(
+                              !account.enabled
+                                ? "context.overview.disabled"
+                                : !account.authenticated
+                                  ? "context.overview.reauthenticate"
+                                  : account.cooldownSeconds > 0
+                                    ? "context.overview.cooldown"
+                                    : account.stale || capacity() === "unconfirmed"
+                                      ? "context.overview.capacityUnconfirmed"
+                                      : account.hasCapacity === false
+                                        ? "context.overview.noCapacity"
+                                        : account.plan !== "pro"
+                                          ? "context.overview.outsidePool"
+                                          : "context.overview.available",
+                            )}
+                          </p>
+                        </div>
+                      )
+                    }}
+                  </For>
+                </div>
+              </details>
+            </Show>
+          </Show>
+        </Show>
+      </section>
       <Section title={language.t("context.overview.background")} count={background.tasks().length}>
         <Show
           when={background.tasks().length}

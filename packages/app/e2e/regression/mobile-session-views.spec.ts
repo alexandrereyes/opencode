@@ -124,6 +124,11 @@ for (const position of ["top", "bottom"] as const) {
     await more.click()
     await page.getByRole("menuitem", { name: "Session details", exact: true }).click()
     await expect(details.getByRole("button", { name: "No changes", exact: true })).toBeVisible()
+    // Corvu starts opening after paint; the transition flag is also absent
+    // before that callback. Wait for the open position before dismissing.
+    await expect
+      .poll(() => details.evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m42))
+      .toBe(0)
     await expect(details).not.toHaveAttribute("data-transitioning")
     await page.keyboard.press("Escape")
     await expect(details).toBeHidden()
