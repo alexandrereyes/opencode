@@ -56,6 +56,12 @@ export type ServerSubscriptionsOutput = {
     readonly plan: string | null
     readonly authenticated: boolean
     readonly cooldownSeconds: number
+    readonly bankedResets: {
+      readonly available: number
+      readonly earliestExpiresAt: string | null
+      readonly latestExpiresAt: string | null
+      readonly nonExpiring: number
+    } | null
     readonly remaining: number | null
     readonly resetAt: string | null
     readonly observedAt: string | null

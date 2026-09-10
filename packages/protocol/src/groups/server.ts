@@ -14,6 +14,14 @@ export const ServerGroup = HttpApiGroup.make("server.server")
             plan: Schema.NullOr(Schema.String),
             authenticated: Schema.Boolean,
             cooldownSeconds: Schema.Number,
+            bankedResets: Schema.NullOr(
+              Schema.Struct({
+                available: Schema.Number,
+                earliestExpiresAt: Schema.NullOr(Schema.String),
+                latestExpiresAt: Schema.NullOr(Schema.String),
+                nonExpiring: Schema.Number,
+              }),
+            ),
             remaining: Schema.NullOr(Schema.Number),
             resetAt: Schema.NullOr(Schema.String),
             observedAt: Schema.NullOr(Schema.String),

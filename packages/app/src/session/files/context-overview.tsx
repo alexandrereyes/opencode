@@ -1,11 +1,12 @@
 import { createEffect, createMemo, createResource, For, Show, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Dynamic } from "solid-js/web"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Switch } from "@opencode/ui/switch"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
 import { createSessionBackground } from "@/session/requests/background"
 import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
@@ -61,6 +62,7 @@ function Meter(props: { value: number | null; label: string; remaining?: boolean
 
 export function ContextOverview(props: { tokens?: number; usage?: number | null; active: boolean }) {
   const language = useLanguage()
+  const dialog = useDialog()
   const data = useData()
   const server = useServer()
   const sdk = useServerSDK()
@@ -264,6 +266,40 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                       {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}
                     </span>
                   </Show>
+                  <div class="flex flex-col gap-1 border-t border-border-weak-base pt-2 text-12-regular text-v2-text-text-muted">
+                    <div class="flex flex-wrap justify-between gap-2">
+                      <span>{language.t("context.overview.banked")}</span>
+                      <span class="tabular-nums">
+                        {pool().banked?.available ?? language.t("context.overview.bankedUnknown")}
+                      </span>
+                    </div>
+                    <Show when={pool().banked && (pool().banked?.available ?? 0) > 0}>
+                      <div class="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                        <span>
+                          {language.t("context.overview.expiryMin", {
+                            date:
+                              pool().banked?.earliest === null
+                                ? language.t("context.overview.noExpiry")
+                                : new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(pool().banked?.earliest ?? 0),
+                          })}
+                        </span>
+                        <span>
+                          {language.t("context.overview.expiryMax", {
+                            date:
+                              (pool().banked?.nonExpiring ?? 0) > 0
+                                ? language.t("context.overview.noExpiry")
+                                : new Intl.DateTimeFormat(language.intl(), {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(pool().banked?.latest ?? 0),
+                          })}
+                        </span>
+                      </div>
+                    </Show>
+                  </div>
                 </summary>
                 <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
                   <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
@@ -371,31 +407,51 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             <For each={background.tasks()}>
               {(task) => (
                 <li class="min-w-0">
-                  <Dynamic
-                    component={task.type === "subagent" ? A : "div"}
-                    href={task.type === "subagent" ? sessionHref(server.key, task.id) : undefined}
-                    class="flex min-h-7 min-w-0 items-start gap-2 rounded-md px-2 py-1"
-                    classList={{
-                      "hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active":
-                        task.type === "subagent",
-                    }}
+                  <button
+                    type="button"
+                    class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-start hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                    onClick={() =>
+                      dialog.show(() => (
+                        <Dialog>
+                          <DialogHeader>
+                            <DialogTitle>{language.t("context.overview.backgroundTask")}</DialogTitle>
+                          </DialogHeader>
+                          <DialogBody>
+                            <div class="flex min-h-0 flex-col gap-3 px-4 pb-4">
+                              <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words text-13-regular text-text-strong [overflow-wrap:anywhere]">
+                                {task.label}
+                              </pre>
+                              <Show when={task.type === "subagent"}>
+                                <A
+                                  class="text-13-medium text-text-strong underline"
+                                  href={sessionHref(server.key, task.id)}
+                                  onClick={() => dialog.close()}
+                                >
+                                  {language.t("context.overview.openSubagent")}
+                                </A>
+                              </Show>
+                            </div>
+                          </DialogBody>
+                        </Dialog>
+                      ))
+                    }
                   >
                     <Icon
                       name={task.type === "shell" ? "console" : "subagent"}
                       size="small"
                       class="mt-0.5 shrink-0 text-v2-text-text-muted"
                     />
-                    <span class="min-w-0 flex-1 break-words">
+                    <span class="min-w-0 flex-1 truncate">
                       <TextShimmer
-                        text={task.label}
+                        text={task.label.replace(/\s+/g, " ").trim()}
                         active
-                        class="w-full [&_[data-slot]]:min-w-0 [&_[data-slot]]:whitespace-pre-wrap! [&_[data-slot]]:[overflow-wrap:anywhere]!"
+                        class="max-w-full [&_[data-slot=text-shimmer-char]]:min-w-0 [&_[data-slot=text-shimmer-char-base]]:truncate [&_[data-slot=text-shimmer-char-shimmer]]:truncate"
                       />
                     </span>
                     <span class="shrink-0 text-12-regular text-v2-text-text-muted">
                       {language.t(task.type === "shell" ? "ui.tool.shell" : "ui.tool.agent.default")}
                     </span>
-                  </Dynamic>
+                  </button>
                 </li>
               )}
             </For>

@@ -60,7 +60,10 @@ for (const position of ["top", "bottom"] as const) {
     await expect(picker).toHaveText("Session")
     await expect(message).toBeVisible()
     await expect(composer).toBeVisible()
-    await expect(tabs.getByRole("tab")).toHaveText(["Session", "Changes", "Files", "Terminal"])
+    await expect(tabs.getByRole("tab")).toHaveText(["Session", "Changes", "Files", "Usage"])
+    await expect(
+      tabs.getByRole("tab", { name: "Usage", exact: true }).locator('[data-component="progress-circle"]'),
+    ).toBeVisible()
     await expect(tabs).toHaveCSS("padding-left", "0px")
     await expect(tabs).toHaveCSS("padding-right", "0px")
     await expect
@@ -93,12 +96,11 @@ for (const position of ["top", "bottom"] as const) {
     await page.keyboard.press("Escape")
     await expect(drawer).toBeHidden()
 
-    await more.click()
-    await page.getByRole("menuitem", { name: "Usage", exact: true }).click()
-    await expect(picker).toHaveCount(0)
+    await tabs.getByRole("tab", { name: "Usage", exact: true }).click()
+    await expect(picker).toHaveText("Usage")
     await expect(page.getByText("Total Cost", { exact: true })).toBeVisible()
     const usage = page.locator('[data-slot="session-usage-content"]')
-    await expect(usage).toHaveCSS("padding-top", "16px")
+    await expect(usage).toHaveCSS("padding-top", "12px")
     await expect(usage).toHaveCSS("padding-inline-start", "16px")
     await expect(usage).toHaveCSS("padding-inline-end", "16px")
     await expect(composer).toBeHidden()
@@ -141,7 +143,8 @@ for (const position of ["top", "bottom"] as const) {
     await expect(page.getByRole("combobox", { name: "Filter files", exact: true })).toBeVisible()
     await expect(composer).toBeHidden()
 
-    await tabs.getByRole("tab", { name: "Terminal", exact: true }).click()
+    await more.click()
+    await page.getByRole("menuitem", { name: "Terminal", exact: true }).click()
     const panel = page.locator("#terminal-panel")
     await expect(panel).toHaveAttribute("data-opened", "true")
     await expect(panel.getByRole("tab", { name: /Terminal 1/ })).toBeVisible()
@@ -158,20 +161,19 @@ for (const position of ["top", "bottom"] as const) {
     await expect(panel).toHaveAttribute("data-cache-probe", "original")
 
     await page.keyboard.press("Control+Backquote")
-    await expect(picker).toHaveText("Terminal")
+    await expect(picker).toHaveCount(0)
     await expect(panel).toBeVisible()
     await expect(panel).toHaveAttribute("data-cache-probe", "original")
     await page.keyboard.press("Control+Backquote")
     await expect(picker).toHaveText("Session")
 
     await page.keyboard.press("Control+Backquote")
-    await expect(picker).toHaveText("Terminal")
+    await expect(picker).toHaveCount(0)
     await panel.getByRole("button", { name: "Close terminal", exact: true }).click()
     await expect(picker).toHaveText("Session")
     await expect(panel).toBeHidden()
 
-    await more.click()
-    await page.getByRole("menuitem", { name: "Usage", exact: true }).click()
+    await tabs.getByRole("tab", { name: "Usage", exact: true }).click()
     await expect(page.getByText("Total Cost", { exact: true })).toBeVisible()
     await page.goto(stressSessionHref(fixture.sourceID))
     await expect(picker).toHaveText("Session")

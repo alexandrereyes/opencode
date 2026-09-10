@@ -2586,6 +2586,12 @@ export type ServerSubscriptionsOutput = {
     plan: string | null
     authenticated: boolean
     cooldownSeconds: number
+    bankedResets: {
+      available: number
+      earliestExpiresAt: string | null
+      latestExpiresAt: string | null
+      nonExpiring: number
+    } | null
     remaining: number | null
     resetAt: string | null
     observedAt: string | null

@@ -24,6 +24,16 @@ const Status = Schema.Struct({
       ),
       usageAgeSeconds: Schema.NullOr(Schema.Finite),
       cooldownSeconds: Schema.Finite,
+      bankedResets: Schema.optional(
+        Schema.NullOr(
+          Schema.Struct({
+            available: Schema.Finite,
+            earliestExpiresAt: Schema.NullOr(Schema.String),
+            latestExpiresAt: Schema.NullOr(Schema.String),
+            nonExpiring: Schema.Finite,
+          }),
+        ),
+      ),
     }),
   ),
 })
@@ -45,6 +55,7 @@ export const readSubscriptions = Effect.fn("Subscriptions.read")(function* () {
         plan: item.usage?.planType ?? item.account.planType,
         authenticated: item.account.authenticationState === "Authenticated",
         cooldownSeconds: item.cooldownSeconds,
+        bankedResets: item.bankedResets ?? null,
         remaining:
           item.usage?.weeklyPercent == null ? null : Math.max(0, Math.min(100, 100 - item.usage.weeklyPercent)),
         resetAt: item.usage?.weeklyResetAt ?? null,

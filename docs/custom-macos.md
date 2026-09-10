@@ -29,3 +29,8 @@ If any participating account lacks a fresh weekly measurement, the balance is un
 than a partial average. Availability separately requires fresh upstream capacity and no cooldown.
 The update time reflects the oldest measurement included. Expanding reveals every subscription,
 including accounts outside the Pro pool. Banked resets are not added to the balance.
+The always-visible summary also shows the fresh banked-reset inventory for the Pro pool, with
+the first and last expiration (or no expiration). Unknown inventory is not reported as zero.
+On mobile, Usage and its live context ring occupy the fourth tab; Terminal is in More options.
+Background task rows are single-line previews. Selecting one opens its full text in a dialog,
+with an Open subagent link for agent tasks.

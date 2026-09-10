@@ -34,6 +34,12 @@ test("context tab retains selection across sessions and shows live quota and sub
             plan: "pro",
             authenticated: true,
             cooldownSeconds: 0,
+            bankedResets: {
+              available: 3,
+              earliestExpiresAt: "2026-10-01T12:00:00Z",
+              latestExpiresAt: "2026-10-05T12:00:00Z",
+              nonExpiring: 0,
+            },
             stale: usage.stale,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
@@ -61,6 +67,9 @@ test("context tab retains selection across sessions and shows live quota and sub
   await page.getByRole("button", { name: "View context usage", exact: true }).click()
   const overview = page.locator('[data-slot="context-overview"]')
   await expect(overview.getByText("subscription@example.test", { exact: true })).toBeHidden()
+  await expect(overview.getByText("Banked resets · Pro", { exact: true })).toBeVisible()
+  await expect(overview.getByText(/First expiry:/)).toBeVisible()
+  await expect(overview.getByText(/Last expiry:/)).toBeVisible()
   await expect(overview.getByRole("meter", { name: "Pro pool" })).toHaveAttribute("aria-valuenow", "25")
   await overview.locator('[data-slot="subscription-pool"] > summary').click()
   await expect(overview.getByText("subscription@example.test", { exact: true })).toBeVisible()
@@ -89,7 +98,7 @@ test("context tab retains selection across sessions and shows live quota and sub
     overview.getByRole("region", { name: "Session", exact: true }).locator('[data-component="text-shimmer"]'),
   ).toHaveCount(0)
   const background = overview.getByRole("list", { name: "Background tasks" })
-  await expect(background.getByRole("link", { name: /Live child title/ })).toBeVisible()
+  await expect(background.getByRole("button", { name: /Live child title/ })).toBeVisible()
   await expect(background.locator('[data-component="text-shimmer"]')).toHaveAttribute("data-active", "true")
   events.push({
     id: "evt_context_done",
@@ -177,7 +186,14 @@ test("shows every background task inline, including tasks beyond the old ten-ite
   const tasks = page.getByRole("list", { name: "Background tasks" })
   await expect(tasks.getByRole("listitem")).toHaveCount(12)
   expect(await tasks.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
-  await expect(tasks.getByRole("link", { name: "Background task 12 Agent", exact: true })).toBeVisible()
-  await tasks.getByRole("link", { name: "Background task 12 Agent", exact: true }).click()
+  const longTask = tasks.getByRole("button", { name: /Long task/ })
+  expect(await longTask.evaluate((element) => element.getBoundingClientRect().height)).toBe(32)
+  await longTask.click()
+  const dialog = page.getByRole("dialog", { name: "Background task", exact: true })
+  await expect(dialog.locator("pre")).toHaveText(`Long task ${"command".repeat(40)}`)
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeHidden()
+  await tasks.getByRole("button", { name: "Background task 12 Agent", exact: true }).click()
+  await dialog.getByRole("link", { name: "Open subagent", exact: true }).click()
   await expect(page).toHaveURL(/ses_background_11$/)
 })
