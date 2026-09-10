@@ -56,7 +56,10 @@ export const dict = {
   "context.overview.noBackground": "No background tasks running.",
   "mcp.status.pending": "connecting",
   "settings.snippets.title": "Snippets",
-  "settings.snippets.description": "Save reusable text and insert it with # in the composer.",
+  "settings.snippets.loadFailed":
+    "Could not load snippets from this server. Check the connection and server version, then retry.",
+  "settings.snippets.retry": "Retry",
+  "settings.snippets.description": "Save reusable text on this server, share it across devices, and insert it with #.",
   "settings.snippets.add": "Add snippet",
   "settings.snippets.edit": "Edit snippet",
   "settings.snippets.search": "Search snippets",

@@ -12,38 +12,43 @@ import { TextInput } from "@opencode/ui/text-input"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useGlobal } from "@/runtime/server/runtime"
-import { ScopedKey } from "@/runtime/server/scope"
-import { serverName } from "@/runtime/server/registry"
 import { displayName } from "@/shell/layout/helpers"
-import { useSettings } from "../model"
+import { InlineServerSelect } from "../server-select"
+import { showToast } from "@/shell/notifications/toast"
+import { formatServerError } from "@/runtime/server/errors"
+import type { ServerSnippets } from "./server"
 import { SettingsList } from "../list"
 import { snippetAliases, type Snippet } from "./model"
 
 export function SettingsSnippets() {
   const language = useLanguage()
-  const settings = useSettings()
   const global = useGlobal()
   const dialog = useDialog()
-  const [state, setState] = createStore({ query: "" })
+  const [state, setState] = createStore({ query: "", deleting: "" })
+  const server = createMemo(() => {
+    const selected = global.settings.server.selected()
+    return selected ? global.ensureServerCtx(selected) : undefined
+  })
+  const snippets = () => server()?.snippets
+  const items = () => snippets()?.list() ?? []
+  const failed = (error: unknown) =>
+    showToast({
+      variant: "error",
+      title: language.t("common.requestFailed"),
+      description: formatServerError(error, language.t),
+    })
   const projects = createMemo(() =>
-    global.servers
-      .list()
-      .flatMap((server) => {
-        const ctx = global.ensureServerCtx(server)
-        return ctx.projects.list().flatMap((project) =>
-          project.id
-            ? [
-                {
-                  id: ScopedKey.from(ctx.sdk.scope, project.id),
-                  label:
-                    global.servers.list().length > 1
-                      ? `${displayName(project)} — ${serverName(server)}`
-                      : displayName(project),
-                },
-              ]
-            : [],
-        )
-      })
+    (server()?.projects.list() ?? [])
+      .flatMap((project) =>
+        project.id
+          ? [
+              {
+                id: project.id,
+                label: displayName(project),
+              },
+            ]
+          : [],
+      )
       .filter((project, index, items) => items.findIndex((item) => item.id === project.id) === index),
   )
   const scopeLabel = (project?: string) =>
@@ -51,8 +56,7 @@ export function SettingsSnippets() {
       ? (projects().find((item) => item.id === project)?.label ?? language.t("settings.snippets.project"))
       : language.t("settings.snippets.global")
   const filtered = createMemo(() =>
-    settings.snippets
-      .list()
+    items()
       .filter((item) =>
         [item.name, item.description, ...item.aliases]
           .join(" ")
@@ -61,7 +65,19 @@ export function SettingsSnippets() {
       )
       .toSorted((a, b) => a.name.localeCompare(b.name)),
   )
-  const edit = (snippet?: Snippet) => dialog.push(() => <SnippetDialog snippet={snippet} projects={projects()} />)
+  const edit = (snippet?: Snippet) => {
+    const catalog = snippets()
+    if (catalog) dialog.push(() => <SnippetDialog snippet={snippet} projects={projects()} catalog={catalog} />)
+  }
+  const remove = async (id: string) => {
+    const catalog = snippets()
+    if (!catalog || state.deleting) return
+    setState("deleting", id)
+    await catalog
+      .remove(id)
+      .catch(failed)
+      .finally(() => setState("deleting", ""))
+  }
 
   return (
     <>
@@ -71,12 +87,15 @@ export function SettingsSnippets() {
             <h2 class="settings-tab-title">{language.t("settings.snippets.title")}</h2>
             <span class="text-11-regular text-v2-text-text-muted">{language.t("settings.snippets.description")}</span>
           </div>
-          <Button variant="ghost-muted" onClick={() => edit()} disabled={!settings.ready()}>
-            <Icon name="plus" />
-            {language.t("settings.snippets.add")}
-          </Button>
+          <div class="flex items-center gap-2">
+            <InlineServerSelect />
+            <Button variant="ghost-muted" onClick={() => edit()} disabled={!snippets()?.ready()}>
+              <Icon name="plus" />
+              {language.t("settings.snippets.add")}
+            </Button>
+          </div>
         </div>
-        <Show when={settings.snippets.list().length > 0}>
+        <Show when={items().length > 0}>
           <div class="settings-tab-search">
             <TextInput
               type="search"
@@ -90,11 +109,23 @@ export function SettingsSnippets() {
         </Show>
       </div>
       <div class="settings-tab-body settings-servers">
+        <Show when={snippets()?.error()}>
+          <div role="alert" class="flex items-center gap-2 text-13-regular text-v2-text-text-muted">
+            <span>{language.t("settings.snippets.loadFailed")}</span>
+            <Button variant="ghost-muted" onClick={() => snippets()?.refresh()}>
+              {language.t("settings.snippets.retry")}
+            </Button>
+          </div>
+        </Show>
         <Show
           when={filtered().length > 0}
           fallback={
             <div class="settings-servers-status">
-              {language.t(state.query ? "palette.empty" : "settings.snippets.empty")}
+              {snippets()?.loading()
+                ? language.t("common.loading")
+                : snippets()?.error()
+                  ? ""
+                  : language.t(state.query ? "palette.empty" : "settings.snippets.empty")}
             </div>
           }
         >
@@ -105,6 +136,7 @@ export function SettingsSnippets() {
                   <button
                     type="button"
                     class="flex min-w-0 flex-1 flex-col gap-1 text-start rounded-md focus-visible:outline-v2-border-border-focus"
+                    disabled={!snippets()?.ready()}
                     onClick={() => edit(snippet)}
                   >
                     <span class="text-13-medium break-words text-v2-text-text-accent">#{snippet.name}</span>
@@ -122,15 +154,14 @@ export function SettingsSnippets() {
                     <Menu.Trigger
                       as={IconButton}
                       variant="ghost-muted"
+                      disabled={!snippets()?.ready() || !!state.deleting}
                       icon={<Icon name="outline-dots" />}
                       aria-label={language.t("settings.snippets.actions", { name: snippet.name })}
                     />
                     <Menu.Portal>
                       <Menu.Content>
                         <Menu.Item onSelect={() => edit(snippet)}>{language.t("common.edit")}</Menu.Item>
-                        <Menu.Item onSelect={() => settings.snippets.remove(snippet.id)}>
-                          {language.t("common.delete")}
-                        </Menu.Item>
+                        <Menu.Item onSelect={() => void remove(snippet.id)}>{language.t("common.delete")}</Menu.Item>
                       </Menu.Content>
                     </Menu.Portal>
                   </Menu>
@@ -144,11 +175,16 @@ export function SettingsSnippets() {
   )
 }
 
-function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label: string }[] }) {
+function SnippetDialog(props: {
+  snippet?: Snippet
+  projects: { id: string; label: string }[]
+  catalog: ServerSnippets
+}) {
   const language = useLanguage()
   const dialog = useDialog()
-  const settings = useSettings()
   const [state, setState] = createStore({
+    saving: false,
+    error: "",
     name: props.snippet?.name ?? "",
     description: props.snippet?.description ?? "",
     aliases: props.snippet?.aliases.join(", ") ?? "",
@@ -156,14 +192,14 @@ function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label
     project: props.snippet?.project ?? "",
   })
   const scopes = createMemo(() => [
-    { id: "global", label: language.t("settings.snippets.global") },
+    { id: "", label: language.t("settings.snippets.global") },
     ...props.projects,
     ...(state.project && !props.projects.some((item) => item.id === state.project)
       ? [{ id: state.project, label: language.t("settings.snippets.project") }]
       : []),
   ])
   const duplicate = () =>
-    settings.snippets
+    props.catalog
       .list()
       .some(
         (item) =>
@@ -173,6 +209,28 @@ function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label
       )
   const invalidName = () => !!state.name.trim() && /[\s#]/.test(state.name.trim())
   const valid = () => !!state.name.trim() && !!state.content.trim() && !invalidName() && !duplicate()
+  const save = async (event: SubmitEvent) => {
+    event.preventDefault()
+    if (!valid() || state.saving) return
+    const active = dialog.active
+    setState({ saving: true, error: "" })
+    await props.catalog
+      .save({
+        id: props.snippet?.id ?? crypto.randomUUID(),
+        name: state.name.trim(),
+        description: state.description.trim(),
+        aliases: snippetAliases(state.aliases),
+        content: state.content,
+        project: state.project || undefined,
+      })
+      .then(
+        () => {
+          if (dialog.active === active) dialog.close()
+        },
+        (error) => setState("error", formatServerError(error, language.t)),
+      )
+      .finally(() => setState("saving", false))
+  }
   return (
     <Dialog
       size="large"
@@ -182,22 +240,7 @@ function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label
       <DialogHeader>
         <DialogTitle>{language.t(props.snippet ? "settings.snippets.edit" : "settings.snippets.add")}</DialogTitle>
       </DialogHeader>
-      <form
-        class="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!valid()) return
-          settings.snippets.save({
-            id: props.snippet?.id ?? crypto.randomUUID(),
-            name: state.name.trim(),
-            description: state.description.trim(),
-            aliases: snippetAliases(state.aliases),
-            content: state.content,
-            project: state.project || undefined,
-          })
-          dialog.close()
-        }}
-      >
+      <form class="flex min-h-0 w-full flex-1 flex-col overflow-hidden" onSubmit={save}>
         <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-6">
           <Field invalid={invalidName() || duplicate()}>
             <Field.Label>{language.t("settings.snippets.name")}</Field.Label>
@@ -236,11 +279,11 @@ function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label
             <Field.Label>{language.t("settings.snippets.scope")}</Field.Label>
             <Select
               options={scopes()}
-              current={scopes().find((item) => item.id === (state.project || "global"))}
-              value={(item) => item.id}
+              current={scopes().find((item) => item.id === state.project)}
+              value={(item) => (item.id ? `project:${item.id}` : "global")}
               label={(item) => item.label}
               onSelect={(item) => {
-                if (item) setState("project", item.id === "global" ? "" : item.id)
+                if (item) setState("project", item.id)
               }}
               aria-label={language.t("settings.snippets.scope")}
             />
@@ -258,11 +301,16 @@ function SnippetDialog(props: { snippet?: Snippet; projects: { id: string; label
           </Field>
         </div>
         <DialogFooter>
+          <Show when={state.error}>
+            <span role="alert" class="text-13-regular text-v2-text-text-muted">
+              {state.error}
+            </span>
+          </Show>
           <Button type="button" variant="neutral" onClick={dialog.close}>
             {language.t("common.cancel")}
           </Button>
-          <Button type="submit" variant="contrast" disabled={!valid()}>
-            {language.t("common.save")}
+          <Button type="submit" variant="contrast" disabled={!valid() || state.saving || !props.catalog.ready()}>
+            {language.t(state.saving ? "common.saving" : "common.save")}
           </Button>
         </DialogFooter>
       </form>

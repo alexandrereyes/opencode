@@ -5,8 +5,6 @@ import { createComposerEditorActions } from "@/composer/editor/actions"
 import { ComposerStore } from "@/composer/schema"
 import { buildPromptRequest } from "@/composer/request"
 import { createComposerInteractionState, transitionComposer } from "@/composer/suggestions/machine"
-import { Persistence } from "@/runtime/persistence/schema"
-import { defaultSettings, settingsPersistence } from "../model"
 import { snippetAliases, snippetSuggestions, type Snippet } from "./model"
 
 const global: Snippet = {
@@ -26,15 +24,6 @@ describe("snippets", () => {
     expect(snippetSuggestions([global, project], "remote\u0000repo").map((item) => item.id)).toEqual(["snippet:global"])
     expect(snippetSuggestions([global])[0]?.search).toContain("audit")
     expect(snippetAliases("audit, test, audit,\n review ")).toEqual(["audit", "test", "review"])
-  })
-
-  test("persists snippets and reads older preferences without losing settings", () => {
-    const codec = Persistence.withInitial(settingsPersistence, defaultSettings)
-    const decode = Schema.decodeUnknownSync(codec)
-    const restored = decode({ snippets: [global], appearance: { fontSize: 17 } })
-    expect(decode(Schema.encodeSync(codec)(restored)).snippets).toEqual([global])
-    expect(restored.appearance.fontSize).toBe(17)
-    expect(decode({ appearance: { fontSize: 18 } }).snippets).toEqual([])
   })
 
   test("triggers at the cursor and leaves anchors, headings and shell text alone", () => {

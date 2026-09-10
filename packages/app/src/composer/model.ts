@@ -23,9 +23,7 @@ import type { PromptHistoryComment } from "./history/entry"
 import { createComposerHistory } from "./history/store"
 import { composerPlaceholder } from "./placeholder"
 import { createComposerSubmit, withSlashSkill } from "./submit"
-import { useSettings } from "@/settings/model"
 import { snippetSuggestions } from "@/settings/snippets/model"
-import { ScopedKey } from "@/runtime/server/scope"
 import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { createSessionSearch } from "./session-search"
@@ -47,7 +45,6 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
-  const settings = useSettings()
   const prompt = adapter.state
   let editor: HTMLDivElement | undefined
 
@@ -423,10 +420,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     server: () => server.key,
     snippets: () => {
       const project = sdk().current?.project.id
-      return snippetSuggestions(
-        settings.snippets.list(),
-        project ? ScopedKey.from(server.ctx.sdk.scope, project) : undefined,
-      )
+      return snippetSuggestions(server.ctx.snippets.list(), project)
     },
     searchContextFiles: async (query) =>
       (await files.searchFilesAndDirectories(query)).map((path) => ({
