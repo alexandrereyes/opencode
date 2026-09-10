@@ -72,6 +72,9 @@ Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The 
 metadata. Weekly percentages are shown as remaining quota; dates are quota resets, not subscription
 or OAuth expirations. Missing/stale usage is marked explicitly. No credits balance is displayed.
 Panel tab selection is persisted per server and Session, including across Location changes.
+The chat/side-panel divider width is a shared local preference: resizing it in any Session
+applies to existing and new Sessions and survives reloads. Narrow windows clamp the rendered
+width without overwriting the saved preference.
 Entering a desktop Session opens the side panel automatically, selecting Context when no
 previous panel tab is saved. Existing selections are restored; mobile navigation is unchanged.
 

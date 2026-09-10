@@ -60,8 +60,6 @@ export type TabPanes = {
   setTerminalHeight(height: number): void
   reviewOpened: Accessor<boolean>
   setReviewOpened(opened: boolean): void
-  sessionWidth: Accessor<number | undefined>
-  setSessionWidth(width: number): void
 }
 
 export type LayoutRoute =
@@ -521,9 +519,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         )
         const reviewPanelOpened =
           panes?.reviewOpened ?? createMemo(() => store.review?.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED)
-        const sessionWidth = createMemo(() =>
-          panes ? (panes.sessionWidth() ?? DEFAULT_SESSION_WIDTH) : store.session.width,
-        )
+        // The divider is a local layout preference shared by every Session.
+        const sessionWidth = createMemo(() => store.session.width)
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
 
         function setTerminalOpened(next: boolean) {
@@ -603,10 +600,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             source: reviewPanelSource,
             width: sessionWidth,
             resize(width: number) {
-              if (panes) {
-                panes.setSessionWidth(width)
-                return
-              }
               setStore("session", "width", width)
             },
             open(source: ReviewPanelSource = "other") {
