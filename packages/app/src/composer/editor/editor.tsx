@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { createMediaQuery } from "@solid-primitives/media"
 import { FileIcon } from "@opencode/ui/file-icon"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
@@ -56,6 +57,7 @@ export type ComposerEditorProps = {
 export function ComposerEditor(props: ComposerEditorProps) {
   const i18n = useI18n()
   const language = useLanguage()
+  const isDesktop = createMediaQuery("(min-width: 768px)")
   const state = props.controller.state
   const view = props.controller.view
   let editor: HTMLDivElement | undefined
@@ -200,6 +202,12 @@ export function ComposerEditor(props: ComposerEditorProps) {
               "unicode-bidi": state.mode === "normal" ? "plaintext" : undefined,
               "text-align": "start",
             }}
+            onBeforeInput={(event) => {
+              if (isDesktop() || composing || event.isComposing || event.inputType !== "insertParagraph") return
+              // Soft keyboards also use this path; keep a line break rather than a nested paragraph.
+              event.preventDefault()
+              document.execCommand("insertLineBreak")
+            }}
             onInput={(event) => {
               if (composing || event.isComposing) return
               syncInput(event.currentTarget)
@@ -223,7 +231,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
                 if (view.submit.queue?.editFirst()) event.preventDefault()
                 return
               }
-              if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+              if (event.key === "Enter" && (mod ? !event.shiftKey : event.shiftKey !== isDesktop())) {
                 event.preventDefault()
                 if (event.repeat) return
                 props.controller.submit(mod ? { alternate: true } : undefined)

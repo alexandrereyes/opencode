@@ -16,6 +16,12 @@ requires an explicit cold maintenance window: never stop the live service hostin
 The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
 configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
 
+## Mobile composer
+
+On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submits the
+composer. Desktop keeps Enter to submit and Shift+Enter for a new line. Mod+Enter
+retains alternate delivery, and Enter still selects an open suggestion before submission.
+
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
