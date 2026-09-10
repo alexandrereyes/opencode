@@ -512,8 +512,18 @@ export function Titlebar(props: {
                         <span data-slot="mobile-tab-title" dir="auto" class="min-w-0 flex-1 truncate text-start">
                           {currentTitle()}
                         </span>
-                        <span class="shrink-0 text-v2-text-text-muted">{tabsStore.length}</span>
                       </MobileDrawerTrigger>
+                      <button
+                        type="button"
+                        data-action="mobile-titlebar-new-session"
+                        class="flex h-7 shrink-0 items-center rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
+                        onClick={() => {
+                          if (layout.route().type !== "home") toggleHome()
+                          setMobileTabs("open", false)
+                        }}
+                      >
+                        {language.t("command.session.new")}
+                      </button>
                       <MobileDrawerContent>
                         <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                         <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
