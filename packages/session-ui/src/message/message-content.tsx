@@ -500,15 +500,39 @@ export function AssistantTextContent(props: {
     })
   })
   const meta = createMemo(() => {
-    const agent = props.message.agent
+    const elapsed = (props.message.time.streamed ?? props.message.time.created) - props.message.time.created
+    const output = props.message.tokens?.output ?? 0
     return [
-      agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
-      model(),
-      duration(),
-      interrupted() ? i18n.t("ui.message.interrupted") : "",
-    ]
-      .filter(Boolean)
-      .join(" \u00B7 ")
+      { icon: "models", text: model() },
+      { icon: "brain", text: props.message.model.variant },
+      { icon: "subagent", text: props.message.agent },
+      {
+        icon: "gauge",
+        text:
+          elapsed > 0 && output > 0
+            ? i18n.t("ui.message.tokensPerSecond", {
+                count: new Intl.NumberFormat(i18n.locale(), {
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                }).format((output * 1000) / elapsed),
+              })
+            : "",
+      },
+      { icon: "hourglass", text: duration() },
+      {
+        icon: "clock",
+        text: new Intl.DateTimeFormat("en-GB", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .format(props.message.time.created)
+          .replace(",", ""),
+      },
+      { icon: "circle-ban-sign", text: interrupted() ? i18n.t("ui.message.interrupted") : "" },
+    ] satisfies { icon: ComponentProps<typeof Icon>["name"]; text: string | undefined }[]
   })
   const [copied, setCopied] = createSignal(false)
   const copy = async () => {
@@ -529,6 +553,16 @@ export function AssistantTextContent(props: {
         </div>
         <Show when={props.showCopy}>
           <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>
+            <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
+              <For each={meta().filter((item) => item.text)}>
+                {(item) => (
+                  <span data-slot="text-part-meta-item">
+                    <Icon name={item.icon} size="small" />
+                    <span>{item.text}</span>
+                  </span>
+                )}
+              </For>
+            </span>
             <MessageActionButton
               icon={copied() ? "check" : "copy"}
               label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
@@ -536,11 +570,6 @@ export function AssistantTextContent(props: {
               onClick={copy}
               aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
             />
-            <Show when={meta()}>
-              <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
-                {meta()}
-              </span>
-            </Show>
           </div>
         </Show>
       </div>

@@ -239,6 +239,7 @@ const source = {
   "ui.message.copied": "Copied",
   "ui.message.thought": "Thought",
   "ui.message.duration.seconds": "{{count}}s",
+  "ui.message.tokensPerSecond": "{{count}} tok/s",
   "ui.message.duration.minutesSeconds": "{{minutes}}m {{seconds}}s",
   "ui.message.interrupted": "Interrupted",
   "ui.sessionTimeline.notice.model": "Model",

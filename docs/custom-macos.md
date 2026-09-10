@@ -16,6 +16,13 @@ requires an explicit cold maintenance window: never stop the live service hostin
 The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
 configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
 
+## Inference footer
+
+Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.
+Icon-labelled items show model, recorded reasoning variant, agent, output tokens per second,
+processing duration, and local date/time (`dd/MM HH:mm`). TPS uses existing output-token and
+provider-stream timestamps; unavailable metrics are omitted. No API changes are required.
+
 ## Session context overview
 
 The existing Context tab prioritizes context usage, session and descendant costs, project/branch,

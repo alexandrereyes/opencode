@@ -20,7 +20,7 @@ story.describe("touch timeline", () => {
 
     await expect(timeline.locator('[data-slot="user-message-meta"]')).toContainText("Build")
     await expect(timeline.locator('[data-slot="user-message-meta-tail"]')).not.toBeEmpty()
-    await expect(timeline.locator('[data-slot="text-part-meta"]')).toContainText("Build")
+    await expect(timeline.locator('[data-slot="text-part-meta"]')).toContainText("build")
     await expect(timeline.locator('[data-slot="text-part-meta"]')).toContainText("Sonnet")
   })
 
@@ -50,26 +50,35 @@ story.describe("touch timeline", () => {
   })
 })
 
-story("desktop message actions still appear on hover and keyboard focus", async ({ mount, page }) => {
+story("desktop assistant metadata stays visible without hover", async ({ mount, page }) => {
   const timeline = await mount("current-session-timeline-rows--conversation", { args: { scenario: "interruption" } })
   expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true)
 
-  for (const action of [
-    { slot: "user-message-copy-wrapper", name: "Copy message" },
-    { slot: "text-part-copy-wrapper", name: "Copy response" },
-  ]) {
-    const actions = timeline.locator(`[data-slot="${action.slot}"]`)
-    await expect(actions).toHaveCount(1)
-    await expect(actions).toHaveCSS("opacity", "0")
-    await expect(actions).toHaveCSS("pointer-events", "none")
-    await actions.locator("..").hover()
-    await expect(actions).toHaveCSS("opacity", "1")
-    await expect(actions).toHaveCSS("pointer-events", "auto")
-    await page.mouse.move(0, 0)
-    await expect(actions).toHaveCSS("opacity", "0")
-    await actions.getByRole("button", { name: action.name, exact: true }).focus()
-    await expect(actions).toHaveCSS("opacity", "1")
-    await expect(actions).toHaveCSS("pointer-events", "auto")
-    await page.getByRole("button", { name: "Reset", exact: true }).focus()
-  }
+  const footer = timeline.locator('[data-slot="text-part-copy-wrapper"]')
+  await expect(footer).toHaveCSS("opacity", "1")
+  await expect(footer).toHaveCSS("pointer-events", "auto")
+  await expect(footer.getByRole("button", { name: "Copy response", exact: true })).toBeVisible()
+  await expect(footer.locator('[data-slot="text-part-meta-item"]')).toHaveText([
+    "Claude Sonnet 4",
+    "build",
+    /\d+s/,
+    /\d{2}\/\d{2} \d{2}:\d{2}/,
+  ])
+  expect(await footer.evaluate((element) => element.firstElementChild?.getAttribute("data-slot"))).toBe(
+    "text-part-meta",
+  )
+
+  const actions = timeline.locator('[data-slot="user-message-copy-wrapper"]')
+  await expect(actions).toHaveCount(1)
+  await expect(actions).toHaveCSS("opacity", "0")
+  await expect(actions).toHaveCSS("pointer-events", "none")
+  await actions.locator("..").hover()
+  await expect(actions).toHaveCSS("opacity", "1")
+  await expect(actions).toHaveCSS("pointer-events", "auto")
+  await page.mouse.move(0, 0)
+  await expect(actions).toHaveCSS("opacity", "0")
+  await actions.getByRole("button", { name: "Copy message", exact: true }).focus()
+  await expect(actions).toHaveCSS("opacity", "1")
+  await expect(actions).toHaveCSS("pointer-events", "auto")
+  await page.getByRole("button", { name: "Reset", exact: true }).focus()
 })

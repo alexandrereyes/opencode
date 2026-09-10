@@ -4,6 +4,18 @@ import "./icon.css"
 
 // Consumers center the SVG viewport, so each icon must center its artwork within its viewBox.
 const icons = {
+  clock: {
+    viewBox: "0 0 16 16",
+    body: `<circle cx="8" cy="8" r="6" stroke="currentColor"/><path d="M8 4.5V8H11" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
+  hourglass: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M4 2H12M4 14H12M5 2V4.5L8 8L11 4.5V2M5 14V11.5L8 8L11 11.5V14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
+  gauge: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M3 12.5A6 6 0 1 1 13 12.5H3Z" stroke="currentColor" stroke-linejoin="round"/><path d="M8 9L11 5.5M3 8H4M8 3V4M12 8H13" stroke="currentColor" stroke-linecap="round"/><circle cx="8" cy="9" r="1" fill="currentColor"/>`,
+  },
   lock: {
     viewBox: "0 0 16 16",
     body: `<rect x="3.5" y="7" width="9" height="7" rx="1" stroke="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2M8 10v1" stroke="currentColor" stroke-linecap="round"/>`,
