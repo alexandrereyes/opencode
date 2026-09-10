@@ -123,6 +123,7 @@ export interface Interface {
   }) => Effect.Effect<SessionEnvironment.Variables | undefined, NotFoundError>
   readonly view: (input: { sessionID: SessionSchema.ID; idle: number }) => Effect.Effect<void, NotFoundError>
   readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
+  readonly archive: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (
     input: SessionStore.MessagesInput,
   ) => Effect.Effect<SessionMessage.Info[], NotFoundError | MessageDecodeError>
@@ -339,6 +340,15 @@ const layer = Layer.effect(
         yield* environments.clear(sessionID)
         yield* bus.publish(SessionEvent.Deleted, { sessionID })
         yield* bus.remove(sessionID)
+      }),
+      archive: Effect.fn("Session.archive")(function* (sessionID) {
+        const current = yield* result.get(sessionID)
+        yield* execution.interrupt(sessionID)
+        yield* execution.awaitIdle(sessionID)
+        yield* transport.close(sessionID)
+        const children = yield* result.list({ parentID: sessionID })
+        yield* Effect.forEach(children.data, (child) => result.archive(child.id), { concurrency: 1, discard: true })
+        if (!current.time.archived) yield* bus.publish(SessionEvent.Archived, { sessionID })
       }),
       list: Effect.fn("Session.list")(function* (input) {
         return { data: yield* store.list(input) }

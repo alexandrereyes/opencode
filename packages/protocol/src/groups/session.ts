@@ -319,6 +319,19 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.post("session.archive", "/api/session/:sessionID/archive", {
+        params: { sessionID: Session.ID },
+        success: HttpApiSchema.NoContent,
+        error: SessionNotFoundError,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.archive",
+          summary: "Archive session",
+          description: "Archive a session and all its descendants, interrupting active execution and retaining history.",
+        }),
+      ),
+    )
+    .add(
       HttpApiEndpoint.post("session.move", "/api/session/:sessionID/move", {
         params: { sessionID: Session.ID },
         payload: Schema.Struct({ ...Location.Ref.fields, delivery: SessionInbox.Delivery.pipe(Schema.optional) }),

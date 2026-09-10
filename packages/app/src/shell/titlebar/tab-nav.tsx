@@ -17,6 +17,7 @@ import { sessionTabTitle } from "./tab-title"
 import { useSettings } from "@/settings/model"
 import { canOpenTabRename, forwardTabRef } from "./tab-gesture"
 import { TabPreviewPopover } from "./tab-popover"
+import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import "./tab-nav.css"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
@@ -41,7 +42,8 @@ export function TabNavItem(props: {
 }) {
   const language = useLanguage()
   const settings = useSettings()
-  const [menu, setMenu] = createStore({ open: false, rename: false })
+  const lifecycle = useSessionLifecycleActions()
+  const [menu, setMenu] = createStore({ open: false, actions: false, rename: false, delete: false })
   const [editing, setEditing] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
   let tabRoot!: HTMLDivElement
@@ -85,7 +87,8 @@ export function TabNavItem(props: {
   })
 
   const [popoverOpen, setPopoverOpen] = createSignal(false)
-  const previewBlocked = () => !!props.dragging || editing() || menu.open || !!props.pressed || !props.session
+  const previewBlocked = () =>
+    !!props.dragging || editing() || menu.open || menu.actions || !!props.pressed || !props.session
 
   const measureTitleOverflow = () => {
     if (!titleEl || editing()) {
@@ -182,6 +185,39 @@ export function TabNavItem(props: {
     onCleanup(cleanup)
   })
 
+  const closeMenu = (event: Event) => {
+    if (menu.rename) {
+      event.preventDefault()
+      setMenu("rename", false)
+      openRename()
+    }
+    if (menu.delete && props.session) {
+      event.preventDefault()
+      setMenu("delete", false)
+      lifecycle.showDelete(props.server, props.session)
+    }
+  }
+  const menuItems = () => (
+    <>
+      <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
+        {language.t("common.rename")}
+      </Menu.Item>
+      <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+      <Menu.Separator />
+      <Menu.Item
+        disabled={!props.session || lifecycle.pending()}
+        onSelect={() => {
+          if (props.session) void lifecycle.archive(props.server, props.session)
+        }}
+      >
+        {language.t("common.archive")}
+      </Menu.Item>
+      <Menu.Item disabled={!props.session || lifecycle.pending()} onSelect={() => setMenu("delete", true)}>
+        {language.t("common.delete")}…
+      </Menu.Item>
+    </>
+  )
+
   const tab = () => (
     <div
       ref={(el) => {
@@ -193,6 +229,7 @@ export function TabNavItem(props: {
       data-orientation={props.orientation ?? "horizontal"}
       data-title-overflow={titleOverflowing()}
       data-editing={editing()}
+      data-session-actions
       class="group relative flex h-7 w-full min-w-0 select-none flex-row items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-[6px] px-1.5 [container-type:inline-size]"
       classList={{ invisible: props.hidden }}
       data-active={props.active}
@@ -310,6 +347,22 @@ export function TabNavItem(props: {
       </Menu.Context.Trigger>
 
       <div data-slot="tab-close">
+        <Menu open={menu.actions} onOpenChange={(open) => setMenu("actions", open)} placement="bottom-end">
+          <Menu.Trigger
+            as={IconButton}
+            size="small"
+            variant="ghost-muted"
+            class="hover-reveal group-hover:opacity-100 group-focus-within:opacity-100 group-data-[active=true]:opacity-100"
+            icon={<Icon name="outline-dots" />}
+            aria-label={language.t("common.moreOptions")}
+            disabled={props.dragging}
+            onPointerDown={(event: PointerEvent) => event.stopPropagation()}
+            onClick={(event: MouseEvent) => event.stopPropagation()}
+          />
+          <Menu.Portal>
+            <Menu.Content onCloseAutoFocus={closeMenu}>{menuItems()}</Menu.Content>
+          </Menu.Portal>
+        </Menu>
         <IconButton
           size="small"
           variant="ghost-muted"
@@ -349,19 +402,7 @@ export function TabNavItem(props: {
         }}
       />
       <Menu.Context.Portal>
-        <Menu.Context.Content
-          onCloseAutoFocus={(event) => {
-            if (!menu.rename) return
-            event.preventDefault()
-            setMenu("rename", false)
-            openRename()
-          }}
-        >
-          <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
-            {language.t("common.rename")}
-          </Menu.Item>
-          <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
-        </Menu.Context.Content>
+        <Menu.Context.Content onCloseAutoFocus={closeMenu}>{menuItems()}</Menu.Context.Content>
       </Menu.Context.Portal>
     </Menu.Context>
   )

@@ -1410,6 +1410,7 @@ export const dict = {
 
   "session.delete.failed.title": "Failed to delete session",
   "session.delete.title": "Delete session",
+  "session.delete.confirmCascade": 'Delete session "{{name}}" and all its child sessions? This permanently deletes their messages and cannot be undone.',
   "session.delete.confirm": 'Delete session "{{name}}"?',
   "session.delete.button": "Delete session",
 

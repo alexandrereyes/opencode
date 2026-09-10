@@ -44,7 +44,7 @@ const clearAuthToken = () => {
 
 const web = createWebPlatform(pkg.version)
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (import.meta.env.PROD && import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
 }
 

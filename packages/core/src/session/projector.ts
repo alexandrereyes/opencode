@@ -571,6 +571,14 @@ const layer = Layer.effectDiscard(
         .run()
         .pipe(Effect.orDie),
     )
+    yield* bus.project(SessionEvent.Archived, (event) =>
+      db
+        .update(SessionTable)
+        .set({ time_archived: event.created, time_updated: sql`${SessionTable.time_updated}` })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie),
+    )
     yield* bus.project(SessionEvent.Viewed, (event) => {
       const idle = event.data.idle
       return db
