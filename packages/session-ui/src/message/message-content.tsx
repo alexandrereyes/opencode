@@ -8,6 +8,7 @@ import { ImagePreview } from "@opencode/ui/image-preview"
 import { getFilename } from "@opencode/util/path"
 import { AttachmentCard } from "./attachment-card"
 import { CommentCard } from "./comment-card"
+import { UserMessageQuote } from "./user-message-quote"
 import { TimelineSeparator } from "../components/timeline-separator"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { IconButton } from "@opencode/ui/icon-button"
@@ -26,7 +27,7 @@ import type {
   SessionMessageCompaction,
   SessionMessageUser,
 } from "@opencode/client/promise"
-import type { SessionUserActions, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
@@ -209,6 +210,9 @@ export function CurrentUserMessageDisplay(props: {
   model: SessionMessageAssistant["model"]
   actions?: SessionUserActions
   comments?: SessionUserComment[]
+  quotes?: SessionUserQuote[]
+  quoteOpen?: (id: string) => boolean | undefined
+  onQuoteOpenChange?: (id: string, open: boolean) => void
   sessions?: Array<{ start: number; end: number }>
 }) {
   const data = useData()
@@ -219,6 +223,8 @@ export function CurrentUserMessageDisplay(props: {
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
   const comments = createMemo(() => props.comments ?? [])
+  const hasBody = () => !!props.text || !!props.quotes?.length
+  const copyText = () => props.copyText ?? (props.quotes?.length ? props.message.text : props.text)
   const model = createMemo(() => {
     const match = data.store.provider?.all?.get(props.model.providerID)
     return match?.models?.[props.model.id]?.name ?? props.model.id
@@ -230,7 +236,7 @@ export function CurrentUserMessageDisplay(props: {
   })
   const stamp = createMemo(() => timefmt().format(props.message.time.created))
   const copy = async () => {
-    if (!props.text || !(await writeClipboard(props.copyText ?? props.text))) return
+    if (!copyText() || !(await writeClipboard(copyText()))) return
     setState("copied", true)
     setTimeout(() => setState("copied", false), 2000)
   }
@@ -282,9 +288,9 @@ export function CurrentUserMessageDisplay(props: {
   )
 
   return (
-    <div data-component="user-message" data-timeline-part-id={props.text ? `${props.message.id}:text:0` : undefined}>
+    <div data-component="user-message" data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}>
       <Show
-        when={props.text}
+        when={hasBody()}
         fallback={
           <Show when={comments().length > 0}>
             <UserMessageComments comments={comments()} bounded={false} />
@@ -292,13 +298,34 @@ export function CurrentUserMessageDisplay(props: {
         }
       >
         <div data-slot="user-message-body">
-          <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText
-              text={props.text}
-              files={inlineFiles()}
-              agents={agents()}
-              sessions={props.sessions ?? []}
-            />
+          <div
+            data-slot="user-message-text"
+            dir={props.quotes?.length ? undefined : "auto"}
+            data-comments={comments().length > 0 ? "true" : undefined}
+          >
+            <Show when={props.text}>
+              <div data-slot="user-message-draft" dir="auto">
+                <CurrentHighlightedText
+                  text={props.text}
+                  files={inlineFiles()}
+                  agents={agents()}
+                  sessions={props.sessions ?? []}
+                />
+              </div>
+            </Show>
+            <Show when={props.quotes?.length}>
+              <div data-slot="user-message-quotes">
+                <For each={props.quotes}>
+                  {(quote) => (
+                    <UserMessageQuote
+                      quote={quote}
+                      open={props.quoteOpen?.(quote.id)}
+                      onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
+                    />
+                  )}
+                </For>
+              </div>
+            </Show>
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />
             </Show>
@@ -306,7 +333,7 @@ export function CurrentUserMessageDisplay(props: {
         </div>
       </Show>
       {renderAttachments()}
-      <Show when={props.text || comments().length > 0}>
+      <Show when={hasBody() || comments().length > 0}>
         <div data-slot="user-message-copy-wrapper">
           <span data-slot="user-message-meta-wrap">
             <Show when={metaHead()}>
@@ -336,7 +363,7 @@ export function CurrentUserMessageDisplay(props: {
               aria-label={i18n.t("ui.message.revertMessage")}
             />
           </Show>
-          <Show when={props.text}>
+          <Show when={copyText()}>
             <MessageActionButton
               icon={state.copied ? "check" : "copy"}
               label={state.copied ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyMessage")}

@@ -231,6 +231,9 @@ const source = {
 
   "ui.message.expand": "Expand message",
   "ui.message.collapse": "Collapse message",
+  "ui.message.quote.caption": "Quoted from an earlier message",
+  "ui.message.quote.expand": "Expand quote",
+  "ui.message.quote.collapse": "Collapse quote",
   "ui.message.copy": "Copy",
   "ui.message.copyMessage": "Copy message",
   "ui.message.forkMessage": "Fork to new session",

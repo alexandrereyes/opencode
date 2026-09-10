@@ -1,6 +1,6 @@
 import type { SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageUser } from "@opencode/client/promise"
 import { Match, Switch, type ComponentProps } from "solid-js"
-import type { SessionUserActions, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { AssistantReasoningContent, AssistantTextContent, CurrentUserMessageDisplay } from "./message-content"
 import { CurrentContextToolGroup, CurrentFileToolGroup, ToolDisplay } from "../tools/tool-renderer"
 import { currentToolError, currentToolInput, currentToolMetadata, currentToolOutput } from "./current-tool-state"
@@ -15,6 +15,9 @@ export function SessionUserMessage(props: {
   displayText?: string
   copyText?: string
   comments?: SessionUserComment[]
+  quotes?: SessionUserQuote[]
+  quoteOpen?: (id: string) => boolean | undefined
+  onQuoteOpenChange?: (id: string, open: boolean) => void
   sessions?: Array<{ start: number; end: number }>
   historicalAgent: string
   historicalModel: SessionMessageAssistant["model"]
@@ -27,6 +30,9 @@ export function SessionUserMessage(props: {
       text={props.displayText ?? props.message.text}
       copyText={props.copyText}
       comments={props.comments}
+      quotes={props.quotes}
+      quoteOpen={props.quoteOpen}
+      onQuoteOpenChange={props.onQuoteOpenChange}
       sessions={props.sessions}
       agent={props.historicalAgent}
       model={props.historicalModel}

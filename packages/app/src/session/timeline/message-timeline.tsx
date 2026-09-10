@@ -30,15 +30,13 @@ import { SessionWorkspaceMenu } from "@/session/timeline/session-workspace-menu"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
 import { displayName, getProjectAvatarSource, projectForSession } from "@/shell/layout/helpers"
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
-import { extractPromptSessions } from "@/composer/prompt"
-import { formatSessionReferences } from "@/composer/session-reference"
 import { useCommand } from "@/shell/commands/command"
 import { useSettings } from "@/settings/model"
 import { SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeader } from "@/session/header/session-header"
 import { ChatQuoteSelection } from "@/composer/chat-quote-selection"
 import type { ChatQuote } from "@/composer/schema"
-import { formatChatQuotes } from "@/composer/chat-quote"
+import { userPresentation } from "../user-presentation"
 
 type BackgroundTask = {
   id: string
@@ -503,6 +501,7 @@ function MessageTimelineView(
         return (
           (presentation?.displayText ?? message.text).length <= 1024 &&
           !presentation?.comments?.length &&
+          !presentation?.quotes.length &&
           !parseCommentNote(message.text)
         )
       }
@@ -574,20 +573,7 @@ function MessageTimelineView(
     sessionID: () => sessionID()!,
     status: sessionStatus,
     projection,
-    presentation: (message) => {
-      const value = readPromptPresentation(message.metadata)
-      const parsed = value ? undefined : parseCommentNote(message.text)
-      const sessions = extractPromptSessions(message.metadata)
-      const displayText = value
-        ? [value.displayText, formatChatQuotes(value.quotes)].filter(Boolean).join("\n\n")
-        : undefined
-      return {
-        displayText,
-        copyText: displayText ? formatSessionReferences(displayText, sessions) : undefined,
-        comments: value?.comments ?? (parsed ? [parsed] : []),
-        sessions: sessions.map((session) => ({ start: session.start, end: session.end })),
-      }
-    },
+    presentation: userPresentation,
     actions: props.actions,
     reasoningMode: props.data.reasoningMode,
     shellToolDefaultOpen: props.data.shellToolPartsExpanded,

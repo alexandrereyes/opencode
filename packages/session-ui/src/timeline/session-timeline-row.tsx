@@ -8,7 +8,7 @@ import { useI18n } from "@opencode/ui/context/i18n"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import type { SessionUserActions, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { useData } from "../context"
 import { TimelineSeparator } from "../components/timeline-separator"
 import {
@@ -42,6 +42,7 @@ export type SessionUserPresentation = {
   displayText?: string
   copyText?: string
   comments?: SessionUserComment[]
+  quotes?: SessionUserQuote[]
   sessions?: Array<{ start: number; end: number }>
 }
 
@@ -584,7 +585,7 @@ export function createSessionTimelineRowRenderer(input: {
         <Frame row={current()}>
           <Show when={message()}>
             {(message) => {
-              const presentation = () => input.presentation(message())
+              const presentation = createMemo(() => input.presentation(message()))
               return (
                 <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
                   <div data-slot="session-turn-message-content" aria-live="off">
@@ -594,6 +595,12 @@ export function createSessionTimelineRowRenderer(input: {
                       displayText={presentation()?.displayText}
                       copyText={presentation()?.copyText}
                       comments={presentation()?.comments}
+                      quotes={presentation()?.quotes}
+                      quoteOpen={(id) => input.disclosure.value(`${message().id}:quote:${id}`)}
+                      onQuoteOpenChange={(id, open) => {
+                        input.disclosure.set(`${message().id}:quote:${id}`, open)
+                        onSizeChange?.()
+                      }}
                       sessions={presentation()?.sessions}
                       historicalAgent={context()?.agent ?? ""}
                       historicalModel={context()?.model ?? { id: "", providerID: "" }}
