@@ -615,6 +615,16 @@ export type SessionRenamed = {
   data: { sessionID: string; title: string }
 }
 
+export type SessionArchived = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.archived"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string }
+}
+
 export type SessionViewed = {
   id: string
   created: number
@@ -2235,6 +2245,7 @@ export type SessionEventDurable =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchived
   | SessionViewed
   | SessionDeleted
   | SessionForked
@@ -2294,6 +2305,7 @@ export type V2Event =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchived
   | SessionViewed
   | SessionUsageUpdated
   | SessionDeleted
@@ -3858,6 +3870,10 @@ export type SessionRenameInput = {
 }
 
 export type SessionRenameOutput = void
+
+export type SessionArchiveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionArchiveOutput = void
 
 export type SessionMoveInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]

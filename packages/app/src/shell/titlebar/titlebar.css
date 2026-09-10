@@ -70,6 +70,19 @@
   opacity: 1;
 }
 
+[data-slot="mobile-tabs-drawer"] [data-titlebar-tab][data-session-actions] [data-slot="tab-close"] {
+  width: 88px;
+  gap: 0;
+}
+
+[data-slot="mobile-tabs-drawer"] [data-titlebar-tab][data-session-actions] [data-slot="tab-close"] button {
+  flex-shrink: 0;
+}
+
+[data-slot="mobile-tabs-drawer"] [data-titlebar-tab][data-session-actions] [data-slot="tab-link"] {
+  padding-inline-end: 88px;
+}
+
 [data-slot="mobile-tabs-drawer"] [data-titlebar-tab] [data-slot="tab-link"] {
   padding-inline-end: 38px;
   -webkit-mask-image: none;

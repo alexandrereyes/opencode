@@ -682,6 +682,15 @@ export function createData(config: CreateDataInput) {
             }),
         )
         return
+      case "session.archived": {
+        refresh(() =>
+          result.session.sync(event.data.sessionID).then(() => {
+            if (store.session.info[event.data.sessionID])
+              setStore("session", "info", event.data.sessionID, "time", "archived", event.created)
+          }),
+        )
+        return
+      }
       case "session.renamed": {
         // Preserve the live title when it races the session's initial read.
         refresh(() => {

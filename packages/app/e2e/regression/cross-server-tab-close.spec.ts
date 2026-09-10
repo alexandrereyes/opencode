@@ -31,7 +31,7 @@ test("closing the active server's last tab opens the remaining server tab", asyn
   await expect(page.getByText(sessionA.title).first()).toBeVisible()
 
   const tabA = page.locator(`[data-titlebar-tab-slot]:has(a[href="${hrefA}"])`)
-  await tabA.locator('[data-slot="tab-close"] button').click()
+  await tabA.getByRole("button", { name: "Close tab", exact: true }).click()
 
   await expect(page).toHaveURL(new RegExp(`${hrefB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
   await expect.poll(() => requests.some((url) => url.startsWith(`${serverB}/api/session/${sessionB.id}`))).toBe(true)

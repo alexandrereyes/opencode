@@ -346,7 +346,11 @@ test("restores the draft after closing and revisiting a pending session that fai
   await draftFollowUp(page)
   const tab = page.locator(`[data-titlebar-tab-link][href="${sessionPath}${pending.sessionID}"]`)
 
-  await page.locator("[data-titlebar-tab-slot]").filter({ has: tab }).locator('[data-slot="tab-close"] button').click()
+  await page
+    .locator("[data-titlebar-tab-slot]")
+    .filter({ has: tab })
+    .getByRole("button", { name: "Close tab", exact: true })
+    .click()
 
   await expect(page).toHaveURL(`${sessionPath}${otherID}`)
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()

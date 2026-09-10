@@ -1,6 +1,5 @@
 import type { SessionMessageInfo } from "@opencode/client/promise"
-import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
-import { Button } from "@opencode/ui/button"
+import { SessionDeleteDialog, useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import { useNavigate } from "@solidjs/router"
 import { createEffect, createMemo, on } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -57,6 +56,7 @@ export function createTimelineController(input: { session: TimelineSessionSource
   const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
+  const lifecycle = useSessionLifecycleActions()
   const handedOffMessages = createMemo(() =>
     applyTimelineMessageHandoff(
       input.session.history.messages(),
@@ -207,34 +207,6 @@ export function createTimelineController(input: { session: TimelineSessionSource
     return true
   }
 
-  function DeleteDialog(props: { sessionID: string }) {
-    const name = createMemo(
-      () => sessionTitle(data.session.get(props.sessionID)?.title) ?? language.t("command.session.new"),
-    )
-    const confirm = async () => {
-      await remove(props.sessionID)
-      dialog.close()
-    }
-    return (
-      <Dialog fit>
-        <DialogHeader hideClose>
-          <DialogTitleGroup
-            title={language.t("session.delete.title")}
-            description={language.t("session.delete.confirm", { name: name() })}
-          />
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => dialog.close()}>
-            {language.t("common.cancel")}
-          </Button>
-          <Button variant="danger" onClick={confirm}>
-            {language.t("session.delete.button")}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-    )
-  }
-
   createEffect(
     on(
       () => [input.session.data.parentID(), childTaskDescription()] as const,
@@ -269,7 +241,14 @@ export function createTimelineController(input: { session: TimelineSessionSource
     action: {
       rename,
       export: exportSession,
-      showDelete: (id: string) => dialog.show(() => <DeleteDialog sessionID={id} />),
+      archive: async (id: string) => {
+        const session = data.session.get(id)
+        if (session) await lifecycle.archive(server.key, session)
+      },
+      showDelete: (id: string) => {
+        const session = data.session.get(id)
+        if (session) dialog.show(() => <SessionDeleteDialog session={session} onConfirm={() => remove(id)} />)
+      },
       navigateParent: () => {
         const id = input.session.data.parentID()
         if (id) navigate(href(id))

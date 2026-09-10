@@ -24,7 +24,6 @@ import {
   type OpenSessionOptions,
 } from "./controller"
 
-const SHOW_HOME_SESSION_ARCHIVE = false
 const HOME_SECTION_LABEL = "text-v2-text-text-muted [font-weight:440]"
 const HOME_SESSION_SEARCH_RESULTS_ID = "home-session-search-results"
 const HOME_SESSION_LONG_PRESS_MS = 500
@@ -587,7 +586,7 @@ function HomeSessionRow(
           aria-expanded={!!menu()}
           class={`
             flex h-10 min-w-0 w-full flex-1 shrink-0 cursor-default items-center gap-2 rounded-[6px] border-0
-            bg-transparent py-3 ps-1.5 pe-3 md:ps-3 md:pe-10 text-start text-v2-text-text-muted [font-weight:530]
+            bg-transparent py-3 ps-1.5 pe-10 md:ps-3 text-start text-v2-text-text-muted [font-weight:530]
             transition-[background-color,color,box-shadow] duration-[120ms] ease-in-out
             hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none
           `}
@@ -696,30 +695,37 @@ function HomeSessionRow(
               {props.language.t("common.export")}…
             </Menu.Item>
             <Menu.Separator />
+            <Menu.Item onSelect={() => void props.onArchiveSession(props.record.session)}>
+              {props.language.t("common.archive")}
+            </Menu.Item>
             <Menu.Item onSelect={() => props.onDeleteSession(props.server, props.record.session)}>
               {props.language.t("common.delete")}…
             </Menu.Item>
           </Menu.Content>
         </Menu.Portal>
       </Menu>
-      <Show when={SHOW_HOME_SESSION_ARCHIVE}>
+      <Show when={!editor()}>
         <div
           class={`
             hover-reveal absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1
             group-hover/session:opacity-100 focus-within:opacity-100
           `}
         >
-          <Tooltip class="flex shrink-0 items-center" placement="bottom" value={props.language.t("common.archive")}>
+          <Tooltip class="flex shrink-0 items-center" placement="bottom" value={props.language.t("common.moreOptions")}>
             <IconButton
-              data-action="home-session-archive"
+              data-action="home-session-actions"
               variant="ghost-muted"
               size="large"
-              icon={<Icon name="archive" />}
-              aria-label={props.language.t("common.archive")}
+              icon={<Icon name="outline-dots" />}
+              aria-label={props.language.t("common.moreOptions")}
+              aria-haspopup="menu"
+              aria-expanded={!!menu()}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                void props.onArchiveSession(props.record.session)
+                const bounds = event.currentTarget.getBoundingClientRect()
+                const row = document.querySelector<HTMLElement>(rowSelector())
+                if (row) openMenu(row, bounds.left, bounds.bottom)
               }}
             />
           </Tooltip>

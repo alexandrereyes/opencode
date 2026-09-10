@@ -36,7 +36,7 @@ test("renames, exports, and deletes a home session from its context menu", async
   const container = page.locator(`[data-component="home-session-row-container"][data-session-id="${fixture.targetID}"]`)
   const titleBox = await container.locator('[data-component="home-session-title"]').boundingBox()
   const avatarBox = await container.locator('[data-component="project-avatar-v2"]').boundingBox()
-  await expect(container.getByRole("button", { name: "More options" })).toHaveCount(0)
+  await expect(container.getByRole("button", { name: "More options" })).toBeVisible()
 
   await row.focus()
   await row.press("Shift+F10")
@@ -96,11 +96,45 @@ test("renames, exports, and deletes a home session from its context menu", async
   await renamedRow.click({ button: "right" })
   await page.getByRole("menuitem", { name: "Delete…" }).click()
   const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText('Delete session "Renamed from Home"?')
+  await expect(dialog).toContainText('Delete session "Renamed from Home" and all its child sessions?')
   const removed = page.waitForRequest(
     (request) => request.method() === "DELETE" && new URL(request.url()).pathname.endsWith(`/${fixture.targetID}`),
   )
   await dialog.getByRole("button", { name: "Delete session" }).click()
   await removed
   await expect(renamedRow).toBeHidden()
+})
+
+test("archives a home session through its visible actions menu", async ({ page }) => {
+  const sessions = structuredClone(fixture.sessions)
+  await mockOpenCodeServer(page, {
+    sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages,
+  })
+  await page.route("**/api/session/*/archive", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2)
+    expect(id).toBe(fixture.targetID)
+    const session = sessions.find((item) => item.id === id)
+    if (!session) throw new Error("Missing fixture session")
+    Object.assign(session.time, { archived: Date.now() })
+    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+  })
+  await page.goto("/")
+  const row = page.locator(`[data-component="home-session-row-container"][data-session-id="${fixture.targetID}"]`)
+  await expect(row).toBeVisible()
+  await row.getByRole("button", { name: "More options", exact: true }).click()
+  const archived = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
+  )
+  await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
+  expect((await archived).status()).toBe(204)
+  await expect(row).toHaveCount(0)
+  await page.reload()
+  await expect(
+    page.locator('[data-component="home-session-row-container"]').filter({ hasText: fixture.expected.sourceTitle }),
+  ).toBeVisible()
+  await expect(row).toHaveCount(0)
 })

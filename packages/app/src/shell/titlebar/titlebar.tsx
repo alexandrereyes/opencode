@@ -459,6 +459,7 @@ export function Titlebar(props: {
                   fallback={
                     <MobileDrawer
                       open={mobileTabs.open}
+                      closeOnOutsideFocus={false}
                       onOpenChange={(open) => setMobileTabs("open", open)}
                       onContentPresentChange={(present) => {
                         if (present || !mobileTabs.settings) return
