@@ -61,7 +61,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const i18n = useI18n()
   const language = useLanguage()
   const isDesktop = createMediaQuery("(min-width: 768px)")
+  const touch = createMediaQuery("(pointer: coarse)")
   const state = props.controller.state
+  const autocorrect = createMemo(() => touch() && state.mode === "normal")
   const view = props.controller.view
   let editor: HTMLDivElement | undefined
   let viewport: HTMLDivElement | undefined
@@ -200,9 +202,9 @@ export function ComposerEditor(props: ComposerEditorProps) {
             aria-label={i18n.t("ui.promptInput.label")}
             dir={state.mode === "normal" ? "auto" : "ltr"}
             contenteditable={!props.disabled && !props.readOnly}
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck={false}
+            autocapitalize={autocorrect() ? "sentences" : "none"}
+            autocorrect={autocorrect() ? "on" : "off"}
+            spellcheck={autocorrect()}
             // @ts-expect-error
             autocomplete="off"
             class="relative z-10 block min-h-[60px] w-full whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
