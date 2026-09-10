@@ -635,6 +635,21 @@ export namespace RevertEvent {
   })
 }
 
+/** Write-ahead assignment of one child input to its exact parent invocation. */
+export const SubagentInputAssigned = Event.durable({
+  type: "session.subagent.input.assigned",
+  ...options,
+  schema: {
+    ...Base,
+    childSessionID: SessionID,
+    inputID: SessionMessage.ID,
+    origin: Schema.Struct({
+      messageID: SessionMessage.ID,
+      toolCallID: Schema.String,
+    }),
+  },
+})
+
 export const Definitions = Event.inventory(
   Created,
   AgentSelected,
@@ -684,6 +699,7 @@ export const Definitions = Event.inventory(
   RevertEvent.Staged,
   RevertEvent.Cleared,
   RevertEvent.Committed,
+  SubagentInputAssigned,
 )
 
 // Internal and replay-only events are excluded from the public manifest.

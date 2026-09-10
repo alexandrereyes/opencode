@@ -41,6 +41,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const files = useFile()
   const layout = useLayout()
   const comments = useComments()
+  const commentScope = comments.capture()
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
@@ -105,7 +106,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     )
 
   const historyComments = () => {
-    const byID = new Map(comments.all().map((item) => [`${item.file}\n${item.id}`, item] as const))
+    const byID = new Map(commentScope.all().map((item) => [`${item.file}\n${item.id}`, item] as const))
     return prompt.context.items().flatMap((item) => {
       const comment = item.comment?.trim()
       if (!comment) return []
@@ -130,7 +131,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     })
   }
   const restoreHistoryComments = (items: PromptHistoryComment[]) => {
-    comments.replace(
+    commentScope.replace(
       items.map((item) => ({
         id: item.id,
         file: item.path,
@@ -388,7 +389,8 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     },
     comments: {
       capture: historyComments,
-      clear: comments.clear,
+      clear: commentScope.clear,
+      current: commentScope.all,
       restore: restoreHistoryComments,
     },
   })
@@ -431,13 +433,13 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
         mention: { type: "file", path, content: `@${path}`, start: 0, end: 0 },
       })),
     onContextRemove(item) {
-      if (item?.commentID) comments.remove(item.path, item.commentID)
+      if (item?.commentID) commentScope.remove(item.path, item.commentID)
     },
     openAttachment: (attachment) =>
       dialog.show(() => createComponent(ImagePreview, { src: attachment.blob.url, alt: attachment.filename })),
     openContext(key) {
       const item = controller.contextItem(key)
-      if (item) openComment(item, adapter.controls(), layout, files, comments)
+      if (item) openComment(item, adapter.controls(), layout, files, commentScope)
     },
     onEditor(element) {
       editor = element as HTMLDivElement
@@ -501,6 +503,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
           // the composer value as a new prompt. Enter keeps it queued in
           // place; the alternate action sends it as a steer.
           if (queue?.editing()) {
+            if (adapter.submissionBarrier?.pending()) return
             prompt.set(expandSnippets(withSlashSkill(prompt.current(), slashSkills())))
             queue.confirmEdit(submitOptions?.alternate ? "steer" : "queue")
             return
@@ -568,7 +571,7 @@ function openComment(
   controls: ComposerControls,
   layout: ReturnType<typeof useLayout>,
   files: ReturnType<typeof useFile>,
-  comments: ReturnType<typeof useComments>,
+  comments: Pick<ReturnType<ReturnType<typeof useComments>["capture"]>, "setActive" | "setFocus" | "focus">,
 ) {
   if (!item.commentID) return
   const focus = { file: item.path, id: item.commentID }

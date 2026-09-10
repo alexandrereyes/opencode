@@ -30,7 +30,7 @@ export type SessionCommandContext = {
     move: () => Promise<void>
   }
   navigateMessageByOffset: (offset: number) => void
-  revert: Pick<SessionRevert, "undo" | "redo">
+  revert: Pick<SessionRevert, "undo" | "redo" | "boundary" | "canUndo">
   focusInput: () => void
 }
 
@@ -258,7 +258,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.undo"),
       description: language.t("command.session.undo.description"),
       slash: "undo",
-      disabled: !actions.session.identity.params.id || actions.session.history.visibleUserMessages().length === 0,
+      disabled: !actions.revert.canUndo(),
       onSelect: undo,
     }),
     sessionCommand({
@@ -266,7 +266,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.redo"),
       description: language.t("command.session.redo.description"),
       slash: "redo",
-      disabled: !actions.session.identity.params.id || !actions.session.data.revertMessageID(),
+      disabled: !actions.session.identity.params.id || !actions.revert.boundary(),
       onSelect: redo,
     }),
     sessionCommand({

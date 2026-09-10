@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createMemoryComposerState } from "@/composer/state"
 import { createComposerSubmission } from "@/composer/submission-state"
+import { createMemo, createRoot } from "solid-js"
 
 describe("prompt submission state", () => {
   test("keeps failed submission restoration with the prompt where it started", () => {
@@ -71,6 +72,18 @@ describe("prompt submission state", () => {
     expect(target.current()[0]).toMatchObject({ type: "text", content: "new draft" })
   })
 
+  test("does not restore over context added after submission", () => {
+    const target = createMemoryComposerState({ prompt: "submitted" })
+    const submission = createComposerSubmission({ target, prompt: target.current(), context: [] })
+
+    submission.clear()
+    target.context.add({ type: "file", path: "src/new.ts", comment: "new comment" })
+
+    expect(submission.restore()).toBeUndefined()
+    expect(target.context.items()).toHaveLength(1)
+    expect(target.context.items()[0]).toMatchObject({ path: "src/new.ts", comment: "new comment" })
+  })
+
   test("preserves a prepared follow-up and recovers both inputs when the first send fails", () => {
     const draft = createMemoryComposerState({ prompt: "first prompt" })
     const session = createMemoryComposerState({ prompt: "follow-up" })
@@ -87,5 +100,25 @@ describe("prompt submission state", () => {
     ])
     session.set([{ type: "text", content: "edited", start: 0, end: 6 }])
     expect(submission.restore()).toBeUndefined()
+  })
+
+  test("publishes an effective redo boundary reactively before the request completes", async () => {
+    const prompt = createMemoryComposerState()
+    const gate = Promise.withResolvers<void>()
+    const reactive = createRoot((dispose) => {
+      const boundary = createMemo(() => prompt.revert.boundary(undefined))
+      return { boundary, dispose }
+    })
+    expect(reactive.boundary()).toBeUndefined()
+
+    const operation = prompt.revert.schedule("message-b", async () => {
+      await gate.promise
+      return true
+    })
+    expect(reactive.boundary()).toBe("message-b")
+
+    gate.resolve()
+    await operation
+    reactive.dispose()
   })
 })

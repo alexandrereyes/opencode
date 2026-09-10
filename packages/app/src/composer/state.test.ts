@@ -112,4 +112,20 @@ describe("prompt state initialization", () => {
     })
     expect(Option.isNone(Schema.decodeUnknownOption(ComposerStore)("not an object"))).toBe(true)
   })
+
+  test("retains the effective revert boundary until server state catches up", async () => {
+    const prompt = createMemoryComposerState()
+    const gate = Promise.withResolvers<void>()
+    const operation = prompt.revert.schedule("message-b", async () => {
+      await gate.promise
+      return true
+    })
+
+    expect(prompt.revert.boundary(undefined)).toBe("message-b")
+    gate.resolve()
+    await operation
+    expect(prompt.revert.boundary(undefined)).toBe("message-b")
+    expect(prompt.revert.boundary("message-b")).toBe("message-b")
+    expect(prompt.revert.boundary(undefined)).toBeUndefined()
+  })
 })

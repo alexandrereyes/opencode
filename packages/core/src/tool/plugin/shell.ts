@@ -152,12 +152,12 @@ export const Plugin = {
     const notifyWhenDone = Effect.fn("ShellTool.notifyWhenDone")(
       function* (
         sessionID: SessionSchema.ID,
-        id: string,
+        generation: Job.Generation,
         shellID: string,
         command: string,
         settled: Deferred.Deferred<Output>,
       ) {
-        const info = (yield* jobs.wait({ id })).info
+        const info = (yield* jobs.wait({ id: generation.id, generation: generation.generation })).info
         if (!info || info.status === "running") return
         const output = info.status === "completed" ? yield* Deferred.await(settled) : undefined
         const text = output
@@ -165,19 +165,22 @@ export const Plugin = {
           : info.status === "error"
             ? (info.error ?? "Command failed")
             : "Command cancelled"
-        yield* sessions.synthetic({
-          ...(info.notificationID ? { id: info.notificationID } : {}),
-          sessionID,
-          description: command,
-          ...ShellResult.notification({
-            jobID: id,
-            shellID,
-            command,
-            state: info.status,
-            text,
-            output,
+        yield* jobs.guard(
+          info,
+          sessions.synthetic({
+            ...(info.notificationID ? { id: info.notificationID } : {}),
+            sessionID,
+            description: command,
+            ...ShellResult.notification({
+              jobID: generation.id,
+              shellID,
+              command,
+              state: info.status,
+              text,
+              output,
+            }),
           }),
-        })
+        )
         if (info.notificationID) yield* jobs.completeBackground(info.notificationID)
       },
       Effect.forkIn(scope, { startImmediately: true }),
@@ -239,12 +242,21 @@ export const Plugin = {
                   shellID: info.id,
                   command: info.command,
                 },
+                origins: [
+                  {
+                    parentSessionID: context.sessionID,
+                    messageID: context.messageID,
+                    toolCallID: context.id,
+                  },
+                ],
+                onInvalid: shell.remove(info.id).pipe(Effect.ignore),
                 run,
               })
+              if (job.status === "cancelled") return yield* Effect.fail(new Error("Command cancelled"))
 
               if (input.background === true) {
                 yield* jobs.background(job.id)
-                yield* notifyWhenDone(context.sessionID, job.id, info.id, info.command, settled)
+                yield* notifyWhenDone(context.sessionID, job, info.id, info.command, settled)
                 return backgroundResult(info.id, info.file)
               }
 
@@ -253,7 +265,7 @@ export const Plugin = {
                 .pipe(Effect.onInterrupt(() => jobs.cancel(job.id).pipe(Effect.ignore)))
               if (result?.type === "backgrounded") {
                 yield* shell.timeout(info.id, 0)
-                yield* notifyWhenDone(context.sessionID, job.id, info.id, info.command, settled)
+                yield* notifyWhenDone(context.sessionID, job, info.id, info.command, settled)
                 return backgroundResult(info.id, info.file)
               }
               if (result?.info.status === "error")
