@@ -49,6 +49,13 @@ export function SessionScreen(props: { session: SessionModel }) {
     return info ? projectForSession(info, server.ctx.sync.data.project) : undefined
   })
   const isDesktop = session.isDesktop
+  createEffect(
+    on([isDesktop, session.identity.sessionID], ([desktop, id]) => {
+      if (!desktop || !id) return
+      session.layout.view().reviewPanel.open()
+      if (!session.layout.tabs().active()) void session.layout.tabs().open("context")
+    }),
+  )
   const browser = createSessionBrowser(session)
   const screen = createSessionScreenLayout(session)
   const timeline = createSessionTimelineInteraction(session)
