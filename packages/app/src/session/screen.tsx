@@ -34,6 +34,7 @@ import { SessionIdentityHeader } from "./session-identity-header"
 import { SessionReviewToggle } from "./header/session-header-actions"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createSessionBrowser } from "./browser/model"
+import { createTimelineCache } from "./timeline/cache"
 
 const SessionMobileFiles = lazy(async () => {
   const { SessionMobileFiles } = await import("./files/session-mobile-files")
@@ -48,6 +49,13 @@ export function SessionScreen(props: { session: SessionModel }) {
     return info ? projectForSession(info, server.ctx.sync.data.project) : undefined
   })
   const isDesktop = session.isDesktop
+  createEffect(
+    on([isDesktop, session.identity.sessionID], ([desktop, id]) => {
+      if (!desktop || !id) return
+      session.layout.view().reviewPanel.open()
+      if (!session.layout.tabs().active()) void session.layout.tabs().open("context")
+    }),
+  )
   const browser = createSessionBrowser(session)
   const screen = createSessionScreenLayout(session)
   const timeline = createSessionTimelineInteraction(session)
@@ -219,6 +227,46 @@ export function SessionScreen(props: { session: SessionModel }) {
     </Show>
   )
 
+  const timelineView = createTimelineCache(
+    session,
+    (source, active) => (
+      <MessageTimeline
+        active={active()}
+        hideHeader={!isDesktop()}
+        session={source}
+        background={composer.requests.background}
+        actions={composer.actions.timeline}
+        onQuote={session.data.isChild() ? undefined : (quote) => composer.active()?.composer.quotes?.add(quote)}
+        scroll={timeline.scroll}
+        onResumeScroll={timeline.actions.resume}
+        setScrollRef={timeline.view.setScrollRef}
+        onScheduleScrollState={timeline.view.scheduleScrollState}
+        onPin={timeline.view.pin}
+        onUnpin={timeline.view.unpin}
+        onUserScroll={timeline.view.markUserScroll}
+        onHistoryScroll={timeline.view.onHistoryScroll}
+        onSelectionInteraction={timeline.view.selectionInteraction}
+        pinned={timeline.view.pinned()}
+        centered={screen.centered()}
+        reserveReviewToggle={!sideVisible()}
+        setContentRef={timeline.view.setContentRef}
+        diffs={review.details.diffs}
+        onReview={review.open}
+        workspaceMoveEligible={composer.workspaceMoveEligible()}
+        onSummaryOpenChange={review.details.setOpen}
+        anchor={timeline.view.anchor}
+        setRevealMessage={timeline.view.setRevealMessage}
+        setScrollToEnd={timeline.view.setScrollToEnd}
+        search={
+          <Show when={active()}>
+            <TimelineSearchBar controller={timelineSearch} />
+          </Show>
+        }
+      />
+    ),
+    () => conversationVisible() && messagesReady(),
+  )
+
   const sessionPanelContent = () => (
     <>
       <ComposerDropzone
@@ -258,36 +306,7 @@ export function SessionScreen(props: { session: SessionModel }) {
             <Show when={isDesktop() && !messagesReady()}>
               <SessionIdentityHeader sessionID={session.identity.params.id ?? ""} session={session.data.info()} />
             </Show>
-            <Show when={messagesReady() ? session.identity.params.id : undefined} keyed>
-              {(_id) => (
-                <MessageTimeline
-                  hideHeader={!isDesktop()}
-                  session={session}
-                  background={composer.requests.background}
-                  actions={composer.actions.timeline}
-                  scroll={timeline.scroll}
-                  onResumeScroll={timeline.actions.resume}
-                  setScrollRef={timeline.view.setScrollRef}
-                  onScheduleScrollState={timeline.view.scheduleScrollState}
-                  onPin={timeline.view.pin}
-                  onUnpin={timeline.view.unpin}
-                  onUserScroll={timeline.view.markUserScroll}
-                  onHistoryScroll={timeline.view.onHistoryScroll}
-                  onSelectionInteraction={timeline.view.selectionInteraction}
-                  pinned={timeline.view.pinned()}
-                  centered={screen.centered()}
-                  setContentRef={timeline.view.setContentRef}
-                  diffs={review.details.diffs}
-                  onReview={review.open}
-                  workspaceMoveEligible={composer.workspaceMoveEligible()}
-                  onSummaryOpenChange={review.details.setOpen}
-                  anchor={timeline.view.anchor}
-                  setRevealMessage={timeline.view.setRevealMessage}
-                  setScrollToEnd={timeline.view.setScrollToEnd}
-                  search={<TimelineSearchBar controller={timelineSearch} />}
-                />
-              )}
-            </Show>
+            <Show when={messagesReady() && session.identity.params.id}>{timelineView()}</Show>
           </Match>
         </Switch>
       </div>

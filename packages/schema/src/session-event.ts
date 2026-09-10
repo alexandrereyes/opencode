@@ -109,6 +109,13 @@ export const Renamed = Event.durable({
 })
 export type Renamed = typeof Renamed.Type
 
+export const Archived = Event.durable({
+  type: "session.archived",
+  ...options,
+  schema: Base,
+})
+export type Archived = typeof Archived.Type
+
 export const Viewed = Event.durable({
   type: "session.viewed",
   ...options,
@@ -628,12 +635,28 @@ export namespace RevertEvent {
   })
 }
 
+/** Write-ahead assignment of one child input to its exact parent invocation. */
+export const SubagentInputAssigned = Event.durable({
+  type: "session.subagent.input.assigned",
+  ...options,
+  schema: {
+    ...Base,
+    childSessionID: SessionID,
+    inputID: SessionMessage.ID,
+    origin: Schema.Struct({
+      messageID: SessionMessage.ID,
+      toolCallID: Schema.String,
+    }),
+  },
+})
+
 export const Definitions = Event.inventory(
   Created,
   AgentSelected,
   ModelSelected,
   Moved,
   Renamed,
+  Archived,
   Viewed,
   UsageUpdated,
   Deleted,
@@ -676,6 +699,7 @@ export const Definitions = Event.inventory(
   RevertEvent.Staged,
   RevertEvent.Cleared,
   RevertEvent.Committed,
+  SubagentInputAssigned,
 )
 
 // Internal and replay-only events are excluded from the public manifest.

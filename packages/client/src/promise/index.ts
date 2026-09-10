@@ -20,6 +20,7 @@ export type {
   WebSearchApi,
   SessionApi,
   SkillApi,
+  SnippetApi,
 } from "./api.js"
 export type { EventSubscribeOutput as OpenCodeEvent } from "./generated/types.js"
 export type OpenCodeClient = ReturnType<typeof OpenCode.make>

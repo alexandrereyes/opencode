@@ -24,6 +24,22 @@ export function getCursorPosition(parent: HTMLElement): number {
   return getTextLength(preCaretRange.cloneContents())
 }
 
+export function getSelectionRange(parent: HTMLElement): { start: number; end: number } | undefined {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return undefined
+  const range = selection.getRangeAt(0)
+  if (!parent.contains(range.startContainer) || !parent.contains(range.endContainer)) return undefined
+  const offset = (node: Node, value: number) => {
+    const before = range.cloneRange()
+    before.selectNodeContents(parent)
+    before.setEnd(node, value)
+    return getTextLength(before.cloneContents())
+  }
+  const start = offset(range.startContainer, range.startOffset)
+  const end = offset(range.endContainer, range.endOffset)
+  return start <= end ? { start, end } : { start: end, end: start }
+}
+
 export function setCursorPosition(parent: HTMLElement, position: number) {
   let remaining = position
   let node = parent.firstChild

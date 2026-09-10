@@ -3,6 +3,10 @@ import type { FileSelection } from "@/workspaces/files/model"
 import { encodeFilePath } from "@/workspaces/files/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillPart } from "@/composer/state"
 import { formatCommentNote, type PromptComment } from "@/composer/comment-note"
+import { expandSnippets } from "./prompt-parts"
+import type { ChatQuote } from "./schema"
+import { formatChatQuotes } from "./chat-quote"
+import { formatSessionContexts } from "./session-reference"
 
 // Network fields feed both boundaries; display fields keep desktop-only rendering details in the local echo.
 type PromptRequest = {
@@ -13,6 +17,8 @@ type PromptRequest = {
   skills: { id: string; name: string; mention?: { start: number; end: number; text: string } }[]
   comments: PromptComment[]
   apps: Extract<Prompt[number], { type: "app" }>[]
+  sessions: Extract<Prompt[number], { type: "session" }>[]
+  quotes: ChatQuote[]
 }
 
 type ContextFile = {
@@ -32,6 +38,7 @@ type BuildPromptRequestInput = {
   images: (Omit<ImageAttachmentPart, "blob"> & { dataUrl: string })[]
   text: string
   sessionDirectory: string
+  quotes?: ChatQuote[]
 }
 
 const absolute = (directory: string, path: string) => {
@@ -59,13 +66,17 @@ const isAgentAttachment = (part: Prompt[number]): part is AgentPart => part.type
 const isSkillAttachment = (part: Prompt[number]): part is SkillPart => part.type === "skill"
 
 export function buildPromptRequest(input: BuildPromptRequestInput): PromptRequest {
-  const apps = input.prompt.filter((part) => part.type === "app")
-  const skills = input.prompt.filter(isSkillAttachment).map((attachment) => ({
+  const prompt = input.prompt.some((part) => part.type === "snippet") ? expandSnippets(input.prompt) : input.prompt
+  const text =
+    prompt === input.prompt ? input.text : prompt.map((part) => ("content" in part ? part.content : "")).join("")
+  const apps = prompt.filter((part) => part.type === "app")
+  const sessions = prompt.filter((part) => part.type === "session")
+  const skills = prompt.filter(isSkillAttachment).map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
     mention: { start: attachment.start, end: attachment.end, text: attachment.content },
   }))
-  const files = input.prompt.filter(isFileAttachment).map((attachment) => {
+  const files = prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)
     return {
       uri: attachment.url ?? `file://${encodeFilePath(path)}${fileQuery(attachment.selection)}`,
@@ -75,7 +86,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     }
   })
 
-  const agents = input.prompt.filter(isAgentAttachment).map((attachment) => ({
+  const agents = prompt.filter(isAgentAttachment).map((attachment) => ({
     name: attachment.name,
     mention: { start: attachment.start, end: attachment.end, text: attachment.content },
   }))
@@ -116,16 +127,20 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
 
   return {
     text: [
-      ...(input.text.trim() ? [input.text] : []),
+      ...(text.trim() ? [text] : []),
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
+      ...formatSessionContexts(sessions),
+      ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
     ].join("\n"),
-    displayText: input.text,
+    displayText: text,
     files: [...files, ...context, ...images],
     agents,
     skills,
     comments,
     apps,
+    sessions,
+    quotes: input.quotes ?? [],
   }
 }
 

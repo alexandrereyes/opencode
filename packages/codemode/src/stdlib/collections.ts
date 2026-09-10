@@ -1,8 +1,8 @@
 import { Effect } from "effect"
-import { isBlockedMember, type SafeObject } from "../data.js"
+import type { SafeObject } from "../data.js"
 import { HostFunction, requiresNew } from "../interpreter/host.js"
 import { type AstNode, InterpreterRuntimeError, isRecord } from "../interpreter/model.js"
-import { isRuntimeReference } from "../interpreter/references.js"
+import { describeValue, isRuntimeReference } from "../interpreter/references.js"
 import { applyCollectionCallback, preserveConsumerError, type Runner, toPrimitive } from "../interpreter/runner.js"
 import { Values } from "../values.js"
 import { coerceToString } from "./value.js"
@@ -73,7 +73,11 @@ const coerceGroupByPropertyKey = <R>(
 ): Effect.Effect<string, unknown, R> => {
   if (value instanceof Values.Promise) return Effect.succeed("[object Promise]")
   if (!Values.isValue(value) && isRuntimeReference(value)) {
-    throw new InterpreterRuntimeError("Object.groupBy callback must return a data value.", node, "InvalidDataValue")
+    throw new InterpreterRuntimeError(
+      `Object.groupBy callback must return a data value, received ${describeValue(value)}.`,
+      node,
+      "InvalidDataValue",
+    )
   }
   return Effect.map(toPrimitive(runner, value, "string", node), coerceToString)
 }
@@ -120,12 +124,6 @@ export const groupBy = <R>(runner: Runner<R>, namespace: "Map" | "Object") =>
             cursor,
             Effect.flatMap(apply([item, index]), (value) => coerceGroupByPropertyKey(runner, value, node)),
           )
-          if (isBlockedMember(key)) {
-            return yield* preserveConsumerError(
-              cursor,
-              Effect.fail(new InterpreterRuntimeError(`Property '${key}' is not available.`, node)),
-            )
-          }
           const group = result[key]
           if (group === undefined) result[key] = [item]
           else (group as Array<unknown>).push(item)

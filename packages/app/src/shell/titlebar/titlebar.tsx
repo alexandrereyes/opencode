@@ -15,6 +15,7 @@ import { useSettings } from "@/settings/model"
 import { WindowsAppMenu } from "./windows-menu"
 import { applyPath, backPath, forwardPath, type HistoryLocation } from "./history"
 import { TitlebarTabStrip } from "@/shell/titlebar/tab-strip"
+import { SessionSidebar } from "./sidebar"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createMediaQuery } from "@solid-primitives/media"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/shell/titlebar/session-events"
@@ -34,6 +35,7 @@ import { projectForSession } from "@/shell/layout/helpers"
 import { useSettingsDialog } from "@/settings/command"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
+import prodIcon from "../../../../desktop/icons/prod/64x64.png"
 
 const titlebarHeight = 36
 const windowsTitlebarHeight = 44 // Includes the content inset; matches the native Windows overlay.
@@ -486,6 +488,7 @@ export function Titlebar(props: {
                   fallback={
                     <MobileDrawer
                       open={mobileTabs.open}
+                      closeOnOutsideFocus={false}
                       onOpenChange={(open) => setMobileTabs("open", open)}
                       onContentPresentChange={(present) => {
                         if (present || !mobileTabs.settings) return
@@ -539,8 +542,18 @@ export function Titlebar(props: {
                         <span data-slot="mobile-tab-title" dir="auto" class="min-w-0 flex-1 truncate text-start">
                           {currentTitle()}
                         </span>
-                        <span class="shrink-0 text-v2-text-text-muted">{tabsStore.length}</span>
                       </MobileDrawerTrigger>
+                      <button
+                        type="button"
+                        data-action="mobile-titlebar-new-session"
+                        class="flex h-7 shrink-0 items-center rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
+                        onClick={() => {
+                          openNewTab()
+                          setMobileTabs("open", false)
+                        }}
+                      >
+                        {language.t("command.session.new")}
+                      </button>
                       <MobileDrawerContent>
                         <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                         <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
@@ -668,43 +681,28 @@ export function Titlebar(props: {
                                 data-tauri-drag-region
                               />
                             </Show>
-                            <Show when={!windows()}>
-                              <ChannelIndicator sidebar debugTools={props.debugTools} />
-                            </Show>
-                            {homeButton(true)}
-                            <button
-                              type="button"
-                              data-action="vertical-tabs-new-session"
-                              class="group flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base"
-                              onClick={openNewTab}
-                              aria-label={language.t("command.session.new")}
+                            <SessionSidebar
+                              currentTab={currentTab()}
+                              header={<ChannelIndicator sidebar debugTools={props.debugTools} />}
                             >
-                              <Icon name="edit" class="shrink-0" />
-                              <span class="min-w-0 truncate">{language.t("command.session.new")}</span>
-                              <span
-                                class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
-                                aria-hidden="true"
+                              {homeButton(true)}
+                              <button
+                                type="button"
+                                data-action="vertical-tabs-new-session"
+                                class="group flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base"
+                                onClick={openNewTab}
+                                aria-label={language.t("command.session.new")}
                               >
-                                <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
-                              </span>
-                            </button>
-                            <div class="h-4 w-full shrink-0" aria-hidden="true" />
-                            <div class="flex min-h-0 flex-1 flex-col gap-1">
-                              <TitlebarTabStrip
-                                orientation="vertical"
-                                tabs={tabsStore}
-                                currentTab={currentTab()}
-                                onNavigate={(tab, el) => {
-                                  tabs.select(tab)
-                                  el?.scrollIntoView({ behavior: "instant", block: "nearest" })
-                                }}
-                                onClose={(tab) => {
-                                  const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
-                                  if (index !== -1) tabsStoreActions.closeTab(index)
-                                }}
-                                onReorder={(keys) => tabsStoreActions.reorder(keys)}
-                              />
-                            </div>
+                                <Icon name="edit" class="shrink-0" />
+                                <span class="min-w-0 truncate">{language.t("command.session.new")}</span>
+                                <span
+                                  class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
+                                  aria-hidden="true"
+                                >
+                                  <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
+                                </span>
+                              </button>
+                            </SessionSidebar>
                             <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col gap-2">
                               <TitlebarRightMount vertical />
                               <Show when={updateState().visible}>
@@ -814,15 +812,16 @@ function ChannelIndicator(props: {
   const language = useLanguage()
   const platform = usePlatform()
   const channel = import.meta.env.VITE_OPENCODE_CHANNEL
-  if (!channel || channel === "prod") return null
+  if ((!channel || channel === "prod") && !props.sidebar) return null
 
-  const label = () => language.t(`titlebar.channel.${channel}`)
+  const label = () =>
+    !channel || channel === "prod" ? language.t("sidebar.brand") : language.t(`titlebar.channel.${channel}`)
   const debug = () => (channel === "dev" ? props.debugTools : undefined)
   return (
     <Tooltip
       placement={props.sidebar ? "right" : "bottom"}
       value={label()}
-      class={`shrink-0 [app-region:no-drag] ${props.sidebar ? "mb-4 ms-0.5 self-start" : ""} ${props.horizontal ? "me-1.5" : ""} ${props.horizontal && platform.platform === "web" ? "ps-2.5" : ""}`}
+      class={`shrink-0 [app-region:no-drag] ${props.sidebar ? "ms-0.5 self-start" : ""} ${props.horizontal ? "me-1.5" : ""} ${props.horizontal && platform.platform === "web" ? "ps-2.5" : ""}`}
     >
       <Dynamic
         component={debug() ? "button" : "div"}
@@ -840,7 +839,7 @@ function ChannelIndicator(props: {
         aria-pressed={debug()?.visible}
       >
         <img
-          src={channel === "beta" ? betaIcon : devIcon}
+          src={channel === "beta" ? betaIcon : channel === "dev" || channel === "local" ? devIcon : prodIcon}
           alt={debug() ? "" : label()}
           class="shrink-0 rounded-[4px] shadow-[var(--v2-elevation-raised)]"
           classList={{ "size-6": props.sidebar, "size-5": !props.sidebar }}

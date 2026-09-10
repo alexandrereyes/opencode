@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test"
 import type { ModelSelection } from "@/providers/models/selection"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
 import { AbsolutePath } from "@opencode/schema/schema"
 import type { ActiveComposerAdapter, ComposerControls, ComposerSession, NewSessionComposerAdapter } from "./adapter"
-import { createMemoryComposerState } from "./state"
+import { createMemoryComposerState, type Prompt } from "./state"
+import type { PromptHistoryComment } from "./history/entry"
 import { createComposerSubmit } from "./submit"
+import { createSessionRevertActions } from "@/session/revert"
 
 const selectedModel = {
   id: "model-1",
@@ -65,6 +68,15 @@ function submitInput(
   mode: "normal" | "shell" = "normal",
   commands: () => readonly { name: string }[] | undefined = () => [],
   skills: () => readonly Skill.Info[] | undefined = () => [],
+  lifecycle?: {
+    history?: (prompt: Prompt, mode: "normal" | "shell") => void
+    comments?: {
+      capture: () => PromptHistoryComment[]
+      clear: () => void
+      current?: () => object
+      restore: (comments: PromptHistoryComment[]) => void
+    }
+  },
 ) {
   return createComposerSubmit({
     adapter,
@@ -73,12 +85,12 @@ function submitInput(
     skills,
     editor: () => undefined,
     queueScroll() {},
-    addToHistory() {},
+    addToHistory: lifecycle?.history ?? (() => undefined),
     resetHistory() {},
     setMode() {},
     closePopover() {},
     notify,
-    comments: { capture: () => [], clear() {}, restore() {} },
+    comments: lifecycle?.comments ?? { capture: () => [], clear() {}, restore() {} },
   })
 }
 
@@ -128,6 +140,131 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  for (const command of [false, true]) {
+    test(`expands snippets for ${command ? "command arguments" : "prompt admission"}`, async () => {
+      const state = createMemoryComposerState().capture()
+      const prefix = command ? "/review " : ""
+      state.set([
+        { type: "text", content: prefix, start: 0, end: prefix.length },
+        {
+          type: "snippet",
+          id: "snippet",
+          name: "review",
+          content: "#review",
+          expansion: "/review is literal\nSecond line",
+          start: prefix.length,
+          end: prefix.length + 7,
+        },
+      ])
+      const completed = Promise.withResolvers<void>()
+      const target = session({
+        calls: [],
+        prompt: async (value) => {
+          expect(command).toBe(false)
+          expect(value.text).toBe("/review is literal\nSecond line")
+          expect(value.metadata?.displayText).toBe(value.text)
+          completed.resolve()
+        },
+        command: async (value) => {
+          expect(command).toBe(true)
+          expect(value.command).toBe("review")
+          expect(value.text).toBe("/review is literal\nSecond line")
+          completed.resolve()
+        },
+      })
+      const adapter: ActiveComposerAdapter = {
+        kind: "active-session",
+        state,
+        ready: () => true,
+        controls,
+        working: () => false,
+        session: () => target,
+        interrupt: async () => undefined,
+        submitted() {},
+        setEditor() {},
+      }
+      await submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+      await completed.promise
+    })
+  }
+
+  test("sends a quote-only prompt and restores its comment after a failed admission", async () => {
+    const state = createMemoryComposerState().capture()
+    const id = state.quotes.add({ messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage" })
+    state.quotes.update(id, "Please explain")
+    const failed = Promise.withResolvers<void>()
+    const requests: Parameters<ComposerSession["data"]["session"]["prompt"]>[0][] = []
+    const target = session({
+      calls: [],
+      prompt: async (value) => {
+        requests.push(value)
+        throw new Error("offline")
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submitted() {},
+      setEditor() {},
+    }
+    await submitInput(adapter, { missingSelection() {}, failed: () => failed.resolve() }).submit(new Event("submit"))
+    await failed.promise
+    expect(requests).toHaveLength(2)
+    expect(requests[0].id).toBe(requests[1].id)
+    expect(requests[0].text).toContain("> Quoted passage\nUser comment: Please explain")
+    expect(state.quotes.all()).toEqual([
+      { id, messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage", comment: "Please explain" },
+    ])
+  })
+  test.each(["prompt", "command"] as const)("preserves new quotes while %s waits for undo", async (kind) => {
+    const state = createMemoryComposerState({
+      prompt: kind === "command" ? "/review changes" : "Review changes",
+    }).capture()
+    const original = state.quotes.add({
+      messageID: "msg_original",
+      partID: "msg_original:text:0",
+      text: "Original quote",
+    })
+    state.quotes.update(original, "Original comment")
+    const ready = Promise.withResolvers<boolean>()
+    const sent = Promise.withResolvers<string>()
+    const target = session({
+      calls: [],
+      prompt: async (request) => sent.resolve(request.text),
+      command: async (request) => sent.resolve(request.text),
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+    const submitting = submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+    expect(state.quotes.all()).toEqual([])
+    const next = state.quotes.add({ messageID: "msg_next", partID: "msg_next:text:0", text: "Next quote" })
+    state.quotes.update(next, "Next comment")
+    ready.resolve(true)
+    await submitting
+    const text = await sent.promise
+    expect(text).toContain("Original quote")
+    expect(text).toContain("Original comment")
+    expect(text).not.toContain("Next quote")
+    expect(state.quotes.all()).toEqual([
+      { id: next, messageID: "msg_next", partID: "msg_next:text:0", text: "Next quote", comment: "Next comment" },
+    ])
+  })
+
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {
     const state = createMemoryComposerState({ prompt: "/review changes" }).capture()
     const calls: string[] = []
@@ -678,9 +815,35 @@ describe("Composer submission", () => {
         type: "skill",
         id: Skill.ID.make("effect"),
         name: Skill.Name.make("Effect"),
-        content: "@effect",
+        content: "$effect",
         start: 28,
         end: 35,
+      },
+      { type: "text", content: " ", start: 35, end: 36 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 36,
+        end: 43,
+      },
+      { type: "text", content: " ", start: 43, end: 44 },
+      {
+        type: "session",
+        session: {
+          id: Session.ID.make("ses_referenced_12345678901234567890"),
+          server: "sidecar",
+          title: "Shared",
+          directory: "/repo/shared",
+        },
+        content: "@Shared",
+        start: 44,
+        end: 51,
       },
     ])
     const sent = Promise.withResolvers<Parameters<ComposerSession["api"]["command"]>[0]>()
@@ -706,7 +869,9 @@ describe("Composer submission", () => {
 
     expect(request.files).toMatchObject([{ name: "app.ts", mention: { text: "@src/app.ts" } }])
     expect(request.agents).toMatchObject([{ name: "review", mention: { text: "@review" } }])
-    expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "@effect" } }])
+    expect(request.skills).toMatchObject([{ id: "effect", name: "Effect", mention: { text: "$effect" } }])
+    expect(request.text.match(/"sessionID":"ses_referenced_12345678901234567890"/g)).toHaveLength(1)
+    expect(request.text).toContain("tools.opencode.session_read")
     expect(request.delivery).toBe("steer")
   })
 
@@ -790,5 +955,449 @@ describe("Composer submission", () => {
     await submitInput(adapter, undefined, "shell").submit(new Event("submit"))
 
     expect(state.current().some((part) => part.type === "image")).toBe(true)
+  })
+
+  test("waits for a pending revert before sending and preserves the draft composed meanwhile", async () => {
+    const state = createMemoryComposerState({ prompt: "send after undo" }).capture()
+    const ready = Promise.withResolvers<boolean>()
+    const received = Promise.withResolvers<string>()
+    const calls: string[] = []
+    const target = session({
+      calls,
+      prompt: async (value) => received.resolve(value.text),
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter).submit(new Event("submit"))
+    expect(state.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
+    const nextDraft: Prompt = [
+      { type: "text", content: "next draft", start: 0, end: 10 },
+      {
+        type: "image",
+        id: "next-attachment",
+        filename: "next.png",
+        mime: "image/png",
+        blob: { id: "next-attachment", url: "data:image/png;base64,bmV4dA==" },
+      },
+    ]
+    state.set(nextDraft)
+    expect(calls).toEqual([])
+
+    ready.resolve(true)
+    await submitted
+
+    expect(await received.promise).toBe("send after undo")
+    expect(state.current()).toEqual(nextDraft)
+  })
+
+  test("does not send through a failed revert or overwrite the draft composed meanwhile", async () => {
+    const state = createMemoryComposerState({ prompt: "blocked by undo" }).capture()
+    const ready = Promise.withResolvers<boolean>()
+    const calls: string[] = []
+    const history: Prompt[] = []
+    const target = session({ calls, prompt: async () => undefined })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter, undefined, "normal", undefined, undefined, {
+      history: (prompt) => history.push(prompt),
+    }).submit(new Event("submit"))
+    state.set([{ type: "text", content: "keep this draft", start: 0, end: 15 }])
+    ready.resolve(false)
+    await submitted
+
+    expect(calls).toEqual([])
+    expect(state.current()).toEqual([{ type: "text", content: "keep this draft", start: 0, end: 15 }])
+    expect(history).toEqual([[{ type: "text", content: "blocked by undo", start: 0, end: 15 }]])
+  })
+
+  test("does not restore captured comments over comment-only work added while revert waits", async () => {
+    const state = createMemoryComposerState({ prompt: "blocked by undo" }).capture()
+    const ready = Promise.withResolvers<boolean>()
+    const cleared = {}
+    const next = {}
+    let commentState = cleared
+    let restored = 0
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => session({ calls: [], prompt: async () => undefined }),
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter, undefined, "normal", undefined, undefined, {
+      comments: {
+        capture: () => [],
+        clear: () => (commentState = cleared),
+        current: () => commentState,
+        restore: () => restored++,
+      },
+    }).submit(new Event("submit"))
+    commentState = next
+    ready.resolve(false)
+    await submitted
+
+    expect(restored).toBe(0)
+    expect(state.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
+  })
+
+  test("restores scoped comments without touching the destination after navigating during a failed revert", async () => {
+    const state = createMemoryComposerState({ prompt: "session A" }).capture()
+    state.context.add({ type: "file", path: "src/a.ts", comment: "comment A", commentID: "comment-a" })
+    const ready = Promise.withResolvers<boolean>()
+    const commentA: PromptHistoryComment = {
+      id: "comment-a",
+      path: "src/a.ts",
+      selection: { start: 1, end: 1 },
+      comment: "comment A",
+      time: 1,
+    }
+    const commentB = { ...commentA, id: "comment-b", path: "src/b.ts", comment: "comment B" }
+    const cleared: PromptHistoryComment[] = []
+    let commentsA = [commentA]
+    const commentsB = [commentB]
+    let active = true
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => session({ calls: [], prompt: async () => undefined }),
+      active: () => active,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter, undefined, "normal", undefined, undefined, {
+      comments: {
+        capture: () => commentsA,
+        clear: () => (commentsA = cleared),
+        current: () => commentsA,
+        restore: (comments) => (commentsA = comments),
+      },
+    }).submit(new Event("submit"))
+    active = false
+    ready.resolve(false)
+    await submitted
+
+    expect(commentsA).toEqual([commentA])
+    expect(commentsB).toEqual([commentB])
+    expect(state.context.items()).toMatchObject([{ path: "src/a.ts", comment: "comment A" }])
+  })
+
+  test.each([
+    { name: "shell", text: "echo retry-me", mode: "shell" as const, commands: () => [] },
+    { name: "command", text: "/review retry-me", mode: "normal" as const, commands: () => [{ name: "review" }] },
+  ])("restores an unchanged $name submission when a pending revert fails", async ({ text, mode, commands }) => {
+    const state = createMemoryComposerState({ prompt: text }).capture()
+    const ready = Promise.withResolvers<boolean>()
+    const comments = {}
+    let restored = 0
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => session({ calls: [], prompt: async () => undefined }),
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter, undefined, mode, commands, undefined, {
+      comments: {
+        capture: () => [],
+        clear() {},
+        current: () => comments,
+        restore: () => restored++,
+      },
+    }).submit(new Event("submit"))
+    ready.resolve(false)
+    await submitted
+
+    expect(state.current()).toEqual([{ type: "text", content: text, start: 0, end: text.length }])
+    expect(state.mode.current()).toBe(mode)
+    expect(restored).toBe(1)
+  })
+
+  test("cleans captured comments before waiting and preserves comments added to the next draft", async () => {
+    const state = createMemoryComposerState({ prompt: "review this" }).capture()
+    state.context.add({
+      type: "file",
+      path: "src/file.ts",
+      comment: "original",
+      commentID: "comment-1",
+    })
+    const ready = Promise.withResolvers<boolean>()
+    const sent = Promise.withResolvers<void>()
+    const original: PromptHistoryComment = {
+      id: "comment-1",
+      path: "src/file.ts",
+      selection: { start: 1, end: 1 },
+      comment: "original",
+      time: 1,
+    }
+    const next = { ...original, comment: "next", time: 2 }
+    let comments = [original]
+    let clears = 0
+    const target = session({ calls: [], prompt: async () => sent.resolve() })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitted = submitInput(adapter, undefined, "normal", undefined, undefined, {
+      comments: {
+        capture: () => comments,
+        clear: () => {
+          clears++
+          comments = []
+        },
+        restore: (value) => (comments = value),
+      },
+    }).submit(new Event("submit"))
+    expect(clears).toBe(1)
+    expect(state.context.items()).toEqual([])
+
+    state.context.add({
+      type: "file",
+      path: "src/file.ts",
+      comment: "next",
+      commentID: "comment-1",
+    })
+    comments = [next]
+    ready.resolve(true)
+    await submitted
+    await sent.promise
+
+    expect(clears).toBe(1)
+    expect(comments).toEqual([next])
+    expect(state.context.items()).toHaveLength(1)
+    expect(state.context.items()[0]?.comment).toBe("next")
+  })
+
+  test("keeps a session revert barrier across composer remounts without blocking another session", async () => {
+    const composerA = createMemoryComposerState({ prompt: "session A" })
+    const stateA = composerA.capture()
+    const stateB = createMemoryComposerState({ prompt: "session B" }).capture()
+    const gate = Promise.withResolvers<void>()
+    const revert = stateA.revert.schedule("message-a", async () => {
+      await gate.promise
+      return true
+    })
+    const callsA: string[] = []
+    const callsB: string[] = []
+    const sentA = Promise.withResolvers<void>()
+    const sentB = Promise.withResolvers<void>()
+    const adapter = (state: typeof stateA, target: ComposerSession): ActiveComposerAdapter => ({
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: state.revert,
+      submitted() {},
+      setEditor() {},
+    })
+    const targetA = session({ calls: callsA, prompt: async () => sentA.resolve() })
+    const targetB = session({ calls: callsB, prompt: async () => sentB.resolve() })
+
+    await submitInput(adapter(stateB, targetB)).submit(new Event("submit"))
+    await sentB.promise
+    expect(callsB.at(-1)).toBe("prompt")
+
+    const submittedA = submitInput(adapter(composerA.capture(), targetA)).submit(new Event("submit"))
+    expect(callsA).toEqual([])
+    gate.resolve()
+    await revert
+    await submittedA
+    await sentA.promise
+    expect(callsA.at(-1)).toBe("prompt")
+  })
+
+  test("captures the active session location and does not submit view callbacks after navigation", async () => {
+    const state = createMemoryComposerState().capture()
+    state.set([
+      { type: "text", content: "review ", start: 0, end: 7 },
+      { type: "file", path: "src/file.ts", content: "@src/file.ts", start: 7, end: 19 },
+    ])
+    const gate = Promise.withResolvers<void>()
+    state.revert.schedule("message-a", async () => {
+      await gate.promise
+      return true
+    })
+    const admitted = Promise.withResolvers<Parameters<ComposerSession["data"]["session"]["prompt"]>[0]>()
+    const target = session({ calls: [], prompt: async (value) => admitted.resolve(value) })
+    let directory = "/workspace-a"
+    let active = true
+    let submitted = 0
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => ({ ...target, directory }),
+      active: () => active,
+      interrupt: async () => undefined,
+      submissionBarrier: state.revert,
+      submitted: () => submitted++,
+      setEditor() {},
+    }
+
+    const request = submitInput(adapter).submit(new Event("submit"))
+    directory = "/workspace-b"
+    active = false
+    gate.resolve()
+    await request
+
+    expect((await admitted.promise).files).toEqual([
+      {
+        uri: "file:///workspace-a/src/file.ts",
+        name: "file.ts",
+        mention: { start: 7, end: 19, text: "@src/file.ts" },
+      },
+    ])
+    expect(submitted).toBe(0)
+  })
+
+  test("holds a reverted submission until the captured inbox cleanup finishes", async () => {
+    const composer = createMemoryComposerState()
+    const message: SessionMessageUser = {
+      id: "message-old",
+      type: "user",
+      text: "old prompt",
+      time: { created: 0 },
+    }
+    const listed = Promise.withResolvers<void>()
+    const list = Promise.withResolvers<
+      {
+        id: string
+        sessionID: string
+        timeCreated: number
+        type: "user"
+        payload: { text: string }
+        delivery: "queue"
+      }[]
+    >()
+    const cancelling = Promise.withResolvers<void>()
+    const cancel = Promise.withResolvers<void>()
+    const revert = createSessionRevertActions(
+      {
+        session: {
+          identity: { params: { id: "session-1" } },
+          history: { userMessages: () => [message] },
+          data: { revertMessageID: () => undefined },
+        },
+        setActiveMessage() {},
+      },
+      {
+        prompt: composer,
+        directory: () => "/repo",
+        failed: () => undefined,
+        pending: { list: () => [] },
+        api: {
+          interrupt: async () => ({ interrupted: true }),
+          wait: async () => undefined,
+          revert: {
+            stage: async () => ({ messageID: message.id }),
+            clear: async () => undefined,
+          },
+          inbox: {
+            list: async () => {
+              listed.resolve()
+              return list.promise
+            },
+            cancel: async () => {
+              cancelling.resolve()
+              await cancel.promise
+            },
+          },
+        },
+      },
+    )
+    const undo = revert.undo()
+    expect(composer.current()).toEqual([{ type: "text", content: "old prompt", start: 0, end: 10 }])
+    composer.set([{ type: "text", content: "edited prompt", start: 0, end: 13 }])
+    expect(composer.current()[0]).toMatchObject({ content: "edited prompt" })
+
+    const calls: string[] = []
+    const sent = Promise.withResolvers<string>()
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state: composer.capture(),
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => session({ calls, prompt: async (value) => sent.resolve(value.text) }),
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: revert.pending, wait: revert.wait },
+      submitted() {},
+      setEditor() {},
+    }
+    const submitted = submitInput(adapter).submit(new Event("submit"))
+
+    await listed.promise
+    expect(calls).toEqual([])
+    list.resolve([
+      {
+        id: "inbox-old",
+        sessionID: "session-1",
+        timeCreated: 0,
+        type: "user",
+        payload: { text: "old" },
+        delivery: "queue",
+      },
+    ])
+    await cancelling.promise
+    expect(calls).toEqual([])
+
+    cancel.resolve()
+    await undo
+    await submitted
+    expect(await sent.promise).toBe("edited prompt")
+    expect(calls.at(-1)).toBe("prompt")
   })
 })

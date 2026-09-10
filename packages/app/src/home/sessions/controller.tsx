@@ -1,11 +1,8 @@
 import type { SessionInfo } from "@opencode/client/promise"
 import { useDialog } from "@opencode/ui/context/dialog"
-import { Button } from "@opencode/ui/button"
-import { DialogFooter, DialogHeader, DialogTitleGroup, Dialog } from "@opencode/ui/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
 import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
-import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { useCommand } from "@/shell/commands/command"
 import {
   HOME_SESSION_LIMIT,
@@ -19,13 +16,12 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { sessionHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { errorMessage } from "@/shell/layout/helpers"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
-import { removedSessionIDs } from "@/session/session-domain"
+import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import { pathKey } from "@/workspaces/path-key"
 import { fetchSessionExport, saveSessionExport, sessionExportFilename } from "@/session/commands/export"
 import { usePlatform } from "@/runtime/platform/platform"
-import { sessionLabel, sessionTitle } from "@/session/title"
+import { sessionLabel } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
-import { archiveHomeSession } from "./archive"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, type HomeSessionRecord } from "./records"
 
@@ -48,6 +44,7 @@ export function createHomeSessionsController(home: HomeController) {
   const language = useLanguage()
   const platform = usePlatform()
   const queryClient = useQueryClient()
+  const lifecycle = useSessionLifecycleActions()
   const projectDirectories = createMemo(() => {
     const selected = home.selection.value().directory
     if (!selected) return
@@ -190,59 +187,6 @@ export function createHomeSessionsController(home: HomeController) {
     }
   }
 
-  const remove = async (server: ServerConnection.Key, session: SessionInfo) => {
-    const conn = home.server.list().find((item) => ServerConnection.key(item) === server)
-    const ctx = conn ? home.server.context(conn) : undefined
-    if (!conn || !ctx) return false
-    const ids = [...removedSessionIDs(ctx.data.session.list(), session.id)]
-    return ctx.data.session
-      .remove(session.id)
-      .then(() => {
-        notifySessionTabsRemoved({
-          server: ServerConnection.key(conn),
-          directory: session.location.directory,
-          sessionIDs: ids,
-        })
-        return true
-      })
-      .catch((cause) => {
-        showToast({
-          title: language.t("session.delete.failed.title"),
-          description: errorMessage(cause, language.t("session.delete.failed.title")),
-        })
-        return false
-      })
-      .finally(() => {
-        void queryClient.invalidateQueries({ queryKey: ["home-sessions", conn], exact: true })
-      })
-  }
-
-  function DeleteDialog(props: { server: ServerConnection.Key; session: SessionInfo }) {
-    const name = () => sessionTitle(props.session.title) ?? language.t("command.session.new")
-    const confirm = async () => {
-      await remove(props.server, props.session)
-      dialog.close()
-    }
-    return (
-      <Dialog fit>
-        <DialogHeader hideClose>
-          <DialogTitleGroup
-            title={language.t("session.delete.title")}
-            description={language.t("session.delete.confirm", { name: name() })}
-          />
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => dialog.close()}>
-            {language.t("common.cancel")}
-          </Button>
-          <Button variant="danger" onClick={confirm}>
-            {language.t("session.delete.button")}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-    )
-  }
-
   return {
     copy: {
       language,
@@ -290,25 +234,11 @@ export function createHomeSessionsController(home: HomeController) {
       },
       archive: async (session: SessionInfo) => {
         const conn = home.server.focused()
-        const ctx = home.server.focusedContext()
-        if (!conn || !ctx) return
-        await archiveHomeSession({
-          server: ServerConnection.key(conn),
-          session,
-          // TODO: Restore archiving when the V2 client exposes a session archive API.
-          archive: async (_sessionID) => Promise.reject(new Error("Session archiving is unavailable")),
-          remove() {},
-          onError: (cause) =>
-            showToast({
-              title: language.t("common.requestFailed"),
-              description: errorMessage(cause, language.t("common.requestFailed")),
-            }),
-        })
+        if (conn) await lifecycle.archive(ServerConnection.key(conn), session)
       },
       rename,
       export: exportSession,
-      showDelete: (server: ServerConnection.Key, session: SessionInfo) =>
-        dialog.show(() => <DeleteDialog server={server} session={session} />),
+      showDelete: lifecycle.showDelete,
     },
     tab: {
       isOpen: (record: HomeSessionRecord) => {

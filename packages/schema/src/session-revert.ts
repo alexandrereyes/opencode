@@ -3,14 +3,25 @@ import { FileDiff } from "./file-diff.js"
 import { optional } from "./schema.js"
 import { SessionMessage } from "./session-message.js"
 import { Snapshot } from "./snapshot.js"
+import { SessionID } from "./session-id.js"
+
+export interface ChildRevert extends Schema.Schema.Type<typeof ChildRevert> {}
+export const ChildRevert = Schema.Struct({
+  sessionID: SessionID,
+  messageID: SessionMessage.ID.pipe(optional),
+  pendingIDs: Schema.Array(SessionMessage.ID),
+}).annotate({ identifier: "Session.Revert.Child" })
 
 export interface Revert extends Schema.Schema.Type<typeof Revert> {}
 export const Revert = Schema.Struct({
   messageID: SessionMessage.ID,
+  /** Root Session whose staged revert owns this derived child marker. */
+  parentID: SessionID.pipe(optional),
   /** Legacy V1 compatibility state. */
   partID: Schema.String.pipe(optional),
   snapshot: Snapshot.ID.pipe(optional),
   files: Schema.Array(FileDiff.Info).pipe(optional),
+  children: Schema.Array(ChildRevert).pipe(optional),
 }).annotate({ identifier: "Session.Revert" })
 
 const FileDiffV1 = Schema.Struct({

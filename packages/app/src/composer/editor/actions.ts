@@ -5,8 +5,10 @@ import type {
   ComposerAppPart,
   ComposerFilePart,
   ComposerSkillPart,
+  ComposerSnippetPart,
   ComposerPersistedState,
   ComposerPrompt,
+  ComposerSessionPart,
 } from "../types"
 import { promptLength } from "../prompt-parts"
 
@@ -56,8 +58,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         })),
       )
     },
-    addText(content: string) {
-      const cursor = store().cursor ?? promptLength(store().prompt)
+    addText(content: string, cursor = store().cursor ?? promptLength(store().prompt)) {
       batch(() =>
         setStore()((state) => ({
           prompt: insertText(state.prompt, cursor, content),
@@ -66,22 +67,40 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         })),
       )
     },
+    replaceRange(content: ComposerPrompt, range: { start: number; end: number }) {
+      const start = Math.min(range.start, range.end)
+      const end = Math.max(range.start, range.end)
+      setStore()({
+        prompt: replacePromptRange(store().prompt, start, end, content),
+        cursor: start + promptLength(content),
+        retry: undefined,
+      })
+    },
     removeContext(key: string) {
       setStore()("context", "items", (items) => items.filter((item) => item.key !== key))
       clearRetry()
     },
     addMention(
-      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
+      mention:
+        | ComposerFilePart
+        | ComposerAgentPart
+        | ComposerSkillPart
+        | ComposerAppPart
+        | ComposerSessionPart
+        | ComposerSnippetPart,
       range?: { start: number; end: number },
     ) {
       const text = store()
         .prompt.map((part) => ("content" in part ? part.content : ""))
         .join("")
       const end = range?.end ?? store().cursor ?? text.length
-      const start = range?.start ?? text.slice(0, end).lastIndexOf("@")
-      setStore()("prompt", insertMention(store().prompt, start < 0 ? end : start, end, mention))
-      setStore()("cursor", (start < 0 ? end : start) + mention.content.length + 1)
-      clearRetry()
+      const trigger = mention.type === "snippet" ? "#" : mention.type === "skill" ? "$" : "@"
+      const start = range?.start ?? text.slice(0, end).lastIndexOf(trigger)
+      setStore()({
+        prompt: insertMention(store().prompt, start < 0 ? end : start, end, mention),
+        cursor: (start < 0 ? end : start) + mention.content.length + 1,
+        retry: undefined,
+      })
     },
     removeAttachment(id: string) {
       setStore()("prompt", (parts) => parts.filter((part) => part.type !== "image" || part.id !== id))
@@ -111,11 +130,48 @@ function insertText(prompt: ComposerPrompt, cursor: number, content: string): Co
   return withOffsets(parts)
 }
 
+function replacePromptRange(
+  prompt: ComposerPrompt,
+  start: number,
+  end: number,
+  content: ComposerPrompt,
+): ComposerPrompt {
+  const before: ComposerPrompt = []
+  const after: ComposerPrompt = []
+  const images = prompt.filter((part) => part.type === "image")
+  let position = 0
+  prompt.forEach((part) => {
+    if (part.type === "image") return
+    const partStart = position
+    position += part.content.length
+    if (position <= start) {
+      before.push(part)
+      return
+    }
+    if (partStart >= end) {
+      after.push(part)
+      return
+    }
+    if (part.type !== "text") return
+    const prefix = part.content.slice(0, Math.max(0, start - partStart))
+    const suffix = part.content.slice(Math.max(0, end - partStart))
+    if (prefix) before.push({ type: "text", content: prefix, start: 0, end: 0 })
+    if (suffix) after.push({ type: "text", content: suffix, start: 0, end: 0 })
+  })
+  return withOffsets([...before, ...content, ...after, ...images])
+}
+
 function insertMention(
   prompt: ComposerPrompt,
   start: number,
   end: number,
-  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerAppPart,
+  mention:
+    | ComposerFilePart
+    | ComposerAgentPart
+    | ComposerSkillPart
+    | ComposerAppPart
+    | ComposerSessionPart
+    | ComposerSnippetPart,
 ): ComposerPrompt {
   if (start === 0 && end === 0) {
     return withOffsets([mention, { type: "text", content: " ", start: 0, end: 0 }, ...prompt])

@@ -8,7 +8,7 @@ import { useI18n } from "@opencode/ui/context/i18n"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import type { SessionUserActions, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { useData } from "../context"
 import { TimelineSeparator } from "../components/timeline-separator"
 import {
@@ -40,7 +40,10 @@ type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, TimelineRow.TurnGap>
 
 export type SessionUserPresentation = {
   displayText?: string
+  copyText?: string
   comments?: SessionUserComment[]
+  quotes?: SessionUserQuote[]
+  sessions?: Array<{ start: number; end: number }>
 }
 
 export function createSessionTimelineRowRenderer(input: {
@@ -69,7 +72,10 @@ export function createSessionTimelineRowRenderer(input: {
   const patchPartKeys = new WeakMap<SessionMessageAssistant["content"][number], string>()
   const patchOwners = createMemo(() => {
     const owners = new Map<string, string>()
-    input.projection.rows().forEach((row) => {
+    const rows = input.projection.rows()
+    // Track status changes before a group is first opened: a failed patch can
+    // split an existing group without changing the projection's row identities.
+    rows.forEach((row) => {
       if (row._tag !== "AssistantPart" || row.group.type !== "context") return
       row.group.refs.forEach((ref) => {
         const content = Timeline.resolveContent(input.projection.messageByID().get(ref.messageID), ref.partID)
@@ -97,10 +103,15 @@ export function createSessionTimelineRowRenderer(input: {
   }
   const copyContentID = (messageID: string) => {
     if (workingTurn(messageID)) return null
-    return (input.projection.assistantMessagesByParent().get(messageID) ?? emptyAssistantMessages)
-      .toReversed()
-      .flatMap((message) => Timeline.contentEntries(message).toReversed())
-      .find((entry) => entry.content.type === "text" && !!entry.content.text.trim())?.id
+    const message = input.projection
+      .assistantMessagesByParent()
+      .get(messageID)
+      ?.findLast((message) => message.content.some((content) => content.type === "text" && !!content.text.trim()))
+    return message
+      ? Timeline.contentEntries(message).findLast(
+          (entry) => entry.content.type === "text" && !!entry.content.text.trim(),
+        )?.id
+      : undefined
   }
   const padding = () => input.padding?.() ?? "px-4 md:px-5"
   const indexGroupContents = (refs: PartRef[]) => {
@@ -574,7 +585,7 @@ export function createSessionTimelineRowRenderer(input: {
         <Frame row={current()}>
           <Show when={message()}>
             {(message) => {
-              const presentation = () => input.presentation(message())
+              const presentation = createMemo(() => input.presentation(message()))
               return (
                 <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
                   <div data-slot="session-turn-message-content" aria-live="off">
@@ -582,7 +593,15 @@ export function createSessionTimelineRowRenderer(input: {
                       sessionID={input.sessionID()}
                       message={message()}
                       displayText={presentation()?.displayText}
+                      copyText={presentation()?.copyText}
                       comments={presentation()?.comments}
+                      quotes={presentation()?.quotes}
+                      quoteOpen={(id) => input.disclosure.value(`${message().id}:quote:${id}`)}
+                      onQuoteOpenChange={(id, open) => {
+                        input.disclosure.set(`${message().id}:quote:${id}`, open)
+                        onSizeChange?.()
+                      }}
+                      sessions={presentation()?.sessions}
                       historicalAgent={context()?.agent ?? ""}
                       historicalModel={context()?.model ?? { id: "", providerID: "" }}
                       actions={input.actions}

@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { and, eq } from "drizzle-orm"
 import { LanguageModel } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { TestLLM } from "@opencode/ai/testing"
@@ -29,6 +30,7 @@ import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionMessage } from "@opencode/core/session/message"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
 import { SessionStore } from "@opencode/core/session/store"
+import { SessionCausalTable } from "@opencode/core/session/sql"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Permission } from "@opencode/core/permission"
@@ -482,6 +484,23 @@ describe("SubagentTool", () => {
               message.type === "user" ? [message.payload.text] : [],
             ),
           ).toEqual(["You are a subagent spawned by another session.\nreview this", "continue this"])
+          const continued = (yield* sessions.inbox(childID))[1]
+          expect(continued?.type).toBe("user")
+          if (continued?.type === "user") expect("metadata" in continued.payload).toBe(false)
+          const database = yield* Database.Service
+          expect(
+            yield* database.db
+              .select()
+              .from(SessionCausalTable)
+              .where(
+                and(
+                  eq(SessionCausalTable.parent_session_id, parent.id),
+                  eq(SessionCausalTable.child_session_id, childID),
+                  eq(SessionCausalTable.tool_call_id, "call-subagent-second"),
+                ),
+              )
+              .get(),
+          ).toMatchObject({ message_id: toolIdentity.messageID })
           expect(second.content).toEqual([{ type: "text", text: completedOutput(childID) }])
         }),
       ),

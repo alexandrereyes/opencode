@@ -14,6 +14,44 @@ const session = (viewed: number): SessionInfo => ({
   location: { directory: "/project" },
 })
 
+test("uses the configured initial window and retains normal cursor page sizes", async () => {
+  const requests: { limit: string | null; cursor: string | null }[] = []
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const url = new URL((input instanceof Request ? input : new Request(input, init)).url)
+      const cursor = url.searchParams.get("cursor")
+      requests.push({ limit: url.searchParams.get("limit"), cursor })
+      return Response.json({
+        data: [{ id: cursor ? "msg_1" : "msg_2", type: "user", text: "History", time: { created: cursor ? 1 : 2 } }],
+        cursor: cursor ? {} : { next: "older" },
+      })
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      initialMessageLimit: () => 40,
+      event: { on: () => () => {}, listen: () => () => {} },
+    }),
+    dispose,
+  }))
+  try {
+    await setup.data.session.message.sync("ses_refresh")
+    await setup.data.session.message.sync("ses_refresh")
+    expect(requests).toEqual([{ limit: "40", cursor: null }])
+    await setup.data.session.message.loadMore("ses_refresh")
+    expect(requests).toEqual([
+      { limit: "40", cursor: null },
+      { limit: "20", cursor: "older" },
+    ])
+    expect(setup.data.session.message.list("ses_refresh").map((message) => message.id)).toEqual(["msg_1", "msg_2"])
+  } finally {
+    setup.dispose()
+  }
+})
+
 test("revalidates after an event overtakes an active session read", async () => {
   let release!: () => void
   const gate = new Promise<void>((resolve) => (release = resolve))
@@ -126,6 +164,44 @@ test("preserves a live session rename across concurrent session and family reads
   } finally {
     family.resolve()
     renamed.resolve()
+    setup.dispose()
+  }
+})
+
+test("updates archived session metadata from the server event", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const original = session(0)
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async () => Response.json({ data: original }),
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+  try {
+    await setup.data.session.sync(original.id)
+    const event: OpenCodeEvent = {
+      id: "evt_archived",
+      created: 123,
+      type: "session.archived",
+      durable: { aggregateID: original.id, seq: 1, version: 1 },
+      data: { sessionID: original.id },
+    }
+    listeners.forEach((listener) => listener({ name: event.type, details: event }))
+    await wait(() => setup.data.session.get(original.id)?.time.archived === 123)
+    expect(setup.data.session.get(original.id)?.title).toBe(original.title)
+  } finally {
     setup.dispose()
   }
 })

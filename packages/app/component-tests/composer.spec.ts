@@ -1,5 +1,51 @@
 import { expect, story } from "../../storybook/playwright/story"
 
+for (const hasTouch of [true, false]) {
+  story.describe(`composer writing assistance with touch=${hasTouch}`, () => {
+    story.use({ hasTouch, isMobile: hasTouch })
+
+    story("follows the input device and mode rather than viewport width", async ({ mount, page }) => {
+      const component = await mount("opencode-composer-flow--empty-draft")
+      const editor = component.locator('[data-component="composer-editor"]')
+
+      for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 844 })
+        expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(hasTouch)
+        await expect(editor).toHaveAttribute("autocorrect", hasTouch ? "on" : "off")
+        await expect(editor).toHaveAttribute("autocapitalize", hasTouch ? "sentences" : "none")
+        await expect(editor).toHaveAttribute("spellcheck", String(hasTouch))
+
+        await editor.fill("!")
+        await expect(editor).toHaveAttribute("autocorrect", "off")
+        await expect(editor).toHaveAttribute("autocapitalize", "none")
+        await expect(editor).toHaveAttribute("spellcheck", "false")
+        await component.locator('[data-action="composer-exit-shell"]').click()
+        await expect(editor).toHaveAttribute("autocorrect", hasTouch ? "on" : "off")
+      }
+    })
+  })
+}
+
+story("mobile Enter preserves newlines in the submitted payload", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--snippets")
+  const editor = component.locator('[data-component="composer-editor"]')
+  const output = component.locator("output")
+
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    const previous = await output.textContent()
+    await editor.fill("First line")
+    await editor.press(width < 768 ? "Enter" : "Shift+Enter")
+    await editor.pressSequentially("Second line")
+    await expect(output).toHaveText(previous!)
+    await editor.press(width < 768 ? "Shift+Enter" : "Enter")
+    await expect(output).toHaveText(
+      JSON.stringify({ text: "First line\nSecond line", files: [], agents: [], skills: [], apps: [] }),
+    )
+    await expect(editor).toHaveText("")
+  }
+})
+
 for (const direction of ["ltr", "rtl"]) {
   for (const alternate of ["none", "queue", "steer"]) {
     story(`scrolls overflowing controls beside fixed ${alternate} actions in ${direction}`, async ({ mount, page }) => {

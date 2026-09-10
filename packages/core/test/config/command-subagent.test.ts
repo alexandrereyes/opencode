@@ -94,7 +94,9 @@ describe("command subagents", () => {
         expect(yield* sessions.context(parent.id)).toEqual([])
         expect(yield* llm.requests()).toHaveLength(1)
         expect((yield* sessions.context(child.id)).filter((message) => message.type === "user")).toMatchObject([
-          { text: "You are a subagent spawned by another session.\nReview changes: ready" },
+          {
+            text: "You are a subagent spawned by another session.\nReview changes: ready",
+          },
         ])
         yield* gate.release
         yield* llm.wait(2)
@@ -120,6 +122,42 @@ describe("command subagents", () => {
       expect((yield* sessions.context(parent.id)).filter((message) => message.type === "user")).toMatchObject([
         { text: "Review changes: ready" },
       ])
+    }),
+  )
+
+  it.live("stages a running command child before its completion notification exists", () =>
+    Effect.gen(function* () {
+      const parent = yield* project({ subagent: true, agent: "reviewer" }, "json")
+      const sessions = yield* Session.Service
+      const llm = yield* TestLLM.Test
+      const boundary = yield* sessions.synthetic({ sessionID: parent.id, text: "before command", resume: false })
+      yield* sessions.resume(parent.id)
+      const gate = yield* llm.gate()
+
+      yield* sessions.command({
+        sessionID: parent.id,
+        command: "review",
+        text: "changes",
+      })
+      yield* gate.started
+      const child = (yield* sessions.list({ parentID: parent.id })).data[0]
+      if (!child) return yield* Effect.die("Expected a command child")
+      const childInput = (yield* sessions.context(child.id)).find((message) => message.type === "user")
+      if (!childInput) return yield* Effect.die("Expected a command child input")
+      expect(childInput.metadata).toBeUndefined()
+      const staged = yield* sessions.revert.stage({ sessionID: parent.id, messageID: boundary.id, files: false })
+
+      expect(staged.children).toContainEqual({
+        sessionID: child.id,
+        messageID: childInput.id,
+        pendingIDs: [],
+      })
+      expect((yield* sessions.get(child.id)).revert?.parentID).toBe(parent.id)
+      yield* Effect.flip(sessions.command({ sessionID: child.id, command: "missing", text: "invalid" }))
+      expect((yield* sessions.get(parent.id)).revert).toBeDefined()
+      yield* sessions.command({ sessionID: child.id, command: "review", text: "valid" })
+      expect((yield* sessions.get(parent.id)).revert).toBeUndefined()
+      expect((yield* sessions.get(child.id)).revert).toBeUndefined()
     }),
   )
 })

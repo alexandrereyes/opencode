@@ -128,6 +128,7 @@ export const layer = Layer.effect(
           if (invalid) return yield* new InvalidFormError({ message: invalid })
           const form: Info = {
             id,
+            created: Date.now(),
             sessionID: input.sessionID,
             title: input.title,
             ...(input.metadata === undefined ? {} : { metadata: input.metadata }),

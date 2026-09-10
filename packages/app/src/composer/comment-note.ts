@@ -1,4 +1,5 @@
 import type { FileSelection } from "@/workspaces/files/model"
+import { readChatQuotes } from "./chat-quote"
 
 export type PromptComment = {
   path: string
@@ -60,6 +61,7 @@ export function readPromptPresentation(value: unknown) {
   if (typeof displayText !== "string" || !Array.isArray(comments)) return
   return {
     displayText,
+    quotes: readChatQuotes((value as { quotes?: unknown }).quotes),
     comments: comments.flatMap((item): PromptComment[] => {
       if (!item || typeof item !== "object") return []
       const path = (item as { path?: unknown }).path

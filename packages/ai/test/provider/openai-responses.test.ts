@@ -406,7 +406,7 @@ describe("OpenAI Responses route", () => {
       expect(prepared.body.input).toEqual([
         { role: "user", content: [{ type: "input_text", text: "Before." }] },
         { role: "developer", content: "Operator update." },
-        { type: "message", role: "assistant", content: [{ type: "output_text", text: "After." }] },
+        { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "After." }] },
       ])
     }),
   )
@@ -581,52 +581,54 @@ describe("OpenAI Responses route", () => {
   )
 
   it.effect("continues a streamed tool call with only the new tool output", () =>
-    Effect.gen(function* () {
-      const firstRequest = {
-        type: "response.create",
-        model: "gpt-5.2",
-        store: false,
-        input: [{ role: "user", content: [{ type: "input_text", text: "Weather?" }] }],
-      }
-      const first = continuationDriver(firstRequest)
-      const firstCreate = yield* first.create(undefined)
-      yield* first.observe(
-        firstCreate,
-        ProviderShared.encodeJson({
-          type: "response.output_item.done",
-          item: {
-            type: "function_call",
-            id: "fc_1",
-            status: "completed",
-            call_id: "call_1",
-            name: "weather",
-            arguments: '{ "city": "Paris" }',
-          },
-        }),
-      )
-      const saved = checkpoint(
+    Effect.forEach([undefined, []], (output) =>
+      Effect.gen(function* () {
+        const firstRequest = {
+          type: "response.create",
+          model: "gpt-5.2",
+          store: false,
+          input: [{ role: "user", content: [{ type: "input_text", text: "Weather?" }] }],
+        }
+        const first = continuationDriver(firstRequest)
+        const firstCreate = yield* first.create(undefined)
         yield* first.observe(
           firstCreate,
-          ProviderShared.encodeJson({ type: "response.completed", response: { id: "resp_1" } }),
-        ),
-      )
-      const second = continuationDriver({
-        ...firstRequest,
-        input: [
-          ...firstRequest.input,
-          { type: "function_call", call_id: "call_1", name: "weather", arguments: '{"city":"Paris"}' },
-          { type: "function_call_output", call_id: "call_1", output: '{"temperature":22}' },
-        ],
-      })
+          ProviderShared.encodeJson({
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              id: "fc_1",
+              status: "completed",
+              call_id: "call_1",
+              name: "weather",
+              arguments: '{ "city": "Paris" }',
+            },
+          }),
+        )
+        const saved = checkpoint(
+          yield* first.observe(
+            firstCreate,
+            ProviderShared.encodeJson({ type: "response.completed", response: { id: "resp_1", output } }),
+          ),
+        )
+        const second = continuationDriver({
+          ...firstRequest,
+          input: [
+            ...firstRequest.input,
+            { type: "function_call", call_id: "call_1", name: "weather", arguments: '{"city":"Paris"}' },
+            { type: "function_call_output", call_id: "call_1", output: '{"temperature":22}' },
+          ],
+        })
 
-      const create = yield* second.create(saved)
+        const create = yield* second.create(saved)
 
-      expect(create.mode).toBe("incremental")
-      expect(ProviderShared.decodeJson(create.message)).toMatchObject({
-        previous_response_id: "resp_1",
-        input: [{ type: "function_call_output", call_id: "call_1", output: '{"temperature":22}' }],
-      })
-    }),
+        expect(create.mode).toBe("incremental")
+        expect(ProviderShared.decodeJson(create.message)).toMatchObject({
+          previous_response_id: "resp_1",
+          input: [{ type: "function_call_output", call_id: "call_1", output: '{"temperature":22}' }],
+        })
+      }),
+    ),
   )
 
   it.effect("continues a tool call from authoritative completed response output", () =>
@@ -680,45 +682,47 @@ describe("OpenAI Responses route", () => {
   )
 
   it.effect("continues a promoted steer after assistant output with response-only text metadata", () =>
-    Effect.gen(function* () {
-      const firstInput = [{ role: "user", content: [{ type: "input_text", text: "First" }] }]
-      const first = continuationDriver({ type: "response.create", model: "gpt-5.2", store: false, input: firstInput })
-      const create = yield* first.create(undefined)
-      yield* first.observe(
-        create,
-        ProviderShared.encodeJson({
-          type: "response.output_item.done",
-          item: {
-            type: "message",
-            id: "msg_1",
-            status: "completed",
-            role: "assistant",
-            content: [{ type: "output_text", text: "Hello", annotations: [], logprobs: [] }],
-          },
-        }),
-      )
-      const saved = checkpoint(
+    Effect.forEach([undefined, []], (output) =>
+      Effect.gen(function* () {
+        const firstInput = [{ role: "user", content: [{ type: "input_text", text: "First" }] }]
+        const first = continuationDriver({ type: "response.create", model: "gpt-5.2", store: false, input: firstInput })
+        const create = yield* first.create(undefined)
         yield* first.observe(
           create,
-          ProviderShared.encodeJson({ type: "response.completed", response: { id: "resp_1" } }),
-        ),
-      )
-      const steer = { role: "user", content: [{ type: "input_text", text: "Actually, be brief" }] }
-      const next = continuationDriver({
-        type: "response.create",
-        model: "gpt-5.2",
-        store: false,
-        input: [...firstInput, { role: "assistant", content: [{ type: "output_text", text: "Hello" }] }, steer],
-      })
+          ProviderShared.encodeJson({
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              id: "msg_1",
+              status: "completed",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Hello", annotations: [], logprobs: [] }],
+            },
+          }),
+        )
+        const saved = checkpoint(
+          yield* first.observe(
+            create,
+            ProviderShared.encodeJson({ type: "response.completed", response: { id: "resp_1", output } }),
+          ),
+        )
+        const steer = { role: "user", content: [{ type: "input_text", text: "Actually, be brief" }] }
+        const next = continuationDriver({
+          type: "response.create",
+          model: "gpt-5.2",
+          store: false,
+          input: [...firstInput, { role: "assistant", content: [{ type: "output_text", text: "Hello" }] }, steer],
+        })
 
-      const continued = yield* next.create(saved)
+        const continued = yield* next.create(saved)
 
-      expect(continued.mode).toBe("incremental")
-      expect(ProviderShared.decodeJson(continued.message)).toMatchObject({
-        previous_response_id: "resp_1",
-        input: [steer],
-      })
-    }),
+        expect(continued.mode).toBe("incremental")
+        expect(ProviderShared.decodeJson(continued.message)).toMatchObject({
+          previous_response_id: "resp_1",
+          input: [steer],
+        })
+      }),
+    ),
   )
 
   it.effect("continues streamed reasoning when completion re-encrypts the same item", () =>
@@ -2118,6 +2122,7 @@ describe("OpenAI Responses route", () => {
           type: "message",
           id: "msg_refusal",
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "I can't help with that." }],
           phase: "final_answer",
         },
@@ -2200,6 +2205,7 @@ describe("OpenAI Responses route", () => {
           type: "message",
           id: "msg_commentary",
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "Checking." }],
           phase: "commentary",
         },
@@ -2207,6 +2213,7 @@ describe("OpenAI Responses route", () => {
           type: "message",
           id: "msg_final",
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "Finished." }],
           phase: "final_answer",
         },
@@ -2214,6 +2221,7 @@ describe("OpenAI Responses route", () => {
           type: "message",
           id: "msg_null",
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "Unclassified." }],
           phase: null,
         },
@@ -3344,14 +3352,19 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(prepared.body.input).toEqual([
-        { type: "message", role: "assistant", content: [{ type: "output_text", text: "Before." }] },
+        {
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "Before." }],
+        },
         {
           type: "reasoning",
           id: "rs_1",
           encrypted_content: "encrypted-state",
           summary: [{ type: "summary_text", text: "Checked order." }],
         },
-        { type: "message", role: "assistant", content: [{ type: "output_text", text: "After." }] },
+        { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "After." }] },
       ])
     }),
   )
@@ -3615,12 +3628,14 @@ describe("OpenAI Responses route", () => {
           type: "message",
           id: "history_1",
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "Hello" }],
         },
         {
           type: "message",
           id: `message_${"a".repeat(64)}`,
           role: "assistant",
+          status: "completed",
           content: [{ type: "output_text", text: "World" }],
         },
         {

@@ -14,13 +14,14 @@ import { SessionMessageUpdater } from "./message-updater.js"
 import { SessionInbox } from "./inbox.js"
 import { Workspace } from "@opencode/schema/workspace"
 import { InstructionState } from "./instruction-state.js"
-import { SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
+import { SessionCausalTable, SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
 import { InstructionEntry } from "./instruction-entry.js"
 import { Slug } from "../util/slug.js"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Money } from "@opencode/schema/money"
 import { Worktree } from "@opencode/schema/worktree"
 import { Project } from "@opencode/schema/project"
+import { PersistedRevert } from "@opencode/schema/session-revert"
 import { AbsolutePath, RelativePath } from "../schema.js"
 import type { SessionSchema } from "./schema.js"
 import { ProjectTable } from "../project/sql.js"
@@ -33,6 +34,7 @@ type MessageEvent = Exclude<
 
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
 const encodeMessage = Schema.encodeSync(SessionMessage.Info)
+const decodeRevert = Schema.decodeUnknownSync(PersistedRevert)
 
 export class SessionAlreadyProjected extends Error {}
 
@@ -461,6 +463,21 @@ const layer = Layer.effectDiscard(
         if (!stored) return yield* Effect.die(new SessionAlreadyProjected())
       }),
     )
+    yield* bus.project(SessionEvent.SubagentInputAssigned, (event) =>
+      db
+        .insert(SessionCausalTable)
+        .values({
+          input_id: event.data.inputID,
+          parent_session_id: event.data.sessionID,
+          child_session_id: event.data.childSessionID,
+          seq: event.durable.seq,
+          message_id: event.data.origin.messageID,
+          tool_call_id: event.data.origin.toolCallID,
+        })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie, Effect.asVoid),
+    )
     yield* bus.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)
@@ -567,6 +584,14 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ title: event.data.title, time_updated: event.created })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie),
+    )
+    yield* bus.project(SessionEvent.Archived, (event) =>
+      db
+        .update(SessionTable)
+        .set({ time_archived: event.created, time_updated: sql`${SessionTable.time_updated}` })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie),
@@ -699,6 +724,40 @@ const layer = Layer.effectDiscard(
     yield* bus.project(SessionEvent.RevertEvent.Staged, (event) =>
       Effect.gen(function* () {
         const revert = event.data.revert
+        const previous = yield* db
+          .select({ revert: SessionTable.revert })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        const next = new Set((revert.children ?? []).map((child) => child.sessionID))
+        yield* clearDerivedMarkers(
+          db,
+          event.data.sessionID,
+          (previous?.revert ? (decodeRevert(previous.revert).children ?? []) : []).filter(
+            (child) => !next.has(child.sessionID),
+          ),
+          event.created,
+        )
+        yield* Effect.forEach(
+          revert.children ?? [],
+          (child) =>
+            Effect.gen(function* () {
+              const messageID = child.messageID ?? child.pendingIDs[0]
+              if (!messageID)
+                return yield* Effect.die(new Error(`Causal revert child has no boundary: ${child.sessionID}`))
+              yield* db
+                .update(SessionTable)
+                .set({
+                  revert: { messageID, parentID: event.data.sessionID, files: [] },
+                  time_updated: event.created,
+                })
+                .where(eq(SessionTable.id, child.sessionID))
+                .run()
+                .pipe(Effect.orDie)
+            }),
+          { discard: true },
+        )
         yield* db
           .update(SessionTable)
           .set({
@@ -711,15 +770,31 @@ const layer = Layer.effectDiscard(
       }),
     )
     yield* bus.project(SessionEvent.RevertEvent.Cleared, (event) =>
-      db
-        .update(SessionTable)
-        .set({ revert: null, time_updated: event.created })
-        .where(eq(SessionTable.id, event.data.sessionID))
-        .run()
-        .pipe(Effect.orDie, Effect.asVoid),
+      Effect.gen(function* () {
+        const staged = yield* db
+          .select({ revert: SessionTable.revert })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        const children = staged?.revert ? (decodeRevert(staged.revert).children ?? []) : []
+        yield* clearDerivedMarkers(db, event.data.sessionID, children, event.created)
+        yield* db
+          .update(SessionTable)
+          .set({ revert: null, time_updated: event.created })
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .run()
+          .pipe(Effect.orDie)
+      }),
     )
     yield* bus.project(SessionEvent.RevertEvent.Committed, (event) =>
       Effect.gen(function* () {
+        const staged = yield* db
+          .select({ revert: SessionTable.revert })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .get()
+          .pipe(Effect.orDie)
         const boundary = yield* db
           .select({ seq: SessionMessageTable.seq })
           .from(SessionMessageTable)
@@ -729,23 +804,44 @@ const layer = Layer.effectDiscard(
           .get()
           .pipe(Effect.orDie)
         if (!boundary) return yield* Effect.die(new Error(`Revert boundary message not found: ${event.data.to}`))
-        yield* db
-          .delete(SessionMessageTable)
-          .where(
-            and(eq(SessionMessageTable.session_id, event.data.sessionID), gte(SessionMessageTable.seq, boundary.seq)),
-          )
-          .run()
-          .pipe(Effect.orDie)
-        yield* db
-          .delete(SessionInboxTable)
-          .where(
-            and(
-              eq(SessionInboxTable.session_id, event.data.sessionID),
-              gte(SessionInboxTable.enqueued_seq, boundary.seq),
-            ),
-          )
-          .run()
-          .pipe(Effect.orDie)
+        const children = staged?.revert ? (decodeRevert(staged.revert).children ?? []) : []
+        yield* Effect.forEach(
+          children.toReversed(),
+          (child) =>
+            Effect.gen(function* () {
+              if (child.messageID) {
+                const message = yield* db
+                  .select({ seq: SessionMessageTable.seq })
+                  .from(SessionMessageTable)
+                  .where(
+                    and(
+                      eq(SessionMessageTable.session_id, child.sessionID),
+                      eq(SessionMessageTable.id, child.messageID),
+                    ),
+                  )
+                  .get()
+                  .pipe(Effect.orDie)
+                if (!message)
+                  return yield* Effect.die(new Error(`Causal revert boundary not found: ${child.messageID}`))
+                yield* deleteFrom(db, child.sessionID, message.seq)
+                yield* InstructionState.reset(db, child.sessionID)
+              }
+              if (child.pendingIDs.length > 0)
+                yield* db
+                  .delete(SessionInboxTable)
+                  .where(
+                    and(
+                      eq(SessionInboxTable.session_id, child.sessionID),
+                      inArray(SessionInboxTable.id, child.pendingIDs),
+                    ),
+                  )
+                  .run()
+                  .pipe(Effect.orDie)
+            }),
+          { discard: true },
+        )
+        yield* deleteFrom(db, event.data.sessionID, boundary.seq)
+        yield* clearDerivedMarkers(db, event.data.sessionID, children, event.created)
         yield* db
           .update(SessionTable)
           .set({ revert: null, time_updated: event.created })
@@ -768,5 +864,51 @@ const layer = Layer.effectDiscard(
     )
   }),
 )
+
+const deleteFrom = Effect.fnUntraced(function* (db: DatabaseService, sessionID: SessionSchema.ID, seq: number) {
+  yield* db
+    .delete(SessionMessageTable)
+    .where(and(eq(SessionMessageTable.session_id, sessionID), gte(SessionMessageTable.seq, seq)))
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .delete(SessionInboxTable)
+    .where(and(eq(SessionInboxTable.session_id, sessionID), gte(SessionInboxTable.enqueued_seq, seq)))
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .delete(SessionCausalTable)
+    .where(and(eq(SessionCausalTable.parent_session_id, sessionID), gte(SessionCausalTable.seq, seq)))
+    .run()
+    .pipe(Effect.orDie)
+})
+
+const clearDerivedMarkers = Effect.fnUntraced(function* (
+  db: DatabaseService,
+  parentID: SessionSchema.ID,
+  children: readonly { readonly sessionID: SessionSchema.ID }[],
+  created: number,
+) {
+  yield* Effect.forEach(
+    children,
+    (child) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select({ revert: SessionTable.revert })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, child.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        if (!row?.revert || decodeRevert(row.revert).parentID !== parentID) return
+        yield* db
+          .update(SessionTable)
+          .set({ revert: null, time_updated: created })
+          .where(eq(SessionTable.id, child.sessionID))
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    { discard: true },
+  )
+})
 
 export const node = makeGlobalNode({ name: "session-projector", layer, deps: [Bus.node, Database.node] })

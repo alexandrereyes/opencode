@@ -28,8 +28,11 @@ NodeRuntime.runMain(
           hostname: "127.0.0.1",
           port: Number(process.env.OPENCODE_CUSTOM_PORT ?? "4177"),
           password: password.trim(),
-          database: { path: `${root}/data/opencode/custom.db` },
-          config: { directory: `${root}/config/opencode`, project: process.env.OPENCODE_CUSTOM_SMOKE !== "1" },
+          database: { path: process.env.OPENCODE_CUSTOM_DB ?? `${root}/data/opencode/custom.db` },
+          config: {
+            directory: process.env.OPENCODE_CONFIG_DIR ?? `${root}/config/opencode`,
+            project: process.env.OPENCODE_CUSTOM_SMOKE !== "1",
+          },
           models: { fetch: process.env.OPENCODE_CUSTOM_SMOKE !== "1" },
         },
         {

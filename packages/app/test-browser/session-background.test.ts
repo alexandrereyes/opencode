@@ -30,10 +30,10 @@ const assistant = (id: string, content: SessionMessageAssistantTool[], completed
   time: { created: 0, completed },
 })
 
-const session = (id: string): SessionInfo => ({
+const session = (id: string, parentID = "root"): SessionInfo => ({
   id,
   title: id,
-  parentID: "root",
+  parentID,
   projectID: "project",
   location: { directory: "/project" },
   cost: 0,
@@ -61,7 +61,7 @@ const notification = (id: string, metadata: Record<string, string>) => ({
 })
 
 describe("createSessionBackground", () => {
-  test("excludes completed children and shells using either shell or tool-call IDs", () => {
+  test("shows historical launches only while their runtime is active", () => {
     createRoot((dispose) => {
       const background = createSessionBackground({
         sessionID: () => "root",
@@ -78,11 +78,103 @@ describe("createSessionBackground", () => {
           notification("shell-id-done", { source: "shell", shellID: "shell-id" }),
           notification("legacy-done", { source: "shell", jobID: "legacy-shell" }),
         ],
-        sessions: () => [],
-        status: () => "idle",
+        sessions: () => [session("child")],
+        status: (id) => (id === "child" ? "running" : "idle"),
         shells: () => [],
       })
-      expect(background.tasks()).toEqual([{ id: "child", type: "subagent", label: "child", agent: "explore" }])
+      expect(background.tasks()).toEqual([{ id: "child", type: "subagent", label: "child" }])
+      dispose()
+    })
+  })
+
+  test("uses labels only when a blocking shell has no runtime ID", () => {
+    createRoot((dispose) => {
+      const background = createSessionBackground({
+        sessionID: () => "root",
+        messages: () => [
+          assistant("current", [tool("foreground", "shell", { shellID: "foreground" }, { command: "bun test" }, "running")]),
+        ],
+        sessions: () => [],
+        status: () => "idle",
+        shells: () => [shell("background", "bun test")],
+      })
+
+      expect(background.tasks()).toEqual([{ id: "background", type: "shell", label: "bun test" }])
+      dispose()
+    })
+  })
+
+  test("keeps an origin shell visible after its session moves until the shell exits", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({
+        shells: [{ ...shell("origin-shell", "bun dev"), location: { directory: "/origin" } }],
+      })
+      const background = createSessionBackground({
+        sessionID: () => "root",
+        messages: () => [],
+        sessions: () => [],
+        status: () => "idle",
+        shells: () => store.shells,
+      })
+
+      expect(background.tasks()).toEqual([{ id: "origin-shell", type: "shell", label: "bun dev" }])
+      setStore("shells", 0, "status", "exited")
+      expect(background.tasks()).toEqual([])
+      dispose()
+    })
+  })
+
+  test("does not resurrect a background child reused by a blocking call", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({
+        current: tool("foreground", "subagent", { sessionID: "child" }, { description: "reuse" }, "running"),
+      })
+      const background = createSessionBackground({
+        sessionID: () => "root",
+        messages: () => [
+          assistant("backgrounded", [
+            tool("backgrounded-child", "subagent", { status: "running", sessionID: "child" }, { description: "reuse" }),
+          ], 1),
+          notification("finished", { source: "subagent", childID: "child" }),
+          assistant("current", [store.current]),
+        ],
+        sessions: () => [session("child")],
+        status: () => "running",
+        shells: () => [],
+      })
+
+      expect(background.tasks()).toEqual([])
+      setStore("current", "state", {
+        status: "completed",
+        input: { description: "reuse" },
+        metadata: { status: "running", sessionID: "child" },
+        content: [{ type: "text", text: "backgrounded" }],
+      })
+      expect(background.tasks()).toEqual([{ id: "child", type: "subagent", label: "child" }])
+      dispose()
+    })
+  })
+
+  test("requires hydrated ownership for copied historical launches", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({ sessions: [] as SessionInfo[] })
+      const background = createSessionBackground({
+        sessionID: () => "fork",
+        messages: () => [
+          assistant("copied", [
+            tool("child-part", "subagent", { status: "running", sessionID: "child" }, { description: "child" }),
+          ]),
+        ],
+        sessions: () => store.sessions,
+        status: () => "running",
+        shells: () => [],
+      })
+
+      expect(background.tasks()).toEqual([])
+      expect(background.unresolved()).toEqual(["child"])
+      setStore("sessions", [session("child", "root")])
+      expect(background.unresolved()).toEqual([])
+      expect(background.tasks()).toEqual([])
       dispose()
     })
   })
@@ -97,7 +189,7 @@ describe("createSessionBackground", () => {
             tool("child-part", "subagent", { status: "running", sessionID: "child" }),
           ]),
         ],
-        sessions: [session("live-child"), session("child")],
+        sessions: [session("live-child"), session("child"), session("unknown-child")],
         status: { root: "idle", child: "idle", "live-child": "idle" } as Record<string, "idle" | "running">,
         shells: [{ ...shell("shell", "command"), status: "exited" as ShellInfo["status"] }],
       })
@@ -114,10 +206,10 @@ describe("createSessionBackground", () => {
       })
       const blocking = background.blocking()
       const initial = background.tasks()
-      expect(initial.map((task) => task.id)).toEqual(["child", "shell"])
+      expect(initial).toEqual([])
 
       setStore("status", { child: "running", "live-child": "running" })
-      expect(background.tasks().map((task) => task.id)).toEqual(["child", "live-child", "shell"])
+      expect(background.tasks().map((task) => task.id)).toEqual(["child", "live-child"])
       setStore("shells", 0, "status", "running")
       expect(background.tasks().at(-1)?.label).toBe("command")
       setStore("sessions", 1, "title", "renamed")
@@ -182,9 +274,9 @@ describe("createSessionBackground", () => {
       })
       expect(store.messages).toBe(messages)
       expect(background.blocking().map((task) => task.partID)).toEqual(["shell-part"])
-      setStore("status", "child", "idle")
       expect(background.tasks().map((task) => task.id)).toEqual(["child", "old-child"])
-      expect(background.tasks()[0]?.label).toBe("background child")
+      setStore("status", "child", "idle")
+      expect(background.tasks().map((task) => task.id)).toEqual(["old-child"])
       setStore("notification", "metadata", "childID", "child")
       expect(background.tasks().map((task) => task.id)).toEqual(["old-child"])
       setStore("messages", [0, 1], "time", "completed", 1)

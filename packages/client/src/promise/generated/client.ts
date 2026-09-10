@@ -1,11 +1,17 @@
 import type {
   HealthGetOutput,
+  ServerSubscriptionsOutput,
   ServerGetOutput,
   ServerMaintenanceAcquireOutput,
   ServerMaintenanceCancelInput,
   ServerMaintenanceCancelOutput,
   ServerMaintenanceCommitInput,
   ServerMaintenanceCommitOutput,
+  SnippetListOutput,
+  SnippetSaveInput,
+  SnippetSaveOutput,
+  SnippetRemoveInput,
+  SnippetRemoveOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentListInput,
@@ -20,6 +26,8 @@ import type {
   PluginCheckOutput,
   PluginUpdateInput,
   PluginUpdateOutput,
+  SessionNavigationInput,
+  SessionNavigationOutput,
   SessionListInput,
   SessionListOutput,
   SessionStatsInput,
@@ -43,6 +51,8 @@ import type {
   SessionSwitchModelOutput,
   SessionRenameInput,
   SessionRenameOutput,
+  SessionArchiveInput,
+  SessionArchiveOutput,
   SessionMoveInput,
   SessionMoveOutput,
   SessionPromptInput,
@@ -421,6 +431,17 @@ export function make(options: ClientOptions) {
         ),
     },
     server: {
+      subscriptions: (requestOptions?: RequestOptions) =>
+        request<ServerSubscriptionsOutput>(
+          {
+            method: "GET",
+            path: `/api/server/subscriptions`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       get: (requestOptions?: RequestOptions) =>
         request<ServerGetOutput>(
           { method: "GET", path: `/api/server`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
@@ -463,6 +484,43 @@ export function make(options: ClientOptions) {
             requestOptions,
           ),
       },
+    },
+    snippet: {
+      list: (requestOptions?: RequestOptions) =>
+        request<SnippetListOutput>(
+          { method: "GET", path: `/api/snippet`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
+          requestOptions,
+        ),
+      save: (input: SnippetSaveInput, requestOptions?: RequestOptions) =>
+        request<SnippetSaveOutput>(
+          {
+            method: "PUT",
+            path: `/api/snippet`,
+            body: {
+              id: input["id"],
+              name: input["name"],
+              description: input["description"],
+              aliases: input["aliases"],
+              content: input["content"],
+              project: input["project"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 409],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remove: (input: SnippetRemoveInput, requestOptions?: RequestOptions) =>
+        request<SnippetRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/snippet/${encodeURIComponent(input.id)}`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
     },
     location: {
       get: (input?: LocationGetInput, requestOptions?: RequestOptions) =>
@@ -557,6 +615,18 @@ export function make(options: ClientOptions) {
         ),
     },
     session: {
+      navigation: (input?: SessionNavigationInput, requestOptions?: RequestOptions) =>
+        request<SessionNavigationOutput>(
+          {
+            method: "GET",
+            path: `/api/session/navigation`,
+            query: { after: input?.["after"], sessionID: input?.["sessionID"], limit: input?.["limit"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       list: (input?: SessionListInput, requestOptions?: RequestOptions) =>
         request<SessionListOutput>(
           {
@@ -715,6 +785,17 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/rename`,
             body: { title: input["title"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401, 404],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      archive: (input: SessionArchiveInput, requestOptions?: RequestOptions) =>
+        request<SessionArchiveOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/archive`,
             successStatus: 204,
             declaredStatuses: [400, 401, 404],
             empty: true,
@@ -1059,7 +1140,7 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/message`,
-            query: { limit: input["limit"], order: input["order"], cursor: input["cursor"] },
+            query: { limit: input["limit"], order: input["order"], cursor: input["cursor"], type: input["type"] },
             successStatus: 200,
             declaredStatuses: [400, 401, 404, 500],
             empty: false,

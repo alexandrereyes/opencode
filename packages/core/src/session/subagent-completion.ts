@@ -19,8 +19,8 @@ export function text(message: SessionMessage.Info | undefined) {
 
 export const deliver = Effect.fnUntraced(function* (
   sessions: Pick<Session.Interface, "synthetic">,
-  jobs: Pick<Job.Interface, "completeBackground">,
-  input: Pick<Job.Info, "status" | "output" | "error" | "notificationID"> & {
+  jobs: Pick<Job.Interface, "completeBackground" | "guard">,
+  input: Pick<Job.Info, "id" | "generation" | "status" | "output" | "error" | "notificationID" | "origins"> & {
     recovery: Extract<Job.Recovery, { kind: "subagent" }>
     resume?: boolean
   },
@@ -33,13 +33,16 @@ export const deliver = Effect.fnUntraced(function* (
       : input.status === "error"
         ? (input.error ?? "Subagent failed")
         : "Subagent cancelled"
-  yield* sessions.synthetic({
-    ...(input.notificationID ? { id: input.notificationID } : {}),
-    sessionID: recovery.parentSessionID,
-    ...(input.resume === false ? { resume: false } : {}),
-    description: recovery.description,
-    text: `<subagent sessionID="${recovery.childSessionID}" state="${input.status}" description="${recovery.description}">\n${text}\n</subagent>`,
-    metadata: { source: "subagent", childID: recovery.childSessionID, agent: recovery.agent, state: input.status },
-  })
+  yield* jobs.guard(
+    input,
+    sessions.synthetic({
+      ...(input.notificationID ? { id: input.notificationID } : {}),
+      sessionID: recovery.parentSessionID,
+      ...(input.resume === false ? { resume: false } : {}),
+      description: recovery.description,
+      text: `<subagent sessionID="${recovery.childSessionID}" state="${input.status}" description="${recovery.description}">\n${text}\n</subagent>`,
+      metadata: { source: "subagent", childID: recovery.childSessionID, agent: recovery.agent, state: input.status },
+    }),
+  )
   if (input.notificationID) yield* jobs.completeBackground(input.notificationID)
 })

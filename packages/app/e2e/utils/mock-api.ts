@@ -68,6 +68,7 @@ const Group = HttpApiGroup.make("mock")
   .add(HttpApiEndpoint.get("skill", "/api/skill", { success: Json }))
   .add(HttpApiEndpoint.get("plugin", "/api/plugin", { success: Json }))
   .add(HttpApiEndpoint.get("mcp", "/api/mcp", { success: Json }))
+  .add(HttpApiEndpoint.get("mcpComputerUseApps", "/api/mcp/computer-use/app", { success: Json }))
   .add(HttpApiEndpoint.get("mcpResource", "/api/mcp/resource", { success: Json }))
   .add(HttpApiEndpoint.get("projectList", "/api/project", { success: Json }))
   .add(HttpApiEndpoint.get("projectCurrent", "/api/project/current", { success: Json }))
@@ -227,6 +228,12 @@ const Group = HttpApiGroup.make("mock")
   )
   .add(
     HttpApiEndpoint.post("sessionInterrupt", "/api/session/:sessionID/interrupt", {
+      params: SessionParams,
+      success: Json,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("sessionWait", "/api/session/:sessionID/wait", {
       params: SessionParams,
       success: NoContent,
     }),

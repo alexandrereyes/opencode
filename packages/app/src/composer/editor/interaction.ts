@@ -20,6 +20,8 @@ import {
 } from "../suggestions/machine"
 import { clonePrompt, promptLength } from "../prompt-parts"
 import type { ComposerQueue } from "../adapter"
+import { parseSessionReferences } from "../session-reference"
+import { getSelectionRange } from "./dom"
 
 export type ComposerSelectControl = {
   options: Accessor<ComposerOption[]>
@@ -60,7 +62,9 @@ export function createComposerEditor(input: {
   history?: ComposerHistory
   commands: Accessor<ComposerSuggestion[]>
   context: Accessor<ComposerSuggestion[]>
+  snippets?: Accessor<ComposerSuggestion[]>
   searchContextFiles: (query: string) => ComposerSuggestion[] | Promise<ComposerSuggestion[]>
+  server?: Accessor<string>
   openAttachment?: (attachment: ComposerAttachment) => void
   openContext?: (key: string) => void
   onContextRemove?: (item: ComposerComment) => void
@@ -105,7 +109,7 @@ export function createComposerEditor(input: {
   }
   const contextList = useFilteredList<ComposerSuggestion>({
     items: async (query) => {
-      const fixed = input.context().filter((item) => item.kind !== "file")
+      const fixed = input.context().filter((item) => item.kind !== "file" && item.kind !== "skill")
       const recent = input.context().filter((item) => item.kind === "file" && item.recent)
       if (!query.trim()) return [...fixed, ...recent]
       const seen = new Set(recent.map((item) => item.id))
@@ -113,28 +117,45 @@ export function createComposerEditor(input: {
       return [...fixed, ...recent, ...files]
     },
     key: (item) => item.id,
-    filterKeys: ["label"],
+    filterKeys: ["label", "search"],
     skipFilter: (item) => item.kind === "file" && !item.recent,
     groupBy: (item) => {
       if (item.kind === "reference") return "reference"
+      if (item.kind === "session") return "session"
       if (item.kind === "app") return "app"
-      if (item.kind === "skill") return "skill"
       if (item.kind === "agent") return "agent"
       if (item.kind === "resource") return "resource"
       if (item.recent) return "recent"
       return "file"
     },
     sortGroupsBy: (a, b) => {
-      const order = ["app", "reference", "skill", "agent", "resource", "recent", "file"]
+      const order = ["session", "app", "reference", "agent", "resource", "recent", "file"]
       return order.indexOf(a.category) - order.indexOf(b.category)
     },
+  })
+  const skillList = useFilteredList<ComposerSuggestion>({
+    items: () => input.context().filter((item) => item.kind === "skill"),
+    key: (item) => item.id,
+    filterKeys: ["label"],
   })
   const commandList = useFilteredList<ComposerSuggestion>({
     items: () => input.commands(),
     key: (item) => item.id,
     filterKeys: ["trigger", "title"],
   })
-  const list = () => (state.popover.type === "context" ? contextList : commandList)
+  const snippetList = useFilteredList<ComposerSuggestion>({
+    items: () => input.snippets?.() ?? [],
+    key: (item) => item.id,
+    filterKeys: ["search", "label"],
+  })
+  const list = () =>
+    state.popover.type === "context"
+      ? contextList
+      : state.popover.type === "skill"
+        ? skillList
+        : state.popover.type === "snippet"
+          ? snippetList
+          : commandList
   const suggestions = () => list().flat()
 
   const execute = (command: ComposerInteractionCommand) => {
@@ -143,7 +164,7 @@ export function createComposerEditor(input: {
       return
     }
     if (command.type === "draft.addText") {
-      draft.addText(command.value)
+      draft.addText(command.value, command.at)
       return
     }
     if (command.type === "mention.add") {
@@ -151,7 +172,14 @@ export function createComposerEditor(input: {
       return
     }
     if (command.type === "popover.filter") {
-      ;(command.popover === "command" ? commandList : contextList).onInput(command.query)
+      ;(command.popover === "command"
+        ? commandList
+        : command.popover === "skill"
+          ? skillList
+          : command.popover === "snippet"
+            ? snippetList
+            : contextList
+      ).onInput(command.query)
       return
     }
     if (command.type === "suggestion.select") {
@@ -159,7 +187,7 @@ export function createComposerEditor(input: {
       if (item) dispatch({ type: "popover.select", item })
       return
     }
-    if (command.type === "focus.editor") requestAnimationFrame(() => editor?.focus())
+    if (command.type === "focus.editor") editor?.focus()
   }
 
   function dispatch(event: ComposerInteractionEvent) {
@@ -190,6 +218,7 @@ export function createComposerEditor(input: {
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229 || event.key === "Dead") return true
     if (
       state.mode === "normal" &&
       (event.metaKey || event.ctrlKey) &&
@@ -309,6 +338,9 @@ export function createComposerEditor(input: {
     parts() {
       return draft.state.prompt
     },
+    cursor() {
+      return draft.state.cursor ?? promptLength(draft.state.prompt)
+    },
     contextItem(id: string) {
       return draft.state.context.items.find((item) => item.key === id)
     },
@@ -342,6 +374,7 @@ export function createComposerEditor(input: {
         return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
       }
       if (persisted.prompt.some((part) => part.type === "image")) return true
+      if (persisted.quotes?.length) return true
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
       return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
     },
@@ -395,6 +428,15 @@ export function createComposerEditor(input: {
       const text = clipboard?.getData("text/plain").replace(/\r\n?/g, "\n")
       if (!text) return
       event.preventDefault()
+      const references = input.server ? parseSessionReferences(text, input.server()) : undefined
+      if (references) {
+        draft.replaceRange(
+          references,
+          (editor && getSelectionRange(editor)) ?? { start: draft.state.cursor ?? 0, end: draft.state.cursor ?? 0 },
+        )
+        restoreFocus()
+        return
+      }
       // insertText emits input events per line, repeatedly parsing and saving the draft.
       // Escaped HTML inserts multiline text once and preserves native selection and undo.
       const multiline = text.includes("\n")

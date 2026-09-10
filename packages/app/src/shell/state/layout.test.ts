@@ -3,7 +3,7 @@ import { createRoot, createSignal } from "solid-js"
 import { Schema } from "effect"
 import { ServerConnection } from "@/runtime/server/registry"
 import { Persistence } from "@/runtime/persistence/schema"
-import { currentRoute, initialLayout, layoutPersistence, layoutSchema } from "./layout"
+import { currentRoute, initialLayout, layoutPersistence, layoutSchema, sessionPanelKey } from "./layout"
 import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./helpers"
 
 test("settings has its own layout route", () => {
@@ -99,12 +99,21 @@ describe("layout persistence", () => {
       sessionTabs: { old: { all: ["old"] }, [key]: { all: ["a", null, "a", "b"], active: 12 } },
       sessionView: { old: { scroll: {} }, [key]: { scroll: {}, reviewOpen: ["a", null, "b"] } },
     })
-    expect(value.sessionTabs).toEqual({ [key]: { all: ["a", "b"], active: undefined } })
+    expect(value.sessionTabs).toEqual({ [sessionPanelKey(key)]: { all: ["a", "b"], active: undefined } })
     expect(value.sessionView).toEqual({ [key]: { scroll: {}, reviewOpen: ["a", "b"] } })
   })
 })
 
 describe("layout session-key helpers", () => {
+  test("keeps panel selection scoped to server and session across locations", () => {
+    expect(sessionPanelKey("local\u0000L29sZA/ses_one")).toBe(sessionPanelKey("local\u0000L25ldw/ses_one"))
+    expect(sessionPanelKey("local\u0000L29sZA/ses_one")).not.toBe(sessionPanelKey("remote\u0000L29sZA/ses_one"))
+    expect(sessionPanelKey("local\u0000L29sZA/ses_one")).not.toBe(sessionPanelKey("local\u0000L29sZA/ses_two"))
+    const decode = Schema.decodeUnknownSync(Persistence.withInitial(layoutPersistence, initialLayout()))
+    const state = decode({ sessionTabs: { "local\u0000L29sZA/ses_one": { all: ["context"], active: "context" } } })
+    expect(state.sessionTabs[sessionPanelKey("local\u0000L25ldw/ses_one")]?.active).toBe("context")
+    expect(decode(state).sessionTabs).toEqual(state.sessionTabs)
+  })
   test("couples touch and scroll seed in order", () => {
     const calls: string[] = []
     const result = ensureSessionKey(

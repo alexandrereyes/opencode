@@ -1,7 +1,7 @@
 import { ImagePreview } from "@opencode/ui/image-preview"
 import { useDialog } from "@opencode/ui/context/dialog"
 import type { ReferenceInfo } from "@opencode/client/promise"
-import { createComponent, createEffect, createMemo, createResource, on } from "solid-js"
+import { createComponent, createEffect, createMemo, createResource, on, onCleanup } from "solid-js"
 import type { ComposerSuggestion } from "./types"
 import { createComposerEditor, createComposerEditorState, type ComposerEditorModel } from "./editor/interaction"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/workspaces/files/model"
@@ -16,15 +16,21 @@ import { createSessionTabs } from "@/session/helpers"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
 import type { ComposerAdapter, ComposerControls, ComposerQueue } from "./adapter"
-import type { ImageAttachmentPart } from "./state"
+import type { ComposerState, ImageAttachmentPart } from "./state"
 import type { PromptHistoryComment } from "./history/entry"
 import { createComposerHistory } from "./history/store"
 import { composerPlaceholder } from "./placeholder"
 import { createComposerSubmit, withSlashSkill } from "./submit"
+import { snippetSuggestions } from "@/settings/snippets/model"
+import { expandSnippets } from "./prompt-parts"
+import type { ChatQuote } from "./schema"
+import { createSessionSearch } from "./session-search"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
+  readonly quotes?: ComposerState["quotes"]
 }
 
 export function createComposerModel(adapter: ComposerAdapter, options?: { queue?: ComposerQueue }): ComposerModel {
@@ -35,6 +41,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const files = useFile()
   const layout = useLayout()
   const comments = useComments()
+  const commentScope = comments.capture()
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
@@ -83,7 +90,12 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
       .current()
       .map((part) => ("content" in part ? part.content : ""))
       .join("")
-    return text.trim().length === 0 && attachments().length === 0 && commentCount() === 0
+    return (
+      text.trim().length === 0 &&
+      attachments().length === 0 &&
+      commentCount() === 0 &&
+      (mode() === "shell" || prompt.quotes.all().length === 0)
+    )
   })
   const stopping = createMemo(() => adapter.working() && blank())
   const placeholder = () =>
@@ -94,7 +106,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     )
 
   const historyComments = () => {
-    const byID = new Map(comments.all().map((item) => [`${item.file}\n${item.id}`, item] as const))
+    const byID = new Map(commentScope.all().map((item) => [`${item.file}\n${item.id}`, item] as const))
     return prompt.context.items().flatMap((item) => {
       const comment = item.comment?.trim()
       if (!comment) return []
@@ -119,7 +131,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     })
   }
   const restoreHistoryComments = (items: PromptHistoryComment[]) => {
-    comments.replace(
+    commentScope.replace(
       items.map((item) => ({
         id: item.id,
         file: item.path,
@@ -206,7 +218,48 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
       .then((result) => result.data)
       .catch(() => []),
   )
+  const sessionSearch = createSessionSearch({
+    list: (query, signal) =>
+      server.ctx.sdk.api.session
+        .list(
+          { ...(query ? { search: query } : {}), parentID: null, order: "desc", limit: query ? 30 : 10 },
+          { signal },
+        )
+        .then((result) => result.data),
+    get: (sessionID, signal) => server.ctx.sdk.api.session.get({ sessionID }, { signal }),
+    current: () => (adapter.kind === "active-session" ? adapter.session().id : undefined),
+  })
+  onCleanup(() => sessionSearch.dispose())
+  const sessionSource = createMemo(() => {
+    if (interaction[0].popover.type !== "context" || !available()) return false
+    return interaction[0].popover.query.trim()
+  })
+  const [sessions] = createResource(sessionSource, (query) => sessionSearch.load(query), { initialValue: [] })
   const context = createMemo<ComposerSuggestion[]>(() => [
+    ...sessions.latest.map((session) => {
+      const title = session.title ?? language.t("command.session.new")
+      return {
+        id: `session:${server.key}:${session.id}`,
+        kind: "session" as const,
+        label: title,
+        description: session.location.directory,
+        detail: session.id,
+        kindLabel: language.t("promptInput.session"),
+        search: [title, session.id, session.location.directory].join(" "),
+        mention: {
+          type: "session" as const,
+          session: {
+            id: Session.ID.make(session.id),
+            server: server.key,
+            title: session.title,
+            directory: session.location.directory,
+          },
+          content: `@${title}`,
+          start: 0,
+          end: 0,
+        },
+      }
+    }),
     ...(appSource() && !apps.loading ? (apps() ?? []) : []).map((app) => ({
       id: `app:${app.server}:${app.bundleID}`,
       kind: "app" as const,
@@ -218,13 +271,13 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     ...skills().map((skill) => ({
       id: `skill:${skill.id}`,
       kind: "skill" as const,
-      label: `@${skill.id}`,
+      label: `$${skill.id}`,
       description: skill.description,
       mention: {
         type: "skill" as const,
         id: Skill.ID.make(skill.id),
         name: Skill.Name.make(skill.name),
-        content: `@${skill.id}`,
+        content: `$${skill.id}`,
         start: 0,
         end: 0,
       },
@@ -336,7 +389,8 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     },
     comments: {
       capture: historyComments,
-      clear: comments.clear,
+      clear: commentScope.clear,
+      current: commentScope.all,
       restore: restoreHistoryComments,
     },
   })
@@ -344,13 +398,32 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     store: prompt.store,
     state: interaction,
     history: {
-      entries: (mode) => history.entries(mode).map((entry) => ({ prompt: entry.prompt, metadata: entry.comments })),
-      add: (value, mode) => history.add(value, mode, mode === "shell" ? [] : historyComments()),
-      capture: historyComments,
-      restore: (metadata) => restoreHistoryComments(metadata as PromptHistoryComment[]),
+      entries: (mode) =>
+        history.entries(mode).map((entry) => ({
+          prompt: entry.prompt,
+          metadata: { comments: entry.comments, quotes: entry.quotes ?? [] },
+        })),
+      add: (value, mode) =>
+        history.add(
+          value,
+          mode,
+          mode === "shell" ? [] : historyComments(),
+          mode === "shell" ? [] : prompt.quotes.all(),
+        ),
+      capture: () => ({ comments: historyComments(), quotes: prompt.quotes.all().map((quote) => ({ ...quote })) }),
+      restore: (metadata) => {
+        const entry = metadata as { comments: PromptHistoryComment[]; quotes: ChatQuote[] } | undefined
+        restoreHistoryComments(entry?.comments ?? [])
+        prompt.quotes.replace(entry?.quotes ?? [])
+      },
     },
     commands,
     context,
+    server: () => server.key,
+    snippets: () => {
+      const project = sdk().current?.project.id
+      return snippetSuggestions(server.ctx.snippets.list(), project)
+    },
     searchContextFiles: async (query) =>
       (await files.searchFilesAndDirectories(query)).map((path) => ({
         id: `file:${path}`,
@@ -360,13 +433,13 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
         mention: { type: "file", path, content: `@${path}`, start: 0, end: 0 },
       })),
     onContextRemove(item) {
-      if (item?.commentID) comments.remove(item.path, item.commentID)
+      if (item?.commentID) commentScope.remove(item.path, item.commentID)
     },
     openAttachment: (attachment) =>
       dialog.show(() => createComponent(ImagePreview, { src: attachment.blob.url, alt: attachment.filename })),
     openContext(key) {
       const item = controller.contextItem(key)
-      if (item) openComment(item, adapter.controls(), layout, files, comments)
+      if (item) openComment(item, adapter.controls(), layout, files, commentScope)
     },
     onEditor(element) {
       editor = element as HTMLDivElement
@@ -430,7 +503,8 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
           // the composer value as a new prompt. Enter keeps it queued in
           // place; the alternate action sends it as a steer.
           if (queue?.editing()) {
-            prompt.set(withSlashSkill(prompt.current(), slashSkills()))
+            if (adapter.submissionBarrier?.pending()) return
+            prompt.set(expandSnippets(withSlashSkill(prompt.current(), slashSkills())))
             queue.confirmEdit(submitOptions?.alternate ? "steer" : "queue")
             return
           }
@@ -441,6 +515,15 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     },
   })
   Object.defineProperty(controller, "model", { get: () => adapter.controls().model })
+  Object.defineProperty(controller, "quotes", {
+    value: {
+      ...prompt.quotes,
+      add: (quote: Parameters<typeof prompt.quotes.add>[0]) => {
+        controller.dispatch({ type: "mode.normal" })
+        return prompt.quotes.add(quote)
+      },
+    },
+  })
 
   command.register("composer-editor", () => [
     {
@@ -488,7 +571,7 @@ function openComment(
   controls: ComposerControls,
   layout: ReturnType<typeof useLayout>,
   files: ReturnType<typeof useFile>,
-  comments: ReturnType<typeof useComments>,
+  comments: Pick<ReturnType<ReturnType<typeof useComments>["capture"]>, "setActive" | "setFocus" | "focus">,
 ) {
   if (!item.commentID) return
   const focus = { file: item.path, id: item.commentID }

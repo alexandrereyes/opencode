@@ -62,12 +62,7 @@ import { Document, Info } from "@opencode/schema/config"
 import { ConfigCompaction } from "@opencode/schema/config/compaction"
 import { Tool } from "@opencode/core/tool"
 import type { Info as ToolInfo } from "@opencode/schema/tool"
-import {
-  InstructionStateTable,
-  SessionInboxTable,
-  SessionMessageTable,
-  SessionTable,
-} from "@opencode/core/session/sql"
+import { InstructionStateTable, SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode/core/session/sql"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { SessionStore } from "@opencode/core/session/store"
 import { Instructions } from "@opencode/core/instructions/index"
@@ -1076,6 +1071,24 @@ describe("SessionRunnerLLM", () => {
         Expected.completedTool({ id: "call-location" }, { content: [Expected.text('{"answer":"HELLO"}')] }),
       ]),
     ])
+  })
+
+  scenario("executes a tool renamed by a session context hook", function* (s) {
+    const hooks = yield* PluginHooks.Service
+    yield* hooks.register("session", "context", (event) =>
+      Effect.sync(() => {
+        event.tools.renamed_echo = event.tools.echo!
+        delete event.tools.echo
+      }),
+    )
+    yield* s.admit("Use the renamed tool")
+    yield* s.llm.push(TestLLM.tool("call-renamed", "renamed_echo", { text: "renamed" }), [])
+
+    yield* s.resume
+
+    expect(s.requests[0]?.tools.map((tool) => tool.name)).toContain("renamed_echo")
+    expect(s.requests[0]?.tools.map((tool) => tool.name)).not.toContain("echo")
+    expect(s.executions).toEqual(["renamed"])
   })
 
   scenario("executes the tool advertised before a registry reload", function* (s) {
@@ -2399,7 +2412,7 @@ describe("SessionRunnerLLM", () => {
             expect(event.model.variant).toBe(variant)
             event.system.push(SystemPart.make("Hook-provided instructions"))
             event.tools.echo.description = "Hook-provided tool description"
-            event.generation.maxTokens = 4_000
+            event.options.maxTokens = 4_000
           }),
         )
         yield* hooks.register("session", "model.request", (event) =>
@@ -2450,7 +2463,7 @@ describe("SessionRunnerLLM", () => {
           expect(compact[field]).toEqual(normal[field])
         expect(compact.toolChoice).toBeUndefined()
         expect(compact.system.map((part) => part.text)).toContain("Review the project carefully.")
-        expect(requestAgents[2]).toBe(Agent.ID.make("compaction"))
+        expect(requestAgents[2]).toBe(agentID)
         expect(s.executions).toEqual(["x".repeat(4_000)])
         expect((yield* s.messages).find((message) => message.type === "compaction")).toMatchObject({
           model: { id: s.currentModel.id, providerID: s.currentModel.provider, variant },
@@ -2565,7 +2578,7 @@ describe("SessionRunnerLLM", () => {
     expect(s.requests).toHaveLength(5)
     for (const request of s.requests) expect(request).toEqual(s.requests[0])
     expect(retries.map((event) => event.attempt)).toEqual([2, 3, 4, 5])
-    expect(retries.every((event) => event.sessionID === sessionID && event.agent === "compaction")).toBe(true)
+    expect(retries.every((event) => event.sessionID === sessionID && event.agent === "build")).toBe(true)
     expect(retries[3].decision).toEqual({ retry: true, delay: 60_000 })
     expect((yield* s.messages).find((message) => message.id === compaction.id)).toMatchObject({
       status: "completed",
@@ -4665,6 +4678,28 @@ describe("SessionRunnerLLM", () => {
     yield* s.llm.push([])
     yield* s.resume
     expect(messageRoles(s.requests[0])).toEqual(["user", "assistant", "tool"])
+  })
+
+  scenario("finishes an existing tool continuation while staged without promoting pending input", function* (s) {
+    const boundary = yield* s.admit("Finish A while B is staged")
+    const tools = yield* s.blockTools()
+    yield* s.llm.push(
+      TestLLM.tool("call-before-stage", "echo", { text: "A tool result" }),
+      TestLLM.text("A final response", "a-final"),
+    )
+    const run = yield* s.resume.pipe(Effect.forkChild)
+    yield* tools.started
+    const pending = yield* s.session.prompt({ sessionID, text: "pending B", resume: false })
+    yield* s.bus.publish(SessionEvent.RevertEvent.Staged, {
+      sessionID,
+      revert: { messageID: boundary.id, files: [] },
+    })
+    yield* tools.release
+    yield* Fiber.join(run)
+
+    expect(s.requests).toHaveLength(2)
+    expect(JSON.stringify(yield* s.context)).toContain("A final response")
+    expect((yield* s.inbox).map((item) => item.id)).toEqual([pending.id])
   })
 
   scenario("interrupts a blocked step without local tool execution", function* (s) {

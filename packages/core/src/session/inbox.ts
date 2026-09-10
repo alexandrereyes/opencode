@@ -23,7 +23,7 @@ import { KeyedMutex } from "../effect/keyed-mutex.js"
 import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
-import { SessionInboxTable, SessionMessageTable } from "./sql.js"
+import { SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -62,6 +62,9 @@ type PendingRef = { readonly id: SessionMessage.ID; readonly sessionID: SessionS
 
 export const serialized = <A, E, R>(sessionID: SessionSchema.ID, effect: Effect.Effect<A, E, R>) =>
   inboxLocks.withLock(sessionID)(effect)
+
+export const serializedAll = <A, E, R>(sessionIDs: readonly SessionSchema.ID[], effect: Effect.Effect<A, E, R>) =>
+  [...new Set(sessionIDs)].toSorted().reduceRight((result, sessionID) => serialized(sessionID, result), effect)
 
 export class LifecycleConflict extends Schema.TaggedError<LifecycleConflict>()("SessionInbox.LifecycleConflict", {
   id: SessionMessage.ID,
@@ -202,31 +205,29 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
     return admitted
   }, Maintenance.process.run)
 
-  const admitCompaction = Effect.fn("SessionInbox.admitCompaction")(function* (input: {
+  const admitCompactionLocked = Effect.fn("SessionInbox.admitCompactionLocked")(function* (input: {
     readonly id: SessionMessage.ID
     readonly sessionID: SessionSchema.ID
     readonly delivery: Delivery
   }) {
-    return yield* serialized(
-      input.sessionID,
-      Effect.gen(function* () {
-        const exact = yield* find(db, input.id)
-        if (exact) {
-          if (exact.type === "compaction" && exact.sessionID === input.sessionID) return exact
-          return yield* new LifecycleConflict({ id: input.id })
-        }
-        if (yield* promotedFromMessage(db, input.sessionID, input.id, input.delivery))
-          return yield* new LifecycleConflict({ id: input.id })
-        const pending = (yield* list(db, input.sessionID)).find((item) => item.type === "compaction")
-        if (pending) return pending
-        return yield* admit({
-          id: input.id,
-          sessionID: input.sessionID,
-          item: { type: "compaction", payload: {}, delivery: Delivery.make(input.delivery) },
-        })
-      }),
-    )
+    const exact = yield* find(db, input.id)
+    if (exact) {
+      if (exact.type === "compaction" && exact.sessionID === input.sessionID) return exact
+      return yield* new LifecycleConflict({ id: input.id })
+    }
+    if (yield* promotedFromMessage(db, input.sessionID, input.id, input.delivery))
+      return yield* new LifecycleConflict({ id: input.id })
+    const pending = (yield* list(db, input.sessionID)).find((item) => item.type === "compaction")
+    if (pending) return pending
+    return yield* admit({
+      id: input.id,
+      sessionID: input.sessionID,
+      item: { type: "compaction", payload: {}, delivery: Delivery.make(input.delivery) },
+    })
   })
+
+  const admitCompaction = (input: Parameters<typeof admitCompactionLocked>[0]) =>
+    serialized(input.sessionID, admitCompactionLocked(input))
 
   const cancel = Effect.fn("SessionInbox.cancel")((input: PendingRef) =>
     publishMutation(
@@ -265,6 +266,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
     reconcile,
     admit,
     admitCompaction,
+    admitCompactionLocked,
     cancel,
     steer,
     queue,
@@ -410,6 +412,13 @@ export const nextPromotable = Effect.fn("SessionInbox.nextPromotable")(function*
   sessionID: SessionSchema.ID,
   promotable: Promotable,
 ) {
+  const session = yield* db
+    .select({ revert: SessionTable.revert })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, sessionID))
+    .get()
+    .pipe(Effect.orDie)
+  if (session?.revert) return undefined
   const steer = (yield* pendingSteers(db, sessionID))[0]
   if (steer) return fromRow(steer)
   if (promotable !== "input") return undefined
@@ -503,6 +512,13 @@ export const promote = Effect.fn("SessionInbox.promote")(function* (
   return yield* serialized(
     sessionID,
     Effect.gen(function* () {
+      const session = yield* db
+        .select({ revert: SessionTable.revert })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (session?.revert) return 0
       const steers = yield* pendingSteers(db, sessionID)
       if (steers.length > 0 || scope === "steer") {
         const control = steers.findIndex((row) => row.type === "compaction" || row.type === "move")

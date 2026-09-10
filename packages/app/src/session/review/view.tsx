@@ -14,6 +14,7 @@ import { ReviewPanel } from "./panel"
 import { SessionReviewTab } from "./review-tab"
 import type { ChangeMode, SessionReviewModel } from "./model"
 import type { createSessionBrowser } from "../browser/model"
+import { SessionContextUsage } from "../timeline/session-context-usage"
 
 const StatusDrawer = lazy(async () => {
   const { StatusDrawer } = await import("@/shell/status/status-drawer")
@@ -50,7 +51,7 @@ export function SessionMobileViewTabs(props: {
     >
       <Tabs value={props.current} variant="line" class="!h-auto min-w-0 flex-1" data-slot="session-mobile-view-tabs">
         <Tabs.List aria-label={language.t("session.view.select")} class="!h-9 !gap-0 !px-0 before:!hidden">
-          <For each={["session", "changes", "files", "terminal"] as const}>
+          <For each={["session", "changes", "files", "usage"] as const}>
             {(view) => (
               <Tabs.Trigger
                 value={view}
@@ -58,13 +59,16 @@ export function SessionMobileViewTabs(props: {
                 classes={{ button: "w-full justify-center" }}
                 onClick={() => props.onSelect(view)}
               >
+                <Show when={view === "usage"}>
+                  <SessionContextUsage variant="indicator" placement="bottom" />
+                </Show>
                 {view === "session"
                   ? language.t("session.tab.session")
                   : view === "changes"
                     ? language.plural("session.review.change", 0)
                     : view === "files"
                       ? language.t("session.tab.files")
-                      : language.t("terminal.title")}
+                      : language.t("session.tab.usage")}
               </Tabs.Trigger>
             )}
           </For>
@@ -87,7 +91,7 @@ export function SessionMobileViewTabs(props: {
           variant="ghost-muted"
           size="normal"
           class="mx-1.5 shrink-0"
-          state={props.current === "usage" || store.menu ? "pressed" : undefined}
+          state={props.current === "terminal" || store.menu ? "pressed" : undefined}
           aria-label={language.t("common.moreOptions")}
         />
         <Menu.Portal>
@@ -100,7 +104,7 @@ export function SessionMobileViewTabs(props: {
               setStore("pending", undefined)
             }}
           >
-            <Menu.Item onSelect={() => props.onSelect("usage")}>{language.t("session.tab.usage")}</Menu.Item>
+            <Menu.Item onSelect={() => props.onSelect("terminal")}>{language.t("terminal.title")}</Menu.Item>
             <Show when={props.details}>
               <Menu.Item onSelect={() => setStore({ pending: "details", menu: false })}>
                 {language.t("session.summary.title")}

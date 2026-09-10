@@ -1487,6 +1487,93 @@ describe("ShellTool", () => {
     ),
   )
 
+  it.live("causal cancellation kills a background shell without admitting a cancellation notice", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const bus = yield* Bus.Service
+            const jobs = yield* Job.Service
+            const shell = yield* Shell.Service
+            const admitted = yield* bus.subscribe(SessionEvent.InboxEnqueued).pipe(
+              Stream.filter((event) => event.data.sessionID === sessionID && event.data.item.type === "synthetic"),
+              Stream.runHead,
+              Effect.timeoutOption(Duration.millis(100)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            const callID = "call-causal-background-shell"
+            const settled = yield* executeTool(registry, call({ command: idleCommand, background: true }, callID))
+            const shellID = settled.metadata?.shellID
+            expect(typeof shellID).toBe("string")
+            if (typeof shellID !== "string") return
+
+            const plan = yield* jobs.invalidateCausal({
+              origins: [
+                {
+                  parentSessionID: sessionID,
+                  messageID: toolIdentity.messageID,
+                  toolCallID: callID,
+                },
+              ],
+            })
+            expect(plan.jobs).toMatchObject([{ id: shellID }])
+            yield* jobs.cancelCausal(plan)
+
+            expect((yield* jobs.get(shellID))?.status).toBe("cancelled")
+            expect((yield* shell.list()).map((info) => info.id)).not.toContain(ID.make(shellID))
+            expect((yield* Fiber.join(admitted)).valueOrUndefined).toBeUndefined()
+            expect((yield* jobs.pendingBackground).find((job) => job.id === shellID)).toBeUndefined()
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+    ),
+  )
+
+  it.live("fails rejected foreground and background shell starts without waiting or reporting running", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const jobs = yield* Job.Service
+            const shell = yield* Shell.Service
+            yield* Effect.forEach(
+              [false, true],
+              Effect.fnUntraced(function* (background) {
+                const callID = `call-rejected-shell-${background ? "background" : "foreground"}`
+                yield* jobs.invalidateCausal({
+                  origins: [
+                    {
+                      parentSessionID: sessionID,
+                      messageID: toolIdentity.messageID,
+                      toolCallID: callID,
+                    },
+                  ],
+                })
+                expect(
+                  yield* executeTool(registry, call({ command: idleCommand, background }, callID)).pipe(
+                    Effect.timeout("5 seconds"),
+                  ),
+                ).toMatchObject({
+                  status: "error",
+                  error: { message: expect.stringContaining("Command cancelled") },
+                })
+                expect(yield* shell.list()).toEqual([])
+                expect(yield* jobs.pendingBackground).toEqual([])
+              }),
+              { discard: true },
+            )
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+    ),
+  )
+
   it.live("preserves a background command's non-zero exit", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

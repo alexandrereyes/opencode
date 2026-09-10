@@ -8,6 +8,7 @@ import { ImagePreview } from "@opencode/ui/image-preview"
 import { getFilename } from "@opencode/util/path"
 import { AttachmentCard } from "./attachment-card"
 import { CommentCard } from "./comment-card"
+import { UserMessageQuote } from "./user-message-quote"
 import { TimelineSeparator } from "../components/timeline-separator"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { IconButton } from "@opencode/ui/icon-button"
@@ -26,7 +27,7 @@ import type {
   SessionMessageCompaction,
   SessionMessageUser,
 } from "@opencode/client/promise"
-import type { SessionUserActions, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
@@ -204,10 +205,15 @@ export function CurrentUserMessageDisplay(props: {
   sessionID: string
   message: SessionMessageUser
   text: string
+  copyText?: string
   agent: string
   model: SessionMessageAssistant["model"]
   actions?: SessionUserActions
   comments?: SessionUserComment[]
+  quotes?: SessionUserQuote[]
+  quoteOpen?: (id: string) => boolean | undefined
+  onQuoteOpenChange?: (id: string, open: boolean) => void
+  sessions?: Array<{ start: number; end: number }>
 }) {
   const data = useData()
   const dialog = useDialog()
@@ -217,6 +223,8 @@ export function CurrentUserMessageDisplay(props: {
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
   const comments = createMemo(() => props.comments ?? [])
+  const hasBody = () => !!props.text || !!props.quotes?.length
+  const copyText = () => props.copyText ?? (props.quotes?.length ? props.message.text : props.text)
   const model = createMemo(() => {
     const match = data.store.provider?.all?.get(props.model.providerID)
     return match?.models?.[props.model.id]?.name ?? props.model.id
@@ -228,7 +236,7 @@ export function CurrentUserMessageDisplay(props: {
   })
   const stamp = createMemo(() => timefmt().format(props.message.time.created))
   const copy = async () => {
-    if (!props.text || !(await writeClipboard(props.text))) return
+    if (!copyText() || !(await writeClipboard(copyText()))) return
     setState("copied", true)
     setTimeout(() => setState("copied", false), 2000)
   }
@@ -280,9 +288,9 @@ export function CurrentUserMessageDisplay(props: {
   )
 
   return (
-    <div data-component="user-message" data-timeline-part-id={props.text ? `${props.message.id}:text:0` : undefined}>
+    <div data-component="user-message" data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}>
       <Show
-        when={props.text}
+        when={hasBody()}
         fallback={
           <Show when={comments().length > 0}>
             <UserMessageComments comments={comments()} bounded={false} />
@@ -290,8 +298,34 @@ export function CurrentUserMessageDisplay(props: {
         }
       >
         <div data-slot="user-message-body">
-          <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />
+          <div
+            data-slot="user-message-text"
+            dir={props.quotes?.length ? undefined : "auto"}
+            data-comments={comments().length > 0 ? "true" : undefined}
+          >
+            <Show when={props.text}>
+              <div data-slot="user-message-draft" dir="auto">
+                <CurrentHighlightedText
+                  text={props.text}
+                  files={inlineFiles()}
+                  agents={agents()}
+                  sessions={props.sessions ?? []}
+                />
+              </div>
+            </Show>
+            <Show when={props.quotes?.length}>
+              <div data-slot="user-message-quotes">
+                <For each={props.quotes}>
+                  {(quote) => (
+                    <UserMessageQuote
+                      quote={quote}
+                      open={props.quoteOpen?.(quote.id)}
+                      onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
+                    />
+                  )}
+                </For>
+              </div>
+            </Show>
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />
             </Show>
@@ -299,7 +333,7 @@ export function CurrentUserMessageDisplay(props: {
         </div>
       </Show>
       {renderAttachments()}
-      <Show when={props.text || comments().length > 0}>
+      <Show when={hasBody() || comments().length > 0}>
         <div data-slot="user-message-copy-wrapper">
           <span data-slot="user-message-meta-wrap">
             <Show when={metaHead()}>
@@ -329,7 +363,7 @@ export function CurrentUserMessageDisplay(props: {
               aria-label={i18n.t("ui.message.revertMessage")}
             />
           </Show>
-          <Show when={props.text}>
+          <Show when={copyText()}>
             <MessageActionButton
               icon={state.copied ? "check" : "copy"}
               label={state.copied ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyMessage")}
@@ -351,6 +385,7 @@ function CurrentHighlightedText(props: {
   text: string
   files: PromptFileAttachment[]
   agents: PromptAgentAttachment[]
+  sessions: Array<{ start: number; end: number }>
 }) {
   const segments = createMemo(() => {
     const references = [
@@ -360,6 +395,7 @@ function CurrentHighlightedText(props: {
       ...props.agents.flatMap((agent) =>
         agent.mention ? [{ start: agent.mention.start, end: agent.mention.end, type: "agent" as const }] : [],
       ),
+      ...props.sessions.map((session) => ({ ...session, type: "session" as const })),
     ].sort((a, b) => a.start - b.start)
     const result: HighlightSegment[] = []
     let last = 0
@@ -377,8 +413,10 @@ function CurrentHighlightedText(props: {
       {(segment) => (
         <span data-highlight={segment.type}>
           <Show when={segment.type && segment.text.startsWith("@")} fallback={segment.text}>
-            <span data-slot="user-message-mention-prefix">@</span>
-            {segment.text.slice(1)}
+            <bdi dir={segment.type === "session" ? "auto" : "ltr"}>
+              <span data-slot="user-message-mention-prefix">@</span>
+              {segment.text.slice(1)}
+            </bdi>
           </Show>
         </span>
       )}
@@ -386,13 +424,14 @@ function CurrentHighlightedText(props: {
   )
 }
 
-type HighlightSegment = { text: string; type?: "file" | "agent" }
+type HighlightSegment = { text: string; type?: "file" | "agent" | "session" }
 
 export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
   const i18n = useI18n()
   const summary = () => (props.message.status === "failed" ? "" : props.message.summary)
   const error = () => {
-    if (props.message.status !== "failed" || props.message.error.type === "aborted") return ""
+    if (props.message.status !== "failed") return ""
+    if (props.message.error.type === "aborted" || props.message.error.type === "compaction.interrupted") return ""
     return props.error
   }
   const compact = createMemo(
@@ -410,24 +449,33 @@ export function SessionCompactionMessage(props: { message: SessionMessageCompact
       output: compact().format(output),
     })
   }
-  const label = createMemo(() =>
-    [
-      i18n.t(
-        props.message.status === "completed" && props.message.providerContext
-          ? "ui.messagePart.providerCompaction"
-          : "ui.messagePart.compaction",
-      ),
-      usage(),
-    ]
-      .filter(Boolean)
-      .join(" · "),
-  )
+  const outcome = () => {
+    if (props.message.status !== "failed")
+      return props.message.status === "completed" && props.message.providerContext
+        ? "ui.messagePart.providerCompaction"
+        : "ui.messagePart.compaction"
+    if (props.message.error.type === "aborted") return "ui.messagePart.compaction.cancelled"
+    if (props.message.error.type === "compaction.interrupted") return "ui.messagePart.compaction.interrupted"
+    return "ui.messagePart.compaction.failed"
+  }
+  const label = createMemo(() => [i18n.t(outcome()), usage()].filter(Boolean).join(" · "))
 
   return (
     <div data-component="session-compaction-message">
       <div class="py-2">
-        <TimelineSeparator label={label()} />
+        <TimelineSeparator label={i18n.t("ui.messagePart.compaction.started")} />
       </div>
+      <Show when={props.message.status === "running"}>
+        <div role="status" class="py-2">
+          <BasicTool
+            icon="archive"
+            trigger={{ title: i18n.t("ui.messagePart.compaction.running") }}
+            status="running"
+            locked
+            hideDetails
+          />
+        </div>
+      </Show>
       <Show when={summary().trim()}>
         <div data-component="text-part" data-timeline-part-id={props.message.id}>
           <div data-slot="text-part-body">
@@ -437,6 +485,11 @@ export function SessionCompactionMessage(props: { message: SessionMessageCompact
               streaming={props.message.status === "running"}
             />
           </div>
+        </div>
+      </Show>
+      <Show when={props.message.status !== "running"}>
+        <div class="py-2">
+          <TimelineSeparator label={label()} />
         </div>
       </Show>
       <Show when={error()}>
@@ -485,15 +538,39 @@ export function AssistantTextContent(props: {
     })
   })
   const meta = createMemo(() => {
-    const agent = props.message.agent
+    const elapsed = (props.message.time.streamed ?? props.message.time.created) - props.message.time.created
+    const output = props.message.tokens?.output ?? 0
     return [
-      agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
-      model(),
-      duration(),
-      interrupted() ? i18n.t("ui.message.interrupted") : "",
-    ]
-      .filter(Boolean)
-      .join(" \u00B7 ")
+      { icon: "models", text: model() },
+      { icon: "brain", text: props.message.model.variant },
+      { icon: "subagent", text: props.message.agent },
+      {
+        icon: "gauge",
+        text:
+          elapsed > 0 && output > 0
+            ? i18n.t("ui.message.tokensPerSecond", {
+                count: new Intl.NumberFormat(i18n.locale(), {
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                }).format((output * 1000) / elapsed),
+              })
+            : "",
+      },
+      { icon: "hourglass", text: duration() },
+      {
+        icon: "clock",
+        text: new Intl.DateTimeFormat("en-GB", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .format(props.message.time.created)
+          .replace(",", ""),
+      },
+      { icon: "circle-ban-sign", text: interrupted() ? i18n.t("ui.message.interrupted") : "" },
+    ] satisfies { icon: ComponentProps<typeof Icon>["name"]; text: string | undefined }[]
   })
   const [copied, setCopied] = createSignal(false)
   const copy = async () => {
@@ -514,6 +591,16 @@ export function AssistantTextContent(props: {
         </div>
         <Show when={props.showCopy}>
           <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>
+            <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
+              <For each={meta().filter((item) => item.text)}>
+                {(item) => (
+                  <span data-slot="text-part-meta-item">
+                    <Icon name={item.icon} size="small" />
+                    <span>{item.text}</span>
+                  </span>
+                )}
+              </For>
+            </span>
             <MessageActionButton
               icon={copied() ? "check" : "copy"}
               label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
@@ -521,11 +608,6 @@ export function AssistantTextContent(props: {
               onClick={copy}
               aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
             />
-            <Show when={meta()}>
-              <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
-                {meta()}
-              </span>
-            </Show>
           </div>
         </Show>
       </div>

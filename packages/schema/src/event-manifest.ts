@@ -27,6 +27,7 @@ import { Reference } from "./reference.js"
 import { ServerEvent } from "./server-event.js"
 import { Shell } from "./shell.js"
 import { Skill } from "./skill.js"
+import { Snippet } from "./snippet.js"
 import { SessionCompactionEvent } from "./session-compaction-event.js"
 import { SessionEvent } from "./session-event.js"
 import { SessionStatusEvent } from "./session-status-event.js"
@@ -57,6 +58,7 @@ const featureDefinitions = Event.inventory(
   ...Command.Event.Definitions,
   ...Config.Event.Definitions,
   ...Skill.Event.Definitions,
+  ...Snippet.Event.Definitions,
   ...Pty.Event.Definitions,
   ...PersistentPty.Event.Definitions,
   ...Shell.Event.Definitions,

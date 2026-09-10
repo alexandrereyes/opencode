@@ -228,6 +228,7 @@ export const { use: useComments, provider: CommentsProvider } = createSimpleCont
     const session = createMemo(() => load(base64Encode(sdk().directory), params.id))
 
     return {
+      capture: () => session(),
       ready: () => session().ready(),
       list: (file: string) => session().list(file),
       all: () => session().all(),

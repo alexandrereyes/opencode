@@ -2,6 +2,8 @@ export type JsonValue = null | boolean | number | string | Array<JsonValue> | { 
 
 export type ServiceHealth = { healthy: true; version: string; pid: number }
 
+export type SnippetID = string
+
 export type ModelRef = { id: string; providerID: string; variant?: string }
 
 export type ProviderSettings = { [x: string]: any }
@@ -42,6 +44,8 @@ export type FileDiffInfo = {
   deletions: number
   status: "added" | "deleted" | "modified"
 }
+
+export type SessionRevertChild = { sessionID: string; messageID?: string; pendingIDs: Array<string> }
 
 export type SessionStatsToolTotals = { calls: number; succeeded: number; failed: number; unfinished: number }
 
@@ -433,6 +437,15 @@ export type WebSearchResult = { url: string; title?: string; content?: string; t
 
 export type ConfigWorktree = { directory: string }
 
+export type SnippetInfo = {
+  id: SnippetID
+  name: string
+  description: string
+  aliases: Array<string>
+  content: string
+  project?: string
+}
+
 export type ProviderRequest = {
   settings: ProviderSettings
   headers: { [x: string]: string }
@@ -473,7 +486,14 @@ export type V2EventServerConnected = {
   data: {}
 }
 
-export type SessionRevert = { messageID: string; partID?: string; snapshot?: string; files?: Array<FileDiffInfo> }
+export type SessionRevert = {
+  messageID: string
+  parentID?: string
+  partID?: string
+  snapshot?: string
+  files?: Array<FileDiffInfo>
+  children?: Array<SessionRevertChild>
+}
 
 export type SessionStatsTools =
   | { mode: "none" }
@@ -613,6 +633,16 @@ export type SessionRenamed = {
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: { sessionID: string; title: string }
+}
+
+export type SessionArchived = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.archived"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string }
 }
 
 export type SessionViewed = {
@@ -842,6 +872,21 @@ export type SessionRevertCommitted = {
   data: { sessionID: string; to: string }
 }
 
+export type SessionSubagentInputAssigned = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.subagent.input.assigned"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    childSessionID: string
+    inputID: string
+    origin: { messageID: string; toolCallID: string }
+  }
+}
+
 export type SessionUsageRecorded = {
   id: string
   created: number
@@ -1029,6 +1074,15 @@ export type SkillUpdated = {
   created: number
   metadata?: { [x: string]: any }
   type: "skill.updated"
+  location?: LocationRef
+  data: {}
+}
+
+export type SnippetUpdated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "snippet.updated"
   location?: LocationRef
   data: {}
 }
@@ -1492,6 +1546,7 @@ export type FormAnswer = { [x: string]: FormValue }
 
 export type PermissionRequest = {
   id: string
+  created?: number
   sessionID: string
   action: string
   resources: Array<string>
@@ -1509,6 +1564,7 @@ export type PermissionAsked = {
   location?: LocationRef
   data: {
     id: string
+    created?: number
     sessionID: string
     action: string
     resources: Array<string>
@@ -2086,6 +2142,14 @@ export type ConfigEntry =
   | { type: "agents"; path: string }
   | { type: "claude"; path: string }
 
+export type SessionNavigationInfo = {
+  session: SessionInfo
+  messageAt?: number
+  unreadAt?: number
+  permissionAt?: number
+  questionAt?: number
+}
+
 export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
 
 export type SessionInboxUser = {
@@ -2142,6 +2206,8 @@ export type FormFields = [FormField, ...Array<FormField>]
 
 export type FormFields2 = [FormField1, ...Array<FormField1>]
 
+export type SessionNavigationPage = { data: Array<SessionNavigationInfo>; next?: string }
+
 export type SessionInboxInfo = SessionInboxUser | SessionInboxSynthetic | SessionInboxCompaction | SessionInboxMove
 
 export type SessionInboxEnqueued = {
@@ -2181,9 +2247,23 @@ export type IntegrationOAuthMethod = { id: string; type: "oauth"; label: string;
 
 export type IntegrationKeyMethod = { type: "key"; label?: string; form?: FormFields }
 
-export type FormInfo = { id: string; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
+export type FormInfo = {
+  id: string
+  sessionID: string
+  title: string
+  metadata?: FormMetadata
+  created?: number
+  fields: FormFields
+}
 
-export type FormInfo1 = { id: string; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields2 }
+export type FormInfo1 = {
+  id: string
+  sessionID: string
+  title: string
+  metadata?: FormMetadata1
+  created?: number
+  fields: FormFields2
+}
 
 export type SessionMessageInfo =
   | SessionMessageAgentSelected
@@ -2235,6 +2315,7 @@ export type SessionEventDurable =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchived
   | SessionViewed
   | SessionDeleted
   | SessionForked
@@ -2271,6 +2352,7 @@ export type SessionEventDurable =
   | SessionRevertStaged
   | SessionRevertCleared
   | SessionRevertCommitted
+  | SessionSubagentInputAssigned
   | SessionUsageRecorded
   | SessionMessageContentUpdated
 
@@ -2294,6 +2376,7 @@ export type V2Event =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
+  | SessionArchived
   | SessionViewed
   | SessionUsageUpdated
   | SessionDeleted
@@ -2336,6 +2419,7 @@ export type V2Event =
   | SessionRevertStaged
   | SessionRevertCleared
   | SessionRevertCommitted
+  | SessionSubagentInputAssigned
   | FilesystemChanged
   | ReferenceUpdated
   | PermissionAsked
@@ -2347,6 +2431,7 @@ export type V2Event =
   | CommandUpdated
   | ConfigUpdated
   | SkillUpdated
+  | SnippetUpdated
   | PtyCreated
   | PtyUpdated
   | PtyExited
@@ -2389,6 +2474,14 @@ export type UnauthorizedError = { readonly _tag: "UnauthorizedError"; readonly m
 export const isUnauthorizedError = (value: unknown): value is UnauthorizedError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError"
 
+export type ConflictError = {
+  readonly _tag: "ConflictError"
+  readonly message: string
+  readonly resource?: string | undefined
+}
+export const isConflictError = (value: unknown): value is ConflictError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
+
 export type AgentNotFoundError = {
   readonly _tag: "AgentNotFoundError"
   readonly agentID: string
@@ -2416,14 +2509,6 @@ export type SessionNotFoundError = {
 }
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
-
-export type ConflictError = {
-  readonly _tag: "ConflictError"
-  readonly message: string
-  readonly resource?: string | undefined
-}
-export const isConflictError = (value: unknown): value is ConflictError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
 export type UnknownError = {
   readonly _tag: "UnknownError"
@@ -2577,6 +2662,29 @@ export const isWorktreeError = (value: unknown): value is WorktreeError =>
 
 export type HealthGetOutput = ServiceHealth
 
+export type ServerSubscriptionsOutput = {
+  status: "ok" | "unconfigured" | "unavailable"
+  accounts: Array<{
+    id: string
+    name: string
+    enabled: boolean
+    plan: string | null
+    authenticated: boolean
+    cooldownSeconds: number
+    bankedResets: {
+      available: number
+      earliestExpiresAt: string | null
+      latestExpiresAt: string | null
+      nonExpiring: number
+    } | null
+    remaining: number | null
+    resetAt: string | null
+    observedAt: string | null
+    stale: boolean
+    hasCapacity: boolean | null
+  }>
+}
+
 export type ServerGetOutput = { urls: Array<string> }
 
 export type ServerMaintenanceAcquireOutput = {
@@ -2594,6 +2702,65 @@ export type ServerMaintenanceCommitInput = {
 }
 
 export type ServerMaintenanceCommitOutput = { committed: boolean }
+
+export type SnippetListOutput = Array<SnippetInfo>
+
+export type SnippetSaveInput = {
+  readonly id: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["id"]
+  readonly name: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["name"]
+  readonly description: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["description"]
+  readonly aliases: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["aliases"]
+  readonly content: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["content"]
+  readonly project?: {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly aliases: ReadonlyArray<string>
+    readonly content: string
+    readonly project?: string
+  }["project"]
+}
+
+export type SnippetSaveOutput = SnippetInfo
+
+export type SnippetRemoveInput = { readonly id: { readonly id: string }["id"] }
+
+export type SnippetRemoveOutput = void
 
 export type LocationGetInput = {
   readonly location?: {
@@ -2669,6 +2836,26 @@ export type PluginUpdateInput = {
 }
 
 export type PluginUpdateOutput = void
+
+export type SessionNavigationInput = {
+  readonly after?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["after"]
+  readonly sessionID?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["sessionID"]
+  readonly limit?: {
+    readonly after?: string | undefined
+    readonly sessionID?: string | undefined
+    readonly limit?: number | undefined
+  }["limit"]
+}
+
+export type SessionNavigationOutput = SessionNavigationPage
 
 export type SessionListInput = {
   readonly workspace?: {
@@ -2902,6 +3089,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -2910,6 +3098,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }
@@ -3207,6 +3400,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -3215,6 +3409,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }
@@ -3512,6 +3711,7 @@ export type SessionImportInput = {
       readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
+        readonly parentID?: string
         readonly partID?: string
         readonly snapshot?: string
         readonly files?: ReadonlyArray<{
@@ -3520,6 +3720,11 @@ export type SessionImportInput = {
           readonly additions: number
           readonly deletions: number
           readonly status: "added" | "deleted" | "modified"
+        }>
+        readonly children?: ReadonlyArray<{
+          readonly sessionID: string
+          readonly messageID?: string
+          readonly pendingIDs: ReadonlyArray<string>
         }>
       }
     }
@@ -3835,6 +4040,10 @@ export type SessionRenameInput = {
 }
 
 export type SessionRenameOutput = void
+
+export type SessionArchiveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionArchiveOutput = void
 
 export type SessionMoveInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
@@ -4366,17 +4575,70 @@ export type MessageListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly cursor?: string | undefined
+    readonly type?:
+      | "agent-switched"
+      | "model-switched"
+      | "location-switched"
+      | "user"
+      | "synthetic"
+      | "system"
+      | "skill"
+      | "shell"
+      | "assistant"
+      | "compaction"
+      | undefined
   }["limit"]
   readonly order?: {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly cursor?: string | undefined
+    readonly type?:
+      | "agent-switched"
+      | "model-switched"
+      | "location-switched"
+      | "user"
+      | "synthetic"
+      | "system"
+      | "skill"
+      | "shell"
+      | "assistant"
+      | "compaction"
+      | undefined
   }["order"]
   readonly cursor?: {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly cursor?: string | undefined
+    readonly type?:
+      | "agent-switched"
+      | "model-switched"
+      | "location-switched"
+      | "user"
+      | "synthetic"
+      | "system"
+      | "skill"
+      | "shell"
+      | "assistant"
+      | "compaction"
+      | undefined
   }["cursor"]
+  readonly type?: {
+    readonly limit?: number | undefined
+    readonly order?: "asc" | "desc" | undefined
+    readonly cursor?: string | undefined
+    readonly type?:
+      | "agent-switched"
+      | "model-switched"
+      | "location-switched"
+      | "user"
+      | "synthetic"
+      | "system"
+      | "skill"
+      | "shell"
+      | "assistant"
+      | "compaction"
+      | undefined
+  }["type"]
 }
 
 export type MessageListOutput = SessionMessagesResponse

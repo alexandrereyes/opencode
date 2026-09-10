@@ -1,0 +1,87 @@
+import { expect, test } from "@playwright/test"
+import { fixture, pageMessages } from "../performance/timeline/session-timeline-stress.fixture"
+import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
+import { mockOpenCodeServer } from "../utils/mock-server"
+
+for (const layout of ["horizontal", "vertical", "mobile"] as const) {
+  test.describe(layout, () => {
+    test.use({
+      viewport: layout === "mobile" ? { width: 390, height: 844 } : { width: 1280, height: 800 },
+      hasTouch: layout === "mobile",
+    })
+
+    test("session menu confirms deletion and archives without deleting", async ({ page }, testInfo) => {
+      const sessions = structuredClone(fixture.sessions)
+      const mutations: string[] = []
+      await mockOpenCodeServer(page, {
+        sessions,
+        provider: fixture.provider,
+        directory: fixture.directory,
+        project: fixture.project,
+        pageMessages,
+      })
+      await installStressSessionTabs(page)
+      await page.addInitScript((layout) => {
+        localStorage.setItem(
+          "settings.v3",
+          JSON.stringify({
+            appearance: { tabLayout: layout === "vertical" ? "vertical" : "horizontal", showProjectName: true },
+          }),
+        )
+      }, layout)
+      await page.route("**/api/session/*/archive", async (route) => {
+        const id = new URL(route.request().url()).pathname.split("/").at(-2)
+        expect(route.request().method()).toBe("POST")
+        expect(id).toBe(fixture.targetID)
+        mutations.push("archive")
+        await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+      })
+      page.on("request", (request) => {
+        if (request.method() === "DELETE") mutations.push("delete")
+      })
+      await page.goto(stressSessionHref(fixture.sourceID))
+      if (layout === "mobile") {
+        await page.getByRole("button", { name: "Tabs", exact: true }).tap()
+        await expect(page.getByRole("dialog", { name: "Tabs", exact: true })).not.toHaveAttribute("data-transitioning")
+      }
+      const scope = page.locator(
+        layout === "mobile"
+          ? '[data-slot="mobile-tabs-drawer"]'
+          : layout === "vertical"
+            ? '[data-slot="vertical-tabs-sidebar"]'
+            : '[data-slot="titlebar-tabs"]',
+      )
+      const tab = scope.locator("[data-titlebar-tab]").filter({ hasText: fixture.expected.targetTitle })
+      const more = tab.getByRole("button", { name: "More options", exact: true })
+      await expect(more).toBeEnabled()
+      await more.click()
+      await expect(page.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`${layout}-session-menu.png`), animations: "disabled" })
+      await page.getByRole("menuitem", { name: "Delete…", exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: "Delete session", exact: true })
+      await expect(dialog).toContainText(fixture.expected.targetTitle)
+      await expect(dialog).toContainText("all its child sessions")
+      expect(mutations).toEqual([])
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      await expect(dialog).toBeHidden()
+      if (layout === "mobile") {
+        const drawer = page.locator('[data-slot="mobile-drawer-content"]')
+        await expect(drawer).not.toHaveAttribute("data-transitioning")
+        if ((await drawer.getAttribute("data-open")) === null) {
+          await page.getByRole("button", { name: "Tabs", exact: true }).tap()
+          await expect(drawer).not.toHaveAttribute("data-transitioning")
+        }
+      }
+      await expect(tab).toBeVisible()
+      await more.click()
+      const archived = page.waitForResponse((response) =>
+        response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
+      )
+      await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
+      expect((await archived).status()).toBe(204)
+      await expect(tab).toHaveCount(0)
+      expect(mutations).toEqual(["archive"])
+      await expect(page).toHaveURL(stressSessionHref(fixture.sourceID))
+    })
+  })
+}

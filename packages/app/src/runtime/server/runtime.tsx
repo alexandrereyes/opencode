@@ -1,5 +1,5 @@
 import { createSimpleContext } from "@opencode/ui/context"
-import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner } from "solid-js"
+import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
@@ -16,6 +16,10 @@ import { ModelState } from "./persistence"
 import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "./errors"
+import { useSettings } from "@/settings/model"
+import { createServerSnippets } from "@/settings/snippets/server"
+import { timelinePreset } from "@opencode/session-ui/timeline/detail"
+import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -131,10 +135,13 @@ function createServerController(
   projects: ReturnType<typeof createServerProjects>,
 ) {
   const language = useLanguage()
+  const settings = useSettings()
   const connKey = ServerConnection.key(conn)
   const sdk = createServerSdkContext(conn, scope)
+  const snippets = createServerSnippets(sdk)
   const source = createData({
     api: () => sdk.api,
+    initialMessageLimit: () => (timelinePreset(settings.general.timelineDetail())?.id === "compact" ? 40 : 20),
     event: {
       on: sdk.event.on,
       listen: (handler) => sdk.event.listen((event) => handler({ name: event.type, details: event })),
@@ -153,6 +160,15 @@ function createServerController(
     data: source,
     remove: (sessionID) => sdk.api.session.remove({ sessionID }),
   })
+  // Each descendant has its own event, including sessions whose ancestry is not cached locally.
+  const hideSession = (sessionID: string) =>
+    notifySessionTabsRemoved({
+      server: connKey,
+      directory: data.session.get(sessionID)?.location.directory ?? "",
+      sessionIDs: [sessionID],
+    })
+  onCleanup(data.on("session.archived", (event) => hideSession(event.data.sessionID)))
+  onCleanup(data.on("session.deleted", (event) => hideSession(event.data.sessionID)))
   const sync = createServerSyncContext(sdk, data)
   createPermissionAutoApprover({ sdk, data })
   const notification = createServerNotificationState({ sdk, data, key: connKey })
@@ -190,6 +206,7 @@ function createServerController(
   return {
     data,
     sdk,
+    snippets,
     sync,
     isLocal,
     projects: {

@@ -9,14 +9,17 @@ export function createComposerSubmission(input: {
   context: (ContextItem & { key: string })[]
 }) {
   const initial = input.target
+  const quotes = input.target.quotes.all().map((quote) => ({ ...quote }))
   let target = input.target
   let cleared: Prompt | undefined
+  let clearedContext: ReturnType<ComposerStateTarget["context"]["items"]> | undefined
   let following: Prompt | undefined
   let preserveDraft = false
 
   return {
     prompt: input.prompt,
     context: input.context,
+    quotes,
     target: () => target,
     clear() {
       if (initial !== target) {
@@ -27,15 +30,20 @@ export function createComposerSubmission(input: {
       }
       if (!following) target.reset()
       cleared = target.current()
+      clearedContext = target.context.items()
     },
     retarget(next: ComposerStateTarget, options?: { preserveDraft?: boolean }) {
       input.context.forEach((item) => next.context.add(item))
+      next.quotes.replace([
+        ...quotes,
+        ...next.quotes.all().filter((item) => !quotes.some((quote) => quote.id === item.id)),
+      ])
       target = next
       preserveDraft = options?.preserveDraft ?? false
     },
     current: (value: ComposerStateTarget) => target === value,
     restore() {
-      if (cleared !== undefined && target.current() !== cleared) return
+      if (cleared !== undefined && (target.current() !== cleared || target.context.items() !== clearedContext)) return
       return {
         target,
         prompt: following ? appendPrompt(input.prompt, following) : input.prompt,
