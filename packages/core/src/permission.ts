@@ -188,6 +188,7 @@ const layer = Layer.effect(
     function request(input: AssertInput, message?: string): Request {
       return {
         id: input.id ?? ID.create(),
+        created: Date.now(),
         sessionID: input.sessionID,
         action: input.action,
         resources: input.resources,

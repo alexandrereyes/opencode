@@ -39,6 +39,9 @@ export function TabNavItem(props: {
   pressed?: boolean
   hidden?: boolean
   orientation?: "horizontal" | "vertical"
+  projectLabel?: string
+  compact?: boolean
+  closable?: boolean
 }) {
   const language = useLanguage()
   const settings = useSettings()
@@ -54,7 +57,7 @@ export function TabNavItem(props: {
   const closeTab = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
-    props.onClose()
+    if (props.closable !== false) props.onClose()
   }
   const servers = useServers()
   const serverCtx = useServerCtx(() => servers.list.find((item) => ServerConnection.key(item) === props.server))
@@ -202,7 +205,9 @@ export function TabNavItem(props: {
       <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
         {language.t("common.rename")}
       </Menu.Item>
-      <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+      <Show when={props.closable !== false}>
+        <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+      </Show>
       <Menu.Separator />
       <Menu.Item
         disabled={!props.session || lifecycle.pending()}
@@ -337,7 +342,13 @@ export function TabNavItem(props: {
             event.preventDefault()
           }}
         />
-        <Show when={props.orientation === "vertical" && settings.appearance.showProjectName() && projectName()}>
+        <Show
+          when={
+            !props.compact &&
+            props.orientation === "vertical" &&
+            (props.projectLabel ?? (settings.appearance.showProjectName() && projectName()))
+          }
+        >
           {(name) => (
             <span data-slot="tab-project" dir="auto">
               {name()}
@@ -363,18 +374,20 @@ export function TabNavItem(props: {
             <Menu.Content onCloseAutoFocus={closeMenu}>{menuItems()}</Menu.Content>
           </Menu.Portal>
         </Menu>
-        <IconButton
-          size="small"
-          variant="ghost-muted"
-          class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onClick={closeTab}
-          icon={<Icon name="xmark-small" />}
-          aria-label={language.t("common.closeTab")}
-        />
+        <Show when={props.closable !== false}>
+          <IconButton
+            size="small"
+            variant="ghost-muted"
+            class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={closeTab}
+            icon={<Icon name="xmark-small" />}
+            aria-label={language.t("common.closeTab")}
+          />
+        </Show>
       </div>
     </div>
   )

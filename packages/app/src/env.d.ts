@@ -4,6 +4,8 @@ interface ImportMetaEnv {
   readonly VITE_OPENCODE_SERVER_PORT: string
   readonly VITE_OPENCODE_CHANNEL?: "local" | "dev" | "beta" | "prod"
   readonly VITE_OPENCODE_DISABLE_SERVICE_WORKER?: "1"
+  readonly VITE_OPENCODE_DEV_BUILD?: string
+  readonly VITE_OPENCODE_TEST_BUILD?: string
 
   readonly VITE_SENTRY_DSN?: string
   readonly VITE_SENTRY_ENVIRONMENT?: string

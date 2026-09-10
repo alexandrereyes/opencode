@@ -233,6 +233,7 @@ function DraftTabSlot(props: {
 
 export function TitlebarTabStrip(props: {
   orientation?: "horizontal" | "vertical"
+  shortcuts?: boolean
   tabs: Tab[]
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
@@ -248,24 +249,28 @@ export function TitlebarTabStrip(props: {
   const visibleTabs = createMemo(() => props.tabs.filter((tab) => tab.type === "draft" || visibility[tabKey(tab)]))
   const visibleTabIds = () => visibleTabs().map(tabKey)
 
-  command.register("titlebar-tab-cycle", () => [
-    {
-      id: `tab.prev`,
-      category: "tab",
-      title: "",
-      keybind: `mod+option+ArrowLeft,ctrl+shift+tab`,
-      hidden: true,
-      onSelect: () => selectAdjacentTab(-1),
-    },
-    {
-      id: `tab.next`,
-      category: "tab",
-      title: "",
-      keybind: `mod+option+ArrowRight,ctrl+tab`,
-      hidden: true,
-      onSelect: () => selectAdjacentTab(1),
-    },
-  ])
+  command.register("titlebar-tab-cycle", () =>
+    props.shortcuts === false
+      ? []
+      : [
+          {
+            id: `tab.prev`,
+            category: "tab",
+            title: "",
+            keybind: `mod+option+ArrowLeft,ctrl+shift+tab`,
+            hidden: true,
+            onSelect: () => selectAdjacentTab(-1),
+          },
+          {
+            id: `tab.next`,
+            category: "tab",
+            title: "",
+            keybind: `mod+option+ArrowRight,ctrl+tab`,
+            hidden: true,
+            onSelect: () => selectAdjacentTab(1),
+          },
+        ],
+  )
 
   function selectAdjacentTab(offset: -1 | 1) {
     const current = props.currentTab

@@ -42,11 +42,12 @@ const clearAuthToken = () => {
   history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash)
 }
 
-const web = createWebPlatform(import.meta.env.VITE_OPENCODE_DEV_BUILD ?? pkg.version)
+const build = import.meta.env.VITE_OPENCODE_DEV_BUILD ?? import.meta.env.VITE_OPENCODE_TEST_BUILD
+const web = createWebPlatform(build ?? pkg.version)
 
 if (
   import.meta.env.PROD &&
-  !import.meta.env.VITE_OPENCODE_DEV_BUILD &&
+  !build &&
   import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" &&
   "serviceWorker" in navigator
 ) {
