@@ -19,12 +19,14 @@ import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { BasicTool } from "../components/basic-tool"
 import { reasoningHeading } from "../timeline/projection"
 import { Card } from "@opencode/ui/card"
+import { turnDuration, turnTokensPerSecond } from "@opencode/client/session-metrics"
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
   SessionMessageAssistant,
   SessionMessageAssistantReasoning,
   SessionMessageCompaction,
+  SessionMessageInfo,
   SessionMessageUser,
 } from "@opencode/client/promise"
 import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
@@ -506,7 +508,7 @@ export function AssistantTextContent(props: {
   text: string
   message: SessionMessageAssistant
   showCopy: boolean
-  turnDurationMs?: number | null
+  messages?: SessionMessageInfo[]
 }) {
   const data = useData()
   const i18n = useI18n()
@@ -520,16 +522,8 @@ export function AssistantTextContent(props: {
     return match?.models?.[props.message.model.id]?.name ?? props.message.model.id
   })
   const duration = createMemo(() => {
-    const completed = props.message.time.completed
-    const ms =
-      props.turnDurationMs === null
-        ? -1
-        : typeof props.turnDurationMs === "number"
-          ? props.turnDurationMs
-          : typeof completed === "number"
-            ? completed - props.message.time.created
-            : -1
-    if (!(ms >= 0)) return ""
+    const ms = turnDuration(props.message, props.messages ?? [props.message])
+    if (!ms) return ""
     const total = Math.round(ms / 1000)
     if (total < 60) return i18n.t("ui.message.duration.seconds", { count: numfmt().format(total) })
     return i18n.t("ui.message.duration.minutesSeconds", {
@@ -538,8 +532,7 @@ export function AssistantTextContent(props: {
     })
   })
   const meta = createMemo(() => {
-    const elapsed = (props.message.time.streamed ?? props.message.time.created) - props.message.time.created
-    const output = props.message.tokens?.output ?? 0
+    const tokensPerSecond = turnTokensPerSecond(props.message, props.messages ?? [props.message])
     return [
       { icon: "models", text: model() },
       { icon: "brain", text: props.message.model.variant },
@@ -547,12 +540,12 @@ export function AssistantTextContent(props: {
       {
         icon: "gauge",
         text:
-          elapsed > 0 && output > 0
+          tokensPerSecond !== undefined
             ? i18n.t("ui.message.tokensPerSecond", {
                 count: new Intl.NumberFormat(i18n.locale(), {
                   minimumFractionDigits: 1,
                   maximumFractionDigits: 1,
-                }).format((output * 1000) / elapsed),
+                }).format(tokensPerSecond),
               })
             : "",
       },
