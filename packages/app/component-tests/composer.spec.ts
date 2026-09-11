@@ -46,6 +46,212 @@ story("mobile Enter preserves newlines in the submitted payload", async ({ mount
   }
 })
 
+story("keeps reference text editable and drops stale metadata when edited", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--snippets")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const output = component.getByRole("status")
+
+  await editor.fill("$eff")
+  await component.locator('[data-suggestion-id="skill:effect"]').click()
+  await expect(editor.locator('[data-mention="skill"][data-id="effect"]')).toHaveText("$effect")
+
+  await editor.press("End")
+  await editor.press("Backspace")
+  await editor.press("Backspace")
+  await editor.pressSequentially("x")
+  await expect(editor).toHaveText("$effecx")
+  await expect(editor.locator('[data-mention="skill"]')).toHaveCount(0)
+  await expect(editor).toBeFocused()
+
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(output).toHaveText(JSON.stringify({ text: "$effecx", files: [], agents: [], skills: [], apps: [] }))
+})
+
+story("undoes and redoes reference text with its structured identity", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--snippets")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const skill = editor.locator('[data-mention="skill"][data-id="effect"]')
+
+  await editor.fill("$eff")
+  await component.locator('[data-suggestion-id="skill:effect"]').click()
+  await expect(skill).toHaveText("$effect")
+
+  await editor.press("ControlOrMeta+z")
+  await expect(editor).toHaveText("$eff")
+  await expect(skill).toHaveCount(0)
+  await editor.press((await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+Shift+z" : "Control+y")
+  await expect(editor).toHaveText("$effect ")
+  await expect(skill).toHaveCount(1)
+
+  await editor.press("Home")
+  await editor.pressSequentially("prefix ")
+  await expect(editor).toHaveText("prefix $effect ")
+  await expect(skill).toHaveCount(1)
+  await editor.press("ControlOrMeta+z")
+  await expect(editor).toHaveText("$effect ")
+  await expect(skill).toHaveCount(1)
+  await editor.press((await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+Shift+z" : "Control+y")
+  await expect(editor).toHaveText("prefix $effect ")
+  await expect(skill).toHaveCount(1)
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+  await expect
+    .poll(async () => JSON.parse((await component.getByRole("status").textContent()) ?? "{}"))
+    .toMatchObject({
+      text: "prefix $effect ",
+      skills: [{ id: "effect", mention: { start: 7, end: 14, text: "$effect" } }],
+    })
+})
+
+story("pastes plain and multiline text and replaces the selected range", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--empty-draft")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const paste = (text: string) =>
+    editor.evaluate((element, value) => {
+      const clipboard = new DataTransfer()
+      clipboard.setData("text/plain", value)
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard })
+      element.dispatchEvent(event)
+      return event.defaultPrevented
+    }, text)
+
+  await editor.fill("replace tail")
+  await editor.press("Home")
+  for (let index = 0; index < "replace".length; index++) await editor.press("Shift+ArrowRight")
+  expect(await paste("plain")).toBe(true)
+  await expect(editor).toHaveText("plain tail")
+
+  await editor.press("End")
+  expect(await paste("\nsecond line")).toBe(true)
+  await expect.poll(async () => (await editor.innerText()).replace(/\n$/, "")).toBe("plain tail\nsecond line")
+})
+
+story("copies partial session text and preserves unselected text during structured paste", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--session-reference")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const session = editor.locator('[data-mention="session"]')
+  const copy = () =>
+    editor.evaluate((element) => {
+      const clipboard = new DataTransfer()
+      const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: clipboard })
+      element.dispatchEvent(event)
+      return {
+        prevented: event.defaultPrevented,
+        data: clipboard.getData("text/plain"),
+        selection: window.getSelection()?.toString(),
+      }
+    })
+  const paste = (text: string) =>
+    editor.evaluate((element, value) => {
+      const clipboard = new DataTransfer()
+      clipboard.setData("text/plain", value)
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard })
+      element.dispatchEvent(event)
+      return event.defaultPrevented
+    }, text)
+
+  await editor.focus()
+  await editor.press("Home")
+  for (let index = 0; index < 3; index++) await editor.press("Shift+ArrowRight")
+  expect(await copy()).toEqual({ prevented: true, data: "@Sh", selection: "@Sh" })
+
+  await editor.press("Home")
+  await editor.press("Shift+End")
+  const structured = await copy()
+  expect(structured.prevented).toBe(true)
+  expect(structured.data).toContain("opencode://session/")
+  await editor.press("Home")
+  await editor.press("ArrowRight")
+  await editor.press("ArrowRight")
+  for (let index = 0; index < 3; index++) await editor.press("Shift+ArrowRight")
+  expect(await paste(structured.data)).toBe(true)
+
+  await expect(editor).toHaveText("@S@Shareded")
+  await expect(session).toHaveCount(1)
+  await expect(session).toHaveText("@Shared")
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+  await expect
+    .poll(async () => JSON.parse((await component.getByRole("status").textContent()) ?? "{}"))
+    .toMatchObject({
+      displayText: "@S@Shareded",
+      sessions: [{ content: "@Shared", start: 2, end: 9 }],
+    })
+})
+
+story("normalizes CRLF drafts before placing references and the caret", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--cr-lf-reference")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const output = component.getByRole("status")
+
+  await expect.poll(async () => (await editor.innerText()).replace(/\n$/, "")).toBe("before\n$effect\nafter")
+  await expect(editor.locator('[data-mention="skill"][data-id="effect"]')).toHaveText("$effect")
+  await editor.focus()
+  await editor.pressSequentially("!")
+  await expect.poll(async () => (await editor.innerText()).replace(/\n$/, "")).toBe("before\n$effect\nafter!")
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+  await expect
+    .poll(async () => JSON.parse((await output.textContent()) ?? "{}"))
+    .toMatchObject({
+      text: "before\n$effect\nafter!",
+      skills: [{ id: "effect", mention: { start: 7, end: 14, text: "$effect" } }],
+    })
+})
+
+story("defers external draft synchronization until composition ends", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--external-draft-during-composition")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+
+  await editor.fill("composing")
+  await editor.dispatchEvent("compositionstart")
+  await component
+    .locator('[data-action="restore-external-draft"]')
+    .evaluate((element: HTMLButtonElement) => element.click())
+  await expect(editor).toHaveText("composing")
+  await expect(editor).toHaveAttribute("dir", "auto")
+  await editor.dispatchEvent("compositionend")
+  await expect.poll(async () => (await editor.innerText()).replace(/\n$/, "")).toBe("restored\ndraft")
+  await expect(editor).toHaveAttribute("dir", "ltr")
+})
+
+story("blocks editor commands while disabled or read only and restores editing", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--mutable-editor-access")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const disabled = component.locator('[data-action="toggle-composer-disabled"]')
+  const readOnly = component.locator('[data-action="toggle-composer-readonly"]')
+  const undo = (await page.evaluate(() => navigator.platform.startsWith("Mac")))
+    ? { key: "z", code: "KeyZ", metaKey: true }
+    : { key: "z", code: "KeyZ", ctrlKey: true }
+
+  await editor.focus()
+  await editor.press("End")
+  await expect(editor).toBeFocused()
+  await disabled.evaluate((element: HTMLButtonElement) => element.click())
+  await expect(editor).toHaveAttribute("contenteditable", "false")
+  await editor.dispatchEvent("keydown", { key: "Backspace", code: "Backspace", bubbles: true, cancelable: true })
+  await editor.dispatchEvent("keydown", { ...undo, bubbles: true, cancelable: true })
+  await expect(editor).toHaveText("abc")
+
+  await disabled.evaluate((element: HTMLButtonElement) => element.click())
+  await expect(editor).toHaveAttribute("contenteditable", "true")
+  await editor.focus()
+  await editor.press("End")
+  await editor.pressSequentially("d")
+  await expect(editor).toHaveText("abcd")
+
+  await readOnly.evaluate((element: HTMLButtonElement) => element.click())
+  await expect(editor).toHaveAttribute("contenteditable", "false")
+  await editor.dispatchEvent("keydown", { key: "Backspace", code: "Backspace", bubbles: true, cancelable: true })
+  await editor.dispatchEvent("keydown", { key: "Delete", code: "Delete", bubbles: true, cancelable: true })
+  await editor.dispatchEvent("keydown", { ...undo, bubbles: true, cancelable: true })
+  await expect(editor).toHaveText("abcd")
+
+  await readOnly.evaluate((element: HTMLButtonElement) => element.click())
+  await expect(editor).toHaveAttribute("contenteditable", "true")
+  await editor.focus()
+  await editor.press("End")
+  await editor.press("Backspace")
+  await expect(editor).toHaveText("abc")
+})
+
 for (const direction of ["ltr", "rtl"]) {
   for (const alternate of ["none", "queue", "steer"]) {
     story(`scrolls overflowing controls beside fixed ${alternate} actions in ${direction}`, async ({ mount, page }) => {
@@ -201,7 +407,7 @@ for (const draft of ["empty-draft", "multiline-draft", "mixed-attachments"]) {
   story(`select all stays inside the composer with ${draft}`, async ({ mount, page }) => {
     const component = await mount(`opencode-composer-flow--${draft}`)
     const input = component.getByRole("textbox", { name: "Prompt", exact: true })
-    const text = await input.textContent()
+    const text = (await input.innerText()).replace(/\n$/, "")
 
     for (let count = 0; count < 2; count++) {
       await input.press("ControlOrMeta+a")
@@ -227,24 +433,19 @@ for (const draft of ["empty-draft", "multiline-draft", "mixed-attachments"]) {
 }
 
 story("renders a draft once and supports editing, caret restoration, and failure recovery", async ({ mount, page }) => {
-  await page.addInitScript(() => {
-    const replace = Element.prototype.replaceChildren
-    Element.prototype.replaceChildren = function (this: Element, ...nodes) {
-      // The ref can run before data-component is assigned, so count on every target.
-      this.setAttribute("data-test-replacements", String(Number(this.getAttribute("data-test-replacements")) + 1))
-      return replace.apply(this, nodes)
-    }
-  })
   const component = await mount("opencode-composer-flow--failed-submission-restoration")
   const input = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const original = await input.elementHandle()
+  const expectSameEditor = async () =>
+    expect(await input.evaluate((element, initial) => element === initial, original)).toBe(true)
   await expect(input).toHaveText("Preserve this draft on failure")
-  await expect(input).toHaveAttribute("data-test-replacements", "1")
+  await expectSameEditor()
 
   await input.press("Home")
   await input.press("Shift+ArrowRight")
   await input.pressSequentially("XY")
   await expect(input).toHaveText("XYreserve this draft on failure")
-  await expect(input).toHaveAttribute("data-test-replacements", "1")
+  await expectSameEditor()
 
   // Closing the model picker restores the controller's saved caret through its editor ref.
   await component.locator('[data-action="composer-model"]').click()
@@ -255,6 +456,7 @@ story("renders a draft once and supports editing, caret restoration, and failure
   await component.getByRole("button", { name: "Send", exact: true }).click()
   await expect(component.getByRole("status")).toHaveText("Submission failed; draft restored")
   await expect(input).toHaveText("Preserve this draft on failure")
+  await expectSameEditor()
 })
 
 story("shows thinking on composer hover or when a non-default variant is selected", async ({ mount, page }) => {

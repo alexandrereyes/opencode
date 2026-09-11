@@ -81,6 +81,58 @@ describe("Composer store", () => {
     expect(prompt.state.cursor).toBe(5)
   })
 
+  test("turns a partially edited mention into text without dropping untouched characters", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "A ", start: 0, end: 2 },
+        { type: "file", path: "one", content: "@one", start: 2, end: 6 },
+        { type: "text", content: " B", start: 6, end: 8 },
+      ],
+      cursor: 4,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.addText("X")
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "A @oXne B", start: 0, end: 9 }])
+    expect(prompt.state.cursor).toBe(5)
+  })
+
+  test("preserves unselected mention text during a partial structured replacement", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [{ type: "file", path: "one", content: "@one", start: 0, end: 4 }],
+      cursor: 2,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.replaceRange([{ type: "text", content: "X", start: 0, end: 1 }], { start: 1, end: 3 })
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "@Xe", start: 0, end: 3 }])
+    expect(prompt.state.cursor).toBe(2)
+  })
+
+  test("normalizes CRLF prompt offsets and cursor at the store boundary", () => {
+    const prompt = createPromptStore()
+
+    prompt.setPrompt(
+      [
+        { type: "text", content: "a\r\n", start: 0, end: 3 },
+        { type: "file", path: "one", content: "@one", start: 3, end: 7 },
+        { type: "text", content: "\r\nb", start: 7, end: 10 },
+      ],
+      10,
+    )
+
+    expect(prompt.state.prompt).toEqual([
+      { type: "text", content: "a\n", start: 0, end: 2 },
+      { type: "file", path: "one", content: "@one", start: 2, end: 6 },
+      { type: "text", content: "\nb", start: 6, end: 8 },
+    ])
+    expect(prompt.state.cursor).toBe(8)
+  })
+
   test("mutates mentions, attachments, and context through editor actions", () => {
     const prompt = createPromptStore()
 

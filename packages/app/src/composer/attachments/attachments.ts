@@ -3,6 +3,7 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createBlobReference } from "@/runtime/persistence/drafts"
 import { uuid } from "@/runtime/persistence/uuid"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
+import { getCursorPosition } from "../editor/dom"
 
 const accepted = [
   "image/png",
@@ -100,7 +101,7 @@ export function createComposerAttachments(
     const prompt = input.capture()
     const editor = input.editor()
     if (!editor) return
-    return { prompt, cursor: prompt.cursor() ?? cursorPosition(editor) }
+    return { prompt, cursor: prompt.cursor() ?? getCursorPosition(editor) }
   }
   const add = async (file: File, toast = true, target = capture(), clipboard = false) => {
     if (!target) return false
@@ -174,11 +175,6 @@ export function createComposerAttachments(
       input.focusEditor()
       return input.addPart({ type: "text", content: text, start: 0, end: 0 })
     }
-    if (text.includes("\n") || largePaste(text)) {
-      put()
-      return
-    }
-    if (typeof document.execCommand === "function" && document.execCommand("insertText", false, text)) return
     put()
   }
   const handleDrop = async (event: DragEvent) => {
@@ -264,20 +260,4 @@ async function attachmentMime(file: File) {
   const control = bytes.filter((byte) => byte < 9 || (byte > 13 && byte < 32)).length
   if (bytes.length > 0 && control / bytes.length > 0.3) return
   return "text/plain"
-}
-
-function cursorPosition(editor: HTMLElement) {
-  const selection = window.getSelection()
-  if (!selection || selection.rangeCount === 0) return 0
-  const range = selection.getRangeAt(0)
-  if (!editor.contains(range.startContainer)) return 0
-  const before = range.cloneRange()
-  before.selectNodeContents(editor)
-  before.setEnd(range.startContainer, range.startOffset)
-  return before.toString().replace(/\u200B/g, "").length
-}
-
-function largePaste(text: string) {
-  if (text.length >= 8000) return true
-  return text.split("\n").length - 1 >= 120
 }

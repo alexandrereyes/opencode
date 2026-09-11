@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import type { ModelSelection } from "@/providers/models/selection"
 import { STORY_MODEL, emptySessionDocument, pendingAndQueuedDocument } from "@opencode/session-ui/storybook"
 import { Composer } from "./composer"
+import { ComposerEditor } from "./editor/editor"
 import type { ComposerModel } from "./model"
 import { createComposerEditor } from "./editor/interaction"
 import type { ComposerPersistedState, ComposerSuggestion } from "./types"
@@ -10,6 +11,7 @@ import { buildPromptRequest } from "./request"
 import { promptLength } from "./prompt-parts"
 import { SessionPreview } from "@/session/story-model"
 import { Skill } from "@opencode/schema/skill"
+import { Session } from "@opencode/schema/session"
 import { resolveSessionComposerSelection } from "@/session/composer/selection"
 import { snippetSuggestions } from "@/settings/snippets/model"
 
@@ -58,6 +60,9 @@ function ComposerStory(props: {
   continueOnStop?: boolean
   longLabels?: boolean
   alternate?: "queue" | "steer"
+  externalDraft?: string
+  includeSessions?: boolean
+  accessControls?: boolean
 }) {
   const [draft, setDraft] = createStore<ComposerPersistedState>({
     prompt: props.prompt ?? [{ type: "text", content: "", start: 0, end: 0 }],
@@ -68,6 +73,8 @@ function ComposerStory(props: {
   const [story, setStory] = createStore({
     activity: props.label ?? "Ready",
     variant: STORY_MODEL.variant,
+    disabled: false,
+    readOnly: false,
   })
   const modelOption = createMemo(() => ({
     ...selectedModel,
@@ -147,6 +154,7 @@ function ComposerStory(props: {
     store: [draft, setDraft],
     commands: () => commands,
     context: () => context,
+    server: () => "http://localhost:4096",
     snippets: () =>
       snippetSuggestions([
         {
@@ -225,6 +233,7 @@ function ComposerStory(props: {
                   agents: request.agents,
                   skills: request.skills,
                   apps: request.apps,
+                  ...(props.includeSessions ? { displayText: request.displayText, sessions: request.sessions } : {}),
                 })
               : `Submitted: ${value}`,
           )
@@ -249,7 +258,48 @@ function ComposerStory(props: {
       <output class="text-12-regular text-text-weak" aria-live="polite">
         {story.activity}
       </output>
-      <Composer model={model} borderUnderlay />
+      <Show when={props.externalDraft}>
+        {(value) => (
+          <button
+            type="button"
+            data-action="restore-external-draft"
+            onClick={() => {
+              setDraft("prompt", text(value()))
+              setDraft("cursor", value().length)
+              editor.dispatch({ type: "mode.shell" })
+            }}
+          >
+            Restore draft
+          </button>
+        )}
+      </Show>
+      <Show when={props.accessControls}>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            data-action="toggle-composer-disabled"
+            onClick={() => setStory("disabled", (value) => !value)}
+          >
+            Toggle disabled
+          </button>
+          <button
+            type="button"
+            data-action="toggle-composer-readonly"
+            onClick={() => setStory("readOnly", (value) => !value)}
+          >
+            Toggle read only
+          </button>
+        </div>
+      </Show>
+      <Show when={props.accessControls} fallback={<Composer model={model} borderUnderlay />}>
+        <ComposerEditor
+          controller={model}
+          disabled={story.disabled}
+          readOnly={story.readOnly}
+          borderUnderlay
+          modelControlsVisible={false}
+        />
+      </Show>
     </div>
   )
 }
@@ -315,6 +365,57 @@ export const MixedAttachments = {
       ]}
     />
   ),
+}
+
+export const CrLfReference = {
+  render: () => (
+    <ComposerStory
+      inspectRequest
+      prompt={[
+        { type: "text", content: "before\r\n", start: 0, end: 8 },
+        {
+          type: "skill",
+          id: Skill.ID.make("effect"),
+          name: Skill.Name.make("Effect"),
+          content: "$effect",
+          start: 8,
+          end: 15,
+        },
+        { type: "text", content: "\r\nafter", start: 15, end: 22 },
+      ]}
+    />
+  ),
+}
+
+export const SessionReference = {
+  render: () => (
+    <ComposerStory
+      inspectRequest
+      includeSessions
+      prompt={[
+        {
+          type: "session",
+          session: {
+            id: Session.ID.make("ses_reference_12345678901234567890"),
+            server: "http://localhost:4096",
+            title: "Shared",
+            directory: "/repo/shared",
+          },
+          content: "@Shared",
+          start: 0,
+          end: 7,
+        },
+      ]}
+    />
+  ),
+}
+
+export const ExternalDraftDuringComposition = {
+  render: () => <ComposerStory externalDraft={"restored\r\ndraft"} />,
+}
+
+export const MutableEditorAccess = {
+  render: () => <ComposerStory prompt={text("abc")} accessControls />,
 }
 
 export const ModelAndVariant = { render: () => <ComposerStory prompt={text("Compare both variants")} /> }

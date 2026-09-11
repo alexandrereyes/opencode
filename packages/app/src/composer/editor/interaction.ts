@@ -10,6 +10,7 @@ import type {
   ComposerHistoryEntry,
   ComposerOption,
   ComposerPersistedState,
+  ComposerPrompt,
   ComposerSuggestion,
 } from "../types"
 import {
@@ -21,13 +22,24 @@ import {
 import { clonePrompt, promptLength } from "../prompt-parts"
 import type { ComposerQueue } from "../adapter"
 import { parseSessionReferences } from "../session-reference"
-import { getSelectionRange } from "./dom"
+import { getCursorPosition, getSelectionRange, setCursorPosition } from "./dom"
 
 export type ComposerSelectControl = {
   options: Accessor<ComposerOption[]>
   current: Accessor<string>
   onSelect: (id: string) => void
   keybind?: Accessor<string[]>
+}
+
+type ComposerEditorBinding = {
+  sync: () => void
+  setText: (value: string) => void
+  addText: (value: string, at?: number) => void
+  addMention: (
+    mention: Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>,
+    range?: { start: number; end: number },
+  ) => void
+  replacePrompt: (prompt: ComposerPrompt, range: { start: number; end: number }) => void
 }
 
 export type ComposerEditorView = {
@@ -74,13 +86,22 @@ export function createComposerEditor(input: {
   attachments?: ComposerAttachmentConfig
 }) {
   let editor: HTMLElement | undefined
+  let editorBinding: ComposerEditorBinding | undefined
   let fileInput: HTMLInputElement | undefined
   const draft = createComposerEditorActions(input.store)
   const [state, setState] = input.state ?? createComposerEditorState(draft.state.mode)
   function addPart(part: ComposerPersistedState["prompt"][number]) {
     if (part.type === "image") return false
     if (part.type !== "text") {
+      if (editorBinding) {
+        editorBinding.addMention(part)
+        return true
+      }
       draft.addMention(part)
+      return true
+    }
+    if (editorBinding) {
+      editorBinding.addText(part.content)
       return true
     }
     draft.addText(part.content)
@@ -92,7 +113,10 @@ export function createComposerEditor(input: {
         capture: () => ({
           current: () => draft.state.prompt,
           cursor: () => draft.state.cursor,
-          set: (prompt, cursor) => draft.setPrompt(prompt, cursor),
+          set: (prompt, cursor) => {
+            draft.setPrompt(prompt, cursor)
+            editorBinding?.sync()
+          },
         }),
         editor: () => editor,
         focusEditor: () => editor?.focus(),
@@ -160,15 +184,29 @@ export function createComposerEditor(input: {
 
   const execute = (command: ComposerInteractionCommand) => {
     if (command.type === "draft.setText") {
+      if (editorBinding) {
+        editorBinding.setText(command.value)
+        return
+      }
       draft.setText(command.value)
       return
     }
     if (command.type === "draft.addText") {
+      if (editorBinding) {
+        editorBinding.addText(command.value, command.at)
+        return
+      }
       draft.addText(command.value, command.at)
       return
     }
     if (command.type === "mention.add") {
-      if (command.item.mention) draft.addMention(command.item.mention, command.range)
+      if (command.item.mention) {
+        if (editorBinding) {
+          editorBinding.addMention(command.item.mention, command.range)
+          return
+        }
+        draft.addMention(command.item.mention, command.range)
+      }
       return
     }
     if (command.type === "popover.filter") {
@@ -283,7 +321,7 @@ export function createComposerEditor(input: {
   const restoreFocus = (cursor = draft.state.cursor ?? promptLength(draft.state.prompt)) => {
     requestAnimationFrame(() => {
       editor?.focus()
-      setEditorCursor(editor, cursor)
+      if (editor) setCursorPosition(editor, cursor)
     })
   }
 
@@ -291,14 +329,15 @@ export function createComposerEditor(input: {
     input.history?.restore?.(entry.metadata)
     const cursor = position === "start" ? 0 : promptLength(entry.prompt)
     draft.setPrompt(clonePrompt(entry.prompt), cursor)
+    editorBinding?.sync()
     restoreFocus(cursor)
   }
   const navigateHistory = (direction: "up" | "down") => {
     if (!input.history || !editor) return false
-    const selection = window.getSelection()
-    if (!selection?.isCollapsed || !editor.contains(selection.anchorNode)) return false
+    const selection = getSelectionRange(editor)
+    if (!selection || selection.start !== selection.end) return false
     const text = draft.state.prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    if (!canNavigateHistory(direction, text, editorCursor(editor), state.historyIndex >= 0)) return false
+    if (!canNavigateHistory(direction, text, getCursorPosition(editor), state.historyIndex >= 0)) return false
     const entries = input.history.entries(state.mode)
     if (direction === "up") {
       if (entries.length === 0 || state.historyIndex >= entries.length - 1) return false
@@ -378,8 +417,9 @@ export function createComposerEditor(input: {
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
       return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
     },
-    setEditor(element: HTMLElement) {
+    setEditor(element: HTMLElement, binding?: ComposerEditorBinding) {
       editor = element
+      editorBinding = binding
       input.onEditor?.(element)
     },
     restoreFocus,
@@ -387,6 +427,9 @@ export function createComposerEditor(input: {
       if (prompt) draft.setPrompt(prompt, cursor)
       if (input.view.draftOnly) return
       dispatch({ type: "input.changed", value, persist: !prompt })
+    },
+    normalize(prompt: ComposerPrompt, cursor: number) {
+      draft.setPrompt(prompt, cursor)
     },
     onCursor(cursor: number) {
       draft.setCursor(cursor)
@@ -427,37 +470,16 @@ export function createComposerEditor(input: {
       }
       const text = clipboard?.getData("text/plain").replace(/\r\n?/g, "\n")
       if (!text) return
-      event.preventDefault()
       const references = input.server ? parseSessionReferences(text, input.server()) : undefined
-      if (references) {
-        draft.replaceRange(
-          references,
-          (editor && getSelectionRange(editor)) ?? { start: draft.state.cursor ?? 0, end: draft.state.cursor ?? 0 },
-        )
-        restoreFocus()
-        return
+      if (!references) return
+      event.preventDefault()
+      const range = (editor && getSelectionRange(editor)) ?? {
+        start: draft.state.cursor ?? 0,
+        end: draft.state.cursor ?? 0,
       }
-      // insertText emits input events per line, repeatedly parsing and saving the draft.
-      // Escaped HTML inserts multiline text once and preserves native selection and undo.
-      const multiline = text.includes("\n")
-      const value = multiline ? text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;") : text
-      if (
-        typeof document.execCommand === "function" &&
-        document.execCommand(multiline ? "insertHTML" : "insertText", false, value)
-      )
-        return
-      const target = event.currentTarget
-      const selection = window.getSelection()
-      if (!(target instanceof HTMLElement) || !selection?.rangeCount || !target.contains(selection.anchorNode)) return
-      const range = selection.getRangeAt(0)
-      range.deleteContents()
-      const node = document.createTextNode(text)
-      range.insertNode(node)
-      range.setStartAfter(node)
-      range.collapse(true)
-      selection.removeAllRanges()
-      selection.addRange(range)
-      target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: text }))
+      if (editorBinding) editorBinding.replacePrompt(references, range)
+      if (!editorBinding) draft.replaceRange(references, range)
+      restoreFocus()
     },
     onDragEnter(event: DragEvent) {
       event.preventDefault()
@@ -498,34 +520,4 @@ function canNavigateHistory(direction: "up" | "down", text: string, cursor: numb
   if (inHistory) return position === 0 || position === text.length
   if (direction === "up") return position === 0 && text.length === 0
   return position === text.length
-}
-
-function editorCursor(editor: HTMLElement) {
-  const selection = window.getSelection()
-  if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) return editor.textContent?.length ?? 0
-  const range = selection.getRangeAt(0).cloneRange()
-  range.selectNodeContents(editor)
-  range.setEnd(selection.anchorNode!, selection.anchorOffset)
-  return range.toString().length
-}
-
-function setEditorCursor(editor: HTMLElement | undefined, cursor: number) {
-  if (!editor) return
-  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
-  let remaining = cursor
-  let node = walker.nextNode()
-  while (node) {
-    const length = node.textContent?.length ?? 0
-    if (remaining <= length) {
-      const range = document.createRange()
-      range.setStart(node, remaining)
-      range.collapse(true)
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-      return
-    }
-    remaining -= length
-    node = walker.nextNode()
-  }
 }

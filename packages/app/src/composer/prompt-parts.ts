@@ -6,6 +6,26 @@ export function clonePrompt(prompt: Prompt): Prompt {
   )
 }
 
+export function normalizeComposerText(value: string) {
+  return value.replace(/\r\n?/g, "\n")
+}
+
+export function normalizeComposerPrompt(prompt: Prompt): Prompt {
+  let offset = 0
+  return clonePrompt(prompt).map((part) => {
+    if (part.type === "image") return part
+    const content = normalizeComposerText(part.content)
+    const next = { ...part, content, start: offset, end: offset + content.length }
+    offset = next.end
+    return next
+  })
+}
+
+export function normalizeComposerCursor(prompt: Prompt, cursor: number) {
+  const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
+  return normalizeComposerText(text.slice(0, Math.min(Math.max(cursor, 0), text.length))).length
+}
+
 export function promptLength(prompt: Prompt) {
   return prompt.reduce((length, part) => length + ("content" in part ? part.content.length : 0), 0)
 }
