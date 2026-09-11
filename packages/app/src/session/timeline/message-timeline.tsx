@@ -25,6 +25,7 @@ import { createSessionTimelineRowRenderer } from "@opencode/session-ui/timeline/
 import { getReadyMarkdown, preloadMarkdown } from "@opencode/session-ui/markdown-cache"
 import { createTimelineController, type TimelineController, type TimelineSessionSource } from "./controller"
 import { createTimelineVirtualizer } from "./virtualizer"
+import type { SessionTimelineInteraction } from "./interaction"
 import { containsDirectory, isWorkspaceDirectory, workspaceDirectories } from "@/workspaces/paths"
 import { SessionWorkspaceMenu } from "@/session/timeline/session-workspace-menu"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
@@ -358,6 +359,7 @@ type MessageTimelineProps = {
   background: SessionBackground
   actions?: SessionUserActions
   scroll: { overflow: boolean; jump: boolean }
+  history: SessionTimelineInteraction["history"]
   onResumeScroll: () => void
   setScrollRef: (el: HTMLDivElement | undefined) => void
   onScheduleScrollState: (el: HTMLDivElement) => void
@@ -472,6 +474,7 @@ function MessageTimelineView(
     showHeader,
     pinned,
     scroll: () => props.scroll,
+    history: props.history,
     onResumeScroll: props.onResumeScroll,
     setScrollRef: (element) => {
       setQuoteRoot("element", element)

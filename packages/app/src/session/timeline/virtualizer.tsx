@@ -7,6 +7,7 @@ import {
   type VirtualItem,
 } from "@tanstack/solid-virtual"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode/ui/scroll-view"
+import { Button } from "@opencode/ui/button"
 import { TimelineRow } from "@opencode/session-ui/timeline/projection"
 import { useLanguage } from "@/runtime/i18n/language"
 import {
@@ -27,6 +28,8 @@ import { createMediaQuery } from "@solid-primitives/media"
 import type { createTimelineProjection } from "./projection"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { filterVirtualIndexes } from "./virtual-items"
+import type { SessionTimelineInteraction } from "./interaction"
+import { showToast } from "@/shell/notifications/toast"
 
 const fallbackItemSize = 60
 const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
@@ -41,6 +44,7 @@ const cache = new Map<
     toolOpen: Record<string, boolean | undefined>
     patchGroupKeys: Map<string, string>
     presentationKey?: string
+    historySpace: boolean
   }
 >()
 
@@ -58,6 +62,7 @@ type Input = {
   /** True while the timeline follows the newest content. Drives every anchoring decision. */
   pinned: Accessor<boolean>
   scroll: Accessor<{ overflow: boolean; jump: boolean }>
+  history?: SessionTimelineInteraction["history"]
   onResumeScroll: () => void
   setScrollRef: (element: HTMLDivElement | undefined) => void
   setContentRef: (element: HTMLDivElement) => void
@@ -87,10 +92,15 @@ export function createTimelineVirtualizer(input: Input) {
   const language = useLanguage()
   const active = () => input.active?.() !== false
   const isDesktop = createMediaQuery("(min-width: 768px)")
-  const topOffset = () => (input.showHeader() ? 64 : isDesktop() ? 0 : 16)
+  const history = () => (!isDesktop() && input.history?.more() ? input.history : undefined)
   const ownerSessionKey = input.sessionKey()
   const entry = cache.get(ownerSessionKey)
   const cached = entry?.presentationKey === input.presentationKey?.() ? entry : undefined
+  // Keep the scroll margin stable while the final prepended page finishes measuring.
+  const historySpace = createMemo<boolean>(
+    (shown = cached?.historySpace ?? false) => shown || (active() && !!history()),
+  )
+  const topOffset = () => (input.showHeader() ? 64 : isDesktop() ? 0 : 16) + (!isDesktop() && historySpace() ? 48 : 0)
   const initialMeasurements = cached?.measurements
   const coldBottomMount = !initialMeasurements?.length && input.pinned()
   const [listRoot, setListRoot] = createSignal<HTMLDivElement>()
@@ -582,6 +592,29 @@ export function createTimelineVirtualizer(input: Input) {
           <Show when={input.showHeader()} fallback={<div aria-hidden="true" class="h-4 md:hidden" />}>
             {props.header}
           </Show>
+          <Show when={!isDesktop() && historySpace()}>
+            <div class="flex h-12 items-center justify-center px-4">
+              <Show when={history()}>
+                {(history) => (
+                  <Button
+                    variant="ghost"
+                    class="min-h-11 w-full"
+                    disabled={history().loading()}
+                    aria-busy={history().loading()}
+                    onClick={() =>
+                      void history()
+                        .loadOlder()
+                        .catch(() => showToast({ title: language.t("common.requestFailed") }))
+                    }
+                  >
+                    {language.t(
+                      history().loading() ? "session.messages.loadingEarlier" : "session.messages.loadEarlier",
+                    )}
+                  </Button>
+                )}
+              </Show>
+            </div>
+          </Show>
           <div
             data-timeline-virtual-content
             ref={(element) => {
@@ -616,6 +649,7 @@ export function createTimelineVirtualizer(input: Input) {
       toolOpen: { ...toolOpen },
       patchGroupKeys,
       presentationKey: input.presentationKey?.(),
+      historySpace: historySpace(),
     })
     while (cache.size > 16) cache.delete(cache.keys().next().value!)
     coldPending = false
