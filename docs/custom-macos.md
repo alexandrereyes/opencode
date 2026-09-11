@@ -50,6 +50,10 @@ quoted passages, source message/part IDs, and comments to the model-visible text
 keeping structured quote metadata for history, queue editing, and revert. Failed prompt
 admission restores the submitted quotes. Selection cannot span different text parts.
 
+Sent quotes use a shared desktop/mobile renderer inside the user bubble, with a caption and subtle quote line.
+Long passages initially show four lines and expand independently; comments remain fully visible.
+Copy retains the complete underlying message, including quote context, regardless of the collapsed state.
+
 The implementation uses existing prompt APIs; no Protocol or generated client changes.
 This ports the chat-comment workflow, not OpenChamber's separate Notes feature.
 

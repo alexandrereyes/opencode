@@ -99,6 +99,72 @@
   font-weight: 440;
 }
 
+[data-slot="mobile-tab-swipe"] {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+[data-slot="mobile-tab-content"] {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateX(var(--mobile-tab-offset, 0px));
+  transition: transform 180ms ease-out;
+}
+
+[data-slot="mobile-tab-content"][data-dragging="true"] {
+  transition: none;
+}
+
+[data-slot="mobile-tab-actions"] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  width: 88px;
+}
+
+[data-slot="mobile-tab-actions"] [data-component="icon-button-v2"] {
+  width: 44px;
+  height: 100%;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+[data-slot="mobile-tab-actions"] [data-component="icon-button-v2"]:focus-visible {
+  outline-offset: -3px;
+}
+
+[data-slot="mobile-tab-actions"] [data-action="mobile-tab-delete"] {
+  color: var(--v2-state-fg-danger);
+}
+
+[data-slot="mobile-tab-actions"] button[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
+[data-slot="mobile-tab-time"] {
+  flex-shrink: 0;
+  grid-column: 3;
+  grid-row: 1 / -1;
+  color: var(--v2-text-text-faint);
+  font-size: 11px;
+  line-height: var(--line-height-compact);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+[data-slot="mobile-tab-content"] [data-titlebar-tab]:has([data-slot="tab-project"]) [data-slot="tab-link"] {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="mobile-tab-content"] {
+    transition: none;
+  }
+}
+
 [data-slot="titlebar-tab-item"] a {
   outline: none;
 }

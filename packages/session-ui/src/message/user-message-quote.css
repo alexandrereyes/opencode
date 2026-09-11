@@ -1,0 +1,62 @@
+[data-component="user-message-quote"] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+  white-space: normal;
+  text-align: start;
+
+  [data-slot="user-message-quote-caption"] {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: var(--line-height-compact);
+    color: inherit;
+  }
+
+  blockquote {
+    margin: 0;
+    padding-inline-start: 12px;
+    border-inline-start: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: var(--line-height-base);
+
+    &[data-expanded="false"] {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 4;
+      overflow: hidden;
+    }
+  }
+
+  [data-slot="user-message-quote-toggle"] {
+    align-self: flex-start;
+    color: inherit;
+    min-height: 28px;
+  }
+
+  [data-slot="user-message-quote-comment"] {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  @media (pointer: coarse) {
+    [data-slot="user-message-quote-toggle"] {
+      min-height: 44px;
+    }
+  }
+}
+
+[data-slot="user-message-quotes"] {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+[data-slot="user-message-draft"] + [data-slot="user-message-quotes"] {
+  margin-block-start: 12px;
+}

@@ -5,6 +5,14 @@ import { ServerInfo } from "../server-info"
 import { Maintenance } from "@opencode/core/maintenance"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { Job } from "@opencode/core/job"
+import { JobMaintenance } from "@opencode/core/job-maintenance"
+import { JobUpgrade } from "@opencode/core/job-upgrade"
+import { KVTable } from "@opencode/core/kv/sql"
+import { Session } from "@opencode/core/session"
+import { SessionExecution } from "@opencode/core/session/execution"
+import { Instance } from "@opencode/core/instance/service"
+import { Shell } from "@opencode/core/shell"
+import { ID } from "@opencode/schema/shell"
 import { Database } from "@opencode/core/database/database"
 import { SessionInboxTable } from "@opencode/core/session/sql"
 import { readSubscriptions } from "../subscriptions"
@@ -28,14 +36,44 @@ export const ServerHandler = HttpApiBuilder.group(Api, "server.server", (handler
           const terminals = yield* PersistentPty.Service
           const jobs = yield* Job.Service
           const database = yield* Database.Service
+          const sessions = yield* Session.Service
+          const execution = yield* SessionExecution.Service
+          const instances = yield* Instance.Service
           // These checks run behind the admission barrier. Unknown terminal state refuses activation.
-          const pending =
-            (yield* terminals.list()).length > 0 ||
-            (yield* jobs.pendingBackground).length > 0 ||
-            (yield* database.db.select().from(SessionInboxTable).limit(1)).length > 0
+          const reason =
+            (yield* database.db.select().from(KVTable).where(JobUpgrade.archived).limit(1)).length > 0
+              ? "background-upgrade-conflict"
+              : (yield* terminals.list()).length > 0
+                ? "open-terminals"
+                : (yield* JobMaintenance.pending({
+                      jobs,
+                      activity: (recovery) =>
+                        Effect.gen(function* () {
+                          if (recovery.kind === "subagent")
+                            return (yield* execution.isActive(recovery.childSessionID))
+                              ? ("running" as const)
+                              : ("ended" as const)
+                          const session = yield* sessions.get(recovery.sessionID)
+                          return yield* Effect.gen(function* () {
+                            const shell = yield* Shell.Service
+                            return yield* shell.get(ID.make(recovery.shellID))
+                          }).pipe(
+                            instances.provide(session),
+                            Effect.map((info) =>
+                              info.status === "running" ? ("running" as const) : ("ended" as const),
+                            ),
+                            Effect.catchTag("Shell.NotFoundError", () => Effect.succeed("missing" as const)),
+                          )
+                        }),
+                    }))
+                  ? "background-notification"
+                  : (yield* database.db.select().from(SessionInboxTable).limit(1)).length > 0
+                    ? "pending-inbox"
+                    : undefined
+          const pending = reason !== undefined
           if (pending) {
             Maintenance.process.cancel(lease.token)
-            return { lease: null, reason: "pending-work" }
+            return { lease: null, reason }
           }
           return { lease: { ...lease, pid: process.pid }, reason: "idle" }
         }).pipe(

@@ -7,6 +7,8 @@ import { Bus } from "@opencode/core/bus"
 import { Instance } from "@opencode/core/instance/service"
 import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
+import { KVTable } from "@opencode/core/kv/sql"
+import { JobUpgrade } from "@opencode/core/job-upgrade"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import type { LocationServices } from "@opencode/core/location-services"
 import { Project } from "@opencode/core/project"
@@ -160,7 +162,7 @@ describe("SessionExecution lifecycle", () => {
     }),
   )
 
-  it.effect("does not resume a user-cancelled background child whose notification was not admitted", () =>
+  it.effect("restores an upgrade-archived cancelled child without rerunning it or losing its notification", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const parent = Session.ID.make("ses_cancelled_background_parent")
@@ -200,6 +202,15 @@ describe("SessionExecution lifecycle", () => {
       expect((yield* claims(database))[child]).toBe(false)
       yield* Scope.close(scope, Exit.void)
 
+      const marker = (yield* jobs.pendingBackground)[0]
+      const archivedKey = `${JobUpgrade.prefix}${marker.notificationID}`
+      yield* database.db
+        .update(KVTable)
+        .set({ key: archivedKey })
+        .where(eq(KVTable.key, `job.background/${marker.notificationID}`))
+        .run()
+      expect(yield* jobs.pendingBackground).toEqual([])
+
       const restartedScope = yield* Scope.make()
       yield* Effect.addFinalizer(() => Scope.close(restartedScope, Exit.void))
       const restartedJobs = yield* Job.make.pipe(Scope.provide(restartedScope))
@@ -214,9 +225,13 @@ describe("SessionExecution lifecycle", () => {
       yield* Context.get(restarted, SessionExecution.Service).awaitIdle(parent)
       expect(drained).toEqual([parent])
       expect(yield* SessionInbox.list(database.db, parent)).toMatchObject([
-        { payload: { text: expect.stringContaining("Subagent cancelled"), metadata: { state: "cancelled" } } },
+        {
+          id: marker.notificationID,
+          payload: { text: expect.stringContaining("Subagent cancelled"), metadata: { state: "cancelled" } },
+        },
       ])
       expect(yield* restartedJobs.pendingBackground).toEqual([])
+      expect(yield* database.db.select().from(KVTable).where(eq(KVTable.key, archivedKey))).toEqual([])
     }),
   )
 
@@ -379,7 +394,7 @@ describe("SessionExecution lifecycle", () => {
 })
 
 describe("SessionRestart background recovery", () => {
-  it.effect("wakes idle shell owners and delivers recovered notices exactly once", () =>
+  it.effect("restores archived orphan shells and delivers recovered notices exactly once", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const store = yield* SessionStore.Service
@@ -396,6 +411,18 @@ describe("SessionRestart background recovery", () => {
 
       expect(yield* store.listSuspended()).toEqual([])
       expect(yield* jobs.pendingBackground).toHaveLength(2)
+      const notifications = (yield* jobs.pendingBackground).map((record) => record.notificationID)
+      yield* database.db.transaction(
+        Effect.fnUntraced(function* (tx) {
+          for (const id of notifications)
+            yield* tx
+              .update(KVTable)
+              .set({ key: `${JobUpgrade.prefix}${id}` })
+              .where(eq(KVTable.key, `job.background/${id}`))
+              .run()
+        }),
+      )
+      expect(yield* jobs.pendingBackground).toHaveLength(0)
 
       const drained: Session.ID[] = []
       const scope = yield* Scope.make()
@@ -417,6 +444,12 @@ describe("SessionRestart background recovery", () => {
       yield* Effect.forEach([parent, child], execution.awaitIdle, { discard: true })
 
       expect(drained.toSorted()).toEqual([parent, child].toSorted())
+      expect(
+        [...(yield* store.context(parent)), ...(yield* store.context(child))]
+          .filter((message) => message.type === "synthetic")
+          .map((message) => message.id)
+          .toSorted(),
+      ).toEqual(notifications.toSorted())
       expect((yield* store.context(parent)).filter((message) => message.type === "synthetic")).toMatchObject([
         {
           type: "synthetic",

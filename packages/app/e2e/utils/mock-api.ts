@@ -229,6 +229,12 @@ const Group = HttpApiGroup.make("mock")
   .add(
     HttpApiEndpoint.post("sessionInterrupt", "/api/session/:sessionID/interrupt", {
       params: SessionParams,
+      success: Json,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("sessionWait", "/api/session/:sessionID/wait", {
+      params: SessionParams,
       success: NoContent,
     }),
   )
