@@ -172,7 +172,7 @@ function SessionBulkDeleteDialog(props: { targets: SessionLifecycleTarget[]; onC
           description={language.plural("session.bulk.delete.confirm", targets().length)}
         />
       </DialogHeader>
-      <DialogBody>
+      <DialogBody class="min-w-0 px-4 pb-2">
         <ul class="max-h-48 overflow-y-auto text-[13px] leading-4 text-v2-text-text-base">
           <For each={targets()}>
             {(target) => (
