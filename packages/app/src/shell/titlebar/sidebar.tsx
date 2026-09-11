@@ -29,7 +29,8 @@ import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
 import { createRecentClock } from "./sidebar-order"
-import { SidebarProjectActions } from "./sidebar-project-actions"
+import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
+import { createSidebarWorktrees, visibleWorktreeSessions } from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
 import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import {
@@ -80,7 +81,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const clock = createRecentClock()
   const indexes = mapArray(global.servers.list, (connection) => {
     const ctx = global.ensureServerCtx(connection)
-    return { connection, ctx, index: createSidebarIndex(ctx, clock) }
+    return { connection, ctx, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
   })
   const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
@@ -192,12 +193,30 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const recentMore = () => recentRows().length > recent().length
   const query = createMemo(() => state.query.trim())
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
+  const worktrees = createMemo(
+    () =>
+      new Map(
+        projects().map((project) => {
+          const entry = indexes().find((entry) => ServerConnection.key(entry.connection) === project.server)!
+          return [project.key, entry.worktrees.group(project, sessions().rows)]
+        }),
+      ),
+  )
+  createEffect(() => {
+    if (!ready() || saved.attention || query()) return
+    projects()
+      .filter((project) => !saved.collapsed[project.key])
+      .forEach((project) => {
+        const entry = indexes().find((entry) => ServerConnection.key(entry.connection) === project.server)!
+        void entry.worktrees.load(() => {
+          if (!ready() || saved.attention || query() || saved.collapsed[project.key]) return
+          const current = projects().find((item) => item.key === project.key)
+          if (current) return { project: current, rows: sessions().rows }
+        })
+      })
+  })
   const projectRows = (key: string) =>
-    visibleSessions(
-      sessions().rows.filter((row) => row.project === key),
-      saved.collapsed[key] ? 0 : (state.limits[key] ?? 5),
-      sessions().current,
-    )
+    visibleWorktreeSessions(worktrees().get(key)!, key, saved.collapsed, state.limits, sessions().current)
   // Match rendered order, retaining the first occurrence of sessions repeated in project groups.
   const selectable = createMemo(() => {
     const rows = query()
@@ -231,6 +250,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     })
   }
   const move = (key: string, to: number) => {
+    const focused = document.activeElement
     const order = projects().map((group) => group.key)
     const from = order.indexOf(key)
     if (from < 0 || to < 0 || to >= order.length) return
@@ -244,6 +264,10 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         order,
       ),
     )
+    queueMicrotask(() => {
+      if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
+        focused.focus({ preventScroll: true })
+    })
   }
   const Row = (props: { item: SidebarSession; compact?: boolean }) => {
     // Recent's monotonic rank and metadata updates are not interaction timestamps.
@@ -599,7 +623,11 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                         )
                         const rows = createMemo(() => sessions().rows.filter((row) => row.project === key))
                         const collapsed = () => saved.collapsed[key] ?? false
-                        const visible = () => projectRows(key)
+                        const tree = () => worktrees().get(key)!
+                        const visible = () =>
+                          collapsed()
+                            ? projectRows(key)
+                            : visibleSessions(tree().root, state.limits[key] ?? 5, sessions().current)
                         return (
                           <SortableProject id={key} index={index()}>
                             {(handle) => (
@@ -655,13 +683,90 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                     {(item) => <Row item={item()} compact />}
                                   </Key>
                                 </div>
-                                <Show when={!collapsed() && rows().length > visible().length}>
+                                <Show when={!collapsed() && tree().root.length > visible().length}>
                                   <button
                                     class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
                                     onClick={() => setState("limits", key, (value = 5) => value + 5)}
                                   >
                                     {language.t("sidebar.sessions.more")}
                                   </button>
+                                </Show>
+                                <Show when={!collapsed()}>
+                                  <Key each={tree().groups} by="key">
+                                    {(group) => {
+                                      const collapsed = () => saved.collapsed[group().key] ?? false
+                                      const visible = () =>
+                                        collapsed()
+                                          ? []
+                                          : visibleSessions(
+                                              group().rows,
+                                              state.limits[group().key] ?? 5,
+                                              sessions().current,
+                                            )
+                                      const id = createUniqueId()
+                                      return (
+                                        <section data-worktree-key={group().key} class="ms-3 mt-2">
+                                          <div class="group/worktree flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
+                                            <button
+                                              type="button"
+                                              class="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                                              aria-expanded={!collapsed()}
+                                              aria-controls={id}
+                                              title={group().directory}
+                                              onClick={() => setSaved("collapsed", group().key, !collapsed())}
+                                            >
+                                              <Icon
+                                                name={collapsed() ? "chevron-right" : "chevron-down"}
+                                                size="small"
+                                                class={collapsed() ? "rtl:rotate-180" : ""}
+                                              />
+                                              <span dir="auto" class="min-w-0 truncate">
+                                                {group().name}
+                                              </span>
+                                              <span
+                                                class="shrink-0 tabular-nums"
+                                                aria-label={language.plural(
+                                                  "sidebar.worktree.sessions",
+                                                  group().rows.length,
+                                                )}
+                                              >
+                                                {group().rows.length}
+                                              </span>
+                                              <Show
+                                                when={
+                                                  collapsed() && group().rows.some((row) => row.attention !== undefined)
+                                                }
+                                              >
+                                                <span
+                                                  class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
+                                                  aria-label={language.t("sidebar.attention.pending")}
+                                                />
+                                              </Show>
+                                            </button>
+                                            <SidebarWorktreeNewSession
+                                              connection={project().connection}
+                                              directory={group().directory}
+                                              name={group().name}
+                                            />
+                                          </div>
+                                          <div id={id} class="flex flex-col gap-1">
+                                            <Key each={visible()} by="key">
+                                              {(item) => <Row item={item()} compact />}
+                                            </Key>
+                                          </div>
+                                          <Show when={!collapsed() && group().rows.length > visible().length}>
+                                            <button
+                                              type="button"
+                                              class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
+                                              onClick={() => setState("limits", group().key, (value = 5) => value + 5)}
+                                            >
+                                              {language.t("sidebar.sessions.more")}
+                                            </button>
+                                          </Show>
+                                        </section>
+                                      )
+                                    }}
+                                  </Key>
                                 </Show>
                               </>
                             )}

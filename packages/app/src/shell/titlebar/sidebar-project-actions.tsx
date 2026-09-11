@@ -80,3 +80,25 @@ export function SidebarProjectActions(props: {
     </div>
   )
 }
+
+export function SidebarWorktreeNewSession(props: {
+  connection: ServerConnection.Any
+  directory: string
+  name: string
+}) {
+  const language = useLanguage()
+  const actions = useProjectActions()
+  return (
+    <Tooltip value={language.t("sidebar.worktree.newSession", { worktree: props.name })}>
+      <IconButton
+        data-action="sidebar-worktree-new-session"
+        variant="ghost-muted"
+        size="small"
+        class="hover-reveal me-1 shrink-0 group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100"
+        icon={<Icon name="plus" />}
+        aria-label={language.t("sidebar.worktree.newSession", { worktree: props.name })}
+        onClick={() => actions.openNewSession(props.connection, props.directory)}
+      />
+    </Tooltip>
+  )
+}
