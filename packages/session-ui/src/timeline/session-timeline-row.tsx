@@ -261,23 +261,49 @@ export function createSessionTimelineRowRenderer(input: {
       const item = content()
       return item ? contentDefaultOpen(item) : undefined
     })
+    const finalAnswer = createMemo(() => {
+      if (content()?.type !== "text") return false
+      const current = message()
+      if (current?.finish !== "stop" || current.time.completed === undefined || current.error || current.retry)
+        return false
+      if (input.projection.assistantMessagesByParent().get(row().userMessageID)?.at(-1)?.id !== current.id) return false
+      if (current.content.find((part) => part.type === "text" && !!part.text.trim()) !== content()) return false
+      const rows = input.projection.rows()
+      // Use projected rows so separate/grouped notices count, but hidden activity does not.
+      for (let index = input.projection.messageRowIndex().get(row().userMessageID) ?? 0; index < rows.length; index++) {
+        const previous = rows[index]
+        if (previous.userMessageID !== row().userMessageID || TimelineRow.key(previous) === TimelineRow.key(row()))
+          return false
+        if (previous._tag !== "UserMessage" && previous._tag !== "TurnGap") return true
+      }
+      return false
+    })
     const disclosureKey = () => (content()?.type === "reasoning" ? ref()!.partID : row().group.key)
     return (
       <Show when={message()}>
         {(message) => (
           <Show when={content()}>
             {(content) => (
-              <SessionAssistantContent
-                message={message()}
-                content={content()}
-                contentID={ref()!.partID}
-                showAssistantCopyPartID={copyContentID(row().userMessageID)}
-                turnDurationMs={duration(row().userMessageID)}
-                defaultOpen={defaultOpen()}
-                toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
-                onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
-                onContentRendered={onSizeChange}
-              />
+              <>
+                <Show when={finalAnswer()}>
+                  <div
+                    data-slot="session-final-answer-divider"
+                    aria-hidden="true"
+                    class="mb-3 h-px w-full bg-v2-border-border-strong"
+                  />
+                </Show>
+                <SessionAssistantContent
+                  message={message()}
+                  content={content()}
+                  contentID={ref()!.partID}
+                  showAssistantCopyPartID={copyContentID(row().userMessageID)}
+                  turnDurationMs={duration(row().userMessageID)}
+                  defaultOpen={defaultOpen()}
+                  toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
+                  onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
+                  onContentRendered={onSizeChange}
+                />
+              </>
             )}
           </Show>
         )}
