@@ -197,23 +197,35 @@ function WorktreeDeleteDialog(props: {
   }
   const dirty = () => state.inspection?.dirty || state.forceRequired
   return (
-    <Dialog fit>
+    <Dialog fit containerClass="max-w-[calc(100vw-32px)]">
       <DialogHeader hideClose>
         <DialogTitleGroup
           title={language.t("sidebar.worktree.delete.title")}
           description={language.t("sidebar.worktree.delete.confirm", { worktree: props.target.name })}
         />
       </DialogHeader>
-      <DialogBody class="flex flex-col gap-3">
-        <div class="flex flex-col gap-1 text-[13px] leading-4">
-          <span class="text-v2-text-text-muted">{language.t("sidebar.worktree.delete.branch")}</span>
-          <span dir="auto" class="text-v2-text-text-base">
-            {state.inspection?.branch ?? props.target.name}
-          </span>
-          <span class="text-v2-text-text-muted">{language.t("sidebar.worktree.delete.path")}</span>
-          <code dir="auto" class="break-all font-mono text-xs leading-4 text-v2-text-text-base">
-            {props.target.directory}
-          </code>
+      <DialogBody class="flex min-w-0 flex-col gap-4 px-4 pb-2">
+        <div data-slot="worktree-delete-details" class="flex min-w-0 flex-col gap-3">
+          <div class="flex min-w-0 flex-col gap-1">
+            <span class="text-11-regular text-v2-text-text-muted">
+              {language.t("sidebar.worktree.delete.branch")}
+            </span>
+            <span dir="auto" class="min-w-0 break-words text-[13px] leading-4 text-v2-text-text-base">
+              {state.inspection?.branch ?? props.target.name}
+            </span>
+          </div>
+          <div class="flex min-w-0 flex-col gap-1">
+            <span class="text-11-regular text-v2-text-text-muted">
+              {language.t("sidebar.worktree.delete.path")}
+            </span>
+            <code
+              data-slot="worktree-delete-path"
+              dir="ltr"
+              class="block min-w-0 max-w-full whitespace-normal break-words font-mono text-xs leading-4 text-v2-text-text-base [overflow-wrap:anywhere]"
+            >
+              {props.target.directory}
+            </code>
+          </div>
         </div>
         <Show when={state.pending}>
           <p role="status" class="text-[13px] leading-4 text-v2-text-text-muted">
@@ -232,22 +244,29 @@ function WorktreeDeleteDialog(props: {
             {language.t("sidebar.worktree.delete.dirty")}
           </p>
         </Show>
-        <Show when={state.inspection?.localBranch}>
-          {(branch) => (
-            <Checkbox checked={state.local} onChange={(checked) => setState("local", checked)}>
-              {language.t("sidebar.worktree.delete.localBranch", { branch: branch().name })}
-            </Checkbox>
-          )}
-        </Show>
-        <Show when={state.inspection?.remoteBranch}>
-          {(branch) => (
-            <Checkbox checked={state.remote} onChange={(checked) => setState("remote", checked)}>
-              {language.t("sidebar.worktree.delete.remoteBranch", {
-                remote: branch().name,
-                branch: branch().branch,
-              })}
-            </Checkbox>
-          )}
+        <Show when={state.inspection?.localBranch || state.inspection?.remoteBranch}>
+          <div
+            data-slot="worktree-delete-options"
+            class="flex min-w-0 flex-col gap-2 [--checkbox-align:flex-start] [--checkbox-offset:2px] [&_[data-component=checkbox]]:min-w-0 [&_[data-slot=checkbox-checkbox-content]]:min-w-0 [&_[data-slot=checkbox-checkbox-label]]:[overflow-wrap:anywhere]"
+          >
+            <Show when={state.inspection?.localBranch}>
+              {(branch) => (
+                <Checkbox checked={state.local} onChange={(checked) => setState("local", checked)}>
+                  {language.t("sidebar.worktree.delete.localBranch", { branch: branch().name })}
+                </Checkbox>
+              )}
+            </Show>
+            <Show when={state.inspection?.remoteBranch}>
+              {(branch) => (
+                <Checkbox checked={state.remote} onChange={(checked) => setState("remote", checked)}>
+                  {language.t("sidebar.worktree.delete.remoteBranch", {
+                    remote: branch().name,
+                    branch: branch().branch,
+                  })}
+                </Checkbox>
+              )}
+            </Show>
+          </div>
         </Show>
       </DialogBody>
       <DialogFooter>

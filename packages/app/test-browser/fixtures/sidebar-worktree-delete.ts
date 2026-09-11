@@ -204,6 +204,20 @@ test("worktree deletion uses real lifecycle results for cancel, success, failure
   try {
     view.button("Open delete").click()
     await view.wait()
+    const body = document.querySelector<HTMLElement>('[data-slot="dialog-body"]')!
+    const container = document.querySelector<HTMLElement>('[data-slot="dialog-container"]')!
+    const details = document.querySelector<HTMLElement>('[data-slot="worktree-delete-details"]')!
+    const path = document.querySelector<HTMLElement>('[data-slot="worktree-delete-path"]')!
+    const options = document.querySelector<HTMLElement>('[data-slot="worktree-delete-options"]')!
+    expect(body.className).toContain("px-4")
+    expect(body.className).toContain("min-w-0")
+    expect(container.className).toContain("max-w-[calc(100vw-32px)]")
+    expect(details.className).toContain("gap-3")
+    expect(path.dir).toBe("ltr")
+    expect(path.className).toContain("break-words")
+    expect(path.className).toContain("[overflow-wrap:anywhere]")
+    expect(options.className).toContain("[--checkbox-align:flex-start]")
+    expect(options.className).toContain("[overflow-wrap:anywhere]")
     view.button("Cancel").click()
     await view.wait()
     expect(active.state.deletes).toBe(0)
