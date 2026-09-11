@@ -84,6 +84,7 @@ const ImageFields = {
   filename: Schema.String,
   sourcePath: Persistence.optional(Schema.String),
   mime: Schema.String,
+  mention: Persistence.optional(Persistence.struct({ text: Schema.String, start: Schema.Number, end: Schema.Number })),
 }
 const Image = Persistence.struct({
   ...ImageFields,
@@ -109,6 +110,7 @@ export const ImageAttachmentPart = Schema.Struct({
         filename: value.filename,
         sourcePath: value.sourcePath,
         mime: value.mime,
+        mention: value.mention,
         blob: {
           id,
           url: url?.startsWith("blob:") || url?.startsWith("data:") ? url : id.startsWith("data:") ? id : "",

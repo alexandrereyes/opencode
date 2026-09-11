@@ -81,6 +81,58 @@ describe("Composer store", () => {
     expect(prompt.state.cursor).toBe(5)
   })
 
+  test("turns a partially edited mention into text without dropping untouched characters", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "A ", start: 0, end: 2 },
+        { type: "file", path: "one", content: "@one", start: 2, end: 6 },
+        { type: "text", content: " B", start: 6, end: 8 },
+      ],
+      cursor: 4,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.addText("X")
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "A @oXne B", start: 0, end: 9 }])
+    expect(prompt.state.cursor).toBe(5)
+  })
+
+  test("preserves unselected mention text during a partial structured replacement", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [{ type: "file", path: "one", content: "@one", start: 0, end: 4 }],
+      cursor: 2,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.replaceRange([{ type: "text", content: "X", start: 0, end: 1 }], { start: 1, end: 3 })
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "@Xe", start: 0, end: 3 }])
+    expect(prompt.state.cursor).toBe(2)
+  })
+
+  test("normalizes CRLF prompt offsets and cursor at the store boundary", () => {
+    const prompt = createPromptStore()
+
+    prompt.setPrompt(
+      [
+        { type: "text", content: "a\r\n", start: 0, end: 3 },
+        { type: "file", path: "one", content: "@one", start: 3, end: 7 },
+        { type: "text", content: "\r\nb", start: 7, end: 10 },
+      ],
+      10,
+    )
+
+    expect(prompt.state.prompt).toEqual([
+      { type: "text", content: "a\n", start: 0, end: 2 },
+      { type: "file", path: "one", content: "@one", start: 2, end: 6 },
+      { type: "text", content: "\nb", start: 6, end: 8 },
+    ])
+    expect(prompt.state.cursor).toBe(8)
+  })
+
   test("mutates mentions, attachments, and context through editor actions", () => {
     const prompt = createPromptStore()
 
@@ -97,6 +149,58 @@ describe("Composer store", () => {
     prompt.setPrompt([{ type: "text", content: "old", start: 0, end: 3 }], 3)
 
     expect(prompt.state.prompt).toEqual([{ type: "text", content: "old", start: 0, end: 3 }])
+  })
+
+  test("removes the matching text when a cited attachment is removed without a mounted editor", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "before [photo.png] after", start: 0, end: 24 },
+        {
+          type: "image",
+          id: "attachment-1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "a", url: "blob:a" },
+          mention: { text: "[photo.png]", start: 7, end: 18 },
+        },
+      ],
+      cursor: 18,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.removeAttachment("attachment-1")
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "before  after", start: 0, end: 13 }])
+  })
+
+  test("remaps existing image mentions for programmatic text edits", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "before [photo.png]", start: 0, end: 18 },
+        {
+          type: "image",
+          id: "attachment-1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "a", url: "blob:a" },
+          mention: { text: "[photo.png]", start: 7, end: 18 },
+        },
+      ],
+      cursor: 0,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.addText("prefix ", 0)
+    expect(prompt.state.prompt.find((part) => part.type === "image")?.mention).toEqual({
+      text: "[photo.png]",
+      start: 14,
+      end: 25,
+    })
+
+    prompt.replaceRange([{ type: "text", content: "x", start: 0, end: 1 }], { start: 16, end: 17 })
+    expect(prompt.state.prompt.some((part) => part.type === "image")).toBe(false)
   })
 
   test("prepends a slash skill to an attachment-only draft without flattening it", () => {

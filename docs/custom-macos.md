@@ -66,6 +66,27 @@ Touch devices (a coarse primary pointer, including iPhone and iPad) enable autoc
 sentence capitalization, and spellcheck in normal chat mode. Desktop pointer input and shell
 mode keep these disabled. Writing assistance follows the input device, not viewport width.
 
+### Reference editing
+
+The web composer uses CodeMirror 6 for its document, selection, composition, and undo history.
+Files, agents, apps, sessions, skills, and snippets remain ordinary editable text with inline
+decorations; they are not atomic `contenteditable=false` chips. Selecting a suggestion associates
+its metadata with that exact text range. Edits outside the range move it, while an edit that changes
+any character inside the range removes the old association so submission cannot send stale metadata.
+Undo and redo restore the text and association together. Copying a complete Session reference emits
+its portable `opencode://` form for same-server structured paste; copying only part of its text stays
+plain text.
+
+Pasting one or more images inserts editable `[filename]` references at the current selection and keeps
+each range associated with that image's attachment identity. Generic and repeated clipboard names are
+made unique before insertion. Editing or deleting a reference removes its image from the payload;
+removing the preview removes the matching reference. Both directions are one CodeMirror history change,
+so undo and redo restore or remove the text and image together. Drafts, history, and queued-message edits
+retain the association. Pending image reads track intervening edits and reserve filenames across concurrent
+pastes; their references remain in paste order even when storage completes out of order. Snippet expansion
+and prompt concatenation remap each image range before image file parts carry the matching mention in the
+multimodal request. Cited images follow document order; uncited picker attachments retain their existing order.
+
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
@@ -73,9 +94,10 @@ and content. Snippets are stored persistently in the OpenCode server database, g
 to a project. Settings selects the server to manage; all its devices share the same catalog and
 receive live updates. Existing device-local snippets are not migrated.
 Project snippets override global snippets with the same name. Type `#` in the composer, search,
-and select with Enter, Tab, or a click. Selected tokens use the theme accent and expand to their
+and select with Enter, Tab, or a click. Selected references use the theme accent and expand to their
 captured content on submission, including when a command is prefixed from the composer menu.
-Drafts and prompt history retain the structured token. Snippets do not require server config files.
+Drafts and prompt history retain the structured association while its text remains unchanged.
+Snippets do not require server config files.
 
 ## Chat quotes
 
@@ -108,8 +130,9 @@ measured 307ms first correct / 333ms stable on the base and 236ms / 266ms with t
 Type `@` in the web composer to search recent top-level sessions on the current server by
 title or exact ID. Sessions from other projects are included; the current session, archived
 sessions, and subagents with a parent are excluded. The existing mention query ends at a space.
-Session suggestions show a conversation icon, title, directory, and shortened ID, and selected
-references use a distinct chip alongside Mac app, file, and agent mentions.
+Session suggestions show a conversation icon, title, directory, and shortened ID. Selected
+references use a distinct inline decoration alongside Mac app, file, and agent references while
+remaining directly editable.
 
 References retain their identity through drafts, history, queue edits, and same-server copy/paste.
 Submission adds compact, deduplicated references. The `opencode.session_read` tool retrieves

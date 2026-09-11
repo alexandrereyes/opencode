@@ -1,74 +1,25 @@
 import { describe, expect, test } from "bun:test"
-import { getCursorPosition, getNodeLength, getSelectionRange, getTextLength, setCursorPosition } from "./dom"
+import { bindComposerEditor, getCursorPosition, getSelectionRange, setCursorPosition } from "./dom"
 
-describe("Composer editor DOM", () => {
-  test("length helpers treat breaks as one char and ignore zero-width chars", () => {
-    const container = document.createElement("div")
-    container.appendChild(document.createTextNode("ab\u200B"))
-    container.appendChild(document.createElement("br"))
-    container.appendChild(document.createTextNode("cd"))
+describe("Composer editor binding", () => {
+  test("routes selection reads and writes through the editor engine", () => {
+    const element = document.createElement("div")
+    const selection = { start: 2, end: 7 }
+    const unbind = bindComposerEditor(element, {
+      selection: () => selection,
+      setSelection: (start, end) => {
+        selection.start = start
+        selection.end = end
+      },
+    })
 
-    expect(getNodeLength(container.childNodes[0]!)).toBe(2)
-    expect(getNodeLength(container.childNodes[1]!)).toBe(1)
-    expect(getTextLength(container)).toBe(5)
-  })
+    expect(getSelectionRange(element)).toEqual({ start: 2, end: 7 })
+    expect(getCursorPosition(element)).toBe(7)
+    setCursorPosition(element, 4)
+    expect(getSelectionRange(element)).toEqual({ start: 4, end: 4 })
 
-  test("setCursorPosition and getCursorPosition round-trip with pills and breaks", () => {
-    const container = document.createElement("div")
-    const pill = document.createElement("span")
-    pill.dataset.mention = "file"
-    pill.textContent = "@file"
-    container.appendChild(document.createTextNode("ab"))
-    container.appendChild(pill)
-    container.appendChild(document.createElement("br"))
-    container.appendChild(document.createTextNode("cd"))
-    document.body.appendChild(container)
-
-    setCursorPosition(container, 2)
-    expect(getCursorPosition(container)).toBe(2)
-
-    setCursorPosition(container, 7)
-    expect(getCursorPosition(container)).toBe(7)
-
-    setCursorPosition(container, 8)
-    expect(getCursorPosition(container)).toBe(8)
-
-    container.remove()
-  })
-
-  test("setCursorPosition and getCursorPosition round-trip across blank lines", () => {
-    const container = document.createElement("div")
-    container.appendChild(document.createTextNode("a"))
-    container.appendChild(document.createElement("br"))
-    container.appendChild(document.createElement("br"))
-    container.appendChild(document.createTextNode("b"))
-    document.body.appendChild(container)
-
-    setCursorPosition(container, 2)
-    expect(getCursorPosition(container)).toBe(2)
-
-    setCursorPosition(container, 3)
-    expect(getCursorPosition(container)).toBe(3)
-
-    container.remove()
-  })
-
-  test("reports a selection spanning text and an atomic mention", () => {
-    const container = document.createElement("div")
-    const before = document.createTextNode("ab")
-    const pill = document.createElement("span")
-    pill.dataset.mention = "session"
-    pill.textContent = "@session"
-    container.append(before, pill, document.createTextNode("cd"))
-    document.body.appendChild(container)
-    const range = document.createRange()
-    range.setStart(before, 1)
-    range.setEndAfter(pill)
-    window.getSelection()?.removeAllRanges()
-    window.getSelection()?.addRange(range)
-
-    expect(getSelectionRange(container)).toEqual({ start: 1, end: 10 })
-
-    container.remove()
+    unbind()
+    expect(getSelectionRange(element)).toBeUndefined()
+    expect(getCursorPosition(element)).toBe(0)
   })
 })

@@ -3,6 +3,7 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createBlobReference } from "@/runtime/persistence/drafts"
 import { uuid } from "@/runtime/persistence/uuid"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
+import { getCursorPosition } from "../editor/dom"
 
 const accepted = [
   "image/png",
@@ -66,6 +67,11 @@ type PromptTarget = {
   current: () => ComposerPrompt
   cursor: () => number | undefined
   set: (prompt: ComposerPrompt, cursor?: number) => void
+  replace: (prompt: ComposerPrompt, range: { start: number; end: number }, order?: number) => void
+  selection: () => { start: number; end: number }
+  trackSelection?: () =>
+    | { current: () => { start: number; end: number }; order: number; release: () => void }
+    | undefined
 }
 
 export type ComposerAttachmentConfig = {
@@ -93,63 +99,158 @@ export function createComposerAttachments(
     setDraggingType: (type: "image" | "@mention" | null) => void
   },
 ) {
+  const pendingFilenames = new Set<string>()
   const clearDrag = () => {
     input.setDraggingType(null)
   }
-  const capture = () => {
+  const capture = (trackSelection = false) => {
     const prompt = input.capture()
     const editor = input.editor()
-    if (!editor) return
-    return { prompt, cursor: prompt.cursor() ?? cursorPosition(editor) }
-  }
-  const add = async (file: File, toast = true, target = capture(), clipboard = false) => {
-    if (!target) return false
-    const mime = await attachmentMime(file)
-    if (!mime) {
-      if (toast) input.warn()
-      return false
+    if (!editor) return undefined
+    const tracked = trackSelection ? prompt.trackSelection?.() : undefined
+    return {
+      prompt,
+      cursor: prompt.cursor() ?? getCursorPosition(editor),
+      selection: tracked?.current ?? prompt.selection,
+      release: tracked?.release,
+      replace: (content: ComposerPrompt, range: { start: number; end: number }) =>
+        prompt.replace(content, range, tracked?.order),
     }
+  }
+  const prepare = async (
+    file: File,
+    target: NonNullable<ReturnType<typeof capture>>,
+    clipboard = false,
+    filename = file.name,
+    pending: ComposerAttachment[] = [],
+  ) => {
+    const mime = await attachmentMime(file)
+    if (!mime) return undefined
     const blob = input.store ? await input.store(file) : await createBlobReference(file)
     const sourcePath = input.getPathForFile?.(file) || undefined
-    // Native clipboard images arrive with a fresh timestamped filename on every paste, so identical
-    // clipboard content is matched on bytes alone.
-    const duplicate = target.prompt
-      .current()
-      .some(
-        (part) =>
-          part.type === "image" &&
-          part.blob.id === blob.id &&
-          (sourcePath
-            ? part.sourcePath === sourcePath
-            : !part.sourcePath && (clipboard || part.filename === file.name)),
-      )
+    const duplicate = [...target.prompt.current(), ...pending].some(
+      (part) =>
+        part.type === "image" &&
+        part.blob.id === blob.id &&
+        (sourcePath ? part.sourcePath === sourcePath : !part.sourcePath && (clipboard || part.filename === filename)),
+    )
     if (duplicate) {
       input.duplicate()
-      return true
+      return false
     }
-    const attachment: ComposerAttachment = {
-      type: "image",
+    return {
+      type: "image" as const,
       id: uuid(),
-      filename: file.name,
+      filename,
       sourcePath,
       mime,
       blob,
     }
+  }
+  const add = async (file: File, toast = true, target = capture(), clipboard = false) => {
+    if (!target) return false
+    const attachment = await prepare(file, target, clipboard)
+    if (attachment === undefined) {
+      if (toast) input.warn()
+      return false
+    }
+    if (attachment === false) return true
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
     return true
   }
   const addAttachments = async (files: File[], toast = true, target = capture()) => {
-    const found = await files.reduce(async (result, file) => {
-      const previous = await result
-      return (await add(file, false, target)) || previous
-    }, Promise.resolve(false))
-    if (!found && files.length > 0 && toast) input.warn()
-    return found
+    return files
+      .reduce(async (result, file) => {
+        const previous = await result
+        return (await add(file, false, target)) || previous
+      }, Promise.resolve(false))
+      .then((found) => {
+        if (!found && files.length > 0 && toast) input.warn()
+        return found
+      })
+  }
+  const addCitedAttachments = async (
+    files: File[],
+    pastedText: string,
+    target: NonNullable<ReturnType<typeof capture>>,
+  ) => {
+    const names = assignAttachmentFilenames(files, [
+      ...target.prompt
+        .current()
+        .filter((part): part is ComposerAttachment => part.type === "image")
+        .map((part) => part.filename),
+      ...pendingFilenames,
+    ])
+    names.forEach((name) => pendingFilenames.add(name.toLowerCase()))
+    return files
+      .reduce(
+        async (result, file, index) => {
+          const state = await result
+          const attachment = await prepare(file, target, true, names[index], state.attachments)
+          if (attachment === false) return { ...state, handled: true }
+          if (!attachment) return state
+          return { attachments: [...state.attachments, attachment], handled: true }
+        },
+        Promise.resolve({ attachments: [] as ComposerAttachment[], handled: false }),
+      )
+      .then((result) => {
+        const selection = target.selection()
+        if (result.attachments.length === 0) {
+          if (pastedText) {
+            target.replace([{ type: "text", content: pastedText, start: 0, end: pastedText.length }], selection)
+          }
+          if (!result.handled) input.warn()
+          return result.handled || !!pastedText
+        }
+        const citations = result.attachments.map((attachment) => `[${attachment.filename}]`).join(" ")
+        const insertion = withInsertionBoundaries(
+          `${pastedText}${pastedText && !/\s$/.test(pastedText) ? " " : ""}${citations}`,
+          promptText(target.prompt.current()).slice(0, selection.start),
+          promptText(target.prompt.current()).slice(selection.end),
+        )
+        const citationStart = insertion.indexOf(citations, pastedText.length)
+        const cited = result.attachments.map((attachment, index) => {
+          const text = `[${attachment.filename}]`
+          const start =
+            citationStart +
+            result.attachments.slice(0, index).reduce((length, item) => length + item.filename.length + 2, 0) +
+            index
+          return { ...attachment, mention: { text, start, end: start + text.length } }
+        })
+        target.replace([{ type: "text", content: insertion, start: 0, end: insertion.length }, ...cited], selection)
+        return true
+      })
+      .finally(() => names.forEach((name) => pendingFilenames.delete(name.toLowerCase())))
+  }
+  const addUncitedClipboardAttachments = async (
+    files: File[],
+    pastedText: string,
+    target: NonNullable<ReturnType<typeof capture>>,
+  ) => {
+    const result = await files.reduce(
+      async (pending, file) => {
+        const state = await pending
+        const attachment = await prepare(file, target, true, file.name, state.attachments)
+        if (attachment === false) return { ...state, handled: true }
+        if (!attachment) return state
+        return { attachments: [...state.attachments, attachment], handled: true }
+      },
+      Promise.resolve({ attachments: [] as ComposerAttachment[], handled: false }),
+    )
+    if (result.attachments.length > 0) {
+      target.prompt.set([...target.prompt.current(), ...result.attachments], target.selection().end)
+      return true
+    }
+    if (pastedText) {
+      target.replace([{ type: "text", content: pastedText, start: 0, end: pastedText.length }], target.selection())
+    }
+    if (!result.handled) input.warn()
+    return result.handled || !!pastedText
   }
   const handlePaste = async (event: ClipboardEvent) => {
     const clipboardData = event.clipboardData
     if (!clipboardData) return
-    const target = capture()
+    const target = capture(true)
     if (!target) return
     event.preventDefault()
     event.stopPropagation()
@@ -159,14 +260,23 @@ export function createComposerAttachments(
       return file ? [file] : []
     })
     if (files.length > 0) {
-      await addAttachments(files, true, target)
+      const pastedText = clipboardData.getData("text/plain").replace(/\r\n?/g, "\n")
+      if (files.some((file) => !isImageFile(file))) {
+        await addUncitedClipboardAttachments(files, pastedText, target).finally(() => target.release?.())
+        return
+      }
+      await addCitedAttachments(files, pastedText, target).finally(() => target.release?.())
       return
     }
     const plainText = clipboardData.getData("text/plain") ?? ""
     if (input.readClipboardImage && !plainText) {
-      const file = await input.readClipboardImage()
-      if (file && (await add(file, true, target, true))) return
+      await input
+        .readClipboardImage()
+        .then((file) => (file ? addCitedAttachments([file], "", target) : false))
+        .finally(() => target.release?.())
+      return
     }
+    target.release?.()
     if (!plainText) return
     const text = plainText.includes("\r") ? plainText.replace(/\r\n?/g, "\n") : plainText
     const put = () => {
@@ -174,11 +284,6 @@ export function createComposerAttachments(
       input.focusEditor()
       return input.addPart({ type: "text", content: text, start: 0, end: 0 })
     }
-    if (text.includes("\n") || largePaste(text)) {
-      put()
-      return
-    }
-    if (typeof document.execCommand === "function" && document.execCommand("insertText", false, text)) return
     put()
   }
   const handleDrop = async (event: DragEvent) => {
@@ -230,6 +335,57 @@ export function createComposerAttachments(
   }
 }
 
+function isImageFile(file: File) {
+  if (file.type.toLowerCase().startsWith("image/")) return true
+  return imageExtensions.has(file.name.split(".").at(-1)?.toLowerCase() ?? "")
+}
+
+const genericImageNames =
+  /^(?:image|screenshot|screen[-_ ]?shot|clipboard|pasted[-_ ]?image|untitled|unknown|file|blob)(?:[-_ ]?\(?\d+\)?)?$/i
+
+export function assignAttachmentFilenames(files: readonly File[], existing: readonly string[]) {
+  const used = new Set(existing.map((name) => name.toLowerCase()))
+  return files.map((file) => {
+    const clean =
+      file.name
+        .replace(/\\/g, "/")
+        .split("/")
+        .at(-1)
+        ?.replace(/[<>:"/\\|?*[\]\u0000-\u001f]/g, "-")
+        .trim() || "image"
+    const dot = clean.lastIndexOf(".")
+    const extension = dot > 0 ? clean.slice(dot + 1).toLowerCase() : imageExtension(file.type)
+    const base = dot > 0 ? clean.slice(0, dot) : clean
+    const generated = genericImageNames.test(base)
+    const root = generated ? "image" : base
+    let index = generated ? 1 : 0
+    let candidate = `${root}${index ? `-${index}` : ""}.${extension}`
+    while (used.has(candidate.toLowerCase())) {
+      index = index === 0 ? 2 : index + 1
+      candidate = `${root}-${index}.${extension}`
+    }
+    used.add(candidate.toLowerCase())
+    return candidate
+  })
+}
+
+function imageExtension(mime: string) {
+  if (mime === "image/jpeg") return "jpg"
+  if (mime === "image/gif") return "gif"
+  if (mime === "image/webp") return "webp"
+  return "png"
+}
+
+function promptText(prompt: ComposerPrompt) {
+  return prompt.map((part) => ("content" in part ? part.content : "")).join("")
+}
+
+function withInsertionBoundaries(content: string, before: string, after: string) {
+  const leading = before && !/\s$/.test(before) && !/^\s/.test(content) && !/[([{]$/.test(before) ? " " : ""
+  const trailing = after && !/\s$/.test(content) && !/^\s/.test(after) && !/^[\])}.,;:!?]/.test(after) ? " " : ""
+  return `${leading}${content}${trailing}`
+}
+
 const imageMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
 
 const imageExtensions = new Map([
@@ -264,20 +420,4 @@ async function attachmentMime(file: File) {
   const control = bytes.filter((byte) => byte < 9 || (byte > 13 && byte < 32)).length
   if (bytes.length > 0 && control / bytes.length > 0.3) return
   return "text/plain"
-}
-
-function cursorPosition(editor: HTMLElement) {
-  const selection = window.getSelection()
-  if (!selection || selection.rangeCount === 0) return 0
-  const range = selection.getRangeAt(0)
-  if (!editor.contains(range.startContainer)) return 0
-  const before = range.cloneRange()
-  before.selectNodeContents(editor)
-  before.setEnd(range.startContainer, range.startOffset)
-  return before.toString().replace(/\u200B/g, "").length
-}
-
-function largePaste(text: string) {
-  if (text.length >= 8000) return true
-  return text.split("\n").length - 1 >= 120
 }

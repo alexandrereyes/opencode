@@ -13,6 +13,7 @@ import { formatSessionContext } from "@/composer/session-reference"
 import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
 import type { ChatQuote } from "@/composer/schema"
 import { blobDataUrl } from "@/runtime/persistence/drafts"
+import { uuid } from "@/runtime/persistence/uuid"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
@@ -165,8 +166,7 @@ export function createSessionQueue(input: {
         quotes: input.draft.quotes.all().map((quote) => ({ ...quote })),
       },
     })
-    const text = queuedPromptText(item)
-    const prompt = extractSessionPrompt(text, item.payload.metadata)
+    const prompt = queuedPrompt(item)
     input.draft.mode.set("normal")
     input.draft.quotes.replace(readChatQuotes(item.payload.metadata?.quotes))
     input.draft.set(prompt, promptLength(prompt))
@@ -264,10 +264,47 @@ export function queuedPromptText(item: QueuedPrompt) {
   return typeof display === "string" ? display : item.payload.text
 }
 
+export function queuedPrompt(item: QueuedPrompt): Prompt {
+  const text = queuedPromptText(item)
+  return [
+    ...extractSessionPrompt(text, item.payload.metadata),
+    ...(item.payload.files?.flatMap((file) => {
+      const mention = queuedImageMention(file, text)
+      if (!mention) return []
+      const filename = mention.text.slice(1, -1)
+      return [
+        {
+          type: "image" as const,
+          id: uuid(),
+          filename,
+          sourcePath: file.name && file.name !== filename ? file.name : undefined,
+          mime: file.mime,
+          blob: {
+            id: `data:${file.mime};base64,${file.data}`,
+            url: `data:${file.mime};base64,${file.data}`,
+          },
+          mention,
+        },
+      ]
+    }) ?? []),
+  ]
+}
+
+function queuedImageMention(file: NonNullable<QueuedPrompt["payload"]["files"]>[number], text: string) {
+  const mention = file.mention
+  if (!file.mime.startsWith("image/") || !file.data || !mention) return undefined
+  if (!/^\[[^[\]\r\n]+\]$/.test(mention.text)) return undefined
+  if (mention.text.slice(1, -1).trim() !== mention.text.slice(1, -1)) return undefined
+  if (!Number.isInteger(mention.start) || !Number.isInteger(mention.end)) return undefined
+  if (mention.start < 0 || mention.end <= mention.start || mention.end > text.length) return undefined
+  if (text.slice(mention.start, mention.end) !== mention.text) return undefined
+  return { text: mention.text, start: mention.start, end: mention.end }
+}
+
 // Confirming an edit submits the current composer content as the replacement:
 // mentions and images added during the edit are parsed like a normal
-// submission, the original's stored attachments are preserved, and the
-// review-comment notes appended to the original's model-visible text survive.
+// submission. Original cited images are reconstructed in the editor and replaced
+// from that state; uncited stored attachments and review-comment notes survive.
 // Ambient composer context (open review comments) stays out: it belongs to
 // the next fresh prompt, not to a queued edit.
 export async function editedPromptInput(
@@ -326,12 +363,17 @@ export async function editedPromptInput(
     sessionID,
     text: [request.text + retainedNotes, formatChatQuotes(quotes)].filter(Boolean).join("\n"),
     files: [
-      ...(payload?.files?.map((file) => ({
-        uri: `data:${file.mime};base64,${file.data}`,
-        name: file.name,
-        description: file.description,
-        mention: mention(file.mention),
-      })) ?? []),
+      ...(payload?.files?.flatMap((file) => {
+        if (queuedImageMention(file, display)) return []
+        return [
+          {
+            uri: `data:${file.mime};base64,${file.data}`,
+            name: file.name,
+            description: file.description,
+            mention: mention(file.mention),
+          },
+        ]
+      }) ?? []),
       ...request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),

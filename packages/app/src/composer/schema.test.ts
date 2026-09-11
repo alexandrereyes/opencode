@@ -141,7 +141,12 @@ describe("composer persistence schemas", () => {
       Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
     )({
       prompt: [
-        { ...image, dataUrl: "data:image/png;base64,YQ==", sourcePath: "/image.png" },
+        {
+          ...image,
+          dataUrl: "data:image/png;base64,YQ==",
+          sourcePath: "/image.png",
+          mention: { text: "[image.png]", start: 0, end: 11 },
+        },
         { ...image, blob: { id: "data:image/png;base64,Yg==" } },
         { ...image, blob: { id: "hash", url: "blob:hydrated" } },
         { ...image, blob: { id: "missing" } },
@@ -153,6 +158,7 @@ describe("composer persistence schemas", () => {
     expect(value.prompt[0]).toEqual({
       ...image,
       sourcePath: "/image.png",
+      mention: { text: "[image.png]", start: 0, end: 11 },
       blob: { id: "data:image/png;base64,YQ==", url: "data:image/png;base64,YQ==" },
     })
     const encoded = Schema.encodeSync(ComposerStore)(value)

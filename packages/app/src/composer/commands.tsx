@@ -27,9 +27,7 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   const chooseModel = async () => {
     const owner = sessionOwnership.capture()
     const editor = document.querySelector<HTMLElement>('[data-component="composer-editor"]')
-    const selection = window.getSelection()
-    const cursor =
-      editor && selection?.rangeCount && editor.contains(selection.anchorNode) ? getCursorPosition(editor) : null
+    const cursor = editor ? getCursorPosition(editor) : null
     const restoreComposer = () => {
       // Kobalte restores focus during its teardown effect; defer past it so the
       // composer keeps focus and the caret returns to where the user left it.
