@@ -30,6 +30,7 @@ target
 .direnv/
 
 # Local dev files
+.playwright-cli/
 opencode-dev
 UPCOMING_CHANGELOG.md
 logs/
