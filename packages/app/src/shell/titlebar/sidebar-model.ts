@@ -3,6 +3,7 @@ import type { ServerConnection } from "@/runtime/server/registry"
 import { pathKey } from "@/workspaces/path-key"
 import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
+import { latestAttention } from "@/shell/notifications/session-attention"
 
 export type SidebarSession = SessionNavigationInfo & {
   server: ServerConnection.Key
@@ -25,6 +26,11 @@ export function sidebarProjects(
   known: Omit<LocalProject, "expanded">[],
   sessions: SessionNavigationInfo[],
 ) {
+  const eligible = new Set(
+    sessions
+      .filter((row) => !row.session.parentID && !row.session.time.archived)
+      .map((row) => projectKey(server, { id: row.session.projectID, worktree: row.session.location.directory })),
+  )
   const entries = [
     ...known.map((project) => ({
       project,
@@ -45,38 +51,38 @@ export function sidebarProjects(
         })
         .reverse(),
     ).values(),
-  ]
+  ].filter((project) => eligible.has(project.key))
 }
 
-export function firstAttention(...times: (number | undefined)[]) {
-  const pending = times.filter((time): time is number => time !== undefined)
-  return pending.length ? Math.min(...pending) : undefined
-}
-
-export function rootSessions(rows: SidebarSession[], current?: string) {
+export function rootSessions(rows: SidebarSession[], current?: string, fallback?: string) {
   const byKey = new Map(rows.map((row) => [row.key, row]))
   const root = (row: SidebarSession) => {
     const seen = new Set([row.key])
     while (row.session.parentID) {
       const parent = byKey.get(sessionKey(row.server, row.session.parentID))
-      if (!parent || seen.has(parent.key)) break
+      if (!parent || seen.has(parent.key)) return
       seen.add(parent.key)
       row = parent
     }
     return row
   }
   const currentRow = current ? byKey.get(current) : undefined
-  const currentRoot = currentRow ? root(currentRow).key : current
+  const fallbackRow = fallback ? byKey.get(fallback) : undefined
+  const currentRoot =
+    (currentRow ? root(currentRow)?.key : undefined) ??
+    (fallbackRow && !fallbackRow.session.parentID ? fallback : current)
   const attention = new Map<string, number>()
-  rows.forEach((row) => {
-    if (row.attention === undefined) return
-    const key = root(row).key
-    attention.set(key, Math.min(attention.get(key) ?? row.attention, row.attention))
+  byKey.forEach((row) => {
+    if (row.session.time.archived) return
+    const time = row.session.parentID ? latestAttention(row.permissionAt, row.questionAt) : row.attention
+    const parent = root(row)
+    if (time === undefined || !parent || parent.session.time.archived) return
+    attention.set(parent.key, Math.max(attention.get(parent.key) ?? time, time))
   })
   return {
     current: currentRoot,
     rows: [...byKey.values()]
-      .filter((row) => !row.session.time.archived && (!row.session.parentID || row.key === currentRoot))
+      .filter((row) => !row.session.time.archived && !row.session.parentID)
       .map((row) => ({ ...row, attention: attention.get(row.key) }))
       .sort((a, b) => (b.messageAt ?? 0) - (a.messageAt ?? 0) || a.key.localeCompare(b.key)),
   }
@@ -101,8 +107,8 @@ export function pinnedSessions(rows: SidebarSession[], pins: readonly string[]) 
 
 export function attentionGroups(rows: SidebarSession[], now: number, current?: string, pins: readonly string[] = []) {
   const priority = rows
-    .filter((row) => row.attention !== undefined)
-    .sort((a, b) => a.attention! - b.attention! || a.key.localeCompare(b.key))
+    .filter((row) => !row.session.parentID && !row.session.time.archived && row.attention !== undefined)
+    .sort((a, b) => b.attention! - a.attention! || a.key.localeCompare(b.key))
   const pinned = pinnedSessions(rows, pins).filter((row) => row.attention === undefined)
   const keys = new Set(pinned.map((row) => row.key))
   const history = rows.filter((row) => row.attention === undefined && !keys.has(row.key))

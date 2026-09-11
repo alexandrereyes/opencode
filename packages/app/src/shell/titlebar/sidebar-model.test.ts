@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { ServerConnection } from "@/runtime/server/registry"
 import {
   attentionGroups,
-  firstAttention,
   loadNavigation,
   localDays,
   pinnedSessions,
@@ -14,6 +13,7 @@ import {
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
+import { latestAttention, navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 
 const server = ServerConnection.Key.make("http://localhost:1234")
 function row(id: string, messageAt?: number, attention?: number, parentID?: string): SidebarSession {
@@ -37,6 +37,92 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("empty, archived-only and child-only projects are hidden before collapse limits", () => {
+    const archived = row("archived")
+    archived.session.projectID = "archive-project"
+    archived.session.time.archived = 10
+    const child = row("child", 20, 20, "missing")
+    child.session.projectID = "child-project"
+    const live = row("root", 1)
+    const known = ["empty", "archive-project", "child-project", "repo"].map((id) => ({ id, worktree: `/${id}` }))
+    expect(sidebarProjects(server, known, [archived, child, live]).map((project) => project.metadata?.id)).toEqual([
+      "repo",
+    ])
+    const roots = rootSessions([live]).rows
+    expect(visibleSessions(roots, 0)).toEqual([])
+    expect(sidebarProjects(server, known, roots)).toHaveLength(1)
+  })
+
+  test("orphan/current children and their completions never become Priority rows", () => {
+    const parent = row("root", 1)
+    const child = row("child", 100, 100, "root")
+    const orphan = { ...row("orphan", 200, 200, "missing"), questionAt: 200 }
+    const roots = rootSessions([parent, child, orphan], orphan.key, parent.key)
+    expect(roots.current).toBe(parent.key)
+    expect(roots.rows.map((row) => row.key)).toEqual([parent.key])
+    expect(attentionGroups(roots.rows, Date.now()).priority).toEqual([])
+    expect(attentionGroups([child, orphan], Date.now(), orphan.key).priority).toEqual([])
+    const requests = rootSessions([parent, { ...child, questionAt: 300 }], child.key)
+    expect(requests.current).toBe(parent.key)
+    expect(attentionGroups(requests.rows, Date.now()).priority.map((row) => [row.key, row.attention])).toEqual([
+      [parent.key, 300],
+    ])
+  })
+
+  test("partial cache updates preserve navigation ancestry and durable read watermarks", () => {
+    const child = row("child", 50, undefined, "root")
+    child.session.time.idle = 30
+    child.session.time.viewed = 20
+    const cached = { ...child.session, parentID: undefined, title: "updated", time: { created: 1, updated: 100 } }
+    const merged = navigationSession(child, cached)
+    expect(merged.parentID).toBe("root")
+    expect(merged.title).toBe("updated")
+    expect(merged.time.idle).toBe(30)
+    expect(merged.time.viewed).toBe(20)
+    expect(rootSessions([{ ...child, session: merged }], child.key).rows).toEqual([])
+  })
+
+  test("unseen notifications, durable unread and confirmed requests use the same latest clock", () => {
+    const session = row("root").session
+    session.time.idle = 40
+    session.time.viewed = 10
+    session.outcome = "succeeded"
+    const notifications = [
+      { time: 30, viewed: false },
+      { time: 50, viewed: false },
+      { time: 80, viewed: true },
+    ]
+    expect(sessionAttention({ session, unreadAt: 20, notifications }).attention).toBe(50)
+    expect(sessionAttention({ session, notifications: [] }).attention).toBe(40)
+    const pending = sessionAttention({ session, notifications, permissionAt: 70 })
+    expect(pending.attention).toBe(70)
+    const read = { ...session, time: { ...session.time, viewed: 80 } }
+    expect(sessionAttention({ session: read, unreadAt: 40, notifications }).attention).toBeUndefined()
+    expect(sessionAttention({ session: read, notifications, permissionAt: 70 }).attention).toBe(70)
+    expect(
+      sessionAttention({ session: read, notifications, permissionAt: 70, autoApprove: true }).attention,
+    ).toBeUndefined()
+    const legacy = row("legacy").session
+    expect(sessionAttention({ session: legacy, notifications }).attention).toBe(50)
+    expect(
+      sessionAttention({ session: { ...legacy, parentID: "root" }, unreadAt: 40, notifications }).attention,
+    ).toBeUndefined()
+  })
+
+  test("a newer pending notification moves its root ahead in DESC order", () => {
+    const older = row("older", 1, 10)
+    const newer = row("newer", 1, 20)
+    expect(attentionGroups(rootSessions([older, newer]).rows, Date.now()).priority.map((row) => row.key)).toEqual([
+      newer.key,
+      older.key,
+    ])
+    expect(
+      attentionGroups(rootSessions([{ ...older, attention: 30 }, newer]).rows, Date.now()).priority.map(
+        (row) => row.key,
+      ),
+    ).toEqual([older.key, newer.key])
+  })
+
   test("project groups keep canonical metadata ahead of local and session worktrees", () => {
     const worktree = row("worktree")
     worktree.session.location.directory = "/worktree"
@@ -47,16 +133,13 @@ describe("sidebar navigation", () => {
       { worktree: "/unresolved" },
     ]
     const groups = sidebarProjects(server, known, [worktree])
-    expect(groups).toHaveLength(3)
+    expect(groups).toHaveLength(1)
     expect(groups.find((group) => group.metadata?.id === "repo")).toMatchObject({
       directory: "/canonical",
       name: "Canonical",
       metadata: { sandboxes: ["/worktree"] },
     })
-    expect(groups.filter((group) => !group.metadata).map((group) => group.directory).sort()).toEqual([
-      "/plain",
-      "/unresolved",
-    ])
+    expect(groups.filter((group) => !group.metadata)).toEqual([])
     const remote = sidebarProjects(ServerConnection.Key.make("https://remote.test"), known, [worktree])
     expect(remote.map((group) => group.key)).not.toEqual(groups.map((group) => group.key))
   })
@@ -72,21 +155,23 @@ describe("sidebar navigation", () => {
     expect(result.days[6].rows.map((item) => item.session.id)).toEqual(["boundary"])
   })
 
-  test("pending children fold into one root, priority sorts by first outstanding clock and has no cutoff", () => {
+  test("pending requests fold into one root, priority sorts by latest outstanding clock and has no cutoff", () => {
     const now = Date.now()
-    const input = rootSessions([row("a", 1, firstAttention(20, 30)), row("child", now, 10, "a"), row("b", now, 15)])
+    const child = { ...row("child", now, 40, "a"), permissionAt: 40 }
+    const input = rootSessions([row("a", 1, latestAttention(20, 30)), child, row("b", now, 35)])
     expect(input.rows).toHaveLength(2)
     const groups = attentionGroups(input.rows, now)
     expect(groups.priority.map((item) => item.session.id)).toEqual(["a", "b"])
     expect(groups.days.flatMap((day) => day.rows)).toEqual([])
-    expect(firstAttention(10, 20, 100)).toBe(10)
-    expect(firstAttention(undefined, 20)).toBe(20)
-    expect(firstAttention(undefined)).toBeUndefined()
+    expect(groups.priority.map((item) => item.attention)).toEqual([40, 35])
+    expect(latestAttention(10, 20, 100)).toBe(100)
+    expect(latestAttention(undefined, 20)).toBe(20)
+    expect(latestAttention(undefined)).toBeUndefined()
   })
 
   test("reading a response removes it from priority, but a pending request survives", () => {
     const now = Date.now()
-    const groups = attentionGroups([row("read", now), row("request", now, firstAttention(undefined, 20))], now)
+    const groups = attentionGroups([row("read", now), row("request", now, latestAttention(undefined, 20))], now)
     expect(groups.priority.map((item) => item.session.id)).toEqual(["request"])
     expect(groups.days[0].rows.map((item) => item.session.id)).toEqual(["read"])
   })
@@ -208,7 +293,7 @@ describe("sidebar search", () => {
     expect(visibleSessions(rows, 5)).not.toContain(old)
     expect(visibleSessions(rows, 0, current.key)).toEqual([current])
     expect(attentionGroups(rows, now).days.flatMap((day) => day.rows)).not.toContain(old)
-    expect(attentionGroups(rows, now).priority.map((item) => item.key)).toEqual([priority.key, latest.key])
+    expect(attentionGroups(rows, now).priority.map((item) => item.key)).toEqual([latest.key, priority.key])
 
     const results = searchSessions(rows, "match", [])
     expect(results).toHaveLength(11)

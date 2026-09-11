@@ -5,7 +5,7 @@ import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { I18nProvider } from "@kobalte/core/i18n"
-import type { SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { FormInfo, PermissionRequest, SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
 import type { Tab } from "@/shell/tabs/tabs"
 import type { Platform } from "@/runtime/platform/platform"
 
@@ -110,6 +110,11 @@ const hosts = connections.map((connection, i) => {
       ]
   const [cache, setCache] = createStore<Record<string, SessionInfo | undefined>>({})
   const [state, setState] = createStore({ connected: true })
+  const [attention, setAttention] = createStore({
+    notifications: {} as Record<string, { time: number; viewed: boolean }[]>,
+    permissions: {} as Record<string, PermissionRequest[] | undefined>,
+    forms: {} as Record<string, FormInfo[] | undefined>,
+  })
   type Listener = (event: { type: string; data: { sessionID: string } }) => void
   const listeners = new Set<Listener>()
   const opened: string[] = []
@@ -122,11 +127,13 @@ const hosts = connections.map((connection, i) => {
       open: (directory: string) => opened.push(directory),
       touch: (directory: string) => touched.push(directory),
     },
-    notification: { session: { unseen: () => [] } },
+    notification: { session: { unseen: (id: string) => attention.notifications[id] ?? [] } },
     data: {
       session: {
         get: (id: string) => cache[id],
         remember: (session: SessionInfo) => setCache(session.id, session),
+        permission: { list: (id: string) => attention.permissions[id] },
+        form: { list: (id: string) => attention.forms[id] },
         message: { sync: async () => {} },
       },
     },
@@ -153,7 +160,7 @@ const hosts = connections.map((connection, i) => {
       },
     },
   }
-  return { connection, backend, ctx, setState, setCache, listeners, opened, touched, imported }
+  return { connection, backend, ctx, setState, setCache, setAttention, listeners, opened, touched, imported }
 })
 mock.module("@/runtime/server/registry", () => ({ ...registry, useServers: () => ({ list: connections }) }))
 mock.module("@/runtime/server/runtime", () => ({
@@ -432,6 +439,7 @@ async function projectMenu(group: HTMLElement, action?: string, keyboard = false
 }
 
 test("project header actions preserve collapse/order and target canonical projects across servers", async () => {
+  hosts[1].backend.push(row("remote-project-session", now))
   platform.platform = "desktop"
   platform.os = "macos"
   const revealed: string[] = []
@@ -456,7 +464,10 @@ test("project header actions preserve collapse/order and target canonical projec
     session: { ...row("unknown", now).session, projectID: "unknown", location: { directory: "/unknown" } },
   })
   const key = projectKey(ServerConnection.key(connections[0]), { id: "repo", worktree: "/repo" })
-  localStorage.setItem(storage, JSON.stringify({ attention: false, order: [key], collapsed: { [key]: true }, pins: [] }))
+  localStorage.setItem(
+    storage,
+    JSON.stringify({ attention: false, order: [key], collapsed: { [key]: true }, pins: [] }),
+  )
   setRoute("sessionId", "old")
   const ui = mount("rtl")
   try {
@@ -464,13 +475,19 @@ test("project header actions preserve collapse/order and target canonical projec
     const groups = [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")]
     const local = groups.find((group) => group.dataset.projectKey === key)!
     const remote = groups.find(
-      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" }),
+      (group) =>
+        group.dataset.projectKey ===
+        projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" }),
     )!
     const plain = groups.find(
-      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[0]), { id: "global", worktree: "/plain" }),
+      (group) =>
+        group.dataset.projectKey ===
+        projectKey(ServerConnection.key(connections[0]), { id: "global", worktree: "/plain" }),
     )!
     const unknown = groups.find(
-      (group) => group.dataset.projectKey === projectKey(ServerConnection.key(connections[0]), { id: "unknown", worktree: "/unknown" }),
+      (group) =>
+        group.dataset.projectKey ===
+        projectKey(ServerConnection.key(connections[0]), { id: "unknown", worktree: "/unknown" }),
     )!
     expect(groups).toHaveLength(4)
     const header = local.querySelector<HTMLButtonElement>("button[aria-expanded]")!
@@ -625,5 +642,74 @@ test("project menu and focus survive session refreshes while project data stays 
       hosts[0].backend.findIndex((row) => row.session.id === background.session.id),
       1,
     )
+  }
+})
+
+test("Priority excludes partial-cache/current children and follows live unread and resolved index requests", async () => {
+  const host = hosts[0]
+  const root = row("slice1-root", now)
+  const child = row("slice1-child", now)
+  child.session.parentID = root.session.id
+  child.unreadAt = 900
+  const orphan = row("slice1-orphan", now, 1000)
+  orphan.session.parentID = "missing-parent"
+  orphan.session.projectID = "only-child"
+  const cachedRequest = row("slice1-cached", now, 70)
+  const indexedRequest = row("slice1-indexed", now, 80)
+  host.backend.push(root, child, orphan, cachedRequest, indexedRequest)
+  host.ctx.sync.data.project.push(
+    { id: "empty", worktree: "/empty", name: "Empty" },
+    { id: "only-child", worktree: "/child", name: "Only child" },
+  )
+  host.setAttention("notifications", root.session.id, [{ time: 50, viewed: false }])
+  host.setAttention("permissions", cachedRequest.session.id, [
+    { id: "per_cached", sessionID: cachedRequest.session.id, action: "shell", resources: [], created: 70 },
+  ])
+  localStorage.setItem(storage, JSON.stringify({ attention: true, order: [], collapsed: {}, pins: [] }))
+  setRoute("sessionId", orphan.session.id)
+  const ui = mount()
+  const priority = () => titles(section(ui.host, "priority")!).filter((title) => title?.startsWith("slice1-"))
+  try {
+    await wait()
+    expect(priority()).toEqual(["slice1-indexed", "slice1-cached", "slice1-root"])
+    host.setCache(child.session.id, undefined)
+    host.setCache(child.session.id, { ...child.session, parentID: undefined })
+    expect(priority()).not.toContain("slice1-child")
+    expect(titles(ui.host)).not.toContain("slice1-orphan")
+    host.setAttention("notifications", root.session.id, [
+      { time: 50, viewed: false },
+      { time: 100, viewed: false },
+    ])
+    expect(priority()).toEqual(["slice1-root", "slice1-indexed", "slice1-cached"])
+    host.setCache(root.session.id, { ...root.session, time: { ...root.session.time, viewed: 100 } })
+    expect(priority()).toEqual(["slice1-indexed", "slice1-cached"])
+    host.setAttention("permissions", cachedRequest.session.id, [])
+    // The complete snapshot, revalidated by the SSE event, confirms resolution.
+    host.backend[host.backend.indexOf(cachedRequest)] = { session: cachedRequest.session, messageAt: now }
+    host.listeners.forEach((listener) =>
+      listener({ type: "permission.replied", data: { sessionID: cachedRequest.session.id } }),
+    )
+    await wait()
+    expect(priority()).toEqual(["slice1-indexed"])
+    host.backend[host.backend.indexOf(indexedRequest)] = { session: indexedRequest.session, messageAt: now }
+    host.listeners.forEach((listener) =>
+      listener({ type: "permission.replied", data: { sessionID: indexedRequest.session.id } }),
+    )
+    await wait()
+    expect(priority()).toEqual([])
+    ui.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.attention.toggle"]')!.click()
+    const projects = () =>
+      [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].map((group) => group.dataset.projectKey)
+    expect(projects()).not.toContain(
+      projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" }),
+    )
+    expect(projects()).not.toContain(
+      projectKey(ServerConnection.key(connections[0]), { id: "only-child", worktree: "/child" }),
+    )
+    const before = projects()
+    ui.host.querySelector<HTMLButtonElement>("[data-project-key] button[aria-expanded]")!.click()
+    expect(projects()).toEqual(before)
+  } finally {
+    ui.dispose()
   }
 })

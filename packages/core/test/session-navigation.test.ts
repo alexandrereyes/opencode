@@ -98,7 +98,7 @@ it.effect("navigation clocks come from actual messages; metadata and ID paginati
   }),
 )
 
-projected.effect("unread attention retains the first unresolved completion across new completions and reads", () =>
+projected.effect("unread attention uses the latest unresolved root completion and ignores child completions", () =>
   Effect.gen(function* () {
     const database = yield* Database.Service
     const bus = yield* Bus.Service
@@ -130,10 +130,23 @@ projected.effect("unread attention retains the first unresolved completion acros
       type: Bus.versionedType(SessionEvent.Execution.Succeeded.type, 1),
       data: { sessionID },
     })
-    expect((yield* SessionNavigation.list()).data[0].unreadAt).toBe(10)
+    expect((yield* SessionNavigation.list()).data[0].unreadAt).toBe(20)
     yield* bus.publish(SessionEvent.Viewed, { sessionID, idle: 10 })
     expect((yield* SessionNavigation.list()).data[0].unreadAt).toBe(20)
     yield* bus.publish(SessionEvent.Viewed, { sessionID, idle: 20 })
     expect((yield* SessionNavigation.list()).data[0].unreadAt).toBeUndefined()
+    const childID = Session.ID.make("ses_child")
+    yield* bus.publish(SessionEvent.Created, {
+      sessionID: childID,
+      parentID: sessionID,
+      projectID: Project.ID.global,
+      slug: "child",
+      location: { directory: AbsolutePath.make("/repo") },
+      version: "test",
+    })
+    yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID: childID })
+    const child = (yield* SessionNavigation.list({ sessionID: childID })).data[0]
+    expect(child.session.parentID).toBe(sessionID)
+    expect(child.unreadAt).toBeUndefined()
   }),
 )

@@ -10,6 +10,7 @@ import { ModelsProvider } from "@/providers/models/models"
 import { useProviders } from "@/providers/catalog/providers"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useNotification } from "@/shell/notifications/notification"
+import { createSessionViewed } from "@/shell/notifications/session-viewed"
 import { ComposerPersistenceProvider } from "@/composer/persistence"
 import { useData, useServer } from "@/runtime/server/current"
 import { ServerConnection } from "@/runtime/server/registry"
@@ -191,6 +192,16 @@ function SessionPage() {
 
 function MarkSessionNotificationsViewed(props: { sessionID: () => string | undefined }) {
   const notification = useNotification()
+  const server = useServer()
+  const data = useData()
+  createSessionViewed({
+    session: () => {
+      const id = props.sessionID()
+      return id ? data.session.get(id) : undefined
+    },
+    view: (input) => server.ctx.sdk.api.session.view(input),
+    remember: data.session.remember,
+  })
   createEffect(() => {
     const sessionID = props.sessionID()
     if (!notification.ready() || !sessionID) return

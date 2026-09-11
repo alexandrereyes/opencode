@@ -5,7 +5,14 @@ import type { ServerCtx } from "@/runtime/server/runtime"
 import { loadNavigation } from "./sidebar-model"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 
-export function createSidebarIndex(ctx: ServerCtx) {
+export function createSidebarIndex(ctx: {
+  data: { session: Pick<ServerCtx["data"]["session"], "remember"> }
+  sdk: {
+    api: Pick<ServerCtx["sdk"]["api"], "session">
+    connection: Pick<ServerCtx["sdk"]["connection"], "status">
+    event: Pick<ServerCtx["sdk"]["event"], "listen">
+  }
+}) {
   const [state, setState] = createStore({
     rows: {} as Record<string, SessionNavigationInfo>,
     loading: true,
@@ -28,7 +35,7 @@ export function createSidebarIndex(ctx: ServerCtx) {
           const page = await ctx.sdk.api.session.navigation({ sessionID }, { signal: abort.signal })
           if (abort.signal.aborted) return
           const row = page.data[0]
-          if (row) setState("rows", sessionID, row)
+          if (row) setState("rows", sessionID, reconcile(row))
           if (!row)
             setState(
               "rows",

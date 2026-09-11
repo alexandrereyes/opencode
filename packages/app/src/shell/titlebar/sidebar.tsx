@@ -22,15 +22,15 @@ import { Persistence } from "@/runtime/persistence/schema"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
 import { useCommand } from "@/shell/commands/command"
-import { adjacentTabKey } from "./tab-order"
+import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
 import { SidebarProjectActions } from "./sidebar-project-actions"
 import { createSidebarSelection } from "./sidebar-selection"
+import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import {
   attentionGroups,
-  firstAttention,
   pinnedSessions,
   projectKey,
   rootSessions,
@@ -77,35 +77,6 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
-  const projectGroups = createMemo(() =>
-    indexes().flatMap(({ connection, ctx, index }) => {
-      const server = ServerConnection.key(connection)
-      const known = [...ctx.sync.data.project.filter((project) => project.id !== "global"), ...ctx.projects.list()]
-      return sidebarProjects(server, known, Object.values(index.state.rows).filter(Boolean)).map((project) => ({
-        ...project,
-        connection,
-        serverName: serverName(connection),
-      }))
-    }),
-  )
-  const projects = createMemo(() =>
-    projectGroups().toSorted((a, b) => {
-      const ai = saved.order.indexOf(a.key)
-      const bi = saved.order.indexOf(b.key)
-      return (
-        (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi) ||
-        a.name.localeCompare(b.name) ||
-        a.key.localeCompare(b.key)
-      )
-    }),
-  )
-  createEffect(() => {
-    if (!ready()) return
-    const missing = projects()
-      .map((group) => group.key)
-      .filter((key) => !saved.order.includes(key))
-    if (missing.length) setSaved("order", [...saved.order, ...missing])
-  })
   const current = () => {
     const route = layout.route()
     return route.type === "session" ? sessionKey(route.server, route.sessionId) : undefined
@@ -142,29 +113,67 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
           const session = ctx.data.session.get(route.sessionId)
           if (session) known.set(session.id, { session })
         }
+        const tab = props.currentTab
+        if (tab?.type === "session" && tab.server === server && !known.has(tab.sessionId)) {
+          const session = ctx.data.session.get(tab.sessionId)
+          if (session) known.set(session.id, { session })
+        }
         return [...known.values()].map((row): SidebarSession => {
-          const session = ctx.data.session.get(row.session.id) ?? row.session
-          const viewed = session.time.viewed ?? 0
-          const unread =
-            row.unreadAt !== undefined && (session.time.idle ?? row.unreadAt) > viewed ? row.unreadAt : undefined
+          const session = navigationSession(row, ctx.data.session.get(row.session.id))
           return {
             ...row,
             session,
             server,
             key: sessionKey(server, session.id),
             project: projectKey(server, { id: session.projectID, worktree: session.location.directory }),
-            attention: firstAttention(
-              unread,
-              ...ctx.notification.session.unseen(session.id).map((notification) => notification.time),
-              settings.permissions.autoApprove() ? undefined : row.permissionAt,
-              row.questionAt,
-            ),
+            ...sessionAttention({
+              ...row,
+              session,
+              notifications: ctx.notification.session.unseen(session.id),
+              autoApprove: settings.permissions.autoApprove(),
+            }),
           }
         })
       }),
       current(),
+      props.currentTab?.type === "session"
+        ? sessionKey(props.currentTab.server, props.currentTab.sessionId)
+        : undefined,
     ),
   )
+  const projectGroups = createMemo(() =>
+    indexes().flatMap(({ connection, ctx }) => {
+      const server = ServerConnection.key(connection)
+      const known = [...ctx.sync.data.project.filter((project) => project.id !== "global"), ...ctx.projects.list()]
+      return sidebarProjects(
+        server,
+        known,
+        sessions().rows.filter((row) => row.server === server),
+      ).map((project) => ({
+        ...project,
+        connection,
+        serverName: serverName(connection),
+      }))
+    }),
+  )
+  const projects = createMemo(() =>
+    projectGroups().toSorted((a, b) => {
+      const ai = saved.order.indexOf(a.key)
+      const bi = saved.order.indexOf(b.key)
+      return (
+        (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi) ||
+        a.name.localeCompare(b.name) ||
+        a.key.localeCompare(b.key)
+      )
+    }),
+  )
+  createEffect(() => {
+    if (!ready()) return
+    const missing = projects()
+      .map((group) => group.key)
+      .filter((key) => !saved.order.includes(key))
+    if (missing.length) setSaved("order", [...saved.order, ...missing])
+  })
   const pins = createMemo(() => new Set(saved.pins))
   // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
   const pinned = createMemo(() => pinnedSessions(sessions().rows, saved.pins))
@@ -222,7 +231,14 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     if (from < 0 || to < 0 || to >= order.length) return
     order.splice(from, 1)
     order.splice(to, 0, key)
-    setSaved("order", order)
+    setSaved(
+      "order",
+      mergeVisibleTabOrder(
+        saved.order,
+        projects().map((project) => project.key),
+        order,
+      ),
+    )
   }
   const row = (item: SidebarSession, compact = false) => {
     const ctx = () => indexes().find((entry) => ServerConnection.key(entry.connection) === item.server)?.ctx
@@ -241,6 +257,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         projectLabel={projectLabel(item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === item.key}
+        unread={item.attention !== undefined}
         pinned={pins().has(item.key)}
         selectionMode={selection.state.mode}
         selected={selection.state.keys.includes(item.key)}
@@ -504,10 +521,14 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                       if (event.canceled || !isSortable(source)) return
                       setSaved(
                         "order",
-                        arrayMove(
+                        mergeVisibleTabOrder(
+                          saved.order,
                           projects().map((project) => project.key),
-                          source.initialIndex,
-                          source.index,
+                          arrayMove(
+                            projects().map((project) => project.key),
+                            source.initialIndex,
+                            source.index,
+                          ),
                         ),
                       )
                     }}

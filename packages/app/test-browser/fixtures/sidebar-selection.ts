@@ -90,6 +90,8 @@ const hosts = connections.map((connection, server) => {
         list: () => Object.values(cache).filter((session): session is SessionInfo => !!session),
         get: (id: string) => cache[id],
         remember: (session: SessionInfo) => setCache(session.id, session),
+        permission: { list: () => undefined },
+        form: { list: () => undefined },
         invalidate: (id: string) => invalidated.push(`${server}:${id}`),
         remove: (id: string) => mutate("remove", id),
       },
