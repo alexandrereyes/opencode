@@ -20,6 +20,7 @@ import { Instance } from "@opencode/core/instance/service"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { ShellSelect } from "@opencode/core/shell/select"
 import { Job } from "@opencode/core/job"
+import { SessionExecution } from "@opencode/core/session/execution"
 import { Mcp } from "@opencode/core/mcp/index"
 import { Global } from "@opencode/util/global"
 import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
@@ -55,6 +56,7 @@ const applicationServiceNodes = [
   EventLogger.node,
   httpClient,
   Job.node,
+  SessionExecution.node,
   Project.node,
   Session.node,
   Snippet.node,
@@ -167,6 +169,9 @@ function makeRoutes<AuthError, AuthServices>(
           Context.pick(
             Database.Service,
             Job.Service,
+            Session.Service,
+            SessionExecution.Service,
+            Instance.Service,
             Snippet.Service,
             PersistentPty.Service,
             PermissionSaved.Service,
