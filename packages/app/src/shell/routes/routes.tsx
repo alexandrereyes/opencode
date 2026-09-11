@@ -15,6 +15,9 @@ export const File = lazy(() => import("@opencode/session-ui/file").then((module)
 const loadSessionRoute = () => Promise.all([import("@/session/route"), File.preload()]).then(([module]) => module)
 const DraftRoute = lazy(() => import("@/new-session/route").then((module) => ({ default: module.DraftRoute })))
 const SettingsScreen = lazy(() => import("@/settings/shell").then((module) => ({ default: module.SettingsScreen })))
+const AgentDashboard = lazy(() =>
+  import("@/agent-dashboard/route").then((module) => ({ default: module.AgentDashboard })),
+)
 const ConnectServerScreen = lazy(() =>
   import("@/servers/connect/screen").then((module) => ({ default: module.ConnectServerScreen })),
 )
@@ -26,6 +29,7 @@ export function preloadRoute(url: string) {
   const pathname = url.split(/[?#]/, 1)[0]
   if (pathname === "/new-session") return DraftRoute.preload().then(() => undefined)
   if (pathname === "/settings") return SettingsScreen.preload().then(() => undefined)
+  if (pathname === "/agent-dashboard") return AgentDashboard.preload().then(() => undefined)
   if (/^\/server\/[^/]+\/session\/[^/]+$/.test(pathname))
     return TargetSessionRouteContent.preload().then(() => undefined)
   return Promise.resolve()
@@ -36,6 +40,7 @@ export function AppRoutes() {
     <Route component={AppLayout}>
       <Route path="/" component={Home} />
       <Route path="/settings" component={SettingsScreen} />
+      <Route path="/agent-dashboard" component={AgentDashboard} />
       <Route
         path="/server/:serverKey/session/:id"
         component={() => (
