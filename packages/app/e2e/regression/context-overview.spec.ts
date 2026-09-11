@@ -116,7 +116,7 @@ test("context tab retains selection across sessions and shows live quota and sub
             observedAt: new Date().toISOString(),
             resetAt: null,
           },
-        ],
+        ].toReversed(),
       },
     })
   })
@@ -152,6 +152,18 @@ test("context tab retains selection across sessions and shows live quota and sub
   const stale = overview.getByRole("group", { name: "stale@example.test" })
   await expect(stale).toContainText("41% remaining · 59% used")
   await expect(stale).toContainText("Capacity unconfirmed")
+  const accountGroups = overview.locator('[data-slot="subscription-pool"] [role="group"]')
+  await expect(accountGroups).toHaveCount(6)
+  await expect
+    .poll(() => accountGroups.evaluateAll((elements) => elements.map((element) => element.getAttribute("aria-label"))))
+    .toEqual([
+      "subscription@example.test",
+      "exhausted@example.test",
+      "stale@example.test",
+      "reauth@example.test",
+      "disabled@example.test",
+      "plus@example.test",
+    ])
   await overview.locator('[data-slot="subscription-pool"] > summary').press("Enter")
   await expect(overview.getByText("plus@example.test", { exact: true })).toBeHidden()
   await expect(overview.getByRole("link", { name: /Inspect child navigation/ })).toBeVisible()
@@ -246,6 +258,21 @@ test("context tab retains selection across sessions and shows live quota and sub
     overview.locator('[data-slot="subscription-pool"] > summary').getByText("Weekly balance unknown", { exact: true }),
   ).toBeVisible()
   await expect(overview.getByText("Current measurements: 1/2", { exact: true })).toBeVisible()
+  const subscriptionPool = overview.locator('[data-slot="subscription-pool"]')
+  await expect(subscriptionPool).not.toHaveAttribute("open", "")
+  await subscriptionPool.locator("> summary").click()
+  await expect(subscriptionPool).toHaveAttribute("open", "")
+  await expect(accountGroups).toHaveCount(6)
+  await expect
+    .poll(() => accountGroups.evaluateAll((elements) => elements.map((element) => element.getAttribute("aria-label"))))
+    .toEqual([
+      "exhausted@example.test",
+      "subscription@example.test",
+      "stale@example.test",
+      "reauth@example.test",
+      "disabled@example.test",
+      "plus@example.test",
+    ])
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
 })

@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test"
-import { subscriptionCapacity, subscriptionPercentages, subscriptionPool } from "./subscription-pool"
+import {
+  subscriptionAccounts,
+  subscriptionCapacity,
+  subscriptionPercentages,
+  subscriptionPool,
+} from "./subscription-pool"
 
 const account = {
   id: "a",
@@ -106,6 +111,40 @@ test("treats a snapshot from before a completed renewal as unconfirmed", () => {
 
 test("rounds remaining once and derives used as its complement", () => {
   expect(subscriptionPercentages(59.5)).toEqual({ remaining: 60, used: 40 })
+})
+
+test("orders available Pro accounts before other Pro, Plus, and other plans without dropping accounts", () => {
+  const accounts = [
+    { ...account, id: "other", plan: "team" },
+    { ...account, id: "plus", plan: "plus" },
+    { ...account, id: "stale", stale: true },
+    { ...account, id: "available" },
+    { ...account, id: "cooldown", cooldownSeconds: 120 },
+    { ...account, id: "unknown", hasCapacity: null },
+    { ...account, id: "exhausted", hasCapacity: false },
+    { ...account, id: "available-second" },
+  ]
+
+  expect(subscriptionAccounts(accounts).map((item) => item.id)).toEqual([
+    "available",
+    "available-second",
+    "stale",
+    "cooldown",
+    "unknown",
+    "exhausted",
+    "plus",
+    "other",
+  ])
+  expect(accounts.map((item) => item.id)).toEqual([
+    "other",
+    "plus",
+    "stale",
+    "available",
+    "cooldown",
+    "unknown",
+    "exhausted",
+    "available-second",
+  ])
 })
 
 test("cooldown and capacity remove known accounts from the available balance", () => {
