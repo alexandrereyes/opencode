@@ -175,7 +175,7 @@
 }
 
 [data-titlebar-tab][data-title-overflow="true"]:not(:hover):not([data-active="true"]):not([data-editing="true"])
-  [data-slot="tab-link"] {
+  [data-slot="tab-link"]:not(:where([data-slot="mobile-tabs-drawer"] *)) {
   padding-inline-end: 0;
 }
 

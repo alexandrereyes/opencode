@@ -18,6 +18,9 @@ import { useSettings } from "@/settings/model"
 import { canOpenTabRename, forwardTabRef } from "./tab-gesture"
 import { TabPreviewPopover } from "./tab-popover"
 import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
+import { MobileTabActions, useMobileTabs } from "./mobile-tab-actions"
+import { tabKey } from "@/shell/tabs/tabs"
+import { getRelativeTime } from "@/shell/time"
 import "./tab-nav.css"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
@@ -46,6 +49,7 @@ export function TabNavItem(props: {
   const language = useLanguage()
   const settings = useSettings()
   const lifecycle = useSessionLifecycleActions()
+  const mobileTabs = useMobileTabs()
   const [menu, setMenu] = createStore({ open: false, actions: false, rename: false, delete: false })
   const [editing, setEditing] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
@@ -188,6 +192,11 @@ export function TabNavItem(props: {
     onCleanup(cleanup)
   })
 
+  const preventMenuTouchMouse = (event: PointerEvent) => {
+    // Kobalte selects on pointerup. Suppress the compatibility mousedown that
+    // can hit a different session after the portaled menu has already closed.
+    if (mobileTabs && event.pointerType === "touch") event.preventDefault()
+  }
   const closeMenu = (event: Event) => {
     if (menu.rename) {
       event.preventDefault()
@@ -355,6 +364,17 @@ export function TabNavItem(props: {
             </span>
           )}
         </Show>
+        <Show when={mobileTabs && props.session}>
+          {(session) => (
+            <time
+              data-slot="mobile-tab-time"
+              dir="auto"
+              dateTime={new Date(session().time.updated ?? session().time.created).toISOString()}
+            >
+              {getRelativeTime(session().time.updated ?? session().time.created, language.t, mobileTabs?.now())}
+            </time>
+          )}
+        </Show>
       </Menu.Context.Trigger>
 
       <div data-slot="tab-close">
@@ -371,7 +391,9 @@ export function TabNavItem(props: {
             onClick={(event: MouseEvent) => event.stopPropagation()}
           />
           <Menu.Portal>
-            <Menu.Content onCloseAutoFocus={closeMenu}>{menuItems()}</Menu.Content>
+            <Menu.Content onPointerDown={preventMenuTouchMouse} onCloseAutoFocus={closeMenu}>
+              {menuItems()}
+            </Menu.Content>
           </Menu.Portal>
         </Menu>
         <Show when={props.closable !== false}>
@@ -400,7 +422,30 @@ export function TabNavItem(props: {
       }}
     >
       <TabPreviewPopover
-        trigger={tab()}
+        trigger={
+          mobileTabs ? (
+            <MobileTabActions
+              tabs={mobileTabs}
+              tabKey={
+                props.session
+                  ? tabKey({ type: "session", server: props.server, sessionId: props.session.id })
+                  : props.href
+              }
+              enabled={!!props.session && !props.preparing}
+              pending={lifecycle.pending()}
+              onArchive={() => {
+                if (props.session) void lifecycle.archive(props.server, props.session)
+              }}
+              onDelete={() => {
+                if (props.session) void lifecycle.showDelete(props.server, props.session)
+              }}
+            >
+              {tab()}
+            </MobileTabActions>
+          ) : (
+            tab()
+          )
+        }
         orientation={props.orientation}
         open={popoverOpen() && !previewBlocked()}
         onOpenChange={(value) => {
@@ -415,7 +460,9 @@ export function TabNavItem(props: {
         }}
       />
       <Menu.Context.Portal>
-        <Menu.Context.Content onCloseAutoFocus={closeMenu}>{menuItems()}</Menu.Context.Content>
+        <Menu.Context.Content onPointerDown={preventMenuTouchMouse} onCloseAutoFocus={closeMenu}>
+          {menuItems()}
+        </Menu.Context.Content>
       </Menu.Context.Portal>
     </Menu.Context>
   )
