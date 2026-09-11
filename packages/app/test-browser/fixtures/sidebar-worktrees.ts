@@ -39,7 +39,15 @@ const archived: string[][] = []
 mock.module("@/session/lifecycle-actions", () => ({
   useSessionLifecycleActions: () => ({
     pending: () => false,
-    archiveMany: (rows: { key: string }[]) => archived.push(rows.map((row) => row.key)),
+    archiveMany: async (
+      rows: { key?: string; session?: { id: string } }[],
+      onComplete: (result: { succeeded: typeof rows; failed: [] }) => void,
+    ) => {
+      archived.push(rows.map((row) => row.key ?? row.session?.id ?? ""))
+      const result = { succeeded: rows, failed: [] as [] }
+      onComplete(result)
+      return result
+    },
   }),
 }))
 mock.module("@/shell/state/layout", () => ({
@@ -53,16 +61,28 @@ const { projectKey, sessionKey } = await import("@/shell/titlebar/sidebar-model"
 const { worktreeKey } = await import("@/shell/titlebar/sidebar-worktrees")
 const tabsModule = await import("@/shell/tabs/tabs")
 const drafts: { server: string; directory?: string }[] = []
+const tabStore: Array<{
+  type: "draft"
+  draftID: string
+  server: string
+  directory: string
+  worktree?: string
+  branch?: string
+}> = []
 mock.module("@/shell/tabs/tabs", () => ({
   ...tabsModule,
   useTabs: () => ({
-    store: [],
+    store: tabStore,
     pendingSession: () => false,
     newDraft: async (input: { server: string; directory?: string }) => {
       drafts.push(input)
     },
     addSessionTab: () => {},
     select: () => {},
+    updateDraft: (draftID: string, update: Partial<(typeof tabStore)[number]>) => {
+      const draft = tabStore.find((item) => item.draftID === draftID)
+      if (draft) Object.assign(draft, update)
+    },
   }),
 }))
 const connections = [
@@ -71,6 +91,8 @@ const connections = [
 ]
 mock.module("@/runtime/server/registry", () => ({ ...registry, useServers: () => ({ list: connections }) }))
 const calls: { server: number; path: string; directory: string }[] = []
+const removals: Record<string, unknown>[] = []
+const removedDirectories = new Set<string>()
 const gates = {
   inventory: Promise.withResolvers<void>(),
   remoteInventory: Promise.withResolvers<void>(),
@@ -108,7 +130,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
   const apiServer = createServer(async (request, response) => {
     response.setHeader("access-control-allow-origin", "*")
     response.setHeader("access-control-allow-headers", "x-fixture-server")
-    response.setHeader("access-control-allow-methods", "GET, OPTIONS")
+    response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")
     if (request.method === "OPTIONS") {
       response.writeHead(204)
       response.end()
@@ -121,7 +143,33 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     const url = new URL(request.url!, "http://localhost")
     const server = Number(request.headers["x-fixture-server"])
     const directory = url.searchParams.get("location[directory]") ?? ""
+    const targetDirectory = url.searchParams.get("directory") ?? directory
     calls.push({ server, path: url.pathname, directory })
+    if (url.pathname === "/api/worktree/inspect")
+      return json({
+        directory: targetDirectory,
+        identity: "idle-token",
+        branch: "idle",
+        dirty: true,
+        localBranch: { name: "idle" },
+        remoteBranch: { name: "upstream", branch: "idle" },
+      })
+    if (url.pathname === "/api/session")
+      return json({ data: [row("idle-history", "/empty/idle/src", 0, "empty").session], cursor: {} })
+    if (url.pathname === "/api/worktree/delete" && request.method === "DELETE") {
+      const payload = JSON.parse(
+        Buffer.concat((await Array.fromAsync(request)).map((chunk) => Buffer.from(chunk))).toString("utf8"),
+      ) as Record<string, unknown>
+      removals.push(payload)
+      removedDirectories.add(String(payload.directory))
+      return json({
+        directory: payload.directory,
+        localBranch: payload.deleteLocalBranch ? { name: "idle", deleted: true } : undefined,
+        remoteBranch: payload.deleteRemoteBranch
+          ? { name: "idle", remote: "upstream", deleted: true }
+          : undefined,
+      })
+    }
     if (url.pathname === "/api/session/navigation")
       return json({
         data: backend[server].filter(
@@ -132,6 +180,8 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     if (url.pathname === "/api/worktree") {
       if (!server && directory === "/repo") await gates.inventory.promise
       if (server && directory === "/repo") await gates.remoteInventory.promise
+      if (directory === "/empty" && removedDirectories.has("/empty/idle"))
+        return json({ message: "Inventory unavailable" }, 503)
       return json(
         directory === "/repo"
           ? [
@@ -139,7 +189,11 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
               { directory: "/trees/feat", strategy: "git" },
               { directory: "/other/feat", strategy: "git" },
             ]
-          : [{ directory }],
+          : directory === "/empty"
+            ? [{ directory: "/empty" }, { directory: "/empty/idle", strategy: "git" }].filter(
+                (item) => !removedDirectories.has(item.directory),
+              )
+            : [{ directory }],
       )
     }
     const worktree = directory === "/loose/feat/src" ? "/loose/feat" : directory
@@ -153,7 +207,16 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       return json({
         location,
         data: {
-          branch: { current: directory === "/loose/feat" ? undefined : server ? "remote/branch" : "feat/payments" },
+          branch: {
+            current:
+              directory === "/loose/feat"
+                ? undefined
+                : directory === "/empty/idle"
+                  ? "idle"
+                  : server
+                    ? "remote/branch"
+                    : "feat/payments",
+          },
         },
       })
     }
@@ -318,16 +381,66 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     ).toEqual([])
     toggle()
     await wait()
+    const emptyProject = projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" })
     expect(calls.filter((call) => call.path === "/api/worktree").map((call) => [call.server, call.directory])).toEqual([
       [0, "/repo"],
       [1, "/repo"],
+      [0, "/empty"],
+      [1, "/empty"],
+      [1, "/second"],
     ])
+    expect(group("/empty/idle", emptyProject)).toBeDefined()
+    expect(titles(group("/empty/idle", emptyProject))).toEqual([])
+    const idle = group("/empty/idle", emptyProject)
+    const idleHeader = header(idle)
+    expect(idleHeader.textContent).toContain("idle (0)")
+    expect(idle.querySelector('[data-action="sidebar-worktree-new-session"]')).toBeDefined()
+    const idleExpanded = idleHeader.getAttribute("aria-expanded")
+    const trash = idle.querySelector<HTMLButtonElement>('[data-action="sidebar-worktree-delete"]')!
+    expect(trash).toBeDefined()
+    trash.focus()
+    trash.click()
+    expect(idleHeader.getAttribute("aria-expanded")).toBe(idleExpanded)
+    await wait()
+    const dialogButton = (text: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === text)!
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("uncommitted changes")
+    dialogButton("Cancel").click()
+    expect(removals).toHaveLength(0)
+    await wait()
+    trash.click()
+    await wait()
+    tabStore.push({
+      type: "draft",
+      draftID: "idle-draft",
+      server: ServerConnection.key(connections[0]),
+      directory: "/empty/idle/src",
+      worktree: "/empty/idle",
+      branch: "idle",
+    })
+    const choices = [...document.querySelectorAll<HTMLInputElement>('[data-slot="checkbox-checkbox-input"]')]
+    expect(choices).toHaveLength(2)
+    choices.forEach((choice) => choice.click())
+    dialogButton("Delete worktree").click()
+    await wait()
+    expect(removals).toContainEqual({
+      directory: "/empty/idle",
+      force: true,
+      identity: "idle-token",
+      branch: "idle",
+      remote: { name: "upstream", branch: "idle" },
+      deleteLocalBranch: true,
+      deleteRemoteBranch: true,
+    })
+    expect(archived.at(-1)).toEqual(["idle-history"])
+    expect(tabStore[0]).toMatchObject({ directory: "/empty", worktree: undefined, branch: undefined })
+    tabStore.splice(0)
+    expect(group("/empty/idle", emptyProject)).toBeUndefined()
     expect(group("/trees/feat/src")).toBeDefined()
     expect(group("/repo/src")).toBeUndefined()
     expect(group("/repo")).toBeUndefined()
     const projectOrder = () =>
       [...host.querySelectorAll<HTMLElement>("[data-project-key]")].map((element) => element.dataset.projectKey)
-    const emptyProject = projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" })
     expect(projectElement(emptyProject)).toBeDefined()
     expect(projectOrder().indexOf(emptyProject)).toBeGreaterThan(projectOrder().indexOf(project))
     expect(titles(group("/trees/feat/src"))).toContain("feat-1")
@@ -337,10 +450,24 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     toggle()
     gates.inventory.resolve()
     await wait()
-    expect(calls.filter((call) => !call.server && ["/api/location", "/api/vcs"].includes(call.path))).toEqual([])
+    expect(
+      calls.filter(
+        (call) =>
+          !call.server &&
+          ["/api/location", "/api/vcs"].includes(call.path) &&
+          !call.directory.startsWith("/empty"),
+      ),
+    ).toEqual([])
     toggle()
     await wait()
-    expect(calls.filter((call) => !call.server && ["/api/location", "/api/vcs"].includes(call.path))).toEqual([])
+    expect(
+      calls.filter(
+        (call) =>
+          !call.server &&
+          ["/api/location", "/api/vcs"].includes(call.path) &&
+          !call.directory.startsWith("/empty"),
+      ),
+    ).toEqual([])
     header(projectElement()).click()
 
     // Independently remove all eligible rows while the other server's inventory
@@ -363,7 +490,12 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     await wait()
     gates.remoteInventory.resolve()
     await wait()
-    expect(calls.filter((call) => call.server && ["/api/location", "/api/vcs"].includes(call.path))).toEqual([])
+    expect(
+      calls
+        .filter((call) => call.server && ["/api/location", "/api/vcs"].includes(call.path))
+        .map((call) => call.directory)
+        .sort(),
+    ).toEqual(["/empty/idle", "/other/feat", "/trees/feat"])
     expect(projectElement(remoteProject)).toBeDefined()
     expect(header(projectElement(remoteProject)) === remoteHeader).toBe(true)
     expect(document.activeElement === remoteHeader).toBe(true)
@@ -419,7 +551,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         .filter((call) => call.path === "/api/vcs" && !call.server)
         .map((call) => call.directory)
         .sort(),
-    ).toEqual(["/loose/feat", "/other/feat", "/trees/feat"])
+    ).toEqual(["/empty/idle", "/loose/feat", "/other/feat", "/trees/feat"])
     for (const direction of ["ltr", "rtl"]) {
       host.dir = direction
       const create = feature.querySelector<HTMLButtonElement>('[data-action="sidebar-worktree-new-session"]')!
@@ -484,7 +616,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     const selected = archived.at(-1)!
     expect(selected).toContain(sessionKey(ServerConnection.key(connections[0]), "feat-4"))
     expect(selected).not.toContain(sessionKey(ServerConnection.key(connections[0]), "feat-5"))
-    button("Clear").click()
+    button("Clear")?.click()
     button("Select sessions").click()
     group("/loose/feat")
       .querySelector("a")!
@@ -498,6 +630,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         sessionKey(ServerConnection.key(connections[0]), id),
       ),
     )
+    button("Select sessions")?.click()
     button("Select visible").click()
     featureHeader.click()
     expect(group("/trees/feat") === feature).toBe(true)
@@ -511,7 +644,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     dispose = mount()
     await wait()
     expect(header(group("/trees/feat")).getAttribute("aria-expanded")).toBe("false")
-    expect(calls.filter((call) => call.path === "/api/worktree")).toHaveLength(2)
+    expect(calls.filter((call) => call.path === "/api/worktree")).toHaveLength(7)
     header(group("/trees/feat")).click()
     const more = [...group("/trees/feat").querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Show more",
@@ -536,9 +669,11 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     }
     roots[0].listeners.forEach((listener) => listener(event))
     await wait()
-    expect(group("/other/feat")).toBeUndefined()
+    expect(group("/other/feat")).toBeDefined()
+    expect(titles(group("/other/feat"))).toEqual([])
     expect(header(projectElement())).toBeDefined()
-    expect(calls.some((call) => call.directory === "/empty" || call.directory === "/second")).toBe(false)
+    expect(calls.some((call) => !call.server && call.directory === "/second")).toBe(false)
+    expect(calls.some((call) => call.directory === "/empty")).toBe(true)
   } finally {
     gates.inventory.resolve()
     gates.remoteInventory.resolve()

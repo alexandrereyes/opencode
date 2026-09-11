@@ -32,6 +32,7 @@ import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
 import { createSidebarWorktrees, visibleWorktreeSessions } from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
+import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
 import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import {
   attentionGroups,
@@ -66,6 +67,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   )
   const command = useCommand()
   const lifecycle = useSessionLifecycleActions()
+  const worktreeDelete = useSidebarWorktreeDelete(lifecycle.archiveMany, lifecycle.pending)
   const [saved, setSaved, , ready] = persisted(Persist.global("sidebar-navigation"), SidebarState, {
     attention: true,
     order: [],
@@ -207,13 +209,13 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   createEffect(() => {
     if (!ready() || saved.attention || query()) return
     projects()
-      .filter((project) => project.occupied && !saved.collapsed[project.key])
+      .filter((project) => !saved.collapsed[project.key])
       .forEach((project) => {
         const entry = indexes().find((entry) => ServerConnection.key(entry.connection) === project.server)!
         void entry.worktrees.load(() => {
           if (!ready() || saved.attention || query() || saved.collapsed[project.key]) return
           const current = projects().find((item) => item.key === project.key)
-          if (current?.occupied) return { project: current, rows: sessions().rows }
+          if (current) return { project: current, rows: sessions().rows }
         })
       })
   })
@@ -624,6 +626,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                           (previous) => projects().find((project) => project.key === key) ?? previous,
                           initial,
                         )
+                        const entry = indexes().find(
+                          (entry) => ServerConnection.key(entry.connection) === project().server,
+                        )!
                         const rows = createMemo(() => sessions().rows.filter((row) => row.project === key))
                         const collapsed = () => saved.collapsed[key] ?? false
                         const tree = () => worktrees().get(key)!
@@ -739,6 +744,31 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                                 />
                                               </Show>
                                             </button>
+                                            <Show when={group().removable ? project().metadata?.id : undefined}>
+                                              {(projectID) => (
+                                                <SidebarWorktreeDelete
+                                                  target={{
+                                                    server: project().server,
+                                                    ctx: entry.ctx,
+                                                    projectID: projectID(),
+                                                    projectDirectory: project().directory,
+                                                    directory: group().directory,
+                                                    name: group().name,
+                                                  }}
+                                                  pending={worktreeDelete.pending(group().directory) || lifecycle.pending()}
+                                                  onDelete={() =>
+                                                    worktreeDelete.show({
+                                                      server: project().server,
+                                                      ctx: entry.ctx,
+                                                      projectID: projectID(),
+                                                      projectDirectory: project().directory,
+                                                      directory: group().directory,
+                                                      name: group().name,
+                                                    })
+                                                  }
+                                                />
+                                              )}
+                                            </Show>
                                             <SidebarWorktreeNewSession
                                               connection={project().connection}
                                               directory={group().directory}

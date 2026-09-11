@@ -26,12 +26,34 @@ export function sidebarWorktrees(
   const root: SidebarSession[] = []
   const groups = new Map<
     string,
-    { key: string; directory: string; name: string; resolved: boolean; rows: SidebarSession[] }
+    {
+      key: string
+      directory: string
+      name: string
+      resolved: boolean
+      removable: boolean
+      rows: SidebarSession[]
+    }
   >()
   // Canonical placement is already authoritative before inventory discovery completes.
   // A linked worktree named main remains a subgroup; only directory identity matters.
+  const inventory = project.metadata?.vcs === "git" ? (metadata.inventory ?? []) : []
+  inventory
+    .filter((item) => !sameDirectory(item.directory, project.directory))
+    .forEach((item) => {
+      const key = worktreeKey(project.key, item.directory)
+      const branch = metadata.branch(item.directory)
+      groups.set(key, {
+        key,
+        directory: item.directory,
+        resolved: true,
+        removable: item.strategy === "git",
+        name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(item.directory)) || item.directory,
+        rows: [],
+      })
+    })
   const candidates = [
-    ...(metadata.inventory?.map((item) => item.directory) ?? []),
+    ...inventory.map((item) => item.directory),
     ...(project.metadata ? [project.directory] : []),
   ].toSorted((a, b) => b.length - a.length)
   rows
@@ -61,6 +83,7 @@ export function sidebarWorktrees(
         key,
         directory: worktree,
         resolved: known !== undefined,
+        removable: inventory.some((item) => sameDirectory(item.directory, worktree) && item.strategy === "git"),
         name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(worktree)) || worktree,
         rows: [],
       }

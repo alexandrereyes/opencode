@@ -56,7 +56,7 @@ test("exposes every standard HTTP API group", () => {
   expect(client.experimental.persistentPty.read).toBeFunction()
   expect(Object.keys(client.shell)).toEqual(["list", "create", "get", "timeout", "output", "remove"])
   expect(Object.keys(client.project)).toEqual(["list", "update", "current"])
-  expect(Object.keys(client.worktree)).toEqual(["list", "create", "remove", "refresh"])
+  expect(Object.keys(client.worktree)).toEqual(["list", "create", "inspect", "remove", "delete", "refresh"])
 })
 
 test("config.get returns ordered config entries for a location", async () => {
@@ -344,9 +344,12 @@ test("all worktree operations use location-based routes without a project parame
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init)
       requests.push(request)
+      if (request.url.endsWith("/inspect?directory=%2Ftmp%2Fworktrees%2Fapi"))
+        return Response.json({ directory: "/tmp/worktrees/api", identity: "token", branch: "feature", dirty: false })
       if (request.method === "GET") return Response.json([{ directory: "/tmp/project" }])
       if (request.method === "POST" && !request.url.endsWith("/refresh"))
         return Response.json({ directory: "/tmp/worktrees/api" })
+      if (request.url.includes("/api/worktree/delete")) return Response.json({ directory: "/tmp/worktrees/api" })
       return new Response(null, { status: 204 })
     },
   })
@@ -359,16 +362,31 @@ test("all worktree operations use location-based routes without a project parame
       name: "api",
     }),
   ).toEqual({ directory: "/tmp/worktrees/api" })
+  expect(await client.worktree.inspect({ directory: "/tmp/worktrees/api" })).toEqual({
+    directory: "/tmp/worktrees/api",
+    identity: "token",
+    branch: "feature",
+    dirty: false,
+  })
   await client.worktree.remove({
     directory: "/tmp/worktrees/api",
     force: false,
+  })
+  await client.worktree.delete({
+    directory: "/tmp/worktrees/api",
+    force: true,
+    identity: "token",
+    branch: "feature",
+    deleteLocalBranch: true,
   })
   await client.worktree.refresh()
 
   expect(requests.map((request) => [request.method, request.url])).toEqual([
     ["GET", "http://localhost:3000/api/worktree"],
     ["POST", "http://localhost:3000/api/worktree"],
+    ["GET", "http://localhost:3000/api/worktree/inspect?directory=%2Ftmp%2Fworktrees%2Fapi"],
     ["DELETE", "http://localhost:3000/api/worktree"],
+    ["DELETE", "http://localhost:3000/api/worktree/delete"],
     ["POST", "http://localhost:3000/api/worktree/refresh"],
   ])
   expect(await requests[1]?.json()).toEqual({
@@ -376,7 +394,14 @@ test("all worktree operations use location-based routes without a project parame
     directory: "/tmp/worktrees",
     name: "api",
   })
-  expect(await requests[2]?.json()).toEqual({ directory: "/tmp/worktrees/api", force: false })
+  expect(await requests[3]?.json()).toEqual({ directory: "/tmp/worktrees/api", force: false })
+  expect(await requests[4]?.json()).toEqual({
+    directory: "/tmp/worktrees/api",
+    force: true,
+    identity: "token",
+    branch: "feature",
+    deleteLocalBranch: true,
+  })
 })
 
 test("worktree operations send the configuration location separately from their payload", async () => {

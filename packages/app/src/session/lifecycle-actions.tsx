@@ -125,6 +125,7 @@ export function useSessionLifecycleActions() {
     ) => {
       const result = await run(targets, "archive", true)
       if (result) onComplete(result)
+      return result
     },
     showDeleteMany: (
       targets: () => readonly SessionLifecycleTarget[],

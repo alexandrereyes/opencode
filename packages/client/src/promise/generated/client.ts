@@ -253,8 +253,12 @@ import type {
   WorktreeListOutput,
   WorktreeCreateInput,
   WorktreeCreateOutput,
+  WorktreeInspectInput,
+  WorktreeInspectOutput,
   WorktreeRemoveInput,
   WorktreeRemoveOutput,
+  WorktreeDeleteInput,
+  WorktreeDeleteOutput,
   WorktreeRefreshInput,
   WorktreeRefreshOutput,
   WorkspaceCreateInput,
@@ -2132,6 +2136,18 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      inspect: (input: WorktreeInspectInput, requestOptions?: RequestOptions) =>
+        request<WorktreeInspectOutput>(
+          {
+            method: "GET",
+            path: `/api/worktree/inspect`,
+            query: { location: input["location"], directory: input["directory"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       remove: (input: WorktreeRemoveInput, requestOptions?: RequestOptions) =>
         request<WorktreeRemoveOutput>(
           {
@@ -2142,6 +2158,27 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+      delete: (input: WorktreeDeleteInput, requestOptions?: RequestOptions) =>
+        request<WorktreeDeleteOutput>(
+          {
+            method: "DELETE",
+            path: `/api/worktree/delete`,
+            query: { location: input["location"] },
+            body: {
+              directory: input["directory"],
+              force: input["force"],
+              identity: input["identity"],
+              branch: input["branch"],
+              remote: input["remote"],
+              deleteLocalBranch: input["deleteLocalBranch"],
+              deleteRemoteBranch: input["deleteRemoteBranch"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
           },
           requestOptions,
         ),

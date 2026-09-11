@@ -2121,6 +2121,15 @@ export type WorktreeCreateInput = {
 export type WorktreeCreateOutput = Worktree.Info
 export type WorktreeCreateOperation<E = never> = (input?: WorktreeCreateInput) => Effect.Effect<WorktreeCreateOutput, E>
 
+export type WorktreeInspectInput = {
+  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  readonly directory: AbsolutePath
+}
+export type WorktreeInspectOutput = Worktree.Inspection
+export type WorktreeInspectOperation<E = never> = (
+  input: WorktreeInspectInput,
+) => Effect.Effect<WorktreeInspectOutput, E>
+
 export type WorktreeRemoveInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   readonly directory: AbsolutePath
@@ -2128,6 +2137,19 @@ export type WorktreeRemoveInput = {
 }
 export type WorktreeRemoveOutput = void
 export type WorktreeRemoveOperation<E = never> = (input: WorktreeRemoveInput) => Effect.Effect<WorktreeRemoveOutput, E>
+
+export type WorktreeDeleteInput = {
+  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  readonly directory: AbsolutePath
+  readonly force: boolean
+  readonly identity: string
+  readonly branch: string | null
+  readonly remote?: { readonly name: string; readonly branch: string } | undefined
+  readonly deleteLocalBranch?: boolean | undefined
+  readonly deleteRemoteBranch?: boolean | undefined
+}
+export type WorktreeDeleteOutput = Worktree.RemoveResult
+export type WorktreeDeleteOperation<E = never> = (input: WorktreeDeleteInput) => Effect.Effect<WorktreeDeleteOutput, E>
 
 export type WorktreeRefreshInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -2140,7 +2162,9 @@ export type WorktreeRefreshOperation<E = never> = (
 export interface WorktreeApi<E = never> {
   readonly list: WorktreeListOperation<E>
   readonly create: WorktreeCreateOperation<E>
+  readonly inspect: WorktreeInspectOperation<E>
   readonly remove: WorktreeRemoveOperation<E>
+  readonly delete: WorktreeDeleteOperation<E>
   readonly refresh: WorktreeRefreshOperation<E>
 }
 

@@ -63,6 +63,22 @@ test("canonical root (on any branch), subdirectories, nested worktrees and safe 
   expect(group.groups.find((group) => group.directory === "/repo-other")?.name).toBe("repo-other")
 })
 
+test("only inventory entries with a removal strategy authorize the worktree action", () => {
+  const group = sidebarWorktrees(project, [row("outside", "/outside/main")], {
+    inventory: [
+      { directory: "/repo" },
+      { directory: "/clone" },
+      { directory: "/trees/main", strategy: "git" },
+    ],
+    location: () => undefined,
+    branch: () => "main",
+  })
+  expect(group.groups.find((item) => item.directory === "/clone")?.removable).toBe(false)
+  expect(group.groups.find((item) => item.directory === "/trees/main")?.removable).toBe(true)
+  expect(group.groups.find((item) => item.directory === "/outside/main")?.removable).toBe(false)
+  expect(group.groups.some((item) => item.directory === "/repo")).toBe(false)
+})
+
 test("incremental inventory/Location/branch never loses rows; unavailable and detached labels stay truthful", () => {
   const rows = [row("sub", "/trees/feat/src"), row("root", "/repo"), row("unknown", "/gone/feat")]
   const cold = sidebarWorktrees(project, rows, { ...metadata, inventory: undefined })
@@ -80,7 +96,8 @@ test("incremental inventory/Location/branch never loses rows; unavailable and de
     )
   }
   expect(located.groups.find((group) => group.directory === "/trees/feat")?.name).toBe("feat")
-  expect(located.groups.map((group) => group.key)).toEqual(ready.groups.map((group) => group.key))
+  expect(ready.groups.map((group) => group.directory)).toEqual(["/gone/feat", "/repo/nested", "/trees/feat"])
+  expect(ready.groups.find((group) => group.directory === "/repo/nested")?.rows).toEqual([])
 })
 
 test("same basename/branch, foreign project/server and foreign Location metadata cannot merge", () => {
@@ -113,7 +130,7 @@ test("visible order uses subgroup caps; subgroup collapse hides rows and project
     ...Array.from({ length: 8 }, (_, i) => row(`f${i}`, "/trees/feat")),
   ]
   const group = sidebarWorktrees(project, rows, metadata)
-  const key = group.groups[0].key
+  const key = group.groups.find((item) => item.directory === "/trees/feat")!.key
   expect(visibleWorktreeSessions(group, project.key, {}, {}).map((row) => row.session.id)).toEqual([
     "r0",
     "r1",
@@ -129,13 +146,19 @@ test("visible order uses subgroup caps; subgroup collapse hides rows and project
   expect(visibleWorktreeSessions(group, project.key, { [key]: true }, {}, rows.at(-1)?.key)).toHaveLength(5)
   expect(visibleWorktreeSessions(group, project.key, { [project.key]: true }, {}, rows[0].key)).toEqual([rows[0]])
   expect(visibleWorktreeSessions(group, project.key, {}, { [key]: 10 })).toHaveLength(13)
-  expect(group.groups).toHaveLength(1)
+  expect(group.groups).toHaveLength(2)
   const child = row("child", "/trees/feat")
   child.session.parentID = "r0"
   const archived = row("archived", "/trees/feat")
   archived.session.time.archived = 10
-  expect(sidebarWorktrees(project, [child, archived], metadata).groups).toEqual([])
-  expect(sidebarWorktrees(project, rootSessions([child, archived]).rows, metadata).groups).toEqual([])
+  expect(sidebarWorktrees(project, [child, archived], metadata).groups.map((item) => item.directory)).toEqual([
+    "/repo/nested",
+    "/trees/feat",
+  ])
+  expect(sidebarWorktrees(project, rootSessions([child, archived]).rows, metadata).groups.map((item) => item.directory)).toEqual([
+    "/repo/nested",
+    "/trees/feat",
+  ])
 })
 
 test("non-git directories preserve existing grouping", () => {
