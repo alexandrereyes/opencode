@@ -51,6 +51,31 @@ describe("sidebar navigation", () => {
     expect(recentSessions([remote, rows[0]]).map((row) => row.key)).toEqual([rows[0].key, remote.key].sort())
   })
 
+  test("Recent windows preserve rank order, exclude pins/children and retain current across five-row pages", () => {
+    const rows = Array.from({ length: 13 }, (_, i) => ({ ...row(`s${i}`, i), recentRank: 13 - i }))
+    const pin = row("pinned", 100)
+    const archived = row("archived", 200)
+    archived.session.time.archived = 1
+    const roots = rootSessions(
+      [...rows, pin, row("child", 300, undefined, "s12"), archived],
+      sessionKey(server, "child"),
+    )
+    const recent = recentSessions(roots.rows.filter((item) => item.key !== pin.key))
+    expect(recent.map((item) => item.key)).toEqual(rows.map((item) => item.key))
+    expect(visibleSessions(recent, 5, roots.current).map((item) => item.key)).toEqual([
+      ...rows.slice(0, 5).map((item) => item.key),
+      rows[12].key,
+    ])
+    expect(visibleSessions(recent, 10, roots.current)).toHaveLength(11)
+    expect(visibleSessions(recent, 15, roots.current)).toEqual(recent)
+    expect(visibleSessions(recent, 5, rows[0].key)).toHaveLength(5)
+    expect(visibleSessions(recent, 5, pin.key)).toHaveLength(5)
+    expect(visibleSessions(recent.slice(0, 6), 5, rows[5].key)).toEqual(recent.slice(0, 6))
+    expect(visibleSessions(recent, 5, roots.current)).toHaveLength(6)
+    expect(pinnedSessions(roots.rows, [pin.key])).toEqual([pin])
+    expect(searchSessions(roots.rows, "s", [])).toHaveLength(13)
+  })
+
   test("empty, archived-only and child-only projects are hidden before collapse limits", () => {
     const archived = row("archived")
     archived.session.projectID = "archive-project"

@@ -42,6 +42,8 @@ export const dict = {
   "sidebar.session.unpin": "Unpin session",
   "sidebar.session.pinned": "Pinned session",
   "sidebar.sessions.recent": "Recent",
+  "sidebar.sessions.recent.more": "Show more sessions",
+  "sidebar.sessions.recent.fewer": "Show fewer sessions",
   "sidebar.sessions.today": "Today",
   "sidebar.sessions.yesterday": "Yesterday",
   "sidebar.sessions.current": "Current session",

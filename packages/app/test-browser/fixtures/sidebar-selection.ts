@@ -176,7 +176,7 @@ const { flushPersisted } = await import("@/runtime/persistence/persist")
 const { Persist, removePersisted } = await import("@/runtime/persistence/storage")
 const storage = "opencode.global.dat:sidebar-navigation"
 const wait = () => new Promise((resolve) => setTimeout(resolve, 160))
-function mount(sidebar = true, direction = "ltr") {
+function mount(sidebar = true, direction = "ltr", currentTab?: Tab) {
   localStorage.setItem(
     storage,
     JSON.stringify({
@@ -201,7 +201,7 @@ function mount(sidebar = true, direction = "ltr") {
               return createComponent(DialogProvider, {
                 get children() {
                   lifecycle = useSessionLifecycleActions()
-                  return sidebar ? createComponent(SessionSidebar, { header: null, children: null }) : null
+                  return sidebar ? createComponent(SessionSidebar, { header: null, children: null, currentTab }) : null
                 },
               })
             },
@@ -281,6 +281,182 @@ const recentSection = (root: ParentNode) =>
   [...root.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")!
 const recentLinks = (root: ParentNode) => [...recentSection(root).querySelectorAll<HTMLAnchorElement>("a")]
 const recentOrder = (root: ParentNode) => recentLinks(root).map((link) => link.getAttribute("href"))
+
+test("Recent expands by five, collapses in place, prunes only hidden selection and keeps search complete", async () => {
+  const original = hosts.map((host) => host.backend.map((row) => structuredClone(row)))
+  try {
+    for (const direction of ["ltr", "rtl"]) {
+      const sessions = Array.from({ length: 13 }, (_, i) => row(`recent-${i}`, i + 1))
+      const archived = row("recent-archived")
+      archived.session.time.archived = now
+      hosts[0].backend.splice(
+        0,
+        hosts[0].backend.length,
+        row("same"),
+        ...sessions,
+        row("recent-child", 0, "same"),
+        archived,
+      )
+      hosts[1].backend.splice(0)
+      const ui = mount(true, direction)
+      try {
+        await wait()
+        flushPersisted()
+        const preferences = localStorage.getItem(storage)
+        const calls = hosts.map((host) => ({ ...host.calls }))
+        const recent = recentSection(ui.host)
+        const control = button(recent, "Show more sessions")
+        expect(control.type).toBe("button")
+        expect(control.tabIndex).toBe(0)
+        expect(control.classList.contains("text-start")).toBe(true)
+        expect(ui.host.dir).toBe(direction)
+        expect(recentLinks(ui.host)).toHaveLength(5)
+        expect(findRows(recent, "same")).toHaveLength(0)
+        expect(findRows(ui.host, "recent-child")).toHaveLength(0)
+        expect(findRows(ui.host, "recent-archived")).toHaveLength(0)
+        const first = recentLinks(ui.host)[0]
+        control.focus()
+        control.click()
+        expect(recentLinks(ui.host)).toHaveLength(10)
+        expect(control.textContent).toBe("Show more sessions")
+        expect(recentLinks(ui.host)[0] === first).toBe(true)
+        expect(document.activeElement === control).toBe(true)
+
+        search(ui.host, "recent-")
+        expect(rows(ui.host)).toHaveLength(13)
+        expect(button(ui.host, "Show more sessions")).toBeUndefined()
+        const input = ui.host.querySelector<HTMLInputElement>('input[type="search"]')!
+        input.focus()
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+        expect(input.value).toBe("")
+        expect(document.activeElement === input).toBe(true)
+        expect(recentLinks(ui.host)).toHaveLength(10)
+
+        const toggle = ui.host.querySelector<HTMLButtonElement>('[aria-label="Attention view"]')!
+        toggle.click()
+        expect(button(ui.host, "Show more sessions")).toBeUndefined()
+        toggle.click()
+        expect(recentLinks(ui.host)).toHaveLength(10)
+        const more = button(recentSection(ui.host), "Show more sessions")
+        more.focus()
+        more.click()
+        expect(recentLinks(ui.host)).toHaveLength(13)
+        expect(more.textContent).toBe("Show fewer sessions")
+        expect(document.activeElement === more).toBe(true)
+        const before = recentLinks(ui.host)
+        const order = recentOrder(ui.host)
+        for (let i = 0; i < 100; i++) hosts[0].emit("session.text.delta", "recent-7")
+        hosts[0].setCache("recent-7", {
+          ...sessions[7].session,
+          title: "Streaming metadata",
+          time: { ...sessions[7].session.time, updated: Date.now() + 1000 },
+        })
+        await wait()
+        expect(recentOrder(ui.host)).toEqual(order)
+        expect(recentLinks(ui.host).every((item, i) => item === before[i])).toBe(true)
+        expect(document.activeElement === more).toBe(true)
+        button(ui.host, "Select sessions").click()
+        link(recentSection(ui.host), "recent-0").click()
+        link(recentSection(ui.host), "recent-7").click()
+        expect(count(ui.host)).toBe("2 sessions selected")
+        more.focus()
+        more.click()
+        expect(recentLinks(ui.host)).toHaveLength(5)
+        expect(more.textContent).toBe("Show more sessions")
+        expect(document.activeElement === more).toBe(true)
+        expect(count(ui.host)).toBe("1 session selected")
+        expect(findRows(recentSection(ui.host), "recent-0")[0].dataset.selected).toBe("true")
+        more.click()
+        more.click()
+        expect(count(ui.host)).toBe("1 session selected")
+        // A row still rendered in its project stays selected when Recent folds.
+        const project = ui.host.querySelector<HTMLElement>("[data-project-key]")!
+        button(project, "Show more").click()
+        link(recentSection(ui.host), "recent-7").click()
+        link(recentSection(ui.host), "recent-9").click()
+        expect(count(ui.host)).toBe("3 sessions selected")
+        more.click()
+        expect(count(ui.host)).toBe("2 sessions selected")
+        expect(findRows(project, "recent-7")[0].dataset.selected).toBe("true")
+        expect(findRows(ui.host, "recent-9")).toHaveLength(0)
+        search(ui.host, "recent-")
+        expect(rows(ui.host)).toHaveLength(13)
+        search(ui.host, "")
+        expect(recentLinks(ui.host)).toHaveLength(5)
+        button(recentSection(ui.host), "Show more sessions").click()
+        expect(recentLinks(ui.host)).toHaveLength(10) // A fresh mount below must reset this local state.
+        flushPersisted()
+        expect(localStorage.getItem(storage)).toBe(preferences)
+        expect(hosts.map((host) => ({ ...host.calls }))).toEqual(calls)
+      } finally {
+        ui.dispose()
+        hosts[0].setCache("recent-7", undefined)
+      }
+      const reload = mount(true, direction)
+      try {
+        await wait()
+        expect(recentLinks(reload.host)).toHaveLength(5)
+      } finally {
+        reload.dispose()
+      }
+    }
+  } finally {
+    hosts.forEach((host, i) => host.backend.splice(0, host.backend.length, ...original[i]))
+  }
+})
+
+test("Recent control counts the forced current root and never offers a no-op expansion", async () => {
+  const original = hosts.map((host) => host.backend.map((row) => structuredClone(row)))
+  try {
+    for (const size of [0, 1, 5, 6, 11, 12]) {
+      const sessions = Array.from({ length: size }, (_, i) => row(`current-${i}`, i + 1))
+      const current = sessions.at(-1)?.session.id ?? "same"
+      hosts[0].backend.splice(0, hosts[0].backend.length, row("same"), ...sessions)
+      hosts[1].backend.splice(0)
+      const ui = mount(true, "ltr", {
+        type: "session",
+        server: ServerConnection.key(connections[0]),
+        sessionId: current,
+      })
+      try {
+        await wait()
+        expect(findRows(ui.host, current).length).toBeGreaterThan(0)
+        if (!size) {
+          expect(recentSection(ui.host)).toBeUndefined()
+          continue
+        }
+        const recent = recentSection(ui.host)
+        expect(recentLinks(ui.host)).toHaveLength(Math.min(size, 6))
+        expect(findRows(recent, current)).toHaveLength(1)
+        const control = button(recent, "Show more sessions")
+        if (size <= 6) {
+          expect(control).toBeUndefined()
+          expect(button(recent, "Show fewer sessions")).toBeUndefined()
+          continue
+        }
+        control.focus()
+        control.click()
+        expect(recentLinks(ui.host)).toHaveLength(11)
+        expect(control.textContent).toBe(size === 11 ? "Show fewer sessions" : "Show more sessions")
+        if (size === 12) control.click()
+        expect(recentLinks(ui.host)).toHaveLength(size)
+        expect(control.textContent).toBe("Show fewer sessions")
+        expect(document.activeElement === control).toBe(true)
+        button(ui.host, "Select sessions").click()
+        link(recent, current).click()
+        control.click()
+        expect(recentLinks(ui.host)).toHaveLength(6)
+        expect(findRows(recent, current)).toHaveLength(1)
+        expect(count(ui.host)).toBe("1 session selected")
+        expect(control.textContent).toBe("Show more sessions")
+      } finally {
+        ui.dispose()
+      }
+    }
+  } finally {
+    hosts.forEach((host, i) => host.backend.splice(0, host.backend.length, ...original[i]))
+  }
+})
 
 test("shared sidebar clock updates every view without reordering, remounting, losing focus or selection", async () => {
   const original = hosts.map((host) => host.backend.map((row) => structuredClone(row)))
@@ -437,6 +613,11 @@ test("Arabic sidebar uses English compact fallback and a localized absolute date
     expect(time.getAttribute("aria-label")).toBe(time.title)
     expect(time.dir).toBe("auto")
     expect(ui.host.dir).toBe("rtl")
+    const control = button(ui.host, "Show more sessions")
+    control.focus()
+    control.click()
+    expect(control.textContent).toBe("Show fewer sessions")
+    expect(document.activeElement === control).toBe(true)
   } finally {
     ui.dispose()
     removePersisted(Persist.global("language"))

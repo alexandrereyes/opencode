@@ -51,6 +51,7 @@ const SidebarState = Persistence.struct({
   collapsed: Persistence.record(Schema.Boolean),
   pins: Persistence.array(Schema.String),
 })
+const RECENT_PAGE_SIZE = 5
 
 export function SessionSidebar(props: { header: JSX.Element; children: JSX.Element; currentTab?: Tab }) {
   const global = useGlobal()
@@ -72,6 +73,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const [state, setState] = createStore({
     now: Date.now(),
     limits: {} as Record<string, number>,
+    recentLimit: RECENT_PAGE_SIZE,
     drag: undefined as string | undefined,
     query: "",
   })
@@ -185,9 +187,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
   const pinned = createMemo(() => pinnedSessions(sessions().rows, saved.pins))
   const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, saved.pins))
-  const recent = createMemo(() =>
-    visibleSessions(recentSessions(sessions().rows.filter((row) => !pins().has(row.key))), 5, sessions().current),
-  )
+  const recentRows = createMemo(() => recentSessions(sessions().rows.filter((row) => !pins().has(row.key))))
+  const recent = createMemo(() => visibleSessions(recentRows(), state.recentLimit, sessions().current))
+  const recentMore = () => recentRows().length > recent().length
   const query = createMemo(() => state.query.trim())
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
   const projectRows = (key: string) =>
@@ -318,7 +320,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       ? language.t("sidebar.project.server", { project: project.name, server: project.serverName })
       : project.name
   }
-  const Section = (props: { title: string; rows: SidebarSession[] }) => {
+  const Section = (props: { title: string; rows: SidebarSession[]; children?: JSX.Element }) => {
     let element: HTMLElement | undefined
     const rows = createMemo(() => ({
       items: props.rows,
@@ -339,6 +341,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
               {(item) => <Row item={item()} />}
             </Key>
           </div>
+          {props.children}
         </section>
       </Show>
     )
@@ -533,7 +536,24 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             fallback={
               <>
                 <Section title={language.t("sidebar.sessions.pinned")} rows={pinned()} />
-                <Section title={language.t("sidebar.sessions.recent")} rows={recent()} />
+                <Section title={language.t("sidebar.sessions.recent")} rows={recent()}>
+                  <Show
+                    when={
+                      recentMore() ||
+                      recent().length > visibleSessions(recentRows(), RECENT_PAGE_SIZE, sessions().current).length
+                    }
+                  >
+                    <button
+                      type="button"
+                      class="mt-1 block h-7 w-fit max-w-full rounded-[6px] px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                      onClick={() =>
+                        setState("recentLimit", (limit) => (recentMore() ? limit + RECENT_PAGE_SIZE : RECENT_PAGE_SIZE))
+                      }
+                    >
+                      {language.t(recentMore() ? "sidebar.sessions.recent.more" : "sidebar.sessions.recent.fewer")}
+                    </button>
+                  </Show>
+                </Section>
                 <div class="mt-4 flex flex-col gap-2">
                   <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
                     {language.t("sidebar.projects.heading")}
