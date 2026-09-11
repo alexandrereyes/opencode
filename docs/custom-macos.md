@@ -92,6 +92,8 @@ The existing Context tab prioritizes context usage, session and descendant costs
 LLM proxy subscriptions, subagent navigation, background tasks, and MCP connection controls above the detailed statistics.
 Project and branch share the context header. Subagents precede Subscriptions, followed by
 background tasks and MCPs; there is no separate Project section.
+The current Session's Context label, ring and usage value stay together at the start edge.
+Its token count uses a fixed K suffix for thousands (for example 701K), with localized decimals.
 Each subagent's metadata line shows its agent icon/name and the production context ring,
 compact token count, and percentage for its most recent measured assistant call. This is
 not cumulative token consumption. The model and limit belong to the child; unknown limits

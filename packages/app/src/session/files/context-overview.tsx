@@ -2,6 +2,7 @@ import { createEffect, createMemo, createResource, For, Show, onCleanup, type JS
 import { createStore } from "solid-js/store"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui/icon"
+import { ProgressCircle } from "@opencode/ui/progress-circle"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Switch } from "@opencode/ui/switch"
 import { Spinner } from "@opencode/ui/spinner"
@@ -207,16 +208,34 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             {branch()}
           </bdi>
         </h2>
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
           <span>{language.t("context.overview.context")}</span>
-          <bdi class="tabular-nums">
-            {props.tokens === undefined
-              ? "—"
-              : new Intl.NumberFormat(language.intl(), { notation: "compact", maximumFractionDigits: 1 }).format(
-                  props.tokens,
-                )}
-            {props.usage != null ? ` (${props.usage}%)` : ""}
-          </bdi>
+          <span class="inline-flex items-center gap-1.5">
+            <Show when={props.usage != null}>
+              <ProgressCircle
+                appearance="indicator"
+                size={16}
+                strokeWidth={2}
+                percentage={props.usage ?? 0}
+                class="shrink-0"
+                style={{
+                  "--progress-circle-background": "var(--v2-background-bg-layer-04, var(--border-weak-base))",
+                  "--progress-circle-background-overlay": "var(--v2-overlay-simple-overlay-pressed, transparent)",
+                  "--progress-circle-progress": "var(--v2-icon-icon-base, var(--icon-base))",
+                }}
+              />
+            </Show>
+            <bdi class="tabular-nums">
+              {props.tokens === undefined
+                ? "—"
+                : new Intl.NumberFormat(language.intl(), {
+                    maximumFractionDigits: props.tokens >= 1000 ? 1 : 0,
+                    useGrouping: false,
+                  }).format(props.tokens >= 1000 ? props.tokens / 1000 : props.tokens)}
+              {props.tokens !== undefined && props.tokens >= 1000 ? "K" : ""}
+              {props.usage != null ? ` (${props.usage}%)` : ""}
+            </bdi>
+          </span>
         </div>
         <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
         <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
