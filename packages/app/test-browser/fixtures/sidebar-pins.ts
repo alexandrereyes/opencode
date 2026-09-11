@@ -26,8 +26,15 @@ Bun.plugin({
     }))
   },
 })
+const drag = { start: undefined as (() => void) | undefined }
 mock.module("@dnd-kit/solid", () => ({
-  DragDropProvider: (props: { children: JSX.Element }) => props.children,
+  DragDropProvider: (props: {
+    children: JSX.Element
+    onDragStart: (event: { operation: { source: { id: string } } }) => void
+  }) => {
+    drag.start = () => props.onDragStart({ operation: { source: { id: "fixture-project" } } })
+    return props.children
+  },
   PointerSensor: { configure: () => ({}) },
 }))
 mock.module("@dnd-kit/solid/sortable", () => ({
@@ -266,6 +273,99 @@ function mount(direction: "ltr" | "rtl" = "ltr") {
     },
   }
 }
+
+test("project folders reset on mount; only the last toggled header has a chevron", async () => {
+  const keys = connections.map((connection) =>
+    projectKey(ServerConnection.key(connection), { id: "repo", worktree: "/repo" }),
+  )
+  for (const direction of ["ltr", "rtl"] as const) {
+    localStorage.setItem(
+      storage,
+      JSON.stringify({ attention: false, order: keys, collapsed: { [keys[0]]: false, [keys[1]]: false }, pins: [] }),
+    )
+    const ui = mount(direction)
+    const header = (key: string) =>
+      [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")]
+        .find((element) => element.dataset.projectKey === key)!
+        .querySelector<HTMLButtonElement>("button[aria-expanded]")!
+    const icon = (key: string) => header(key).querySelector("use")?.getAttribute("href")
+    try {
+      await wait()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
+      expect(header(keys[0]).getAttribute("aria-expanded")).toBe("true")
+      expect(header(keys[0]).querySelector("span[dir=auto]")?.classList.contains("font-semibold")).toBe(true)
+      const first = header(keys[0])
+      first.click()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
+      header(keys[1]).click()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      expect(header(keys[0]).getAttribute("aria-expanded")).toBe("false")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      // Native buttons synthesize a detail=0 click for Enter/Space. HappyDOM does
+      // not implement that default action, so dispatch it explicitly after the key.
+      for (const key of ["Enter", " "]) {
+        header(keys[1]).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
+        header(keys[1]).dispatchEvent(new MouseEvent("click", { detail: 0, bubbles: true }))
+        expect(icon(keys[1])).toBe(
+          key === "Enter" ? "#opencode-v2-icon-chevron-down" : "#opencode-v2-icon-chevron-right",
+        )
+      }
+      expect(header(keys[0]).querySelector("[class*=rotate]")).toBeNull()
+      first.focus()
+      setRoute("sessionId", "same")
+      first.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true }),
+      )
+      await Promise.resolve()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      const group = first.closest<HTMLElement>("[data-project-key]")!
+      group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!.click()
+      await projectMenu(group)
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+      await wait()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      drag.start!()
+      first.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }))
+      expect(header(keys[0]).getAttribute("aria-expanded")).toBe("false")
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      const session = structuredClone(hosts[0].backend[0].session)
+      hosts[0].setCache(session.id, { ...session, title: "Header metadata churn" })
+      expect(header(keys[0]) === first).toBe(true)
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      hosts[0].setCache(session.id, session)
+      const input = ui.host.querySelector<HTMLInputElement>('input[type="search"]')!
+      input.value = "same"
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+      input.value = ""
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+      const toggle = ui.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.attention.toggle"]')!
+      toggle.click()
+      toggle.click()
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      flushPersisted()
+      expect(JSON.parse(localStorage.getItem(storage)!)).not.toHaveProperty("lastTouchedProject")
+    } finally {
+      ui.dispose()
+      setRoute("sessionId", undefined)
+    }
+    const reopened = mount(direction)
+    try {
+      await wait()
+      expect(
+        [...reopened.host.querySelectorAll("[data-project-key]")].map((group) =>
+          group.querySelector("button[aria-expanded] use")?.getAttribute("href"),
+        ),
+      ).toEqual(keys.map(() => "#opencode-v2-icon-folder"))
+    } finally {
+      reopened.dispose()
+    }
+  }
+})
 
 test("legacy prefs, real menus, search, priorities, reload, disconnect, archive and delete", async () => {
   const project = projectKey(ServerConnection.key(connections[0]), { id: "repo", worktree: "/repo" })

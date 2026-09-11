@@ -80,6 +80,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     recentLimit: RECENT_PAGE_SIZE,
     drag: undefined as string | undefined,
     query: "",
+    lastTouchedProject: undefined as string | undefined,
   })
   const clock = createRecentClock()
   const indexes = mapArray(global.servers.list, (connection) => {
@@ -662,15 +663,22 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                     aria-expanded={!collapsed()}
                                     onClick={(event) => {
                                       if (event.detail > 0 && gesture.dragged) return
+                                      setState("lastTouchedProject", key)
                                       setSaved("collapsed", key, !collapsed())
                                     }}
                                   >
                                     <Icon
-                                      name={collapsed() ? "chevron-right" : "chevron-down"}
+                                      name={
+                                        state.lastTouchedProject === key
+                                          ? collapsed()
+                                            ? "chevron-right"
+                                            : "chevron-down"
+                                          : "folder"
+                                      }
                                       size="small"
-                                      class={collapsed() ? "rtl:rotate-180" : ""}
+                                      class={state.lastTouchedProject === key && collapsed() ? "rtl:rotate-180" : ""}
                                     />
-                                    <span dir="auto" class="min-w-0 truncate" title={projectLabel(key)}>
+                                    <span dir="auto" class="min-w-0 truncate font-semibold" title={projectLabel(key)}>
                                       {projectLabel(key)}
                                     </span>
                                     <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
