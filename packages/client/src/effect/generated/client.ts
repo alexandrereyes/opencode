@@ -260,8 +260,12 @@ import type {
   WorktreeListOutput,
   WorktreeCreateInput,
   WorktreeCreateOutput,
+  WorktreeInspectInput,
+  WorktreeInspectOutput,
   WorktreeRemoveInput,
   WorktreeRemoveOutput,
+  WorktreeDeleteInput,
+  WorktreeDeleteOutput,
   WorktreeRefreshInput,
   WorktreeRefreshOutput,
   WorkspaceCreateInput,
@@ -1563,11 +1567,34 @@ const EndpointWorktreeCreate = (raw: RawClient["server.worktree"]) => (input?: W
     }).pipe(Effect.mapError(mapClientError)),
   )
 
+const EndpointWorktreeInspect = (raw: RawClient["server.worktree"]) => (input: WorktreeInspectInput) =>
+  preserveEffect<WorktreeInspectOutput>()(
+    raw["worktree.inspect"]({ query: { location: input["location"], directory: input["directory"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
 const EndpointWorktreeRemove = (raw: RawClient["server.worktree"]) => (input: WorktreeRemoveInput) =>
   preserveEffect<WorktreeRemoveOutput>()(
     raw["worktree.remove"]({
       query: { location: input["location"] },
       payload: { directory: input["directory"], force: input["force"] },
+    }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointWorktreeDelete = (raw: RawClient["server.worktree"]) => (input: WorktreeDeleteInput) =>
+  preserveEffect<WorktreeDeleteOutput>()(
+    raw["worktree.delete"]({
+      query: { location: input["location"] },
+      payload: {
+        directory: input["directory"],
+        force: input["force"],
+        identity: input["identity"],
+        branch: input["branch"],
+        remote: input["remote"],
+        deleteLocalBranch: input["deleteLocalBranch"],
+        deleteRemoteBranch: input["deleteRemoteBranch"],
+      },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
@@ -1579,7 +1606,9 @@ const EndpointWorktreeRefresh = (raw: RawClient["server.worktree"]) => (input?: 
 const adaptGroupWorktree = (raw: RawClient["server.worktree"]) => ({
   list: EndpointWorktreeList(raw),
   create: EndpointWorktreeCreate(raw),
+  inspect: EndpointWorktreeInspect(raw),
   remove: EndpointWorktreeRemove(raw),
+  delete: EndpointWorktreeDelete(raw),
   refresh: EndpointWorktreeRefresh(raw),
 })
 
