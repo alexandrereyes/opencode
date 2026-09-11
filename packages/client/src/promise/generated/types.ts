@@ -432,6 +432,12 @@ export type WorktreeDirectory = { directory: string; strategy?: string }
 
 export type WorktreeInfo = { directory: string }
 
+export type WorktreeRemovalOption = { name: string }
+
+export type WorktreeRemoteRemovalOption = { name: string; branch: string }
+
+export type WorktreeCleanupResult = { name: string; remote?: string; deleted: boolean; error?: string }
+
 export type WorkspaceDestroyResult = { destroyed: boolean }
 
 export type VcsBranch = { current?: string; default?: string }
@@ -1713,6 +1719,21 @@ export type SessionStatusUpdated = {
 export type ReferenceSource = ReferenceLocalSource | ReferenceGitSource
 
 export type WorktreeList = Array<WorktreeDirectory>
+
+export type WorktreeInspection = {
+  directory: string
+  identity: string
+  branch?: string
+  dirty: boolean
+  localBranch?: WorktreeRemovalOption
+  remoteBranch?: WorktreeRemoteRemovalOption
+}
+
+export type WorktreeRemoveResult = {
+  directory: string
+  localBranch?: WorktreeCleanupResult
+  remoteBranch?: WorktreeCleanupResult
+}
 
 export type VcsInfo = { branch: VcsBranch }
 
@@ -6541,6 +6562,19 @@ export type WorktreeCreateInput = {
 
 export type WorktreeCreateOutput = WorktreeInfo
 
+export type WorktreeInspectInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly directory: string
+  }["location"]
+  readonly directory: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly directory: string
+  }["directory"]
+}
+
+export type WorktreeInspectOutput = WorktreeInspection
+
 export type WorktreeRemoveInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -6550,6 +6584,77 @@ export type WorktreeRemoveInput = {
 }
 
 export type WorktreeRemoveOutput = void
+
+export type WorktreeDeleteInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly directory: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["directory"]
+  readonly force: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["force"]
+  readonly identity: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["identity"]
+  readonly branch: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["branch"]
+  readonly remote?: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["remote"]
+  readonly deleteLocalBranch?: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["deleteLocalBranch"]
+  readonly deleteRemoteBranch?: {
+    readonly directory: string
+    readonly force: boolean
+    readonly identity: string
+    readonly branch: string | null
+    readonly remote?: { readonly name: string; readonly branch: string }
+    readonly deleteLocalBranch?: boolean
+    readonly deleteRemoteBranch?: boolean
+  }["deleteRemoteBranch"]
+}
+
+export type WorktreeDeleteOutput = WorktreeRemoveResult
 
 export type WorktreeRefreshInput = {
   readonly location?: {

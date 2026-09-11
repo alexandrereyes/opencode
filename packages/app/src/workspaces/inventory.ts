@@ -30,16 +30,22 @@ export function createWorktreeInventory(input: {
   api: () => Pick<ServerApi["worktree"], "list">
   updated: (directory: string, worktrees: WorktreeDirectory[]) => void
 }) {
+  const revisions = new Map<string, number>()
   const options = (directory: string) => ({
     queryKey: worktreeInventoryKey(input.scope, directory),
-    queryFn: () =>
-      input
+    queryFn: () => {
+      const key = String(pathKey(directory))
+      const revision = revisions.get(key) ?? 0
+      return input
         .api()
         .list({ location: { directory } })
         .then((items) => {
+          if ((revisions.get(key) ?? 0) !== revision)
+            return input.queryClient.getQueryData<WorktreeDirectory[]>(worktreeInventoryKey(input.scope, directory)) ?? []
           input.updated(directory, items)
           return items
-        }),
+        })
+    },
     // `worktree.updated` and reconnect invalidation drive refreshes; time alone does not re-list.
     staleTime: Infinity,
     gcTime: Infinity,
@@ -49,6 +55,15 @@ export function createWorktreeInventory(input: {
     cached: (directory: string) =>
       input.queryClient.getQueryData<WorktreeDirectory[]>(worktreeInventoryKey(input.scope, directory)),
     load: (directory: string) => input.queryClient.fetchQuery(options(directory)).catch(() => undefined),
+    remove: (directory: string, target: string) => {
+      const current = input.queryClient.getQueryData<WorktreeDirectory[]>(worktreeInventoryKey(input.scope, directory))
+      if (!current) return
+      const key = String(pathKey(directory))
+      revisions.set(key, (revisions.get(key) ?? 0) + 1)
+      const next = current.filter((item) => !sameDirectory(item.directory, target))
+      input.queryClient.setQueryData(worktreeInventoryKey(input.scope, directory), next)
+      input.updated(directory, next)
+    },
     // Only inventories some view already demanded are refreshed.
     refresh: (directory: string) => {
       if (!input.queryClient.getQueryState(worktreeInventoryKey(input.scope, directory))) return Promise.resolve()

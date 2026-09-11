@@ -29,8 +29,8 @@ export const list = Effect.fn("SessionNavigation.list")(function* (
         where ${SessionMessageTable.session_id} = ${SessionTable.id}
         and ${SessionMessageTable.type} in ('user', 'assistant')
       )`,
-      unreadAt: sql<number | null>`case when ${SessionTable.time_idle} > coalesce(${SessionTable.time_viewed}, 0)
-        then coalesce((select min(${EventTable.created}) from ${EventTable}
+      unreadAt: sql<number | null>`case when ${SessionTable.parent_id} is null and ${SessionTable.time_idle} > coalesce(${SessionTable.time_viewed}, 0)
+        then coalesce((select max(${EventTable.created}) from ${EventTable}
           where ${EventTable.aggregate_id} = ${SessionTable.id}
           and ${EventTable.type} in (
             ${Event.versionedType(SessionEvent.Execution.Succeeded.type, 1)},
@@ -100,8 +100,8 @@ export const page = Effect.fn("SessionNavigation.page")(function* (
       const questions = items.filter((item) => item.type === "question")
       return {
         ...row,
-        permissionAt: permissions.length ? Math.min(...permissions.map((item) => item.time)) : undefined,
-        questionAt: questions.length ? Math.min(...questions.map((item) => item.time)) : undefined,
+        permissionAt: permissions.length ? Math.max(...permissions.map((item) => item.time)) : undefined,
+        questionAt: questions.length ? Math.max(...questions.map((item) => item.time)) : undefined,
       }
     }),
   }

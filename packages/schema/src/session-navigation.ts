@@ -8,7 +8,9 @@ import { optional } from "./schema.js"
 export const Info = Schema.Struct({
   session: Session.Info,
   messageAt: Schema.Finite.pipe(optional),
+  /** Latest unread root completion; child completions do not request attention. */
   unreadAt: Schema.Finite.pipe(optional),
+  /** Latest outstanding request creation time, including requests owned by child sessions. */
   permissionAt: Schema.Finite.pipe(optional),
   questionAt: Schema.Finite.pipe(optional),
 }).annotate({ identifier: "SessionNavigation.Info" })

@@ -51,6 +51,21 @@ export const WorktreeGroup = HttpApiGroup.make("server.worktree")
       ),
   )
   .add(
+    HttpApiEndpoint.get("worktree.inspect", `${root}/inspect`, {
+      query: Schema.Struct({ ...LocationQuery.fields, directory: Worktree.RemoveInput.fields.directory }),
+      success: Worktree.Inspection,
+      error: WorktreeError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.worktree.inspect",
+          summary: "Inspect worktree removal",
+          description: "Inspect a managed worktree and the Git branches that can be safely removed with it.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.delete("worktree.remove", root, {
       query: LocationQuery,
       payload: Worktree.RemoveInput,
@@ -63,6 +78,22 @@ export const WorktreeGroup = HttpApiGroup.make("server.worktree")
           identifier: "v2.worktree.remove",
           summary: "Remove worktree",
           description: "Remove a managed worktree from the requested location's project using its recorded strategy.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.delete("worktree.delete", `${root}/delete`, {
+      query: LocationQuery,
+      payload: Worktree.DeleteInput,
+      success: Worktree.RemoveResult,
+      error: WorktreeError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.worktree.delete",
+          summary: "Delete worktree",
+          description: "Remove a managed worktree and optionally clean up its verified Git branches.",
         }),
       ),
   )

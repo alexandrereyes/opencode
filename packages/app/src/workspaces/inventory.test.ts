@@ -70,6 +70,42 @@ describe("createWorktreeInventory", () => {
     setupResult.client.clear()
   })
 
+  test("keeps a confirmed removal out of cache when reconciliation fails", async () => {
+    let fail = false
+    const setupResult = setup(async (directory) => {
+      if (fail) throw new Error("Service unavailable")
+      return [{ directory }, { directory: `${directory}/feature`, strategy: "git" }]
+    })
+    await setupResult.inventory.load("/repo")
+    setupResult.inventory.remove("/repo", "/repo/feature")
+    fail = true
+    await setupResult.inventory.refresh("/repo")
+
+    expect(setupResult.inventory.cached("/repo")).toEqual([{ directory: "/repo" }])
+    expect(setupResult.updates.at(-1)).toEqual(["/repo", [{ directory: "/repo" }]])
+    expect(setupResult.calls).toEqual(["/repo", "/repo"])
+    setupResult.client.clear()
+  })
+
+  test("does not let an older in-flight inventory resurrect a confirmed removal", async () => {
+    const gate = Promise.withResolvers<void>()
+    let calls = 0
+    const setupResult = setup(async (directory) => {
+      calls++
+      if (calls > 1) await gate.promise
+      return [{ directory }, { directory: `${directory}/feature`, strategy: "git" }]
+    })
+    await setupResult.inventory.load("/repo")
+    const refresh = setupResult.inventory.refresh("/repo")
+    setupResult.inventory.remove("/repo", "/repo/feature")
+    gate.resolve()
+    await refresh
+
+    expect(setupResult.inventory.cached("/repo")).toEqual([{ directory: "/repo" }])
+    expect(setupResult.updates.at(-1)).toEqual(["/repo", [{ directory: "/repo" }]])
+    setupResult.client.clear()
+  })
+
   test("keys are partitioned by server and normalized by path", () => {
     const remote = "https://remote.example" as typeof ServerScope.local
     expect(worktreeInventoryKey(ServerScope.local, "C:\\Repo\\")).toEqual(

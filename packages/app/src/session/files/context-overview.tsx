@@ -18,7 +18,12 @@ import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
-import { subscriptionCapacity, subscriptionPercentages, subscriptionPool } from "./subscription-pool"
+import {
+  subscriptionAccounts,
+  subscriptionCapacity,
+  subscriptionPercentages,
+  subscriptionPool,
+} from "./subscription-pool"
 import { SubagentContext } from "./subagent-context"
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
@@ -138,6 +143,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id
   const familyFailed = () => !familyPending() && familyResult()?.ok === false
   const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], clock.now))
+  const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], clock.now))
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
@@ -411,12 +417,16 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                 </summary>
                 <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
                   <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
-                  <For each={subscription()?.accounts}>
+                  <For each={accounts()}>
                     {(account) => {
                       const capacity = () => subscriptionCapacity(account, clock.now)
                       const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
                       return (
-                        <div role="group" aria-label={account.name} class="flex flex-col gap-1.5 py-1">
+                        <div
+                          role="group"
+                          aria-label={account.name}
+                          class="flex flex-col gap-1.5 border-b border-border-weak-base py-2 last:border-b-0"
+                        >
                           <div class="flex flex-wrap items-baseline justify-between gap-2">
                             <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
                             <bdi class="tabular-nums">
@@ -443,6 +453,14 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                       account.plan === "pro" ? "Pro" : account.plan === "plus" ? "Plus" : account.plan,
                                   })
                                 : language.t("context.overview.planUnknown")}
+                            </span>
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5 tabular-nums">
+                              {account.bankedResets === null
+                                ? language.t("context.overview.accountBankedUnknown")
+                                : language.plural(
+                                    "context.overview.accountBanked",
+                                    account.bankedResets.available,
+                                  )}
                             </span>
                             <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
                               {language.t(

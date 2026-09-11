@@ -1,4 +1,9 @@
-import type { SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageUser } from "@opencode/client/promise"
+import type {
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from "@opencode/client/promise"
 import { Match, Switch, type ComponentProps } from "solid-js"
 import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
 import { AssistantReasoningContent, AssistantTextContent, CurrentUserMessageDisplay } from "./message-content"
@@ -46,7 +51,7 @@ export function SessionAssistantContent(props: {
   content: SessionMessageAssistant["content"][number]
   contentID: string
   showAssistantCopyPartID?: string | null
-  turnDurationMs?: number | null
+  messages?: SessionMessageInfo[]
   defaultOpen?: boolean
   reasoningDefaultOpen?: boolean
   toolOpen?: boolean
@@ -62,7 +67,7 @@ export function SessionAssistantContent(props: {
             text={content().text}
             message={props.message}
             showCopy={props.showAssistantCopyPartID === props.contentID}
-            turnDurationMs={props.turnDurationMs}
+            messages={props.messages}
           />
         )}
       </Match>

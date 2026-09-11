@@ -191,8 +191,13 @@ average. Account details explicitly label remaining/used quota, plan, and confir
 unconfirmed capacity; non-Pro accounts are marked outside the active pool.
 The update time reflects the oldest measurement included. Expanding reveals every subscription,
 including accounts outside the Pro pool. Banked resets are not added to the balance.
+Subscription details list available Pro accounts first, followed by other Pro accounts,
+Plus, and other plans. Accounts retain their source order within the same priority group;
+the ordering follows quota refreshes without changing pool calculations or proxy selection.
 The always-visible summary also shows the fresh banked-reset inventory for the Pro pool, with
 the first and last expiration (or no expiration). Unknown inventory is not reported as zero.
+Each expanded account shows its own banked-reset count beside the plan, including zero;
+unavailable inventory is marked explicitly. Dividers separate the account rows.
 On mobile, Usage and its live context ring occupy the fourth tab; Terminal is in More options.
 Background task rows are single-line previews. Selecting one opens its full text in a dialog,
 with an Open subagent link for agent tasks.

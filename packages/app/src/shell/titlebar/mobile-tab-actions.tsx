@@ -132,6 +132,7 @@ export function MobileTabActions(
         <IconButton
           variant="ghost-muted"
           data-action="mobile-tab-delete"
+          style={{ color: "var(--v2-state-fg-danger)" }}
           icon={<Icon name="trash" />}
           aria-label={language.t("common.delete")}
           aria-disabled={props.pending}

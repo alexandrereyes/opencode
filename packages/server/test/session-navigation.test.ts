@@ -40,6 +40,15 @@ it.live("navigation includes closed sessions and live questions, with generated-
       const pending = await api.session.navigation({ sessionID: session.id })
       expect(pending.data[0].questionAt).toBe(form.created)
       expect(pending.data[0].questionAt).toBeGreaterThan(0)
+      const latest = await api.form.create({
+        sessionID: session.id,
+        title: "Another question",
+        metadata: { kind: "question" },
+        fields: [{ key: "answer", type: "string" }],
+      })
+      expect((await api.session.navigation({ sessionID: session.id })).data[0].questionAt).toBe(latest.created)
+      await api.form.reply({ sessionID: session.id, formID: latest.id, answer: { answer: "done" } })
+      expect((await api.session.navigation({ sessionID: session.id })).data[0].questionAt).toBe(form.created)
       await api.form.reply({ sessionID: session.id, formID: form.id, answer: { answer: "done" } })
       expect((await api.session.navigation({ sessionID: session.id })).data[0].questionAt).toBeUndefined()
       await api.session.archive({ sessionID: session.id })

@@ -11,6 +11,7 @@ export function SessionTabAvatar(props: {
   directory: string
   sessionId: string
   server: ServerConnection.Key
+  unread?: boolean
 }) {
   const state = useSessionTabAvatarState(
     () => props.server,
@@ -21,8 +22,8 @@ export function SessionTabAvatar(props: {
     <SessionTabAvatarView
       project={props.project}
       directory={props.directory}
-      unread={state.unread()}
-      loading={state.loading()}
+      unread={props.unread ?? state.unread()}
+      loading={!props.unread && state.loading()}
     />
   )
 }

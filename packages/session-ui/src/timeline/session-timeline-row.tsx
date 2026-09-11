@@ -89,18 +89,7 @@ export function createSessionTimelineRowRenderer(input: {
   })
   const workingTurn = (messageID: string) =>
     input.status().type !== "idle" && input.projection.activeMessageID() === messageID
-  const duration = (messageID: string) => {
-    const user = input.projection.messageByID().get(messageID)
-    if (user?.type !== "user") return null
-    const completed = (input.projection.assistantMessagesByParent().get(messageID) ?? emptyAssistantMessages).reduce<
-      number | undefined
-    >((latest, message) => {
-      if (message.time.completed === undefined) return latest
-      return latest === undefined ? message.time.completed : Math.max(latest, message.time.completed)
-    }, undefined)
-    if (completed === undefined || completed < user.time.created) return undefined
-    return completed - user.time.created
-  }
+  const messages = createMemo(() => [...input.projection.messageByID().values()])
   const copyContentID = (messageID: string) => {
     if (workingTurn(messageID)) return null
     const message = input.projection
@@ -297,7 +286,7 @@ export function createSessionTimelineRowRenderer(input: {
                   content={content()}
                   contentID={ref()!.partID}
                   showAssistantCopyPartID={copyContentID(row().userMessageID)}
-                  turnDurationMs={duration(row().userMessageID)}
+                  messages={messages()}
                   defaultOpen={defaultOpen()}
                   toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
                   onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}

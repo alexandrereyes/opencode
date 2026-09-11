@@ -109,6 +109,7 @@ export const errorMessage = (err: unknown, fallback: string) => {
     const data = (err as { data?: { message?: string } }).data
     if (data?.message) return data.message
   }
+  if (err && typeof err === "object" && "message" in err && typeof err.message === "string") return err.message
   if (err instanceof Error) return err.message
   return fallback
 }
