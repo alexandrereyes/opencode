@@ -93,7 +93,7 @@ function row(id: string, messageAt: number, permissionAt?: number): SessionNavig
       projectID: "repo",
       title: id,
       location: { directory: "/repo" },
-      time: { created: 1, updated: 1 },
+      time: { created: 1, updated: messageAt },
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
@@ -147,6 +147,7 @@ const hosts = connections.map((connection, i) => {
       },
       api: {
         session: {
+          active: async () => ({}),
           import: async (input: unknown) => {
             imported.push(input)
             return row("ses_imported", now).session

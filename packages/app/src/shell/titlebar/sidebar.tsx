@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createUniqueId, For, mapArray, onCleanup, Show, type JSX } from "solid-js"
+import { Key } from "@solid-primitives/keyed"
 import { createStore } from "solid-js/store"
 import { Schema } from "effect"
 import { Icon } from "@opencode/ui/icon"
@@ -26,6 +27,7 @@ import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
+import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions } from "./sidebar-project-actions"
 import { createSidebarSelection } from "./sidebar-selection"
 import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
@@ -33,6 +35,7 @@ import {
   attentionGroups,
   pinnedSessions,
   projectKey,
+  recentSessions,
   rootSessions,
   searchSessions,
   sessionKey,
@@ -68,12 +71,11 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     drag: undefined as string | undefined,
     query: "",
   })
-  const indexes = createMemo(() =>
-    global.servers.list().map((connection) => {
-      const ctx = global.ensureServerCtx(connection)
-      return { connection, ctx, index: createSidebarIndex(ctx) }
-    }),
-  )
+  const clock = createRecentClock()
+  const indexes = mapArray(global.servers.list, (connection) => {
+    const ctx = global.ensureServerCtx(connection)
+    return { connection, ctx, index: createSidebarIndex(ctx, clock) }
+  })
   const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
@@ -126,6 +128,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             server,
             key: sessionKey(server, session.id),
             project: projectKey(server, { id: session.projectID, worktree: session.location.directory }),
+            recentRank: index.ranks[session.id],
             ...sessionAttention({
               ...row,
               session,
@@ -179,11 +182,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const pinned = createMemo(() => pinnedSessions(sessions().rows, saved.pins))
   const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, saved.pins))
   const recent = createMemo(() =>
-    visibleSessions(
-      sessions().rows.filter((row) => !pins().has(row.key)),
-      5,
-      sessions().current,
-    ),
+    visibleSessions(recentSessions(sessions().rows.filter((row) => !pins().has(row.key))), 5, sessions().current),
   )
   const query = createMemo(() => state.query.trim())
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
@@ -240,38 +239,42 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       ),
     )
   }
-  const row = (item: SidebarSession, compact = false) => {
-    const ctx = () => indexes().find((entry) => ServerConnection.key(entry.connection) === item.server)?.ctx
+  const Row = (props: { item: SidebarSession; compact?: boolean }) => {
+    const ctx = () => indexes().find((entry) => ServerConnection.key(entry.connection) === props.item.server)?.ctx
     const tab = () =>
       tabs.store.find(
-        (tab) => tab.type === "session" && tab.server === item.server && tab.sessionId === item.session.id,
-      ) ?? { type: "session" as const, server: item.server, sessionId: item.session.id }
+        (tab) => tab.type === "session" && tab.server === props.item.server && tab.sessionId === props.item.session.id,
+      ) ?? { type: "session" as const, server: props.item.server, sessionId: props.item.session.id }
     return (
       <TabNavItem
         href={tabHref(tab())}
-        server={item.server}
-        session={item.session}
+        server={props.item.server}
+        session={props.item.session}
         preparing={false}
         orientation="vertical"
-        compact={compact}
-        projectLabel={projectLabel(item.project)}
+        compact={props.compact}
+        projectLabel={projectLabel(props.item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
-        active={sessions().current === item.key}
-        unread={item.attention !== undefined}
-        pinned={pins().has(item.key)}
+        active={sessions().current === props.item.key}
+        unread={props.item.attention !== undefined}
+        pinned={pins().has(props.item.key)}
         selectionMode={selection.state.mode}
-        selected={selection.state.keys.includes(item.key)}
+        selected={selection.state.keys.includes(props.item.key)}
         selectionPending={lifecycle.pending()}
-        onActivate={(event) => selection.activate(item.key, event)}
+        onActivate={(event) => selection.activate(props.item.key, event)}
         onTogglePin={
           ready()
             ? () =>
                 setSaved("pins", (keys) =>
-                  keys.includes(item.key) ? keys.filter((key) => key !== item.key) : [...keys, item.key],
+                  keys.includes(props.item.key)
+                    ? keys.filter((key) => key !== props.item.key)
+                    : [...keys, props.item.key],
                 )
             : undefined
         }
-        onNavigate={() => tabs.select(tabs.addSessionTab({ server: item.server, sessionId: item.session.id }))}
+        onNavigate={() =>
+          tabs.select(tabs.addSessionTab({ server: props.item.server, sessionId: props.item.session.id }))
+        }
         onClose={() => {
           const index = tabs.store.findIndex((value) => tabKey(value) === tabKey(tab()))
           if (index !== -1) tabs.closeTab(index)
@@ -280,9 +283,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
           const context = ctx()
           if (!context) return
           await context.sdk.api.session
-            .rename({ sessionID: item.session.id, title })
+            .rename({ sessionID: props.item.session.id, title })
             .then(() => {
-              context.data.session.remember({ ...item.session, title })
+              context.data.session.remember({ ...props.item.session, title })
             })
             .catch((error) =>
               showToast({
@@ -301,16 +304,31 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       ? language.t("sidebar.project.server", { project: project.name, server: project.serverName })
       : project.name
   }
-  const section = (title: string, rows: SidebarSession[]) => (
-    <Show when={rows.length}>
-      <section class="mt-4 first:mt-0">
-        <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{title}</h2>
-        <div class="flex flex-col gap-1">
-          <For each={rows}>{(item) => row(item)}</For>
-        </div>
-      </section>
-    </Show>
-  )
+  const Section = (props: { title: string; rows: SidebarSession[] }) => {
+    let element: HTMLElement | undefined
+    const rows = createMemo(() => ({
+      items: props.rows,
+      focused: element?.contains(document.activeElement) ? document.activeElement : undefined,
+    }))
+    createEffect(() => {
+      const focused = rows().focused
+      // Moving a keyed DOM node can blur it even though the row remains mounted.
+      if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
+        focused.focus({ preventScroll: true })
+    })
+    return (
+      <Show when={rows().items.length}>
+        <section ref={element} class="mt-4 first:mt-0">
+          <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{props.title}</h2>
+          <div class="flex flex-col gap-1">
+            <Key each={rows().items} by="key">
+              {(item) => <Row item={item()} />}
+            </Key>
+          </div>
+        </section>
+      </Show>
+    )
+  }
   return (
     <>
       <div class="mb-4 flex h-7 shrink-0 items-center justify-between gap-2 [app-region:no-drag]">
@@ -489,7 +507,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                     : language.t("sidebar.search.empty")}
             </p>
             <div class="flex flex-col gap-1">
-              <For each={results()}>{(item) => row(item)}</For>
+              <Key each={results()} by="key">
+                {(item) => <Row item={item()} />}
+              </Key>
             </div>
           </div>
         </Show>
@@ -498,8 +518,8 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             when={saved.attention}
             fallback={
               <>
-                {section(language.t("sidebar.sessions.pinned"), pinned())}
-                {section(language.t("sidebar.sessions.recent"), recent())}
+                <Section title={language.t("sidebar.sessions.pinned")} rows={pinned()} />
+                <Section title={language.t("sidebar.sessions.recent")} rows={recent()} />
                 <div class="mt-4 flex flex-col gap-2">
                   <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
                     {language.t("sidebar.projects.heading")}
@@ -596,7 +616,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                   />
                                 </div>
                                 <div class="flex flex-col gap-1">
-                                  <For each={visible()}>{(item) => row(item, true)}</For>
+                                  <Key each={visible()} by="key">
+                                    {(item) => <Row item={item()} compact />}
+                                  </Key>
                                 </div>
                                 <Show when={!collapsed() && rows().length > visible().length}>
                                   <button
@@ -630,28 +652,32 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                 }
               >
                 <div class="flex flex-col gap-1">
-                  <For each={groups().priority}>{(item) => row(item)}</For>
+                  <Key each={groups().priority} by="key">
+                    {(item) => <Row item={item()} />}
+                  </Key>
                 </div>
               </Show>
             </section>
-            {section(language.t("sidebar.sessions.pinned"), groups().pinned)}
-            <For each={groups().days}>
-              {(day) =>
-                section(
-                  day.index === 0
-                    ? language.t("sidebar.sessions.today")
-                    : day.index === 1
-                      ? language.t("sidebar.sessions.yesterday")
-                      : new Intl.DateTimeFormat(language.intl(), {
-                          weekday: "long",
-                          month: "short",
-                          day: "numeric",
-                        }).format(day.start),
-                  day.rows,
-                )
-              }
-            </For>
-            {section(language.t("sidebar.sessions.current"), groups().current)}
+            <Section title={language.t("sidebar.sessions.pinned")} rows={groups().pinned} />
+            <Key each={groups().days} by="start">
+              {(day) => (
+                <Section
+                  title={
+                    day().index === 0
+                      ? language.t("sidebar.sessions.today")
+                      : day().index === 1
+                        ? language.t("sidebar.sessions.yesterday")
+                        : new Intl.DateTimeFormat(language.intl(), {
+                            weekday: "long",
+                            month: "short",
+                            day: "numeric",
+                          }).format(day().start)
+                  }
+                  rows={day().rows}
+                />
+              )}
+            </Key>
+            <Section title={language.t("sidebar.sessions.current")} rows={groups().current} />
             <Show
               when={
                 !groups().priority.length &&

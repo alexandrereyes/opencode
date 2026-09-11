@@ -6,6 +6,7 @@ import {
   localDays,
   pinnedSessions,
   projectKey,
+  recentSessions,
   rootSessions,
   searchSessions,
   sessionKey,
@@ -37,6 +38,19 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("Recent alone uses lifecycle rank and deterministic server/session ties", () => {
+    const rows = rootSessions([row("a", 30, 10), row("b", 20, 20), row("c", 10)]).rows
+    rows.forEach((row) => {
+      row.recentRank = row.session.id === "c" ? 50 : 40
+    })
+    expect(recentSessions(rows).map((row) => row.session.id)).toEqual(["c", "a", "b"])
+    expect(rows.map((row) => row.session.id)).toEqual(["a", "b", "c"])
+    expect(attentionGroups(rows, 100).priority.map((row) => row.session.id)).toEqual(["b", "a"])
+    expect(pinnedSessions(rows, [rows[1].key, rows[0].key]).map((row) => row.session.id)).toEqual(["b", "a"])
+    const remote = { ...rows[0], key: sessionKey("remote", "a") }
+    expect(recentSessions([remote, rows[0]]).map((row) => row.key)).toEqual([rows[0].key, remote.key].sort())
+  })
+
   test("empty, archived-only and child-only projects are hidden before collapse limits", () => {
     const archived = row("archived")
     archived.session.projectID = "archive-project"

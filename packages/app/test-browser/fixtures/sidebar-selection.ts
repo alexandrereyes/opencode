@@ -53,7 +53,7 @@ function row(id: string, position = 0, parentID?: string): SessionNavigationInfo
       projectID: "repo",
       title: id,
       location: { directory: "/repo" },
-      time: { created: 1, updated: 1 },
+      time: { created: 1, updated: now - position },
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
@@ -68,10 +68,16 @@ const hosts = connections.map((connection, server) => {
   const failures = new Set<string>()
   const waiters = new Map<string, Promise<void>>()
   const navigation = { wait: undefined as Promise<void> | undefined }
+  const active = new Set<string>()
+  const calls = { active: 0, navigation: 0 }
   type Listener = (event: { type: string; data: { sessionID: string } }) => void
   const listeners = new Set<Listener>()
-  const emit = (type: string, sessionID: string) =>
+  const emit = (type: string, sessionID: string) => {
+    if (type === "session.execution.started") active.add(sessionID)
+    if (["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"].includes(type))
+      active.delete(sessionID)
     listeners.forEach((listener) => listener({ type, data: { sessionID } }))
+  }
   const mutate = async (action: string, id: string) => {
     requests.push({ server, action, id })
     await waiters.get(id)
@@ -106,8 +112,13 @@ const hosts = connections.map((connection, server) => {
       },
       api: {
         session: {
+          active: async () => {
+            calls.active++
+            return Object.fromEntries([...active].map((id) => [id, { type: "running" }]))
+          },
           archive: ({ sessionID }: { sessionID: string }) => mutate("archive", sessionID),
           navigation: async (input: { sessionID?: string }) => {
+            calls.navigation++
             await navigation.wait
             return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
           },
@@ -115,7 +126,7 @@ const hosts = connections.map((connection, server) => {
       },
     },
   }
-  return { connection, ctx, backend, setCache, setState, failures, waiters, navigation, emit }
+  return { connection, ctx, backend, setCache, setState, failures, waiters, navigation, emit, active, calls, listeners }
 })
 mock.module("@/runtime/server/registry", () => ({
   ...registry,
@@ -239,6 +250,223 @@ function search(root: ParentNode, value: string) {
   input.value = value
   input.dispatchEvent(new Event("input", { bubbles: true }))
 }
+
+test("sidebar render/churn benchmark", async () => {
+  const start = performance.now()
+  const ui = mount()
+  try {
+    await wait()
+    const mounted = performance.now()
+    const observer = new MutationObserver(() => {})
+    observer.observe(ui.host, { childList: true, subtree: true })
+    const session = hosts[0].backend[1].session
+    for (let i = 0; i < 100; i++) hosts[0].setCache(session.id, { ...session, title: `Churn ${i}` })
+    console.info(
+      JSON.stringify({
+        benchmark: "sidebar-happydom",
+        mountMs: mounted - start,
+        churnMs: performance.now() - mounted,
+        mutations: observer.takeRecords().length,
+      }),
+    )
+    observer.disconnect()
+    hosts[0].setCache(session.id, session)
+  } finally {
+    ui.dispose()
+  }
+})
+
+const recentSection = (root: ParentNode) =>
+  [...root.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")!
+const recentLinks = (root: ParentNode) => [...recentSection(root).querySelectorAll<HTMLAnchorElement>("a")]
+const recentOrder = (root: ParentNode) => recentLinks(root).map((link) => link.getAttribute("href"))
+
+test("Recent keeps DOM, focus and selection through assistant steps, reads, rename and duplicate lifecycle events", async () => {
+  const ui = mount()
+  const original = hosts[0].backend.map((row) => structuredClone(row))
+  try {
+    await wait()
+    const activeCalls = hosts[0].calls.active
+    const focused = link(recentSection(ui.host), "row-2")
+    button(ui.host, "Select sessions").click()
+    focused.click()
+    focused.focus()
+    const checkbox = findRows(recentSection(ui.host), "row-2")[0].querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )!
+    const before = recentOrder(ui.host)
+    const requests = hosts[0].calls.navigation
+    for (let i = 0; i < 100; i++) hosts[0].emit("session.text.delta", "row-2")
+    await wait()
+    expect(hosts[0].calls.navigation).toBe(requests)
+    for (const type of [
+      "session.step.started",
+      "session.step.ended",
+      "session.retry.scheduled",
+      "session.step.started",
+      "session.step.ended",
+      "session.renamed",
+      "session.viewed",
+      "session.inbox.delivered",
+    ]) {
+      const index = hosts[0].backend.findIndex((row) => row.session.id === "row-2")
+      const previous = hosts[0].backend[index]
+      hosts[0].backend[index] = {
+        ...previous,
+        messageAt: Date.now(),
+        session: { ...previous.session, title: type, time: { ...previous.session.time, updated: Date.now() } },
+      }
+      hosts[0].emit(type, "row-2")
+      await wait()
+      expect(recentOrder(ui.host)).toEqual(before)
+      expect(link(recentSection(ui.host), "row-2") === focused).toBe(true)
+      expect(document.activeElement === focused).toBe(true)
+      expect(checkbox.checked).toBe(true)
+      expect(count(ui.host)).toBe("1 session selected")
+    }
+    hosts[0].emit("session.execution.started", "row-3")
+    hosts[0].emit("session.execution.started", "row-2")
+    expect(recentLinks(ui.host)[0] === focused).toBe(true)
+    const active = recentOrder(ui.host)
+    hosts[0].emit("session.execution.started", "row-3")
+    for (const type of [
+      "session.step.started",
+      "session.step.ended",
+      "session.retry.scheduled",
+      "session.step.started",
+      "session.step.ended",
+    ])
+      hosts[0].emit(type, "row-3")
+    hosts[0].emit("session.inbox.delivered", "row-3") // steering during the same execution
+    await wait()
+    expect(recentOrder(ui.host)).toEqual(active)
+    hosts[0].emit("session.execution.succeeded", "row-3")
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-3")).toBe(true)
+    hosts[0].emit("session.execution.succeeded", "row-2")
+    expect(recentLinks(ui.host)[0] === focused).toBe(true)
+    hosts[0].emit("session.execution.succeeded", "row-3")
+    expect(recentLinks(ui.host)[0] === focused).toBe(true)
+    expect(document.activeElement === focused).toBe(true)
+    expect(checkbox.checked).toBe(true)
+    expect(hosts[0].calls.active).toBe(activeCalls)
+    await wait()
+  } finally {
+    ui.dispose()
+    hosts[0].backend.splice(0, hosts[0].backend.length, ...original)
+    hosts[0].active.clear()
+  }
+})
+
+test("Recent reconciles reconnect snapshots and isolates identical IDs across server removal", async () => {
+  const ui = mount()
+  const original = hosts[0].backend.map((row) => structuredClone(row))
+  try {
+    await wait()
+    hosts[0].emit("session.execution.started", "row-2")
+    const before = recentOrder(ui.host)
+    hosts[0].setState("connected", false)
+    hosts[0].setState("connected", true)
+    await wait()
+    expect(recentOrder(ui.host)).toEqual(before)
+    hosts[0].setState("connected", false)
+    const index = hosts[0].backend.findIndex((row) => row.session.id === "row-3")
+    const previous = hosts[0].backend[index]
+    hosts[0].backend[index] = {
+      ...previous,
+      session: { ...previous.session, time: { ...previous.session.time, updated: Date.now() + 1000 } },
+    }
+    hosts[0].active.delete("row-2") // a missed terminal
+    hosts[0].active.add("row-3") // a missed start
+    hosts[0].setState("connected", true)
+    await wait()
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-2")).toBe(true)
+    expect(recentLinks(ui.host)[1] === link(recentSection(ui.host), "row-3")).toBe(true)
+    hosts[1].emit("session.execution.started", "same")
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "same", 1)).toBe(true)
+    const calls = hosts[0].calls.active
+    setRegistry("connections", [connections[0]])
+    await wait()
+    expect(hosts[1].listeners.size).toBe(0)
+    expect(hosts[0].calls.active).toBe(calls)
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-2")).toBe(true)
+    hosts[1].active.clear()
+    setRegistry("connections", connections)
+    await wait()
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-2")).toBe(true)
+    expect(hosts[0].calls.active).toBe(calls)
+  } finally {
+    ui.dispose()
+    setRegistry("connections", connections)
+    hosts[0].backend.splice(0, hosts[0].backend.length, ...original)
+    hosts.forEach((host) => host.active.clear())
+  }
+})
+
+test("Recent retains a moved identity and forgets archived/deleted ranks", async () => {
+  const ui = mount()
+  const added = row("transient", 100)
+  try {
+    await wait()
+    hosts[0].backend.push(added)
+    hosts[0].emit("session.created", "transient")
+    hosts[0].emit("session.execution.started", "transient")
+    await wait()
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "transient")).toBe(true)
+    const moved = { ...added, session: { ...added.session, projectID: "other", location: { directory: "/other" } } }
+    hosts[0].backend[hosts[0].backend.indexOf(added)] = moved
+    const focused = link(recentSection(ui.host), "transient")
+    focused.focus()
+    hosts[0].emit("session.moved", "transient")
+    await wait()
+    expect(recentLinks(ui.host)[0] === focused).toBe(true)
+    expect(document.activeElement === focused).toBe(true)
+    expect(ui.host.textContent).toContain("other")
+    for (const type of ["session.archived", "session.deleted"]) {
+      hosts[0].backend.splice(
+        hosts[0].backend.findIndex((row) => row.session.id === "transient"),
+        1,
+      )
+      hosts[0].emit(type, "transient")
+      await wait()
+      expect(findRows(ui.host, "transient")).toHaveLength(0)
+      hosts[0].backend.push(added)
+      hosts[0].emit("session.created", "transient")
+      await wait()
+      expect(findRows(recentSection(ui.host), "transient")).toHaveLength(0)
+      hosts[0].emit("session.execution.started", "transient")
+      expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "transient")).toBe(true)
+    }
+  } finally {
+    ui.dispose()
+    hosts[0].backend.splice(
+      hosts[0].backend.findIndex((row) => row.session.id === "transient"),
+      1,
+    )
+    hosts[0].active.clear()
+  }
+})
+
+test("a lifecycle event during initial snapshot wins over its older active snapshot", async () => {
+  const hold = Promise.withResolvers<void>()
+  hosts[0].navigation.wait = hold.promise
+  const ui = mount()
+  try {
+    await Promise.resolve()
+    hosts[0].emit("session.execution.started", "row-3")
+    hold.resolve()
+    await wait()
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-3")).toBe(true)
+    hosts[0].emit("session.execution.started", "row-2")
+    hosts[0].emit("session.execution.started", "row-3")
+    expect(recentLinks(ui.host)[0] === link(recentSection(ui.host), "row-2")).toBe(true)
+    await wait()
+  } finally {
+    hold.resolve()
+    hosts[0].navigation.wait = undefined
+    ui.dispose()
+    hosts[0].active.clear()
+  }
+})
 
 test("checkbox gestures preserve Shift ranges without double toggles", async () => {
   const ui = mount()

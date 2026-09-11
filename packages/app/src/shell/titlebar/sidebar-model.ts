@@ -10,6 +10,7 @@ export type SidebarSession = SessionNavigationInfo & {
   key: string
   project: string
   attention?: number
+  recentRank?: number
 }
 
 export function projectKey(server: string, project: { id?: string; worktree: string }) {
@@ -124,6 +125,14 @@ export function visibleSessions(rows: SidebarSession[], limit: number, current?:
   const visible = rows.slice(0, limit)
   const active = rows.find((row) => row.key === current)
   return active && !visible.includes(active) ? [...visible, active] : visible
+}
+
+export function recentSessions(rows: SidebarSession[]) {
+  return rows.toSorted(
+    (a, b) =>
+      (b.recentRank ?? (b.session.time.updated || b.session.time.created)) -
+        (a.recentRank ?? (a.session.time.updated || a.session.time.created)) || a.key.localeCompare(b.key),
+  )
 }
 
 // Filter the complete, message-ordered root index before applying view limits.
