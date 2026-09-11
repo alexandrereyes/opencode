@@ -28,7 +28,12 @@ export function sidebarWorktrees(
     string,
     { key: string; directory: string; name: string; resolved: boolean; rows: SidebarSession[] }
   >()
-  const candidates = metadata.inventory?.map((item) => item.directory).toSorted((a, b) => b.length - a.length)
+  // Canonical placement is already authoritative before inventory discovery completes.
+  // A linked worktree named main remains a subgroup; only directory identity matters.
+  const candidates = [
+    ...(metadata.inventory?.map((item) => item.directory) ?? []),
+    ...(project.metadata ? [project.directory] : []),
+  ].toSorted((a, b) => b.length - a.length)
   rows
     .filter((row) => row.project === project.key && !row.session.parentID && !row.session.time.archived)
     .forEach((row) => {

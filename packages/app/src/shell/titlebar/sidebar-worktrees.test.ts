@@ -28,6 +28,17 @@ const metadata = {
   branch: (directory: string) => (directory === "/trees/feat" ? "feat/payments" : undefined),
 }
 
+test("canonical root and its subdirectories never acquire a main accordion across cold, loaded and reconnect snapshots", () => {
+  const rows = [row("root", "/repo"), row("sub", "/repo/src"), row("linked-main", "/trees/main")]
+  for (const inventory of [undefined, [{ directory: "/repo" }, { directory: "/trees/main" }], undefined]) {
+    const grouped = sidebarWorktrees(project, rows, { ...metadata, inventory, branch: () => "main" })
+    expect(grouped.root.map((row) => row.session.id)).toEqual(["root", "sub"])
+    expect(grouped.groups).toHaveLength(1)
+    expect(grouped.groups[0].directory).toBe("/trees/main")
+    expect(grouped.groups[0].name).toBe("main")
+  }
+})
+
 test("canonical root (on any branch), subdirectories, nested worktrees and safe path boundaries", () => {
   const rows = [
     row("root", "/repo"),

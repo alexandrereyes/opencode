@@ -51,6 +51,8 @@ export const dict = {
   "sidebar.worktree.newSession": "New session in {{worktree}}",
   "sidebar.worktree.sessions.one": "{{count}} session",
   "sidebar.worktree.sessions.other": "{{count}} sessions",
+  "sidebar.worktree.heading.one": "{{worktree}} ({{count}})",
+  "sidebar.worktree.heading.other": "{{worktree}} ({{count}})",
   "sidebar.sessions.empty": "No recent sessions or pending requests",
   "sidebar.project.server": "{{project}} · {{server}}",
   "sidebar.sessions.retry": "Couldn't load sessions from {{server}}. Retry",

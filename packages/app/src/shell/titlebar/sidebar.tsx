@@ -35,6 +35,7 @@ import { createSidebarSelection } from "./sidebar-selection"
 import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import {
   attentionGroups,
+  orderSidebarProjects,
   pinnedSessions,
   projectKey,
   recentSessions,
@@ -166,17 +167,18 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
       }))
     }),
   )
-  const projects = createMemo(() =>
-    projectGroups().toSorted((a, b) => {
-      const ai = saved.order.indexOf(a.key)
-      const bi = saved.order.indexOf(b.key)
-      return (
-        (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi) ||
-        a.name.localeCompare(b.name) ||
-        a.key.localeCompare(b.key)
-      )
-    }),
-  )
+  const projects = createMemo(() => orderSidebarProjects(projectGroups(), saved.order))
+  let projectList: HTMLDivElement | undefined
+  const projectOrder = createMemo(() => ({
+    keys: projects().map((project) => project.key),
+    focused: projectList?.contains(document.activeElement) ? document.activeElement : undefined,
+  }))
+  createEffect(() => {
+    const focused = projectOrder().focused
+    // Occupancy changes move the same keyed header between blocks, which can blur it.
+    if (focused instanceof HTMLElement && focused.isConnected && document.activeElement === document.body)
+      focused.focus({ preventScroll: true })
+  })
   createEffect(() => {
     if (!ready()) return
     const missing = projects()
@@ -205,13 +207,13 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   createEffect(() => {
     if (!ready() || saved.attention || query()) return
     projects()
-      .filter((project) => !saved.collapsed[project.key])
+      .filter((project) => project.occupied && !saved.collapsed[project.key])
       .forEach((project) => {
         const entry = indexes().find((entry) => ServerConnection.key(entry.connection) === project.server)!
         void entry.worktrees.load(() => {
           if (!ready() || saved.attention || query() || saved.collapsed[project.key]) return
           const current = projects().find((item) => item.key === project.key)
-          if (current) return { project: current, rows: sessions().rows }
+          if (current?.occupied) return { project: current, rows: sessions().rows }
         })
       })
   })
@@ -487,6 +489,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
               size="small"
               disabled={lifecycle.pending() || !selection.state.keys.length}
               onClick={() => lifecycle.showDeleteMany(() => selection.selected(), selection.complete)}
+              style={{ color: "var(--v2-state-fg-danger)" }}
             >
               {language.t("common.delete")}…
             </Button>
@@ -579,7 +582,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                     </button>
                   </Show>
                 </Section>
-                <div class="mt-4 flex flex-col gap-2">
+                <div ref={projectList} class="mt-4 flex flex-col gap-2">
                   <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
                     {language.t("sidebar.projects.heading")}
                   </h2>
@@ -613,7 +616,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                     }}
                   >
                     {/* Keep headers and open menus mounted across navigation-index and metadata updates. */}
-                    <For each={projects().map((project) => project.key)}>
+                    <For each={projectOrder().keys}>
                       {(key, index) => {
                         const initial = projects().find((project) => project.key === key)
                         if (!initial) return
@@ -721,16 +724,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                                 class={collapsed() ? "rtl:rotate-180" : ""}
                                               />
                                               <span dir="auto" class="min-w-0 truncate">
-                                                {group().name}
-                                              </span>
-                                              <span
-                                                class="shrink-0 tabular-nums"
-                                                aria-label={language.plural(
-                                                  "sidebar.worktree.sessions",
-                                                  group().rows.length,
-                                                )}
-                                              >
-                                                {group().rows.length}
+                                                {language.plural("sidebar.worktree.heading", group().rows.length, {
+                                                  worktree: group().name,
+                                                })}
                                               </span>
                                               <Show
                                                 when={

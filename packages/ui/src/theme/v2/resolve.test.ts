@@ -4,6 +4,23 @@ import { resolveThemeV2, resolveThemeVariantV2, themeV2ToCss } from "./resolve"
 
 const theme: DesktopTheme = await Bun.file(new URL("../themes/oc-2.json", import.meta.url)).json()
 
+describe("sidebar destructive foreground uses the existing danger role", () => {
+  test.each([false, true])("built-in and custom fallback resolve danger (dark: %s)", (dark) => {
+    const variant = dark ? theme.dark : theme.light
+    for (const value of [variant, { ...variant, v2Overrides: undefined }]) {
+      const tokens = resolveThemeVariantV2(value, dark)
+      expect(tokens["v2-state-fg-danger"]).toBe(dark ? "var(--v2-red-500)" : "var(--v2-red-800)")
+      expect(tokens[dark ? "v2-red-500" : "v2-red-800"]).toBeDefined()
+      expect(themeV2ToCss(tokens)).toContain(`--v2-state-fg-danger: ${tokens["v2-state-fg-danger"]};`)
+    }
+    expect(
+      resolveThemeVariantV2({ ...variant, v2Overrides: { "v2-state-fg-danger": "#aa1234" } }, dark)[
+        "v2-state-fg-danger"
+      ],
+    ).toBe("#aa1234")
+  })
+})
+
 describe("contrast icon-button tokens", () => {
   test("OC-2 dark mode uses a light background and an inverse icon matching the base surface", () => {
     const tokens = resolveThemeV2(theme).dark

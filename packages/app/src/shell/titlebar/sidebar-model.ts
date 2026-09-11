@@ -37,10 +37,12 @@ export function sidebarProjects(
       project,
       metadata: project.id && project.id !== "global" ? { ...project, expanded: true } : undefined,
     })),
-    ...sessions.map((row) => ({
-      project: { id: row.session.projectID, worktree: row.session.location.directory },
-      metadata: undefined,
-    })),
+    ...sessions
+      .filter((row) => !row.session.parentID && !row.session.time.archived)
+      .map((row) => ({
+        project: { id: row.session.projectID, worktree: row.session.location.directory },
+        metadata: undefined,
+      })),
   ]
   // The first known entry is canonical; session worktrees must not replace its destination or metadata.
   return [
@@ -48,11 +50,37 @@ export function sidebarProjects(
       entries
         .map(({ project, metadata }) => {
           const key = projectKey(server, project)
-          return [key, { key, server, directory: project.worktree, name: displayName(project), metadata }] as const
+          return [
+            key,
+            {
+              key,
+              server,
+              directory: project.worktree,
+              name: displayName(project),
+              metadata,
+              occupied: eligible.has(key),
+            },
+          ] as const
         })
         .reverse(),
     ).values(),
-  ].filter((project) => eligible.has(project.key))
+  ]
+}
+
+export function orderSidebarProjects<T extends { key: string; name: string; occupied: boolean }>(
+  projects: T[],
+  order: readonly string[],
+) {
+  return projects.toSorted((a, b) => {
+    const ai = order.indexOf(a.key)
+    const bi = order.indexOf(b.key)
+    return (
+      Number(b.occupied) - Number(a.occupied) ||
+      (ai < 0 ? Infinity : ai) - (bi < 0 ? Infinity : bi) ||
+      a.name.localeCompare(b.name) ||
+      a.key.localeCompare(b.key)
+    )
+  })
 }
 
 export function rootSessions(rows: SidebarSession[], current?: string, fallback?: string) {

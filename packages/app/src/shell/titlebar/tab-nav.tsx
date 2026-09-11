@@ -272,6 +272,7 @@ export function TabNavItem(props: {
         onSelect={() => {
           if (!lifecyclePending()) setMenu("delete", true)
         }}
+        style={{ color: "var(--v2-state-fg-danger)" }}
       >
         {language.t("common.delete")}…
       </Menu.Item>
@@ -559,6 +560,7 @@ export function TabNavItem(props: {
               variant="ghost-muted"
               disabled={props.dragging || lifecyclePending()}
               icon={<Icon name="trash" />}
+              style={{ color: "var(--v2-state-fg-danger)" }}
               aria-label={language.t("common.delete")}
               title={language.t("common.delete")}
               on:click={(event) => {

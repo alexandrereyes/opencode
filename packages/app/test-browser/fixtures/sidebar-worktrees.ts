@@ -323,6 +323,13 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       [1, "/repo"],
     ])
     expect(group("/trees/feat/src")).toBeDefined()
+    expect(group("/repo/src")).toBeUndefined()
+    expect(group("/repo")).toBeUndefined()
+    const projectOrder = () =>
+      [...host.querySelectorAll<HTMLElement>("[data-project-key]")].map((element) => element.dataset.projectKey)
+    const emptyProject = projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" })
+    expect(projectElement(emptyProject)).toBeDefined()
+    expect(projectOrder().indexOf(emptyProject)).toBeGreaterThan(projectOrder().indexOf(project))
     expect(titles(group("/trees/feat/src"))).toContain("feat-1")
     // In-flight inventory may finish, but a collapsed project in Priority must not
     // start Location or branch work from the old Projects snapshot.
@@ -338,6 +345,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
 
     // Independently remove all eligible rows while the other server's inventory
     // is pending. The old request must not resurrect demand for those paths.
+    const remoteProject = projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" })
+    const remoteHeader = header(projectElement(remoteProject))
+    const occupiedIndex = projectOrder().indexOf(remoteProject)
+    remoteHeader.focus()
     const remoteRows = backend[1].splice(0)
     remoteRows.forEach((row) => {
       const event: OpenCodeEvent = {
@@ -353,8 +364,14 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     gates.remoteInventory.resolve()
     await wait()
     expect(calls.filter((call) => call.server && ["/api/location", "/api/vcs"].includes(call.path))).toEqual([])
-    const remoteProject = projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" })
-    expect(projectElement(remoteProject)).toBeUndefined()
+    expect(projectElement(remoteProject)).toBeDefined()
+    expect(header(projectElement(remoteProject)) === remoteHeader).toBe(true)
+    expect(document.activeElement === remoteHeader).toBe(true)
+    expect(projectOrder().indexOf(remoteProject)).toBeGreaterThan(occupiedIndex)
+    expect(titles(projectElement(remoteProject))).toEqual([])
+    expect(projectOrder().indexOf(remoteProject)).toBeGreaterThan(projectOrder().indexOf(second))
+    const emptyIndex = projectOrder().indexOf(remoteProject)
+    remoteHeader.focus()
     backend[1].push(...remoteRows)
     remoteRows.forEach((row) => {
       const event: OpenCodeEvent = {
@@ -367,6 +384,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       roots[1].listeners.forEach((listener) => listener(event))
     })
     await wait()
+    expect(document.activeElement === remoteHeader).toBe(true)
     const feature = group("/trees/feat")
     const featureHeader = header(feature)
     const rootHeader = header(projectElement())
@@ -392,7 +410,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(header(group("/other/feat")).textContent).toContain("feat/payments")
     const remote = projectKey(ServerConnection.key(connections[1]), { id: "repo", worktree: "/repo" })
     expect(header(group("/trees/feat", remote)).textContent).toContain("remote/branch")
-    expect(header(group("/loose/feat")).textContent).toBe("feat1")
+    expect(header(projectElement(remoteProject)) === remoteHeader).toBe(true)
+    expect(projectOrder().indexOf(remoteProject)).toBeLessThan(emptyIndex)
+    expect(projectOrder().indexOf(remote)).toBeLessThan(projectOrder().indexOf(emptyProject))
+    expect(header(group("/loose/feat")).textContent).toBe("feat (1)")
     expect(
       calls
         .filter((call) => call.path === "/api/vcs" && !call.server)
@@ -450,6 +471,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       ...new Set([...host.querySelectorAll<HTMLAnchorElement>("[data-titlebar-tab-link]")].map((link) => link.href)),
     ]
     button("Select sessions").click()
+    expect(button("Delete…").style.color).toBe("var(--v2-state-fg-danger)")
+    expect(feature.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.style.color).toBe(
+      "var(--v2-state-fg-danger)",
+    )
     button("Select visible").click()
     expect(host.querySelector('[data-slot="sidebar-selection"] [role="status"]')?.textContent).toContain(
       String(rendered().length),

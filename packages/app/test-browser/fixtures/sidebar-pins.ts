@@ -829,10 +829,8 @@ test("Priority excludes partial-cache/current children and follows live unread a
     ui.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.attention.toggle"]')!.click()
     const projects = () =>
       [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].map((group) => group.dataset.projectKey)
-    expect(projects()).not.toContain(
-      projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" }),
-    )
-    expect(projects()).not.toContain(
+    expect(projects()).toContain(projectKey(ServerConnection.key(connections[0]), { id: "empty", worktree: "/empty" }))
+    expect(projects()).toContain(
       projectKey(ServerConnection.key(connections[0]), { id: "only-child", worktree: "/child" }),
     )
     const before = projects()

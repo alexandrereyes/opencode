@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { ServerConnection } from "@/runtime/server/registry"
 import {
   attentionGroups,
+  orderSidebarProjects,
   loadNavigation,
   localDays,
   pinnedSessions,
@@ -38,6 +39,20 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("occupied projects precede empty ones while each block retains manual order as sessions arrive and leave", () => {
+    const known = ["a", "b", "c", "d"].map((id) => ({ id, worktree: `/${id}` }))
+    const session = (id: string) => ({ ...row(id), session: { ...row(id).session, projectID: id } })
+    const manual = ["d", "c", "b", "a"].map((id) => projectKey(server, { id, worktree: `/${id}` }))
+    const ordered = (ids: string[]) =>
+      orderSidebarProjects(sidebarProjects(server, known, ids.map(session)), manual).map(
+        (project) => project.metadata?.id,
+      )
+    expect(ordered(["a", "c"])).toEqual(["c", "a", "d", "b"])
+    expect(ordered(["a", "b", "c"])).toEqual(["c", "b", "a", "d"])
+    expect(ordered(["b", "c"])).toEqual(["c", "b", "d", "a"])
+    expect(ordered([])).toEqual(["d", "c", "b", "a"])
+    expect(manual).toEqual(["d", "c", "b", "a"].map((id) => projectKey(server, { id, worktree: `/${id}` })))
+  })
   test("Recent alone uses lifecycle rank and deterministic server/session ties", () => {
     const rows = rootSessions([row("a", 30, 10), row("b", 20, 20), row("c", 10)]).rows
     rows.forEach((row) => {
@@ -76,7 +91,7 @@ describe("sidebar navigation", () => {
     expect(searchSessions(roots.rows, "s", [])).toHaveLength(13)
   })
 
-  test("empty, archived-only and child-only projects are hidden before collapse limits", () => {
+  test("all known projects remain visible; only eligible roots make a project occupied", () => {
     const archived = row("archived")
     archived.session.projectID = "archive-project"
     archived.session.time.archived = 10
@@ -84,12 +99,17 @@ describe("sidebar navigation", () => {
     child.session.projectID = "child-project"
     const live = row("root", 1)
     const known = ["empty", "archive-project", "child-project", "repo"].map((id) => ({ id, worktree: `/${id}` }))
-    expect(sidebarProjects(server, known, [archived, child, live]).map((project) => project.metadata?.id)).toEqual([
+    const projects = sidebarProjects(server, known, [archived, child, live])
+    expect(projects.map((project) => project.metadata?.id).sort()).toEqual([
+      "archive-project",
+      "child-project",
+      "empty",
       "repo",
     ])
+    expect(projects.filter((project) => project.occupied).map((project) => project.metadata?.id)).toEqual(["repo"])
     const roots = rootSessions([live]).rows
     expect(visibleSessions(roots, 0)).toEqual([])
-    expect(sidebarProjects(server, known, roots)).toHaveLength(1)
+    expect(sidebarProjects(server, known, roots)).toHaveLength(4)
   })
 
   test("orphan/current children and their completions never become Priority rows", () => {
@@ -172,13 +192,18 @@ describe("sidebar navigation", () => {
       { worktree: "/unresolved" },
     ]
     const groups = sidebarProjects(server, known, [worktree])
-    expect(groups).toHaveLength(1)
+    expect(groups).toHaveLength(3)
     expect(groups.find((group) => group.metadata?.id === "repo")).toMatchObject({
       directory: "/canonical",
       name: "Canonical",
       metadata: { sandboxes: ["/worktree"] },
     })
-    expect(groups.filter((group) => !group.metadata)).toEqual([])
+    expect(
+      groups
+        .filter((group) => !group.metadata)
+        .map((group) => group.directory)
+        .sort(),
+    ).toEqual(["/plain", "/unresolved"])
     const remote = sidebarProjects(ServerConnection.Key.make("https://remote.test"), known, [worktree])
     expect(remote.map((group) => group.key)).not.toEqual(groups.map((group) => group.key))
   })
