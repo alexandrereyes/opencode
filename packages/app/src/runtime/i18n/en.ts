@@ -973,6 +973,9 @@ export const dict = {
   "session.header.open.app.androidStudio": "Android Studio",
   "session.header.open.app.powershell": "PowerShell",
   "session.header.open.app.sublimeText": "Sublime Text",
+  "session.header.open.app.rider": "Rider",
+  "session.header.open.failed":
+    "Could not open the path in {{app}}. Check that the path and application are still available.",
 
   "status.popover.trigger": "Status",
   "status.popover.ariaLabel": "Server configurations",

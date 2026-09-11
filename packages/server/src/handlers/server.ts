@@ -8,9 +8,29 @@ import { Job } from "@opencode/core/job"
 import { Database } from "@opencode/core/database/database"
 import { SessionInboxTable } from "@opencode/core/session/sql"
 import { readSubscriptions } from "../subscriptions"
+import { NativeApp } from "@opencode/core/native-app"
+import { InvalidRequestError, ServiceUnavailableError } from "@opencode/protocol/errors"
 
 export const ServerHandler = HttpApiBuilder.group(Api, "server.server", (handlers) =>
   handlers
+    .handle("server.nativeApps.list", () =>
+      Effect.gen(function* () {
+        const apps = yield* NativeApp.Service
+        return yield* apps.list()
+      }),
+    )
+    .handle("server.nativeApps.open", ({ payload }) =>
+      Effect.gen(function* () {
+        const apps = yield* NativeApp.Service
+        yield* apps.open(payload)
+      }).pipe(
+        Effect.mapError((error) =>
+          error.reason === "invalid-path"
+            ? new InvalidRequestError({ message: error.message, field: "path" })
+            : new ServiceUnavailableError({ message: error.message, service: "native-apps" }),
+        ),
+      ),
+    )
     .handle("server.subscriptions", () => readSubscriptions())
     .handle("server.get", () =>
       Effect.gen(function* () {
