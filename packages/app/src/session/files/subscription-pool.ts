@@ -15,6 +15,22 @@ export function subscriptionPercentages(remaining: number) {
   return { remaining: rounded, used: 100 - rounded }
 }
 
+export function subscriptionAccounts(accounts: ServerSubscriptionsOutput["accounts"], now = Date.now()) {
+  const rank = (account: Account) => {
+    if (account.plan !== "pro") return account.plan === "plus" ? 2 : 3
+    if (
+      account.enabled &&
+      account.authenticated &&
+      account.cooldownSeconds <= 0 &&
+      subscriptionCapacity(account, now) === "available"
+    )
+      return 0
+    return 1
+  }
+  // Preserve source order among equally ranked accounts.
+  return accounts.toSorted((a, b) => rank(a) - rank(b))
+}
+
 export function subscriptionPool(accounts: ServerSubscriptionsOutput["accounts"], now = Date.now()) {
   const members = accounts.filter((account) => account.plan === "pro" && account.enabled && account.authenticated)
   const measured = members.filter(
