@@ -16,6 +16,46 @@ requires an explicit cold maintenance window: never stop the live service hostin
 The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
 configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
 
+## Agent dashboard
+
+The desktop sidebar has **Agent dashboard** immediately below **New session**. The
+`/agent-dashboard` route fills the central workspace with compact or comfortable cards;
+selecting a card opens its normal Session. The route also fits narrow windows, while its
+navigation entry follows the existing desktop-only sidebar breakpoint (768px).
+
+The selected server's global navigation index includes sessions outside the recent page.
+The default view shows active sessions, pending permissions/questions, and conversation
+activity or completion in the last 24 hours. Search covers title, project name, and directory;
+filters cover project, status, and subagents. Cards keep creation order during live updates.
+Filters, density, the displayed
+page size, and return scroll position persist per window.
+
+Top-level sessions are the default; their cards include descendant running/attention state
+and a subagent count. **Include subagents** exposes child cards individually. Completed and
+error states come from execution outcomes; interrupted or never-run sessions remain idle.
+Unread responses alone do not mean **Needs you**.
+
+Navigation refreshes reconcile complete rows, removing omitted request/unread timestamps.
+This clears **Needs you** in both the dashboard and sidebar after a question or permission is resolved.
+
+The dashboard reuses existing APIs and SSE. It pages lightweight navigation metadata,
+renders 60 cards at a time with **Show more** (running/attention cards bypass this limit), and reads only the three latest messages for
+visible/near-visible cards, with four preview requests at most in flight. Previews retain
+up to 600 text characters, omit reasoning and tool payloads, and follow live text/tool events.
+Current branch reads are deduplicated by Location and requested as cards become visible;
+branches are displayed on cards but are not a search criterion. A text response outside the
+three-message window is not loaded. No per-card timeline or periodic history polling is mounted.
+
+New source copy is English-only, including the **Agent dashboard** title; other locales use
+the runtime fallback. This change adds a route and sidebar integration, without changing
+session/timeline code; no session production-benchmark comparison is applicable. Unit
+coverage exercises request/status transitions, the 24-hour boundary, filters, stable order,
+descendant aggregation, preview omission, and bounded read concurrency. Reactive unit tests in
+`test-browser/agent-dashboard-preview.test.ts` exercise the production preview's SSE updates,
+stale reads, execution completion/interruption, and viewport/unmount cancellation using the
+browser Solid runtime. Browser verification
+is prepared in `e2e/regression/agent-dashboard.spec.ts` for an isolated reviewer-run server.
+
 ## Mobile composer
 
 On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submits the

@@ -1,0 +1,185 @@
+.agent-dashboard {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+  margin: var(--shell-top-inset, 8px) 8px var(--shell-bottom-inset, 8px);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--v2-background-bg-base);
+  box-shadow: var(--v2-elevation-raised);
+  color: var(--v2-text-text-base);
+  font-size: 13px;
+  line-height: var(--line-height-compact);
+}
+
+.agent-dashboard-header {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 16px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--v2-border-border-muted);
+}
+
+.agent-dashboard-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-dashboard-control {
+  height: 32px;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 10px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 6px;
+  background: var(--v2-background-bg-base);
+  color: var(--v2-text-text-base);
+  text-overflow: ellipsis;
+}
+.agent-dashboard-control::placeholder {
+  color: var(--v2-text-text-muted);
+}
+.agent-dashboard-control:focus-visible,
+.agent-dashboard-card:focus-visible,
+.agent-dashboard-retry:focus-visible {
+  outline: 2px solid var(--v2-border-border-focus);
+  outline-offset: 2px;
+}
+.agent-dashboard button {
+  cursor: pointer;
+}
+.agent-dashboard button:hover {
+  background: var(--v2-background-bg-layer-02);
+}
+.agent-dashboard input[type="checkbox"] {
+  accent-color: var(--v2-icon-icon-accent);
+}
+.agent-dashboard-search {
+  flex: 1 1 230px;
+}
+.agent-dashboard-viewport {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 20px;
+}
+.agent-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  gap: 12px;
+}
+.agent-dashboard-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--v2-border-border-muted);
+  border-radius: 8px;
+  background: var(--v2-background-bg-base);
+  text-decoration: none;
+}
+.agent-dashboard-card:hover {
+  background: var(--v2-background-bg-layer-01);
+  border-color: var(--v2-border-border-base);
+}
+.agent-dashboard-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--v2-text-text-muted);
+}
+.agent-dashboard-status > span {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+.agent-dashboard-card[data-status="running"] .agent-dashboard-status {
+  color: var(--v2-state-fg-info);
+}
+.agent-dashboard-card[data-status="attention"] .agent-dashboard-status {
+  color: var(--v2-state-fg-warning);
+}
+.agent-dashboard-card[data-status="completed"] .agent-dashboard-status {
+  color: var(--v2-state-fg-success);
+}
+.agent-dashboard-card[data-status="error"] .agent-dashboard-status {
+  color: var(--v2-state-fg-danger);
+}
+.agent-dashboard-card-title {
+  font-weight: 500;
+  color: var(--v2-text-text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-dashboard-directory {
+  color: var(--v2-text-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: start;
+}
+.agent-dashboard-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  height: 60px;
+  line-height: var(--line-height-base);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.agent-dashboard-card-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  color: var(--v2-text-text-muted);
+  min-width: 0;
+}
+.agent-dashboard-notice {
+  padding: 12px;
+  color: var(--v2-text-text-muted);
+}
+.agent-dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 32px 12px;
+  color: var(--v2-text-text-muted);
+}
+.agent-dashboard[data-density="comfortable"] .agent-dashboard-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 16px;
+}
+.agent-dashboard[data-density="comfortable"] .agent-dashboard-card {
+  padding: 20px;
+  gap: 12px;
+}
+.agent-dashboard[data-density="comfortable"] .agent-dashboard-preview {
+  height: 100px;
+  -webkit-line-clamp: 5;
+}
+@media (max-width: 767px) {
+  .agent-dashboard-header {
+    padding: 16px 12px 12px;
+    gap: 12px;
+    max-height: 50%;
+    overflow: auto;
+  }
+  .agent-dashboard-viewport {
+    padding: 12px;
+  }
+  .agent-dashboard-filters > select {
+    flex: 1 1 140px;
+  }
+}

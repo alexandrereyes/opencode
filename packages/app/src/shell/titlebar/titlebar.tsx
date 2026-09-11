@@ -306,6 +306,7 @@ export function Titlebar(props: {
                   void tabs.newDraft({ server: activeTab.server, directory: activeTab.directory }, "", model)
                   return
                 }
+                case "agent-dashboard":
                 case "settings":
                 case "home": {
                   const selection = layout.home.selection()
@@ -452,6 +453,7 @@ export function Titlebar(props: {
               return projectForSession(value, conn ? global.ensureServerCtx(conn).projects.list() : [])
             })
             const currentTitle = () => {
+              if (layout.route().type === "agent-dashboard") return language.t("dashboard.title")
               const tab = currentTab()
               if (!tab) return language.t("home.title")
               if (tab.type === "draft") return language.t("session.tab.session")
@@ -707,6 +709,17 @@ export function Titlebar(props: {
                                 >
                                   <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
                                 </span>
+                              </button>
+                              <button
+                                type="button"
+                                data-action="agent-dashboard"
+                                data-state={layout.route().type === "agent-dashboard" ? "pressed" : undefined}
+                                class="group mt-1 flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base data-[state=pressed]:bg-v2-background-bg-layer-02 data-[state=pressed]:text-v2-text-text-base"
+                                onClick={() => navigate("/agent-dashboard")}
+                                aria-current={layout.route().type === "agent-dashboard" ? "page" : undefined}
+                              >
+                                <Icon name="gauge" class="shrink-0" />
+                                <span class="min-w-0 truncate">{language.t("dashboard.title")}</span>
                               </button>
                             </SessionSidebar>
                             <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col gap-2">
