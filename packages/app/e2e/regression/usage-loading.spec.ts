@@ -106,7 +106,9 @@ test("Usage errors and late family responses preserve the current session and na
     await expect(usage.getByText("Total Cost", { exact: true })).toBeVisible()
     await expect(overview.getByRole("link", { name: /Inspect child navigation/ })).toBeVisible()
     quota.resolve()
-    await expect(overview.getByText("Subscription usage is unavailable. Try refreshing.", { exact: true })).toBeVisible()
+    await expect(
+      overview.getByText("Subscription usage is unavailable. Try refreshing.", { exact: true }),
+    ).toBeVisible()
     await expect(usage.getByText("Total Cost", { exact: true })).toBeVisible()
     await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.targetID)}"]`).click()
     await expect(page).toHaveURL(new RegExp(`${fixture.targetID}$`))
@@ -152,7 +154,7 @@ for (const leave of ["navigate", "unmount"] as const) {
     await mockOpenCodeServer(page, {
       directory: fixture.directory,
       project: fixture.project,
-      sessions: fixture.sessions.map((session) => session.id === target.id ? { ...session, cost: 7 } : session),
+      sessions: fixture.sessions.map((session) => (session.id === target.id ? { ...session, cost: 7 } : session)),
       provider: fixture.provider,
       pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
     })
@@ -166,10 +168,17 @@ for (const leave of ["navigate", "unmount"] as const) {
       familyRequest.resolve(route.request())
       started.resolve()
       await family.promise
-      await route.fulfill({ json: {
-        data: [currentSession({ ...target, parentID: fixture.sourceID, title: "Stale target title", cost: 1 }, fixture.directory)],
-        cursor: {},
-      } })
+      await route.fulfill({
+        json: {
+          data: [
+            currentSession(
+              { ...target, parentID: fixture.sourceID, title: "Stale target title", cost: 1 },
+              fixture.directory,
+            ),
+          ],
+          cursor: {},
+        },
+      })
     })
     try {
       await page.goto(stressSessionHref(fixture.sourceID))
@@ -183,7 +192,10 @@ for (const leave of ["navigate", "unmount"] as const) {
       await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.targetID)}"]`).click()
       if (leave === "unmount") await page.getByRole("tab", { name: "Context", exact: true }).click()
       await expect(usage.getByText(fixture.expected.targetTitle, { exact: true })).toBeVisible()
-      const totalCost = usage.locator("div").filter({ has: page.getByText("Total Cost", { exact: true }) }).filter({ hasText: /^Total Cost\$7\.00$/ })
+      const totalCost = usage
+        .locator("div")
+        .filter({ has: page.getByText("Total Cost", { exact: true }) })
+        .filter({ hasText: /^Total Cost\$7\.00$/ })
       await expect(totalCost).toBeVisible()
       const request = await familyRequest.promise
       const response = page.waitForResponse((response) => response.request() === request)
@@ -223,23 +235,44 @@ test("closing pending Usage keeps unknown sections until the panel unmounts", as
   try {
     await page.goto(stressSessionHref(fixture.targetID))
     const overview = page.locator('[data-slot="context-overview"]')
-    await expect(overview.getByRole("status")).toHaveCount(2)
+    const subagents = overview
+      .locator("details")
+      .filter({ has: page.locator("summary").filter({ hasText: /^Subagents/ }) })
+    const subscriptions = overview
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "Subscriptions", exact: true }) })
+    const pendingSections = subagents.or(subscriptions)
+    await expect(subagents.getByRole("status")).toHaveCount(1)
+    await expect(subscriptions.getByRole("status")).toHaveCount(1)
+    await expect(pendingSections.getByRole("status")).toHaveCount(2)
     const toggle = page.getByRole("button", { name: "Toggle review", exact: true })
     await expect(toggle).toHaveAttribute("aria-expanded", "true")
     // Observe the real closing animation rather than sleeping or sampling after unmount.
-    const closing = overview.evaluate((element) => new Promise<{ text: string; loading: number }[]>((resolve) => {
-      const samples: { text: string; loading: number }[] = []
-      const observer = new MutationObserver(() => {
-        if (!element.isConnected) {
-          observer.disconnect()
-          resolve(samples)
-          return
-        }
-        if (document.querySelector('[aria-controls="review-panel"]')?.getAttribute("aria-expanded") !== "false") return
-        samples.push({ text: element.textContent ?? "", loading: element.querySelectorAll('[role="status"]').length })
-      })
-      observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
-    }))
+    const closing = pendingSections.evaluateAll(
+      (sections) =>
+        new Promise<{ text: string; loading: number }[]>((resolve) => {
+          const element = sections[0]?.closest('[data-slot="context-overview"]')
+          if (!element) throw new Error("Missing pending Usage sections")
+          const samples: { text: string; loading: number }[] = []
+          const observer = new MutationObserver(() => {
+            if (!element.isConnected) {
+              observer.disconnect()
+              resolve(samples)
+              return
+            }
+            if (document.querySelector('[aria-controls="review-panel"]')?.getAttribute("aria-expanded") !== "false")
+              return
+            samples.push({
+              text: element.textContent ?? "",
+              loading: sections.reduce(
+                (count, section) => count + section.querySelectorAll('[role="status"]').length,
+                0,
+              ),
+            })
+          })
+          observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
+        }),
+    )
     await toggle.click()
     const samples = await closing
     expect(samples.length).toBeGreaterThan(0)
@@ -266,11 +299,14 @@ test("MCP catalog loads locally without presenting an empty catalog", async ({ p
   await installStressSessionTabs(page)
   const gate = Promise.withResolvers<void>()
   const started = Promise.withResolvers<void>()
-  await page.route((url) => url.pathname === "/api/mcp", async (route) => {
-    started.resolve()
-    await gate.promise
-    await route.fallback()
-  })
+  await page.route(
+    (url) => url.pathname === "/api/mcp",
+    async (route) => {
+      started.resolve()
+      await gate.promise
+      await route.fallback()
+    },
+  )
   try {
     await page.goto(stressSessionHref(fixture.targetID))
     await started.promise

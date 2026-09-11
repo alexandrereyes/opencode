@@ -20,12 +20,14 @@ import { Instance } from "@opencode/core/instance/service"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { ShellSelect } from "@opencode/core/shell/select"
 import { Job } from "@opencode/core/job"
+import { SessionExecution } from "@opencode/core/session/execution"
 import { Mcp } from "@opencode/core/mcp/index"
 import { Global } from "@opencode/util/global"
 import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { LocationActivity } from "@opencode/core/location-activity"
 import { ModelsDev } from "@opencode/core/models-dev"
+import { NativeApp } from "@opencode/core/native-app"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { PluginUpdate } from "@opencode/core/plugin/update"
 import { SdkPlugins } from "@opencode/core/plugin/sdk"
@@ -50,11 +52,13 @@ import type { ServerOptions } from "./options"
 
 const applicationServiceNodes = [
   Global.node,
+  NativeApp.node,
   Database.node,
   Bus.node,
   EventLogger.node,
   httpClient,
   Job.node,
+  SessionExecution.node,
   Project.node,
   Session.node,
   Snippet.node,
@@ -166,7 +170,11 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.succeedContext(
           Context.pick(
             Database.Service,
+            NativeApp.Service,
             Job.Service,
+            Session.Service,
+            SessionExecution.Service,
+            Instance.Service,
             Snippet.Service,
             PersistentPty.Service,
             PermissionSaved.Service,

@@ -13,50 +13,52 @@ export function OpenInAppButton(props: { directory: () => string }) {
   const state = useOpenInApp({ path: props.directory })
 
   return (
-    <Show when={props.directory() && state.canOpen()}>
-      <SplitButton class="session-review-v2-open-in-app" onPointerDown={(event) => event.stopPropagation()}>
-        <Tooltip
-          placement="bottom"
-          value={language.t("session.header.open.ariaLabel", { app: state.current().label })}
-          class="flex items-center"
-        >
-          <SplitButtonAction
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation()
-              if (state.opening()) return
-              state.openPath(state.current().id)
-            }}
-            disabled={state.opening()}
-            aria-label={language.t("session.header.open.ariaLabel", { app: state.current().label })}
+    <Show when={!!props.directory() && state.canOpen() && state.current()}>
+      {(current) => (
+        <SplitButton class="session-review-v2-open-in-app" onPointerDown={(event) => event.stopPropagation()}>
+          <Tooltip
+            placement="bottom"
+            value={language.t("session.header.open.ariaLabel", { app: current().label })}
+            class="flex items-center"
           >
-            <Show when={state.opening()} fallback={<AppIcon id={state.current().icon} class="size-[18px]" />}>
-              <Spinner class="size-3.5" />
-            </Show>
-          </SplitButtonAction>
-        </Tooltip>
-        <Menu
-          gutter={4}
-          modal={false}
-          placement="bottom-end"
-          open={state.menu.open}
-          onOpenChange={(open) => state.setMenu("open", open)}
-        >
-          <Menu.Trigger
-            as={SplitButtonMenuTrigger}
-            disabled={state.opening()}
-            aria-label={language.t("session.header.open.menu")}
-            onPointerDown={(event) => event.stopPropagation()}
+            <SplitButtonAction
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (state.opening()) return
+                state.openPath(current().id)
+              }}
+              disabled={state.opening()}
+              aria-label={language.t("session.header.open.ariaLabel", { app: current().label })}
+            >
+              <Show when={state.opening()} fallback={<AppIcon id={current().icon} class="size-[18px]" />}>
+                <Spinner class="size-3.5" />
+              </Show>
+            </SplitButtonAction>
+          </Tooltip>
+          <Menu
+            gutter={4}
+            modal={false}
+            placement="bottom-end"
+            open={state.menu.open}
+            onOpenChange={(open) => state.setMenu("open", open)}
           >
-            <Icon name="chevron-down" size="small" />
-          </Menu.Trigger>
-          <Menu.Portal>
-            <Menu.Content class="open-in-app-v2-menu">
-              <OpenInAppMenuItemsV2 state={state} close={() => state.setMenu("open", false)} />
-            </Menu.Content>
-          </Menu.Portal>
-        </Menu>
-      </SplitButton>
+            <Menu.Trigger
+              as={SplitButtonMenuTrigger}
+              disabled={state.opening()}
+              aria-label={language.t("session.header.open.menu")}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <Icon name="chevron-down" size="small" />
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Content class="open-in-app-v2-menu">
+                <OpenInAppMenuItemsV2 state={state} close={() => state.setMenu("open", false)} />
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu>
+        </SplitButton>
+      )}
     </Show>
   )
 }
@@ -98,7 +100,7 @@ function OpenInAppMenuItemsV2(props: {
           }
         >
           <Menu.RadioGroup
-            value={props.state.current().id}
+            value={props.state.current()?.id}
             onChange={(value) => {
               props.state.selectApp(value as OpenApp)
             }}
