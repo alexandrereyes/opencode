@@ -1,4 +1,30 @@
 import { expect, story } from "../../storybook/playwright/story"
+import type { Locator } from "@playwright/test"
+import { fileURLToPath } from "node:url"
+
+const pasteImages = (editor: Locator, names: string[], colorOffset = 0) =>
+  editor.evaluate(
+    async (element, input) => {
+      const transfer = new DataTransfer()
+      for (let index = 0; index < input.names.length; index++) {
+        const canvas = document.createElement("canvas")
+        canvas.width = 2
+        canvas.height = 2
+        const context = canvas.getContext("2d")
+        if (!context) throw new Error("Canvas unavailable")
+        context.fillStyle = (index + input.colorOffset) % 2 ? "#00ff00" : "#ff0000"
+        context.fillRect(0, 0, 2, 2)
+        const blob = await new Promise<Blob>((resolve, reject) =>
+          canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("PNG encoding failed"))), "image/png"),
+        )
+        transfer.items.add(new File([blob], input.names[index], { type: "image/png" }))
+      }
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer })
+      element.dispatchEvent(event)
+      return event.defaultPrevented
+    },
+    { names, colorOffset },
+  )
 
 for (const hasTouch of [true, false]) {
   story.describe(`composer writing assistance with touch=${hasTouch}`, () => {
@@ -123,6 +149,196 @@ story("pastes plain and multiline text and replaces the selected range", async (
   await editor.press("End")
   expect(await paste("\nsecond line")).toBe(true)
   await expect.poll(async () => (await editor.innerText()).replace(/\n$/, "")).toBe("plain tail\nsecond line")
+})
+
+story("pastes same-named images at the selection and submits their exact references", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const component = await mount("opencode-composer-flow--snippets")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+
+  await editor.fill("before replace after")
+  await editor.press("Home")
+  for (let index = 0; index < "before ".length; index++) await editor.press("ArrowRight")
+  for (let index = 0; index < "replace".length; index++) await editor.press("Shift+ArrowRight")
+  expect(await pasteImages(editor, ["photo.png", "photo.png"])).toBe(true)
+
+  await expect(editor).toHaveText("before [photo.png] [photo-2.png] after")
+  const references = editor.locator('[data-mention="file"][data-id]')
+  await expect(references).toHaveCount(2)
+  await expect(references).toHaveText(["[photo.png]", "[photo-2.png]"])
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+  await expect(component.getByAltText("photo-2.png")).toHaveCount(1)
+
+  await editor.pressSequentially("!")
+  await expect(editor).toHaveText("before [photo.png] [photo-2.png]! after")
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+  const status = component.getByRole("status")
+  await expect(status).toContainText('{"text":')
+  await expect
+    .poll(async () => {
+      const value = JSON.parse((await status.textContent()) ?? "{}")
+      return {
+        text: value.text,
+        files: value.files?.map((file: { uri: string; name: string; mention: unknown }) => ({
+          data: file.uri.startsWith("data:image/png;base64,"),
+          name: file.name,
+          mention: file.mention,
+        })),
+      }
+    })
+    .toEqual({
+      text: "before [photo.png] [photo-2.png]! after",
+      files: [
+        { data: true, name: "photo.png", mention: { text: "[photo.png]", start: 7, end: 18 } },
+        { data: true, name: "photo-2.png", mention: { text: "[photo-2.png]", start: 19, end: 32 } },
+      ],
+    })
+})
+
+story("uploads a real image through the attachment input", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--snippets")
+  await component
+    .locator('input[type="file"]')
+    .setInputFiles(fileURLToPath(new URL("../../ui/src/assets/favicon/favicon-96x96.png", import.meta.url)))
+
+  await expect(component.getByAltText("favicon-96x96.png")).toHaveCount(1)
+  await expect(component.getByRole("textbox", { name: "Prompt", exact: true })).toHaveText("")
+})
+
+story("tracks the paste position while image storage is pending", async ({ mount }) => {
+  const component = await mount("opencode-composer-flow--delayed-image-paste")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const complete = component.getByRole("button", { name: "Complete attachment", exact: true })
+
+  await editor.fill("before after")
+  await editor.press("Home")
+  for (let index = 0; index < "before ".length; index++) await editor.press("ArrowRight")
+  expect(await pasteImages(editor, ["photo.png"])).toBe(true)
+  await editor.press("Home")
+  await editor.pressSequentially("prefix ")
+  await complete.click()
+
+  await expect(editor).toHaveText("prefix before [photo.png] after")
+  await expect(editor.locator('[data-mention="file"][data-filename="photo.png"]')).toHaveText("[photo.png]")
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+})
+
+for (const completion of ["in order", "out of order"] as const) {
+  story(`keeps concurrent image paste order and identity when storage completes ${completion}`, async ({ mount }) => {
+    const component = await mount("opencode-composer-flow--delayed-image-paste")
+    const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+    const complete = component.getByRole("button", {
+      name: completion === "in order" ? "Complete attachment" : "Complete latest attachment",
+      exact: true,
+    })
+
+    expect(await pasteImages(editor, ["photo.png"])).toBe(true)
+    await expect(complete).toBeEnabled()
+    expect(await pasteImages(editor, ["photo.png"], 1)).toBe(true)
+    await complete.click()
+    await expect(editor).toHaveText(completion === "in order" ? "[photo.png]" : "[photo-2.png]")
+    await complete.click()
+
+    await expect(editor).toHaveText("[photo.png] [photo-2.png]")
+    const references = editor.locator('[data-mention="file"][data-id]')
+    await expect(references).toHaveText(["[photo.png]", "[photo-2.png]"])
+    expect(
+      new Set(await references.evaluateAll((items) => items.map((item) => item.getAttribute("data-id")))).size,
+    ).toBe(2)
+  })
+}
+
+story("keeps image reference edits and preview removal in CodeMirror history", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--empty-draft")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const reference = editor.locator('[data-mention="file"][data-id]')
+  const undo = (await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+z" : "Control+z"
+  const redo = (await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+Shift+z" : "Control+y"
+
+  expect(await pasteImages(editor, ["photo.png"])).toBe(true)
+  await expect(reference).toHaveText("[photo.png]")
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+
+  await editor.press(undo)
+  await expect(editor).toHaveText("")
+  await expect(component.getByAltText("photo.png")).toHaveCount(0)
+  await editor.press(redo)
+  await expect(reference).toHaveText("[photo.png]")
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+
+  await editor.press("Home")
+  for (let index = 0; index < 6; index++) await editor.press("ArrowRight")
+  await editor.press("Backspace")
+  await expect(editor).toHaveText("[phot.png]")
+  await expect(reference).toHaveCount(0)
+  await expect(component.getByAltText("photo.png")).toHaveCount(0)
+
+  await editor.press(undo)
+  await expect(reference).toHaveText("[photo.png]")
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+  await editor.press(redo)
+  await expect(reference).toHaveCount(0)
+  await expect(component.getByAltText("photo.png")).toHaveCount(0)
+
+  await editor.press(undo)
+  const id = await reference.getAttribute("data-id")
+  if (!id) throw new Error("Missing attachment identity")
+  await component.locator(`[data-action="remove-attachment"][data-attachment-id="${id}"]`).click()
+  await expect(editor).toHaveText("")
+  await expect(component.getByAltText("photo.png")).toHaveCount(0)
+  await editor.press(undo)
+  await expect(reference).toHaveText("[photo.png]")
+  await expect(component.getByAltText("photo.png")).toHaveCount(1)
+})
+
+story("restores two pasted images in document and payload order after removing the first", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--snippets")
+  const editor = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const undo = (await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+z" : "Control+z"
+  const redo = (await page.evaluate(() => navigator.platform.startsWith("Mac"))) ? "Meta+Shift+z" : "Control+y"
+
+  expect(await pasteImages(editor, ["a.png", "b.png"])).toBe(true)
+  const references = editor.locator('[data-mention="file"][data-id]')
+  await expect(references).toHaveText(["[a.png]", "[b.png]"])
+  const original = await component.locator('[data-slot="composer-attachments"] img').evaluateAll(async (images) =>
+    Promise.all(
+      images.map(async (image) => {
+        const blob = await fetch((image as HTMLImageElement).src).then((response) => response.blob())
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.addEventListener("load", () => resolve(String(reader.result)))
+          reader.addEventListener("error", () => reject(reader.error))
+          reader.readAsDataURL(blob)
+        })
+        return { name: (image as HTMLImageElement).alt, data }
+      }),
+    ),
+  )
+  const firstID = await references.filter({ hasText: "[a.png]" }).getAttribute("data-id")
+  if (!firstID) throw new Error("Missing first attachment identity")
+
+  await component.locator(`[data-action="remove-attachment"][data-attachment-id="${firstID}"]`).click()
+  await expect(references).toHaveText(["[b.png]"])
+  await editor.press(undo)
+  await expect(references).toHaveText(["[a.png]", "[b.png]"])
+  const previews = component.locator('[data-slot="composer-attachments"] img')
+  await expect(previews).toHaveCount(2)
+  await expect
+    .poll(() => previews.evaluateAll((images) => images.map((image) => image.getAttribute("alt"))))
+    .toEqual(["a.png", "b.png"])
+  await editor.press(redo)
+  await expect(references).toHaveText(["[b.png]"])
+  await editor.press(undo)
+  await component.getByRole("button", { name: "Send", exact: true }).click()
+
+  const status = component.getByRole("status")
+  await expect(status).toContainText('{"text":')
+  await expect
+    .poll(async () => {
+      const value = JSON.parse((await status.textContent()) ?? "{}")
+      return value.files?.map((file: { uri: string; name: string }) => ({ name: file.name, data: file.uri }))
+    })
+    .toEqual(original)
 })
 
 story("copies partial session text and preserves unselected text during structured paste", async ({ mount }) => {

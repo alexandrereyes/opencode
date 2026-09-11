@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Prompt } from "./state"
-import { clonePrompt, promptLength } from "./prompt-parts"
+import { appendPrompt, clonePrompt, expandSnippets, promptLength } from "./prompt-parts"
 
 describe("composer prompt parts", () => {
   test("clones parts shallowly and copies file selections", () => {
@@ -26,6 +26,7 @@ describe("composer prompt parts", () => {
     if (copy[1]?.type !== "file" || original[1]?.type !== "file") throw new Error("expected file parts")
     if (copy[2]?.type !== "image" || original[2]?.type !== "image") throw new Error("expected image parts")
     expect(copy[2].blob).toBe(original[2].blob)
+    expect(copy[2].mention).toBeUndefined()
     expect(copy[1].selection).not.toBe(original[1].selection)
     copy[1].selection!.startLine = 9
     expect(original[1].selection?.startLine).toBe(1)
@@ -39,5 +40,33 @@ describe("composer prompt parts", () => {
     ]
 
     expect(promptLength(prompt)).toBe(9)
+  })
+
+  test("remaps cited images after snippet expansion and prompt append", () => {
+    const cited: Prompt = [
+      { type: "snippet", id: "long", name: "long", expansion: "expanded", content: "#long", start: 0, end: 5 },
+      { type: "text", content: " [photo.png]", start: 5, end: 17 },
+      {
+        type: "image",
+        id: "image-1",
+        filename: "photo.png",
+        mime: "image/png",
+        blob: { id: "blob", url: "blob:test" },
+        mention: { text: "[photo.png]", start: 6, end: 17 },
+      },
+    ]
+
+    expect(expandSnippets(cited).find((part) => part.type === "image")?.mention).toEqual({
+      text: "[photo.png]",
+      start: 9,
+      end: 20,
+    })
+    expect(
+      appendPrompt([{ type: "text", content: "base", start: 0, end: 4 }], cited).find((part) => part.type === "image"),
+    ).toMatchObject({
+      type: "image",
+      id: "image-1",
+      mention: { text: "[photo.png]", start: 12, end: 23 },
+    })
   })
 })

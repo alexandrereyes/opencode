@@ -5,7 +5,7 @@ import type { ComposerAttachment, ComposerPrompt } from "../types"
 import { normalizeComposerPrompt } from "../prompt-parts"
 import { formatSessionReference } from "../session-reference"
 
-export type ComposerReference = Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>
+export type ComposerReference = Exclude<ComposerPrompt[number], { type: "text" }>
 
 export type ComposerReferenceRange = {
   from: number
@@ -39,7 +39,8 @@ export function composerReferencesFromPrompt(
   labels?: { app: string; session: string },
 ): ComposerReferenceRange[] {
   let offset = 0
-  return normalizeComposerPrompt(prompt).flatMap((part) => {
+  const normalized = normalizeComposerPrompt(prompt)
+  const references = normalized.flatMap((part) => {
     if (part.type === "image") return []
     const from = offset
     offset += part.content.length
@@ -53,6 +54,13 @@ export function composerReferencesFromPrompt(
       },
     ]
   })
+  return [
+    ...references,
+    ...normalized.flatMap((part) => {
+      if (part.type !== "image" || !part.mention) return []
+      return [{ from: part.mention.start, to: part.mention.end, part }]
+    }),
+  ].toSorted((a, b) => a.from - b.from)
 }
 
 export function composerPromptFromDocument(
@@ -66,12 +74,16 @@ export function composerPromptFromDocument(
         reference.from >= 0 &&
         reference.from < reference.to &&
         reference.to <= text.length &&
-        text.slice(reference.from, reference.to) === reference.part.content,
+        text.slice(reference.from, reference.to) === referenceText(reference.part),
     )
     .toSorted((a, b) => a.from - b.from)
+  const structured = valid.filter(
+    (reference): reference is ComposerReferenceRange & { part: Exclude<ComposerReference, ComposerAttachment> } =>
+      reference.part.type !== "image",
+  )
   const prompt: ComposerPrompt = []
   let offset = 0
-  valid.forEach((reference) => {
+  structured.forEach((reference) => {
     if (reference.from < offset) return
     if (reference.from > offset) {
       prompt.push({ type: "text", content: text.slice(offset, reference.from), start: offset, end: reference.from })
@@ -82,7 +94,18 @@ export function composerPromptFromDocument(
   if (offset < text.length || prompt.length === 0) {
     prompt.push({ type: "text", content: text.slice(offset), start: offset, end: text.length })
   }
-  return [...prompt, ...images.map((image) => ({ ...image }))]
+  const referenced = valid.flatMap((reference) => {
+    if (reference.part.type !== "image") return []
+    return [
+      {
+        ...reference.part,
+        mention: { text: text.slice(reference.from, reference.to), start: reference.from, end: reference.to },
+      },
+    ]
+  })
+  const ids = new Set(referenced.map((image) => image.id))
+  const uncited = images.filter((image) => !image.mention && !ids.has(image.id)).map((image) => ({ ...image }))
+  return [...prompt, ...referenced, ...uncited]
 }
 
 export function mapComposerReferences(
@@ -104,11 +127,21 @@ export function mapComposerReferences(
         ...reference,
         from: changes.mapPos(reference.from, 1),
         to: changes.mapPos(reference.to, -1),
-        part: {
-          ...reference.part,
-          start: changes.mapPos(reference.from, 1),
-          end: changes.mapPos(reference.to, -1),
-        },
+        part:
+          reference.part.type === "image"
+            ? {
+                ...reference.part,
+                mention: {
+                  text: reference.part.mention?.text ?? "",
+                  start: changes.mapPos(reference.from, 1),
+                  end: changes.mapPos(reference.to, -1),
+                },
+              }
+            : {
+                ...reference.part,
+                start: changes.mapPos(reference.from, 1),
+                end: changes.mapPos(reference.to, -1),
+              },
       },
     ]
   })
@@ -153,8 +186,16 @@ function referenceDecorations(references: readonly ComposerReferenceRange[]): De
 
 function referenceAttributes(reference: ComposerReferenceRange) {
   const part = reference.part
-  const mention = part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
+  const mention =
+    part.type === "image"
+      ? "file"
+      : part.type === "file" && part.mime === "application/x-directory"
+        ? "reference"
+        : part.type
   const base = { "data-mention": mention, dir: "auto", style: "unicode-bidi: isolate" }
+  if (part.type === "image") {
+    return { ...base, "data-id": part.id, "data-filename": part.filename, title: part.filename }
+  }
   if (part.type === "agent") return { ...base, "data-name": part.name }
   if (part.type === "skill") {
     return { ...base, "data-id": part.id, "data-name": part.name }
@@ -185,6 +226,10 @@ function referenceAttributes(reference: ComposerReferenceRange) {
     ...(part.mime ? { "data-mime": part.mime } : {}),
     ...(part.filename ? { "data-filename": part.filename } : {}),
   }
+}
+
+function referenceText(part: ComposerReference) {
+  return part.type === "image" ? (part.mention?.text ?? "") : part.content
 }
 
 export const composerEditorTheme = EditorView.theme({

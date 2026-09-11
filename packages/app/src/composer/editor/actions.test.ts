@@ -151,6 +151,58 @@ describe("Composer store", () => {
     expect(prompt.state.prompt).toEqual([{ type: "text", content: "old", start: 0, end: 3 }])
   })
 
+  test("removes the matching text when a cited attachment is removed without a mounted editor", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "before [photo.png] after", start: 0, end: 24 },
+        {
+          type: "image",
+          id: "attachment-1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "a", url: "blob:a" },
+          mention: { text: "[photo.png]", start: 7, end: 18 },
+        },
+      ],
+      cursor: 18,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.removeAttachment("attachment-1")
+
+    expect(prompt.state.prompt).toEqual([{ type: "text", content: "before  after", start: 0, end: 13 }])
+  })
+
+  test("remaps existing image mentions for programmatic text edits", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "before [photo.png]", start: 0, end: 18 },
+        {
+          type: "image",
+          id: "attachment-1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "a", url: "blob:a" },
+          mention: { text: "[photo.png]", start: 7, end: 18 },
+        },
+      ],
+      cursor: 0,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.addText("prefix ", 0)
+    expect(prompt.state.prompt.find((part) => part.type === "image")?.mention).toEqual({
+      text: "[photo.png]",
+      start: 14,
+      end: 25,
+    })
+
+    prompt.replaceRange([{ type: "text", content: "x", start: 0, end: 1 }], { start: 16, end: 17 })
+    expect(prompt.state.prompt.some((part) => part.type === "image")).toBe(false)
+  })
+
   test("prepends a slash skill to an attachment-only draft without flattening it", () => {
     const prompt = createPromptStore()
     prompt.setPrompt([{ type: "file", path: "one", content: "@one", start: 0, end: 4 }], 4)

@@ -77,6 +77,16 @@ Undo and redo restore the text and association together. Copying a complete Sess
 its portable `opencode://` form for same-server structured paste; copying only part of its text stays
 plain text.
 
+Pasting one or more images inserts editable `[filename]` references at the current selection and keeps
+each range associated with that image's attachment identity. Generic and repeated clipboard names are
+made unique before insertion. Editing or deleting a reference removes its image from the payload;
+removing the preview removes the matching reference. Both directions are one CodeMirror history change,
+so undo and redo restore or remove the text and image together. Drafts, history, and queued-message edits
+retain the association. Pending image reads track intervening edits and reserve filenames across concurrent
+pastes; their references remain in paste order even when storage completes out of order. Snippet expansion
+and prompt concatenation remap each image range before image file parts carry the matching mention in the
+multimodal request. Cited images follow document order; uncited picker attachments retain their existing order.
+
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,

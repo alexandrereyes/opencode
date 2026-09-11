@@ -9,6 +9,7 @@ import {
   composerReferences,
   composerReferencesFromPrompt,
   copyComposerText,
+  mapComposerReferences,
   setComposerReferences,
 } from "./codemirror"
 import type { ComposerPrompt } from "../types"
@@ -21,6 +22,15 @@ const skill = {
   content: "$effect",
   start: 2,
   end: 9,
+}
+
+const image = {
+  type: "image" as const,
+  id: "image-1",
+  filename: "photo.png",
+  mime: "image/png",
+  blob: { id: "blob-1", url: "blob:photo" },
+  mention: { text: "[photo.png]", start: 2, end: 13 },
 }
 
 function createView(prompt: ComposerPrompt) {
@@ -138,6 +148,74 @@ describe("CodeMirror composer references", () => {
     expect(view.state.field(composerReferences)[0]?.part).toMatchObject({ type: "skill", id: "effect" })
   })
 
+  test("ties an editable image reference to its attachment identity through undo and redo", () => {
+    const view = createView([{ type: "text", content: "A [photo.png] B", start: 0, end: 15 }, image])
+
+    expect(view.state.field(composerReferences)).toMatchObject([
+      { from: 2, to: 13, part: { type: "image", id: "image-1" } },
+    ])
+    expect(
+      composerPromptFromDocument(view.state.doc.toString(), view.state.field(composerReferences), []),
+    ).toMatchObject([
+      { type: "text", content: "A [photo.png] B" },
+      { type: "image", id: "image-1", mention: { text: "[photo.png]", start: 2, end: 13 } },
+    ])
+
+    view.dispatch({ changes: { from: 7, to: 8, insert: "X" } })
+    expect(view.state.field(composerReferences)).toEqual([])
+    expect(
+      composerPromptFromDocument(view.state.doc.toString(), view.state.field(composerReferences), [image]),
+    ).toEqual([{ type: "text", content: "A [photX.png] B", start: 0, end: 15 }])
+
+    expect(view.command(undo)).toBe(true)
+    expect(view.state.field(composerReferences)[0]?.part).toMatchObject({ type: "image", id: "image-1" })
+    expect(
+      composerPromptFromDocument(view.state.doc.toString(), view.state.field(composerReferences), []),
+    ).toMatchObject([
+      { type: "text", content: "A [photo.png] B" },
+      { type: "image", id: "image-1" },
+    ])
+    expect(view.command(redo)).toBe(true)
+    expect(view.state.field(composerReferences)).toEqual([])
+  })
+
+  test("keeps attachment order while updating cited image ranges", () => {
+    const uncited = { ...image, id: "image-2", filename: "manual.png", mention: undefined }
+    const references = composerReferencesFromPrompt([
+      { type: "text", content: "[photo.png]", start: 0, end: 11 },
+      { ...image, mention: { text: "[photo.png]", start: 0, end: 11 } },
+      uncited,
+    ])
+
+    const changes = EditorState.create({ doc: "[photo.png]" }).changes({ from: 0, insert: "x " })
+    expect(
+      composerPromptFromDocument("x [photo.png]", mapComposerReferences(references, changes), [image, uncited]).map(
+        (part) => (part.type === "image" ? part.id : part.content),
+      ),
+    ).toEqual(["x [photo.png]", "image-1", "image-2"])
+  })
+
+  test("restores a removed leading image in document order", () => {
+    const first = { ...image, id: "first", filename: "a.png", mention: { text: "[a.png]", start: 0, end: 7 } }
+    const second = {
+      ...image,
+      id: "second",
+      filename: "b.png",
+      mention: { text: "[b.png]", start: 8, end: 15 },
+    }
+    const references = composerReferencesFromPrompt([
+      { type: "text", content: "[a.png] [b.png]", start: 0, end: 15 },
+      first,
+      second,
+    ])
+
+    expect(
+      composerPromptFromDocument("[a.png] [b.png]", references, [second])
+        .filter((part) => part.type === "image")
+        .map((part) => part.id),
+    ).toEqual(["first", "second"])
+  })
+
   test("round-trips duplicate visible references by range and serializes sessions for the clipboard", () => {
     const session = {
       type: "session" as const,
@@ -179,5 +257,13 @@ describe("CodeMirror composer references", () => {
     ])
     expect(normalizeComposerCursor(prompt, 22)).toBe(20)
     expect(normalizeComposerCursor(prompt, 8)).toBe(7)
+
+    const withImage: ComposerPrompt = [
+      { type: "text", content: "before\r\n[photo.png]", start: 0, end: 19 },
+      { ...image, mention: { text: "[photo.png]", start: 8, end: 19 } },
+    ]
+    expect(composerReferencesFromPrompt(withImage)).toMatchObject([
+      { from: 7, to: 18, part: { type: "image", mention: { start: 7, end: 18 } } },
+    ])
   })
 })

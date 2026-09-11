@@ -59,7 +59,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         setStore()((state) => ({
           prompt: [
             { type: "text", content: value, start: 0, end: value.length },
-            ...state.prompt.filter((part) => part.type === "image"),
+            ...state.prompt.filter((part) => part.type === "image" && !part.mention),
           ],
           cursor: value.length,
           retry: undefined,
@@ -120,7 +120,12 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       })
     },
     removeAttachment(id: string) {
-      setStore()("prompt", (parts) => parts.filter((part) => part.type !== "image" || part.id !== id))
+      setStore()("prompt", (parts) => {
+        const attachment = parts.find((part) => part.type === "image" && part.id === id)
+        const remaining = parts.filter((part) => part.type !== "image" || part.id !== id)
+        if (!attachment || attachment.type !== "image" || !attachment.mention) return remaining
+        return replacePromptRange(remaining, attachment.mention.start, attachment.mention.end, [])
+      })
       clearRetry()
     },
   }
@@ -138,7 +143,24 @@ function replacePromptRange(
 ): ComposerPrompt {
   const before: ComposerPrompt = []
   const after: ComposerPrompt = []
-  const images = prompt.filter((part) => part.type === "image")
+  const insertedLength = promptLength(content)
+  const images = prompt.flatMap((part) => {
+    if (part.type !== "image") return []
+    if (!part.mention) return [part]
+    const overlaps =
+      start === end
+        ? start > part.mention.start && start < part.mention.end
+        : start < part.mention.end && end > part.mention.start
+    if (overlaps) return []
+    if (part.mention.end <= start) return [part]
+    const delta = insertedLength - (end - start)
+    return [
+      {
+        ...part,
+        mention: { ...part.mention, start: part.mention.start + delta, end: part.mention.end + delta },
+      },
+    ]
+  })
   let position = 0
   prompt.forEach((part) => {
     if (part.type === "image") return
@@ -157,7 +179,23 @@ function replacePromptRange(
     if (prefix) before.push({ type: "text", content: prefix, start: 0, end: 0 })
     if (suffix) after.push({ type: "text", content: suffix, start: 0, end: 0 })
   })
-  return withOffsets([...before, ...content, ...after, ...images])
+  return withOffsets([
+    ...before,
+    ...content.map((part) =>
+      part.type === "image" && part.mention
+        ? {
+            ...part,
+            mention: {
+              ...part.mention,
+              start: part.mention.start + start,
+              end: part.mention.end + start,
+            },
+          }
+        : part,
+    ),
+    ...after,
+    ...images,
+  ])
 }
 
 function insertMention(

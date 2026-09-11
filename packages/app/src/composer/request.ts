@@ -119,10 +119,14 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     return [file, ...mentions]
   })
 
+  const imageMentions = new Map(
+    prompt.flatMap((part) => (part.type === "image" ? [[part.id, part.mention] as const] : [])),
+  )
   const images = input.images.map((attachment) => ({
     uri: attachment.dataUrl,
     mime: attachment.mime,
     name: attachment.sourcePath ?? attachment.filename,
+    mention: imageMentions.get(attachment.id),
   }))
 
   return {

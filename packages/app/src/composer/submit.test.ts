@@ -582,16 +582,18 @@ describe("Composer submission", () => {
     expect(promoted.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
   })
 
-  test("hands off image-only first prompts before admission", async () => {
+  test("hands off cited images with offsets remapped after snippet expansion", async () => {
     const draft = createMemoryComposerState().capture()
     draft.set([
-      { type: "text", content: "", start: 0, end: 0 },
+      { type: "snippet", id: "short", name: "short", expansion: "Expanded", content: "#s", start: 0, end: 2 },
+      { type: "text", content: " [image.png]", start: 2, end: 14 },
       {
         type: "image",
         id: "attachment",
         filename: "image.png",
         mime: "image/png",
         blob: { id: "attachment", url: "data:image/png;base64,YQ==" },
+        mention: { text: "[image.png]", start: 3, end: 14 },
       },
     ])
     const handedOff = Promise.withResolvers<SessionMessageUser>()
@@ -614,18 +616,23 @@ describe("Composer submission", () => {
 
     await submitInput(adapter).submit(new Event("submit"))
 
-    expect(await handedOff.promise).toMatchObject({
+    const message = await handedOff.promise
+    expect(message).toMatchObject({
       type: "user",
-      text: "",
+      text: "Expanded [image.png]",
       files: [
         {
           data: "",
           mime: "image/png",
           source: { type: "uri", uri: "data:image/png;base64,YQ==" },
           name: "image.png",
+          mention: { text: "[image.png]", start: 9, end: 20 },
         },
       ],
     })
+    const mention = message.files?.[0]?.mention
+    if (!mention) throw new Error("Missing image mention")
+    expect(message.text.slice(mention.start, mention.end)).toBe(mention.text)
   })
 
   test("previews the first prompt while starting and hands it off before completing preparation", async () => {

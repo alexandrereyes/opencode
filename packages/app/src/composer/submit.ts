@@ -185,6 +185,9 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 }
 
 function handoffMessage(value: ComposerSubmission): SessionMessageUser {
+  const imageMentions = new Map(
+    expandSnippets(value.prompt).flatMap((part) => (part.type === "image" ? [[part.id, part.mention] as const] : [])),
+  )
   return {
     id: value.id,
     type: "user",
@@ -194,6 +197,7 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
       mime: image.mime,
       source: { type: "uri", uri: image.blob.url },
       name: image.sourcePath ?? image.filename,
+      mention: imageMentions.get(image.id),
     })),
     metadata: {
       displayText: value.text,

@@ -14,6 +14,7 @@ import { Skill } from "@opencode/schema/skill"
 import { Session } from "@opencode/schema/session"
 import { resolveSessionComposerSelection } from "@/session/composer/selection"
 import { snippetSuggestions } from "@/settings/snippets/model"
+import { blobDataUrl, createBlobReference } from "@/runtime/persistence/drafts"
 
 const selectedModel = {
   id: STORY_MODEL.id,
@@ -63,7 +64,9 @@ function ComposerStory(props: {
   externalDraft?: string
   includeSessions?: boolean
   accessControls?: boolean
+  deferredAttachments?: boolean
 }) {
+  const attachmentResolvers: (() => void)[] = []
   const [draft, setDraft] = createStore<ComposerPersistedState>({
     prompt: props.prompt ?? [{ type: "text", content: "", start: 0, end: 0 }],
     cursor: props.prompt ? promptLength(props.prompt) : 0,
@@ -75,6 +78,7 @@ function ComposerStory(props: {
     variant: STORY_MODEL.variant,
     disabled: false,
     readOnly: false,
+    pendingAttachments: 0,
   })
   const modelOption = createMemo(() => ({
     ...selectedModel,
@@ -206,13 +210,20 @@ function ComposerStory(props: {
               editFirst: () => false,
             }
           : undefined,
-        onSubmit: () => {
-          const value = draft.prompt.map((part) => ("content" in part ? part.content : `[${part.filename}]`)).join("")
+        onSubmit: async () => {
+          const value = draft.prompt.map((part) => ("content" in part ? part.content : "")).join("")
+          const images = await Promise.all(
+            draft.prompt.flatMap((part) =>
+              part.type === "image"
+                ? [blobDataUrl(part.blob, part.mime).then((dataUrl) => ({ ...part, dataUrl }))]
+                : [],
+            ),
+          )
           const request = props.inspectRequest
             ? buildPromptRequest({
                 prompt: draft.prompt,
                 context: draft.context.items,
-                images: [],
+                images,
                 text: value,
                 sessionDirectory: "C:/repo",
               })
@@ -240,6 +251,22 @@ function ComposerStory(props: {
         },
         onStop: () =>
           setStory("activity", props.continueOnStop ? "POST /interrupt · continue: true" : "Stop requested"),
+      },
+    },
+    attachments: {
+      directory: () => "C:/repo",
+      isDialogActive: () => false,
+      warn: () => setStory("activity", "Unsupported attachment"),
+      duplicate: () => setStory("activity", "Duplicate attachment"),
+      onError: () => setStory("activity", "Attachment failed"),
+      store: async (file) => {
+        if (props.deferredAttachments) {
+          await new Promise<void>((resolve) => {
+            attachmentResolvers.push(resolve)
+            setStory("pendingAttachments", attachmentResolvers.length)
+          })
+        }
+        return createBlobReference(file)
       },
     },
   })
@@ -272,6 +299,32 @@ function ComposerStory(props: {
             Restore draft
           </button>
         )}
+      </Show>
+      <Show when={props.deferredAttachments}>
+        <div>
+          <button
+            type="button"
+            data-action="complete-attachment"
+            disabled={story.pendingAttachments === 0}
+            onClick={() => {
+              attachmentResolvers.shift()?.()
+              setStory("pendingAttachments", attachmentResolvers.length)
+            }}
+          >
+            Complete attachment
+          </button>
+          <button
+            type="button"
+            data-action="complete-latest-attachment"
+            disabled={story.pendingAttachments === 0}
+            onClick={() => {
+              attachmentResolvers.pop()?.()
+              setStory("pendingAttachments", attachmentResolvers.length)
+            }}
+          >
+            Complete latest attachment
+          </button>
+        </div>
       </Show>
       <Show when={props.accessControls}>
         <div class="flex gap-2">
@@ -417,6 +470,8 @@ export const ExternalDraftDuringComposition = {
 export const MutableEditorAccess = {
   render: () => <ComposerStory prompt={text("abc")} accessControls />,
 }
+
+export const DelayedImagePaste = { render: () => <ComposerStory deferredAttachments /> }
 
 export const ModelAndVariant = { render: () => <ComposerStory prompt={text("Compare both variants")} /> }
 

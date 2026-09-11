@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { history, historyKeymap, isolateHistory, standardKeymap } from "@codemirror/commands"
-import { Compartment, EditorState, Prec, Transaction } from "@codemirror/state"
+import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state"
 import { drawSelection, EditorView, keymap } from "@codemirror/view"
 import { FileIcon } from "@opencode/ui/file-icon"
 import { Icon } from "@opencode/ui/icon"
@@ -53,6 +53,8 @@ export type {
 
 export type ComposerMode = "normal" | "shell"
 
+const pasteOrder = Annotation.define<number>()
+
 export type ComposerEditorProps = {
   controller: ComposerEditorModel
   disabled?: boolean
@@ -76,6 +78,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const view = props.controller.view
   let editorHost!: HTMLDivElement
   let editorView: EditorView | undefined
+  const trackedSelections = new Set<{ start: number; end: number; order: number }>()
+  let nextTrackedSelectionOrder = 0
   let controlsViewport!: HTMLDivElement
   let controlsContent!: HTMLDivElement
   const [overflow, setOverflow] = createStore({ start: false, end: false })
@@ -145,7 +149,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       scrollIntoView: current.hasFocus,
     })
   }
-  const replaceEditorRange = (prompt: ComposerPrompt, range: { start: number; end: number }) => {
+  const replaceEditorRange = (prompt: ComposerPrompt, range: { start: number; end: number }, order?: number) => {
     const current = editorView
     if (!current) return
     const start = Math.min(Math.max(Math.min(range.start, range.end), 0), current.state.doc.length)
@@ -160,18 +164,32 @@ export function ComposerEditor(props: ComposerEditorProps) {
         ...reference,
         from: reference.from + start,
         to: reference.to + start,
-        part: {
-          ...reference.part,
-          start: reference.from + start,
-          end: reference.to + start,
-        },
+        part:
+          reference.part.type === "image"
+            ? {
+                ...reference.part,
+                mention: {
+                  text: reference.part.mention?.text ?? "",
+                  start: reference.from + start,
+                  end: reference.to + start,
+                },
+              }
+            : {
+                ...reference.part,
+                start: reference.from + start,
+                end: reference.to + start,
+              },
       })),
     ].toSorted((a, b) => a.from - b.from)
     current.dispatch({
       changes,
       selection: { anchor: start + insertedLength },
       effects: setComposerReferences.of(references),
-      annotations: [Transaction.addToHistory.of(true), isolateHistory.of("full")],
+      annotations: [
+        Transaction.addToHistory.of(true),
+        isolateHistory.of("full"),
+        ...(order === undefined ? [] : [pasteOrder.of(order)]),
+      ],
       scrollIntoView: true,
     })
   }
@@ -240,6 +258,31 @@ export function ComposerEditor(props: ComposerEditorProps) {
           editableCompartment.of(editorAccess()),
           attributesCompartment.of(EditorView.contentAttributes.of(editorAttributes())),
           EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const insertedOrder = update.transactions.reduce<number | undefined>(
+                (found, transaction) => found ?? transaction.annotation(pasteOrder),
+                undefined,
+              )
+              trackedSelections.forEach((range) => {
+                if (range.start === range.end) {
+                  const association = insertedOrder !== undefined && range.order > insertedOrder ? 1 : -1
+                  const position = update.changes.mapPos(range.start, association)
+                  range.start = position
+                  range.end = position
+                  return
+                }
+                const start = update.changes.mapPos(range.start, 1)
+                const end = update.changes.mapPos(range.end, -1)
+                if (start > end) {
+                  const position = insertedOrder !== undefined && range.order < insertedOrder ? end : start
+                  range.start = position
+                  range.end = position
+                  return
+                }
+                range.start = start
+                range.end = end
+              })
+            }
             const selection = update.state.selection.main
             const referencesChanged =
               update.startState.field(composerReferences) !== update.state.field(composerReferences)
@@ -333,6 +376,31 @@ export function ComposerEditor(props: ComposerEditorProps) {
         })
       },
       replacePrompt: replaceEditorRange,
+      removeAttachment: (id) => {
+        const current = editorView
+        if (!current) return false
+        const reference = current.state
+          .field(composerReferences)
+          .find((item) => item.part.type === "image" && item.part.id === id)
+        if (!reference) return false
+        current.dispatch({
+          changes: { from: reference.from, to: reference.to },
+          selection: { anchor: reference.from },
+          annotations: [Transaction.addToHistory.of(true), isolateHistory.of("full")],
+          scrollIntoView: true,
+        })
+        return true
+      },
+      trackSelection: () => {
+        const selection = editorView?.state.selection.main
+        const range = { start: selection?.from ?? 0, end: selection?.to ?? 0, order: nextTrackedSelectionOrder++ }
+        trackedSelections.add(range)
+        return {
+          current: () => ({ start: range.start, end: range.end }),
+          order: range.order,
+          release: () => trackedSelections.delete(range),
+        }
+      },
     })
     onCleanup(() => {
       clearDeferredEnter()
@@ -596,7 +664,7 @@ export function ComposerAttachments(props: {
           </For>
           <For each={props.attachments}>
             {(attachment) => (
-              <div class="relative group shrink-0">
+              <div class="relative group shrink-0" data-attachment-id={attachment.id}>
                 <Tooltip value={attachment.filename} placement="top" contentClass="break-all">
                   <Show
                     when={attachment.mime.startsWith("image/")}
@@ -617,6 +685,8 @@ export function ComposerAttachments(props: {
                 </Tooltip>
                 <button
                   type="button"
+                  data-action="remove-attachment"
+                  data-attachment-id={attachment.id}
                   onClick={() => props.onAttachmentRemove(attachment)}
                   class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   aria-label={props.removeLabel}

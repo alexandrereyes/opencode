@@ -65,6 +65,56 @@ describe("buildPromptRequest", () => {
     expect(uploads.map((file) => file.name)).toEqual(["a.png", "b.pdf"])
   })
 
+  test("remaps an inline image reference after expanding a preceding snippet", () => {
+    const result = buildPromptRequest({
+      prompt: [
+        {
+          type: "snippet",
+          id: "review",
+          name: "review",
+          expansion: "Review thoroughly",
+          content: "#review",
+          start: 0,
+          end: 7,
+        },
+        { type: "text", content: " [photo.png]", start: 7, end: 19 },
+        {
+          type: "image",
+          id: "img_1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "blob", url: "blob:photo" },
+          mention: { text: "[photo.png]", start: 8, end: 19 },
+        },
+      ],
+      context: [],
+      images: [
+        {
+          type: "image",
+          id: "img_1",
+          filename: "photo.png",
+          mime: "image/png",
+          mention: { text: "[photo.png]", start: 8, end: 19 },
+          dataUrl: "data:image/png;base64,AAA",
+        },
+      ],
+      text: "#review [photo.png]",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.files).toEqual([
+      {
+        uri: "data:image/png;base64,AAA",
+        mime: "image/png",
+        name: "photo.png",
+        mention: { text: "[photo.png]", start: 18, end: 29 },
+      },
+    ])
+    const mention = result.files[0]?.mention
+    if (!mention) throw new Error("Missing image mention")
+    expect(result.text.slice(mention.start, mention.end)).toBe(mention.text)
+  })
+
   test("preserves an external attachment source path for the model", () => {
     const result = buildPromptRequest({
       prompt: [],

@@ -298,4 +298,28 @@ describe("draft store image retention", () => {
     await tick()
     expect(await released(store, 6, url)).toBe(true)
   })
+
+  test("round-trips an image mention with its persisted blob", async () => {
+    const { store } = fresh()
+    const blob = await store.putBlob(image(7))
+    await store.setDocument("composer", {
+      prompt: [
+        { type: "text", content: "[photo.png]", start: 0, end: 11 },
+        {
+          type: "image",
+          id: "image-1",
+          filename: "photo.png",
+          mime: "image/png",
+          mention: { text: "[photo.png]", start: 0, end: 11 },
+          blob,
+        },
+      ],
+    })
+
+    expect(JSON.parse((await store.getItem("composer"))!).prompt[1]).toMatchObject({
+      id: "image-1",
+      mention: { text: "[photo.png]", start: 0, end: 11 },
+      blob: { id: blob.id },
+    })
+  })
 })

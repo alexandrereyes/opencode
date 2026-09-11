@@ -39,7 +39,9 @@ type ComposerEditorBinding = {
     mention: Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>,
     range?: { start: number; end: number },
   ) => void
-  replacePrompt: (prompt: ComposerPrompt, range: { start: number; end: number }) => void
+  replacePrompt: (prompt: ComposerPrompt, range: { start: number; end: number }, order?: number) => void
+  removeAttachment: (id: string) => boolean
+  trackSelection: () => { current: () => { start: number; end: number }; order: number; release: () => void }
 }
 
 export type ComposerEditorView = {
@@ -117,6 +119,19 @@ export function createComposerEditor(input: {
             draft.setPrompt(prompt, cursor)
             editorBinding?.sync()
           },
+          replace: (prompt, range, order) => {
+            if (editorBinding) {
+              editorBinding.replacePrompt(prompt, range, order)
+              return
+            }
+            draft.replaceRange(prompt, range)
+          },
+          selection: () =>
+            (editor && getSelectionRange(editor)) ?? {
+              start: draft.state.cursor ?? promptLength(draft.state.prompt),
+              end: draft.state.cursor ?? promptLength(draft.state.prompt),
+            },
+          trackSelection: () => editorBinding?.trackSelection(),
         }),
         editor: () => editor,
         focusEditor: () => editor?.focus(),
@@ -403,6 +418,7 @@ export function createComposerEditor(input: {
       input.openAttachment?.(attachment)
     },
     removeAttachment(id: string) {
+      if (editorBinding?.removeAttachment(id)) return
       draft.removeAttachment(id)
     },
     canSubmit() {
