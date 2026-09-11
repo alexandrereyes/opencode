@@ -13,7 +13,7 @@ Bun.plugin({
   name: "sidebar-search-solid",
   setup(build) {
     build.onLoad(
-      { filter: /[/\\](sidebar|tab-strip|helper|text-input|icon-button|tooltip|icon)\.tsx$/ },
+      { filter: /[/\\](sidebar|tab-strip|helper|text-input|button|icon-button|tooltip|icon)\.tsx$/ },
       async (args) => ({
         contents: transformSync(await Bun.file(args.path).text(), {
           filename: args.path,
@@ -59,6 +59,7 @@ mock.module("@/runtime/persistence/storage", () => ({
 }))
 mock.module("@/composer/persistence", () => ({ createTabComposerState: () => {} }))
 mock.module("@/shell/notifications/toast", () => ({ showToast: () => {} }))
+mock.module("@/session/lifecycle-actions", () => ({ useSessionLifecycleActions: () => ({ pending: () => false }) }))
 mock.module("@/shell/titlebar/tab-nav", () => {
   const item = (props: { href: string }) => {
     const link = document.createElement("a")

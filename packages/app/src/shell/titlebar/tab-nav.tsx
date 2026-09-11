@@ -5,8 +5,9 @@ import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { createMutation } from "@tanstack/solid-query"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Icon } from "@opencode/ui/icon"
+import { Checkbox } from "@opencode/ui/checkbox"
 import { Menu } from "@opencode/ui/menu"
-import { useGlobal, useServerCtx } from "@/runtime/server/runtime"
+import { useServerCtx } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection, serverName, useServers } from "@/runtime/server/registry"
 import { displayName, projectForSession } from "@/shell/layout/helpers"
@@ -44,6 +45,10 @@ export function TabNavItem(props: {
   closable?: boolean
   pinned?: boolean
   onTogglePin?: () => void
+  selectionMode?: boolean
+  selected?: boolean
+  selectionPending?: boolean
+  onActivate?: (event: MouseEvent | KeyboardEvent) => boolean
 }) {
   const language = useLanguage()
   const settings = useSettings()
@@ -55,6 +60,8 @@ export function TabNavItem(props: {
   let titleEl!: HTMLSpanElement
   let measureFrame: number | undefined
   const rename = createMutation(() => ({ mutationFn: props.onRename }))
+  const gesture = { selected: false, checkbox: undefined as MouseEvent | KeyboardEvent | undefined }
+  const lifecyclePending = () => lifecycle.pending() || props.selectionPending
 
   const closeTab = (event: MouseEvent) => {
     event.preventDefault()
@@ -93,7 +100,13 @@ export function TabNavItem(props: {
 
   const [popoverOpen, setPopoverOpen] = createSignal(false)
   const previewBlocked = () =>
-    !!props.dragging || editing() || menu.open || menu.actions || !!props.pressed || !props.session
+    !!props.dragging ||
+    editing() ||
+    menu.open ||
+    menu.actions ||
+    !!props.pressed ||
+    !!props.selectionMode ||
+    !props.session
 
   const measureTitleOverflow = () => {
     if (!titleEl || editing()) {
@@ -199,7 +212,7 @@ export function TabNavItem(props: {
     if (menu.delete && props.session) {
       event.preventDefault()
       setMenu("delete", false)
-      lifecycle.showDelete(props.server, props.session)
+      if (!lifecyclePending()) void lifecycle.showDelete(props.server, props.session)
     }
   }
   const menuItems = () => (
@@ -217,14 +230,19 @@ export function TabNavItem(props: {
       </Show>
       <Menu.Separator />
       <Menu.Item
-        disabled={!props.session || lifecycle.pending()}
+        disabled={!props.session || lifecyclePending()}
         onSelect={() => {
-          if (props.session) void lifecycle.archive(props.server, props.session)
+          if (props.session && !lifecyclePending()) void lifecycle.archive(props.server, props.session)
         }}
       >
         {language.t("common.archive")}
       </Menu.Item>
-      <Menu.Item disabled={!props.session || lifecycle.pending()} onSelect={() => setMenu("delete", true)}>
+      <Menu.Item
+        disabled={!props.session || lifecyclePending()}
+        onSelect={() => {
+          if (!lifecyclePending()) setMenu("delete", true)
+        }}
+      >
         {language.t("common.delete")}…
       </Menu.Item>
     </>
@@ -245,8 +263,9 @@ export function TabNavItem(props: {
       class="group relative flex h-7 w-full min-w-0 select-none flex-row items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-[6px] px-1.5 [container-type:inline-size]"
       classList={{ invisible: props.hidden }}
       data-active={props.active}
+      data-selected={props.selected}
       data-dragging={props.dragging}
-      data-state={props.active || props.pressed ? "pressed" : undefined}
+      data-state={props.active || props.pressed || props.selected ? "pressed" : undefined}
       onMouseDown={(event) => {
         if (event.button !== MIDDLE_MOUSE_BUTTON) return
         event.preventDefault()
@@ -257,6 +276,39 @@ export function TabNavItem(props: {
         closeTab(event)
       }}
     >
+      <Show when={props.selectionMode}>
+        <Checkbox
+          ref={(element: HTMLDivElement) => {
+            // Kobalte's onChange exposes only checked; capture the originating gesture before it toggles.
+            makeEventListener(
+              element,
+              "click",
+              (event) => {
+                gesture.checkbox = event
+              },
+              { capture: true },
+            )
+            makeEventListener(
+              element,
+              "keydown",
+              (event) => {
+                gesture.checkbox = event
+              },
+              { capture: true },
+            )
+          }}
+          checked={props.selected}
+          disabled={props.selectionPending}
+          hideLabel
+          onChange={() => {
+            const event = gesture.checkbox
+            gesture.checkbox = undefined
+            if (event) props.onActivate?.(event)
+          }}
+        >
+          {language.t("sidebar.selection.session", { name: title() ?? "" })}
+        </Checkbox>
+      </Show>
       <Show when={props.pinned}>
         <span
           data-slot="tab-pin"
@@ -277,6 +329,16 @@ export function TabNavItem(props: {
         data-titlebar-tab-link
         href={props.href}
         draggable={false}
+        onPointerDown={(event) => {
+          gesture.selected = false
+          if (event.button !== 0 || editing()) return
+          gesture.selected = props.onActivate?.(event) ?? false
+          if (gesture.selected) event.currentTarget.focus()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== " " || !props.selectionMode || editing()) return
+          props.onActivate?.(event)
+        }}
         onDragStart={(event) => {
           event.preventDefault()
           event.stopPropagation()
@@ -285,6 +347,7 @@ export function TabNavItem(props: {
           // Navigate on mousedown to shave the press-release delay off tab switches.
           if (event.button !== 0) return
           if (editing()) return
+          if (gesture.selected || props.onActivate?.(event)) return
           if (props.suppressNavigation) return
           props.onNavigate()
         }}
@@ -293,6 +356,7 @@ export function TabNavItem(props: {
           // Mouse navigation already happened on mousedown; detail 0 means keyboard activation.
           if (event.detail > 0) return
           if (editing()) return
+          if (props.onActivate?.(event)) return
           if (props.suppressNavigation) return
           props.onNavigate()
         }}
@@ -337,7 +401,9 @@ export function TabNavItem(props: {
             "select-text": editing(),
           }}
           contenteditable={editing() ? true : undefined}
-          onDblClick={openRename}
+          onDblClick={(event) => {
+            if (!props.selectionMode) openRename(event)
+          }}
           onKeyDown={(event) => {
             event.stopPropagation()
             if (event.key === "Enter") {

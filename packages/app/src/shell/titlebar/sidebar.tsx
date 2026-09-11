@@ -5,6 +5,8 @@ import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { TextInput } from "@opencode/ui/text-input"
+import { Button } from "@opencode/ui/button"
+import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { useSortable, isSortable } from "@dnd-kit/solid/sortable"
 import { PointerActivationConstraints } from "@dnd-kit/dom"
@@ -25,6 +27,7 @@ import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
 import { SidebarProjectActions } from "./sidebar-project-actions"
+import { createSidebarSelection } from "./sidebar-selection"
 import {
   attentionGroups,
   firstAttention,
@@ -52,6 +55,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const settings = useSettings()
   const language = useLanguage()
   const command = useCommand()
+  const lifecycle = useSessionLifecycleActions()
   const [saved, setSaved, , ready] = persisted(Persist.global("sidebar-navigation"), SidebarState, {
     attention: true,
     order: [],
@@ -174,6 +178,31 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   )
   const query = createMemo(() => state.query.trim())
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
+  const projectRows = (key: string) =>
+    visibleSessions(
+      sessions().rows.filter((row) => row.project === key),
+      saved.collapsed[key] ? 0 : (state.limits[key] ?? 5),
+      sessions().current,
+    )
+  // Match rendered order, retaining the first occurrence of sessions repeated in project groups.
+  const selectable = createMemo(() => {
+    const rows = query()
+      ? results()
+      : saved.attention
+        ? [...groups().priority, ...groups().pinned, ...groups().days.flatMap((day) => day.rows), ...groups().current]
+        : [...pinned(), ...recent(), ...projects().flatMap((project) => projectRows(project.key))]
+    const seen = new Set<string>()
+    return rows.filter((row) => {
+      if (seen.has(row.key)) return false
+      seen.add(row.key)
+      return true
+    })
+  })
+  const selection = createSidebarSelection({
+    rows: selectable,
+    view: () => JSON.stringify([state.query, saved.attention]),
+    pending: lifecycle.pending,
+  })
   const loading = () => indexes().some((entry) => entry.index.state.loading)
   const searchID = createUniqueId()
   let searchInput: HTMLInputElement | undefined
@@ -213,6 +242,10 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === item.key}
         pinned={pins().has(item.key)}
+        selectionMode={selection.state.mode}
+        selected={selection.state.keys.includes(item.key)}
+        selectionPending={lifecycle.pending()}
+        onActivate={(event) => selection.activate(item.key, event)}
         onTogglePin={
           ready()
             ? () =>
@@ -287,7 +320,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         </Tooltip>
       </div>
       {props.children}
-      <div class="shrink-0 pt-4 [app-region:no-drag]">
+      <div class="shrink-0 pt-4 [app-region:no-drag]" onKeyDown={selection.escape}>
         <TextInput
           ref={searchInput}
           type="search"
@@ -307,6 +340,10 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
           }}
           onInput={(event) => setState("query", event.currentTarget.value)}
           onKeyDown={(event) => {
+            if (event.key === "Escape" && selection.state.mode) {
+              selection.escape(event)
+              return
+            }
             if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
             if (event.key === "Escape" && state.query) {
               event.preventDefault()
@@ -328,7 +365,59 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
           {language.t("sidebar.search.hint")}
         </span>
       </div>
+      <div class="shrink-0 pt-2 [app-region:no-drag]" onKeyDown={selection.escape}>
+        <Show
+          when={selection.state.mode}
+          fallback={
+            <Button variant="ghost" size="small" onClick={selection.start}>
+              {language.t("sidebar.selection.start")}
+            </Button>
+          }
+        >
+          <div
+            data-slot="sidebar-selection"
+            role="group"
+            aria-label={language.t("sidebar.selection.start")}
+            aria-description={language.t("sidebar.selection.hint")}
+            class="flex flex-wrap items-center gap-1"
+            aria-busy={lifecycle.pending()}
+          >
+            <span role="status" class="w-full px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+              {language.plural("sidebar.selection.count", selection.state.keys.length)}
+            </span>
+            <Button
+              variant="ghost"
+              size="small"
+              disabled={lifecycle.pending() || !selectable().length}
+              onClick={selection.all}
+              title={language.t("sidebar.selection.hint")}
+            >
+              {language.t("sidebar.selection.all")}
+            </Button>
+            <Button variant="ghost" size="small" disabled={lifecycle.pending()} onClick={selection.clear}>
+              {language.t("sidebar.selection.clear")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="small"
+              disabled={lifecycle.pending() || !selection.state.keys.length}
+              onClick={() => void lifecycle.archiveMany(selection.selected(), selection.complete)}
+            >
+              {language.t("common.archive")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="small"
+              disabled={lifecycle.pending() || !selection.state.keys.length}
+              onClick={() => lifecycle.showDeleteMany(() => selection.selected(), selection.complete)}
+            >
+              {language.t("common.delete")}…
+            </Button>
+          </div>
+        </Show>
+      </div>
       <nav
+        onKeyDown={selection.escape}
         aria-label={language.t("sidebar.sessions")}
         ref={scroller}
         class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-4 [app-region:no-drag]"
@@ -434,12 +523,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                         )
                         const rows = createMemo(() => sessions().rows.filter((row) => row.project === key))
                         const collapsed = () => saved.collapsed[key] ?? false
-                        const visible = () =>
-                          visibleSessions(
-                            rows(),
-                            collapsed() ? 0 : (state.limits[key] ?? 5),
-                            sessions().current,
-                          )
+                        const visible = () => projectRows(key)
                         return (
                           <SortableProject id={key} index={index()}>
                             {(handle) => (
