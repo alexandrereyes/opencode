@@ -174,7 +174,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       historyRequests.delete(owner.key)
     }
     if (!owner.current() || timeline.messages().length <= before) return
-    if (pinned() || !scroller || scroller.scrollTop >= 200 || !timeline.history.more()) return
+    if (!session.isDesktop() || pinned() || !scroller || scroller.scrollTop >= 200 || !timeline.history.more()) return
     if (historyContinuationFrame !== undefined) cancelAnimationFrame(historyContinuationFrame)
     historyContinuationFrame = requestAnimationFrame(() => {
       historyContinuationFrame = undefined
@@ -183,6 +183,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   }
   const onHistoryScroll = () => {
     if (
+      !session.isDesktop() ||
       historyRequests.has(session.ownership.key()) ||
       timeline.history.loading() ||
       pinned() ||
@@ -196,6 +197,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     if (fillFrame !== undefined) return
     fillFrame = requestAnimationFrame(() => {
       fillFrame = undefined
+      if (!session.isDesktop()) return
       if (!session.identity.params.id || !timeline.ready()) return
       if (!pinned() || timeline.history.loading() || !scroller) return
       if (scroller.scrollHeight > scroller.clientHeight + 1 || !timeline.history.more()) return
@@ -290,6 +292,14 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   })
 
   return {
+    history: {
+      more: timeline.history.more,
+      loading: timeline.history.loading,
+      loadOlder: () => {
+        setState("follow", { sessionKey: session.identity.sessionKey(), pinned: false })
+        return loadOlder()
+      },
+    },
     actions: {
       navigateMessage,
       revealMessage: (id: string, partID?: string) => revealMessage(id, partID),

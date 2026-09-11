@@ -11,7 +11,9 @@ export {
   selectVisibleSessionUserMessages as selectVisibleUserMessages,
 } from "../session-domain"
 
-export function createTimelineModel(input: { session: Pick<SessionModel, "identity" | "history" | "ownership"> }) {
+export function createTimelineModel(input: {
+  session: Pick<SessionModel, "identity" | "history" | "ownership" | "isDesktop">
+}) {
   const data = useData()
 
   const [resource] = createResource(
@@ -21,7 +23,7 @@ export function createTimelineModel(input: { session: Pick<SessionModel, "identi
       const owner = input.session.ownership.capture()
       await Promise.all([data.session.message.sync(id), data.session.pending.sync(id)])
       await enrichLeadingTurn({
-        current: owner.current,
+        current: () => owner.current() && input.session.isDesktop(),
         messages: () => data.session.message.list(id),
         more: () => data.session.message.more(id),
         loading: () => data.session.message.loading(id),
