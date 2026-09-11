@@ -1,4 +1,4 @@
-import { expect, mock, test } from "bun:test"
+import { expect, jest, mock, test } from "bun:test"
 import { createRequire } from "node:module"
 import { createComponent } from "solid-js"
 import { render } from "solid-js/web"
@@ -173,6 +173,7 @@ const { DialogProvider } = await import("@opencode/ui/context/dialog")
 const { sessionKey } = await import("@/shell/titlebar/sidebar-model")
 const { SESSION_TABS_REMOVED_EVENT, readSessionTabsRemovedDetail } = await import("@/shell/titlebar/session-events")
 const { flushPersisted } = await import("@/runtime/persistence/persist")
+const { Persist, removePersisted } = await import("@/runtime/persistence/storage")
 const storage = "opencode.global.dat:sidebar-navigation"
 const wait = () => new Promise((resolve) => setTimeout(resolve, 160))
 function mount(sidebar = true, direction = "ltr") {
@@ -280,6 +281,168 @@ const recentSection = (root: ParentNode) =>
   [...root.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")!
 const recentLinks = (root: ParentNode) => [...recentSection(root).querySelectorAll<HTMLAnchorElement>("a")]
 const recentOrder = (root: ParentNode) => recentLinks(root).map((link) => link.getAttribute("href"))
+
+test("shared sidebar clock updates every view without reordering, remounting, losing focus or selection", async () => {
+  const original = hosts.map((host) => host.backend.map((row) => structuredClone(row)))
+  const sheet = document.createElement("style")
+  sheet.textContent = await Bun.file(new URL("../../src/shell/titlebar/tab-nav.css", import.meta.url)).text()
+  document.head.append(sheet)
+  try {
+    for (const direction of ["ltr", "rtl"]) {
+      jest.useFakeTimers()
+      const at = new Date(2026, 8, 11, 12).getTime()
+      jest.setSystemTime(at)
+      const pinned = row("same")
+      pinned.messageAt = at - 42_000
+      pinned.session.title = "جلسة mixed project title with a long descriptive name"
+      pinned.session.time.updated = at // A metadata update must not mask the message clock.
+      const minute = row("row-0")
+      minute.messageAt = at - 60_000
+      const hours = row("row-1")
+      hours.messageAt = at - 36_000_000
+      hours.session.location.directory = "/repo-worktree"
+      const empty = row("row-2")
+      delete empty.messageAt
+      empty.session.time = { created: at - 86_400_000, updated: at }
+      const priority = row("row-3")
+      priority.messageAt = at - 3_600_000
+      priority.permissionAt = at - 1000
+      hosts[0].backend.splice(0, hosts[0].backend.length, pinned, minute, hours, empty, priority)
+      hosts[1].backend.splice(0)
+      const ui = mount(true, direction)
+      ui.host.style.setProperty("--line-height-compact", "16px")
+      try {
+        // Drain navigation/persistence promises while the shared wall clock stays fixed.
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve()
+          jest.advanceTimersByTime(0)
+        }
+        const labels = new Map([
+          ["same", "42s"],
+          ["row-0", "1m"],
+          ["row-1", "10h"],
+          ["row-2", "1d"],
+          ["row-3", "1h"],
+        ])
+        for (const [id, label] of labels) {
+          const matches = findRows(ui.host, id)
+          expect(matches.length).toBeGreaterThan(0)
+          for (const match of matches) expect(match.querySelector("time")?.textContent).toBe(label)
+        }
+        const recent = recentSection(ui.host)
+        const project = ui.host.querySelector<HTMLElement>("[data-project-key]")!
+        expect(project.querySelector('[data-action="sidebar-project-menu"]')).not.toBeNull()
+        const compact = findRows(project, "same")[0]
+        const pinnedRow = findRows(ui.host, "same")[0]
+        const time = pinnedRow.querySelector<HTMLTimeElement>("time")!
+        expect(time.dateTime).toBe(new Date(pinned.messageAt).toISOString())
+        expect(time.title).toBe(
+          new Intl.DateTimeFormat("en", { dateStyle: "full", timeStyle: "long" }).format(pinned.messageAt),
+        )
+        expect(time.getAttribute("aria-label")).toBe(time.title)
+        expect(time.dir).toBe("auto")
+        expect(pinnedRow.querySelector('[data-slot="tab-pin"]')).not.toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="Close tab"]')).not.toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="More options"]')).not.toBeNull()
+        expect(getComputedStyle(time).lineHeight).toBe("16px")
+        expect(getComputedStyle(compact.querySelector("a")!).paddingInlineEnd).toBe("48px")
+        pinnedRow.dataset.titleOverflow = "true"
+        pinnedRow.dataset.active = "true"
+        expect(getComputedStyle(pinnedRow.querySelector("a")!).paddingInlineEnd).toBe("48px")
+        expect(getComputedStyle(pinnedRow.querySelector("a")!).gridTemplateColumns).toBe("16px minmax(0, 1fr) auto")
+        expect(getComputedStyle(pinnedRow.querySelector('[data-slot="tab-title"]')!).textOverflow).toBe("ellipsis")
+        const focused = link(recent, "row-0")
+        button(ui.host, "Select sessions").click()
+        focused.click()
+        focused.focus()
+        const checkbox = findRows(recent, "row-0")[0].querySelector<HTMLInputElement>('input[type="checkbox"]')!
+        const before = rows(ui.host)
+        const calls = hosts.map((host) => ({ ...host.calls }))
+        const observer = new MutationObserver(() => {})
+        observer.observe(ui.host, { childList: true, subtree: true })
+        jest.advanceTimersByTime(60_000)
+        expect(time.textContent).toBe("1m")
+        expect(findRows(recent, "row-0")[0].querySelector("time")?.textContent).toBe("2m")
+        expect(rows(ui.host).every((row, i) => row === before[i])).toBe(true)
+        expect(document.activeElement === focused).toBe(true)
+        expect(checkbox.checked).toBe(true)
+        expect(count(ui.host)).toBe("1 session selected")
+        expect(hosts.map((host) => ({ ...host.calls }))).toEqual(calls)
+        // Clock ticks change text in place, never row elements.
+        expect(
+          observer
+            .takeRecords()
+            .flatMap((record) => [...record.removedNodes])
+            .some((node) => node instanceof HTMLElement),
+        ).toBe(false)
+        observer.disconnect()
+
+        // Execution ordering can advance independently of the last real interaction.
+        hosts[0].emit("session.execution.started", "same")
+        expect(time.textContent).toBe("1m")
+        hosts[0].setCache("same", {
+          ...pinned.session,
+          title: "Renamed",
+          time: { ...pinned.session.time, updated: at + 60_000 },
+        })
+        expect(time.dateTime).toBe(new Date(pinned.messageAt).toISOString())
+        expect(time.textContent).toBe("1m")
+
+        search(ui.host, "row-1")
+        expect(rows(ui.host)).toHaveLength(1)
+        const result = rows(ui.host)[0]
+        const resultTime = result.querySelector("time")!
+        result.querySelector("a")!.focus()
+        jest.advanceTimersByTime(60_000)
+        expect(rows(ui.host)[0] === result).toBe(true)
+        expect(resultTime.textContent).toBe("10h")
+        expect(document.activeElement === result.querySelector("a")).toBe(true)
+        search(ui.host, "")
+        ui.host.querySelector<HTMLButtonElement>('[aria-label="Attention view"]')!.click()
+        const prioritySection = [...ui.host.querySelectorAll("section")].find(
+          (section) => section.querySelector("h2")?.textContent === "Priority",
+        )!
+        const priorityRow = findRows(prioritySection, "row-3")[0]
+        const attentionRows = rows(ui.host)
+        expect(priorityRow.querySelector("time")?.textContent).toBe("1h")
+        expect(findRows(ui.host, "same")[0].querySelector("time")?.textContent).toBe("2m")
+        priorityRow.querySelector("a")!.focus()
+        jest.advanceTimersByTime(60_000)
+        expect(rows(ui.host).every((row, i) => row === attentionRows[i])).toBe(true)
+        expect(document.activeElement === priorityRow.querySelector("a")).toBe(true)
+        expect(findRows(ui.host, "same")[0].querySelector("time")?.textContent).toBe("3m")
+      } finally {
+        ui.dispose()
+        hosts[0].active.clear()
+        jest.useRealTimers()
+      }
+    }
+  } finally {
+    sheet.remove()
+    hosts.forEach((host, i) => host.backend.splice(0, host.backend.length, ...original[i]))
+  }
+})
+
+test("Arabic sidebar uses English compact fallback and a localized absolute date", async () => {
+  const stored = localStorage.getItem("opencode.global.dat:language")
+  localStorage.setItem("opencode.global.dat:language", JSON.stringify({ locale: "ar" }))
+  const ui = mount(true, "rtl")
+  try {
+    await wait()
+    const time = ui.host.querySelector<HTMLTimeElement>("time")!
+    expect(time.textContent).toMatch(/^\d+[smhd]$/)
+    expect(time.title).toBe(
+      new Intl.DateTimeFormat("ar", { dateStyle: "full", timeStyle: "long" }).format(new Date(time.dateTime)),
+    )
+    expect(time.getAttribute("aria-label")).toBe(time.title)
+    expect(time.dir).toBe("auto")
+    expect(ui.host.dir).toBe("rtl")
+  } finally {
+    ui.dispose()
+    removePersisted(Persist.global("language"))
+    if (stored !== null) localStorage.setItem("opencode.global.dat:language", stored)
+  }
+})
 
 test("Recent keeps DOM, focus and selection through assistant steps, reads, rename and duplicate lifecycle events", async () => {
   const ui = mount()

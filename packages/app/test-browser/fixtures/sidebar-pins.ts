@@ -404,6 +404,7 @@ test("horizontal and Home row consumers have no pin action without opting in", a
       ),
     ).toBe(false)
     expect(host.querySelector('[data-slot="tab-pin"]')).toBeNull()
+    expect(host.querySelector('[data-slot="tab-time"]')).toBeNull()
   } finally {
     dispose()
     host.remove()

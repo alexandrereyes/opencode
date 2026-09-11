@@ -46,6 +46,7 @@ export function TabNavItem(props: {
   orientation?: "horizontal" | "vertical"
   projectLabel?: string
   compact?: boolean
+  timestamp?: { dateTime: string; title: string; label: string }
   closable?: boolean
   pinned?: boolean
   onTogglePin?: () => void
@@ -267,6 +268,7 @@ export function TabNavItem(props: {
       data-titlebar-tab
       data-slot="titlebar-tab-item"
       data-orientation={props.orientation ?? "horizontal"}
+      data-sidebar-time={props.orientation === "vertical" && props.timestamp ? "" : undefined}
       data-title-overflow={titleOverflowing()}
       data-editing={editing()}
       data-session-actions
@@ -448,6 +450,19 @@ export function TabNavItem(props: {
             <span data-slot="tab-project" dir="auto">
               {name()}
             </span>
+          )}
+        </Show>
+        <Show when={props.orientation === "vertical" && props.timestamp}>
+          {(timestamp) => (
+            <time
+              data-slot="tab-time"
+              dir="auto"
+              dateTime={timestamp().dateTime}
+              title={timestamp().title}
+              aria-label={timestamp().title}
+            >
+              {timestamp().label}
+            </time>
           )}
         </Show>
         <Show when={mobileTabs && props.session}>

@@ -23,6 +23,7 @@ import { Persistence } from "@/runtime/persistence/schema"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
 import { useCommand } from "@/shell/commands/command"
+import { getCompactRelativeTime } from "@/shell/time"
 import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
@@ -57,6 +58,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const tabs = useTabs()
   const settings = useSettings()
   const language = useLanguage()
+  const dateFormat = createMemo(
+    () => new Intl.DateTimeFormat(language.intl(), { dateStyle: "full", timeStyle: "long" }),
+  )
   const command = useCommand()
   const lifecycle = useSessionLifecycleActions()
   const [saved, setSaved, , ready] = persisted(Persist.global("sidebar-navigation"), SidebarState, {
@@ -240,6 +244,13 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     )
   }
   const Row = (props: { item: SidebarSession; compact?: boolean }) => {
+    // Recent's monotonic rank and metadata updates are not interaction timestamps.
+    const at = createMemo(() => props.item.messageAt ?? props.item.session.time.created)
+    const time = createMemo(() => {
+      const date = new Date(at())
+      if (!Number.isFinite(date.getTime())) return
+      return { at: at(), dateTime: date.toISOString(), title: dateFormat().format(date) }
+    })
     const ctx = () => indexes().find((entry) => ServerConnection.key(entry.connection) === props.item.server)?.ctx
     const tab = () =>
       tabs.store.find(
@@ -252,6 +263,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         session={props.item.session}
         preparing={false}
         orientation="vertical"
+        timestamp={
+          time() ? { ...time()!, label: getCompactRelativeTime(time()!.at, language.plural, state.now) } : undefined
+        }
         compact={props.compact}
         projectLabel={projectLabel(props.item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
