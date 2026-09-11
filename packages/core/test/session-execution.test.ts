@@ -394,7 +394,7 @@ describe("SessionExecution lifecycle", () => {
 })
 
 describe("SessionRestart background recovery", () => {
-  it.effect("wakes idle shell owners and delivers recovered notices exactly once", () =>
+  it.effect("restores archived orphan shells and delivers recovered notices exactly once", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const store = yield* SessionStore.Service
@@ -411,6 +411,18 @@ describe("SessionRestart background recovery", () => {
 
       expect(yield* store.listSuspended()).toEqual([])
       expect(yield* jobs.pendingBackground).toHaveLength(2)
+      const notifications = (yield* jobs.pendingBackground).map((record) => record.notificationID)
+      yield* database.db.transaction(
+        Effect.fnUntraced(function* (tx) {
+          for (const id of notifications)
+            yield* tx
+              .update(KVTable)
+              .set({ key: `${JobUpgrade.prefix}${id}` })
+              .where(eq(KVTable.key, `job.background/${id}`))
+              .run()
+        }),
+      )
+      expect(yield* jobs.pendingBackground).toHaveLength(0)
 
       const drained: Session.ID[] = []
       const scope = yield* Scope.make()
@@ -432,6 +444,12 @@ describe("SessionRestart background recovery", () => {
       yield* Effect.forEach([parent, child], execution.awaitIdle, { discard: true })
 
       expect(drained.toSorted()).toEqual([parent, child].toSorted())
+      expect(
+        [...(yield* store.context(parent)), ...(yield* store.context(child))]
+          .filter((message) => message.type === "synthetic")
+          .map((message) => message.id)
+          .toSorted(),
+      ).toEqual(notifications.toSorted())
       expect((yield* store.context(parent)).filter((message) => message.type === "synthetic")).toMatchObject([
         {
           type: "synthetic",
