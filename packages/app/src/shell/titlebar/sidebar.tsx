@@ -265,6 +265,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         session={props.item.session}
         preparing={false}
         orientation="vertical"
+        sidebarActions
         timestamp={
           time() ? { ...time()!, label: getCompactRelativeTime(time()!.at, language.plural, state.now) } : undefined
         }

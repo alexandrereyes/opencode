@@ -197,7 +197,8 @@ mock.module("@/shell/tabs/tabs", () => ({
   }),
 }))
 const { SessionSidebar } = await import("@/shell/titlebar/sidebar")
-const { TabNavItem } = await import("@/shell/titlebar/tab-nav")
+const { TabNavItem, DraftTabItem } = await import("@/shell/titlebar/tab-nav")
+const { MobileTabProvider } = await import("@/shell/titlebar/mobile-tab-actions")
 const { flushPersisted } = await import("@/runtime/persistence/persist")
 const storage = "opencode.global.dat:sidebar-navigation"
 const key = (id: string, server = 0) => sessionKey(ServerConnection.key(connections[server]), id)
@@ -219,12 +220,12 @@ async function pin(host: HTMLElement, id: string, action: "pin" | "unpin", serve
   const row = findRow(host, id, server)
   if (context)
     row.querySelector("a")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }))
-  if (!context)
+  if (!context) {
+    row.querySelector("a")!.focus()
     row
-      .querySelector<HTMLButtonElement>('[aria-label="common.moreOptions"]')!
-      .dispatchEvent(
-        new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, pointerType: "mouse" }),
-      )
+      .querySelector("a")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }))
+  }
   await wait()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
     (item) => item.textContent === `sidebar.session.${action}`,
@@ -408,6 +409,132 @@ test("horizontal and Home row consumers have no pin action without opting in", a
   } finally {
     dispose()
     host.remove()
+  }
+})
+
+test("quick actions opt in only for persisted sidebar rows and guard dragging and pending props", async () => {
+  // HappyDOM's unset animationName is empty, not the browser's "none"; make menu teardown explicit.
+  const sheet = document.createElement("style")
+  sheet.textContent = '[data-component="menu-v2-content"] { animation-name: none; }'
+  document.head.append(sheet)
+  const host = document.createElement("div")
+  document.body.append(host)
+  const [state, setState] = createStore({ sidebar: false, dragging: false, pending: false })
+  const calls: string[] = []
+  const props = {
+    href: "/test",
+    server: ServerConnection.key(connections[0]),
+    session: row("ordinary", now).session,
+    preparing: false,
+    onClose: () => calls.push("close"),
+    onNavigate: () => calls.push("navigate"),
+    onActivate: () => {
+      calls.push("select")
+      return true
+    },
+    onTogglePin: () => calls.push("pin"),
+    onRename: async () => {
+      calls.push("rename")
+    },
+    get sidebarActions() {
+      return state.sidebar
+    },
+    get dragging() {
+      return state.dragging
+    },
+    get selectionPending() {
+      return state.pending
+    },
+  }
+  const dispose = render(
+    () =>
+      createComponent(QueryClientProvider, {
+        client: new QueryClient(),
+        get children() {
+          return [
+            createComponent(TabNavItem, props),
+            createComponent(MobileTabProvider, {
+              open: true,
+              get children() {
+                return createComponent(TabNavItem, { ...props, sidebarActions: true, orientation: "vertical" })
+              },
+            }),
+            createComponent(DraftTabItem, {
+              href: "/draft",
+              title: "Draft",
+              orientation: "vertical",
+              onClose: () => calls.push("draft-close"),
+              onNavigate: () => calls.push("draft-navigate"),
+            }),
+          ]
+        },
+      }),
+    host,
+  )
+  try {
+    const rows = [...host.querySelectorAll<HTMLElement>("[data-titlebar-tab]")]
+    const [ordinary, mobile, draft] = rows
+    expect(ordinary.querySelector('[aria-label="common.moreOptions"]')).not.toBeNull()
+    expect(ordinary.querySelector('[aria-label="common.closeTab"]')).not.toBeNull()
+    expect(mobile.querySelector('[aria-label="common.moreOptions"]')).not.toBeNull()
+    expect(mobile.querySelector('[data-slot="mobile-tab-time"]')).not.toBeNull()
+    expect(draft.querySelector('[aria-label="common.closeTab"]')).not.toBeNull()
+    expect(rows.every((row) => !row.querySelector('[data-slot="tab-quick-actions"]'))).toBe(true)
+    setState("sidebar", true)
+    expect(ordinary.querySelector('[aria-label="common.moreOptions"]')).toBeNull()
+    expect(ordinary.querySelector('[aria-label="common.closeTab"]')).toBeNull()
+    const before = lifecycle.length
+    for (const blocker of ["dragging", "pending"] as const) {
+      setState(blocker, true)
+      for (const action of ordinary.querySelectorAll<HTMLButtonElement>('[data-slot="tab-quick-actions"] button')) {
+        expect(action.disabled).toBe(true)
+        action.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+      }
+      if (blocker === "pending") {
+        ordinary.dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }))
+        ordinary
+          .querySelector("a")!
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true }))
+        await wait()
+        const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        expect(items).toHaveLength(5)
+        for (const item of items) {
+          expect(item.getAttribute("aria-disabled")).toBe("true")
+          item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+        }
+        document
+          .querySelector('[role="menu"]')!
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+        await wait()
+        expect(ordinary.querySelector('[contenteditable="true"]')).toBeNull()
+      }
+      setState(blocker, false)
+    }
+    expect(lifecycle).toHaveLength(before)
+    expect(calls).toEqual([])
+    ordinary.querySelector("a")!.focus()
+    ordinary
+      .querySelector("a")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }))
+    await wait()
+    const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === "common.rename",
+    )!
+    rename.focus()
+    rename.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await wait()
+    const title = ordinary.querySelector<HTMLElement>('[contenteditable="true"]')!
+    expect(title).not.toBeNull()
+    title.textContent = "Renamed session"
+    title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await wait()
+    expect(calls).toEqual(["rename"])
+    expect(mobile.querySelector('[data-slot="tab-quick-actions"]')).toBeNull()
+    expect(draft.querySelector('[data-slot="tab-quick-actions"]')).toBeNull()
+  } finally {
+    dispose()
+    host.remove()
+    sheet.remove()
   }
 })
 

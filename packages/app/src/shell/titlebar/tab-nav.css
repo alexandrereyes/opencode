@@ -24,6 +24,26 @@
   padding-inline-end: 48px;
 }
 
+/* Reserve the same two-button space at rest so the title and time never shift on reveal. */
+[data-titlebar-tab][data-sidebar-actions] [data-slot="tab-quick-actions"] {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-titlebar-tab][data-sidebar-actions]:is(:hover, :focus-within) [data-slot="tab-quick-actions"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  [data-titlebar-tab][data-sidebar-actions] [data-slot="tab-quick-actions"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 [data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-project"]) {
   height: 45px;
 }
@@ -203,9 +223,9 @@
   --tab-title-fade-offset: 24px;
 }
 
-[data-titlebar-tab]:not([data-sidebar-time])[data-title-overflow="true"]:not(:hover):not([data-active="true"]):not(
-    [data-editing="true"]
-  )
+[data-titlebar-tab]:not([data-sidebar-time]):not([data-sidebar-actions])[data-title-overflow="true"]:not(:hover):not(
+    [data-active="true"]
+  ):not([data-editing="true"])
   [data-slot="tab-link"]:not(:where([data-slot="mobile-tabs-drawer"] *)) {
   padding-inline-end: 0;
 }

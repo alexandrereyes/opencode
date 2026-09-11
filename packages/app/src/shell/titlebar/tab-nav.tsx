@@ -47,6 +47,7 @@ export function TabNavItem(props: {
   projectLabel?: string
   compact?: boolean
   timestamp?: { dateTime: string; title: string; label: string }
+  sidebarActions?: boolean
   closable?: boolean
   pinned?: boolean
   onTogglePin?: () => void
@@ -68,11 +69,12 @@ export function TabNavItem(props: {
   const rename = createMutation(() => ({ mutationFn: props.onRename }))
   const gesture = { selected: false, checkbox: undefined as MouseEvent | KeyboardEvent | undefined }
   const lifecyclePending = () => lifecycle.pending() || props.selectionPending
+  const sidebarActions = () => props.sidebarActions && !!props.session && !mobileTabs
 
   const closeTab = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
-    if (props.closable !== false) props.onClose()
+    if (props.closable !== false && !lifecyclePending()) props.onClose()
   }
   const servers = useServers()
   const serverCtx = useServerCtx(() => servers.list.find((item) => ServerConnection.key(item) === props.server))
@@ -161,7 +163,7 @@ export function TabNavItem(props: {
     titleEl.scrollLeft = 0
     setEditing(false)
 
-    if (!save || !next || next === original) {
+    if (!save || !next || next === original || lifecyclePending()) {
       return
     }
 
@@ -179,7 +181,7 @@ export function TabNavItem(props: {
   const openRename = (event?: MouseEvent) => {
     event?.preventDefault()
     event?.stopPropagation()
-    if (!canOpenTabRename(props.dragging, editing(), rename.isPending)) return
+    if (lifecyclePending() || !canOpenTabRename(props.dragging, editing(), rename.isPending)) return
     const session = props.session
     if (!session) return
     titleEl.textContent = session.title ?? ""
@@ -229,15 +231,32 @@ export function TabNavItem(props: {
   const menuItems = () => (
     <>
       <Show when={props.onTogglePin}>
-        <Menu.Item disabled={!props.session} onSelect={() => props.onTogglePin?.()}>
+        <Menu.Item
+          disabled={!props.session || lifecyclePending()}
+          onSelect={() => {
+            if (!lifecyclePending()) props.onTogglePin?.()
+          }}
+        >
           {language.t(props.pinned ? "sidebar.session.unpin" : "sidebar.session.pin")}
         </Menu.Item>
       </Show>
-      <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
+      <Menu.Item
+        disabled={!props.session || rename.isPending || lifecyclePending()}
+        onSelect={() => {
+          if (!lifecyclePending()) setMenu("rename", true)
+        }}
+      >
         {language.t("common.rename")}
       </Menu.Item>
       <Show when={props.closable !== false}>
-        <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
+        <Menu.Item
+          disabled={lifecyclePending()}
+          onSelect={() => {
+            if (!lifecyclePending()) props.onClose()
+          }}
+        >
+          {language.t("common.closeTab")}
+        </Menu.Item>
       </Show>
       <Menu.Separator />
       <Menu.Item
@@ -269,6 +288,7 @@ export function TabNavItem(props: {
       data-slot="titlebar-tab-item"
       data-orientation={props.orientation ?? "horizontal"}
       data-sidebar-time={props.orientation === "vertical" && props.timestamp ? "" : undefined}
+      data-sidebar-actions={sidebarActions() ? "" : undefined}
       data-title-overflow={titleOverflowing()}
       data-editing={editing()}
       data-session-actions
@@ -348,6 +368,16 @@ export function TabNavItem(props: {
           if (gesture.selected) event.currentTarget.focus()
         }}
         onKeyDown={(event) => {
+          if (sidebarActions() && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
+            event.preventDefault()
+            event.stopPropagation()
+            // Kobalte opens on contextmenu; macOS does not synthesize it for these keys.
+            const rect = event.currentTarget.getBoundingClientRect()
+            event.currentTarget.dispatchEvent(
+              new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.x, clientY: rect.bottom }),
+            )
+            return
+          }
           if (event.key !== " " || !props.selectionMode || editing()) return
           props.onActivate?.(event)
         }}
@@ -479,37 +509,103 @@ export function TabNavItem(props: {
       </Menu.Context.Trigger>
 
       <div data-slot="tab-close">
-        <Menu open={menu.actions} onOpenChange={(open) => setMenu("actions", open)} placement="bottom-end">
-          <Menu.Trigger
-            as={IconButton}
-            size="small"
-            variant="ghost-muted"
-            class="hover-reveal group-hover:opacity-100 group-focus-within:opacity-100 group-data-[active=true]:opacity-100"
-            icon={<Icon name="outline-dots" />}
-            aria-label={language.t("common.moreOptions")}
-            disabled={props.dragging}
-            onPointerDown={(event: PointerEvent) => event.stopPropagation()}
-            onClick={(event: MouseEvent) => event.stopPropagation()}
-          />
-          <Menu.Portal>
-            <Menu.Content onPointerDown={preventMenuTouchMouse} onCloseAutoFocus={closeMenu}>
-              {menuItems()}
-            </Menu.Content>
-          </Menu.Portal>
-        </Menu>
-        <Show when={props.closable !== false}>
-          <IconButton
-            size="small"
-            variant="ghost-muted"
-            class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
-            onPointerDown={(event) => {
+        <Show when={sidebarActions()}>
+          <div
+            data-slot="tab-quick-actions"
+            // Native listeners stop drag sensors before Solid's delegated document handlers run.
+            on:pointerdown={(event) => {
               event.preventDefault()
               event.stopPropagation()
             }}
-            onClick={closeTab}
-            icon={<Icon name="xmark-small" />}
-            aria-label={language.t("common.closeTab")}
-          />
+            on:mousedown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            on:click={(event) => event.stopPropagation()}
+            on:dblclick={(event) => event.stopPropagation()}
+            on:auxclick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            on:keydown={(event) => {
+              if (event.key === "Enter" || event.key === " ") event.stopPropagation()
+            }}
+            on:keyup={(event) => {
+              if (event.key === "Enter" || event.key === " ") event.stopPropagation()
+            }}
+            on:dragstart={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+          >
+            <IconButton
+              size="small"
+              variant="ghost-muted"
+              disabled={props.dragging || lifecyclePending()}
+              icon={<Icon name="archive" />}
+              aria-label={language.t("common.archive")}
+              title={language.t("common.archive")}
+              on:click={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                if (props.session && !props.dragging && !lifecyclePending()) {
+                  setPopoverOpen(false)
+                  void lifecycle.archive(props.server, props.session)
+                }
+              }}
+            />
+            <IconButton
+              size="small"
+              variant="ghost-muted"
+              disabled={props.dragging || lifecyclePending()}
+              icon={<Icon name="trash" />}
+              aria-label={language.t("common.delete")}
+              title={language.t("common.delete")}
+              on:click={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                if (props.session && !props.dragging && !lifecyclePending()) {
+                  setPopoverOpen(false)
+                  void lifecycle.showDelete(props.server, props.session)
+                }
+              }}
+            />
+            {/* Reserved for a future sidebar overflow trigger; secondary actions live in the context menu. */}
+          </div>
+        </Show>
+        <Show when={!sidebarActions()}>
+          <Menu open={menu.actions} onOpenChange={(open) => setMenu("actions", open)} placement="bottom-end">
+            <Menu.Trigger
+              as={IconButton}
+              size="small"
+              variant="ghost-muted"
+              class="hover-reveal group-hover:opacity-100 group-focus-within:opacity-100 group-data-[active=true]:opacity-100"
+              icon={<Icon name="outline-dots" />}
+              aria-label={language.t("common.moreOptions")}
+              disabled={props.dragging}
+              onPointerDown={(event: PointerEvent) => event.stopPropagation()}
+              onClick={(event: MouseEvent) => event.stopPropagation()}
+            />
+            <Menu.Portal>
+              <Menu.Content onPointerDown={preventMenuTouchMouse} onCloseAutoFocus={closeMenu}>
+                {menuItems()}
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu>
+          <Show when={props.closable !== false}>
+            <IconButton
+              size="small"
+              variant="ghost-muted"
+              class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+              onPointerDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={closeTab}
+              icon={<Icon name="xmark-small" />}
+              aria-label={language.t("common.closeTab")}
+            />
+          </Show>
         </Show>
       </div>
     </div>

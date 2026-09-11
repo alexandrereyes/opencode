@@ -518,8 +518,10 @@ test("shared sidebar clock updates every view without reordering, remounting, lo
         expect(time.getAttribute("aria-label")).toBe(time.title)
         expect(time.dir).toBe("auto")
         expect(pinnedRow.querySelector('[data-slot="tab-pin"]')).not.toBeNull()
-        expect(pinnedRow.querySelector('[aria-label="Close tab"]')).not.toBeNull()
-        expect(pinnedRow.querySelector('[aria-label="More options"]')).not.toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="Close tab"]')).toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="More options"]')).toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="Archive"]')).not.toBeNull()
+        expect(pinnedRow.querySelector('[aria-label="Delete"]')).not.toBeNull()
         expect(getComputedStyle(time).lineHeight).toBe("16px")
         expect(getComputedStyle(compact.querySelector("a")!).paddingInlineEnd).toBe("48px")
         pinnedRow.dataset.titleOverflow = "true"
@@ -812,6 +814,216 @@ test("a lifecycle event during initial snapshot wins over its older active snaps
   }
 })
 
+test("sidebar quick actions reserve space and reveal on focus with real icons in LTR and RTL", async () => {
+  const sheet = document.createElement("style")
+  sheet.textContent = await Bun.file(new URL("../../src/shell/titlebar/tab-nav.css", import.meta.url)).text()
+  document.head.append(sheet)
+  try {
+    for (const direction of ["ltr", "rtl"]) {
+      const ui = mount(true, direction)
+      try {
+        await wait()
+        const row = findRows(ui.host, "same")[0]
+        const cluster = row.querySelector<HTMLElement>('[data-slot="tab-quick-actions"]')!
+        const actions = [...cluster.querySelectorAll<HTMLButtonElement>("button")]
+        const link = row.querySelector("a")!
+        const time = row.querySelector("time")!
+        expect(actions.map((item) => item.getAttribute("aria-label"))).toEqual(["Archive", "Delete"])
+        expect(actions.map((item) => item.querySelector("use")?.getAttribute("href"))).toEqual([
+          expect.stringContaining("archive"),
+          expect.stringContaining("trash"),
+        ])
+        expect(actions.every((item) => item.tabIndex === 0 && item.title === item.getAttribute("aria-label"))).toBe(
+          true,
+        )
+        expect(row.querySelector('[aria-label="More options"]')).toBeNull()
+        expect(row.querySelector('[aria-label="Close tab"]')).toBeNull()
+        expect(getComputedStyle(cluster).opacity).toBe("0")
+        expect(getComputedStyle(cluster).pointerEvents).toBe("none")
+        const padding = getComputedStyle(link).paddingInlineEnd
+        expect(padding).toBe("48px")
+        expect(getComputedStyle(cluster.parentElement!).width).toBe("44px")
+        row.removeAttribute("data-sidebar-time")
+        row.dataset.titleOverflow = "true"
+        expect(getComputedStyle(link).paddingInlineEnd).toBe(padding)
+        row.setAttribute("data-sidebar-time", "")
+        for (const focused of [link, ...actions]) {
+          focused.focus()
+          expect(document.activeElement === focused).toBe(true)
+          expect(row.contains(document.activeElement)).toBe(true)
+          expect(getComputedStyle(link).paddingInlineEnd).toBe(padding)
+          expect(time.isConnected).toBe(true)
+          expect(time.getAttribute("aria-hidden")).toBeNull()
+          expect(getComputedStyle(time).display).not.toBe("none")
+        }
+        // HappyDOM has no hover/focus-within CSS evaluation; inspect the parsed reveal and touch rules.
+        const rules = [...sheet.sheet!.cssRules]
+        expect(
+          rules.some(
+            (rule) =>
+              rule.cssText.includes(":hover, :focus-within") &&
+              rule.cssText.includes("opacity: 1") &&
+              rule.cssText.includes("pointer-events: auto"),
+          ),
+        ).toBe(true)
+        expect(
+          rules.some((rule) => rule.cssText.includes("(hover: none)") && rule.cssText.includes("tab-quick-actions")),
+        ).toBe(true)
+      } finally {
+        ui.dispose()
+      }
+    }
+  } finally {
+    sheet.remove()
+  }
+})
+
+test("Escape clears selection while either quick action is focused without running actions", async () => {
+  const ui = mount()
+  try {
+    await wait()
+    const before = requests.length
+    const navigations = selected.length
+    const closes = closed.length
+    for (const label of ["Archive", "Delete"]) {
+      button(ui.host, "Select sessions").click()
+      link(ui.host, "same").click()
+      expect(count(ui.host)).toBe("1 session selected")
+      const action = findRows(ui.host, "same")[0].querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+      action.focus()
+      expect(document.activeElement === action).toBe(true)
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      action.dispatchEvent(escape)
+      action.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true, cancelable: true }))
+      expect(escape.defaultPrevented).toBe(true)
+      expect(count(ui.host)).toBeUndefined()
+      expect(ui.host.querySelectorAll('input[type="checkbox"]')).toHaveLength(0)
+      expect(requests).toHaveLength(before)
+      expect(selected).toHaveLength(navigations)
+      expect(closed).toHaveLength(closes)
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+    }
+  } finally {
+    ui.dispose()
+  }
+})
+
+test("quick Archive/Delete isolate pointer, keyboard and modifiers, preserve confirmation and remove live selection", async () => {
+  const original = hosts.map((host) => host.backend.map((row) => structuredClone(row)))
+  try {
+    for (const selectionMode of [false, true]) {
+      hosts[0].backend.splice(0, hosts[0].backend.length, row("same"), row("row-0"), row("row-1"))
+      hosts[1].backend.splice(0)
+      const ui = mount(true, selectionMode ? "rtl" : "ltr")
+      const gate = Promise.withResolvers<void>()
+      const events: unknown[] = []
+      const listener = (event: Event) => events.push(readSessionTabsRemovedDetail(event))
+      window.addEventListener(SESSION_TABS_REMOVED_EVENT, listener)
+      try {
+        await wait()
+        const navigations = selected.length
+        const closes = closed.length
+        const before = requests.length
+        if (selectionMode) {
+          button(ui.host, "Select sessions").click()
+          link(ui.host, "same").click()
+          link(ui.host, "row-0").click()
+        }
+        const selection = count(ui.host)
+        const project = ui.host.querySelector("[data-project-key]")!
+        const expanded = project.querySelector("button[aria-expanded]")!.getAttribute("aria-expanded")
+        const row = findRows(ui.host, "same")[0]
+        const archive = row.querySelector<HTMLButtonElement>('[aria-label="Archive"]')!
+        const remove = row.querySelector<HTMLButtonElement>('[aria-label="Delete"]')!
+        const bubbled: string[] = []
+        for (const type of [
+          "pointerdown",
+          "mousedown",
+          "click",
+          "dblclick",
+          "auxclick",
+          "keydown",
+          "keyup",
+          "dragstart",
+        ])
+          row.addEventListener(type, () => bubbled.push(type))
+        for (const init of [{}, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+          press(remove, init)
+          await wait()
+          expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1)
+          expect(document.querySelector('[data-slot="dialog-title"]')?.textContent).toBe("Delete session")
+          expect(requests).toHaveLength(before)
+          button(document, "Cancel").click()
+          await wait()
+          expect(count(ui.host)).toBe(selection)
+        }
+        for (const key of ["Enter", " "]) {
+          remove.focus()
+          remove.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: true, bubbles: true, cancelable: true }))
+          remove.dispatchEvent(new KeyboardEvent("keyup", { key, shiftKey: true, bubbles: true, cancelable: true }))
+          remove.click() // Browser-generated native button activation has detail=0.
+          await wait()
+          expect(requests).toHaveLength(before)
+          button(document, "Cancel").click()
+          await wait()
+        }
+        for (const type of ["dblclick", "auxclick", "dragstart"])
+          remove.dispatchEvent(new MouseEvent(type, { button: 1, bubbles: true, cancelable: true }))
+        // Touch gets the same direct archive action, regardless of Shift.
+        hosts[0].waiters.set("same", gate.promise)
+        archive.dispatchEvent(
+          new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true, cancelable: true }),
+        )
+        archive.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }))
+        archive.dispatchEvent(new MouseEvent("click", { detail: 1, shiftKey: true, bubbles: true, cancelable: true }))
+        await Promise.resolve()
+        expect(archive.disabled).toBe(true)
+        expect(remove.disabled).toBe(true)
+        archive.click()
+        remove.click()
+        expect(requests.slice(before)).toEqual([{ server: 0, action: "archive", id: "same" }])
+        expect(document.querySelector('[role="dialog"]')).toBeNull()
+        expect(bubbled).toEqual([])
+        expect(count(ui.host)).toBe(selection)
+        expect(selected).toHaveLength(navigations)
+        expect(closed).toHaveLength(closes)
+        expect(project.querySelector("button[aria-expanded]")!.getAttribute("aria-expanded")).toBe(expanded)
+        gate.resolve()
+        await wait()
+        expect(findRows(ui.host, "same")).toHaveLength(0)
+        expect(count(ui.host)).toBe(selectionMode ? "1 session selected" : undefined)
+        findRows(ui.host, "row-0")[0].querySelector<HTMLButtonElement>('[aria-label="Delete"]')!.click()
+        await wait()
+        expect(requests).toHaveLength(before + 1)
+        button(document, "Delete session").click()
+        await wait()
+        expect(requests.slice(before)).toEqual([
+          { server: 0, action: "archive", id: "same" },
+          { server: 0, action: "remove", id: "row-0" },
+        ])
+        expect(findRows(ui.host, "row-0")).toHaveLength(0)
+        expect(count(ui.host)).toBe(selectionMode ? "0 sessions selected" : undefined)
+        expect(events).toEqual([
+          {
+            server: ServerConnection.key(connections[0]),
+            directory: "/repo",
+            sessionIDs: expect.arrayContaining(["same"]),
+          },
+          { server: ServerConnection.key(connections[0]), directory: "/repo", sessionIDs: ["row-0"] },
+        ])
+      } finally {
+        gate.resolve()
+        hosts[0].waiters.clear()
+        window.removeEventListener(SESSION_TABS_REMOVED_EVENT, listener)
+        ui.dispose()
+        ;["same", "row-0", "row-1"].forEach((id) => hosts[0].setCache(id, undefined))
+      }
+    }
+  } finally {
+    hosts.forEach((host, i) => host.backend.splice(0, host.backend.length, ...original[i]))
+  }
+}, 15_000)
+
 test("checkbox gestures preserve Shift ranges without double toggles", async () => {
   const ui = mount()
   try {
@@ -876,13 +1088,17 @@ test("pointer modifiers intercept navigation, ranges dedupe repeated rows, check
     expect(count(ui.host)).toBe(`${unique.size} sessions selected`)
     expect(unique.size).toBeLessThan(10) // undisplayed project overflow was not selected
     const before = count(ui.host)
-    const close = findRows(ui.host, "same")[0].querySelector<HTMLButtonElement>('[aria-label="Close tab"]')!
-    press(close)
+    link(ui.host, "same").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))
+    await wait()
+    const close = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === "Close tab",
+    )!
+    close.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await wait()
     expect(closed).toHaveLength(1)
     expect(count(ui.host)).toBe(before)
-    const menu = findRows(ui.host, "same")[0].querySelector<HTMLButtonElement>('[aria-label="More options"]')!
-    menu.dispatchEvent(
-      new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
+    link(ui.host, "same").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
     )
     await wait()
     const pin = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
@@ -1142,7 +1358,7 @@ test("shared lifecycle dedupes cascade roots across servers and preserves cache/
   }
 })
 
-test("row menus block Archive and Delete while a bulk request is pending", async () => {
+test("row menus and direct actions block mutations while a bulk request is pending", async () => {
   const ui = mount()
   const gate = Promise.withResolvers<void>()
   try {
@@ -1162,12 +1378,10 @@ test("row menus block Archive and Delete while a bulk request is pending", async
           .dispatchEvent(new MouseEvent("contextmenu", { button: 2, bubbles: true, cancelable: true }))
       if (!context)
         row
-          .querySelector<HTMLButtonElement>('[aria-label="More options"]')!
-          .dispatchEvent(
-            new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
-          )
+          .querySelector("a")!
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }))
       await wait()
-      for (const action of ["Archive", "Delete…"]) {
+      for (const action of ["Pin session", "Rename", "Archive", "Delete…"]) {
         const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
           (item) => item.textContent === action,
         )!
@@ -1185,6 +1399,14 @@ test("row menus block Archive and Delete while a bulk request is pending", async
         .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
       await wait()
     }
+    for (const label of ["Archive", "Delete"]) {
+      const action = findRows(ui.host, "row-1")[0].querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+      expect(action.disabled).toBe(true)
+      press(action, { shiftKey: true })
+      action.click()
+    }
+    expect(requests.slice(before)).toEqual([{ server: 0, action: "archive", id: "row-0" }])
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
     gate.resolve()
     await wait()
     expect(requests.slice(before)).toEqual([
