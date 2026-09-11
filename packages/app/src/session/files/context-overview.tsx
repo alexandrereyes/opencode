@@ -422,7 +422,11 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                       const capacity = () => subscriptionCapacity(account, clock.now)
                       const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
                       return (
-                        <div role="group" aria-label={account.name} class="flex flex-col gap-1.5 py-1">
+                        <div
+                          role="group"
+                          aria-label={account.name}
+                          class="flex flex-col gap-1.5 border-b border-border-weak-base py-2 last:border-b-0"
+                        >
                           <div class="flex flex-wrap items-baseline justify-between gap-2">
                             <bdi class="min-w-0 break-all text-13-medium text-text-strong">{account.name}</bdi>
                             <bdi class="tabular-nums">
@@ -449,6 +453,14 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                       account.plan === "pro" ? "Pro" : account.plan === "plus" ? "Plus" : account.plan,
                                   })
                                 : language.t("context.overview.planUnknown")}
+                            </span>
+                            <span class="rounded-full bg-surface-raised-base px-2 py-0.5 tabular-nums">
+                              {account.bankedResets === null
+                                ? language.t("context.overview.accountBankedUnknown")
+                                : language.plural(
+                                    "context.overview.accountBanked",
+                                    account.bankedResets.available,
+                                  )}
                             </span>
                             <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
                               {language.t(
