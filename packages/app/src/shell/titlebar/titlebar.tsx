@@ -28,6 +28,8 @@ import { newTabTooltipKeybind } from "@/shell/commands/tooltip-keybind"
 import { TitlebarRightMount } from "@/shell/titlebar/right-slot"
 import { MobileDrawer, MobileDrawerContent, MobileDrawerLabel, MobileDrawerTrigger } from "@/shell/mobile-drawer"
 import { sessionTabTitle } from "./tab-title"
+import { MobileTabProvider } from "./mobile-tab-actions"
+import { useDialog } from "@opencode/ui/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-progress-indicator-v2"
@@ -61,6 +63,7 @@ export function Titlebar(props: {
   const language = useLanguage()
   const settings = useSettings()
   const openSettings = useSettingsDialog()
+  const dialog = useDialog()
   const navigate = useNavigate()
   const location = useLocation()
   const mobile = createMediaQuery("(max-width: 767px)")
@@ -488,6 +491,7 @@ export function Titlebar(props: {
                   fallback={
                     <MobileDrawer
                       open={mobileTabs.open}
+                      suspended={!!dialog.active}
                       closeOnOutsideFocus={false}
                       onOpenChange={(open) => setMobileTabs("open", open)}
                       onContentPresentChange={(present) => {
@@ -554,23 +558,25 @@ export function Titlebar(props: {
                       >
                         {language.t("command.session.new")}
                       </button>
-                      <MobileDrawerContent>
+                      <MobileDrawerContent suspended={!!dialog.active}>
                         <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                         <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
                           <div data-slot="mobile-tabs-drawer-list">
-                            <TitlebarTabStrip
-                              orientation="vertical"
-                              tabs={orderedMobileTabs()}
-                              currentTab={currentTab()}
-                              onNavigate={(tab) => {
-                                tabs.select(tab)
-                                setMobileTabs("open", false)
-                              }}
-                              onClose={(tab) => {
-                                const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
-                                if (index !== -1) tabsStoreActions.closeTab(index)
-                              }}
-                            />
+                            <MobileTabProvider open={mobileTabs.open}>
+                              <TitlebarTabStrip
+                                orientation="vertical"
+                                tabs={orderedMobileTabs()}
+                                currentTab={currentTab()}
+                                onNavigate={(tab) => {
+                                  tabs.select(tab)
+                                  setMobileTabs("open", false)
+                                }}
+                                onClose={(tab) => {
+                                  const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
+                                  if (index !== -1) tabsStoreActions.closeTab(index)
+                                }}
+                              />
+                            </MobileTabProvider>
                           </div>
                           <button
                             type="button"

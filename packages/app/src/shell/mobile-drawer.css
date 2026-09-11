@@ -43,6 +43,12 @@
   pointer-events: none;
 }
 
+/* App dialogs start at layer 50. Keep the open drawer below their scrim. */
+[data-slot="mobile-drawer-overlay"][data-suspended],
+[data-slot="mobile-drawer-content"][data-suspended] {
+  z-index: 49;
+}
+
 [data-slot="mobile-drawer-handle"] {
   display: flex;
   height: 28px;
