@@ -72,6 +72,12 @@ test("context tab retains selection across sessions and shows live quota and sub
             plan: "plus",
             authenticated: true,
             cooldownSeconds: 0,
+            bankedResets: {
+              available: 2,
+              earliestExpiresAt: null,
+              latestExpiresAt: null,
+              nonExpiring: 2,
+            },
             stale: false,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
@@ -85,6 +91,7 @@ test("context tab retains selection across sessions and shows live quota and sub
             plan: "plus",
             authenticated: true,
             cooldownSeconds: 0,
+            bankedResets: null,
             stale: false,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
@@ -98,6 +105,7 @@ test("context tab retains selection across sessions and shows live quota and sub
             plan: "plus",
             authenticated: false,
             cooldownSeconds: 0,
+            bankedResets: null,
             stale: true,
             hasCapacity: null,
             observedAt: null,
@@ -111,6 +119,7 @@ test("context tab retains selection across sessions and shows live quota and sub
             plan: "plus",
             authenticated: true,
             cooldownSeconds: 0,
+            bankedResets: null,
             stale: true,
             hasCapacity: true,
             observedAt: new Date().toISOString(),
@@ -138,17 +147,22 @@ test("context tab retains selection across sessions and shows live quota and sub
   const pro = overview.getByRole("group", { name: "subscription@example.test" })
   await expect(pro).toContainText("59% remaining · 41% used")
   await expect(pro).toContainText("Plan: Pro")
+  await expect(pro).toContainText("Banked resets: 3")
   await expect(pro).toContainText("Capacity confirmed · available")
   const exhausted = overview.getByRole("group", { name: "exhausted@example.test" })
   await expect(exhausted).toContainText("0% remaining · 100% used")
+  await expect(exhausted).toContainText("Banked resets: 0")
   await expect(exhausted).toContainText("Capacity confirmed · unavailable")
   await expect(exhausted).toContainText("No capacity available")
   const plus = overview.getByRole("group", { name: "plus@example.test" })
   await expect(plus).toContainText("100% remaining · 0% used")
   await expect(plus).toContainText("Plan: Plus")
+  await expect(plus).toContainText("Banked resets: 2")
   await expect(plus).toContainText("Outside the active Pro pool")
   await expect(overview.getByRole("group", { name: "disabled@example.test" })).toContainText("Subscription disabled")
-  await expect(overview.getByRole("group", { name: "reauth@example.test" })).toContainText("Reauthentication required")
+  const reauth = overview.getByRole("group", { name: "reauth@example.test" })
+  await expect(reauth).toContainText("Banked resets: Unavailable")
+  await expect(reauth).toContainText("Reauthentication required")
   const stale = overview.getByRole("group", { name: "stale@example.test" })
   await expect(stale).toContainText("41% remaining · 59% used")
   await expect(stale).toContainText("Capacity unconfirmed")
