@@ -18,6 +18,7 @@ import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
 import { subscriptionCapacity, subscriptionPercentages, subscriptionPool } from "./subscription-pool"
+import { SubagentContext } from "./subagent-context"
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
   return (
@@ -258,7 +259,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                   <bdi class="block truncate" title={child.title}>
                     <TextShimmer text={child.title ?? child.id} active={data.session.status(child.id) === "running"} />
                   </bdi>
-                  <bdi class="block truncate text-12-regular text-v2-text-text-muted">{child.agent}</bdi>
+                  <SubagentContext child={child} active={props.active} />
                 </span>
                 <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
                   <span class="block">
