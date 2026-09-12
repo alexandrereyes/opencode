@@ -46,8 +46,8 @@ test("inactive tabs load attention, but read transcript and inbox only on select
   )
   await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
   await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
-  await page.route("**/api/server/subscriptions", (route) =>
-    route.fulfill({ json: { status: "unconfigured", accounts: [] } }),
+  await page.route("**/api/rpc/custom.subscriptions/list?*", (route) =>
+    route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } }),
   )
   await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID, fixture.targetID, fixture.childID] })
   const attention = Promise.all(

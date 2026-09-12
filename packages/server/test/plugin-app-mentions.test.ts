@@ -4,13 +4,14 @@ import { pathToFileURL } from "node:url"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
 import { AppMentions } from "@opencode/plugin-app-custom/rpc"
+import { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
 import { Effect, Schedule } from "effect"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "./fixture/server"
 
 it.live(
-  "discovers the app plugin per Location and serves its RPC through the public client",
+  "serves app mentions and subscriptions from the same Location plugin over HTTP RPC",
   () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped("opencode-app-mentions-")
@@ -19,6 +20,47 @@ it.live(
       const config = path.join(tmp.path, "config")
       const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
       const fixture = path.resolve(import.meta.dir, "../../plugin-app-custom/test/fixture/mcp-server.ts")
+      const proxy = Bun.serve({
+        port: 0,
+        fetch: () =>
+          Response.json({
+            accounts: [
+              {
+                account: {
+                  id: "quota",
+                  name: null,
+                  email: "quota@example.test",
+                  enabled: true,
+                  planType: "pro",
+                  authenticationState: "Authenticated",
+                  oauth: { accessToken: "private" },
+                },
+                usage: {
+                  weeklyPercent: 25,
+                  weeklyResetAt: null,
+                  observedAt: "2026-09-12T12:00:00Z",
+                  hasCapacity: true,
+                  planType: "pro",
+                },
+                usageAgeSeconds: 0,
+                cooldownSeconds: 0,
+                bankedResets: null,
+              },
+            ],
+          }),
+      })
+      const previousProxy = process.env.OPENCODE_LLM_PROXY_URL
+      process.env.OPENCODE_LLM_PROXY_URL = proxy.url.toString()
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => proxy.stop(true)).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              if (previousProxy === undefined) delete process.env.OPENCODE_LLM_PROXY_URL
+              if (previousProxy !== undefined) process.env.OPENCODE_LLM_PROXY_URL = previousProxy
+            }),
+          ),
+        ),
+      )
       yield* Effect.promise(async () => {
         await Promise.all([fs.mkdir(path.join(first, ".opencode", "plugins"), { recursive: true }), fs.mkdir(second)])
         await fs.writeFile(
@@ -82,6 +124,29 @@ it.live(
           },
         ],
       })
+      const subscriptions = yield* Effect.promise(() =>
+        client.rpc(Subscriptions.Definition).list({}, { location: firstLocation }),
+      )
+      expect(subscriptions).toEqual({
+        status: "ok",
+        accounts: [
+          {
+            id: "quota",
+            name: "quota@example.test",
+            enabled: true,
+            plan: "pro",
+            authenticated: true,
+            cooldownSeconds: 0,
+            bankedResets: null,
+            remaining: 75,
+            resetAt: null,
+            observedAt: "2026-09-12T12:00:00Z",
+            stale: false,
+            hasCapacity: true,
+          },
+        ],
+      })
+      expect(JSON.stringify(subscriptions)).not.toContain("private")
 
       yield* Effect.promise(() => client.plugin.awaitActivation({ location: secondLocation }))
       const isolated = yield* Effect.promise(() => client.plugin.list({ location: secondLocation }))
@@ -91,6 +156,16 @@ it.live(
         catch: (error) => error,
       }).pipe(Effect.flip)
       expect(unavailable).toMatchObject({ type: "rpc.unavailable" })
+      const subscriptionsUnavailable = yield* Effect.tryPromise({
+        try: () => client.rpc(Subscriptions.Definition).list({}, { location: secondLocation }),
+        catch: (error) => error,
+      }).pipe(Effect.flip)
+      expect(subscriptionsUnavailable).toMatchObject({ type: "rpc.unavailable" })
+
+      const oldSubscriptions = yield* Effect.promise(() =>
+        fetch(new URL("/api/server/subscriptions", server.base), { headers: server.headers }),
+      )
+      expect(oldSubscriptions.status).toBe(404)
 
       const removed = yield* Effect.promise(() =>
         fetch(new URL(`/api/mcp/computer-use/app?location[directory]=${encodeURIComponent(first)}`, server.base), {

@@ -2777,29 +2777,6 @@ export type ServerNativeAppsOpenInput = {
 
 export type ServerNativeAppsOpenOutput = void
 
-export type ServerSubscriptionsOutput = {
-  status: "ok" | "unconfigured" | "unavailable"
-  accounts: Array<{
-    id: string
-    name: string
-    enabled: boolean
-    plan: string | null
-    authenticated: boolean
-    cooldownSeconds: number
-    bankedResets: {
-      available: number
-      earliestExpiresAt: string | null
-      latestExpiresAt: string | null
-      nonExpiring: number
-    } | null
-    remaining: number | null
-    resetAt: string | null
-    observedAt: string | null
-    stale: boolean
-    hasCapacity: boolean | null
-  }>
-}
-
 export type ServerGetOutput = { urls: Array<string> }
 
 export type ServerMaintenanceAcquireOutput = {

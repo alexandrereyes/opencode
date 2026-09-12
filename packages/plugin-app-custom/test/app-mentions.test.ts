@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import fixture from "./fixtures/open-computer-use-apps.json"
-import { parseApps } from "../src/index"
+import { parseApps } from "../src/app-mentions"
 import { AppMentions } from "../src/rpc"
 
 describe("app mentions", () => {

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@opencode/plugin-app-custom",
   "version": "2.0.0",
-  "description": "OpenCode app mention suggestions backed by computer-use MCP servers",
+  "description": "Custom OpenCode app integrations",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -18,7 +18,8 @@
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./rpc": "./src/rpc.ts"
+    "./rpc": "./src/rpc.ts",
+    "./subscriptions/rpc": "./src/subscriptions/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

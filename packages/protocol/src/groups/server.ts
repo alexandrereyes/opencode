@@ -26,41 +26,6 @@ export const ServerGroup = HttpApiGroup.make("server.server")
     ),
   )
   .add(
-    HttpApiEndpoint.get("server.subscriptions", "/api/server/subscriptions", {
-      success: Schema.Struct({
-        status: Schema.Literals(["ok", "unconfigured", "unavailable"]),
-        accounts: Schema.Array(
-          Schema.Struct({
-            id: Schema.String,
-            name: Schema.String,
-            enabled: Schema.Boolean,
-            plan: Schema.NullOr(Schema.String),
-            authenticated: Schema.Boolean,
-            cooldownSeconds: Schema.Number,
-            bankedResets: Schema.NullOr(
-              Schema.Struct({
-                available: Schema.Number,
-                earliestExpiresAt: Schema.NullOr(Schema.String),
-                latestExpiresAt: Schema.NullOr(Schema.String),
-                nonExpiring: Schema.Number,
-              }),
-            ),
-            remaining: Schema.NullOr(Schema.Number),
-            resetAt: Schema.NullOr(Schema.String),
-            observedAt: Schema.NullOr(Schema.String),
-            stale: Schema.Boolean,
-            hasCapacity: Schema.NullOr(Schema.Boolean),
-          }),
-        ),
-      }),
-    }).annotateMerge(
-      OpenApi.annotations({
-        identifier: "v2.server.subscriptions",
-        summary: "Read subscription quotas from the configured LLM proxy",
-      }),
-    ),
-  )
-  .add(
     HttpApiEndpoint.get("server.get", "/api/server", {
       success: Schema.Struct({ urls: Schema.Array(Schema.String) }),
     }).annotateMerge(
