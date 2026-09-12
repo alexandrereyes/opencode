@@ -9,6 +9,7 @@ import type { CatalogDomain } from "./catalog.js"
 import type { CommandDomain } from "./command.js"
 import type { EventDomain } from "./event.js"
 import type { IntegrationDomain } from "./integration.js"
+import type { MessageDomain } from "./message.js"
 import type { MCPDomain } from "./mcp.js"
 import type { PermissionDomain } from "./permission.js"
 import type { ReferenceDomain } from "./reference.js"
@@ -35,6 +36,7 @@ export interface Context {
     readonly terminal: Pick<OpenCodeClient["experimental"]["persistentPty"], "read">
   }
   readonly integration: IntegrationDomain
+  readonly message: MessageDomain
   readonly mcp: MCPDomain
   readonly generate: GenerateApi
   readonly permission: PermissionDomain

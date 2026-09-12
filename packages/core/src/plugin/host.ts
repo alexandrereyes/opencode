@@ -6,6 +6,7 @@ import type { IntegrationMethodRegistration } from "@opencode/plugin/effect/inte
 import { EventManifest } from "@opencode/schema/event-manifest"
 import type { Event } from "@opencode/schema/event"
 import { ServerConfig } from "@opencode/schema/mcp"
+import { MessagePage } from "@opencode/schema/session-message-page"
 import { App } from "../app.js"
 import { Effect, Schema, Stream } from "effect"
 import { Agent } from "../agent.js"
@@ -350,6 +351,31 @@ export const make = Effect.fn("PluginHost.make")(function* (
                 editor.method.remove(Integration.ID.make(id), Schema.decodeUnknownSync(Integration.Method)(method)),
             },
           })
+        }),
+    },
+    message: {
+      list: (input) =>
+        Effect.gen(function* () {
+          if (input.cursor && input.order !== undefined)
+            return yield* Effect.fail(new Error("Cursor cannot be combined with order"))
+          const decoded = input.cursor ? yield* MessagePage.Cursor.parse(input.cursor) : undefined
+          const order = decoded?.order ?? input.order ?? "desc"
+          const messages = yield* sessions.messages({
+            sessionID: input.sessionID,
+            limit: input.limit ?? 50,
+            order,
+            type: input.type,
+            cursor: decoded ? { id: decoded.id, direction: decoded.direction } : undefined,
+          })
+          const first = messages[0]
+          const last = messages.at(-1)
+          return {
+            data: messages,
+            cursor: {
+              previous: first ? MessagePage.Cursor.make({ id: first.id, order, direction: "previous" }) : undefined,
+              next: last ? MessagePage.Cursor.make({ id: last.id, order, direction: "next" }) : undefined,
+            },
+          }
         }),
     },
     mcp: {

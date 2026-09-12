@@ -124,6 +124,21 @@ await ctx.tool.transform((tools) => {
 })
 ```
 
+## Reading Messages
+
+`ctx.message.list` uses the same newest-first default, filters, limits, and opaque
+cursors as the public message API. Plugins that need to start at a known message
+boundary can construct a compatible cursor without depending on server internals:
+
+```ts
+import { MessagePage } from "@opencode/plugin/message"
+
+const page = await ctx.message.list({
+  sessionID,
+  cursor: MessagePage.Cursor.make({ id: messageID, order: "desc", direction: "next" }),
+})
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

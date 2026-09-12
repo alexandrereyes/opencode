@@ -624,6 +624,7 @@
       "version": "2.0.0",
       "dependencies": {
         "@opencode/plugin": "workspace:*",
+        "@opencode/schema": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

@@ -1,29 +1,12 @@
-import { SessionMessage } from "@opencode/core/session/message"
 import { Session } from "@opencode/core/session"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { InvalidCursorError } from "@opencode/protocol/errors"
+import { MessagePage } from "@opencode/schema/session-message-page"
 import { failedMessageDecode, missingSession } from "./session-error"
 
 const DefaultMessagesLimit = 50
-
-const Cursor = Schema.Struct({
-  id: SessionMessage.ID,
-  order: Schema.Union([Schema.Literal("asc"), Schema.Literal("desc")]),
-  direction: Schema.Union([Schema.Literal("previous"), Schema.Literal("next")]),
-})
-
-const decodeCursor = Schema.decodeUnknownSync(Cursor)
-
-const cursor = {
-  encode(message: SessionMessage.Info, order: "asc" | "desc", direction: "previous" | "next") {
-    return Buffer.from(JSON.stringify({ id: message.id, order, direction })).toString("base64url")
-  },
-  decode(input: string) {
-    return decodeCursor(JSON.parse(Buffer.from(input, "base64url").toString("utf8")))
-  },
-}
 
 export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handlers) =>
   Effect.gen(function* () {
@@ -34,10 +17,11 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
       Effect.fn(function* (ctx) {
         if (ctx.query.cursor && ctx.query.order !== undefined)
           return yield* new InvalidCursorError({ message: "Cursor cannot be combined with order" })
-        const decoded = yield* Effect.try({
-          try: () => (ctx.query.cursor ? cursor.decode(ctx.query.cursor) : undefined),
-          catch: () => new InvalidCursorError({ message: "Invalid cursor" }),
-        })
+        const decoded = ctx.query.cursor
+          ? yield* MessagePage.Cursor.parse(ctx.query.cursor).pipe(
+              Effect.mapError(() => new InvalidCursorError({ message: "Invalid cursor" })),
+            )
+          : undefined
         const order = decoded?.order ?? ctx.query.order ?? "desc"
         const messages = yield* session
           .messages({
@@ -56,8 +40,8 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
         return {
           data: messages,
           cursor: {
-            previous: first ? cursor.encode(first, order, "previous") : undefined,
-            next: last ? cursor.encode(last, order, "next") : undefined,
+            previous: first ? MessagePage.Cursor.make({ id: first.id, order, direction: "previous" }) : undefined,
+            next: last ? MessagePage.Cursor.make({ id: last.id, order, direction: "next" }) : undefined,
           },
         }
       }),
