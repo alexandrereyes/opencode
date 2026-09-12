@@ -8,11 +8,12 @@ export function make(duration = 60_000) {
   const blockers = new Set<() => boolean>()
   const waiting = new Set<() => void>()
   const state: {
+    identity?: string
     lease?: { token: string; expires: number }
     timer?: ReturnType<typeof setTimeout>
     committed: boolean
   } = { committed: false }
-  const identity = crypto.randomUUID()
+  const identity = () => (state.identity ??= crypto.randomUUID())
 
   const open = () => {
     if (state.timer) clearTimeout(state.timer)
@@ -59,7 +60,9 @@ export function make(duration = 60_000) {
     )
 
   return {
-    identity,
+    get identity() {
+      return identity()
+    },
     run,
     enter,
     /** Register conservative synchronous blockers (for example, every open terminal). */
@@ -75,7 +78,7 @@ export function make(duration = 60_000) {
       ),
     status: () => {
       expire()
-      return { identity, active: activities.size, held: !!state.lease, committed: state.committed }
+      return { identity: identity(), active: activities.size, held: !!state.lease, committed: state.committed }
     },
     lease: () => {
       expire()
@@ -83,7 +86,7 @@ export function make(duration = 60_000) {
       state.lease = { token: crypto.randomUUID(), expires: Date.now() + duration }
       state.timer = setTimeout(expire, duration)
       state.timer.unref?.()
-      return { identity, ...state.lease }
+      return { identity: identity(), ...state.lease }
     },
     cancel: (token: string) => {
       expire()
@@ -94,7 +97,7 @@ export function make(duration = 60_000) {
     /** Caller must trigger shutdown synchronously after this succeeds, never signal a saved PID later. */
     commit: (token: string, expected: string) => {
       expire()
-      if (state.committed || identity !== expected || state.lease?.token !== token) return false
+      if (state.committed || identity() !== expected || state.lease?.token !== token) return false
       state.committed = true
       if (state.timer) clearTimeout(state.timer)
       return true

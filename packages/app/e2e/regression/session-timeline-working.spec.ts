@@ -153,8 +153,13 @@ for (const name of ["read", "shell", "subagent"] as const) {
 
 for (const grouped of [false, true]) {
   test(`uses ${grouped ? "grouped" : "standalone"} background shell presentation for Working`, async ({ page }) => {
-    await setupTimeline(page, {
-      settings: { shellToolPartsExpanded: !grouped },
+    const timeline = await setupTimeline(page, {
+      settings: {
+        timelineDetail: {
+          ...timelinePresets[2].value,
+          shell: { placement: grouped ? "grouped" : "separate", details: grouped ? "collapsed" : "expanded" },
+        },
+      },
       messages: [
         userMessage(),
         assistantMessage(
@@ -173,6 +178,24 @@ for (const grouped of [false, true]) {
           { completed: false },
         ),
       ],
+    })
+    await timeline.transport.send({
+      id: `evt_working_background_${grouped}`,
+      created: 3,
+      type: "shell.created",
+      location: { directory },
+      data: {
+        info: {
+          id: "sh_working_background",
+          status: "running",
+          command: "sleep 10",
+          cwd: directory,
+          shell: "bash",
+          file: "/tmp/working-background.out",
+          metadata: { sessionID },
+          time: { started: 2 },
+        },
+      },
     })
     const working = page.locator('[data-component="session-working"]')
     const group = page.locator('[data-component="collapsed-tool-group"]')

@@ -22,7 +22,7 @@ export function changedFileDiff(value: unknown): value is FileDiffInfo {
   if (!("deletions" in value) || typeof value.deletions !== "number") return false
   if (!("status" in value)) return false
   if (value.status !== "added" && value.status !== "deleted" && value.status !== "modified") return false
-  return value.additions > 0 || value.deletions > 0
+  return value.status === "added" || value.additions > 0 || value.deletions > 0
 }
 
 export function patchFile(value: unknown): ApplyPatchFile | undefined {

@@ -292,9 +292,11 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         const draft = { ...actions.draft(draftID) }
         const next = { type: "session" as const, ...session }
         const key = tabKey(next)
+        const draftKey = tabKey(draft)
         const composer = createMemoryComposerState()
         const ready = startTransition(() => {
           setPending(key, { draft, ...preview, composer })
+          if (panes[draftKey]) setPanes(key, panes[draftKey])
           const index = store.findIndex((tab) => tab.type === "draft" && tab.draftID === draftID)
           if (index === -1) return
           const active = location.pathname === "/new-session" && location.query.draftId === draftID
@@ -504,6 +506,10 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       pane(tab: Tab | undefined, pane: TabPane) {
         if (!tab) return false
         return panes[tabKey(tab)]?.[pane] ?? false
+      },
+      paneConfigured(tab: Tab | undefined, pane: TabPane) {
+        if (!tab) return false
+        return panes[tabKey(tab)]?.[pane] !== undefined
       },
       setPane(tab: Tab | undefined, pane: TabPane, opened: boolean) {
         if (!tab) return

@@ -27,6 +27,7 @@ export async function verifyTargets(win: BrowserWindow, url: string) {
     assert.equal(result.files.length, 0)
     return Schema.decodeUnknownSync(Browser.Target)(result.value)
   }
+  let subscribed = false
   try {
     await page.ready
     for (const color of [
@@ -42,24 +43,47 @@ export async function verifyTargets(win: BrowserWindow, url: string) {
       assert.equal(right[3], 0)
       assert.equal(right[(10 * 10 - 1) * 4 + 3], 255)
     }
+    const firstFrame = Promise.withResolvers<void>()
+    page.contents.beginFrameSubscription(false, (image) => {
+      if (!image.isEmpty()) firstFrame.resolve()
+    })
+    subscribed = true
+    page.setVisible(true)
     for (const bounds of [
       { x: 30, y: 40, width: 500, height: 300 },
       { x: 50, y: 60, width: 600, height: 400 },
     ]) {
       page.layout(bounds, [255, 255, 255, 255], 10)
-      page.setVisible(true)
-      await page.contents.executeJavaScript(
-        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))))",
-      )
+      await Promise.race([
+        firstFrame.promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Target surface did not produce a frame")), 5_000).unref(),
+        ),
+      ])
+      const viewport = await page.contents.executeJavaScript(`new Promise((resolve, reject) => {
+        const expected = ${JSON.stringify({ width: bounds.width, height: bounds.height })}
+        const check = () => {
+          const current = { width: innerWidth, height: innerHeight }
+          if (current.width !== expected.width || current.height !== expected.height) return
+          clearTimeout(timeout)
+          removeEventListener("resize", check)
+          resolve(current)
+        }
+        const timeout = setTimeout(() => {
+          removeEventListener("resize", check)
+          reject(
+            new Error("Viewport did not reach ${bounds.width}x${bounds.height}; current " + innerWidth + "x" + innerHeight),
+          )
+        }, 5_000)
+        addEventListener("resize", check)
+        check()
+      })`)
       assert.deepEqual(page.view.getBounds(), bounds)
-      assert.deepEqual(await page.contents.executeJavaScript("({width:innerWidth,height:innerHeight})"), {
-        width: bounds.width,
-        height: bounds.height,
-      })
+      assert.deepEqual(viewport, { width: bounds.width, height: bounds.height })
       assert.equal(win.contentView.children.length, children + 3)
-      page.setVisible(false)
-      assert(win.contentView.children.slice(children).every((view) => !view.getVisible()))
     }
+    page.setVisible(false)
+    assert(win.contentView.children.slice(children).every((view) => !view.getVisible()))
     await execute({ type: "navigate", tabID, url })
     const frameURL = new URL("/frame", url.replace("127.0.0.1", "localhost")).href
     await execute({
@@ -118,6 +142,7 @@ export async function verifyTargets(win: BrowserWindow, url: string) {
     const retained = await inspect({ type: "trace.analyze", tabID, fileID: trace.files[0].id })
     assert(retained.resources.includes(url + "/"))
   } finally {
+    if (subscribed && !page.contents.isDestroyed()) page.contents.endFrameSubscription()
     await page.dispose()
     assert.equal(win.contentView.children.length, children)
   }

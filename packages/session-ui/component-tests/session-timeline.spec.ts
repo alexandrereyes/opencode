@@ -80,9 +80,9 @@ story("space activates a focused timeline button instead of scrolling", async ({
 // Moved from packages/app/e2e/regression/session-timeline-file-projection.spec.ts
 story("renders a completed write through the production file component", async ({ mount }) => {
   const timeline = await mount("current-session-file-changes--changing-files", { args: { scenario: "write" } })
-  await expect(
-    timeline.locator('[data-timeline-part-id="prt_file_projection_write"] [data-component="write-content"]'),
-  ).toBeVisible()
+  const write = timeline.locator('[data-timeline-part-id="prt_file_projection_write"]')
+  await expect(write.locator('[data-component="apply-patch-file-diff"]')).toBeVisible()
+  await expect(write).toContainText("export const written = true")
 })
 
 // Moved from packages/app/e2e/regression/session-timeline-file-state.spec.ts

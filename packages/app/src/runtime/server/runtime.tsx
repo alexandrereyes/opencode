@@ -10,6 +10,7 @@ import { createData } from "@opencode/client/solid"
 import type { ServerScope } from "@/runtime/server/scope"
 import { createPermissionAutoApprover } from "@/session/requests/auto-approve"
 import { createServerNotificationState } from "@/shell/notifications/notification"
+import { createNotificationCoordinator } from "@/shell/notifications/coordinator"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { createDesktopData } from "./data"
 import { ModelState } from "./persistence"
@@ -35,6 +36,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       },
     })
     const models = createGlobalModels()
+    const notificationCoordinator = createNotificationCoordinator()
 
     const settingsServer = createMemo(() => {
       const list = server.list
@@ -59,7 +61,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       if (existing) return existing
       const serverCtx = createRoot((dispose) => {
         serverCtxDisposers.set(key, dispose)
-        return createServerController(conn, server.scope(key), server.projects.forServer(key))
+        return createServerController(conn, server.scope(key), server.projects.forServer(key), notificationCoordinator)
       }, owner)
       serverCtxs.set(key, serverCtx)
       return serverCtx
@@ -133,6 +135,7 @@ function createServerController(
   conn: ServerConnection.Any,
   scope: ServerScope,
   projects: ReturnType<typeof createServerProjects>,
+  notificationCoordinator: ReturnType<typeof createNotificationCoordinator>,
 ) {
   const language = useLanguage()
   const settings = useSettings()
@@ -171,7 +174,7 @@ function createServerController(
   onCleanup(data.on("session.deleted", (event) => hideSession(event.data.sessionID)))
   const sync = createServerSyncContext(sdk, data)
   createPermissionAutoApprover({ sdk, data })
-  const notification = createServerNotificationState({ sdk, data, key: connKey })
+  const notification = createServerNotificationState({ sdk, data, key: connKey, coordinator: notificationCoordinator })
 
   function enrich(project: { worktree: string; expanded: boolean }) {
     const [childStore] = sync.child(project.worktree, { bootstrap: false })

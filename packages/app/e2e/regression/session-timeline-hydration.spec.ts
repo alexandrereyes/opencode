@@ -8,6 +8,9 @@ test.use({ viewport: { width: 1440, height: 900 }, serviceWorkers: "block" })
 
 for (const window of ["assistant-only", "mixed"] as const) {
   test(`renders the ${window} latest page before parent hydration and preserves it afterward`, async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("opencode.global.dat:layout", JSON.stringify({ review: { panelOpened: false } }))
+    })
     const session = { ...fixture.sessions[0]!, id: `ses_hydration_${window}` }
     // Compact's initial 40 and the next 20 begin with an assistant; page three supplies its parent.
     const messages = Array.from({ length: 61 }, (_, index): SessionMessageInfo => {
@@ -87,7 +90,7 @@ for (const window of ["assistant-only", "mixed"] as const) {
         await expectReadyTail()
         expect(await markdown.evaluate((element, original) => element === original, original)).toBe(true)
       }
-      expect(requests).toEqual([undefined, ...gates.map((gate) => gate.before)])
+      expect(requests).toEqual([undefined, undefined, ...gates.map((gate) => gate.before)])
       const ids = await content
         .locator("[data-timeline-part-id]")
         .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-timeline-part-id")))

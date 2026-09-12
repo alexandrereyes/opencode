@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { fixture, pageMessages } from "../performance/timeline/session-timeline-stress.fixture"
 import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 
 for (const layout of ["horizontal", "vertical", "mobile"] as const) {
   test.describe(layout, () => {
@@ -21,6 +21,11 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
         pageMessages,
       })
       await installStressSessionTabs(page)
+      await page.route("**/api/session/navigation?*", (route) =>
+        route.fulfill({
+          json: { data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })) },
+        }),
+      )
       await page.addInitScript((layout) => {
         localStorage.setItem(
           "settings.v3",
@@ -44,6 +49,13 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
         await page.getByRole("button", { name: "Tabs", exact: true }).tap()
         await expect(page.getByRole("dialog", { name: "Tabs", exact: true })).not.toHaveAttribute("data-transitioning")
       }
+      if (layout === "vertical") {
+        await page.getByRole("button", { name: "Attention view", exact: true }).click()
+        await expect(page.getByRole("navigation", { name: "Sessions", exact: true })).toHaveAttribute(
+          "data-mode",
+          "projects",
+        )
+      }
       const scope = page.locator(
         layout === "mobile"
           ? '[data-slot="mobile-tabs-drawer"]'
@@ -51,13 +63,23 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
             ? '[data-slot="vertical-tabs-sidebar"]'
             : '[data-slot="titlebar-tabs"]',
       )
-      const tab = scope.locator("[data-titlebar-tab]").filter({ hasText: fixture.expected.targetTitle })
+      const matchingTabs = scope.locator("[data-titlebar-tab]").filter({
+        has: page.locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.targetID)}"]`),
+      })
+      const tab =
+        layout === "vertical" ? matchingTabs.filter({ has: page.locator('[data-slot="tab-project"]') }) : matchingTabs
       const more = tab.getByRole("button", { name: "More options", exact: true })
-      await expect(more).toBeEnabled()
-      await more.click()
-      await expect(page.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible()
+      if (layout === "vertical") {
+        await tab.hover()
+        await expect(tab.getByRole("button", { name: "Archive", exact: true })).toBeEnabled()
+      } else {
+        await expect(more).toBeEnabled()
+        await more.click()
+        await expect(page.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible()
+      }
       await page.screenshot({ path: testInfo.outputPath(`${layout}-session-menu.png`), animations: "disabled" })
-      await page.getByRole("menuitem", { name: "Delete…", exact: true }).click()
+      if (layout === "vertical") await tab.getByRole("button", { name: "Delete", exact: true }).click()
+      else await page.getByRole("menuitem", { name: "Delete…", exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Delete session", exact: true })
       await expect(dialog).toContainText(fixture.expected.targetTitle)
       await expect(dialog).toContainText("all its child sessions")
@@ -73,11 +95,13 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
         }
       }
       await expect(tab).toBeVisible()
-      await more.click()
+      if (layout === "vertical") await tab.hover()
+      else await more.click()
       const archived = page.waitForResponse((response) =>
         response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
       )
-      await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
+      if (layout === "vertical") await tab.getByRole("button", { name: "Archive", exact: true }).click()
+      else await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
       expect((await archived).status()).toBe(204)
       await expect(tab).toHaveCount(0)
       expect(mutations).toEqual(["archive"])

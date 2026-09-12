@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from "solid-js"
+import { createEffect, on, onCleanup } from "solid-js"
 import type { PermissionRequest } from "@opencode/client/promise"
 import type { Data } from "@opencode/client/solid"
 import type { ServerSDK } from "@/runtime/server/client"
@@ -23,14 +23,15 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
     unsubscribe()
   })
 
-  // The event stream does not replay requests asked while this client was
-  // disconnected, and requests may already be pending before the setting turns
-  // on, so sweep on every connect while the setting is on.
-  createEffect(() => {
-    if (!enabled() || input.sdk.connection.status() !== "connected") return
-    const generation = ++state.generation
-    void sweepWithRetry(generation, 0)
-  })
+  // Every physical event stream starts with server.connected. Its retained,
+  // server-scoped epoch also covers consumers attached after the handshake.
+  createEffect(
+    on([enabled, input.sdk.connection.epoch], ([enabled, epoch]) => {
+      if (!enabled || epoch === 0) return
+      const generation = ++state.generation
+      void sweepWithRetry(generation, 0)
+    }),
+  )
 
   // Approves pending requests that reach the local store, which is how a
   // previously unknown idle session's requests surface when its view opens
@@ -49,10 +50,13 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   async function sweepWithRetry(generation: number, attempt: number) {
     const complete = await sweep()
     if (complete || attempt >= retryLimit) return
-    setTimeout(() => {
-      if (state.disposed || !enabled() || generation !== state.generation) return
-      void sweepWithRetry(generation, attempt + 1)
-    }, retryDelayMs * (attempt + 1))
+    setTimeout(
+      () => {
+        if (state.disposed || !enabled() || generation !== state.generation) return
+        void sweepWithRetry(generation, attempt + 1)
+      },
+      retryDelayMs * (attempt + 1),
+    )
   }
 
   async function sweep() {

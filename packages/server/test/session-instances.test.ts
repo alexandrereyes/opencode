@@ -13,6 +13,7 @@ import { Plugin } from "@opencode/core/plugin"
 import { Session } from "@opencode/core/session"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
 import { define } from "@opencode/plugin/effect/plugin"
+import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Agent } from "@opencode/schema/agent"
 import { Location } from "@opencode/schema/location"
 import { AbsolutePath } from "@opencode/schema/schema"
@@ -92,11 +93,12 @@ it.live(
                                 event.prompt.text += ` [${config.tool}]`
                               }),
                             )
-                            yield* ctx.session.hook("context", (event) =>
+                            const tune = (event: SessionHooks["context"]) =>
                               Effect.sync(() => {
                                 event.options.temperature = config.temperature
-                              }),
-                            )
+                              })
+                            yield* ctx.session.hook("context", tune)
+                            yield* ctx.session.hook("generate", tune)
                             yield* ctx.permission.hook("evaluate", (event) =>
                               Effect.sync(() => {
                                 event.effect = event.action === "instance-test" ? "ask" : "allow"
@@ -251,7 +253,13 @@ it.live(
               action: "instance-test",
               resources: [config.tool],
             }
+            const beforePermission = Date.now()
             expect(yield* permissions.ask(permission)).toEqual({ id: permission.id, effect: "ask" })
+            const admittedPermission = yield* permissions.get(permission.id)
+            if (!admittedPermission) return yield* Effect.die(new Error(`Permission was not admitted: ${permission.id}`))
+            expect(admittedPermission).toEqual({ ...permission, message: config.tool, created: expect.any(Number) })
+            expect(admittedPermission.created).toBeGreaterThanOrEqual(beforePermission)
+            expect(admittedPermission.created).toBeLessThanOrEqual(Date.now())
             const foreignID = config.id === first.id ? second.id : first.id
             const foreignForm = yield* forms.create({
               sessionID: foreignID,
@@ -266,7 +274,7 @@ it.live(
             return {
               session,
               form,
-              permission: { ...permission, message: config.tool },
+              permission: admittedPermission,
               foreignForm,
               foreignPermission,
             }

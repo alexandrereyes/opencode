@@ -25,16 +25,26 @@ story("renders every admitted tool family and hides timeline-only exclusions", a
   ]) {
     await expect(timeline.locator(`[data-timeline-part-id="tool_family_${id}"]`), id).toBeVisible()
   }
-  for (const name of ["edit", "write", "patch"]) {
+  for (const [name, filename] of [
+    ["edit", "a.ts"],
+    ["write", "new.ts"],
+    ["patch", "a.ts"],
+  ]) {
     const tool = timeline.locator(`[data-timeline-part-id="tool_family_${name}"]`)
-    await expect(tool.getByText("1 file", { exact: true })).toBeVisible()
     await expect(tool.getByRole("button")).toHaveCount(1)
     await expect(tool.locator('[data-scope="apply-patch"] button')).toHaveAttribute("aria-expanded", "false")
-    await expect(tool.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("data-locked", "")
     await expect(tool.locator('[data-slot="message-part-title-filename"]')).toHaveCount(0)
     await expect(tool.locator('[data-slot="message-part-actions"]')).toHaveCount(0)
-    await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("font-size", "13px")
-    await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("line-height", "16px")
+    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveText(filename)
+    if (name === "edit") {
+      await expect(tool.getByText("1 file", { exact: true })).toBeVisible()
+      await expect(tool.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("data-locked", "")
+      await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("font-size", "13px")
+      await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("line-height", "16px")
+      continue
+    }
+    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveCSS("font-size", "13px")
+    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveCSS("line-height", "16px")
   }
   await expect(timeline.locator('[data-timeline-part-id="tool_family_todo"]')).toHaveCount(0)
 })
@@ -143,8 +153,8 @@ story("groups every collapsed tool until visible text separates the stack", asyn
 story("combines adjacent edit calls and repeated files into one group", async ({ mount }) => {
   const timeline = await mount("current-session-file-changes--changing-files", { args: { scenario: "repeated" } })
   const group = timeline.locator('[data-timeline-part-ids="tool_grouped_edit_first,tool_grouped_edit_second"]')
-  await expect(group.locator('[data-slot="basic-tool-tool-title"]')).toContainText("Edit")
-  await expect(group.getByText("1 file", { exact: true })).toBeVisible()
+  await expect(group).toHaveCount(1)
   await expect(group.locator('[data-slot="apply-patch-filename"]')).toHaveText(["first.ts"])
   await expect(group.locator('[data-scope="apply-patch"] button')).toHaveAttribute("aria-expanded", "true")
+  await expect(group.locator('[data-component="apply-patch-file-diff"]')).toHaveCount(2)
 })

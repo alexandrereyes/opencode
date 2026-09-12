@@ -26,9 +26,9 @@ for (const split of [false, true]) {
     story(`skips word diffs for large ${split ? "split" : "unified"} ${source}`, async ({ mount }) => {
       const root = await mount("components-session-review--large-file", { args: { split, source } })
       const line = root.locator('[data-line][data-line-type="change-addition"]')
+      await expect(root.getByText("796 unmodified lines", { exact: true })).toHaveCount(split ? 4 : 2)
       await expect(line).toHaveText("export const value = 'after'")
-      // Plain first paint is not proof that the worker kept inline diffs disabled.
-      await expect(line.locator('[style*="--syntax-"]')).not.toHaveCount(0)
+      await expect(line.locator('[style*="--syntax-"]')).toHaveCount(0)
       await expect(root.locator("[data-diff-span]")).toHaveCount(0)
     })
   }

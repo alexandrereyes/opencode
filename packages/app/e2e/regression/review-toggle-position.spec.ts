@@ -45,7 +45,7 @@ for (const width of [1000, 1440]) {
       const toggle = page.getByRole("button", { name: "Toggle review", exact: true })
       const header = page.locator("[data-session-title]")
       const panel = page.locator("#review-panel")
-      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await closeReview(page, toggle)
       const closed = await toggle.boundingBox()
       if (!closed) throw new Error("Review toggle bounds are unavailable")
       const headerBox = await header.boundingBox()
@@ -92,16 +92,9 @@ for (const width of [1000, 1440]) {
       await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
 
       const toggle = page.getByRole("button", { name: "Toggle review", exact: true })
-      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await closeReview(page, toggle)
       for (const opened of [true, false]) {
-        // Pause in the same task as the click so even the first painted state can be inspected.
-        await toggle.evaluate((element) => {
-          ;(element as HTMLButtonElement).click()
-          document
-            .getAnimations()
-            .filter((animation) => animation.timeline instanceof DocumentTimeline)
-            .forEach((animation) => animation.pause())
-        })
+        await startPausedTransition(toggle)
         await expect(toggle).toHaveAttribute("aria-expanded", String(opened))
         await expect(page.locator("#review-panel")).toHaveAttribute("aria-hidden", String(!opened))
         for (const progress of [0.08, 0.16, 0.25, 0.5, 0.8, 0.96]) {
@@ -113,6 +106,7 @@ for (const width of [1000, 1440]) {
             .filter((animation) => animation.timeline instanceof DocumentTimeline)
             .forEach((animation) => animation.finish())
         })
+        await expect(page.locator('[data-slot="session-chat-panel"]')).toHaveAttribute("data-width-animating", "false")
       }
       await expect(page.locator("#review-panel")).toBeHidden()
     })
@@ -144,7 +138,7 @@ for (const width of [1000, 1440]) {
       await page.locator("html").evaluate((element, dir) => element.setAttribute("dir", dir), direction)
 
       const toggle = page.getByRole("button", { name: "Toggle review", exact: true })
-      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await closeReview(page, toggle)
       await page.keyboard.press("Control+Backquote")
       const terminal = page.getByRole("region", { name: "Terminal", exact: true })
       await expect(terminal.getByRole("tab", { name: "Terminal 1", exact: true })).toHaveAttribute(
@@ -210,13 +204,7 @@ for (const width of [1000, 1440]) {
         )
         .toBe(true)
       await expect(page.locator('[data-slot="session-review-content"]')).toHaveCSS("opacity", "0")
-      await toggle.evaluate((element) => {
-        ;(element as HTMLButtonElement).click()
-        document
-          .getAnimations()
-          .filter((animation) => animation.timeline instanceof DocumentTimeline)
-          .forEach((animation) => animation.pause())
-      })
+      await startPausedTransition(toggle)
       await expect(toggle).toHaveAttribute("aria-expanded", "true")
       await expectHeaderClearOfToggle(page, toggle, 0.25)
     })
@@ -229,12 +217,9 @@ async function expectHeaderClearOfToggle(page: Page, toggle: Locator, progress: 
     const animations = row
       .getAnimations({ subtree: true })
       .filter((animation) => animation.timeline instanceof DocumentTimeline)
-    const width = animations.find(
-      (animation) => animation instanceof CSSTransition && animation.transitionProperty === "width",
-    )!
     animations.forEach((animation) => {
       animation.pause()
-      animation.currentTime = Number(width.effect!.getTiming().duration) * progress
+      animation.currentTime = Number(animation.effect!.getTiming().duration) * progress
     })
     const chatBounds = chat.getBoundingClientRect()
     const panelBounds = document.querySelector("#review-panel")!.getBoundingClientRect()
@@ -265,6 +250,42 @@ async function expectHeaderClearOfToggle(page: Page, toggle: Locator, progress: 
       style: ".session-review-v2-tabs-bar { visibility: hidden !important; }",
     }),
   )
+}
+
+async function closeReview(page: Page, toggle: Locator) {
+  await expect(toggle).toHaveAttribute("aria-expanded", "true")
+  await page.locator("#session-side-panel-review-tab").click()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-expanded", "false")
+  await expect(page.locator('[data-slot="session-chat-panel"]')).toHaveAttribute("data-width-animating", "false")
+}
+
+async function startPausedTransition(toggle: Locator) {
+  await toggle.evaluate(() => {
+    if (document.querySelector("#review-transition-probe-style")) return
+    const style = document.createElement("style")
+    style.id = "review-transition-probe-style"
+    style.textContent =
+      '[data-slot="session-chat-panel"], [data-slot="session-review-content"] { transition-duration: 10s !important; transition-delay: 0s !important; } [data-slot="session-side-region-presence"] { animation-duration: 10s !important; }'
+    document.head.append(style)
+  })
+  await toggle.click()
+  await expect
+    .poll(
+      () =>
+        toggle.evaluate(() => {
+          const chat = document.querySelector('[data-slot="session-chat-panel"]')
+          const animations = document.getAnimations()
+          const width = animations.find(
+            (animation) => animation.effect instanceof KeyframeEffect && animation.effect.target === chat,
+          )
+          if (!width) return false
+          animations.forEach((animation) => animation.pause())
+          return true
+        }),
+      { intervals: [1] },
+    )
+    .toBe(true)
 }
 
 async function expectTerminalControlsAligned(terminal: Locator, toggle: Locator) {

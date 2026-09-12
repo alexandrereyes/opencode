@@ -40,6 +40,14 @@ describe("apply patch files", () => {
     ).toEqual(["src/changed.ts"])
   })
 
+  test("keeps an added empty file", () => {
+    const files = [{ file: "src/empty.ts", patch: "", additions: 0, deletions: 0, status: "added" }]
+    expect(patchFiles(files).map((file) => ({ path: file.path, type: file.type }))).toEqual([
+      { path: "src/empty.ts", type: "add" },
+    ])
+    expect(patchFileGroups(files)[0]).toMatchObject({ path: "src/empty.ts", additions: 0, deletions: 0 })
+  })
+
   test("composes sequential complete patches for the same file", () => {
     const before = "const a = 1\nconst b = 2\n"
     const middle = "const a = 2\nconst b = 2\n"

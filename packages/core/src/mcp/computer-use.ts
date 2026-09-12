@@ -31,7 +31,7 @@ export const apps = Effect.fn("ComputerUse.apps")(function* (mcp: Mcp.Interface)
   if (!server) return []
   const result = yield* mcp.callTool({ server, name: "list_apps", args: {} }).pipe(
     Effect.timeout("5 seconds"),
-    Effect.catch(() => Effect.succeed(undefined)),
+    Effect.orElseSucceed(() => undefined),
   )
   if (!result || result.isError) return []
   return parseApps(

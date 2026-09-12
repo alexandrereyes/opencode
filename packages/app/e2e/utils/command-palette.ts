@@ -22,6 +22,13 @@ export function captureConsoleWarnings(page: Page) {
   return warnings
 }
 
+export async function pressPlatformShortcut(page: Page, shortcut: string) {
+  const modifier = await page.evaluate(() =>
+    /(Mac|iPod|iPhone|iPad)/.test(navigator.platform) ? "Meta" : "Control",
+  )
+  await page.keyboard.press(`${modifier}+${shortcut}`)
+}
+
 export async function openCommandPalette(page: Page, home = false) {
   await mockOpenCodeServer(page, {
     directory: paletteSession.directory,
@@ -38,6 +45,11 @@ export async function openCommandPalette(page: Page, home = false) {
     pageMessages: () => ({ items: [] }),
     findFiles: () => [],
   })
+  await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
+  await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
+  await page.route("**/api/server/subscriptions", (route) =>
+    route.fulfill({ json: { status: "unconfigured", accounts: [] } }),
+  )
   const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
   await page.goto(home ? "/" : `/server/${base64Encode(server)}/session/${paletteSession.id}`)
   if (home) {
@@ -48,7 +60,7 @@ export async function openCommandPalette(page: Page, home = false) {
   if (!home) {
     await expect(page.locator('[data-component="composer-editor"]')).toBeEditable({ timeout: APP_READY_TIMEOUT })
   }
-  await page.keyboard.press("ControlOrMeta+Shift+P")
+  await pressPlatformShortcut(page, "Shift+P")
   const dialog = page.getByRole("dialog")
   const input = dialog.getByRole("textbox")
   await expect(input).toBeFocused()

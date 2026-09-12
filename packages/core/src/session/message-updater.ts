@@ -118,6 +118,7 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
         }),
       "session.renamed": () => Effect.void,
       "session.archived": () => Effect.void,
+      "session.permissions.updated": () => Effect.void,
       "session.deleted": () => Effect.void,
       "session.forked": () => Effect.void,
       "session.inbox.delivered": () => Effect.void,
@@ -411,6 +412,7 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
             yield* adapter.updateCompaction({
               ...current,
               status: "completed",
+              metadata: event.metadata ? { ...current.metadata, ...event.metadata } : current.metadata,
               reason: event.data.reason,
               model: event.data.model,
               providerState: event.data.providerState,

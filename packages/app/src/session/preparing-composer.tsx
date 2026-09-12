@@ -1,4 +1,4 @@
-import { createEffect, on, onCleanup } from "solid-js"
+import { createEffect, on, onCleanup, onMount } from "solid-js"
 import { useLocation } from "@solidjs/router"
 import { ComposerEditor } from "@/composer/editor/editor"
 import { setCursorPosition } from "@/composer/editor/dom"
@@ -8,6 +8,15 @@ import type { PendingSession } from "@/shell/tabs/tabs"
 export function PreparingComposer(props: { pending: PendingSession }) {
   const location = useLocation()
   let element: HTMLElement | undefined
+  let focused = false
+  const onFocusIn = (event: FocusEvent) => {
+    if (event.target === element) focused = true
+    if (event.target !== element && event.target !== document.body) focused = false
+  }
+  onMount(() => {
+    document.addEventListener("focusin", onFocusIn, true)
+    onCleanup(() => document.removeEventListener("focusin", onFocusIn, true))
+  })
   const editor = createComposerEditor({
     store: () => props.pending.composer.store,
     commands: () => [],
@@ -28,7 +37,7 @@ export function PreparingComposer(props: { pending: PendingSession }) {
         const pathname = location.pathname
         editor.restoreFocus(pending.composer.cursor())
         onCleanup(() => {
-          if (document.activeElement !== element) return
+          if (!focused) return
           const cursor = pending.composer.cursor()
           requestAnimationFrame(() => {
             if (location.pathname !== pathname) return

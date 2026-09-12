@@ -7,7 +7,7 @@ import type {
   SessionStatus,
 } from "@opencode/client/promise"
 import { Option, Schema } from "effect"
-import { createMemo, mapArray, type Accessor } from "solid-js"
+import { createMemo, indexArray, type Accessor } from "solid-js"
 import { currentContentDefaultOpen, currentToolFailed, currentToolHasLoadedFiles } from "../message/current-tool-state"
 import { TimelineRow, type PartGroup, type PartRef, type TimelineRowMap } from "./timeline-row"
 import { timelineCategory, timelineNoticeRequired, type TimelineDetail } from "./detail"
@@ -89,16 +89,24 @@ export function createReactiveTimelineProjection(input: {
   const assistantMessagesByParent = createMemo(() => indexAssistantMessages(input.sessionMessages()))
   // Row structure depends on the empty/non-empty boundary, not each text delta.
   // Keep the original content objects so row renderers still read live text.
-  const textParts = mapArray(
+  const textParts = indexArray(
     () =>
       input
         .sessionMessages()
         .flatMap((message) =>
-          message.type === "assistant" ? message.content.filter((content) => content.type !== "tool") : [],
+          message.type === "assistant"
+            ? Timeline.contentEntries(message).filter((entry) => entry.content.type !== "tool")
+            : [],
         ),
-    (content) => [content, createMemo(() => !!content.text.trim())] as const,
+    (entry) => ({
+      id: createMemo(() => entry().id),
+      visible: createMemo(() => {
+        const content = entry().content
+        return content.type !== "tool" && !!content.text.trim()
+      }),
+    }),
   )
-  const textVisible = createMemo(() => new Map<Content, Accessor<boolean>>(textParts()))
+  const textVisible = createMemo(() => new Map(textParts().map((entry) => [entry.id(), entry.visible] as const)))
   const projection = createMemo(() =>
     Timeline.constructSessionMessageRows(
       input.sessionMessages(),
@@ -107,11 +115,13 @@ export function createReactiveTimelineProjection(input: {
       input.pendingUserMessageIDs?.(),
       input.shellToolDefaultOpen?.() ?? false,
       input.editToolDefaultOpen?.() ?? false,
-      (content, showReasoning, detail) =>
-        content.type === "tool"
-          ? renderable(content, showReasoning, detail)
-          : (content.type === "text" || (detail ? detail.thinking.placement !== "hidden" : showReasoning)) &&
-            textVisible().get(content)!(),
+      (content, showReasoning, detail, partID) => {
+        if (content.type === "tool") return renderable(content, showReasoning, detail)
+        if (content.type !== "text" && !(detail ? detail.thinking.placement !== "hidden" : showReasoning)) return false
+        const visible = textVisible().get(partID)
+        if (!visible) throw new Error(`Missing text visibility for ${partID}`)
+        return visible()
+      },
       input.timelineDetail?.(),
     ),
   )
@@ -163,7 +173,12 @@ export namespace Timeline {
     pendingUserMessageIDs?: ReadonlySet<string>,
     shellToolDefaultOpen = false,
     editToolDefaultOpen = false,
-    isRenderable = renderable,
+    isRenderable: (
+      content: Content,
+      showReasoning: boolean,
+      detail: TimelineDetail | undefined,
+      partID: string,
+    ) => boolean = renderable,
     detail?: TimelineDetail,
   ) {
     type Turn = {
@@ -227,7 +242,9 @@ export namespace Timeline {
               ? visibleNotice(entry.message)
               : !!entry.message.error ||
                 !!entry.message.retry ||
-                entry.message.content.some((content) => isRenderable(content, showReasoning, detail)),
+                Timeline.contentEntries(entry.message).some((content) =>
+                  isRenderable(content.content, showReasoning, detail, content.id),
+                ),
           )
         })
       : turns
@@ -289,7 +306,12 @@ export namespace Timeline {
     isActive: boolean,
     shellToolDefaultOpen = false,
     editToolDefaultOpen = false,
-    isRenderable = renderable,
+    isRenderable: (
+      content: Content,
+      showReasoning: boolean,
+      detail: TimelineDetail | undefined,
+      partID: string,
+    ) => boolean = renderable,
     detail?: TimelineDetail,
   ) {
     const rows: TimelineRow.TimelineRow[] = []
@@ -320,7 +342,8 @@ export namespace Timeline {
         contentEntries(message)
           .filter(
             (entry) =>
-              isRenderable(entry.content, showReasoning, detail) && !(thinking && entry.content === lastContent),
+              isRenderable(entry.content, showReasoning, detail, entry.id) &&
+              !(thinking && entry.content === lastContent),
           )
           .map((entry) => ({ messageID: message.id, messageIndex, partID: entry.id, content: entry.content })),
       )
@@ -597,7 +620,7 @@ function groupContent(
   detail?: TimelineDetail,
 ): PartGroup[] {
   const groups: PartGroup[] = []
-  let adjacent: { type: "context" | "patch" | "edit"; refs: PartRef[]; tools: boolean } | undefined
+  let adjacent: { type: "context" | "file"; refs: PartRef[]; tools: boolean } | undefined
   const flush = () => {
     const current = adjacent
     const first = current?.refs[0]
@@ -665,8 +688,7 @@ function toolGroupType(
     const category = timelineCategory(content)!
     if (detail[category].placement === "grouped") return "context"
     if (currentToolFailed(content)) return undefined
-    if (content.name === "patch") return "patch"
-    if (content.name === "edit") return "edit"
+    if (content.name === "patch" || content.name === "edit" || content.name === "write") return "file"
     return undefined
   }
   if (content.name === "question" || currentToolHasLoadedFiles(content)) return undefined
@@ -684,8 +706,7 @@ function toolGroupType(
   )
     return undefined
   if (currentContentDefaultOpen(content, shellExpanded, editExpanded) !== true) return "context"
-  if (content.name === "patch") return "patch"
-  if (content.name === "edit") return "edit"
+  if (content.name === "patch" || content.name === "edit" || content.name === "write") return "file"
   return undefined
 }
 

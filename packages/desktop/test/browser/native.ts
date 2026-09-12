@@ -3,7 +3,7 @@ import { createServer } from "node:http"
 import { once } from "node:events"
 import { createHash } from "node:crypto"
 import path from "node:path"
-import { app, BrowserWindow, nativeImage } from "electron"
+import { app, BrowserWindow, nativeImage, webContents, type WebContents } from "electron"
 import { Browser } from "@opencode/plugin-browser/rpc"
 import { OpenCode } from "@opencode/client"
 import { Effect, Fiber, Schema, Stream } from "effect"
@@ -29,6 +29,9 @@ process.on("unhandledRejection", (error) => {
 async function main() {
   const root = process.env.SMOKE_ROOT!
   app.setPath("userData", path.join(root, "electron-data"))
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows")
+  app.commandLine.appendSwitch("disable-renderer-backgrounding")
+  app.commandLine.appendSwitch("disable-background-timer-throttling")
   app.on("window-all-closed", () => {})
   await app.whenReady()
   const web = createServer((request, response) => {
@@ -132,6 +135,7 @@ async function main() {
   const storage = createStateStore(database.db)
   const pane = createBrowserPane(storage)
   let restored: ReturnType<typeof createBrowserPane> | undefined
+  let surface: WebContents | undefined
   const win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { sandbox: true } })
   const readyToShow = once(win, "ready-to-show")
   await win.loadURL("about:blank")
@@ -299,6 +303,18 @@ async function main() {
     })()`,
     })
     pane.layout(win, "suite", { tabID, visible: true, bounds: { x: 0, y: 0, width: 1000, height: 700 } })
+    surface = webContents.getAllWebContents().find((contents) => contents.getURL() === fixture + "/")
+    assert(surface)
+    const firstFrame = Promise.withResolvers<void>()
+    surface.beginFrameSubscription(false, (image) => {
+      if (!image.isEmpty()) firstFrame.resolve()
+    })
+    await Promise.race([
+      firstFrame.promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Browser surface did not produce a frame")), 5_000).unref(),
+      ),
+    ])
     await call("tabs.focus", { tabID: second.id })
     pane.layout(win, "suite", { tabID: second.id, visible: true, bounds: { x: 0, y: 0, width: 1000, height: 700 } })
     const snap = await call("snapshot", { tabID, boxes: true })
@@ -554,6 +570,8 @@ async function main() {
       [],
     )
     assert.deepEqual(ipcErrors, [])
+    surface.endFrameSubscription()
+    surface = undefined
     await pane.register(win, "replacement", {
       serverKey: "browser-suite",
       sessionID: session.id,
@@ -599,6 +617,7 @@ async function main() {
       `PASS ${visited.size} browser operations over physical authenticated HTTP, including file bytes in both directions`,
     )
   } finally {
+    if (surface && !surface.isDestroyed()) surface.endFrameSubscription()
     await restored?.dispose()
     await pane.dispose()
     storage.close()

@@ -1,10 +1,14 @@
-import { Effect, FileSystem, Option } from "effect"
+import { Effect, FileSystem, Option, Schema } from "effect"
 import path from "node:path"
 import { brotliDecompressSync } from "node:zlib"
 import { OPENCODE_LOCAL } from "./version"
 
 export type AssetMap = Readonly<Record<string, string | Uint8Array>>
-type EncodedAssetMap = Readonly<Record<string, { readonly content: string; readonly encoding: "utf8" | "base64" }>>
+const EncodedAssetMap = Schema.Record(
+  Schema.String,
+  Schema.Struct({ content: Schema.String, encoding: Schema.Literals(["utf8", "base64"]) }),
+)
+type EncodedAssetMap = typeof EncodedAssetMap.Type
 
 export const load = Effect.fn("cli.app-assets.load")(function* () {
   const embedded = yield* Effect.tryPromise(() => import("virtual:opencode-app-assets")).pipe(Effect.option)
@@ -15,7 +19,7 @@ export const load = Effect.fn("cli.app-assets.load")(function* () {
 
 function decodeArchive(archive: string) {
   const body = brotliDecompressSync(Buffer.from(archive, "base64")).toString()
-  return decode(JSON.parse(body) as EncodedAssetMap)
+  return decode(Schema.decodeUnknownSync(Schema.fromJsonString(EncodedAssetMap))(body))
 }
 
 const sourceAssets = Effect.fnUntraced(function* () {

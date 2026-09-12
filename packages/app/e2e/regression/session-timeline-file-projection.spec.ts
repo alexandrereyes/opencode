@@ -126,11 +126,10 @@ test("keeps an expanded file diff header at the same viewport position", async (
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
     .toBeLessThanOrEqual(0.5)
-  const bottomScrollTop = await scroller.evaluate((element) => element.scrollTop)
   await scroller.hover()
   await page.mouse.wheel(0, -20)
   await expect
-    .poll(() => scroller.evaluate((element, bottom) => bottom - element.scrollTop, bottomScrollTop))
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
     .toBeGreaterThan(0)
   const y = await trigger.evaluate((element) => element.getBoundingClientRect().y)
   const collapsedHeight = await row.evaluate((element) => element.getBoundingClientRect().height)

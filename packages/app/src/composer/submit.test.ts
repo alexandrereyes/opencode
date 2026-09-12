@@ -4,7 +4,13 @@ import type { SessionMessageUser } from "@opencode/client/promise"
 import { Skill } from "@opencode/schema/skill"
 import { Session } from "@opencode/schema/session"
 import { AbsolutePath } from "@opencode/schema/schema"
-import type { ActiveComposerAdapter, ComposerControls, ComposerSession, NewSessionComposerAdapter } from "./adapter"
+import type {
+  ActiveComposerAdapter,
+  ComposerControls,
+  ComposerDelivery,
+  ComposerSession,
+  NewSessionComposerAdapter,
+} from "./adapter"
 import { createMemoryComposerState, type Prompt } from "./state"
 import type { PromptHistoryComment } from "./history/entry"
 import { createComposerSubmit } from "./submit"
@@ -70,6 +76,7 @@ function submitInput(
   skills: () => readonly Skill.Info[] | undefined = () => [],
   lifecycle?: {
     history?: (prompt: Prompt, mode: "normal" | "shell") => void
+    delivery?: (alternate: boolean) => ComposerDelivery
     comments?: {
       capture: () => PromptHistoryComment[]
       clear: () => void
@@ -86,6 +93,7 @@ function submitInput(
     editor: () => undefined,
     queueScroll() {},
     addToHistory: lifecycle?.history ?? (() => undefined),
+    delivery: lifecycle?.delivery,
     resetHistory() {},
     setMode() {},
     closePopover() {},
@@ -263,6 +271,50 @@ describe("Composer submission", () => {
     expect(state.quotes.all()).toEqual([
       { id: next, messageID: "msg_next", partID: "msg_next:text:0", text: "Next quote", comment: "Next comment" },
     ])
+  })
+
+  test("queues a slash command after undo without applying selection or overwriting the next draft", async () => {
+    const state = createMemoryComposerState({ prompt: "/review changes" }).capture()
+    const ready = Promise.withResolvers<boolean>()
+    const sent = Promise.withResolvers<Parameters<ComposerSession["api"]["command"]>[0]>()
+    const calls: string[] = []
+    const target = session({
+      calls,
+      prompt: async () => {
+        throw new Error("command must not call prompt")
+      },
+      command: async (request) => {
+        calls.push("command")
+        sent.resolve(request)
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => true,
+      session: () => target,
+      interrupt: async () => undefined,
+      submissionBarrier: { pending: () => true, wait: () => ready.promise },
+      submitted() {},
+      setEditor() {},
+    }
+
+    const submitting = submitInput(adapter, undefined, "normal", () => [{ name: "review" }], undefined, {
+      delivery: () => "queue",
+    }).submit(new Event("submit"))
+    expect(state.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
+    const nextDraft = [{ type: "text", content: "next draft", start: 0, end: 10 }] satisfies Prompt
+    state.set(nextDraft)
+    expect(calls).toEqual([])
+
+    ready.resolve(true)
+    await submitting
+
+    expect(await sent.promise).toMatchObject({ command: "review", text: "changes", delivery: "queue" })
+    expect(calls).toEqual(["command"])
+    expect(state.current()).toEqual(nextDraft)
   })
 
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {

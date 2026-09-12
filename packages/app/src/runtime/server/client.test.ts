@@ -83,6 +83,27 @@ describe("server event stream", () => {
     expect(received).toEqual({ first: 1, second: 1 })
     second.dispose()
   })
+
+  test("retains connection epochs for late server-scoped consumers", () => {
+    const first = setup()
+    const second = setup()
+    let replayed = 0
+
+    first.publish({ id: "evt_connected_1", type: "server.connected", data: {} })
+    first.event.on("server.connected", () => replayed++)
+
+    expect(first.connectionEpoch()).toBe(1)
+    expect(second.connectionEpoch()).toBe(0)
+    expect(replayed).toBe(0)
+
+    first.publish({ id: "evt_connected_2", type: "server.connected", data: {} })
+
+    expect(first.connectionEpoch()).toBe(2)
+    expect(second.connectionEpoch()).toBe(0)
+    expect(replayed).toBe(1)
+    first.dispose()
+    second.dispose()
+  })
 })
 
 test("rotates HTTP and PTY clients together", async () => {

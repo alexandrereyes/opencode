@@ -104,9 +104,12 @@ test("animates review and terminal panels while caching hidden terminal content"
 
   await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
   await expectSessionTitle(page, title)
+  const reviewToggle = page.getByRole("button", { name: "Toggle review" })
+  await page.locator("#session-side-panel-review-tab").click()
+  await reviewToggle.click()
+  await expect(page.locator("#review-panel")).toBeHidden()
   await installMotionProbe(page)
 
-  const reviewToggle = page.getByRole("button", { name: "Toggle review" })
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()
   await expectWidthMotions(page, 1)

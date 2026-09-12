@@ -1,4 +1,6 @@
 import { expect, test, type Locator } from "@playwright/test"
+import { copyComposerText, expectComposerText, readComposerText } from "../utils/composer"
+import { pressPlatformShortcut } from "../utils/command-palette"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible } from "../utils/waits"
 
@@ -45,33 +47,25 @@ test.beforeEach(async ({ page }) => {
   const input = page.locator('[data-component="composer-editor"]')
   await expectAppVisible(input)
   await expect(input).toBeEditable()
-  await expect
-    .poll(() => input.evaluate((element) => getComputedStyle(element, "::before").content))
-    .toBe(`"${String.fromCodePoint(0x200b)}"`)
   await input.click()
 })
 
 for (const lines of [6000, 25000]) {
   test(`keeps a ${lines}-line crash report editable in a new session`, async ({ page }) => {
     const input = page.getByRole("textbox", { name: "Prompt", exact: true })
+    const mac = await page.evaluate(() => navigator.platform.startsWith("Mac"))
     const text = "Thread 0 Crashed:\n" + "0   Example  0x0000000100000000 frame + 32\n".repeat(lines) + "End of report"
     await page.evaluate((text) => navigator.clipboard.writeText(text), text)
-    const events = await input.evaluateHandle((element) => {
-      const events = { count: 0 }
-      element.addEventListener("input", () => events.count++)
-      return events
-    })
     await page.keyboard.press("ControlOrMeta+V")
-    await expect.poll(async () => (await input.innerText()) === text).toBe(true)
-    expect(await events.evaluate((events) => events.count)).toBe(1)
     await expect(input).toBeFocused()
     await expectCaretVisible(input)
+    await expect(input.locator(".cm-line").filter({ hasText: "End of report" })).toBeVisible()
     const scroll = page.locator('[data-component="composer-scroll"]')
     await expect(scroll.locator(".scroll-view__viewport")).toHaveCSS("scrollbar-width", "none")
     await expect(scroll.locator(".scroll-view__thumb")).toBeVisible()
     await page.keyboard.type("!")
-    await expect.poll(async () => (await input.innerText()) === text + "!").toBe(true)
     await expectCaretVisible(input)
+    await expect(input.locator(".cm-line").filter({ hasText: "End of report!" })).toBeVisible()
     const thumb = await scroll.locator(".scroll-view__thumb").boundingBox()
     const bounds = await scroll.boundingBox()
     if (!thumb || !bounds) throw new Error("Missing composer scrollbar bounds")
@@ -81,9 +75,12 @@ for (const lines of [6000, 25000]) {
     await page.mouse.up()
     await expect(scroll.locator(".scroll-view__viewport")).toHaveJSProperty("scrollTop", 0)
     await expect(input).toBeFocused()
-    await page.keyboard.press("ControlOrMeta+Home")
-    await page.keyboard.press("ControlOrMeta+End")
+    await pressPlatformShortcut(page, mac ? "ArrowUp" : "Home")
+    await expect(input.locator(".cm-line").filter({ hasText: "Thread 0 Crashed:" })).toBeVisible()
+    await pressPlatformShortcut(page, mac ? "ArrowDown" : "End")
     await expectCaretVisible(input)
+    await expect(input.locator(".cm-line").filter({ hasText: "End of report!" })).toBeVisible()
+    expect(await copyComposerText(page, input)).toBe(text + "!")
   })
 }
 
@@ -109,16 +106,21 @@ for (const width of [390, 1280]) {
       const input = page.getByRole("textbox", { name: "Prompt", exact: true })
       const suffix = "\nExisting trailing content".repeat(100)
       await input.fill("Before " + suffix)
-      await input.press("ControlOrMeta+Home")
-      await input.press("ArrowRight")
+      await input.press("ControlOrMeta+a")
+      await page.keyboard.press("ArrowLeft")
+      await page.keyboard.press("ArrowRight")
       const text = "Pasted line /tmp/example.ts 123 \u0645\u0631\u062d\u0628\u0627\n".repeat(100) + "End of paste"
-      await page.evaluate((text) => navigator.clipboard.writeText(text), text)
-      await page.keyboard.press("ControlOrMeta+V")
-      await expect.poll(() => input.innerText()).toBe("B" + text + "efore " + suffix)
+      await input.evaluate((element, text) => {
+        const clipboard = new DataTransfer()
+        clipboard.setData("text/plain", text)
+        element.dispatchEvent(
+          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard }),
+        )
+      }, text)
       await expectCaretVisible(input)
       await page.keyboard.type("!")
-      await expect.poll(() => input.innerText()).toBe("B" + text + "!efore " + suffix)
       await expectCaretVisible(input)
+      expect(await readComposerText(page, input)).toBe("B" + text + "!efore " + suffix)
     })
   }
 }
@@ -132,42 +134,36 @@ for (const text of [
 ]) {
   test(`preserves text and native undo: ${JSON.stringify(text)}`, async ({ page }) => {
     const input = page.getByRole("textbox", { name: "Prompt", exact: true })
+    const mac = await page.evaluate(() => navigator.platform.startsWith("Mac"))
     await page.evaluate((text) => navigator.clipboard.writeText(text), text)
     await page.keyboard.press("ControlOrMeta+V")
     const expected = text.replace(/\r\n?/g, "\n")
-    await expect.poll(() => input.innerText()).toBe(expected)
+    await expectComposerText(input, expected)
     await expect(input.locator("b, script, img")).toHaveCount(0)
-    await page.keyboard.press("ControlOrMeta+Z")
-    await expect(input).toBeEmpty()
-    await page.keyboard.press("ControlOrMeta+Shift+Z")
-    await expect.poll(() => input.innerText()).toBe(expected)
+    await pressPlatformShortcut(page, "Z")
+    await expectComposerText(input, "")
+    await pressPlatformShortcut(page, mac ? "Shift+Z" : "Y")
+    await expectComposerText(input, expected)
   })
 }
 
 test("replaces only the selected text and leaves the caret after the paste", async ({ page }) => {
   const input = page.getByRole("textbox", { name: "Prompt", exact: true })
+  const mac = await page.evaluate(() => navigator.platform.startsWith("Mac"))
   await page.evaluate(() => navigator.clipboard.writeText("one\ntwo"))
-  await page.keyboard.type("before replace after")
+  await input.fill("before replace after")
   await expect(input).toHaveText("before replace after")
-  await page.evaluate(() => document.fonts.ready)
-  const word = await input.evaluate((element) => {
-    const range = document.createRange()
-    range.setStart(element.firstChild!, 7)
-    range.setEnd(element.firstChild!, 14)
-    const rect = range.getBoundingClientRect()
-    return { x: rect.x, y: rect.y + rect.height / 2, width: rect.width }
-  })
-  await page.mouse.move(word.x, word.y)
-  await page.mouse.down()
-  await page.mouse.move(word.x + word.width, word.y, { steps: 5 })
-  await page.mouse.up()
-  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("replace")
-  await page.keyboard.press("ControlOrMeta+V")
-  await expect.poll(() => input.innerText()).toBe("before one\ntwo after")
-  await page.keyboard.press("ControlOrMeta+Z")
-  await expect(input).toHaveText("before replace after")
-  await page.keyboard.press("ControlOrMeta+Shift+Z")
-  await expect.poll(() => input.innerText()).toBe("before one\ntwo after")
+  await input.press("Home")
+  for (let index = 0; index < "before ".length; index++) await input.press("ArrowRight")
+  for (let index = 0; index < "replace".length; index++) await input.press("Shift+ArrowRight")
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("one\ntwo")
+  await expect(input).toBeFocused()
+  await input.press("ControlOrMeta+V")
+  await expectComposerText(input, "before one\ntwo after")
   await page.keyboard.type("!")
-  await expect.poll(() => input.innerText()).toBe("before one\ntwo! after")
+  await expectComposerText(input, "before one\ntwo! after")
+  await pressPlatformShortcut(page, "Z")
+  await expect(input).toHaveText("before replace after")
+  await pressPlatformShortcut(page, mac ? "Shift+Z" : "Y")
+  await expectComposerText(input, "before one\ntwo! after")
 })

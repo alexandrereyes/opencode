@@ -16,6 +16,45 @@ test("matches only the scroll element or an ancestor containing it", () => {
   expect(mutationNodesContainElement([child, sibling], viewport)).toBe(false)
 })
 
+test.each([
+  { name: "vertical", horizontal: false, isRtl: false, expected: 180 },
+  { name: "horizontal LTR", horizontal: true, isRtl: false, expected: 180 },
+  { name: "horizontal RTL", horizontal: true, isRtl: true, expected: -180 },
+])("scroll reset preserves the current $name offset after anchoring", async ({ horizontal, isRtl, expected }) => {
+  const targetWindow = new Window()
+  const viewport = targetWindow.document.createElement("div")
+  targetWindow.document.body.append(viewport)
+  const instance = {
+    scrollElement: viewport,
+    targetWindow,
+    scrollOffset: 0,
+    options: { horizontal, isRtl, isScrollingResetDelay: 0, useScrollendEvent: false },
+  } as unknown as Virtualizer<HTMLDivElement, HTMLDivElement>
+  const settled = Promise.withResolvers<void>()
+  const calls: [number, boolean][] = []
+  const cleanup = observeElementOffsetReconnectAware(instance, (offset, isScrolling) => {
+    calls.push([offset, isScrolling])
+    instance.scrollOffset = offset
+    if (!isScrolling) settled.resolve()
+  })
+  try {
+    viewport.dispatchEvent(new targetWindow.Event("scroll"))
+    // Prepend anchoring updates both offsets before the next native scroll event.
+    if (horizontal) viewport.scrollLeft = 180
+    else viewport.scrollTop = 180
+    instance.scrollOffset = expected
+    await settled.promise
+    expect(calls).toEqual([
+      [isRtl ? -0 : 0, true],
+      [expected, false],
+    ])
+    expect(instance.scrollOffset).toBe(expected)
+  } finally {
+    cleanup()
+    await targetWindow.happyDOM.close()
+  }
+})
+
 test("restores a view observed before its first attachment", async () => {
   const targetWindow = new Window()
   const mutations = controlledMutations(targetWindow)

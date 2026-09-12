@@ -52,7 +52,7 @@ export function SessionScreen(props: { session: SessionModel }) {
   createEffect(
     on([isDesktop, session.identity.sessionID], ([desktop, id]) => {
       if (!desktop || !id) return
-      session.layout.view().reviewPanel.open()
+      if (!session.layout.view().reviewPanel.configured()) session.layout.view().reviewPanel.open()
       if (!session.layout.tabs().active()) void session.layout.tabs().open("context")
     }),
   )

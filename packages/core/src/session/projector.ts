@@ -162,6 +162,7 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
       agent: parent.agent,
       model: parent.model,
       metadata: parent.metadata,
+      permission: parent.permission,
       version: parent.version,
       cost: 0,
       tokens_input: 0,
@@ -452,6 +453,7 @@ const layer = Layer.effectDiscard(
             agent: event.data.agent,
             model: event.data.model,
             metadata: event.data.metadata,
+            permission: event.data.permissions,
             version: event.data.version,
             time_created: event.created,
             time_updated: event.created,
@@ -592,6 +594,14 @@ const layer = Layer.effectDiscard(
       db
         .update(SessionTable)
         .set({ time_archived: event.created, time_updated: sql`${SessionTable.time_updated}` })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie),
+    )
+    yield* bus.project(SessionEvent.PermissionsUpdated, (event) =>
+      db
+        .update(SessionTable)
+        .set({ permission: event.data.permissions, time_updated: event.created })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie),

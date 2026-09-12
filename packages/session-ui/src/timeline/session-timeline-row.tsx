@@ -24,7 +24,7 @@ import type { ContextGroupPart } from "../tools/tool-renderer"
 import { SessionRetry } from "../components/session-retry"
 import { SessionError } from "../components/session-error"
 import { timelineCategory, type TimelineDetail } from "./detail"
-import { currentToolFailed } from "../message/current-tool-state"
+import { currentToolFailed, currentToolInput } from "../message/current-tool-state"
 import {
   createReactiveTimelineProjection,
   Timeline,
@@ -209,6 +209,10 @@ export function createSessionTimelineRowRenderer(input: {
       })
       const firstPath = createMemo(() => {
         const tool = tools()[0]
+        if (tool?.name === "write") {
+          const input = currentToolInput(tool)
+          return typeof input.path === "string" ? input.path : undefined
+        }
         if (!tool || !("metadata" in tool.state)) return undefined
         const files = tool.state.metadata?.files
         if (!Array.isArray(files)) return undefined
@@ -224,7 +228,7 @@ export function createSessionTimelineRowRenderer(input: {
             const open = input.disclosure.value(`${row().group.key}:file:${path}`)
             if (open !== undefined) return open
             if (input.timelineDetail) return input.timelineDetail().edit.details === "expanded"
-            if (tools()[0]?.name !== "edit" || path !== firstPath()) return false
+            if (!["edit", "write"].includes(tools()[0]?.name ?? "") || path !== firstPath()) return false
             return input.disclosure.value(row().group.key) ?? input.editToolDefaultOpen()
           }}
           onFileOpenChange={(path, open) => input.disclosure.set(`${row().group.key}:file:${path}`, open)}

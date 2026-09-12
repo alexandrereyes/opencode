@@ -220,6 +220,12 @@ it.live("embedded client exposes plugin-backed web search", () =>
           }),
       })
 
+      yield* opencode.websearch.providers({ location: location(fixture) }).pipe(
+        Effect.filterOrFail((result) => result.data.some((provider) => provider.id === providerID)),
+        Effect.retry(Schedule.spaced("10 millis")),
+        Effect.timeout("2 seconds"),
+      )
+
       const result = yield* opencode.websearch.query({
         query: "opencode",
         providerID,

@@ -25,6 +25,7 @@ import { TokenUsage } from "./token-usage.js"
 import { SessionInbox } from "./session-inbox.js"
 import { Project } from "./project.js"
 import { SessionFork } from "./session-fork.js"
+import { Permission } from "./permission.js"
 
 export { FileAttachment }
 
@@ -62,6 +63,7 @@ export const Created = Event.durable({
     model: Model.Ref.pipe(optional),
     /** Host-supplied annotations resolved at creation, including any inherited from a parent. */
     metadata: SessionMetadata.pipe(optional),
+    permissions: Permission.Ruleset.pipe(optional),
     version: Schema.String,
   },
 })
@@ -115,6 +117,16 @@ export const Archived = Event.durable({
   schema: Base,
 })
 export type Archived = typeof Archived.Type
+
+export const PermissionsUpdated = Event.durable({
+  type: "session.permissions.updated",
+  ...options,
+  schema: {
+    ...Base,
+    permissions: Permission.Ruleset,
+  },
+})
+export type PermissionsUpdated = typeof PermissionsUpdated.Type
 
 export const Viewed = Event.durable({
   type: "session.viewed",
@@ -657,6 +669,7 @@ export const Definitions = Event.inventory(
   Moved,
   Renamed,
   Archived,
+  PermissionsUpdated,
   Viewed,
   UsageUpdated,
   Deleted,

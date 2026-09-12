@@ -37,10 +37,8 @@ test("keeps a narrow session composer contained when invoking a built-in", async
   await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
   const composer = page.locator('[data-component="composer"]')
   const input = composer.locator('[data-component="composer-editor"]')
-  await expect
-    .poll(() => input.evaluate((element) => getComputedStyle(element, "::before").content))
-    .toBe(`"${String.fromCodePoint(0x200b)}"`)
   await expectAppVisible(composer)
+  await expect(input).toBeEditable()
   await expect(page.locator('[data-slot="session-chat-panel"]')).toHaveCSS("min-width", "0px")
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 

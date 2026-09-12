@@ -18,15 +18,23 @@ const PROBE = "original"
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
-// The review pane's data is workspace-scoped, but visibility belongs to each
-// session tab. Switching tabs must keep the pane mounted without opening it.
-test("keeps review visibility per tab and the pane mounted across tab switches", async ({ page }) => {
+// The review pane's data is workspace-scoped, while each session retains its
+// selected side-panel tab. Switching sessions must keep the panel shell mounted.
+test("keeps the selected review tab per session and the panel mounted across tab switches", async ({ page }) => {
   await setup(page)
 
   await page.goto(sessionHref(sessionA))
   await expectSessionTitle(page, titleA)
 
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "false")
   await page.getByRole("button", { name: "Toggle review" }).click()
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "true")
+  await page.locator("#session-side-panel-review-tab").click()
+  await page.getByRole("button", { name: "Toggle review" }).click()
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "false")
+  await expect(page.locator('[data-slot="session-chat-panel"]')).toHaveAttribute("data-width-animating", "false")
+  await page.getByRole("button", { name: "Toggle review" }).click()
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "true")
   await expect
     .poll(() =>
       page
@@ -41,30 +49,29 @@ test("keeps review visibility per tab and the pane mounted across tab switches",
   await expect(reviewTabPanel).toHaveAttribute("id", "session-side-panel-review-tabpanel")
   const review = page.locator('#review-panel [data-component="session-review-v2"]')
   await expectAppVisible(review)
-  await expect(chatPanel).toHaveCSS("width", "580px")
+  await expect(chatPanel).toHaveCSS("width", "600px")
   await expectAppVisible(page.getByRole("button", { name: "generated-0000.ts" }))
   await writeProbe(page)
 
   await switchTab(page, titleB)
   await expectSessionTitle(page, titleB)
   await expect(review).toBeHidden()
-  await expect
-    .poll(() =>
-      page
-        .locator('[data-slot="session-chat-panel"]')
-        .evaluate((element) => getComputedStyle(element).transitionDuration),
-    )
-    .toBe("0s")
+  // Switching session identity restores its pane state without a width animation.
+  await expect(chatPanel).toHaveCSS("transition-duration", "0s")
   expect(await readProbe(page)).toBe(PROBE)
 
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "false")
   await page.getByRole("button", { name: "Toggle review" }).click()
+  await expect(page.getByRole("button", { name: "Toggle review" })).toHaveAttribute("aria-expanded", "true")
+  await expect(page.getByRole("tab", { name: "Context", selected: true })).toBeVisible()
+  await page.locator("#session-side-panel-review-tab").click()
   await expectAppVisible(review)
-  await expect(chatPanel).toHaveCSS("width", "520px")
+  await expect(chatPanel).toHaveCSS("width", "600px")
 
   await switchTab(page, titleA)
   await expectSessionTitle(page, titleA)
   await expectAppVisible(review)
-  await expect(chatPanel).toHaveCSS("width", "580px")
+  await expect(chatPanel).toHaveCSS("width", "600px")
   await expectAppVisible(page.getByRole("button", { name: "generated-0000.ts" }))
   expect(await readProbe(page)).toBe(PROBE)
 
@@ -82,7 +89,7 @@ test("keeps review visibility per tab and the pane mounted across tab switches",
   await page.reload()
   await expectSessionTitle(page, titleA)
   await expectAppVisible(review)
-  await expect(chatPanel).toHaveCSS("width", "580px")
+  await expect(chatPanel).toHaveCSS("width", "600px")
 
   const viewport = page.locator('#review-panel [data-slot="session-review-v2-sidebar-tree"] .scroll-view__viewport')
   await viewport.hover()
@@ -100,13 +107,13 @@ async function switchTab(page: Page, title: string) {
 }
 
 async function writeProbe(page: Page) {
-  await page.locator('#review-panel [data-component="session-review-v2"]').evaluate((el, probe) => {
+  await page.locator('[data-slot="session-side-panel-presence"]').evaluate((el, probe) => {
     ;(el as Probed).__e2eProbe = probe
   }, PROBE)
 }
 
 async function readProbe(page: Page) {
-  return page.locator('#review-panel [data-component="session-review-v2"]').evaluate((el) => (el as Probed).__e2eProbe)
+  return page.locator('[data-slot="session-side-panel-presence"]').evaluate((el) => (el as Probed).__e2eProbe)
 }
 
 async function setup(page: Page) {
@@ -158,8 +165,8 @@ async function setup(page: Page) {
       server,
       sessions: [sessionA, sessionB],
       panes: {
-        [`${server}\n${sessionHref(sessionA)}`]: { sessionWidth: 580 },
-        [`${server}\n${sessionHref(sessionB)}`]: { sessionWidth: 520 },
+        [`${server}\n${sessionHref(sessionA)}`]: { review: false },
+        [`${server}\n${sessionHref(sessionB)}`]: { review: false },
       },
     },
   )

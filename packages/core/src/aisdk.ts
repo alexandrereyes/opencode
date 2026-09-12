@@ -44,6 +44,7 @@ type AssistantContent = Extract<LanguageModelV3Message, { role: "assistant" }>["
 type ToolResultContent = Extract<AssistantContent[number], { type: "tool-result" }>
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const decodeJsonValue = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 export interface SDKEvent {
   readonly model: Info
@@ -803,10 +804,17 @@ function jsonObject(input: Record<string, unknown>) {
 function jsonValue(input: unknown): JSONValue {
   try {
     const encoded = JSON.stringify(input)
-    return encoded === undefined ? null : (JSON.parse(encoded) as JSONValue)
+    return encoded === undefined ? null : toJSONValue(decodeJsonValue(encoded))
   } catch {
     return messageValue(input)
   }
+}
+
+function toJSONValue(input: Schema.Json): JSONValue {
+  if (Array.isArray(input)) return input.map(toJSONValue)
+  if (input !== null && typeof input === "object")
+    return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, toJSONValue(value)]))
+  return input
 }
 
 function messageValue(input: unknown) {

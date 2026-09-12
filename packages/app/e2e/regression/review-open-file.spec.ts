@@ -90,7 +90,6 @@ test("opens and searches project files inline", async ({ page }) => {
   const sidebar = panel.locator('[data-slot="session-review-v2-sidebar"]')
   const sidebarToggle = panel.getByRole("button", { name: "Toggle file tree" })
   const contextButton = page.getByRole("button", { name: "View context usage" })
-  await contextButton.click()
   await expect(panel.getByRole("tab", { name: "Context", selected: true })).toBeVisible()
   await expect(panel.getByRole("button", { name: "Open file" }).locator("use")).toHaveAttribute(
     "href",

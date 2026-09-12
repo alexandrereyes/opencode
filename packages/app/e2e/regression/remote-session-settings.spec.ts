@@ -2,6 +2,7 @@ import { base64Encode } from "@opencode/util/encode"
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { installSseTransport } from "../utils/sse-transport"
 import { currentSession } from "../utils/mock-server"
+import { pressPlatformShortcut } from "../utils/command-palette"
 
 const serverA = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 const serverB = "http://127.0.0.1:4097"
@@ -26,7 +27,7 @@ test("session settings use the remote server context", async ({ page }) => {
   await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
   const sessionHeading = page.getByRole("heading", { name: sessionB.title, exact: true, includeHidden: true })
   await expect(sessionHeading).toBeVisible()
-  await page.keyboard.press("Control+,")
+  await pressPlatformShortcut(page, ",")
 
   const settings = page.getByTestId("settings-screen")
   await expect(settings).toBeVisible()
@@ -63,6 +64,20 @@ test("session settings use the remote server context", async ({ page }) => {
       },
     ])
 
+  permissionRequests.length = 0
+  await autoAccept.locator('[data-slot="switch-control"]').click()
+  await expect(input).not.toBeChecked()
+  await autoAccept.locator('[data-slot="switch-control"]').click()
+  await expect(input).toBeChecked()
+  await expect
+    .poll(() =>
+      permissionRequests.some((request) => {
+        const url = new URL(request)
+        return url.origin === serverB && url.searchParams.get("location[directory]") === directoryB
+      }),
+    )
+    .toBe(true)
+
   await settings.getByRole("tab", { name: "Models" }).click()
   await expect(settings.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
   await expect(settings.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
@@ -97,7 +112,7 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
   const hrefB = `/server/${base64Encode(serverB)}/session/${sessionB.id}`
   await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
-  await page.keyboard.press("Control+,")
+  await pressPlatformShortcut(page, ",")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -197,7 +212,7 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
   const first = await transport.waitForConnection()
 
-  await page.keyboard.press("Control+,")
+  await pressPlatformShortcut(page, ",")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -215,11 +230,23 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   // delivered as an event and only a reconnect sweep can find it. The first
   // listing after the reconnect fails, so only the bounded sweep retry can
   // deliver the reply.
+  permissionRequests.length = 0
   pendingA.push(pendingPermission("permission-offline-a", sessionA.id))
   listFailures[serverA] = 1
   const syncsBeforeReconnect = sessionGets.length
   await transport.disconnect()
   await transport.waitForConnection({ after: first.id })
+  await expect.poll(() => sessionGets.slice(syncsBeforeReconnect)).toContain(sessionA.id)
+
+  await expect
+    .poll(
+      () =>
+        permissionRequests.filter((request) => {
+          const url = new URL(request)
+          return url.origin === serverA && url.searchParams.get("location[directory]") === directoryA
+        }).length,
+    )
+    .toBeGreaterThanOrEqual(2)
 
   await expect
     .poll(() => permissionResponses)
@@ -232,9 +259,6 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
         body: { reply: "once" },
       },
     ])
-  // The reconnect sweep must resync active sessions instead of trusting
-  // cached locations, since another client may have moved them meanwhile.
-  expect(sessionGets.slice(syncsBeforeReconnect)).toContain(sessionA.id)
 })
 
 test("auto-accept approves a request discovered by opening a session", async ({ page }) => {
@@ -253,7 +277,7 @@ test("auto-accept approves a request discovered by opening a session", async ({ 
   await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
 
-  await page.keyboard.press("Control+,")
+  await pressPlatformShortcut(page, ",")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -343,6 +367,7 @@ async function mockServers(
       return json(route, { data: options.sessionPending?.[sessionPermission[1]!] ?? [] })
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/api/config") return json(route, [])
+    if (url.pathname === "/api/snippet") return json(route, [])
     if (url.pathname === "/api/provider")
       return json(route, {
         location: { directory },
@@ -384,8 +409,15 @@ async function mockServers(
     }
     if (url.pathname === "/api/project/current")
       return json(route, { id: remote ? sessionB.projectID : "project-server-a", directory, canonical: directory })
-    if (url.pathname === "/api/session")
-      return json(route, { data: sessions.map((session) => currentSession(session)), cursor: {} })
+    if (url.pathname === "/api/session") {
+      const parentID = url.searchParams.get("parentID")
+      return json(route, {
+        data: sessions
+          .filter((session) => !parentID || ("parentID" in session && session.parentID === parentID))
+          .map((session) => currentSession(session)),
+        cursor: {},
+      })
+    }
     if (url.pathname === "/api/session/active")
       return json(route, { data: Object.fromEntries(sessions.map((session) => [session.id, { type: "running" }])) })
     const currentSessionInfo = sessions.find((session) => url.pathname === `/api/session/${session.id}`)

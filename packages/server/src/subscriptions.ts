@@ -66,7 +66,7 @@ export const readSubscriptions = Effect.fn("Subscriptions.read")(function* () {
     }
   }).pipe(
     Effect.timeout("8 seconds"),
-    Effect.catch(() => Effect.succeed({ status: "unavailable" as const, accounts: [] })),
+    Effect.orElseSucceed(() => ({ status: "unavailable" as const, accounts: [] })),
     Effect.provide(FetchHttpClient.layer),
   )
 })

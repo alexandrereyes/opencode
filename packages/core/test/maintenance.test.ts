@@ -4,6 +4,21 @@ import { Maintenance } from "../src/maintenance"
 import { SessionRunCoordinator } from "../src/session/run-coordinator"
 import { it } from "./lib/effect"
 
+it.live("keeps one stable identity across status and leases", () =>
+  Effect.sync(() => {
+    const gate = Maintenance.make()
+    const identity = gate.identity
+    expect(gate.identity).toBe(identity)
+    expect(gate.status().identity).toBe(identity)
+    const first = requireLease(gate)
+    expect(first.identity).toBe(identity)
+    expect(gate.cancel(first.token)).toBe(true)
+    const second = requireLease(gate)
+    expect(second.identity).toBe(identity)
+    expect(gate.cancel(second.token)).toBe(true)
+  }),
+)
+
 it.live(
   "lease and synchronous admission exclude each other",
   Effect.gen(function* () {

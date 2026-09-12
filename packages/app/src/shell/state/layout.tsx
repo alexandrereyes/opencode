@@ -59,6 +59,7 @@ export type TabPanes = {
   terminalHeight: Accessor<number | undefined>
   setTerminalHeight(height: number): void
   reviewOpened: Accessor<boolean>
+  reviewConfigured: Accessor<boolean>
   setReviewOpened(opened: boolean): void
 }
 
@@ -521,6 +522,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         )
         const reviewPanelOpened =
           panes?.reviewOpened ?? createMemo(() => store.review?.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED)
+        const reviewPanelConfigured = panes?.reviewConfigured ?? (() => store.review?.panelOpened !== undefined)
         // The divider is a local layout preference shared by every Session.
         const sessionWidth = createMemo(() => store.session.width)
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
@@ -599,6 +601,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           },
           reviewPanel: {
             opened: reviewPanelOpened,
+            configured: reviewPanelConfigured,
             source: reviewPanelSource,
             width: sessionWidth,
             resize(width: number) {

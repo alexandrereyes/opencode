@@ -1,6 +1,6 @@
 export * as Observability from "./observability.js"
 
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { layer } from "@effect/platform-node/NodeFileSystem"
 import { LayerNode } from "./effect/layer-node.js"
 import { Effect, Layer, Logger, References, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -17,7 +17,9 @@ export const Options = Schema.Struct({
 })
 export type Options = typeof Options.Type
 
-export function layer(
+export { observabilityLayer as layer }
+
+function observabilityLayer(
   options: Options = {
     endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     headers: process.env.OTEL_EXPORTER_OTLP_HEADERS,
@@ -29,7 +31,7 @@ export function layer(
     channel: options.channel ?? "local",
   }
   const local = Logger.layer(Logging.loggers(app.channel === "local", app.channel), { mergeWithExisting: false }).pipe(
-    Layer.provide(NodeFileSystem.layer),
+    Layer.provide(layer),
     Layer.orDie,
     Layer.merge(Layer.succeed(References.MinimumLogLevel, Logging.minimumLogLevel())),
   )
@@ -39,7 +41,7 @@ export function layer(
         [...Logging.loggers(app.channel === "local", app.channel), ...Otlp.loggers(options, app)],
         { mergeWithExisting: false },
       ).pipe(
-        Layer.provide(NodeFileSystem.layer),
+        Layer.provide(layer),
         Layer.provide(OtlpSerialization.layerJson),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(OtlpExporter.layerFlusher),
@@ -55,6 +57,6 @@ export function layer(
 // I/O (file logger, run id) that workerd forbids in global scope.
 export const node = LayerNode.make({
   name: "observability",
-  layer: Layer.suspend(() => layer()),
+  layer: Layer.suspend(() => observabilityLayer()),
   deps: [],
 })

@@ -34,6 +34,7 @@ export const useSessionLayout = () => {
     terminalHeight: () => tabs.paneSize(currentTab(), "terminalHeight"),
     setTerminalHeight: (height: number) => tabs.setPaneSize(currentTab(), "terminalHeight", height),
     reviewOpened: () => tabs.pane(currentTab(), "review"),
+    reviewConfigured: () => tabs.paneConfigured(currentTab(), "review"),
     setReviewOpened: (opened: boolean) => tabs.setPane(currentTab(), "review", opened),
   }
   return {

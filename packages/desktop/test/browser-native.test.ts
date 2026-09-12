@@ -38,7 +38,12 @@ test.skipIf(!!process.env.CI).each(["native", "idle"])(
       [process.execPath, path.join(import.meta.dir, suite === "idle" ? "browser/idle-server.ts" : "browser/server.ts")],
       {
         cwd: root,
-        env: { ...environment, TMP: path.join(root, "server-files"), TEMP: path.join(root, "server-files") },
+        env: {
+          ...environment,
+          TMPDIR: path.join(root, "server-files"),
+          TMP: path.join(root, "server-files"),
+          TEMP: path.join(root, "server-files"),
+        },
         stdout: "inherit",
         stderr: "inherit",
         ipc(message: unknown) {
@@ -87,6 +92,7 @@ test.skipIf(!!process.env.CI).each(["native", "idle"])(
         env: {
           ...environment,
           SMOKE_URL: proxy.url.href,
+          TMPDIR: path.join(root, "client-files"),
           TMP: path.join(root, "client-files"),
           TEMP: path.join(root, "client-files"),
         },

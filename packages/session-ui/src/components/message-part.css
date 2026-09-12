@@ -1317,6 +1317,7 @@
   [data-slot="apply-patch-file-name-container"] {
     display: flex;
     flex-grow: 1;
+    line-height: var(--line-height-compact);
     min-width: 0;
     overflow: hidden;
     direction: ltr;

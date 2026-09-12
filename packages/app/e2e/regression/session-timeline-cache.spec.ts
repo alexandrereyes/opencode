@@ -5,6 +5,7 @@ import { mockOpenCodeServer } from "../utils/mock-server"
 import { fixture } from "../performance/timeline/session-timeline-stress.fixture"
 import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
 import { waitForStableTimeline } from "../performance/timeline/session-tab-switch-probe"
+import { pressPlatformShortcut } from "../utils/command-palette"
 
 test.use({ viewport: { width: 1440, height: 900 }, serviceWorkers: "block" })
 
@@ -29,6 +30,9 @@ test("recovers from a failed cold history load when another session is selected"
 })
 
 test("focuses Find in the selected cached timeline", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("opencode.global.dat:layout", JSON.stringify({ review: { panelOpened: false } }))
+  })
   await mockOpenCodeServer(page, {
     ...fixture,
     pageMessages: (id) => ({
@@ -42,14 +46,14 @@ test("focuses Find in the selected cached timeline", async ({ page }) => {
   await expect(page.getByText(`History for ${fixture.targetID}`, { exact: true })).toBeVisible()
   await page.locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.sourceID)}"]`).click()
   await expect(page.getByText(`History for ${fixture.sourceID}`, { exact: true })).toBeVisible()
-  await page.keyboard.press("ControlOrMeta+f")
+  await pressPlatformShortcut(page, "F")
   const search = page.locator('[data-component="timeline-search-bar"] input')
   await expect(search).toBeFocused()
   await page.keyboard.type("History")
   await expect(search).toHaveValue("History")
   await page.locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.targetID)}"]`).click()
   await expect(page.getByText(`History for ${fixture.targetID}`, { exact: true })).toBeVisible()
-  await page.keyboard.press("ControlOrMeta+f")
+  await pressPlatformShortcut(page, "F")
   await expect(search).toBeFocused()
   await search.press("Escape")
   await expect(search).toHaveCount(0)

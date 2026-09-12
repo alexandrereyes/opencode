@@ -122,7 +122,15 @@ test("renders compaction progress, summary, and outcome in order", async ({ page
   )
   await expect(compaction.getByRole("heading", { name: "Checkpoint" })).toBeVisible()
   await expect(compaction).toContainText("Streamed implementation details.")
-  await expect(compaction.getByRole("status").getByLabel("Compacting", { exact: true })).toBeVisible()
+  const running = compaction.getByRole("status").getByLabel("Compacting", { exact: true })
+  await expect(running).toBeVisible()
+  await expect
+    .poll(async () => {
+      const summary = await compaction.locator('[data-component="text-part"]').boundingBox()
+      const status = await running.boundingBox()
+      return !!summary && !!status && status.y >= summary.y + summary.height
+    })
+    .toBe(true)
   await expect(compaction.getByText("Session compacted", { exact: true })).toHaveCount(0)
 
   await timeline.send(
@@ -452,6 +460,11 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
   await expect(used).toHaveAttribute("aria-expanded", "false")
   await used.click()
   await expect(used).toHaveAttribute("aria-expanded", "true")
+  await expect(backgroundCard).toContainText("Background task (background)")
+  await expect(backgroundCard.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
+  await expect(
+    page.locator('[data-timeline-part-id="call_shell_backgrounded"] [data-component="text-shimmer"]'),
+  ).toHaveAttribute("data-active", "true")
   await page.getByRole("button", { name: "Session details" }).click()
   const summary = page.getByRole("button", { name: "2 background tasks running", exact: true })
   await expect(summary).toContainText("2")
@@ -460,12 +473,6 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
   await expect(list).toContainText("Background task")
   await expect(list).toContainText("sleep 120")
   await expect(list).not.toContainText("Foreground task")
-  await expect(backgroundCard).toContainText("Background task (background)")
-  await expect(backgroundCard.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
-  await expect(
-    page.locator('[data-timeline-part-id="call_shell_backgrounded"] [data-component="text-shimmer"]'),
-  ).toHaveAttribute("data-active", "true")
-
   await timeline.transport.send({
     id: "evt_background_succeeded",
     created: Date.now(),

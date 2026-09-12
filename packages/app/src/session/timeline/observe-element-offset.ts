@@ -6,12 +6,16 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
   onReconnect?: () => void,
 ) {
   let active = true
+  const element = instance.scrollElement
+  const currentOffset = () =>
+    instance.options.horizontal ? element!.scrollLeft * (instance.options.isRtl ? -1 : 1) : element!.scrollTop
   const deliver = (offset: number, isScrolling: boolean) => {
     if (!active) return
-    callback(offset, isScrolling)
+    // The reset-delay callback retains the last scroll event's offset. Prepend
+    // anchoring can have moved the viewport before its next native scroll event.
+    callback(!isScrolling && element ? currentOffset() : offset, isScrolling)
   }
   const cleanupOffset = observeElementOffset(instance, deliver)
-  const element = instance.scrollElement
   const targetWindow = instance.targetWindow
   const root = element?.closest("main") ?? element?.ownerDocument.body
   if (!element || !targetWindow || !root)
@@ -35,9 +39,7 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
     const check = (time: number) => {
       frame = undefined
       if (element.isConnected) {
-        const offset = instance.options.horizontal
-          ? element.scrollLeft * (instance.options.isRtl ? -1 : 1)
-          : element.scrollTop
+        const offset = currentOffset()
         if (instance.scrollOffset === null || Math.abs(offset - instance.scrollOffset) > 1) deliver(offset, false)
       }
       if (time >= deadline) framesAfterDeadline += 1

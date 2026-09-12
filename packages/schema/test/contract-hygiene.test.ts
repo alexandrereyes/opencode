@@ -4,6 +4,7 @@ import { Agent } from "../src/agent.js"
 import { ConfigAgent } from "../src/config/agent.js"
 import { FileSystem } from "../src/filesystem.js"
 import { Form } from "../src/form.js"
+import { Integration } from "../src/integration.js"
 import { Mcp } from "../src/mcp.js"
 import { Model } from "../src/model.js"
 import { Project } from "../src/project.js"
@@ -224,6 +225,24 @@ describe("contract hygiene", () => {
       expect(decode({ ...base, type: "compaction", payload: {}, delivery }).delivery).toBe(delivery)
       expect(decode({ ...base, type: "move", payload: move, delivery }).delivery).toBe(delivery)
     }
+  })
+
+  test("integration metadata remains opaque", () => {
+    const opaque = () => "value"
+    const metadata = { opaque }
+
+    expect(
+      Schema.decodeUnknownSync(Integration.Ref)({ id: "integration_test", name: "Test", metadata }).metadata?.opaque,
+    ).toBe(opaque)
+    expect(
+      Schema.decodeUnknownSync(Integration.Info)({
+        id: "integration_test",
+        name: "Test",
+        metadata,
+        methods: [],
+        connections: [],
+      }).metadata?.opaque,
+    ).toBe(opaque)
   })
 
   test("current source limits Any to provider options and avoids mutable contract wrappers", async () => {

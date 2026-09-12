@@ -21,23 +21,18 @@ for (const theme of ["light", "dark"]) {
   story(`snippets search by alias, insert at the cursor and expand on send in ${theme}`, async ({ mount, page }) => {
     const component = await mount("opencode-composer-flow--snippets", { globals: { theme } })
     const input = component.getByRole("textbox", { name: "Prompt", exact: true })
-    await input.fill("Before #audit after")
-    await input.evaluate((editor) => {
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.setStart(editor.firstChild!, 13)
-      range.collapse(true)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-      editor.dispatchEvent(new InputEvent("input", { bubbles: true }))
-    })
+    await input.fill("Before  after")
+    await input.press("Home")
+    for (let index = 0; index < "Before ".length; index++) await input.press("ArrowRight")
+    await input.pressSequentially("#audit")
     await expect(
       component.getByRole("button", { name: "#code-review Review for correctness and clarity" }),
     ).toBeVisible()
     await page.keyboard.press("Tab")
     const token = input.locator('[data-mention="snippet"]')
     await expect(token).toHaveText("#code-review")
-    await expect(token).toHaveAttribute("contenteditable", "false")
+    await expect(token).toHaveAttribute("title", "Review this code for correctness.\nSuggest concrete improvements.")
+    await expect(input).toBeFocused()
     expect(await token.evaluate((element) => getComputedStyle(element).color)).not.toBe(
       await input.evaluate((element) => getComputedStyle(element).color),
     )

@@ -52,7 +52,7 @@ test("shows parent lineage while the child timeline loads", async ({ page }) => 
   await page.goto(sessionHref(parentID))
   await expectSessionTitle(page, parentTitle)
   await page.getByRole("button", { name: "Used 1 Agent", exact: true }).click()
-  await page.locator(`a[href="${sessionHref(childID)}"]`).click()
+  await page.getByRole("link", { name: `Explore ${taskDescription}`, exact: true }).click()
   await Promise.all([requested.promise, expect(page).toHaveURL(sessionHref(childID))])
   await Promise.all([
     expect(page.locator('[data-slot="session-title-parent"]')).toHaveText(parentTitle),
@@ -77,7 +77,7 @@ test("keeps the parent visible while the child session resolves", async ({ page 
   await expectSessionTitle(page, parentTitle)
 
   await page.getByRole("button", { name: "Used 1 Agent", exact: true }).click()
-  await page.locator(`a[href="${sessionHref(childID)}"]`).click()
+  await page.getByRole("link", { name: `Explore ${taskDescription}`, exact: true }).click()
   await requested.promise
   await Promise.all([expect(page).toHaveURL(sessionHref(parentID)), expectSessionTitle(page, parentTitle)]).finally(
     () => release.resolve(),
@@ -107,7 +107,7 @@ test("keeps the parent tab selected while a loaded child session resolves", asyn
   const parentTab = page.locator("[data-titlebar-tab-slot]", {
     has: page.locator('[data-slot="tab-title"]', { hasText: parentTitle }),
   })
-  await page.locator(`a[href="${sessionHref(childID)}"]`).click()
+  await page.getByRole("link", { name: `Explore ${taskDescription}`, exact: true }).click()
   await Promise.all([requested.promise, expect(page).toHaveURL(sessionHref(childID))])
   await Promise.all([
     expect(parentTab).toHaveAttribute("data-active", "true"),

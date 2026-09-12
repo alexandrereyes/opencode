@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 import { fixture } from "../performance/timeline/session-timeline-stress.fixture"
 import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
 
 test("inactive tabs load attention, but read transcript and inbox only on selection", async ({ page }) => {
-  const reads: string[] = []
+  const reads: URL[] = []
   const mutations: string[] = []
   const errors: string[] = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -15,9 +15,10 @@ test("inactive tabs load attention, but read transcript and inbox only on select
   })
   const state = { text: "Original fixture answer" }
   page.on("request", (request) => {
-    const path = new URL(request.url()).pathname
+    const url = new URL(request.url())
+    const path = url.pathname
     if (!path.startsWith("/api/")) return
-    if (request.method() === "GET") reads.push(path)
+    if (request.method() === "GET") reads.push(url)
     if (request.method() === "DELETE" || /\/(interrupt|prompt)$/.test(path)) mutations.push(path)
   })
   await mockOpenCodeServer(page, {
@@ -36,6 +37,18 @@ test("inactive tabs load attention, but read transcript and inbox only on select
       ],
     }),
   })
+  await page.route("**/api/session/navigation?*", (route) =>
+    route.fulfill({
+      json: {
+        data: fixture.sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
+      },
+    }),
+  )
+  await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
+  await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
+  await page.route("**/api/server/subscriptions", (route) =>
+    route.fulfill({ json: { status: "unconfigured", accounts: [] } }),
+  )
   await installStressSessionTabs(page, { sessionIDs: [fixture.sourceID, fixture.targetID, fixture.childID] })
   const attention = Promise.all(
     [fixture.targetID, fixture.childID].flatMap((id) =>
@@ -62,12 +75,16 @@ test("inactive tabs load attention, but read transcript and inbox only on select
     state.text,
   )
   for (const id of [fixture.sourceID, fixture.targetID]) {
-    expect(reads.filter((path) => path === `/api/session/${id}/message`)).toHaveLength(1)
-    expect(reads.filter((path) => path === `/api/session/${id}/inbox`)).toHaveLength(1)
+    expect(
+      reads.filter((url) => url.pathname === `/api/session/${id}/message` && !url.searchParams.has("type")),
+    ).toHaveLength(1)
+    expect(reads.filter((url) => url.pathname === `/api/session/${id}/inbox`)).toHaveLength(1)
   }
   expect(
     reads.filter(
-      (path) => path === `/api/session/${fixture.childID}/message` || path === `/api/session/${fixture.childID}/inbox`,
+      (url) =>
+        (url.pathname === `/api/session/${fixture.childID}/message` && !url.searchParams.has("type")) ||
+        url.pathname === `/api/session/${fixture.childID}/inbox`,
     ),
   ).toEqual([])
   expect(mutations).toEqual([])

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { captureConsoleWarnings, openCommandPalette } from "../utils/command-palette"
+import { captureConsoleWarnings, openCommandPalette, pressPlatformShortcut } from "../utils/command-palette"
 
 test.use({ serviceWorkers: "block", video: "off" })
 
@@ -14,11 +14,12 @@ test("opening and closing files does not duplicate tab commands", async ({ page 
   )
   await palette.input.fill("fixture.txt")
   await palette.dialog.getByRole("option", { name: /fixture\.txt/ }).click()
-  const file = page.getByRole("tab", { name: /fixture\.txt/ })
-  await expect(file).toBeVisible()
+  const file = page.getByRole("tab", { name: "fixture.txt", exact: true })
+  await expect(file).toHaveAttribute("aria-selected", "true")
   await expect(palette.dialog).toHaveCount(0)
   await page
-    .getByRole("complementary", { name: "Review and files" })
+    .locator('[data-slot="tabs-trigger-wrapper"]')
+    .filter({ has: file })
     .getByRole("button", { name: "Close tab", exact: true })
     .click()
   await expect(file).toHaveCount(0)
@@ -36,13 +37,13 @@ test("navigation replaces commands without retaining disposed owners", async ({ 
     .getByRole("button", { name: /Palette fixture session/ })
     .click()
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
-  await page.keyboard.press("ControlOrMeta+t")
+  await pressPlatformShortcut(page, "T")
   await expect(page).toHaveURL(/\/new-session\?/)
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
   await page.locator('[data-component="composer-editor"]').blur()
   await page.keyboard.press("Control+l")
   await expect(page.locator('[data-component="composer-editor"]')).toBeFocused()
-  await page.keyboard.press("ControlOrMeta+Shift+P")
+  await pressPlatformShortcut(page, "Shift+P")
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByRole("textbox")).toBeFocused()
   await expect(dialog.getByRole("textbox")).toHaveAttribute("placeholder", "Search files, commands, and sessions")
@@ -62,11 +63,11 @@ test("navigation replaces commands without retaining disposed owners", async ({ 
   await expect(page.locator('[data-slot="mobile-tabs-drawer"] [data-titlebar-tab-link]')).toHaveCount(4)
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(page.locator('[data-slot="titlebar-tabs"] [data-titlebar-tab-link]')).toHaveCount(4)
-  await page.keyboard.press("ControlOrMeta+w")
+  await pressPlatformShortcut(page, "W")
   await expect(page.locator("[data-titlebar-tab-link]")).toHaveCount(3)
   await page.locator("[data-titlebar-tab-link]").filter({ hasText: "Palette fixture session" }).click()
   await expect(page.getByRole("heading", { name: "Palette fixture session", exact: true })).toBeVisible()
-  await page.keyboard.press("ControlOrMeta+Shift+P")
+  await pressPlatformShortcut(page, "Shift+P")
   await expect(dialog.getByRole("textbox")).toBeFocused()
   await dialog.getByRole("textbox").fill("copy session")
   await expect(dialog.getByRole("option", { name: "Copy Session ID", exact: true })).toHaveAttribute(

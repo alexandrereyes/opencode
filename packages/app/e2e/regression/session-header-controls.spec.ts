@@ -67,15 +67,17 @@ for (const direction of ["ltr", "rtl"] as const) {
     await header.getByRole("textbox").press("Escape")
     await expect(header.getByRole("heading")).toHaveText(fixture.expected.targetTitle)
 
-    await review.click()
     await expect(review).toHaveAttribute("aria-expanded", "true")
     await expect(page.locator("#review-panel")).toBeVisible()
     await review.click()
     await expect(review).toHaveAttribute("aria-expanded", "false")
+    await review.click()
+    await expect(review).toHaveAttribute("aria-expanded", "true")
+    await expect(page.locator("#review-panel")).toBeVisible()
 
     await more.click()
     const options = page.getByRole("menu")
-    await expect(options.getByRole("menuitem")).toHaveText(["Rename", "Export…", "Delete…"])
+    await expect(options.getByRole("menuitem")).toHaveText(["Rename", "Export…", "Archive", "Delete…"])
     if (direction === "ltr") {
       await expect
         .poll(async () => {
