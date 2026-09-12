@@ -22,7 +22,6 @@ import { ProjectTable } from "./project/sql.js"
 import { AppProcess } from "@opencode/util/process"
 import { ChildProcess } from "effect/unstable/process"
 import { State } from "./state.js"
-import { Project } from "./project.js"
 
 export { DirectoryUnavailableError } from "./worktree/directory.js"
 export { OperationError } from "@opencode/schema/worktree"
@@ -35,15 +34,6 @@ export type CreateInput = typeof CreateInput.Type
 
 export const RemoveInput = Worktree.RemoveInput
 export type RemoveInput = typeof RemoveInput.Type
-
-export const DeleteInput = Worktree.DeleteInput
-export type DeleteInput = typeof DeleteInput.Type
-
-export const Inspection = Worktree.Inspection
-export type Inspection = typeof Inspection.Type
-
-export const RemoveResult = Worktree.RemoveResult
-export type RemoveResult = typeof RemoveResult.Type
 
 export const RefreshResult = Schema.Struct({
   updated: Schema.Array(AbsolutePath),
@@ -103,8 +93,7 @@ export interface Strategy {
     directory: AbsolutePath
     branch?: string
   }) => Effect.Effect<Info, unknown>
-  readonly remove: (input: RemoveInput | DeleteInput) => Effect.Effect<RemoveResult | void, unknown>
-  readonly inspect?: (directory: AbsolutePath) => Effect.Effect<Inspection, unknown>
+  readonly remove: (input: { directory: AbsolutePath; force: boolean }) => Effect.Effect<void, unknown>
   readonly list: (directory: AbsolutePath) => Effect.Effect<readonly ListEntry[], unknown>
 }
 
@@ -127,8 +116,7 @@ export interface Editor {
 export interface Interface extends State.Transformable<Editor> {
   readonly list: () => Effect.Effect<List, Error>
   readonly create: (input?: CreateInput) => Effect.Effect<Info, Error>
-  readonly inspect: (directory: AbsolutePath) => Effect.Effect<Inspection, Error>
-  readonly remove: (input: RemoveInput | DeleteInput) => Effect.Effect<RemoveResult, Error>
+  readonly remove: (input: RemoveInput) => Effect.Effect<void, Error>
   readonly refresh: () => Effect.Effect<RefreshResult, Error>
 }
 
@@ -141,10 +129,8 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const db = database.db
     const bus = yield* Bus.Service
-    const git = yield* Git.Service
     const processService = yield* AppProcess.Service
     const location = yield* Location.Service
-    const projects = yield* Project.Service
     const global = yield* Global.Service
     const projectID = location.project.id
 
@@ -302,60 +288,19 @@ const layer = Layer.effect(
       return result
     })
 
-    const remove = Effect.fn("Worktree.remove")(function* (input: RemoveInput | DeleteInput) {
+    const remove = Effect.fn("Worktree.remove")(function* (input: RemoveInput) {
       yield* local
       const worktreeDirectory = yield* canonical(fs, input.directory)
-      const inventory = yield* ops.list()
-      const stored = inventory.find((item) => item.directory === worktreeDirectory)
+      const stored = yield* ops.find(worktreeDirectory)
       if (!stored?.strategy) return yield* new InvalidDirectoryError({ directory: worktreeDirectory })
       const strategy = yield* getStrategy(StrategyID.make(stored.strategy), state.get().strategies)
-      if (strategy.id === gitStrategy.id) yield* verifyGitOwner(worktreeDirectory, inventory)
-      if (
-        "branch" in input &&
-        (input.deleteLocalBranch || input.deleteRemoteBranch) &&
-        !strategy.inspect
-      )
-        return yield* new Worktree.OperationError({
-          message: `Worktree strategy ${strategy.id} cannot remove branches`,
-        })
-      const result = yield* strategy
+      yield* strategy
         .remove({
-          ...input,
           directory: worktreeDirectory,
+          force: input.force,
         })
         .pipe(Effect.mapError((error) => operationError(strategy.id, "remove", error)))
       yield* changed(yield* ops.remove(worktreeDirectory))
-      return result ?? { directory: worktreeDirectory }
-    })
-
-    const inspect = Effect.fn("Worktree.inspect")(function* (directory: AbsolutePath) {
-      yield* local
-      const worktreeDirectory = yield* canonical(fs, directory)
-      const inventory = yield* ops.list()
-      const stored = inventory.find((item) => item.directory === worktreeDirectory)
-      if (!stored?.strategy) return yield* new InvalidDirectoryError({ directory: worktreeDirectory })
-      const strategy = yield* getStrategy(StrategyID.make(stored.strategy), state.get().strategies)
-      if (!strategy.inspect)
-        return yield* new Worktree.OperationError({ message: `Worktree strategy ${strategy.id} cannot inspect removal` })
-      if (strategy.id === gitStrategy.id) yield* verifyGitOwner(worktreeDirectory, inventory)
-      return yield* strategy.inspect(worktreeDirectory).pipe(
-        Effect.mapError((error) => operationError(strategy.id, "inspect", error)),
-      )
-    })
-
-    const verifyGitOwner = Effect.fn("Worktree.verifyGitOwner")(function* (
-      directory: AbsolutePath,
-      inventory: List,
-    ) {
-      const repository = yield* git.repo.discover(directory)
-      if (!repository) return yield* new DirectoryUnavailableError({ directory })
-      const main = (yield* git.worktree.list(repository)).find((entry) => entry.kind === "main")
-      const owner = main ? yield* canonical(fs, main.directory) : undefined
-      const registered = owner ? inventory.some((item) => !item.strategy && item.directory === owner) : false
-      if (!owner || !registered || (yield* projects.resolve(owner)).id !== projectID)
-        return yield* new Worktree.OperationError({
-          message: `Directory is not a worktree of the requested project: ${directory}`,
-        })
     })
 
     const refresh = Effect.fn("Worktree.refresh")(function* () {
@@ -410,7 +355,6 @@ const layer = Layer.effect(
         return yield* ops.list()
       }),
       create,
-      inspect,
       remove,
       refresh,
     })
@@ -420,7 +364,7 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Git.node, Project.node, Bus.node, Database.node, AppProcess.node, Location.node, Global.node],
+  deps: [FSUtil.node, Git.node, Bus.node, Database.node, AppProcess.node, Location.node, Global.node],
 })
 
 function operationError(strategy: StrategyID, operation: string, error: unknown) {

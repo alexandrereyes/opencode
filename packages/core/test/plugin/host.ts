@@ -155,8 +155,6 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     worktree: overrides.worktree ?? {
       list: () => Effect.die("unused worktree.list"),
       create: () => Effect.die("unused worktree.create"),
-      inspect: () => Effect.die("unused worktree.inspect"),
-      delete: () => Effect.die("unused worktree.delete"),
       remove: () => Effect.die("unused worktree.remove"),
       refresh: () => Effect.die("unused worktree.refresh"),
       transform: () => Effect.die("unused worktree.transform"),

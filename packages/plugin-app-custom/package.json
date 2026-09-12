@@ -21,7 +21,8 @@
     "./rpc": "./src/rpc.ts",
     "./snippets/rpc": "./src/snippets/rpc.ts",
     "./native-apps/rpc": "./src/native-apps/rpc.ts",
-    "./subscriptions/rpc": "./src/subscriptions/rpc.ts"
+    "./subscriptions/rpc": "./src/subscriptions/rpc.ts",
+    "./worktrees/rpc": "./src/worktrees/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

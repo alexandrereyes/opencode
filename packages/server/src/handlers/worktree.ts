@@ -10,11 +10,9 @@ export const WorktreeHandler = HttpApiBuilder.group(Api, "server.worktree", (han
   handlers
     .handle("worktree.list", () => run((worktrees) => worktrees.list()))
     .handle("worktree.create", (ctx) => run((worktrees) => worktrees.create(ctx.payload)))
-    .handle("worktree.inspect", (ctx) => run((worktrees) => worktrees.inspect(ctx.query.directory)))
     .handle("worktree.remove", (ctx) =>
       run((worktrees) => worktrees.remove(ctx.payload)).pipe(Effect.as(HttpApiSchema.NoContent.make())),
     )
-    .handle("worktree.delete", (ctx) => run((worktrees) => worktrees.remove(ctx.payload)))
     .handle("worktree.refresh", () =>
       run((worktrees) => worktrees.refresh()).pipe(Effect.as(HttpApiSchema.NoContent.make())),
     ),

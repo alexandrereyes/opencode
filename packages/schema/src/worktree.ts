@@ -26,57 +26,6 @@ export const RemoveInput = Schema.Struct({
 }).annotate({ identifier: "Worktree.RemoveInput" })
 export interface RemoveInput extends Schema.Schema.Type<typeof RemoveInput> {}
 
-export const DeleteInput = Schema.Struct({
-  ...RemoveInput.fields,
-  identity: Schema.String,
-  branch: Schema.NullOr(Schema.String),
-  remote: optional(
-    Schema.Struct({
-      name: Schema.String,
-      branch: Schema.String,
-    }),
-  ),
-  deleteLocalBranch: optional(Schema.Boolean),
-  deleteRemoteBranch: optional(Schema.Boolean),
-}).annotate({ identifier: "Worktree.DeleteInput" })
-export interface DeleteInput extends Schema.Schema.Type<typeof DeleteInput> {}
-
-export const RemovalOption = Schema.Struct({
-  name: Schema.String,
-}).annotate({ identifier: "Worktree.RemovalOption" })
-export interface RemovalOption extends Schema.Schema.Type<typeof RemovalOption> {}
-
-export const RemoteRemovalOption = Schema.Struct({
-  name: Schema.String,
-  branch: Schema.String,
-}).annotate({ identifier: "Worktree.RemoteRemovalOption" })
-export interface RemoteRemovalOption extends Schema.Schema.Type<typeof RemoteRemovalOption> {}
-
-export const Inspection = Schema.Struct({
-  directory: AbsolutePath,
-  identity: Schema.String,
-  branch: optional(Schema.String),
-  dirty: Schema.Boolean,
-  localBranch: optional(RemovalOption),
-  remoteBranch: optional(RemoteRemovalOption),
-}).annotate({ identifier: "Worktree.Inspection" })
-export interface Inspection extends Schema.Schema.Type<typeof Inspection> {}
-
-export const CleanupResult = Schema.Struct({
-  name: Schema.String,
-  remote: optional(Schema.String),
-  deleted: Schema.Boolean,
-  error: optional(Schema.String),
-}).annotate({ identifier: "Worktree.CleanupResult" })
-export interface CleanupResult extends Schema.Schema.Type<typeof CleanupResult> {}
-
-export const RemoveResult = Schema.Struct({
-  directory: AbsolutePath,
-  localBranch: optional(CleanupResult),
-  remoteBranch: optional(CleanupResult),
-}).annotate({ identifier: "Worktree.RemoveResult" })
-export interface RemoveResult extends Schema.Schema.Type<typeof RemoveResult> {}
-
 export const Info = Schema.Struct({
   directory: AbsolutePath,
 }).annotate({ identifier: "Worktree.Info" })

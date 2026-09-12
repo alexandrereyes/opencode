@@ -79,19 +79,21 @@ function fixture() {
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init)
       const url = new URL(request.url)
-      if (url.pathname === "/api/worktree/inspect")
+      if (url.pathname === "/api/rpc/custom.worktrees/inspect")
         return Response.json({
-          directory: "/repo/feature",
-          identity: "identity",
-          branch: "feature",
-          dirty: false,
-          localBranch: { name: "feature" },
+          output: {
+            directory: "/repo/feature",
+            identity: "identity",
+            branch: "feature",
+            dirty: false,
+            localBranch: { name: "feature" },
+          },
         })
       if (url.pathname === "/api/session") return Response.json({ data: sessions, cursor: {} })
-      if (url.pathname === "/api/worktree/delete") {
+      if (url.pathname === "/api/rpc/custom.worktrees/delete") {
         state.deletes++
         await state.deleteGate?.promise
-        return Response.json({ directory: "/repo/feature" })
+        return Response.json({ output: { directory: "/repo/feature" } })
       }
       if (url.pathname.endsWith("/archive")) {
         const sessionID = url.pathname.split("/").at(-2)
@@ -178,7 +180,11 @@ async function mount() {
           return createComponent(QueryClientProvider, {
             client: query,
             get children() {
-              return createComponent(DialogProvider, { get children() { return createComponent(Harness, {}) } })
+              return createComponent(DialogProvider, {
+                get children() {
+                  return createComponent(Harness, {})
+                },
+              })
             },
           })
         },

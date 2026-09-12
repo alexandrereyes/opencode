@@ -28,16 +28,6 @@ test("worktree mutation inputs do not require a project or explicit creation def
   expect(Worktree.CreateInput.fields).not.toHaveProperty("projectID")
   expect(Worktree.RemoveInput.fields).not.toHaveProperty("projectID")
   expect(Object.keys(Worktree.RemoveInput.fields)).toEqual(["directory", "force"])
-  expect(
-    Schema.encodeSync(Worktree.DeleteInput)(
-      Schema.decodeUnknownSync(Worktree.DeleteInput)({
-        directory: "/repo/task",
-        force: false,
-        identity: "identity",
-        branch: null,
-      }),
-    ),
-  ).toEqual({ directory: "/repo/task", force: false, identity: "identity", branch: null })
 })
 
 test("inventory contains only the directory and its owning strategy", () => {

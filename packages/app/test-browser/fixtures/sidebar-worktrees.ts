@@ -143,31 +143,37 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     const url = new URL(request.url!, "http://localhost")
     const server = Number(request.headers["x-fixture-server"])
     const directory = url.searchParams.get("location[directory]") ?? ""
-    const targetDirectory = url.searchParams.get("directory") ?? directory
     calls.push({ server, path: url.pathname, directory })
-    if (url.pathname === "/api/worktree/inspect")
+    if (url.pathname === "/api/rpc/custom.worktrees/inspect") {
+      const body = JSON.parse(
+        Buffer.concat((await Array.fromAsync(request)).map((chunk) => Buffer.from(chunk))).toString("utf8"),
+      ) as { input: { directory: string } }
       return json({
-        directory: targetDirectory,
-        identity: "idle-token",
-        branch: "idle",
-        dirty: true,
-        localBranch: { name: "idle" },
-        remoteBranch: { name: "upstream", branch: "idle" },
+        output: {
+          directory: body.input.directory,
+          identity: "idle-token",
+          branch: "idle",
+          dirty: true,
+          localBranch: { name: "idle" },
+          remoteBranch: { name: "upstream", branch: "idle" },
+        },
       })
+    }
     if (url.pathname === "/api/session")
       return json({ data: [row("idle-history", "/empty/idle/src", 0, "empty").session], cursor: {} })
-    if (url.pathname === "/api/worktree/delete" && request.method === "DELETE") {
-      const payload = JSON.parse(
+    if (url.pathname === "/api/rpc/custom.worktrees/delete" && request.method === "POST") {
+      const body = JSON.parse(
         Buffer.concat((await Array.fromAsync(request)).map((chunk) => Buffer.from(chunk))).toString("utf8"),
-      ) as Record<string, unknown>
+      ) as { input: Record<string, unknown> }
+      const payload = body.input
       removals.push(payload)
       removedDirectories.add(String(payload.directory))
       return json({
-        directory: payload.directory,
-        localBranch: payload.deleteLocalBranch ? { name: "idle", deleted: true } : undefined,
-        remoteBranch: payload.deleteRemoteBranch
-          ? { name: "idle", remote: "upstream", deleted: true }
-          : undefined,
+        output: {
+          directory: payload.directory,
+          localBranch: payload.deleteLocalBranch ? { name: "idle", deleted: true } : undefined,
+          remoteBranch: payload.deleteRemoteBranch ? { name: "idle", remote: "upstream", deleted: true } : undefined,
+        },
       })
     }
     if (url.pathname === "/api/session/navigation")
@@ -453,9 +459,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(
       calls.filter(
         (call) =>
-          !call.server &&
-          ["/api/location", "/api/vcs"].includes(call.path) &&
-          !call.directory.startsWith("/empty"),
+          !call.server && ["/api/location", "/api/vcs"].includes(call.path) && !call.directory.startsWith("/empty"),
       ),
     ).toEqual([])
     toggle()
@@ -463,9 +467,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(
       calls.filter(
         (call) =>
-          !call.server &&
-          ["/api/location", "/api/vcs"].includes(call.path) &&
-          !call.directory.startsWith("/empty"),
+          !call.server && ["/api/location", "/api/vcs"].includes(call.path) && !call.directory.startsWith("/empty"),
       ),
     ).toEqual([])
     header(projectElement()).click()
