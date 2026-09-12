@@ -132,6 +132,8 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       set: () => Effect.die("unused storage.set"),
       remove: () => Effect.die("unused storage.remove"),
       scan: () => Effect.die("unused storage.scan"),
+      update: () => Effect.die("unused storage.update"),
+      adoptLegacy: () => Effect.die("unused storage.adoptLegacy"),
     },
     shell: overrides.shell ?? {
       hook: () => Effect.die("unused shell.hook"),

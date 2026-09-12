@@ -268,6 +268,9 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
         mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
         rpcCall: (ctx) => {
+          if (ctx.params.rpcID === "custom.snippets" && ctx.params.method === "list") {
+            return Effect.succeed({ output: { items: [] } })
+          }
           if (ctx.params.rpcID === "custom.subscriptions" && ctx.params.method === "list") {
             return Effect.succeed({
               output: config.subscriptions ?? { status: "unavailable", accounts: [] },

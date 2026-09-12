@@ -2,8 +2,6 @@ export type JsonValue = null | boolean | number | string | Array<JsonValue> | { 
 
 export type ServiceHealth = { healthy: true; version: string; pid: number }
 
-export type SnippetID = string
-
 export type ModelRef = { id: string; providerID: string; variant?: string }
 
 export type ProviderSettings = { [x: string]: any }
@@ -440,15 +438,6 @@ export type WebSearchProvider = { id: string; name: string }
 export type WebSearchResult = { url: string; title?: string; content?: string; time: { published?: number } }
 
 export type ConfigWorktree = { directory: string }
-
-export type SnippetInfo = {
-  id: SnippetID
-  name: string
-  description: string
-  aliases: Array<string>
-  content: string
-  project?: string
-}
 
 export type ProviderRequest = {
   settings: ProviderSettings
@@ -1056,15 +1045,6 @@ export type SkillUpdated = {
   created: number
   metadata?: { [x: string]: any }
   type: "skill.updated"
-  location?: LocationRef
-  data: {}
-}
-
-export type SnippetUpdated = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "snippet.updated"
   location?: LocationRef
   data: {}
 }
@@ -2464,7 +2444,6 @@ export type V2Event =
   | CommandUpdated
   | ConfigUpdated
   | SkillUpdated
-  | SnippetUpdated
   | PtyCreated
   | PtyUpdated
   | PtyExited
@@ -2507,14 +2486,6 @@ export type UnauthorizedError = { readonly _tag: "UnauthorizedError"; readonly m
 export const isUnauthorizedError = (value: unknown): value is UnauthorizedError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError"
 
-export type ConflictError = {
-  readonly _tag: "ConflictError"
-  readonly message: string
-  readonly resource?: string | undefined
-}
-export const isConflictError = (value: unknown): value is ConflictError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
-
 export type AgentNotFoundError = {
   readonly _tag: "AgentNotFoundError"
   readonly agentID: string
@@ -2542,6 +2513,14 @@ export type SessionNotFoundError = {
 }
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
+
+export type ConflictError = {
+  readonly _tag: "ConflictError"
+  readonly message: string
+  readonly resource?: string | undefined
+}
+export const isConflictError = (value: unknown): value is ConflictError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
 export type UnknownError = {
   readonly _tag: "UnknownError"
@@ -2712,65 +2691,6 @@ export type ServerMaintenanceCommitInput = {
 }
 
 export type ServerMaintenanceCommitOutput = { committed: boolean }
-
-export type SnippetListOutput = Array<SnippetInfo>
-
-export type SnippetSaveInput = {
-  readonly id: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["id"]
-  readonly name: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["name"]
-  readonly description: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["description"]
-  readonly aliases: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["aliases"]
-  readonly content: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["content"]
-  readonly project?: {
-    readonly id: string
-    readonly name: string
-    readonly description: string
-    readonly aliases: ReadonlyArray<string>
-    readonly content: string
-    readonly project?: string
-  }["project"]
-}
-
-export type SnippetSaveOutput = SnippetInfo
-
-export type SnippetRemoveInput = { readonly id: { readonly id: string }["id"] }
-
-export type SnippetRemoveOutput = void
 
 export type LocationGetInput = {
   readonly location?: {

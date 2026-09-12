@@ -805,6 +805,24 @@ effect: (ctx) =>
   }),
 ```
 
+Use `update` for an atomic read-modify-write shared by every Location running the same plugin ID. Its callback is
+synchronous and returns the next JSON value together with a local result. If it throws, the stored value is unchanged.
+
+```ts
+effect: (ctx) =>
+  ctx.storage.update("counter", (current) => {
+    const next = typeof current === "number" ? current + 1 : 1
+    return [next, next]
+  }),
+```
+
+Use `adoptLegacy` only when moving an existing unnamespaced key into plugin storage. Adoption uses the same key name,
+preserves an existing destination, and runs once even if that destination is later removed.
+
+```ts
+effect: (ctx) => ctx.storage.adoptLegacy("settings").pipe(Effect.asVoid),
+```
+
 Scan keys by prefix with cursor pagination.
 
 ```ts
@@ -827,6 +845,11 @@ interface StorageDomain {
   readonly set: (key: string, value: Schema.Json) => Effect.Effect<void>
   readonly remove: (key: string) => Effect.Effect<void>
   readonly scan: (options: StorageScanOptions) => Effect.Effect<StorageScanResult>
+  readonly update: <A>(
+    key: string,
+    update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
+  ) => Effect.Effect<A>
+  readonly adoptLegacy: (key: string) => Effect.Effect<boolean>
 }
 ```
 
@@ -874,12 +897,13 @@ namespaces and unsupported characters in tool names become `_`. Missing names ar
 them rather than mutating nested values. Invalid updates are logged and leave the previous definition intact.
 
 ```ts
-yield* ctx.tool.transform((editor) => {
-  editor.update("acme_greeting", (tool) => {
-    tool.description = "Greet the user by name"
+yield *
+  ctx.tool.transform((editor) => {
+    editor.update("acme_greeting", (tool) => {
+      tool.description = "Greet the user by name"
+    })
+    editor.remove("acme_obsolete")
   })
-  editor.remove("acme_obsolete")
-})
 ```
 
 Updates and removals replay in order with additions, including after MCP catalog refreshes.

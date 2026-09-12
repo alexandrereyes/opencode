@@ -787,6 +787,23 @@ const settings = await ctx.storage.get("settings")
 await ctx.storage.remove("settings")
 ```
 
+Update one value atomically when multiple plugin instances may write it. The callback is synchronous and returns the
+next JSON value plus a local result. If it throws, the stored value is unchanged.
+
+```ts
+const count = await ctx.storage.update("counter", (current) => {
+  const next = typeof current === "number" ? current + 1 : 1
+  return [next, next]
+})
+```
+
+Adopt a legacy unnamespaced key once when moving existing data into plugin storage. The source must have the same key;
+an internal marker prevents a deleted destination from importing it again.
+
+```ts
+const imported = await ctx.storage.adoptLegacy("settings")
+```
+
 Scan keys by prefix with optional cursor pagination.
 
 ```ts
@@ -802,6 +819,8 @@ interface StorageContext {
   set(key: string, value: Json): Promise<void>
   remove(key: string): Promise<void>
   scan(options: StorageScanOptions): Promise<StorageScanResult>
+  update<A>(key: string, update: (current: Json | undefined) => readonly [next: Json, result: A]): Promise<A>
+  adoptLegacy(key: string): Promise<boolean>
 }
 
 interface StorageScanOptions {

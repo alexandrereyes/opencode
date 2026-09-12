@@ -367,7 +367,7 @@ async function mockServers(
       return json(route, { data: options.sessionPending?.[sessionPermission[1]!] ?? [] })
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/api/config") return json(route, [])
-    if (url.pathname === "/api/snippet") return json(route, [])
+    if (url.pathname === "/api/rpc/custom.snippets/list") return json(route, { output: { items: [] } })
     if (url.pathname === "/api/provider")
       return json(route, {
         location: { directory },

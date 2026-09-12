@@ -18,7 +18,6 @@ import { AgentGroup } from "./groups/agent.js"
 import { PluginGroup } from "./groups/plugin.js"
 import { HealthGroup } from "./groups/health.js"
 import { ServerGroup } from "./groups/server.js"
-import { SnippetGroup } from "./groups/snippet.js"
 import { DebugGroup } from "./groups/debug.js"
 import { PtyGroup } from "./groups/pty.js"
 import { PersistentPtyGroup } from "./groups/persistent-pty.js"
@@ -88,7 +87,6 @@ type ApiGroups<
 > =
   | typeof HealthGroup
   | typeof ServerGroup
-  | typeof SnippetGroup
   | typeof DebugGroup
   | typeof MigrationGroup
   | typeof WorkspaceGroup
@@ -155,7 +153,6 @@ const makeApiFromGroup = <
   HttpApi.make("server")
     .add(HealthGroup)
     .add(ServerGroup)
-    .add(SnippetGroup)
     .add(LocationGroup.middleware(locationMiddleware))
     .add(AgentGroup.middleware(locationMiddleware))
     .add(PluginGroup.middleware(locationMiddleware))

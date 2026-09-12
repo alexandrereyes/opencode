@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
+import { Project } from "@opencode/schema/project"
 import { createStore } from "solid-js/store"
 import { createComposerEditorActions } from "@/composer/editor/actions"
 import { ComposerStore } from "@/composer/schema"
 import { buildPromptRequest } from "@/composer/request"
 import { createComposerInteractionState, transitionComposer } from "@/composer/suggestions/machine"
-import { snippetAliases, snippetSuggestions, type Snippet } from "./model"
+import { isSnippetConflict, snippetAliases, snippetSuggestions, type Snippet } from "./model"
 
 const global: Snippet = {
   id: "global",
@@ -17,13 +18,25 @@ const global: Snippet = {
 
 describe("snippets", () => {
   test("keeps global snippets, scopes projects and overrides names case-insensitively", () => {
-    const project = { ...global, id: "project", project: "local\u0000repo", name: "Review", content: "Local review" }
+    const project = {
+      id: "project",
+      project: Project.ID.make("local\u0000repo"),
+      name: "Review",
+      description: global.description,
+      aliases: global.aliases,
+      content: "Local review",
+    }
     expect(snippetSuggestions([global, project], project.project).map((item) => item.mention)).toMatchObject([
       { id: "project", content: "#Review", expansion: "Local review" },
     ])
     expect(snippetSuggestions([global, project], "remote\u0000repo").map((item) => item.id)).toEqual(["snippet:global"])
     expect(snippetSuggestions([global])[0]?.search).toContain("audit")
     expect(snippetAliases("audit, test, audit,\n review ")).toEqual(["audit", "test", "review"])
+  })
+
+  test("recognizes declared RPC conflicts for localized UI feedback", () => {
+    expect(isSnippetConflict({ type: "conflict", message: "duplicate", data: { name: "review" } })).toBe(true)
+    expect(isSnippetConflict(new Error("duplicate"))).toBe(false)
   })
 
   test("triggers at the cursor and leaves anchors, headings and shell text alone", () => {

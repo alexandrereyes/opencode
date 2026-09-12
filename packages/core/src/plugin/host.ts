@@ -612,14 +612,22 @@ export const requirements = LayerNode.group([
 ])
 
 export function storage(kv: KV.Interface, pluginID: string): Plugin.Context["storage"] {
-  const namespace = `plugin:${pluginID
+  const encoded = pluginID
     .split("")
     .map((value) => value.charCodeAt(0).toString(16).padStart(4, "0"))
-    .join("")}:`
+    .join("")
+  const namespace = `plugin:${encoded}:`
   return {
     get: (key) => kv.get(namespace + key),
     set: (key, value) => kv.set(namespace + key, value),
     remove: (key) => kv.remove(namespace + key),
+    update: (key, update) => kv.update(namespace + key, update),
+    adoptLegacy: (key) => {
+      if (key.startsWith("plugin:") || key.startsWith("plugin-adopted:"))
+        return Effect.die(new Error(`Cannot adopt reserved plugin storage key: ${key}`))
+      // Keep the marker outside the plugin namespace so removing the adopted key cannot re-enable its migration.
+      return kv.adoptLegacy({ source: key, target: namespace + key, marker: `plugin-adopted:${encoded}:${key}` })
+    },
     scan: (options) =>
       kv
         .scan({

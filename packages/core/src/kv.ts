@@ -29,6 +29,8 @@ export interface Interface {
   readonly set: (key: string, value: Value) => Effect.Effect<void>
   readonly remove: (key: string) => Effect.Effect<void>
   readonly scan: (options: ScanOptions) => Effect.Effect<ScanResult>
+  readonly update: <A>(key: string, update: (current: Value | undefined) => readonly [Value, A]) => Effect.Effect<A>
+  readonly adoptLegacy: (input: { source: string; target: string; marker: string }) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/KV") {}
@@ -77,6 +79,58 @@ const layer = Layer.effect(
         const entries = rows.slice(0, limit)
         if (rows.length <= limit) return { entries }
         return { entries, next: entries[entries.length - 1].key }
+      }),
+      update: Effect.fn("KV.update")(function* (key, update) {
+        return yield* db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const current = yield* db
+                  .select({ value: KVTable.value })
+                  .from(KVTable)
+                  .where(eq(KVTable.key, key))
+                  .get()
+                const [value, result] = update(current?.value)
+                yield* db
+                  .insert(KVTable)
+                  .values({ key, value })
+                  .onConflictDoUpdate({ target: KVTable.key, set: { value, time_updated: Date.now() } })
+                  .run()
+                return result
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
+      }),
+      adoptLegacy: Effect.fn("KV.adoptLegacy")(function* (input) {
+        return yield* db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const adopted = yield* db
+                  .select({ value: KVTable.value })
+                  .from(KVTable)
+                  .where(eq(KVTable.key, input.marker))
+                  .get()
+                if (adopted) return false
+                const target = yield* db
+                  .select({ value: KVTable.value })
+                  .from(KVTable)
+                  .where(eq(KVTable.key, input.target))
+                  .get()
+                const source = yield* db
+                  .select({ value: KVTable.value })
+                  .from(KVTable)
+                  .where(eq(KVTable.key, input.source))
+                  .get()
+                if (!target && source)
+                  yield* db.insert(KVTable).values({ key: input.target, value: source.value }).run()
+                yield* db.insert(KVTable).values({ key: input.marker, value: true }).run()
+                return !target && !!source
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie)
       }),
     })
   }),

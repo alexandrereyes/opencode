@@ -9,6 +9,7 @@ import { Menu } from "@opencode/ui/menu"
 import { Select } from "@opencode/ui/select"
 import { Textarea } from "@opencode/ui/textarea"
 import { TextInput } from "@opencode/ui/text-input"
+import { Project } from "@opencode/schema/project"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useGlobal } from "@/runtime/server/runtime"
@@ -18,7 +19,7 @@ import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
 import type { ServerSnippets } from "./server"
 import { SettingsList } from "../list"
-import { snippetAliases, type Snippet } from "./model"
+import { isSnippetConflict, snippetAliases, type Snippet } from "./model"
 
 export function SettingsSnippets() {
   const language = useLanguage()
@@ -221,13 +222,19 @@ function SnippetDialog(props: {
         description: state.description.trim(),
         aliases: snippetAliases(state.aliases),
         content: state.content,
-        project: state.project || undefined,
+        project: state.project ? Project.ID.make(state.project) : undefined,
       })
       .then(
         () => {
           if (dialog.active === active) dialog.close()
         },
-        (error) => setState("error", formatServerError(error, language.t)),
+        (error) =>
+          setState(
+            "error",
+            isSnippetConflict(error)
+              ? language.t("settings.snippets.duplicate")
+              : formatServerError(error, language.t),
+          ),
       )
       .finally(() => setState("saving", false))
   }

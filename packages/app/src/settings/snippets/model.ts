@@ -1,9 +1,13 @@
-import type { SnippetInfo } from "@opencode/client/promise"
+import type { Snippets } from "@opencode/plugin-app-custom/snippets/rpc"
 import type { ComposerSuggestion } from "@/composer/types"
 
-export type Snippet = SnippetInfo
+export type Snippet = Snippets.Info
 
-export function snippetSuggestions(snippets: Snippet[], project?: string): ComposerSuggestion[] {
+export function isSnippetConflict(error: unknown) {
+  return typeof error === "object" && error !== null && "type" in error && error.type === "conflict"
+}
+
+export function snippetSuggestions(snippets: readonly Snippet[], project?: string): ComposerSuggestion[] {
   const local = snippets.filter((item) => item.project === project && item.project !== undefined)
   return [
     ...local,
