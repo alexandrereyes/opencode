@@ -2,8 +2,8 @@ import { Schema, SchemaGetter } from "effect"
 import { checksum } from "@opencode/util/encode"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Skill } from "@opencode/schema/skill"
-import { Mcp } from "@opencode/schema/mcp"
 import { Session } from "@opencode/schema/session"
+import { AppMentions } from "@opencode/plugin-app-custom/rpc"
 import { Persistence } from "@/runtime/persistence/schema"
 import { FileSelection, SelectedLineRange } from "@/workspaces/files/types"
 
@@ -63,7 +63,7 @@ export const SnippetPart = Persistence.struct({
 })
 export type SnippetPart = typeof SnippetPart.Type
 
-export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: Mcp.ComputerUseApp })
+export const AppPart = Persistence.struct({ type: Schema.Literal("app"), ...PartBase, app: AppMentions.App })
 export type AppPart = typeof AppPart.Type
 
 export const SessionPart = Persistence.struct({

@@ -237,6 +237,8 @@ export function fromPromise(plugin: Plugin) {
         const WebSearchEndpoints = ClientApi.groups["server.websearch"].endpoints
         const WorktreeEndpoints = ClientApi.groups["server.worktree"].endpoints
         const context = yield* Effect.context<Scope.Scope>()
+        const unload = new AbortController()
+        yield* Effect.addFinalizer(() => Effect.sync(() => unload.abort()))
         const streams = yield* makeStreams()
 
         // Run a hook registration on the plugin scope and resolve once it is registered.
@@ -429,6 +431,10 @@ export function fromPromise(plugin: Plugin) {
           },
           mcp: {
             list: adaptApiMethod(McpEndpoints["mcp.list"], host.mcp.list),
+            callTool: (input, options) => {
+              const signal = options?.signal ? AbortSignal.any([unload.signal, options.signal]) : unload.signal
+              return Effect.runPromiseWith(context)(host.mcp.callTool(input), { signal })
+            },
             transform: transform(host.mcp),
             reload: () => run(host.mcp.reload()),
           },
@@ -595,7 +601,10 @@ export function fromPromise(plugin: Plugin) {
 
         yield* Effect.acquireRelease(
           Effect.promise(() => Promise.resolve(plugin.setup(context2))),
-          (cleanup) => (cleanup ? Effect.promise(() => Promise.resolve(cleanup())) : Effect.void),
+          (cleanup) =>
+            Effect.sync(() => unload.abort()).pipe(
+              Effect.andThen(cleanup ? Effect.promise(() => Promise.resolve(cleanup())) : Effect.void),
+            ),
         )
       }),
   })

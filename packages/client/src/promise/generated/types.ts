@@ -294,8 +294,6 @@ export type IntegrationCommandAttemptStatus =
       time: { created: number | "Infinity" | "-Infinity" | "NaN"; expires: number | "Infinity" | "-Infinity" | "NaN" }
     }
 
-export type McpComputerUseApp = { server: string; name: string; path?: string; bundleID: string; running: boolean }
-
 export type McpStatusConnected = { status: "connected" }
 
 export type McpStatusPending = { status: "pending" }
@@ -5035,17 +5033,6 @@ export type IntegrationCommandCancelInput = {
 }
 
 export type IntegrationCommandCancelOutput = void
-
-export type McpComputerUseAppsInput = {
-  readonly location?: {
-    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-  }["location"]
-}
-
-export type McpComputerUseAppsOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
-  data: Array<McpComputerUseApp>
-}
 
 export type McpListInput = {
   readonly location?: {

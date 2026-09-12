@@ -1,6 +1,7 @@
 export * as PluginHost from "./host.js"
 
 import { Plugin } from "@opencode/plugin/effect"
+import { MCP } from "@opencode/plugin/mcp"
 import type { IntegrationMethodRegistration } from "@opencode/plugin/effect/integration"
 import { EventManifest } from "@opencode/schema/event-manifest"
 import type { Event } from "@opencode/schema/event"
@@ -369,6 +370,27 @@ export const make = Effect.fn("PluginHost.make")(function* (
           }).pipe(Effect.provide(locations.get(ref)))
         return response(mcp.servers())
       },
+      callTool: (input) =>
+        mcp.callTool({ server: input.server, name: input.name, args: input.args }).pipe(
+          Effect.map(
+            (result) =>
+              new MCP.ToolResult({
+                server: result.server,
+                tool: result.tool,
+                isError: result.isError,
+                structured: result.structured,
+                content: result.content,
+              }),
+          ),
+          Effect.mapError(
+            (error) =>
+              new MCP.CallToolError({
+                server: input.server,
+                tool: input.name,
+                message: error.message,
+              }),
+          ),
+        ),
       reload: mcp.reload,
       transform: (callback) =>
         mcp.transform((editor) => {

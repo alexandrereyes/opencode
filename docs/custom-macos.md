@@ -7,6 +7,12 @@ The operational updater, autonomous Astra reviewer/worker pipeline, launchd depl
 and runbook are versioned in [alexandrereyes/my-env](https://github.com/alexandrereyes/my-env):
 `deploy/opencode-custom/` and `docs/opencode-custom.md`.
 
+Every custom release carries and builds `@opencode/plugin-app-custom` in
+`packages/plugin-app-custom`. The runtime activates its release-owned `dist` directory
+for every Location through the normal plugin configuration path. The obsolete
+project-local POC loader is not retained; do not configure a second global or
+project-local copy of this custom-only plugin.
+
 Backend source and production UI must come from the same release commit. The MyEnv
 controller owns isolated persistence, idle-leased activation, backups, and process handoff.
 

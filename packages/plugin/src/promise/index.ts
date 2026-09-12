@@ -1,5 +1,6 @@
 export type { PluginOptions } from "../options.js"
 export type { StorageEntry, StorageScanOptions, StorageScanResult } from "../storage.js"
+export { MCP } from "../mcp.js"
 export * as Plugin from "./plugin.js"
 
 export { Agent } from "@opencode/schema/agent"

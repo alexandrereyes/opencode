@@ -136,6 +136,47 @@ describe("composer persistence schemas", () => {
     ).toEqual(value)
   })
 
+  test("preserves existing app mentions through canonical round trips", () => {
+    const decode = Schema.decodeUnknownSync(
+      Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
+    )
+    const prompt = [
+      {
+        type: "app",
+        content: "@Safari",
+        start: 0,
+        end: 7,
+        app: {
+          server: "open-computer-use",
+          name: "Safari",
+          bundleID: "com.apple.Safari",
+          running: true,
+        },
+      },
+      {
+        type: "app",
+        content: "@Preview",
+        start: 8,
+        end: 16,
+        app: {
+          server: "codex-computer-use",
+          name: "Preview",
+          path: "/Applications/Preview.app/",
+          bundleID: "com.apple.Preview",
+          running: false,
+        },
+      },
+    ] satisfies ComposerStore["prompt"]
+    const value = decode({ prompt })
+    expect(value.prompt).toEqual(prompt)
+    expect(value.prompt[0]).not.toHaveProperty("app.path")
+    expect(value.prompt[1]).toHaveProperty("app.path", "/Applications/Preview.app/")
+    const roundTrip = decode(Schema.encodeSync(ComposerStore)(value))
+    expect(roundTrip.prompt).toEqual(prompt)
+    expect(roundTrip.prompt[0]).not.toHaveProperty("app.path")
+    expect(roundTrip.prompt[1]).toHaveProperty("app.path", "/Applications/Preview.app/")
+  })
+
   test("migrates inline images but never encodes dataUrl or unresolved references", () => {
     const value = Schema.decodeUnknownSync(
       Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),

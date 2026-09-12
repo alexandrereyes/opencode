@@ -4,11 +4,13 @@ import { ServerProcess } from "@opencode/server/process"
 import { WebUi } from "../src/services/web-ui"
 import type { AssetMap } from "../src/app-assets"
 import { HttpServer } from "effect/unstable/http"
+import path from "node:path"
 
 const root = process.env.OPENCODE_CUSTOM_HOME
 const version = process.env.OPENCODE_CUSTOM_COMMIT
 if (!root || !version) throw new Error("Run this entrypoint through opencode-custom")
 const password = await Bun.file(`${root}/password`).text()
+const plugin = path.resolve("packages/plugin-app-custom/dist")
 const assets: AssetMap = Object.fromEntries(
   await Promise.all(
     Array.from(new Bun.Glob("**/*").scanSync({ cwd: "packages/app/dist", onlyFiles: true })).map(async (name) => [
@@ -32,6 +34,7 @@ NodeRuntime.runMain(
           config: {
             directory: process.env.OPENCODE_CONFIG_DIR ?? `${root}/config/opencode`,
             project: process.env.OPENCODE_CUSTOM_SMOKE !== "1",
+            content: JSON.stringify({ plugins: [plugin] }),
           },
           models: { fetch: process.env.OPENCODE_CUSTOM_SMOKE !== "1" },
         },

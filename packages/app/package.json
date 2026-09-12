@@ -68,6 +68,7 @@
     "@ibm/plex": "6.4.1",
     "@kobalte/core": "catalog:",
     "@opencode/client": "workspace:*",
+    "@opencode/plugin-app-custom": "workspace:*",
     "@opencode/plugin-browser": "workspace:*",
     "@opencode/schema": "workspace:*",
     "@opencode/session-ui": "workspace:*",
