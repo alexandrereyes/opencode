@@ -17,6 +17,7 @@ import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
 import { Skill } from "@opencode/schema/skill"
 import { Session } from "@opencode/schema/session"
+import { AppMentions } from "@opencode/plugin-app-custom/rpc"
 import type { ComposerAdapter, ComposerControls, ComposerQueue } from "./adapter"
 import type { ComposerState, ImageAttachmentPart } from "./state"
 import type { PromptHistoryComment } from "./history/entry"
@@ -202,20 +203,23 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     })),
   )
   const skills = createMemo(() => data.location.skill.list({ directory: sdk().directory }) ?? [])
-  const appSource = createMemo(() => {
-    if (interaction[0].popover.type !== "context" || !available()) return false
-    const connected = data.location.mcp.server
-      .list({ directory: sdk().directory })
-      ?.some(
-        (server) =>
-          ["open-computer-use", "codex-computer-use"].includes(server.name) && server.status.status === "connected",
-      )
-    return connected ? sdk().directory : false
-  })
-  const [apps] = createResource(appSource, (directory) =>
-    server.ctx.sdk.api.mcp.computerUse
-      .apps({ location: { directory } })
-      .then((result) => result.data)
+  const appSource = createMemo(
+    () => {
+      if (interaction[0].popover.type !== "context" || !available()) return false
+      return { server: server.key, directory: sdk().directory }
+    },
+    false,
+    {
+      equals: (previous, next) =>
+        previous === next ||
+        (!!previous && !!next && previous.server === next.server && previous.directory === next.directory),
+    },
+  )
+  const [apps] = createResource(appSource, (source) =>
+    server.ctx.sdk.api
+      .rpc(AppMentions.Definition)
+      .list({}, { location: { directory: source.directory } })
+      .then((result) => result.apps)
       .catch(() => []),
   )
   const sessionSearch = createSessionSearch({

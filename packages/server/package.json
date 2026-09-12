@@ -38,6 +38,7 @@
   "devDependencies": {
     "@opencode/client": "workspace:*",
     "@opencode/plugin": "workspace:*",
+    "@opencode/plugin-app-custom": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:"

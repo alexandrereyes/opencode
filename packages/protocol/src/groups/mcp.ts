@@ -7,21 +7,6 @@ import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 export const McpGroup = HttpApiGroup.make("server.mcp")
   .add(
-    HttpApiEndpoint.get("mcp.computerUse.apps", "/api/mcp/computer-use/app", {
-      query: LocationQuery,
-      success: Location.response(Schema.Array(Mcp.ComputerUseApp)),
-    })
-      .annotateMerge(locationQueryOpenApi)
-      .annotateMerge(
-        OpenApi.annotations({
-          identifier: "v2.mcp.computerUse.apps",
-          summary: "List computer-use apps",
-          description:
-            "List Mac apps from the connected open-computer-use MCP, with legacy codex-computer-use support. Returns an empty list when unavailable.",
-        }),
-      ),
-  )
-  .add(
     HttpApiEndpoint.get("mcp.list", "/api/mcp", {
       query: LocationQuery,
       success: Location.response(Schema.Array(Mcp.Server)),

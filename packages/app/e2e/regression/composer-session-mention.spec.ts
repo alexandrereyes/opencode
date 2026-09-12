@@ -19,12 +19,17 @@ test.use({ permissions: ["clipboard-read", "clipboard-write"] })
 test("selects, copies, pastes, and submits a globally searched session reference", async ({ page }) => {
   const prompts: Record<string, unknown>[] = []
   const referencedMessageRequests: string[] = []
+  const appMentionRequests: Array<{ url: string; body: unknown }> = []
+  let rejectAppMentions = false
   const sessionListParents: Array<string | null> = []
   const sessionListGates = new Map<
     string,
     { started: ReturnType<typeof Promise.withResolvers<void>>; release: ReturnType<typeof Promise.withResolvers<void>> }
   >()
   page.on("request", (request) => {
+    if (request.url().includes("/api/rpc/custom.app-mentions/list")) {
+      appMentionRequests.push({ url: request.url(), body: request.postDataJSON() })
+    }
     if (
       request.url().includes(`/api/session/${firstID}/message`) ||
       request.url().includes(`/api/session/${secondID}/message`)
@@ -68,8 +73,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
         time: { created: 3, updated: 3, archived: 4 },
       },
     ],
-    mcpServers: [{ name: "open-computer-use", status: { status: "connected" } }],
-    computerUseApps: [
+    appMentions: [
       {
         server: "open-computer-use",
         name: "Shared work",
@@ -80,6 +84,10 @@ test("selects, copies, pastes, and submits a globally searched session reference
     pageMessages: () => ({ items: [] }),
     findFiles: () => [],
     onPrompt: ({ body }) => prompts.push(body),
+  })
+  await page.route("**/api/rpc/custom.app-mentions/list?*", (route) => {
+    if (!rejectAppMentions) return route.fallback()
+    return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "missing" }) })
   })
   await page.route("**/api/session?*", async (route) => {
     const url = new URL(route.request().url())
@@ -124,6 +132,9 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toContainText(
     "Shared work",
   )
+  expect(appMentionRequests).toHaveLength(1)
+  expect(new URL(appMentionRequests[0].url).searchParams.get("location[directory]")).toBe(directory)
+  expect(appMentionRequests[0].body).toEqual({ input: {} })
   await expect(page.getByText("Archived work", { exact: true })).toHaveCount(0)
   await expect(page.locator(`[data-suggestion-id="session:${server}:${childID}"]`)).toHaveCount(0)
   expect(sessionListParents).toEqual(["null"])
@@ -133,6 +144,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await editor.fill("@Shared")
   await filtered.started.promise
   await expectComposerStable()
+  expect(appMentionRequests).toHaveLength(1)
   filtered.release.resolve()
   await page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` }).click()
   expect(sessionListParents).toEqual(["null", "null"])
@@ -147,8 +159,12 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await editor.press("ControlOrMeta+V")
   await expect(editor.locator(`[data-mention="session"][data-id="${secondID}"]`)).toHaveCount(1)
 
+  await editor.press("End")
   await editor.pressSequentially("@Shared")
-  await page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]').click()
+  const appSuggestion = page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')
+  await expect(appSuggestion).toBeVisible()
+  expect(appMentionRequests).toHaveLength(2)
+  await appSuggestion.click()
   await expect(editor.locator(`[data-mention="session"][data-id="${secondID}"]`)).toHaveCount(1)
   await expect(editor.locator('[data-mention="app"]')).toHaveText("@Shared work")
 
@@ -168,6 +184,12 @@ test("selects, copies, pastes, and submits a globally searched session reference
   const sent = page.locator('[data-slot="user-message-text"]')
   await expect(sent).toContainText("@Shared work")
   await expect(sent.locator('[data-highlight="session"]')).toHaveText("@Shared work")
+
+  rejectAppMentions = true
+  await editor.fill("@")
+  await expect(page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` })).toBeVisible()
+  await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toHaveCount(0)
+  expect(appMentionRequests).toHaveLength(3)
 
   await page.setViewportSize({ width: 390, height: 844 })
   for (const value of [

@@ -1524,17 +1524,6 @@ export interface IntegrationApi<E = never> {
   }
 }
 
-export type McpComputerUseAppsInput = {
-  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-}
-export type McpComputerUseAppsOutput = {
-  readonly location: Location.Info
-  readonly data: ReadonlyArray<Mcp.ComputerUseApp>
-}
-export type McpComputerUseAppsOperation<E = never> = (
-  input?: McpComputerUseAppsInput,
-) => Effect.Effect<McpComputerUseAppsOutput, E>
-
 export type McpListInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
 }
@@ -1579,7 +1568,6 @@ export type McpResourceCatalogOperation<E = never> = (
 ) => Effect.Effect<McpResourceCatalogOutput, E>
 
 export interface McpApi<E = never> {
-  readonly computerUse: { readonly apps: McpComputerUseAppsOperation<E> }
   readonly list: McpListOperation<E>
   readonly add: McpAddOperation<E>
   readonly remove: McpRemoveOperation<E>

@@ -13,7 +13,7 @@ export interface MockServerConfig {
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
   mcpServers?: unknown[]
-  computerUseApps?: unknown[]
+  appMentions?: unknown[]
   pageMessages: (
     sessionId: string,
     limit: number,
@@ -266,7 +266,12 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         skill: () => Effect.succeed({ location: location(config), data: [] }),
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
         mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
-        mcpComputerUseApps: () => Effect.succeed({ location: location(config), data: config.computerUseApps ?? [] }),
+        rpcCall: (ctx) => {
+          if (ctx.params.rpcID !== "custom.app-mentions" || ctx.params.method !== "list") {
+            return Effect.succeed({ output: {} })
+          }
+          return Effect.succeed({ output: { apps: config.appMentions ?? [] } })
+        },
         mcpResource: () => Effect.succeed({ location: location(config), data: { resources: [], templates: [] } }),
         projectList: () => {
           const project = config.project as typeof config.project & { canonical?: string; worktree?: string }

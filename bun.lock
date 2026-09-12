@@ -66,6 +66,7 @@
         "@ibm/plex": "6.4.1",
         "@kobalte/core": "catalog:",
         "@opencode/client": "workspace:*",
+        "@opencode/plugin-app-custom": "workspace:*",
         "@opencode/plugin-browser": "workspace:*",
         "@opencode/schema": "workspace:*",
         "@opencode/session-ui": "workspace:*",
@@ -618,6 +619,21 @@
         "solid-js",
       ],
     },
+    "packages/plugin-app-custom": {
+      "name": "@opencode/plugin-app-custom",
+      "version": "2.0.0",
+      "dependencies": {
+        "@opencode/plugin": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@modelcontextprotocol/sdk": "1.29.0",
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/plugin-browser": {
       "name": "@opencode/plugin-browser",
       "version": "2.0.0",
@@ -725,6 +741,7 @@
       "devDependencies": {
         "@opencode/client": "workspace:*",
         "@opencode/plugin": "workspace:*",
+        "@opencode/plugin-app-custom": "workspace:*",
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
@@ -2233,6 +2250,8 @@
     "@opencode/merman": ["@opencode/merman@workspace:packages/merman"],
 
     "@opencode/plugin": ["@opencode/plugin@workspace:packages/plugin"],
+
+    "@opencode/plugin-app-custom": ["@opencode/plugin-app-custom@workspace:packages/plugin-app-custom"],
 
     "@opencode/plugin-browser": ["@opencode/plugin-browser@workspace:packages/plugin-browser"],
 

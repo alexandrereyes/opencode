@@ -148,8 +148,6 @@ import type {
   IntegrationCommandStatusOutput,
   IntegrationCommandCancelInput,
   IntegrationCommandCancelOutput,
-  McpComputerUseAppsInput,
-  McpComputerUseAppsOutput,
   McpListInput,
   McpListOutput,
   McpAddInput,
@@ -1025,11 +1023,6 @@ const adaptGroupIntegration = (raw: RawClient["server.integration"]) => ({
   },
 })
 
-const EndpointMcpComputerUseApps = (raw: RawClient["server.mcp"]) => (input?: McpComputerUseAppsInput) =>
-  preserveEffect<McpComputerUseAppsOutput>()(
-    raw["mcp.computerUse.apps"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const EndpointMcpList = (raw: RawClient["server.mcp"]) => (input?: McpListInput) =>
   preserveEffect<McpListOutput>()(
     raw["mcp.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
@@ -1071,7 +1064,6 @@ const EndpointMcpResourceCatalog = (raw: RawClient["server.mcp"]) => (input?: Mc
   )
 
 const adaptGroupMcp = (raw: RawClient["server.mcp"]) => ({
-  computerUse: { apps: EndpointMcpComputerUseApps(raw) },
   list: EndpointMcpList(raw),
   add: EndpointMcpAdd(raw),
   remove: EndpointMcpRemove(raw),
