@@ -8,7 +8,7 @@ import { useServer } from "@/runtime/server/current"
 import { Schema } from "effect"
 import { Persistence } from "@/runtime/persistence/schema"
 import { useServerSDK } from "@/runtime/server/client"
-import { AbsolutePath } from "@opencode/schema/schema"
+import { NativeApps } from "@opencode/plugin-app-custom/native-apps/rpc"
 import { createNativeAppAvailability } from "./open-in-app-availability"
 
 export const OPEN_APPS = [
@@ -136,12 +136,14 @@ export function useOpenInApp(input: { path: () => string }) {
   const nativeApps = createNativeAppAvailability({
     platform: () => platform.platform,
     local: () => server.isLocal,
+    server: () => server.key,
+    location: input.path,
     status: sdk.connection.status,
-    list: () => sdk.api.server.nativeApps.list(),
+    list: (directory) => sdk.api.rpc(NativeApps.Definition).list({}, { location: { directory } }),
   })
 
   const os = createMemo(() =>
-    platform.platform === "desktop" ? detectOpenAppOS(platform) : (nativeApps()?.os ?? "unknown"),
+    platform.platform === "desktop" ? detectOpenAppOS(platform) : (nativeApps.value()?.os ?? "unknown"),
   )
   const apps = createMemo(() => openAppsForOS(os()).filter((app) => app.id === "vscode" || app.id === "rider"))
 
@@ -163,7 +165,7 @@ export function useOpenInApp(input: { path: () => string }) {
   })
 
   const options = createMemo(() => {
-    const available = nativeApps()?.apps
+    const available = nativeApps.value()?.apps
     return apps()
       .filter((app) => (platform.platform === "desktop" ? exists[app.id] : available?.some((id) => id === app.id)))
       .map((app) => ({ ...app, label: language.t(app.label) }))
@@ -179,7 +181,7 @@ export function useOpenInApp(input: { path: () => string }) {
     () =>
       server.isLocal &&
       options().length > 0 &&
-      (platform.platform === "desktop" ? !!platform.openPath : nativeApps()?.os === "macos"),
+      (platform.platform === "desktop" ? !!platform.openPath : nativeApps.value()?.os === "macos"),
   )
   const current = createMemo(() => options().find((o) => o.id === prefs.app) ?? options().at(0))
   const opening = createMemo(() => openRequest.app !== undefined)
@@ -199,7 +201,9 @@ export function useOpenInApp(input: { path: () => string }) {
     const request =
       platform.platform === "desktop"
         ? platform.openPath!(target, item.openWith)
-        : sdk.api.server.nativeApps.open({ app: item.id, path: AbsolutePath.make(target), reveal })
+        : sdk.api
+            .rpc(NativeApps.Definition)
+            .open({ app: item.id, path: target, reveal }, { location: { directory: input.path() } })
     request
       .catch((err: unknown) => {
         if (platform.platform === "desktop") return showRequestError(language, err)

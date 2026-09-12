@@ -1,30 +1,7 @@
 import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { NativeApp } from "@opencode/schema/native-app"
-import { InvalidRequestError, ServiceUnavailableError } from "../errors.js"
+import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 
 export const ServerGroup = HttpApiGroup.make("server.server")
-  .add(
-    HttpApiEndpoint.get("server.nativeApps.list", "/api/server/native-apps", {
-      success: NativeApp.Availability,
-    }).annotateMerge(
-      OpenApi.annotations({
-        identifier: "v2.server.nativeApps.list",
-        summary: "List native applications available on the server host",
-      }),
-    ),
-    HttpApiEndpoint.post("server.nativeApps.open", "/api/server/native-apps/open", {
-      payload: NativeApp.OpenInput,
-      success: HttpApiSchema.NoContent,
-      error: [InvalidRequestError, ServiceUnavailableError],
-    }).annotateMerge(
-      OpenApi.annotations({
-        identifier: "v2.server.nativeApps.open",
-        summary: "Open a host-local path in a known native application",
-        description: "Launches on the server host, not on the browser's device. Currently supported on macOS only.",
-      }),
-    ),
-  )
   .add(
     HttpApiEndpoint.get("server.get", "/api/server", {
       success: Schema.Struct({ urls: Schema.Array(Schema.String) }),

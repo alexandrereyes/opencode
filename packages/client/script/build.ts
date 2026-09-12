@@ -15,7 +15,6 @@ import { Integration } from "@opencode/schema/integration"
 import { Location } from "@opencode/schema/location"
 import { Mcp } from "@opencode/schema/mcp"
 import { Model } from "@opencode/schema/model"
-import { NativeApp } from "@opencode/schema/native-app"
 import { Permission } from "@opencode/schema/permission"
 import { PermissionSaved } from "@opencode/schema/permission-saved"
 import { Plugin } from "@opencode/schema/plugin"
@@ -58,7 +57,6 @@ const effectTypeReferences = [
   ...namespaceTypes("Location", "@opencode/schema/location", Location),
   ...namespaceTypes("Mcp", "@opencode/schema/mcp", Mcp),
   ...namespaceTypes("Model", "@opencode/schema/model", Model),
-  ...namespaceTypes("NativeApp", "@opencode/schema/native-app", NativeApp),
   ...namespaceTypes("Permission", "@opencode/schema/permission", Permission),
   ...namespaceTypes("PermissionSaved", "@opencode/schema/permission-saved", PermissionSaved),
   ...namespaceTypes("Plugin", "@opencode/schema/plugin", Plugin),

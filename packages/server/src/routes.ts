@@ -27,7 +27,6 @@ import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { LocationActivity } from "@opencode/core/location-activity"
 import { ModelsDev } from "@opencode/core/models-dev"
-import { NativeApp } from "@opencode/core/native-app"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { PluginUpdate } from "@opencode/core/plugin/update"
 import { SdkPlugins } from "@opencode/core/plugin/sdk"
@@ -52,7 +51,6 @@ import type { ServerOptions } from "./options"
 
 const applicationServiceNodes = [
   Global.node,
-  NativeApp.node,
   Database.node,
   Bus.node,
   EventLogger.node,
@@ -170,7 +168,6 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.succeedContext(
           Context.pick(
             Database.Service,
-            NativeApp.Service,
             Job.Service,
             Session.Service,
             SessionExecution.Service,

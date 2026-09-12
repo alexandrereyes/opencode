@@ -40,12 +40,17 @@ test("inactive tabs load attention, but read transcript and inbox only on select
   await page.route("**/api/session/navigation?*", (route) =>
     route.fulfill({
       json: {
-        data: fixture.sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
+        data: fixture.sessions.map((session) => ({
+          session: currentSession(session),
+          messageAt: session.time.updated,
+        })),
       },
     }),
   )
   await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
-  await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
+  await page.route("**/api/rpc/custom.native-apps/list**", (route) =>
+    route.fulfill({ json: { output: { os: null, apps: [] } } }),
+  )
   await page.route("**/api/rpc/custom.subscriptions/list?*", (route) =>
     route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } }),
   )
