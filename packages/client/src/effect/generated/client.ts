@@ -12,11 +12,6 @@ import type {
   ServerMaintenanceCancelOutput,
   ServerMaintenanceCommitInput,
   ServerMaintenanceCommitOutput,
-  SnippetListOutput,
-  SnippetSaveInput,
-  SnippetSaveOutput,
-  SnippetRemoveInput,
-  SnippetRemoveOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentListInput,
@@ -339,34 +334,6 @@ const adaptGroupServer = (raw: RawClient["server.server"]) => ({
     cancel: EndpointServerMaintenanceCancel(raw),
     commit: EndpointServerMaintenanceCommit(raw),
   },
-})
-
-const EndpointSnippetList = (raw: RawClient["server.snippet"]) => () =>
-  preserveEffect<SnippetListOutput>()(raw["snippet.list"]({}).pipe(Effect.mapError(mapClientError)))
-
-const EndpointSnippetSave = (raw: RawClient["server.snippet"]) => (input: SnippetSaveInput) =>
-  preserveEffect<SnippetSaveOutput>()(
-    raw["snippet.save"]({
-      payload: {
-        id: input["id"],
-        name: input["name"],
-        description: input["description"],
-        aliases: input["aliases"],
-        content: input["content"],
-        project: input["project"],
-      },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const EndpointSnippetRemove = (raw: RawClient["server.snippet"]) => (input: SnippetRemoveInput) =>
-  preserveEffect<SnippetRemoveOutput>()(
-    raw["snippet.remove"]({ params: { id: input["id"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
-const adaptGroupSnippet = (raw: RawClient["server.snippet"]) => ({
-  list: EndpointSnippetList(raw),
-  save: EndpointSnippetSave(raw),
-  remove: EndpointSnippetRemove(raw),
 })
 
 const EndpointLocationGet = (raw: RawClient["server.location"]) => (input?: LocationGetInput) =>
@@ -1697,7 +1664,6 @@ const adaptGroupConfig = (raw: RawClient["server.config"]) => ({ get: EndpointCo
 const adaptClient = (raw: RawClient) => ({
   health: adaptGroupHealth(raw["server.health"]),
   server: adaptGroupServer(raw["server.server"]),
-  snippet: adaptGroupSnippet(raw["server.snippet"]),
   location: adaptGroupLocation(raw["server.location"]),
   agent: adaptGroupAgent(raw["server.agent"]),
   plugin: adaptGroupPlugin(raw["server.plugin"]),

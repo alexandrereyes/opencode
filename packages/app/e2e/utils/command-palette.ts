@@ -43,7 +43,7 @@ export async function openCommandPalette(page: Page, home = false) {
     pageMessages: () => ({ items: [] }),
     findFiles: () => [],
   })
-  await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
+  await page.route("**/api/rpc/custom.snippets/list", (route) => route.fulfill({ json: { output: { items: [] } } }))
   await page.route("**/api/rpc/custom.native-apps/list**", (route) =>
     route.fulfill({ json: { output: { os: null, apps: [] } } }),
   )

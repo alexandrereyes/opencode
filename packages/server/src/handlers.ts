@@ -15,7 +15,6 @@ import { AgentHandler } from "./handlers/agent"
 import { PluginHandler } from "./handlers/plugin"
 import { HealthHandler } from "./handlers/health"
 import { ServerHandler } from "./handlers/server"
-import { SnippetHandler } from "./handlers/snippet"
 import { DebugHandler } from "./handlers/debug"
 import { PtyHandler } from "./handlers/pty"
 import { PersistentPtyHandler } from "./handlers/persistent-pty"
@@ -37,7 +36,6 @@ import { WorkspaceHandler } from "./handlers/workspace"
 export const handlers = Layer.mergeAll(
   HealthHandler,
   ServerHandler,
-  SnippetHandler,
   DebugHandler,
   MigrationHandler,
   LocationHandler,

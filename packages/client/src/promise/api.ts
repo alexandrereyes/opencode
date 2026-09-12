@@ -20,7 +20,6 @@ export type ReferenceApi = Client["reference"]
 export type WebSearchApi = Client["websearch"]
 export type SessionApi = Client["session"]
 export type SkillApi = Client["skill"]
-export type SnippetApi = Client["snippet"]
 export type VcsApi = Client["vcs"]
 export type WorktreeApi = Client["worktree"]
 

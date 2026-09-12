@@ -6,4 +6,9 @@ export interface StorageDomain {
   readonly set: (key: string, value: Schema.Json) => Effect.Effect<void>
   readonly remove: (key: string) => Effect.Effect<void>
   readonly scan: (options: StorageScanOptions) => Effect.Effect<StorageScanResult>
+  readonly update: <A>(
+    key: string,
+    update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
+  ) => Effect.Effect<A>
+  readonly adoptLegacy: (key: string) => Effect.Effect<boolean>
 }
