@@ -169,6 +169,86 @@ test("worktree deletion sends the project location separately from the target", 
   await expect(settings.getByText("11 worktrees", { exact: true })).toBeVisible()
 })
 
+test("sidebar worktree deletion uses RPC force confirmation and removes the item", async ({ page }) => {
+  const target = sandboxes[0]
+  const removed = new Set<string>()
+  const requests: Record<string, unknown>[] = []
+  await page.evaluate(() =>
+    localStorage.setItem("settings.v3", JSON.stringify({ appearance: { tabLayout: "vertical" } })),
+  )
+  await page.reload()
+  await page.route(
+    (url) => url.pathname === "/api/worktree",
+    (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({
+            json: [
+              { directory },
+              ...sandboxes.filter((item) => !removed.has(item)).map((directory) => ({ directory, strategy: "git" })),
+            ],
+          })
+        : route.fallback(),
+  )
+  await page.route("**/api/rpc/custom.worktrees/inspect?*", async (route) => {
+    expect(new URL(route.request().url()).searchParams.get("location[directory]")).toBe(directory)
+    expect(route.request().postDataJSON()).toEqual({ input: { directory: target } })
+    await route.fulfill({
+      json: { output: { directory: target, identity: "identity", branch: "feature", dirty: false } },
+    })
+  })
+  await page.route("**/api/rpc/custom.worktrees/delete?*", async (route) => {
+    expect(new URL(route.request().url()).searchParams.get("location[directory]")).toBe(directory)
+    const body = route.request().postDataJSON() as { input: Record<string, unknown> }
+    requests.push(body.input)
+    if (body.input.force !== true) {
+      await route.fulfill({
+        status: 400,
+        json: {
+          _tag: "RpcError",
+          type: "operation_failed",
+          message: "Dirty worktree",
+          data: { message: "Dirty worktree", forceRequired: true },
+        },
+      })
+      return
+    }
+    removed.add(target)
+    await route.fulfill({ json: { output: { directory: target } } })
+  })
+
+  await page.getByRole("button", { name: "Home", exact: true }).click()
+  await page.getByRole("button", { name: "Attention view", exact: true }).click()
+  const action = page.getByRole("button", { name: "Delete workspace-1 worktree", exact: true })
+  await expect(action).toBeVisible()
+  await action.click()
+  const dialog = page.getByRole("dialog", { name: "Delete worktree", exact: true })
+  const remove = dialog.getByRole("button", { name: "Delete worktree", exact: true })
+  await expect(remove).toBeEnabled()
+  await remove.click()
+  await expect(dialog.getByRole("alert")).toContainText("uncommitted changes")
+  await remove.click()
+  await expect(dialog).toBeHidden()
+  await expect(action).toHaveCount(0)
+  expect(requests).toEqual([
+    {
+      directory: target,
+      force: false,
+      identity: "identity",
+      branch: "feature",
+      deleteLocalBranch: false,
+      deleteRemoteBranch: false,
+    },
+    {
+      directory: target,
+      force: true,
+      identity: "identity",
+      branch: "feature",
+      deleteLocalBranch: false,
+      deleteRemoteBranch: false,
+    },
+  ])
+})
+
 test("extensions opens without waiting for MCPs", async ({ page }) => {
   const mcps = Promise.withResolvers<void>()
   await page.route("**/api/mcp", async (route) => {

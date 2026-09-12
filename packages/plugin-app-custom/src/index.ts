@@ -5,6 +5,7 @@ import { registerNativeApps } from "./native-apps/index.js"
 import { registerSubscriptions } from "./subscriptions/index.js"
 import { registerSessionRead } from "./session-read/index.js"
 import { registerSnippets } from "./snippets/index.js"
+import { registerWorktrees } from "./worktrees/index.js"
 
 export default Plugin.define({
   id: "custom.app-mentions",
@@ -15,5 +16,6 @@ export default Plugin.define({
       yield* registerSubscriptions(ctx)
       yield* registerSessionRead(ctx)
       yield* registerSnippets(ctx)
+      yield* registerWorktrees(ctx)
     }),
 })

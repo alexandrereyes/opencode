@@ -1,8 +1,5 @@
-import type {
-  SessionInfo,
-  WorktreeInspection,
-  WorktreeRemoveResult,
-} from "@opencode/client/promise"
+import type { SessionInfo } from "@opencode/client/promise"
+import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
 import { Button } from "@opencode/ui/button"
 import { Checkbox } from "@opencode/ui/checkbox"
 import { useDialog } from "@opencode/ui/context/dialog"
@@ -57,30 +54,32 @@ export function useSidebarWorktreeDelete(archive: Archive, lifecyclePending: () 
     return sessions(target, page.cursor.next, all)
   }
 
-  const cleanupErrors = (result: WorktreeRemoveResult) =>
+  const cleanupErrors = (result: Worktrees.RemoveResult) =>
     [result.localBranch, result.remoteBranch]
       .filter((item): item is NonNullable<typeof item> => !!item && !item.deleted)
       .map((item) => item.error ?? language.t("common.requestFailed"))
 
   const remove = async (
     target: Target,
-    inspection: WorktreeInspection,
+    inspection: Worktrees.Inspection,
     options: { local: boolean; remote: boolean; force: boolean },
   ) => {
     if (state.pending[target.directory]) return { completed: false }
     setState("pending", target.directory, true)
     try {
       const linked = await sessions(target)
-      const result = await target.ctx.sdk.api.worktree.delete({
-        location: { directory: target.projectDirectory },
-        directory: target.directory,
-        force: options.force,
-        identity: inspection.identity,
-        branch: inspection.branch ?? null,
-        remote: inspection.remoteBranch,
-        deleteLocalBranch: options.local,
-        deleteRemoteBranch: options.remote,
-      })
+      const result = await target.ctx.sdk.api.rpc(Worktrees.Definition).delete(
+        {
+          directory: target.directory,
+          force: options.force,
+          identity: inspection.identity,
+          branch: inspection.branch ?? null,
+          remote: inspection.remoteBranch,
+          deleteLocalBranch: options.local,
+          deleteRemoteBranch: options.remote,
+        },
+        { location: { directory: target.projectDirectory } },
+      )
       target.ctx.sync.worktrees.remove(target.projectDirectory, target.directory)
       await target.ctx.sync.worktrees.refresh(target.projectDirectory)
       tabs.store.forEach((tab) => {
@@ -150,7 +149,7 @@ function WorktreeDeleteDialog(props: {
   target: Target
   remove: (
     target: Target,
-    inspection: WorktreeInspection,
+    inspection: Worktrees.Inspection,
     options: { local: boolean; remote: boolean; force: boolean },
   ) => Promise<{ completed: boolean; forceRequired?: boolean }>
 }) {
@@ -162,15 +161,13 @@ function WorktreeDeleteDialog(props: {
     forceRequired: false,
     local: false,
     remote: false,
-    inspection: undefined as WorktreeInspection | undefined,
+    inspection: undefined as Worktrees.Inspection | undefined,
     error: undefined as string | undefined,
   })
   onMount(() => {
-    void props.target.ctx.sdk.api.worktree
-      .inspect({
-        location: { directory: props.target.projectDirectory },
-        directory: props.target.directory,
-      })
+    void props.target.ctx.sdk.api
+      .rpc(Worktrees.Definition)
+      .inspect({ directory: props.target.directory }, { location: { directory: props.target.projectDirectory } })
       .then((inspection) => setState({ inspection, pending: false }))
       .catch((error) =>
         setState({
@@ -207,17 +204,13 @@ function WorktreeDeleteDialog(props: {
       <DialogBody class="flex min-w-0 flex-col gap-4 px-4 pb-2">
         <div data-slot="worktree-delete-details" class="flex min-w-0 flex-col gap-3">
           <div class="flex min-w-0 flex-col gap-1">
-            <span class="text-11-regular text-v2-text-text-muted">
-              {language.t("sidebar.worktree.delete.branch")}
-            </span>
+            <span class="text-11-regular text-v2-text-text-muted">{language.t("sidebar.worktree.delete.branch")}</span>
             <span dir="auto" class="min-w-0 break-words text-[13px] leading-4 text-v2-text-text-base">
               {state.inspection?.branch ?? props.target.name}
             </span>
           </div>
           <div class="flex min-w-0 flex-col gap-1">
-            <span class="text-11-regular text-v2-text-text-muted">
-              {language.t("sidebar.worktree.delete.path")}
-            </span>
+            <span class="text-11-regular text-v2-text-text-muted">{language.t("sidebar.worktree.delete.path")}</span>
             <code
               data-slot="worktree-delete-path"
               dir="ltr"

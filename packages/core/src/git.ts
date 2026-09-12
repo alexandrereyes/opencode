@@ -1,7 +1,6 @@
 export * as Git from "./git.js"
 
 import path from "path"
-import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { AbsolutePath, RelativePath } from "./schema.js"
@@ -60,24 +59,15 @@ export class OperationError extends Schema.TaggedError<OperationError>()("Git.Op
 export class Worktree extends Schema.Class<Worktree>("Git.Worktree")({
   directory: AbsolutePath,
   kind: Schema.Literals(["main", "linked"]),
-  branch: Schema.optional(Schema.String),
 }) {}
 
 export class WorktreeError extends Schema.TaggedError<WorktreeError>()("Git.WorktreeError", {
-  operation: Schema.Literals(["create", "remove", "list", "inspect", "delete_local_branch", "delete_remote_branch"]),
+  operation: Schema.Literals(["create", "remove", "list"]),
   message: Schema.String,
   directory: Schema.optional(AbsolutePath),
   forceRequired: Schema.optional(Schema.Boolean),
   cause: Schema.optional(Schema.Defect()),
 }) {}
-
-export interface WorktreeInspection {
-  readonly identity: string
-  readonly branch?: string
-  readonly dirty: boolean
-  readonly defaultBranches: readonly string[]
-  readonly upstream?: { readonly remote: string; readonly branch: string; readonly defaultBranch?: string }
-}
 
 export interface Interface {
   readonly repo: {
@@ -127,12 +117,6 @@ export interface Interface {
       force: boolean
     }) => Effect.Effect<void, WorktreeError>
     readonly list: (repository: Repository) => Effect.Effect<readonly Worktree[], WorktreeError>
-    readonly inspect: (repository: Repository) => Effect.Effect<WorktreeInspection, WorktreeError>
-    readonly deleteLocalBranch: (repository: Repository, branch: string) => Effect.Effect<void, WorktreeError>
-    readonly deleteRemoteBranch: (
-      repository: Repository,
-      input: { remote: string; branch: string },
-    ) => Effect.Effect<void, WorktreeError>
   }
   readonly index: {
     /** Refresh only the requested project-relative scope, preserving all other entries. */
@@ -238,9 +222,7 @@ const layer = Layer.effect(
     ) {
       const result = yield* run(repository.worktree, proc, ["symbolic-ref", `refs/remotes/${remoteName}/HEAD`])
       if (result.exitCode !== 0) return undefined
-      const ref = result.text.trim()
-      const prefix = `refs/remotes/${remoteName}/`
-      return ref.startsWith(prefix) ? ref.slice(prefix.length) || undefined : undefined
+      return result.text.trim().replace(new RegExp(`^refs/remotes/${remoteName}/`), "") || undefined
     })
 
     const operation = Effect.fnUntraced(function* (
@@ -630,7 +612,7 @@ const layer = Layer.effect(
     )
 
     const worktreeRun = Effect.fnUntraced(function* (
-      operation: WorktreeError["operation"],
+      operation: "create" | "remove" | "list",
       repository: Repository,
       args: string[],
       worktreeDirectory?: AbsolutePath,
@@ -689,107 +671,15 @@ const layer = Layer.effect(
 
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {
       return (yield* worktreeRun("list", repository, ["worktree", "list", "--porcelain"]))
-        .trim()
-        .split(/\r?\n\r?\n/)
-        .flatMap((block, index) => {
-          const lines = block.split(/\r?\n/)
-          const directory = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length).trim()
-          if (!directory) return []
-          const branch = lines.find((line) => line.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length)
-          return [
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+        .map(
+          (line, index) =>
             new Worktree({
-              directory: AbsolutePath.make(resolvePath(repository.worktree, directory)),
+              directory: AbsolutePath.make(resolvePath(repository.worktree, line.slice("worktree ".length).trim())),
               kind: index === 0 ? "main" : "linked",
-              branch,
             }),
-          ]
-        })
-    })
-
-    const worktreeInspect = Effect.fn("Git.worktree.inspect")(function* (repository: Repository) {
-      const status = yield* worktreeRun("inspect", repository, ["status", "--porcelain"])
-      const identityFile = path.join(repository.gitDirectory, "opencode.identity")
-      const readIdentity = fs.readFileString(identityFile).pipe(Effect.map((value) => value.trim()))
-      const identity = yield* readIdentity.pipe(
-        Effect.catch((error) => {
-          if (error.reason._tag !== "NotFound") return Effect.fail(error)
-          const value = randomUUID()
-          return fs.writeFileString(identityFile, value, { flag: "wx", mode: 0o600 }).pipe(
-            Effect.as(value),
-            Effect.catch((error) => (error.reason._tag === "AlreadyExists" ? readIdentity : Effect.fail(error))),
-          )
-        }),
-        Effect.mapError(
-          (cause) =>
-            new WorktreeError({
-              operation: "inspect",
-              directory: repository.worktree,
-              message: `Failed to inspect Git worktree identity: ${cause.message}`,
-              cause,
-            }),
-        ),
-      )
-      const branchName = yield* branch(repository)
-      const remotes = (yield* run(repository.worktree, proc, ["remote"]))
-        .text.split(/\r?\n/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-      const defaultBranches = [
-        ...new Set(
-          (yield* Effect.forEach(remotes, (remoteName) => remoteHead(repository, remoteName))).filter(
-            (item): item is string => item !== undefined,
-          ),
-        ),
-      ]
-      if (!branchName) return { identity, dirty: status.length > 0, defaultBranches }
-      const upstreamResult = yield* run(repository.worktree, proc, [
-        "for-each-ref",
-        "--format=%(upstream:remotename)%00%(upstream:remoteref)",
-        `refs/heads/${branchName}`,
-      ])
-      const [remoteName, upstreamRef] = upstreamResult.text.trim().split("\0")
-      const upstreamBranch = upstreamRef?.replace(/^refs\/heads\//, "")
-      const upstream =
-        remoteName && remoteName !== "." && upstreamBranch && (yield* remote(repository, remoteName))
-          ? {
-              remote: remoteName,
-              branch: upstreamBranch,
-              defaultBranch: yield* remoteHead(repository, remoteName),
-            }
-          : undefined
-      return {
-        identity,
-        branch: branchName,
-        dirty: status.length > 0,
-        defaultBranches,
-        upstream,
-      }
-    })
-
-    const deleteLocalBranch = Effect.fn("Git.worktree.deleteLocalBranch")(function* (
-      repository: Repository,
-      branch: string,
-    ) {
-      yield* worktreeRun(
-        "delete_local_branch",
-        repository,
-        ["--git-dir", repository.commonDirectory, "branch", "-d", "--", branch],
-        repository.worktree,
-        repository.commonDirectory,
-      )
-    })
-
-    const deleteRemoteBranch = Effect.fn("Git.worktree.deleteRemoteBranch")(function* (
-      repository: Repository,
-      input: { remote: string; branch: string },
-    ) {
-      yield* worktreeRun(
-        "delete_remote_branch",
-        repository,
-        ["--git-dir", repository.commonDirectory, "push", "--delete", input.remote, input.branch],
-        repository.worktree,
-        repository.commonDirectory,
-      )
+        )
     })
 
     return Service.of({
@@ -797,14 +687,7 @@ const layer = Layer.effect(
       remote: { get: remote },
       history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
-      worktree: {
-        create: worktreeCreate,
-        remove: worktreeRemove,
-        list: worktreeList,
-        inspect: worktreeInspect,
-        deleteLocalBranch,
-        deleteRemoteBranch,
-      },
+      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
       index: { refresh, ignored },
       tree: {
         capture: captureTree,
