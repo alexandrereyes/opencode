@@ -1,8 +1,5 @@
 import type {
   HealthGetOutput,
-  ServerNativeAppsListOutput,
-  ServerNativeAppsOpenInput,
-  ServerNativeAppsOpenOutput,
   ServerGetOutput,
   ServerMaintenanceAcquireOutput,
   ServerMaintenanceCancelInput,
@@ -437,31 +434,6 @@ export function make(options: ClientOptions) {
         ),
     },
     server: {
-      nativeApps: {
-        list: (requestOptions?: RequestOptions) =>
-          request<ServerNativeAppsListOutput>(
-            {
-              method: "GET",
-              path: `/api/server/native-apps`,
-              successStatus: 200,
-              declaredStatuses: [400, 401],
-              empty: false,
-            },
-            requestOptions,
-          ),
-        open: (input: ServerNativeAppsOpenInput, requestOptions?: RequestOptions) =>
-          request<ServerNativeAppsOpenOutput>(
-            {
-              method: "POST",
-              path: `/api/server/native-apps/open`,
-              body: { app: input["app"], path: input["path"], reveal: input["reveal"] },
-              successStatus: 204,
-              declaredStatuses: [400, 401, 503],
-              empty: true,
-            },
-            requestOptions,
-          ),
-      },
       get: (requestOptions?: RequestOptions) =>
         request<ServerGetOutput>(
           { method: "GET", path: `/api/server`, successStatus: 200, declaredStatuses: [400, 401], empty: false },

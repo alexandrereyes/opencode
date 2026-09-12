@@ -19,6 +19,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./rpc": "./src/rpc.ts",
+    "./native-apps/rpc": "./src/native-apps/rpc.ts",
     "./subscriptions/rpc": "./src/subscriptions/rpc.ts"
   },
   "scripts": {

@@ -6,9 +6,6 @@ import { HttpApiClient } from "effect/unstable/httpapi"
 import { ClientApi } from "../../contract"
 import type {
   HealthGetOutput,
-  ServerNativeAppsListOutput,
-  ServerNativeAppsOpenInput,
-  ServerNativeAppsOpenOutput,
   ServerGetOutput,
   ServerMaintenanceAcquireOutput,
   ServerMaintenanceCancelInput,
@@ -315,16 +312,6 @@ const EndpointHealthGet = (raw: RawClient["server.health"]) => () =>
 
 const adaptGroupHealth = (raw: RawClient["server.health"]) => ({ get: EndpointHealthGet(raw) })
 
-const EndpointServerNativeAppsList = (raw: RawClient["server.server"]) => () =>
-  preserveEffect<ServerNativeAppsListOutput>()(raw["server.nativeApps.list"]({}).pipe(Effect.mapError(mapClientError)))
-
-const EndpointServerNativeAppsOpen = (raw: RawClient["server.server"]) => (input: ServerNativeAppsOpenInput) =>
-  preserveEffect<ServerNativeAppsOpenOutput>()(
-    raw["server.nativeApps.open"]({
-      payload: { app: input["app"], path: input["path"], reveal: input["reveal"] },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const EndpointServerGet = (raw: RawClient["server.server"]) => () =>
   preserveEffect<ServerGetOutput>()(raw["server.get"]({}).pipe(Effect.mapError(mapClientError)))
 
@@ -346,7 +333,6 @@ const EndpointServerMaintenanceCommit = (raw: RawClient["server.server"]) => (in
   )
 
 const adaptGroupServer = (raw: RawClient["server.server"]) => ({
-  nativeApps: { list: EndpointServerNativeAppsList(raw), open: EndpointServerNativeAppsOpen(raw) },
   get: EndpointServerGet(raw),
   maintenance: {
     acquire: EndpointServerMaintenanceAcquire(raw),

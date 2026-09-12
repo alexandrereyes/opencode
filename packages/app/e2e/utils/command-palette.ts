@@ -23,9 +23,7 @@ export function captureConsoleWarnings(page: Page) {
 }
 
 export async function pressPlatformShortcut(page: Page, shortcut: string) {
-  const modifier = await page.evaluate(() =>
-    /(Mac|iPod|iPhone|iPad)/.test(navigator.platform) ? "Meta" : "Control",
-  )
+  const modifier = await page.evaluate(() => (/(Mac|iPod|iPhone|iPad)/.test(navigator.platform) ? "Meta" : "Control"))
   await page.keyboard.press(`${modifier}+${shortcut}`)
 }
 
@@ -46,7 +44,9 @@ export async function openCommandPalette(page: Page, home = false) {
     findFiles: () => [],
   })
   await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
-  await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
+  await page.route("**/api/rpc/custom.native-apps/list**", (route) =>
+    route.fulfill({ json: { output: { os: null, apps: [] } } }),
+  )
   await page.route("**/api/rpc/custom.subscriptions/list?*", (route) =>
     route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } }),
   )

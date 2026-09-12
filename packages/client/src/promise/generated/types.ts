@@ -2,22 +2,6 @@ export type JsonValue = null | boolean | number | string | Array<JsonValue> | { 
 
 export type ServiceHealth = { healthy: true; version: string; pid: number }
 
-export type NativeAppID =
-  | "finder"
-  | "vscode"
-  | "cursor"
-  | "zed"
-  | "textmate"
-  | "antigravity"
-  | "terminal"
-  | "iterm2"
-  | "ghostty"
-  | "warp"
-  | "xcode"
-  | "android-studio"
-  | "sublime-text"
-  | "rider"
-
 export type SnippetID = string
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
@@ -456,8 +440,6 @@ export type WebSearchProvider = { id: string; name: string }
 export type WebSearchResult = { url: string; title?: string; content?: string; time: { published?: number } }
 
 export type ConfigWorktree = { directory: string }
-
-export type NativeAppAvailability = { os: "macos" | null; apps: Array<NativeAppID> }
 
 export type SnippetInfo = {
   id: SnippetID
@@ -2525,14 +2507,6 @@ export type UnauthorizedError = { readonly _tag: "UnauthorizedError"; readonly m
 export const isUnauthorizedError = (value: unknown): value is UnauthorizedError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError"
 
-export type ServiceUnavailableError = {
-  readonly _tag: "ServiceUnavailableError"
-  readonly message: string
-  readonly service?: string | undefined
-}
-export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
-
 export type ConflictError = {
   readonly _tag: "ConflictError"
   readonly message: string
@@ -2548,6 +2522,14 @@ export type AgentNotFoundError = {
 }
 export const isAgentNotFoundError = (value: unknown): value is AgentNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "AgentNotFoundError"
+
+export type ServiceUnavailableError = {
+  readonly _tag: "ServiceUnavailableError"
+  readonly message: string
+  readonly service?: string | undefined
+}
+export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
 
 export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly message: string }
 export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
@@ -2712,70 +2694,6 @@ export const isWorktreeError = (value: unknown): value is WorktreeError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "WorktreeError"
 
 export type HealthGetOutput = ServiceHealth
-
-export type ServerNativeAppsListOutput = NativeAppAvailability
-
-export type ServerNativeAppsOpenInput = {
-  readonly app: {
-    readonly app:
-      | "finder"
-      | "vscode"
-      | "cursor"
-      | "zed"
-      | "textmate"
-      | "antigravity"
-      | "terminal"
-      | "iterm2"
-      | "ghostty"
-      | "warp"
-      | "xcode"
-      | "android-studio"
-      | "sublime-text"
-      | "rider"
-    readonly path: string
-    readonly reveal?: boolean
-  }["app"]
-  readonly path: {
-    readonly app:
-      | "finder"
-      | "vscode"
-      | "cursor"
-      | "zed"
-      | "textmate"
-      | "antigravity"
-      | "terminal"
-      | "iterm2"
-      | "ghostty"
-      | "warp"
-      | "xcode"
-      | "android-studio"
-      | "sublime-text"
-      | "rider"
-    readonly path: string
-    readonly reveal?: boolean
-  }["path"]
-  readonly reveal?: {
-    readonly app:
-      | "finder"
-      | "vscode"
-      | "cursor"
-      | "zed"
-      | "textmate"
-      | "antigravity"
-      | "terminal"
-      | "iterm2"
-      | "ghostty"
-      | "warp"
-      | "xcode"
-      | "android-studio"
-      | "sublime-text"
-      | "rider"
-    readonly path: string
-    readonly reveal?: boolean
-  }["reveal"]
-}
-
-export type ServerNativeAppsOpenOutput = void
 
 export type ServerGetOutput = { urls: Array<string> }
 
