@@ -1,6 +1,6 @@
-import type { ServerSubscriptionsOutput } from "@opencode/client/promise"
+import type { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
 
-type Account = ServerSubscriptionsOutput["accounts"][number]
+type Account = Subscriptions.Account
 
 export function subscriptionCapacity(account: Account, now = Date.now()) {
   if (account.plan !== "pro") return "outside" as const
@@ -15,7 +15,7 @@ export function subscriptionPercentages(remaining: number) {
   return { remaining: rounded, used: 100 - rounded }
 }
 
-export function subscriptionAccounts(accounts: ServerSubscriptionsOutput["accounts"], now = Date.now()) {
+export function subscriptionAccounts(accounts: readonly Subscriptions.Account[], now = Date.now()) {
   const rank = (account: Account) => {
     if (account.plan !== "pro") return account.plan === "plus" ? 2 : 3
     if (
@@ -31,7 +31,7 @@ export function subscriptionAccounts(accounts: ServerSubscriptionsOutput["accoun
   return accounts.toSorted((a, b) => rank(a) - rank(b))
 }
 
-export function subscriptionPool(accounts: ServerSubscriptionsOutput["accounts"], now = Date.now()) {
+export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now()) {
   const members = accounts.filter((account) => account.plan === "pro" && account.enabled && account.authenticated)
   const measured = members.filter(
     (account) => !account.stale && account.remaining !== null && !renewalPassed(account, now),

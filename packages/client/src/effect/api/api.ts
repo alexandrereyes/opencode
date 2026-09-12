@@ -62,30 +62,6 @@ export type ServerNativeAppsOpenOperation<E = never> = (
   input: ServerNativeAppsOpenInput,
 ) => Effect.Effect<ServerNativeAppsOpenOutput, E>
 
-export type ServerSubscriptionsOutput = {
-  readonly status: "ok" | "unconfigured" | "unavailable"
-  readonly accounts: ReadonlyArray<{
-    readonly id: string
-    readonly name: string
-    readonly enabled: boolean
-    readonly plan: string | null
-    readonly authenticated: boolean
-    readonly cooldownSeconds: number
-    readonly bankedResets: {
-      readonly available: number
-      readonly earliestExpiresAt: string | null
-      readonly latestExpiresAt: string | null
-      readonly nonExpiring: number
-    } | null
-    readonly remaining: number | null
-    readonly resetAt: string | null
-    readonly observedAt: string | null
-    readonly stale: boolean
-    readonly hasCapacity: boolean | null
-  }>
-}
-export type ServerSubscriptionsOperation<E = never> = () => Effect.Effect<ServerSubscriptionsOutput, E>
-
 export type ServerGetOutput = { readonly urls: ReadonlyArray<string> }
 export type ServerGetOperation<E = never> = () => Effect.Effect<ServerGetOutput, E>
 
@@ -117,7 +93,6 @@ export interface ServerApi<E = never> {
     readonly list: ServerNativeAppsListOperation<E>
     readonly open: ServerNativeAppsOpenOperation<E>
   }
-  readonly subscriptions: ServerSubscriptionsOperation<E>
   readonly get: ServerGetOperation<E>
   readonly maintenance: {
     readonly acquire: ServerMaintenanceAcquireOperation<E>

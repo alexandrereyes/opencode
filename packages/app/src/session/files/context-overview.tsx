@@ -18,6 +18,7 @@ import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
+import { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
 import {
   subscriptionAccounts,
   subscriptionCapacity,
@@ -97,13 +98,21 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     shells: () => (layout.params.id ? data.shell.listBySession(layout.params.id) : []),
   })
   const [clock, setClock] = createStore({ now: Date.now() })
-  const [subscriptions, quota] = createResource(
-    () => props.active,
-    () =>
-      sdk.api.server.subscriptions().catch(() => ({
-        status: "unavailable" as const,
-        accounts: [],
-      })),
+  const subscriptionSource = createMemo(
+    () => (props.active ? { server: server.key, directory: directory() } : false),
+    false,
+    {
+      equals: (previous, next) =>
+        previous === next ||
+        (!!previous && !!next && previous.server === next.server && previous.directory === next.directory),
+    },
+  )
+  const [subscriptions, quota] = createResource(subscriptionSource, (source) =>
+    sdk.api
+      .rpc(Subscriptions.Definition)
+      .list({}, { location: { directory: source.directory } })
+      .then((data) => ({ ...source, data }))
+      .catch(() => ({ ...source, data: { status: "unavailable" as const, accounts: [] } })),
   )
   const familyRequest = createMemo(() => {
     const id = layout.params.id
@@ -135,9 +144,14 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   )
   // `latest` falls back to the suspending resource read before its first result.
   // These optional sections must never enlist the enclosing route's Suspense.
-  const subscription = createMemo(() =>
-    subscriptions.state === "ready" || subscriptions.state === "refreshing" ? subscriptions.latest : undefined,
-  )
+  const subscription = createMemo(() => {
+    const source = subscriptionSource()
+    const result =
+      subscriptions.state === "ready" || subscriptions.state === "refreshing" ? subscriptions.latest : undefined
+    return source && result && result.server === source.server && result.directory === source.directory
+      ? result.data
+      : undefined
+  })
   const familyResult = () =>
     family.state === "ready" || family.state === "refreshing" ? family.latest : undefined
   const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id

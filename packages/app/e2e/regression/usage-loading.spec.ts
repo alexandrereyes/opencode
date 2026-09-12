@@ -17,10 +17,10 @@ for (const first of ["subscriptions", "children"] as const) {
     const subscriptions = Promise.withResolvers<void>()
     const children = Promise.withResolvers<void>()
     const started = { subscriptions: false, children: false }
-    await page.route("**/api/server/subscriptions", async (route) => {
+    await page.route("**/api/rpc/custom.subscriptions/list?*", async (route) => {
       started.subscriptions = true
       await subscriptions.promise
-      await route.fulfill({ json: { status: "unconfigured", accounts: [] } })
+      await route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } })
     })
     await page.route("**/api/session?*", async (route) => {
       if (!new URL(route.request().url()).searchParams.has("parentID")) return route.fallback()
@@ -64,7 +64,9 @@ for (const first of ["subscriptions", "children"] as const) {
   })
 }
 
-test("Usage errors and late family responses preserve the current session and navigation", async ({ page }) => {
+test("missing subscriptions RPC and late family responses preserve the current session and navigation", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockOpenCodeServer(page, {
     directory: fixture.directory,
@@ -87,10 +89,10 @@ test("Usage errors and late family responses preserve the current session and na
   const familyRequest = Promise.withResolvers<Request>()
   const quota = Promise.withResolvers<void>()
   const started = { family: false, quota: false }
-  await page.route("**/api/server/subscriptions", async (route) => {
+  await page.route("**/api/rpc/custom.subscriptions/list?*", async (route) => {
     started.quota = true
     await quota.promise
-    await route.fulfill({ status: 503, body: "Unavailable" })
+    await route.fulfill({ status: 404, body: "Missing plugin RPC" })
   })
   await page.route("**/api/session?*", async (route) => {
     const query = new URL(route.request().url()).searchParams
@@ -223,9 +225,9 @@ test("closing pending Usage keeps unknown sections until the panel unmounts", as
   })
   await installStressSessionTabs(page)
   const gate = Promise.withResolvers<void>()
-  await page.route("**/api/server/subscriptions", async (route) => {
+  await page.route("**/api/rpc/custom.subscriptions/list?*", async (route) => {
     await gate.promise
-    await route.fulfill({ json: { status: "unconfigured", accounts: [] } })
+    await route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } })
   })
   await page.route("**/api/session?*", async (route) => {
     if (!new URL(route.request().url()).searchParams.has("parentID")) return route.fallback()

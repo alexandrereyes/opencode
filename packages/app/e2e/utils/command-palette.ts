@@ -47,8 +47,8 @@ export async function openCommandPalette(page: Page, home = false) {
   })
   await page.route("**/api/snippet", (route) => route.fulfill({ json: [] }))
   await page.route("**/api/server/native-apps", (route) => route.fulfill({ json: { os: null, apps: [] } }))
-  await page.route("**/api/server/subscriptions", (route) =>
-    route.fulfill({ json: { status: "unconfigured", accounts: [] } }),
+  await page.route("**/api/rpc/custom.subscriptions/list?*", (route) =>
+    route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } }),
   )
   const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
   await page.goto(home ? "/" : `/server/${base64Encode(server)}/session/${paletteSession.id}`)

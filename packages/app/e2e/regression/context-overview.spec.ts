@@ -19,115 +19,141 @@ test("context tab retains selection across sessions and shows live quota and sub
     pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
     events: () => events.splice(0),
   })
-  const usage = { remaining: 59, requests: 0, stale: false }
-  await page.route("**/api/server/subscriptions", (route) => {
+  const usage = { remaining: 59, requests: 0, stale: false, locations: [] as string[] }
+  const delayed = {
+    enabled: false,
+    captured: false,
+    started: Promise.withResolvers<void>(),
+    release: Promise.withResolvers<void>(),
+    completed: Promise.withResolvers<void>(),
+  }
+  await page.route("**/api/rpc/custom.subscriptions/list?*", async (route) => {
     usage.requests++
-    return route.fulfill({
-      json: {
-        status: "ok",
-        accounts: [
-          {
-            id: "quota-fixture",
-            name: "subscription@example.test",
-            remaining: usage.remaining,
-            enabled: true,
-            plan: "pro",
-            authenticated: true,
-            cooldownSeconds: 0,
-            bankedResets: {
-              available: 3,
-              earliestExpiresAt: "2026-10-01T12:00:00Z",
-              latestExpiresAt: "2026-10-05T12:00:00Z",
-              nonExpiring: 0,
-            },
-            stale: usage.stale,
-            hasCapacity: true,
-            observedAt: new Date().toISOString(),
-            resetAt: "2026-09-15T02:15:47Z",
+    const location = new URL(route.request().url()).searchParams.get("location[directory]") ?? ""
+    usage.locations.push(location)
+    expect(route.request().postDataJSON()).toEqual({ input: {} })
+    if (location === "C:/OpenCode/MovedProject") {
+      await route.fulfill({ status: 404, body: "Missing plugin RPC" })
+      return
+    }
+    const waiting = delayed.enabled && !delayed.captured
+    if (waiting) {
+      delayed.captured = true
+      delayed.started.resolve()
+      await delayed.release.promise
+    }
+    try {
+      await route.fulfill({
+        json: {
+          output: {
+            status: "ok",
+            accounts: [
+              {
+                id: "quota-fixture",
+                name: "subscription@example.test",
+                remaining: usage.remaining,
+                enabled: true,
+                plan: "pro",
+                authenticated: true,
+                cooldownSeconds: 0,
+                bankedResets: {
+                  available: 3,
+                  earliestExpiresAt: "2026-10-01T12:00:00Z",
+                  latestExpiresAt: "2026-10-05T12:00:00Z",
+                  nonExpiring: 0,
+                },
+                stale: usage.stale,
+                hasCapacity: true,
+                observedAt: new Date().toISOString(),
+                resetAt: "2026-09-15T02:15:47Z",
+              },
+              {
+                id: "exhausted-fixture",
+                name: "exhausted@example.test",
+                remaining: 0,
+                enabled: true,
+                plan: "pro",
+                authenticated: true,
+                cooldownSeconds: 0,
+                bankedResets: {
+                  available: 0,
+                  earliestExpiresAt: null,
+                  latestExpiresAt: null,
+                  nonExpiring: 0,
+                },
+                stale: false,
+                hasCapacity: false,
+                observedAt: new Date().toISOString(),
+                resetAt: null,
+              },
+              {
+                id: "plus-fixture",
+                name: "plus@example.test",
+                remaining: 100,
+                enabled: true,
+                plan: "plus",
+                authenticated: true,
+                cooldownSeconds: 0,
+                bankedResets: {
+                  available: 2,
+                  earliestExpiresAt: null,
+                  latestExpiresAt: null,
+                  nonExpiring: 2,
+                },
+                stale: false,
+                hasCapacity: true,
+                observedAt: new Date().toISOString(),
+                resetAt: null,
+              },
+              {
+                id: "disabled-fixture",
+                name: "disabled@example.test",
+                remaining: 80,
+                enabled: false,
+                plan: "plus",
+                authenticated: true,
+                cooldownSeconds: 0,
+                bankedResets: null,
+                stale: false,
+                hasCapacity: true,
+                observedAt: new Date().toISOString(),
+                resetAt: null,
+              },
+              {
+                id: "unauthenticated-fixture",
+                name: "reauth@example.test",
+                remaining: null,
+                enabled: true,
+                plan: "plus",
+                authenticated: false,
+                cooldownSeconds: 0,
+                bankedResets: null,
+                stale: true,
+                hasCapacity: null,
+                observedAt: null,
+                resetAt: null,
+              },
+              {
+                id: "stale-fixture",
+                name: "stale@example.test",
+                remaining: 41,
+                enabled: true,
+                plan: "plus",
+                authenticated: true,
+                cooldownSeconds: 0,
+                bankedResets: null,
+                stale: true,
+                hasCapacity: true,
+                observedAt: new Date().toISOString(),
+                resetAt: null,
+              },
+            ].toReversed(),
           },
-          {
-            id: "exhausted-fixture",
-            name: "exhausted@example.test",
-            remaining: 0,
-            enabled: true,
-            plan: "pro",
-            authenticated: true,
-            cooldownSeconds: 0,
-            bankedResets: {
-              available: 0,
-              earliestExpiresAt: null,
-              latestExpiresAt: null,
-              nonExpiring: 0,
-            },
-            stale: false,
-            hasCapacity: false,
-            observedAt: new Date().toISOString(),
-            resetAt: null,
-          },
-          {
-            id: "plus-fixture",
-            name: "plus@example.test",
-            remaining: 100,
-            enabled: true,
-            plan: "plus",
-            authenticated: true,
-            cooldownSeconds: 0,
-            bankedResets: {
-              available: 2,
-              earliestExpiresAt: null,
-              latestExpiresAt: null,
-              nonExpiring: 2,
-            },
-            stale: false,
-            hasCapacity: true,
-            observedAt: new Date().toISOString(),
-            resetAt: null,
-          },
-          {
-            id: "disabled-fixture",
-            name: "disabled@example.test",
-            remaining: 80,
-            enabled: false,
-            plan: "plus",
-            authenticated: true,
-            cooldownSeconds: 0,
-            bankedResets: null,
-            stale: false,
-            hasCapacity: true,
-            observedAt: new Date().toISOString(),
-            resetAt: null,
-          },
-          {
-            id: "unauthenticated-fixture",
-            name: "reauth@example.test",
-            remaining: null,
-            enabled: true,
-            plan: "plus",
-            authenticated: false,
-            cooldownSeconds: 0,
-            bankedResets: null,
-            stale: true,
-            hasCapacity: null,
-            observedAt: null,
-            resetAt: null,
-          },
-          {
-            id: "stale-fixture",
-            name: "stale@example.test",
-            remaining: 41,
-            enabled: true,
-            plan: "plus",
-            authenticated: true,
-            cooldownSeconds: 0,
-            bankedResets: null,
-            stale: true,
-            hasCapacity: true,
-            observedAt: new Date().toISOString(),
-            resetAt: null,
-          },
-        ].toReversed(),
-      },
-    })
+        },
+      })
+    } finally {
+      if (waiting) delayed.completed.resolve()
+    }
   })
   await installStressSessionTabs(page)
   await page.goto(stressSessionHref(fixture.sourceID))
@@ -135,6 +161,7 @@ test("context tab retains selection across sessions and shows live quota and sub
   const overview = page.locator('[data-slot="context-overview"]')
   await expect(overview.getByText("subscription@example.test", { exact: true })).toBeHidden()
   await expect(overview.getByText("Banked resets · Pro", { exact: true })).toBeVisible()
+  expect(usage.locations).toContain(fixture.directory)
   await expect(overview.getByText(/First expiry:/)).toBeVisible()
   await expect(overview.getByText(/Last expiry:/)).toBeVisible()
   await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveAttribute(
@@ -240,29 +267,13 @@ test("context tab retains selection across sessions and shows live quota and sub
   expect(usage.requests).toBe(requests)
   await page.getByRole("tab", { name: "Context", exact: true }).click()
   await expect(overview).toBeVisible()
-  const source = sessions.find((session) => session.id === fixture.sourceID)
-  if (!source) throw new Error("Missing source fixture")
-  source.directory = "C:/OpenCode/MovedProject"
-  events.push({
-    id: "evt_context_moved",
-    created: Date.now(),
-    type: "session.moved",
-    durable: { aggregateID: fixture.sourceID, seq: 1, version: 1 },
-    data: { sessionID: fixture.sourceID, projectID: source.projectID, location: { directory: source.directory } },
-  })
-  await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.targetID)}"]`).click()
-  await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview).toBeVisible()
-  await page.locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.sourceID)}"]`).click()
-  await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
-  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toBeVisible()
   usage.remaining = 21
   await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
   await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveAttribute(
     "aria-valuenow",
     "21",
   )
+  expect(usage.locations.at(-1)).toBe(fixture.directory)
   await page.reload()
   await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toBeVisible()
@@ -287,6 +298,25 @@ test("context tab retains selection across sessions and shows live quota and sub
       "disabled@example.test",
       "plus@example.test",
     ])
+  delayed.enabled = true
+  await overview.getByRole("button", { name: "Refresh subscription usage" }).click()
+  await delayed.started.promise
+  const source = sessions.find((session) => session.id === fixture.sourceID)
+  if (!source) throw new Error("Missing source fixture")
+  source.directory = "C:/OpenCode/MovedProject"
+  events.push({
+    id: "evt_context_moved",
+    created: Date.now(),
+    type: "session.moved",
+    durable: { aggregateID: fixture.sourceID, seq: 1, version: 1 },
+    data: { sessionID: fixture.sourceID, projectID: source.projectID, location: { directory: source.directory } },
+  })
+  await expect.poll(() => usage.locations.at(-1)).toBe("C:/OpenCode/MovedProject")
+  await expect(overview.getByText("Subscription usage is unavailable. Try refreshing.", { exact: true })).toBeVisible()
+  delayed.release.resolve()
+  await delayed.completed.promise
+  await expect(overview.getByText("Subscription usage is unavailable. Try refreshing.", { exact: true })).toBeVisible()
+  await expect(overview.getByRole("meter", { name: "Available Pro pool", exact: true })).toHaveCount(0)
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
 })

@@ -9,7 +9,6 @@ import type {
   ServerNativeAppsListOutput,
   ServerNativeAppsOpenInput,
   ServerNativeAppsOpenOutput,
-  ServerSubscriptionsOutput,
   ServerGetOutput,
   ServerMaintenanceAcquireOutput,
   ServerMaintenanceCancelInput,
@@ -326,9 +325,6 @@ const EndpointServerNativeAppsOpen = (raw: RawClient["server.server"]) => (input
     }).pipe(Effect.mapError(mapClientError)),
   )
 
-const EndpointServerSubscriptions = (raw: RawClient["server.server"]) => () =>
-  preserveEffect<ServerSubscriptionsOutput>()(raw["server.subscriptions"]({}).pipe(Effect.mapError(mapClientError)))
-
 const EndpointServerGet = (raw: RawClient["server.server"]) => () =>
   preserveEffect<ServerGetOutput>()(raw["server.get"]({}).pipe(Effect.mapError(mapClientError)))
 
@@ -351,7 +347,6 @@ const EndpointServerMaintenanceCommit = (raw: RawClient["server.server"]) => (in
 
 const adaptGroupServer = (raw: RawClient["server.server"]) => ({
   nativeApps: { list: EndpointServerNativeAppsList(raw), open: EndpointServerNativeAppsOpen(raw) },
-  subscriptions: EndpointServerSubscriptions(raw),
   get: EndpointServerGet(raw),
   maintenance: {
     acquire: EndpointServerMaintenanceAcquire(raw),

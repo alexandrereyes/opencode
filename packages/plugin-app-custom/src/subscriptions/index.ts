@@ -1,5 +1,7 @@
+import { Plugin } from "@opencode/plugin/effect"
 import { Config, Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { Subscriptions } from "./rpc.js"
 
 // Decode only quota metadata. Admin credentials and OAuth data never cross this boundary.
 const Status = Schema.Struct({
@@ -38,7 +40,11 @@ const Status = Schema.Struct({
   ),
 })
 
-export const readSubscriptions = Effect.fn("Subscriptions.read")(function* () {
+export const registerSubscriptions = Effect.fn("Subscriptions.register")(function* (ctx: Plugin.Context) {
+  yield* ctx.rpc.register(Subscriptions.Definition, { list: () => read() }).pipe(Effect.orDie)
+})
+
+export const read = Effect.fn("Subscriptions.read")(function* () {
   const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url) return { status: "unconfigured" as const, accounts: [] }
   return yield* Effect.gen(function* () {

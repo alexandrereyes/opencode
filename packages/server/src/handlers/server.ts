@@ -15,7 +15,6 @@ import { Shell } from "@opencode/core/shell"
 import { ID } from "@opencode/schema/shell"
 import { Database } from "@opencode/core/database/database"
 import { SessionInboxTable } from "@opencode/core/session/sql"
-import { readSubscriptions } from "../subscriptions"
 import { NativeApp } from "@opencode/core/native-app"
 import { InvalidRequestError, ServiceUnavailableError } from "@opencode/protocol/errors"
 
@@ -39,7 +38,6 @@ export const ServerHandler = HttpApiBuilder.group(Api, "server.server", (handler
         ),
       ),
     )
-    .handle("server.subscriptions", () => readSubscriptions())
     .handle("server.get", () =>
       Effect.gen(function* () {
         const info = yield* ServerInfo.Service
