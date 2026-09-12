@@ -98,6 +98,9 @@ export function host(overrides: Overrides = {}): Plugin.Context {
         resolve: () => Effect.die("unused integration.connection.resolve"),
       },
     },
+    message: overrides.message ?? {
+      list: () => Effect.die("unused message.list"),
+    },
     mcp: overrides.mcp ?? {
       list: () => Effect.die("unused mcp.list"),
       callTool: () => Effect.die("unused mcp.callTool"),

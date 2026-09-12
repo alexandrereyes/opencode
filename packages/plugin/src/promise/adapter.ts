@@ -225,6 +225,7 @@ export function fromPromise(plugin: Plugin) {
         const ExperimentalEndpoints = ClientApi.groups["server.experimental"].endpoints
         const GenerateEndpoints = ClientApi.groups["server.generate"].endpoints
         const IntegrationEndpoints = ClientApi.groups["server.integration"].endpoints
+        const MessageEndpoints = ClientApi.groups["server.message"].endpoints
         const McpEndpoints = ClientApi.groups["server.mcp"].endpoints
         const ModelEndpoints = ClientApi.groups["server.model"].endpoints
         const PluginEndpoints = ClientApi.groups["server.plugin"].endpoints
@@ -428,6 +429,9 @@ export function fromPromise(plugin: Plugin) {
               active: (id) => Effect.runPromiseWith(context)(host.integration.connection.active(id)),
               resolve: (connection) => Effect.runPromiseWith(context)(host.integration.connection.resolve(connection)),
             },
+          },
+          message: {
+            list: adaptApiMethod(MessageEndpoints["session.messages"], host.message.list),
           },
           mcp: {
             list: adaptApiMethod(McpEndpoints["mcp.list"], host.mcp.list),

@@ -36,6 +36,7 @@ import { Worktree } from "@opencode/core/worktree"
 import { Effect, Layer } from "effect"
 import { tempLocationLayer } from "../fixture/location"
 import { emptyMcpLayer } from "../fixture/mcp"
+import { offlineModels } from "../fixture/models"
 
 const npmLayer = Layer.succeed(
   Npm.Service,
@@ -62,47 +63,49 @@ const permissionLayer = Layer.succeed(
   }),
 )
 
-export const PluginTestLayer = AppNodeBuilder.build(
-  LayerNode.group([
-    AppProcess.node,
-    FileSystem.node,
-    FSUtil.node,
-    Location.node,
-    Npm.node,
-    Credential.node,
-    Bus.node,
-    Form.node,
-    Generate.node,
-    LayerNodePlatform.httpClient,
-    Plugin.node,
-    Agent.node,
-    AISDK.node,
-    Catalog.node,
-    Command.node,
-    Integration.node,
-    KV.node,
-    Mcp.node,
-    Session.node,
-    PersistentPty.node,
-    LocationServiceMap.node,
-    Permission.node,
-    PluginHooks.node,
-    Reference.node,
-    Rpc.node,
-    Skill.node,
-    SkillDiscovery.node,
-    Tool.node,
-    Vcs.node,
-    Watcher.node,
-    WebSearch.node,
-    Worktree.node,
-  ]),
-  [
-    Location.node.replace(tempLocationLayer),
-    Npm.node.replace(npmLayer),
-    Config.node.replace(Config.testLayer()),
-    Mcp.node.replace(emptyMcpLayer),
-    Generate.node.replace(generateLayer),
-    Permission.node.replace(permissionLayer),
-  ],
-)
+const nodes = LayerNode.group([
+  AppProcess.node,
+  FileSystem.node,
+  FSUtil.node,
+  Location.node,
+  Npm.node,
+  Credential.node,
+  Bus.node,
+  Form.node,
+  Generate.node,
+  LayerNodePlatform.httpClient,
+  Plugin.node,
+  Agent.node,
+  AISDK.node,
+  Catalog.node,
+  Command.node,
+  Integration.node,
+  KV.node,
+  Mcp.node,
+  Session.node,
+  PersistentPty.node,
+  LocationServiceMap.node,
+  Permission.node,
+  PluginHooks.node,
+  Reference.node,
+  Rpc.node,
+  Skill.node,
+  SkillDiscovery.node,
+  Tool.node,
+  Vcs.node,
+  Watcher.node,
+  WebSearch.node,
+  Worktree.node,
+])
+
+const replacements = [
+  Location.node.replace(tempLocationLayer),
+  Npm.node.replace(npmLayer),
+  Config.node.replace(Config.testLayer()),
+  Mcp.node.replace(emptyMcpLayer),
+  Generate.node.replace(generateLayer),
+  Permission.node.replace(permissionLayer),
+] as const
+
+export const PluginTestLayer = AppNodeBuilder.build(nodes, replacements)
+export const OfflinePluginTestLayer = AppNodeBuilder.build(nodes, [...replacements, offlineModels])

@@ -107,6 +107,20 @@ yield *
   )
 ```
 
+## Reading Messages
+
+`ctx.message.list` exposes the public message pagination contract as an Effect.
+Use the shared cursor constructor when starting from a known message boundary:
+
+```ts
+import { MessagePage } from "@opencode/plugin/message"
+
+const page = yield* ctx.message.list({
+  sessionID,
+  cursor: MessagePage.Cursor.make({ id: messageID, order: "desc", direction: "next" }),
+})
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@opencode/plugin": "workspace:*",
+    "@opencode/schema": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
