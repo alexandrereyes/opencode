@@ -431,6 +431,10 @@ export type WebSearchResult = { url: string; title?: string; content?: string; t
 
 export type ConfigWorktree = { directory: string }
 
+export type ConfigPreferences = { shell?: string; websearch?: false | { provider: "random" | (string & {}) } }
+
+export type ConfigShellOption = { path: string; name: string; acceptable: boolean }
+
 export type ProviderRequest = {
   settings: ProviderSettings
   headers: { [x: string]: string }
@@ -2577,6 +2581,10 @@ export type PermissionNotFoundError = {
 }
 export const isPermissionNotFoundError = (value: unknown): value is PermissionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionNotFoundError"
+
+export type FileNotFoundError = { readonly _tag: "FileNotFoundError"; readonly path: string; readonly message: string }
+export const isFileNotFoundError = (value: unknown): value is FileNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "FileNotFoundError"
 
 export type RpcError = {
   readonly _tag: "RpcError"
@@ -6497,3 +6505,20 @@ export type ConfigGetInput = {
 }
 
 export type ConfigGetOutput = Array<ConfigEntry>
+
+export type ConfigPreferencesOutput = ConfigPreferences
+
+export type ConfigUpdatePreferencesInput = {
+  readonly shell?: {
+    readonly shell?: string | null
+    readonly websearch?: false | { readonly provider: "random" | (string & {}) } | null
+  }["shell"]
+  readonly websearch?: {
+    readonly shell?: string | null
+    readonly websearch?: false | { readonly provider: "random" | (string & {}) } | null
+  }["websearch"]
+}
+
+export type ConfigUpdatePreferencesOutput = ConfigPreferences
+
+export type ConfigShellsOutput = Array<ConfigShellOption>
