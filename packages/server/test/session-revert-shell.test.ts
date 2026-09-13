@@ -1,5 +1,7 @@
 import { watch } from "node:fs"
+import fs from "node:fs/promises"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { expect } from "bun:test"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { Bus } from "@opencode/core/bus"
@@ -30,6 +32,16 @@ it.live(
   () =>
     Effect.gen(function* () {
       const directory = yield* tmpdirScoped()
+      const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
+      const pluginPackage = path.join(directory.path, "plugin")
+      yield* Effect.promise(async () => {
+        await fs.mkdir(pluginPackage)
+        await fs.writeFile(
+          path.join(pluginPackage, "package.json"),
+          JSON.stringify({ type: "module", exports: "./index.ts" }),
+        )
+        await fs.writeFile(path.join(pluginPackage, "index.ts"), `export { default } from ${JSON.stringify(plugin)}\n`)
+      })
       const llm = yield* TestLLM.Test.pipe(Effect.provide(TestLLM.testLayer()))
       const ready = yield* Deferred.make<void>()
       const completionReady = yield* Deferred.make<void>()
@@ -104,6 +116,7 @@ it.live(
               project: false,
               content: JSON.stringify({
                 snapshots: false,
+                plugins: [pluginPackage],
                 permissions: [{ action: "*", resource: "*", effect: "allow" }],
               }),
             },

@@ -9,6 +9,7 @@ import type { SessionInbox } from "@opencode/schema/session-inbox"
 import type { SessionError } from "@opencode/schema/session-error"
 import type { SessionMessage } from "@opencode/schema/session-message"
 import type { TokenUsage } from "@opencode/schema/token-usage"
+import type { CausalRevert } from "../session-revert.js"
 import type { Effect, JsonSchema, Types } from "effect"
 import type { ModelHooks } from "./registration.js"
 
@@ -108,6 +109,7 @@ export interface SessionHooks {
   readonly "http.request": SessionHttpRequest
   readonly "http.response": SessionHttpResponse
   readonly retry: SessionRetry
+  readonly "revert.plan": CausalRevert.PlanEvent
 }
 
 export type SessionDomain = Pick<

@@ -1185,6 +1185,34 @@ effect: (ctx) =>
   }),
 ```
 
+Plan derived Session history rollback with `revert.plan`. The shared contract is exported from
+`@opencode/plugin/session-revert`.
+
+```ts
+import { CausalRevert } from "@opencode/plugin/session-revert"
+
+effect: (ctx) =>
+  Effect.gen(function* () {
+    yield* ctx.session.hook("revert.plan", (event) =>
+      Effect.sync(() => {
+        event.plan = selectRevertPlan(event.facts)
+      }),
+    )
+  })
+
+function selectRevertPlan(facts: CausalRevert.Facts): CausalRevert.Plan {
+  return { participants: [], origins: [], pendingOrigins: [], discardedSessionIDs: [] }
+}
+```
+
+Treat `facts` as an immutable snapshot and keep the planner deterministic and free of I/O. OpenCode activates the root
+Session's Location before collecting facts, invokes the hook outside Session locks, and may invoke it again if provenance
+changes. The hook has no `providerID` option.
+
+OpenCode validates the returned plan before invalidating jobs, interrupting Sessions, restoring snapshots, or persisting
+state. With no planner, a new revert is root-only. Already staged participant plans remain durable and continue through
+clear, commit, and automatic commit from a new prompt, synthetic input, or compaction after the plugin unloads.
+
 Modify model request settings and optionally scope the hook to one provider. The event carries the same `kind` as
 the HTTP hooks below.
 
@@ -1266,6 +1294,7 @@ interface SessionHooks {
   readonly "http.request": SessionHttpRequest
   readonly "http.response": SessionHttpResponse
   readonly retry: SessionRetry
+  readonly "revert.plan": CausalRevert.PlanEvent
 }
 
 type RetryDecision = { retry: false } | { retry: true; delay: number }

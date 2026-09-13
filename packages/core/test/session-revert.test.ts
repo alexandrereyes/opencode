@@ -1,5 +1,6 @@
 import { $ } from "bun"
 import { describe, expect } from "bun:test"
+import { eq } from "drizzle-orm"
 import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
@@ -11,6 +12,7 @@ import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { Job } from "@opencode/core/job"
 import { Model } from "@opencode/core/model"
 import { Plugin } from "@opencode/core/plugin"
+import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { Provider } from "@opencode/core/provider"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Session } from "@opencode/core/session"
@@ -19,7 +21,7 @@ import { SessionExecution } from "@opencode/core/session/execution"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionMessage } from "@opencode/core/session/message"
 import { SessionProjector } from "@opencode/core/session/projector"
-import { SessionRevert } from "@opencode/core/session/revert"
+import { SessionTable } from "@opencode/core/session/sql"
 import { Snapshot } from "@opencode/core/snapshot"
 import { Money } from "@opencode/schema/money"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -28,6 +30,7 @@ import { tempGlobalLayer } from "./fixture/global"
 import { offlineModels } from "./fixture/models"
 import { tmpdirScoped } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
+import { plan } from "../../plugin-app-custom/src/causal-undo/index.js"
 
 const it = testEffect(
   AppNodeBuilder.build(
@@ -40,6 +43,15 @@ const it = testEffect(
     ],
   ),
 )
+
+const installCausalPlanner = (session: Session.Info) =>
+  PluginHooks.Service.use((hooks) =>
+    hooks.register("session", "revert.plan", (event) =>
+      Effect.sync(() => {
+        event.plan = plan(event.facts)
+      }),
+    ),
+  ).pipe(Effect.provide(LocationServiceMap.Service.get(session.location)))
 
 describe("Session.revert files", () => {
   it.live(
@@ -137,6 +149,7 @@ describe("Session.revert files", () => {
         const database = yield* Database.Service
         const bus = yield* Bus.Service
         const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        yield* installCausalPlanner(parent)
         const child = yield* sessions.create({ parentID: parent.id })
         const boundary = yield* sessions.prompt({ sessionID: parent.id, text: "delegate edit", resume: false })
         yield* SessionInbox.promote(database.db, bus, parent.id, "steer")
@@ -221,6 +234,59 @@ describe("Session.revert files", () => {
 })
 
 describe("Session.revert causal history", () => {
+  it.live("uses the root planner while retaining a cross-Location history participant", () =>
+    Effect.gen(function* () {
+      const rootDirectory = yield* tmpdirScoped()
+      const childDirectory = yield* tmpdirScoped()
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(rootDirectory.path) } })
+      const child = yield* sessions.create({
+        parentID: parent.id,
+      })
+      yield* database.db
+        .update(SessionTable)
+        .set({ directory: AbsolutePath.make(childDirectory.path) })
+        .where(eq(SessionTable.id, child.id))
+        .run()
+      let rootCalls = 0
+      let plannedLocation: unknown
+      let plannedChildLocation: unknown
+      yield* PluginHooks.Service.use((hooks) =>
+        hooks.register("session", "revert.plan", (event) =>
+          Effect.sync(() => {
+            rootCalls++
+            plannedLocation = event.facts.sessions.find(
+              (session) => session.sessionID === event.facts.boundary.sessionID,
+            )?.location
+            plannedChildLocation = event.facts.sessions.find((session) => session.sessionID === child.id)?.location
+            event.plan = plan(event.facts)
+          }),
+        ),
+      ).pipe(Effect.provide(LocationServiceMap.Service.get(parent.location)))
+      const boundary = yield* sessions.prompt({ sessionID: parent.id, text: "boundary", resume: false })
+      yield* SessionInbox.promote(database.db, bus, parent.id, "steer")
+      const input = yield* admitSubagent(sessions, {
+        parentSessionID: parent.id,
+        childSessionID: child.id,
+        messageID: SessionMessage.ID.create(),
+        toolCallID: "cross-location",
+        text: "child input",
+      })
+      yield* SessionInbox.promote(database.db, bus, child.id, "steer")
+      rootCalls = 0
+
+      const staged = yield* sessions.revert.stage({ sessionID: parent.id, messageID: boundary.id, files: false })
+      expect(staged.children).toEqual([{ sessionID: child.id, messageID: input.id, pendingIDs: [] }])
+      expect(rootCalls).toBe(1)
+      expect(plannedLocation).toEqual(parent.location)
+      expect(plannedChildLocation).toMatchObject({ directory: childDirectory.path })
+      yield* sessions.revert.commit(parent.id)
+      expect(yield* sessions.messages({ sessionID: child.id })).toEqual([])
+    }),
+  )
+
   it.live("rejects a parent stage that would overwrite an independent child stage", () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()
@@ -228,6 +294,7 @@ describe("Session.revert causal history", () => {
       const database = yield* Database.Service
       const bus = yield* Bus.Service
       const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(tmp.path) } })
+      yield* installCausalPlanner(parent)
       const child = yield* sessions.create({ parentID: parent.id })
       const childBoundary = yield* sessions.prompt({ sessionID: child.id, text: "child boundary", resume: false })
       yield* SessionInbox.promote(database.db, bus, child.id, "steer")
@@ -276,6 +343,7 @@ describe("Session.revert causal history", () => {
       const database = yield* Database.Service
       const bus = yield* Bus.Service
       const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(tmp.path) } })
+      yield* installCausalPlanner(parent)
       const child = yield* sessions.create({ parentID: parent.id })
       yield* sessions.prompt({ sessionID: child.id, text: "preserved prefix", resume: false })
       yield* SessionInbox.promote(database.db, bus, child.id, "steer")
@@ -324,6 +392,7 @@ describe("Session.revert causal history", () => {
       const database = yield* Database.Service
       const bus = yield* Bus.Service
       const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(tmp.path) } })
+      yield* installCausalPlanner(parent)
       const child = yield* sessions.create({ parentID: parent.id })
       yield* sessions.prompt({ sessionID: child.id, text: "step A", resume: false })
       yield* SessionInbox.promote(database.db, bus, child.id, "steer")
@@ -399,6 +468,7 @@ describe("Session.revert causal history", () => {
       const database = yield* Database.Service
       const bus = yield* Bus.Service
       const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(tmp.path) } })
+      yield* installCausalPlanner(parent)
       const reused = yield* sessions.create({ parentID: parent.id })
       const earlier = yield* sessions.prompt({ sessionID: reused.id, text: "earlier independent work", resume: false })
       yield* SessionInbox.promote(database.db, bus, reused.id, "steer")
