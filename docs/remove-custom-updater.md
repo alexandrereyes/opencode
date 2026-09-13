@@ -13,9 +13,8 @@ process supervision, and native Session/Job shutdown and restart recovery.
 - Remove `/api/server/maintenance` acquire/cancel/commit and their Server
   wiring; regenerate the client through `packages/client`.
 - Remove `JobMaintenance` and updater-specific shutdown/handoff plumbing.
-- Retire the recurring `JobUpgrade` compatibility scan without abandoning
-  `job.background.upgrade/` records. Use a narrowly scoped one-time migration
-  or explicit versioned conversion, tested with legacy data and conflicts.
+- Retire the recurring `JobUpgrade` compatibility scan and abandon legacy
+  `job.background.upgrade/` records.
 - Preserve normal execution, permissions/forms, PTYs, shells, session claims,
   and startup recovery.
 
@@ -28,9 +27,8 @@ installed files, launchd state, global configuration, and live processes remain 
 ## Verification
 
 Test normal startup/shutdown and recovery, including pending background
-notifications; legacy bridge conversion must preserve payload/identity and
-never silently overwrite conflicts. Verify removed HTTP routes, plugin loading,
-and normal Session revert behavior. Operator tests must prove that pending
+notifications. Verify removed HTTP routes, plugin loading, and normal Session
+revert behavior. Operator tests must prove that pending
 releases or controller-pointer changes do not cause automatic activation and
 that manual build/dev paths work without maintenance APIs.
 
@@ -47,10 +45,6 @@ releases, or activate a release. The installed updater remains disabled.
 
 - Core and Server no longer expose an idle-maintenance barrier or maintenance HTTP routes.
 - Native Session/Job execution, durable background markers, shutdown claims, and startup recovery remain unchanged.
-- Migration `20260913000000_restore-background-upgrade` converts legacy
-  `job.background.upgrade/` markers exactly once. Missing destinations receive the original
-  payload and timestamps. Equivalent destinations are retained even when their timestamps differ.
-  A divergent destination fails and rolls back the migration, including its journal entry, so the
-  conflict remains visible and startup retries after explicit resolution.
+- Legacy `job.background.upgrade/` markers are intentionally unsupported.
 - MyEnv no longer contains an OpenCode deployment or update workflow. The custom server can be
   built and run directly from this repository through `packages/cli/script/custom-server.ts`.
