@@ -49,8 +49,6 @@ import type {
   SessionSwitchModelOutput,
   SessionRenameInput,
   SessionRenameOutput,
-  SessionArchiveInput,
-  SessionArchiveOutput,
   SessionMoveInput,
   SessionMoveOutput,
   SessionPromptInput,
@@ -504,11 +502,6 @@ const EndpointSessionRename = (raw: RawClient["server.session"]) => (input: Sess
     ),
   )
 
-const EndpointSessionArchive = (raw: RawClient["server.session"]) => (input: SessionArchiveInput) =>
-  preserveEffect<SessionArchiveOutput>()(
-    raw["session.archive"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const EndpointSessionMove = (raw: RawClient["server.session"]) => (input: SessionMoveInput) =>
   preserveEffect<SessionMoveOutput>()(
     raw["session.move"]({
@@ -756,7 +749,6 @@ const adaptGroupSession = (raw: RawClient["server.session"]) => ({
   switchAgent: EndpointSessionSwitchAgent(raw),
   switchModel: EndpointSessionSwitchModel(raw),
   rename: EndpointSessionRename(raw),
-  archive: EndpointSessionArchive(raw),
   move: EndpointSessionMove(raw),
   prompt: EndpointSessionPrompt(raw),
   command: EndpointSessionCommand(raw),

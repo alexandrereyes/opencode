@@ -7,6 +7,7 @@ import { registerSessionRead } from "./session-read/index.js"
 import { registerSnippets } from "./snippets/index.js"
 import { registerWorktrees } from "./worktrees/index.js"
 import { registerNavigation } from "./navigation/index.js"
+import { registerArchive } from "./archive/index.js"
 
 export default Plugin.define({
   id: "custom.app-mentions",
@@ -19,5 +20,6 @@ export default Plugin.define({
       yield* registerSnippets(ctx)
       yield* registerWorktrees(ctx)
       yield* registerNavigation(ctx)
+      yield* registerArchive(ctx)
     }),
 })

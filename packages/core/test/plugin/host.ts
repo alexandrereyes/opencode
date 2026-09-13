@@ -185,6 +185,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       wait: overrides.session?.wait ?? (() => Effect.die("unused session.wait")),
       context: overrides.session?.context ?? (() => Effect.die("unused session.context")),
       scan: overrides.session?.scan ?? (() => Effect.die("unused session.scan")),
+      archive: overrides.session?.archive ?? (() => Effect.die("unused session.archive")),
     },
   }
 }

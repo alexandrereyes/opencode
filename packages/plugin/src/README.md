@@ -142,7 +142,8 @@ const page = await ctx.message.list({
 ## Scanning Sessions
 
 Use `ctx.session.scan` for bounded session metadata without loading transcripts. Results are ordered by session ID, with
-a default limit of 200 and a maximum of 1000; `after` continues that stable ordering and `sessionID` selects one session.
+a default limit of 200 and a maximum of 1000; `after` continues that stable ordering, `sessionID` selects one session,
+and `parentID` selects direct children. Pass `parentID: null` to select roots.
 
 ```ts
 const page = await ctx.session.scan({
@@ -158,6 +159,14 @@ for (const item of page.data) {
 Omit `archived` to include all sessions, pass `false` for active history, or `true` for archived sessions. `messageAt` is
 the latest user or assistant message timestamp, while `completionAt` is the latest durable succeeded or failed execution
 timestamp. Promise-plugin session values use their browser-safe encoded form, including millisecond timestamps.
+
+`ctx.session.archive({ sessionID })` archives exactly one session. It interrupts active execution, waits for idle, closes
+the model transport, and records the native archive event without deleting history. It does not archive descendants;
+plugins implementing tree policy must scan and archive those descendants explicitly.
+
+```ts
+await ctx.session.archive({ sessionID })
+```
 
 ## Reading Live Pending Requests
 

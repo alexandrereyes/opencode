@@ -10,6 +10,7 @@ import { Project } from "@opencode/core/project"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Session } from "@opencode/core/session"
 import { SessionExecution } from "@opencode/core/session/execution"
+import { SessionRunCoordinator } from "@opencode/core/session/run-coordinator"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionStore } from "@opencode/core/session/store"
@@ -35,6 +36,30 @@ const transport = Layer.effect(
     })
   }),
 )
+const activeExecution = Layer.effect(
+  SessionExecution.Service,
+  SessionRunCoordinator.make<Session.ID, never, "user">({
+    started: () => Effect.void,
+    drain: () => Effect.never,
+    settled: () => Effect.void,
+  }).pipe(
+    Effect.map((coordinator) =>
+      SessionExecution.Service.of({
+        active: coordinator.active,
+        isActive: coordinator.isActive,
+        resume: coordinator.run,
+        wake: coordinator.wake,
+        interrupt: (sessionID, options) =>
+          coordinator.interrupt(
+            sessionID,
+            "user",
+            options?.awaitSettlement ? { awaitSettlement: true } : undefined,
+          ),
+        awaitIdle: coordinator.awaitIdle,
+      }),
+    ),
+  ),
+)
 const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([
@@ -55,9 +80,29 @@ const it = testEffect(
     ],
   ),
 )
+const activeIt = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([
+      Database.node,
+      Bus.node,
+      SessionProjector.node,
+      SessionStore.node,
+      SessionEnvironment.node,
+      Session.node,
+      Instance.node,
+      LocationServiceMap.node,
+    ]),
+    [
+      Project.node.replace(globalProjectNode),
+      SessionExecution.node.replace(activeExecution),
+      SessionModelTransport.node.replace(transport),
+      offlineModels,
+    ],
+  ),
+)
 
 describe("Session.archive", () => {
-  it.effect("archives every descendant, preserves history, and can be repeated before deletion", () =>
+  it.effect("archives one session, preserves related sessions, and can be repeated before deletion", () =>
     Effect.gen(function* () {
       const temporary = yield* tmpdirScoped()
       const session = yield* Session.Service
@@ -67,20 +112,25 @@ describe("Session.archive", () => {
       const child = yield* session.create({ parentID: parent.id })
       const grandchild = yield* session.create({ parentID: child.id })
       const unrelated = yield* session.create({ location: parent.location })
-      yield* session.rename({ sessionID: grandchild.id, title: "Retained history" })
+      yield* session.rename({ sessionID: parent.id, title: "Retained history" })
+      const updated = (yield* session.get(parent.id)).time.updated
       closed.length = 0
 
       yield* session.archive(parent.id)
 
-      expect(closed).toEqual([parent.id, child.id, grandchild.id])
-      const archived = yield* Effect.forEach([parent, child, grandchild], (item) => session.get(item.id))
-      expect(archived.every((item) => !!item.time.archived)).toBe(true)
-      expect(archived[2].title).toBe("Retained history")
+      expect(closed).toEqual([parent.id])
+      const archived = yield* session.get(parent.id)
+      expect(archived.time.archived).toBeDefined()
+      expect(archived.time.updated).toEqual(updated)
+      expect(archived.title).toBe("Retained history")
+      expect((yield* session.get(child.id)).time.archived).toBeUndefined()
+      expect((yield* session.get(grandchild.id)).time.archived).toBeUndefined()
       expect((yield* session.get(unrelated.id)).time.archived).toBeUndefined()
       expect((yield* session.list()).data).toHaveLength(4)
 
       yield* session.archive(parent.id)
-      expect((yield* session.get(parent.id)).time.archived).toEqual(archived[0].time.archived)
+      expect((yield* session.get(parent.id)).time.archived).toEqual(archived.time.archived)
+      expect(closed).toEqual([parent.id, parent.id])
       yield* session.remove(parent.id)
       expect((yield* session.list()).data.map((item) => item.id)).toEqual([unrelated.id])
     }),
@@ -93,6 +143,24 @@ describe("Session.archive", () => {
         _tag: "Failure",
         failure: { _tag: "Session.NotFoundError" },
       })
+    }),
+  )
+
+  activeIt.effect("interrupts an active execution and waits for settlement", () =>
+    Effect.gen(function* () {
+      const temporary = yield* tmpdirScoped()
+      const session = yield* Session.Service
+      const created = yield* session.create({
+        location: Location.Ref.make({ directory: AbsolutePath.make(temporary.path) }),
+      })
+      yield* session.resume(created.id).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      expect((yield* session.active).has(created.id)).toBe(true)
+
+      yield* session.archive(created.id)
+
+      expect((yield* session.active).has(created.id)).toBe(false)
+      expect((yield* session.get(created.id)).time.archived).toBeDefined()
     }),
   )
 })

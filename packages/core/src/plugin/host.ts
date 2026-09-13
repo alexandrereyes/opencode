@@ -600,6 +600,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
       wait: (input) => sessions.wait(input.sessionID),
       context: (input) => sessions.context(input.sessionID),
       scan: sessions.scan,
+      archive: (input) => sessions.archive(input.sessionID),
     },
   }
   return context

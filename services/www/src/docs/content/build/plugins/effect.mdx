@@ -155,6 +155,12 @@ Use `sessionID` to select one session. Omit `archived` to include all sessions, 
 `true` for archived sessions. `messageAt` reports user or assistant activity; `completionAt` reports only durable succeeded
 or failed executions.
 
+Use `parentID` to select direct children, or `parentID: null` to select root sessions.
+
+```ts
+const children = yield * ctx.session.scan({ parentID: sessionID })
+```
+
 ### Live pending requests
 
 `ctx.request.pending()` snapshots raw pending permissions and forms from already-live Locations without starting historical
@@ -749,6 +755,14 @@ effect: (ctx) =>
   }),
 ```
 
+Archive exactly one session with the native session capability. It stops active execution, waits for idle, closes the model
+transport, and records the archive event without deleting history. It does not archive descendants; scan and archive
+descendants explicitly when the plugin owns a tree policy.
+
+```ts
+yield * ctx.session.archive({ sessionID })
+```
+
 Schemas: [`Session.Info`](/api#schema-Session.Info), [`Model.Ref`](/api#schema-Model.Ref),
 [`Session.Inbox.User`](/api#schema-Session.Inbox.User),
 [`Session.Inbox.Synthetic`](/api#schema-Session.Inbox.Synthetic).
@@ -767,7 +781,10 @@ type SessionDomain = Pick<
   | "interrupt"
   | "rename"
   | "wait"
->
+> & {
+  readonly scan: (input?: SessionScan.Input) => Effect.Effect<SessionScan.Page>
+  readonly archive: (input: { readonly sessionID: Session.ID }) => Effect.Effect<void, unknown>
+}
 ```
 
 ### Skills

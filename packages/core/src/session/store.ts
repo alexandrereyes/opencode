@@ -179,6 +179,11 @@ const layer = Layer.effect(
               archived,
               input.after ? gt(SessionTable.id, input.after) : undefined,
               input.sessionID ? eq(SessionTable.id, input.sessionID) : undefined,
+              input.parentID === undefined
+                ? undefined
+                : input.parentID === null
+                  ? isNull(SessionTable.parent_id)
+                  : eq(SessionTable.parent_id, input.parentID),
             ),
           )
           .orderBy(asc(SessionTable.id))

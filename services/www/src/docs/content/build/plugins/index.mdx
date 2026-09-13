@@ -102,6 +102,12 @@ Use `sessionID` to select one session. Omit `archived` to include all sessions, 
 `true` for archived sessions. `messageAt` is the latest user or assistant message timestamp, and `completionAt` is the
 latest durable succeeded or failed execution timestamp.
 
+Use `parentID` to select direct children, or `parentID: null` to select root sessions.
+
+```ts
+const children = await ctx.session.scan({ parentID: sessionID })
+```
+
 ### Live pending requests
 
 Use `ctx.request.pending()` to read raw pending permissions and forms grouped by Location.
@@ -722,13 +728,18 @@ const command = await ctx.session.command({ sessionID, command: "review", argume
 const synthetic = await ctx.session.synthetic({ sessionID, text: "Deployment completed" })
 ```
 
-Rename, interrupt, or wait for a session.
+Rename, interrupt, wait for, or archive a session.
 
 ```ts
 await ctx.session.rename({ sessionID, title: "Review" })
 await ctx.session.interrupt({ sessionID, continue: false })
 await ctx.session.wait({ sessionID })
+await ctx.session.archive({ sessionID })
 ```
+
+`archive` affects exactly the target session: it stops active execution, waits for idle, closes its model transport, and
+records the native archive event without deleting history. It does not archive descendants; scan and archive descendants
+explicitly when your plugin owns a tree policy.
 
 #### Reference
 
@@ -749,6 +760,8 @@ interface SessionContext {
   interrupt(input: SessionInterruptInput, requestOptions?: RequestOptions): Promise<void>
   rename(input: SessionRenameInput, requestOptions?: RequestOptions): Promise<void>
   wait(input: SessionWaitInput, requestOptions?: RequestOptions): Promise<void>
+  scan(input?: SessionScanInput): Promise<SessionScanPage>
+  archive(input: { sessionID: string }): Promise<void>
 }
 ```
 

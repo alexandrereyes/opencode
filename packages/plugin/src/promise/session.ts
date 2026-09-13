@@ -128,4 +128,5 @@ export type SessionDomain = Pick<
 > & {
   readonly hook: ModelHooks<SessionHooks>
   readonly scan: (input?: typeof SessionScan.Input.Encoded) => Promise<typeof SessionScan.Page.Encoded>
+  readonly archive: (input: { readonly sessionID: Session.ID }) => Promise<void>
 }

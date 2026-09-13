@@ -112,19 +112,21 @@ const hosts = connections.map((connection, server) => {
         },
       },
       api: {
-        rpc: () => ({
-          list: async (input: { sessionID?: string }) => {
-            calls.navigation++
-            await navigation.wait
-            return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
-          },
-        }),
+        rpc: (definition: { id: string }) =>
+          definition.id === "custom.archive"
+            ? { archive: ({ sessionID }: { sessionID: string }) => mutate("archive", sessionID) }
+            : {
+                list: async (input: { sessionID?: string }) => {
+                  calls.navigation++
+                  await navigation.wait
+                  return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
+                },
+              },
         session: {
           active: async () => {
             calls.active++
             return Object.fromEntries([...active].map((id) => [id, { type: "running" }]))
           },
-          archive: ({ sessionID }: { sessionID: string }) => mutate("archive", sessionID),
         },
       },
     },
