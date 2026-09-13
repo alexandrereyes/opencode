@@ -8,7 +8,7 @@ import path from "node:path"
 
 const root = process.env.OPENCODE_CUSTOM_HOME
 const version = process.env.OPENCODE_CUSTOM_COMMIT
-if (!root || !version) throw new Error("Run this entrypoint through opencode-custom")
+if (!root || !version) throw new Error("Set OPENCODE_CUSTOM_HOME and OPENCODE_CUSTOM_COMMIT")
 const password = await Bun.file(`${root}/password`).text()
 const plugin = path.resolve("packages/plugin-app-custom/dist")
 const assets: AssetMap = Object.fromEntries(
@@ -50,7 +50,7 @@ NodeRuntime.runMain(
         },
         transform,
       )
-      // A supervisor crash closes this private pipe, so an orphan cannot keep serving an old release.
+      // stdin is the explicit lifecycle signal for scripts that supervise this process.
       const parentClosed = Effect.callback<void>((resume) => {
         const end = () => resume(Effect.void)
         process.stdin.once("end", end)

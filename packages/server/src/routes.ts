@@ -19,7 +19,6 @@ import { Instance } from "@opencode/core/instance/service"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { ShellSelect } from "@opencode/core/shell/select"
 import { Job } from "@opencode/core/job"
-import { SessionExecution } from "@opencode/core/session/execution"
 import { Mcp } from "@opencode/core/mcp/index"
 import { Global } from "@opencode/util/global"
 import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
@@ -55,7 +54,6 @@ const applicationServiceNodes = [
   EventLogger.node,
   httpClient,
   Job.node,
-  SessionExecution.node,
   Project.node,
   Session.node,
   Instance.node,
@@ -79,7 +77,6 @@ export function createRoutes(
   options: ServerOptions = {},
   serviceURLs: () => ReadonlyArray<string> = () => [],
   overrides: LayerNode.Replacements = [],
-  shutdown?: () => void,
 ) {
   return makeRoutes(
     options.password
@@ -88,8 +85,6 @@ export function createRoutes(
     options,
     serviceURLs,
     overrides,
-    undefined,
-    shutdown,
   )
 }
 
@@ -112,7 +107,6 @@ function makeRoutes<AuthError, AuthServices>(
   // Runtime-profile replacements (e.g. workerd) applied after the standard set, so later entries win.
   overrides: LayerNode.Replacements,
   instances?: InstanceNode,
-  shutdown?: () => void,
 ) {
   const standard: LayerNode.Replacements = [
     Database.node.replace(Database.configured(options.database)),
@@ -166,18 +160,13 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.succeedContext(
           Context.pick(
             Database.Service,
-            Job.Service,
-            Session.Service,
-            SessionExecution.Service,
-            Instance.Service,
-            PersistentPty.Service,
             PermissionSaved.Service,
             PluginUpdate.Service,
             Project.Service,
             WellKnown.Service,
           )(context),
         ),
-        ServerInfo.layer(serviceURLs, options.app, shutdown),
+        ServerInfo.layer(serviceURLs, options.app),
       )
       const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
         Layer.provide(handlers.pipe(Layer.provide(services), Layer.provide(Layer.succeed(CorsConfig, options)))),

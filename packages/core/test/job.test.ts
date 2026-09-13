@@ -9,7 +9,6 @@ import { SessionMessage } from "@opencode/core/session/message"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { SubagentCompletion } from "@opencode/core/session/subagent-completion"
 import { testEffect } from "./lib/effect"
-import { Maintenance } from "../src/maintenance"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Job.node, KV.node])))
 
@@ -25,7 +24,6 @@ describe("Job", () => {
       })
 
       expect(job).toMatchObject({ type: "test", status: "running", metadata: { durable: false } })
-      expect(Maintenance.process.lease()).toBeUndefined()
       expect(yield* jobs.wait({ id: job.id, timeout: 0 })).toMatchObject({
         timedOut: true,
         info: { status: "running" },

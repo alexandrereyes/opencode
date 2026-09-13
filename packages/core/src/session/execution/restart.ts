@@ -4,7 +4,6 @@ import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Bus } from "../../bus.js"
 import { Job } from "../../job.js"
-import { JobUpgrade } from "../../job-upgrade.js"
 import { Database } from "../../database/database.js"
 import { Session } from "../../session.js"
 import { SessionEvent } from "../event.js"
@@ -207,12 +206,6 @@ export const layer = (options?: Options) =>
 
       return Service.of({
         resumeSuspendedSessions: Effect.gen(function* () {
-          const bridge = yield* JobUpgrade.restore(database.db)
-          if (bridge.restored || bridge.conflicts.length)
-            yield* Effect.logInfo("background upgrade markers restored", {
-              restored: bridge.restored,
-              conflicts: bridge.conflicts.length,
-            })
           const active = yield* execution.active
           const pending = yield* jobs.pendingBackground
           const children = pending.flatMap((background) =>

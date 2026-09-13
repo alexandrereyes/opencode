@@ -4,7 +4,7 @@ import { fileURLToPath } from "url"
 import path from "path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { EffectDrizzleSqlite } from "@opencode/core/database/drizzle"
-import { Deferred, Effect, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient, Statement } from "effect/unstable/sql"
 import { sql } from "drizzle-orm"
@@ -20,6 +20,7 @@ import workspaceMigration from "@opencode/core/database/migration/20260808023530
 import executionClaimsMigration from "@opencode/core/database/migration/20260811161259_execution_claim_attempts"
 import sessionInboxMigration from "@opencode/core/database/migration/20260812181746_session_inbox"
 import sessionViewedStateMigration from "@opencode/core/database/migration/20260819222447_session_viewed_state"
+import backgroundUpgradeMigration from "@opencode/core/database/migration/20260913000000_restore-background-upgrade"
 import { Global } from "@opencode/util/global"
 
 const run = <A, E>(
@@ -62,6 +63,93 @@ const parkedClient = (arrived: Deferred.Deferred<void>, gate: Deferred.Deferred<
   ).pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })), Layer.provide(Reactivity.layer))
 
 describe("DatabaseMigration", () => {
+  test("records an empty legacy background migration once", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE kv (key text PRIMARY KEY, value text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
+        )
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        expect(yield* db.all(sql`SELECT key FROM kv`)).toEqual([])
+        expect(yield* db.all(sql`SELECT id FROM migration`)).toEqual([{ id: backgroundUpgradeMigration.id }])
+      }),
+    )
+  })
+
+  test("copies a missing background marker with its payload and timestamps", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE kv (key text PRIMARY KEY, value text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
+        )
+        yield* db.run(sql`INSERT INTO kv VALUES ('job.background.upgrade/missing', '{"notificationID":"missing"}', 1, 2)`)
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        expect(yield* db.all(sql`SELECT key, value, time_created, time_updated FROM kv`)).toEqual([
+          { key: "job.background/missing", value: '{"notificationID":"missing"}', time_created: 1, time_updated: 2 },
+        ])
+      }),
+    )
+  })
+
+  test("removes an equivalent legacy marker while preserving the existing live timestamps", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE kv (key text PRIMARY KEY, value text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
+        )
+        yield* db.run(sql`
+          INSERT INTO kv VALUES
+            ('job.background.upgrade/same', '{"notificationID":"same"}', 1, 2),
+            ('job.background/same', '{"notificationID":"same"}', 3, 4)
+        `)
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        expect(yield* db.all(sql`SELECT key, value, time_created, time_updated FROM kv`)).toEqual([
+          { key: "job.background/same", value: '{"notificationID":"same"}', time_created: 3, time_updated: 4 },
+        ])
+      }),
+    )
+  })
+
+  test("rolls back conflicts without journaling and succeeds after explicit resolution", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE kv (key text PRIMARY KEY, value text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
+        )
+        yield* db.run(sql`
+          INSERT INTO kv VALUES
+            ('job.background.upgrade/missing', '{"notificationID":"missing"}', 1, 2),
+            ('job.background.upgrade/conflict', '{"notificationID":"conflict"}', 5, 6),
+            ('job.background/conflict', '{"notificationID":"newer"}', 7, 8)
+        `)
+
+        const failed = yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration]).pipe(Effect.exit)
+        expect(failed).toMatchObject({ _tag: "Failure" })
+        if (failed._tag === "Failure")
+          expect(Cause.pretty(failed.cause)).toContain("Conflicting legacy background markers")
+        expect(yield* db.all(sql`SELECT id FROM migration`)).toEqual([])
+        expect(yield* db.all(sql`SELECT key FROM kv ORDER BY key`)).toEqual([
+          { key: "job.background.upgrade/conflict" },
+          { key: "job.background.upgrade/missing" },
+          { key: "job.background/conflict" },
+        ])
+        yield* db.run(sql`DELETE FROM kv WHERE key = 'job.background/conflict'`)
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        yield* DatabaseMigration.applyOnly(db, [backgroundUpgradeMigration])
+        expect(yield* db.all(sql`SELECT key, value, time_created, time_updated FROM kv ORDER BY key`)).toEqual([
+          { key: "job.background/conflict", value: '{"notificationID":"conflict"}', time_created: 5, time_updated: 6 },
+          { key: "job.background/missing", value: '{"notificationID":"missing"}', time_created: 1, time_updated: 2 },
+        ])
+        expect(yield* db.all(sql`SELECT id FROM migration`)).toEqual([{ id: backgroundUpgradeMigration.id }])
+      }),
+    )
+  })
+
   test("defaults missing workspace names while preserving legacy workspace data", async () => {
     await run(
       Effect.gen(function* () {

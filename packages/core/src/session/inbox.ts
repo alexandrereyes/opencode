@@ -1,5 +1,4 @@
 export * as SessionInbox from "./inbox.js"
-import { Maintenance } from "../maintenance.js"
 
 import { and, asc, eq, or } from "drizzle-orm"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
@@ -204,7 +203,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
     if (!matches(admitted, { ...request, type: request.item.type }))
       return yield* new LifecycleConflict({ id: request.id })
     return admitted
-  }, Maintenance.process.run)
+  })
 
   const admitCompactionLocked = Effect.fn("SessionInbox.admitCompactionLocked")(function* (input: {
     readonly id: SessionMessage.ID
