@@ -276,6 +276,20 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
               output: config.subscriptions ?? { status: "unavailable", accounts: [] },
             })
           }
+          if (ctx.params.rpcID === "custom.navigation" && ctx.params.method === "list") {
+            const payload = ctx.payload as { input?: { sessionID?: string } }
+            const sessionID = payload.input?.sessionID
+            return Effect.succeed({
+              output: {
+                data: config.sessions
+                  .filter((session) => !sessionID || session.id === sessionID)
+                  .map((session) => {
+                    const current = currentSession(session, config.directory)
+                    return { session: current, messageAt: current.time.updated }
+                  }),
+              },
+            })
+          }
           if (ctx.params.rpcID !== "custom.app-mentions" || ctx.params.method !== "list") {
             return Effect.succeed({ output: {} })
           }

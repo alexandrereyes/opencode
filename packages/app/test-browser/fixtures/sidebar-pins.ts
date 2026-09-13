@@ -5,9 +5,10 @@ import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { I18nProvider } from "@kobalte/core/i18n"
-import type { FormInfo, PermissionRequest, SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { FormInfo, PermissionRequest, SessionInfo } from "@opencode/client/promise"
 import type { Tab } from "@/shell/tabs/tabs"
 import type { Platform } from "@/runtime/platform/platform"
+import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
 
 // Real Solid DOM components, including both menu variants, the index and persistence.
 // Only host services and unrelated avatar/preview/drag presentation are substituted.
@@ -153,17 +154,19 @@ const hosts = connections.map((connection, i) => {
         },
       },
       api: {
+        rpc: () => ({
+          list: async (input: { sessionID?: string }) => ({
+            data: backend.filter(
+              (row) => !row.session.time.archived && (!input.sessionID || row.session.id === input.sessionID),
+            ),
+          }),
+        }),
         session: {
           active: async () => ({}),
           import: async (input: unknown) => {
             imported.push(input)
             return row("ses_imported", now).session
           },
-          navigation: async (input: { sessionID?: string }) => ({
-            data: backend.filter(
-              (row) => !row.session.time.archived && (!input.sessionID || row.session.id === input.sessionID),
-            ),
-          }),
         },
       },
     },

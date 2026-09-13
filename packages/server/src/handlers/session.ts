@@ -1,7 +1,5 @@
 import { Session } from "@opencode/core/session"
 import { SessionStats } from "@opencode/core/session/stats"
-import { SessionNavigation } from "@opencode/core/session/navigation"
-import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { SessionTitle } from "@opencode/core/session/title"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
@@ -29,7 +27,6 @@ const DefaultSessionsLimit = 50
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
-    const locations = yield* LocationServiceMap.Service
     const transfer = yield* SessionTransfer.Service
     const busySession = (error: Session.BusyError) =>
       new SessionBusyError({
@@ -47,9 +44,6 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       )
 
     return handlers
-      .handle("session.navigation", (ctx) =>
-        SessionNavigation.page(ctx.query).pipe(Effect.provideService(LocationServiceMap.Service, locations)),
-      )
       .handle(
         "session.list",
         Effect.fn(function* (ctx) {

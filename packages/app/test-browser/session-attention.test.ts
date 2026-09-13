@@ -2,11 +2,12 @@ import { expect, test } from "bun:test"
 import { createEffect, createRoot } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createData, type CreateDataInput } from "@opencode/client/solid"
-import { OpenCode, type OpenCodeEvent, type SessionNavigationInfo } from "@opencode/client/promise"
+import { OpenCode, type OpenCodeEvent } from "@opencode/client/promise"
 import { sessionAttention } from "@/shell/notifications/session-attention"
 import { createSidebarIndex } from "@/shell/titlebar/sidebar-index"
 import { attentionGroups, projectKey, rootSessions, sessionKey } from "@/shell/titlebar/sidebar-model"
 import { ServerConnection } from "@/runtime/server/registry"
+import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
 
 for (const kind of ["question", "permission"] as const) {
   test(`${kind}: partial SSE and reconnect cannot override authoritative navigation requests`, async () => {
@@ -32,8 +33,8 @@ for (const kind of ["question", "permission"] as const) {
         const path = new URL(request.url).pathname
         requests.push(path)
         if (path === "/api/session/active") return Response.json({ data: {} })
-        if (path !== "/api/session/navigation") throw new Error(`Unexpected request: ${path}`)
-        return Response.json({ data: [snapshot] })
+        if (path !== "/api/rpc/custom.navigation/list") throw new Error(`Unexpected request: ${path}`)
+        return Response.json({ output: { data: [snapshot] } })
       },
     })
     const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
@@ -160,11 +161,11 @@ for (const kind of ["question", "permission"] as const) {
       expect(attention().attention).toBeUndefined()
       expect(priority()).toEqual([])
       expect(requests).toEqual([
-        "/api/session/navigation",
+        "/api/rpc/custom.navigation/list",
         "/api/session/active",
-        "/api/session/navigation",
-        "/api/session/navigation",
-        "/api/session/navigation",
+        "/api/rpc/custom.navigation/list",
+        "/api/rpc/custom.navigation/list",
+        "/api/rpc/custom.navigation/list",
         "/api/session/active",
       ])
     } finally {

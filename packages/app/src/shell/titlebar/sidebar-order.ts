@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import type { SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionNavigationInfo } from "./sidebar-model"
 
 /** One epoch-ms clock across servers, independent of render and message clocks. */
 export function createRecentClock(now = Date.now) {

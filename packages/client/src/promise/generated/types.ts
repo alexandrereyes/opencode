@@ -2186,14 +2186,6 @@ export type FormFields = [FormField, ...Array<FormField>]
 
 export type FormFields2 = [FormField1, ...Array<FormField1>]
 
-export type SessionNavigationInfo = {
-  session: SessionInfo
-  messageAt?: number
-  unreadAt?: number
-  permissionAt?: number
-  questionAt?: number
-}
-
 export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
 
 export type SessionInboxInfo = SessionInboxUser | SessionInboxSynthetic | SessionInboxCompaction | SessionInboxMove
@@ -2252,8 +2244,6 @@ export type FormInfo1 = {
   created?: number
   fields: FormFields2
 }
-
-export type SessionNavigationPage = { data: Array<SessionNavigationInfo>; next?: string }
 
 export type SessionMessageInfo =
   | SessionMessageAgentSelected
@@ -2745,26 +2735,6 @@ export type PluginUpdateInput = {
 }
 
 export type PluginUpdateOutput = void
-
-export type SessionNavigationInput = {
-  readonly after?: {
-    readonly after?: string | undefined
-    readonly sessionID?: string | undefined
-    readonly limit?: number | undefined
-  }["after"]
-  readonly sessionID?: {
-    readonly after?: string | undefined
-    readonly sessionID?: string | undefined
-    readonly limit?: number | undefined
-  }["sessionID"]
-  readonly limit?: {
-    readonly after?: string | undefined
-    readonly sessionID?: string | undefined
-    readonly limit?: number | undefined
-  }["limit"]
-}
-
-export type SessionNavigationOutput = SessionNavigationPage
 
 export type SessionListInput = {
   readonly workspace?: {

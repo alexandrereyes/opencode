@@ -26,8 +26,6 @@ import type {
   PluginCheckOutput,
   PluginUpdateInput,
   PluginUpdateOutput,
-  SessionNavigationInput,
-  SessionNavigationOutput,
   SessionListInput,
   SessionListOutput,
   SessionStatsInput,
@@ -386,13 +384,6 @@ const adaptGroupPlugin = (raw: RawClient["server.plugin"]) => ({
   check: EndpointPluginCheck(raw),
   update: EndpointPluginUpdate(raw),
 })
-
-const EndpointSessionNavigation = (raw: RawClient["server.session"]) => (input?: SessionNavigationInput) =>
-  preserveEffect<SessionNavigationOutput>()(
-    raw["session.navigation"]({
-      query: { after: input?.["after"], sessionID: input?.["sessionID"], limit: input?.["limit"] },
-    }).pipe(Effect.mapError(mapClientError)),
-  )
 
 const EndpointSessionList = (raw: RawClient["server.session"]) => (input?: SessionListInput) =>
   preserveEffect<SessionListOutput>()(
@@ -753,7 +744,6 @@ const EndpointSessionView = (raw: RawClient["server.session"]) => (input: Sessio
   )
 
 const adaptGroupSession = (raw: RawClient["server.session"]) => ({
-  navigation: EndpointSessionNavigation(raw),
   list: EndpointSessionList(raw),
   stats: EndpointSessionStats(raw),
   create: EndpointSessionCreate(raw),

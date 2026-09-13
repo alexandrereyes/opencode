@@ -4,7 +4,6 @@ import { SessionInbox } from "@opencode/schema/session-inbox"
 import { PromptInput } from "@opencode/schema/prompt-input"
 import { Session } from "@opencode/schema/session"
 import { SessionStats } from "@opencode/schema/session-stats"
-import { SessionNavigation } from "@opencode/schema/session-navigation"
 import { InstructionEntry } from "@opencode/schema/instruction-entry"
 import { Project } from "@opencode/schema/project"
 import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath, statics } from "@opencode/schema/schema"
@@ -129,23 +128,6 @@ export const SessionsQuery = Schema.Struct({
 
 export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLocationMiddleware: Context.Key<I, S>) =>
   HttpApiGroup.make("server.session")
-    .add(
-      HttpApiEndpoint.get("session.navigation", "/api/session/navigation", {
-        query: Schema.Struct({
-          after: Session.ID.pipe(Schema.optional),
-          sessionID: Session.ID.pipe(Schema.optional),
-          limit: Schema.NumberFromString.pipe(Schema.decodeTo(PositiveInt), Schema.optional),
-        }),
-        success: SessionNavigation.Page,
-      }).annotateMerge(
-        OpenApi.annotations({
-          identifier: "v2.session.navigation",
-          summary: "List session navigation summaries",
-          description:
-            "Non-archived sessions, including children, with message and attention clocks. ID-ordered pagination; no transcript bodies. The page size is capped at 1000.",
-        }),
-      ),
-    )
     .add(
       HttpApiEndpoint.get("session.list", "/api/session", {
         query: SessionsQuery,
@@ -347,7 +329,8 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         OpenApi.annotations({
           identifier: "v2.session.archive",
           summary: "Archive session",
-          description: "Archive a session and all its descendants, interrupting active execution and retaining history.",
+          description:
+            "Archive a session and all its descendants, interrupting active execution and retaining history.",
         }),
       ),
     )

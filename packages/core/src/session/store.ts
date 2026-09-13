@@ -13,6 +13,10 @@ import { SessionMessage } from "./message.js"
 import { Session } from "@opencode/schema/session"
 import { SessionMessageTable, SessionTable } from "./sql.js"
 import { fromRow } from "./info.js"
+import { EventTable } from "../event/sql.js"
+import { Event } from "@opencode/schema/event"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionScan } from "@opencode/schema/session-scan"
 
 const ListInputBase = {
   workspaceID: Workspace.ID.pipe(Schema.optional),
@@ -50,9 +54,14 @@ export type MessagesInput = {
   }
 }
 
+export type ScanInput = SessionScan.Input
+export type ScanInfo = SessionScan.Info
+export type ScanPage = SessionScan.Page
+
 export interface Interface {
   readonly get: (sessionID: Session.ID) => Effect.Effect<Session.Info | undefined>
   readonly list: (input?: ListInput) => Effect.Effect<Session.Info[]>
+  readonly scan: (input?: ScanInput) => Effect.Effect<ScanPage>
   readonly messages: (input: MessagesInput) => Effect.Effect<SessionMessage.Info[], MessageDecodeError>
   readonly context: (sessionID: Session.ID) => Effect.Effect<SessionMessage.Info[], MessageDecodeError>
   readonly message: (
@@ -136,6 +145,52 @@ const layer = Layer.effect(
           Effect.orDie,
         )
         return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+      }),
+      scan: Effect.fn("SessionStore.scan")(function* (input = {}) {
+        const limit = Math.max(1, Math.min(input.limit ?? 200, 1000))
+        const archived =
+          input.archived === undefined
+            ? undefined
+            : input.archived
+              ? isNotNull(SessionTable.time_archived)
+              : isNull(SessionTable.time_archived)
+        const rows = yield* db
+          .select({
+            session: SessionTable,
+            // Keep metadata scans independent of transcript decoding.
+            messageAt: sql<number | null>`(
+              select max(${SessionMessageTable.time_created}) from ${SessionMessageTable}
+              where ${SessionMessageTable.session_id} = ${SessionTable.id}
+              and ${SessionMessageTable.type} in ('user', 'assistant')
+            )`,
+            // Projected outcomes are intentionally separate facts; consumers decide fallback policy.
+            completionAt: sql<number | null>`(
+              select max(${EventTable.created}) from ${EventTable}
+              where ${EventTable.aggregate_id} = ${SessionTable.id}
+              and ${EventTable.type} in (
+                ${Event.versionedType(SessionEvent.Execution.Succeeded.type, 1)},
+                ${Event.versionedType(SessionEvent.Execution.Failed.type, 1)}
+              )
+            )`,
+          })
+          .from(SessionTable)
+          .where(
+            and(
+              archived,
+              input.after ? gt(SessionTable.id, input.after) : undefined,
+              input.sessionID ? eq(SessionTable.id, input.sessionID) : undefined,
+            ),
+          )
+          .orderBy(asc(SessionTable.id))
+          .limit(limit + 1)
+          .all()
+          .pipe(Effect.orDie)
+        const data = rows.slice(0, limit).map((row) => ({
+          session: fromRow(row.session),
+          messageAt: row.messageAt ?? undefined,
+          completionAt: row.completionAt ?? undefined,
+        }))
+        return { data, next: rows.length > limit ? data.at(-1)?.session.id : undefined }
       }),
       messages: Effect.fn("SessionStore.messages")(function* (input) {
         const direction = input.cursor?.direction ?? "next"

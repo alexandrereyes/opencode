@@ -120,6 +120,7 @@ interface Context {
   readonly mcp: MCPDomain
   readonly plugin: PluginApi<unknown>
   readonly reference: ReferenceDomain
+  readonly request: RequestDomain
   readonly rpc: RpcDomain
   readonly session: SessionDomain
   readonly shell: ShellDomain
@@ -134,6 +135,38 @@ interface Plugin<R = Scope.Scope> {
   readonly id: string
   readonly effect: (context: Context) => Effect.Effect<void, never, R>
 }
+```
+
+### Session metadata
+
+`ctx.session.scan()` returns ID-ordered session metadata without decoding transcripts. The default limit is 200 and the
+maximum is 1000.
+
+```ts
+effect: (ctx) =>
+  Effect.gen(function* () {
+    const sessions = ctx.session
+    const page = yield* sessions.scan({ limit: 500, archived: false })
+    yield* Effect.logInfo("session metadata", { count: page.data.length })
+  }),
+```
+
+Use `sessionID` to select one session. Omit `archived` to include all sessions, pass `false` for unarchived sessions, or
+`true` for archived sessions. `messageAt` reports user or assistant activity; `completionAt` reports only durable succeeded
+or failed executions.
+
+### Live pending requests
+
+`ctx.request.pending()` snapshots raw pending permissions and forms from already-live Locations without starting historical
+Locations. The snapshot is best-effort rather than atomic across Locations.
+
+```ts
+effect: (ctx) =>
+  Effect.gen(function* () {
+    const requests = ctx.request
+    const snapshots = yield* requests.pending()
+    yield* Effect.logInfo("pending requests", { locations: snapshots.length })
+  }),
 ```
 
 ### Options

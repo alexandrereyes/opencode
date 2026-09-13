@@ -114,6 +114,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<{
     readonly data: SessionSchema.Info[]
   }>
+  readonly scan: (input?: SessionStore.ScanInput) => Effect.Effect<SessionStore.ScanPage>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly fork: (
     input: ForkInput,
@@ -360,6 +361,7 @@ const layer = Layer.effect(
       list: Effect.fn("Session.list")(function* (input) {
         return { data: yield* store.list(input) }
       }),
+      scan: store.scan,
       messages: Effect.fn("Session.messages")(function* (input) {
         yield* result.get(input.sessionID)
         return yield* store.messages(input)

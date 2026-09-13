@@ -3,8 +3,8 @@ import type { Effect, Stream } from "effect"
 import type { Location } from "@opencode/schema/location"
 import type { Agent } from "@opencode/schema/agent"
 import type { Plugin } from "@opencode/schema/plugin"
-import type { Session } from "@opencode/schema/session"
 import type { Workspace } from "@opencode/schema/workspace"
+import type { Session } from "@opencode/schema/session"
 import type { AbsolutePath } from "@opencode/schema/schema"
 import type { Project } from "@opencode/schema/project"
 import type { RelativePath } from "@opencode/schema/schema"
@@ -144,25 +144,6 @@ export interface PluginApi<E = never> {
   readonly check: PluginCheckOperation<E>
   readonly update: PluginUpdateOperation<E>
 }
-
-export type SessionNavigationInput = {
-  readonly after?: Session.ID | undefined
-  readonly sessionID?: Session.ID | undefined
-  readonly limit?: number | undefined
-}
-export type SessionNavigationOutput = {
-  readonly data: ReadonlyArray<{
-    readonly session: Session.Info
-    readonly messageAt?: number | undefined
-    readonly unreadAt?: number | undefined
-    readonly permissionAt?: number | undefined
-    readonly questionAt?: number | undefined
-  }>
-  readonly next?: Session.ID | undefined
-}
-export type SessionNavigationOperation<E = never> = (
-  input?: SessionNavigationInput,
-) => Effect.Effect<SessionNavigationOutput, E>
 
 export type SessionListInput = {
   readonly workspace?: Workspace.ID | undefined
@@ -1198,7 +1179,6 @@ export type SessionViewOutput = void
 export type SessionViewOperation<E = never> = (input: SessionViewInput) => Effect.Effect<SessionViewOutput, E>
 
 export interface SessionApi<E = never> {
-  readonly navigation: SessionNavigationOperation<E>
   readonly list: SessionListOperation<E>
   readonly stats: SessionStatsOperation<E>
   readonly create: SessionCreateOperation<E>

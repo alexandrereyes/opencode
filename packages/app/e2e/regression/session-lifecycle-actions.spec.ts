@@ -21,9 +21,13 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
         pageMessages,
       })
       await installStressSessionTabs(page)
-      await page.route("**/api/session/navigation?*", (route) =>
+      await page.route("**/api/rpc/custom.navigation/list*", (route) =>
         route.fulfill({
-          json: { data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })) },
+          json: {
+            output: {
+              data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
+            },
+          },
         }),
       )
       await page.addInitScript((layout) => {

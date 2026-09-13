@@ -1,8 +1,8 @@
 import { batch, createEffect, onCleanup } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
-import type { SessionNavigationInfo } from "@opencode/client/promise"
+import { Navigation } from "@opencode/plugin-app-custom/navigation/rpc"
 import type { ServerCtx } from "@/runtime/server/runtime"
-import { loadNavigation } from "./sidebar-model"
+import { loadNavigation, navigationPage, type SessionNavigationInfo } from "./sidebar-model"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { createRecentClock, createRecentOrder } from "./sidebar-order"
 
@@ -10,7 +10,9 @@ export function createSidebarIndex(
   ctx: {
     data: { session: Pick<ServerCtx["data"]["session"], "remember"> }
     sdk: {
-      api: { session: Pick<ServerCtx["sdk"]["api"]["session"], "navigation" | "active"> }
+      api: Pick<ServerCtx["sdk"]["api"], "rpc"> & {
+        session: Pick<ServerCtx["sdk"]["api"]["session"], "active">
+      }
       connection: Pick<ServerCtx["sdk"]["connection"], "status">
       event: Pick<ServerCtx["sdk"]["event"], "listen">
     }
@@ -44,7 +46,9 @@ export function createSidebarIndex(
       void Promise.all(
         ids.map(async (sessionID) => {
           const revision = revisions.get(sessionID)
-          const page = await ctx.sdk.api.session.navigation({ sessionID }, { signal: abort.signal })
+          const page = navigationPage(
+            await ctx.sdk.api.rpc(Navigation.Definition).list({ sessionID }, { signal: abort.signal }),
+          )
           // An intervening event invalidates this read even before its replacement starts.
           if (abort.signal.aborted || revision !== revisions.get(sessionID)) return
           const row = page.data[0]
@@ -124,7 +128,9 @@ export function createSidebarIndex(
     })
     setState({ loading: true, error: false })
     void Promise.all([
-      loadNavigation(ctx.sdk.api.session.navigation, abort.signal),
+      loadNavigation((input, options) => {
+        return ctx.sdk.api.rpc(Navigation.Definition).list(input, options).then(navigationPage)
+      }, abort.signal),
       ctx.sdk.api.session.active({ signal: abort.signal }).then((active) => {
         // Establish phases before the slower navigation pages: a terminal arriving
         // between these responses must still observe the preceding active phase.

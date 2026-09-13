@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test"
-import type { SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionInfo } from "@opencode/client/promise"
 import { base64Encode } from "@opencode/util/encode"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
+import type { SessionNavigationInfo } from "../../src/shell/titlebar/sidebar-model"
 
 const directory = "/workspace/dashboard"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
@@ -64,10 +65,21 @@ async function setup(page: Page) {
       ],
     }),
   })
-  // The fixture's general mock predates the lightweight navigation endpoint.
-  await page.route("**/api/session/navigation?*", async (route) => {
-    const id = new URL(route.request().url()).searchParams.get("sessionID")
-    await route.fulfill({ json: { data: id ? rows.filter((row) => row.session.id === id) : rows } })
+  await page.route("**/api/rpc/custom.navigation/list*", async (route) => {
+    const body: unknown = route.request().postDataJSON()
+    const id =
+      typeof body === "object" &&
+      body !== null &&
+      "input" in body &&
+      typeof body.input === "object" &&
+      body.input !== null &&
+      "sessionID" in body.input &&
+      typeof body.input.sessionID === "string"
+        ? body.input.sessionID
+        : undefined
+    await route.fulfill({
+      json: { output: { data: id ? rows.filter((row) => row.session.id === id) : rows } },
+    })
   })
   await page.addInitScript(() => {
     localStorage.setItem("settings.v3", JSON.stringify({ appearance: { tabLayout: "vertical" } }))

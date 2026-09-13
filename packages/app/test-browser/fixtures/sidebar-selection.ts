@@ -4,9 +4,10 @@ import { createComponent } from "solid-js"
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
-import type { SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionInfo } from "@opencode/client/promise"
 import type { SessionLifecycleResult } from "@/session/lifecycle-actions"
 import type { Tab } from "@/shell/tabs/tabs"
+import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
 
 // Compile production JSX; use the real sidebar, rows, menus, dialogs, i18n and lifecycle.
 const require = createRequire(import.meta.url)
@@ -111,17 +112,19 @@ const hosts = connections.map((connection, server) => {
         },
       },
       api: {
+        rpc: () => ({
+          list: async (input: { sessionID?: string }) => {
+            calls.navigation++
+            await navigation.wait
+            return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
+          },
+        }),
         session: {
           active: async () => {
             calls.active++
             return Object.fromEntries([...active].map((id) => [id, { type: "running" }]))
           },
           archive: ({ sessionID }: { sessionID: string }) => mutate("archive", sessionID),
-          navigation: async (input: { sessionID?: string }) => {
-            calls.navigation++
-            await navigation.wait
-            return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
-          },
         },
       },
     },

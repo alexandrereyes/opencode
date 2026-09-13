@@ -1,9 +1,23 @@
-import type { SessionNavigationInfo, SessionNavigationPage } from "@opencode/client/promise"
+import type { Navigation } from "@opencode/plugin-app-custom/navigation/rpc"
+import type { SessionInfo } from "@opencode/client/promise"
+import type { Types } from "effect"
 import type { ServerConnection } from "@/runtime/server/registry"
 import { pathKey } from "@/workspaces/path-key"
 import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
 import { latestAttention } from "@/shell/notifications/session-attention"
+
+export type SessionNavigationInfo = Omit<Types.DeepMutable<Navigation.Info>, "session"> & { session: SessionInfo }
+export interface SessionNavigationPage {
+  data: SessionNavigationInfo[]
+  next?: string
+}
+
+/** The RPC payload is JSON-compatible; client state owns mutability after this boundary. */
+export function navigationPage(page: Navigation.Page): SessionNavigationPage {
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+  return page as SessionNavigationPage
+}
 
 export type SidebarSession = SessionNavigationInfo & {
   server: ServerConnection.Key
