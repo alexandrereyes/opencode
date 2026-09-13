@@ -14,12 +14,6 @@ import { ReviewPanel } from "./panel"
 import { SessionReviewTab } from "./review-tab"
 import type { ChangeMode, SessionReviewModel } from "./model"
 import type { createSessionBrowser } from "../browser/model"
-import { SessionContextUsage } from "../timeline/session-context-usage"
-
-const StatusDrawer = lazy(async () => {
-  const { StatusDrawer } = await import("@/shell/status/status-drawer")
-  return { default: StatusDrawer }
-})
 
 const MobilePanelDrawer = lazy(async () => {
   const { MobilePanelDrawer } = await import("@/shell/mobile-panel-drawer")
@@ -35,11 +29,9 @@ export function SessionMobileViewTabs(props: {
   const language = useLanguage()
   const [store, setStore] = createStore({
     menu: false,
-    status: false,
-    statusLoaded: false,
     details: false,
     detailsLoaded: false,
-    pending: undefined as "status" | "details" | undefined,
+    pending: false,
   })
   createEffect(() => props.onDetailsOpenChange?.(store.details))
   onCleanup(() => props.onDetailsOpenChange?.(false))
@@ -51,7 +43,7 @@ export function SessionMobileViewTabs(props: {
     >
       <Tabs value={props.current} variant="line" class="!h-auto min-w-0 flex-1" data-slot="session-mobile-view-tabs">
         <Tabs.List aria-label={language.t("session.view.select")} class="!h-9 !gap-0 !px-0 before:!hidden">
-          <For each={["session", "changes", "files", "usage"] as const}>
+          <For each={["session", "changes", "files", "terminal"] as const}>
             {(view) => (
               <Tabs.Trigger
                 value={view}
@@ -59,16 +51,13 @@ export function SessionMobileViewTabs(props: {
                 classes={{ button: "w-full justify-center" }}
                 onClick={() => props.onSelect(view)}
               >
-                <Show when={view === "usage"}>
-                  <SessionContextUsage variant="indicator" placement="bottom" />
-                </Show>
                 {view === "session"
                   ? language.t("session.tab.session")
                   : view === "changes"
                     ? language.plural("session.review.change", 0)
                     : view === "files"
                       ? language.t("session.tab.files")
-                      : language.t("session.tab.usage")}
+                      : language.t("terminal.title")}
               </Tabs.Trigger>
             )}
           </For>
@@ -91,7 +80,7 @@ export function SessionMobileViewTabs(props: {
           variant="ghost-muted"
           size="normal"
           class="mx-1.5 shrink-0"
-          state={props.current === "terminal" || store.menu ? "pressed" : undefined}
+          state={props.current === "usage" || store.menu ? "pressed" : undefined}
           aria-label={language.t("common.moreOptions")}
         />
         <Menu.Portal>
@@ -99,32 +88,18 @@ export function SessionMobileViewTabs(props: {
             onCloseAutoFocus={(event) => {
               if (!store.pending) return
               event.preventDefault()
-              if (store.pending === "status") setStore({ status: true, statusLoaded: true })
-              if (store.pending === "details") setStore({ details: true, detailsLoaded: true })
-              setStore("pending", undefined)
+              setStore({ details: true, detailsLoaded: true, pending: false })
             }}
           >
-            <Menu.Item onSelect={() => props.onSelect("terminal")}>{language.t("terminal.title")}</Menu.Item>
+            <Menu.Item onSelect={() => props.onSelect("usage")}>{language.t("session.tab.usage")}</Menu.Item>
             <Show when={props.details}>
-              <Menu.Item onSelect={() => setStore({ pending: "details", menu: false })}>
+              <Menu.Item onSelect={() => setStore({ pending: true, menu: false })}>
                 {language.t("session.summary.title")}
               </Menu.Item>
             </Show>
-            <Menu.Item onSelect={() => setStore({ pending: "status", menu: false })}>
-              {language.t("status.popover.trigger")}
-            </Menu.Item>
           </Menu.Content>
         </Menu.Portal>
       </Menu>
-      <Show when={store.statusLoaded}>
-        <Suspense>
-          <StatusDrawer
-            open={store.status}
-            onOpenChange={(open) => setStore("status", open)}
-            returnFocus={() => trigger}
-          />
-        </Suspense>
-      </Show>
       <Show when={store.detailsLoaded}>
         <Suspense>
           <MobilePanelDrawer

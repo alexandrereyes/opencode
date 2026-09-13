@@ -16,7 +16,7 @@ Build and run the custom server directly from a checkout:
 
 ```sh
 bun install --frozen-lockfile
-bun --cwd packages/app run build
+bun --cwd packages/app-custom run build
 bun --cwd packages/plugin-app-custom run build
 
 export OPENCODE_CUSTOM_HOME=/path/to/isolated/runtime

@@ -8,11 +8,11 @@ import {
   type PromptHistoryStoredEntry,
 } from "./entry"
 import { clonePrompt } from "../prompt-parts"
-import { PromptHistoryState, type ChatQuote } from "../schema"
+import { PromptHistoryState } from "../schema"
 
 export type ComposerHistoryStore = {
   entries: (mode: "normal" | "shell") => PromptHistoryStoredEntry[]
-  add: (prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes?: ChatQuote[]) => void
+  add: (prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[]) => void
 }
 
 type PromptHistoryState = typeof PromptHistoryState.Type
@@ -25,10 +25,10 @@ function createComposerHistoryStore(
 ): ComposerHistoryStore {
   return {
     entries: (mode) => (mode === "shell" ? shell.entries : normal.entries),
-    add(prompt, mode, comments, quotes) {
+    add(prompt, mode, comments) {
       const current = mode === "shell" ? shell : normal
       const setCurrent = mode === "shell" ? setShell : setNormal
-      const next = prependHistoryEntry(current.entries, prompt, comments, undefined, quotes)
+      const next = prependHistoryEntry(current.entries, prompt, comments)
       if (next === current.entries) return
       setCurrent("entries", next)
     },
@@ -49,13 +49,12 @@ export function createComposerHistory() {
   const history = createComposerHistoryStore(normal, setNormal, shell, setShell)
   return {
     ...history,
-    add(prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes: ChatQuote[] = []) {
+    add(prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[]) {
       const ready = mode === "shell" ? shellInit : normalInit
-      if (!(ready instanceof Promise)) return history.add(prompt, mode, comments, quotes)
+      if (!(ready instanceof Promise)) return history.add(prompt, mode, comments)
       const saved = clonePrompt(prompt)
       const metadata = clonePromptHistoryComments(comments)
-      const savedQuotes = quotes.map((quote) => ({ ...quote }))
-      void ready.then(() => history.add(saved, mode, metadata, savedQuotes))
+      void ready.then(() => history.add(saved, mode, metadata))
     },
   }
 }

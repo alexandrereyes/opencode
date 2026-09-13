@@ -5,8 +5,6 @@ export type ComposerInteractionState = {
   popover:
     | { type: "closed" }
     | { type: "context"; query: string; activeID?: string }
-    | { type: "skill"; query: string; activeID?: string }
-    | { type: "snippet"; query: string; activeID?: string }
     | { type: "command-inline"; query: string; activeID?: string }
     | { type: "command-menu"; query: string; activeID?: string }
   drag: "idle" | "active"
@@ -36,9 +34,9 @@ export type ComposerInteractionEvent =
 
 export type ComposerInteractionCommand =
   | { type: "draft.setText"; value: string }
-  | { type: "draft.addText"; value: string; at?: number }
+  | { type: "draft.addText"; value: string }
   | { type: "mention.add"; item: ComposerSuggestion; range?: { start: number; end: number } }
-  | { type: "popover.filter"; popover: "command" | "context" | "skill" | "snippet"; query: string }
+  | { type: "popover.filter"; popover: "command" | "context"; query: string }
   | { type: "suggestion.select"; id: string }
   | { type: "focus.editor" }
   | { type: "focus.command-search" }
@@ -97,27 +95,11 @@ function inputChanged(
     ])
   }
   const context = value.slice(0, cursor ?? value.length).match(/(?:^|\s)@([^\s@]*)$/)
-  const skill = state.mode === "normal" && value.slice(0, cursor ?? value.length).match(/(?:^|\s)\$([^\s$]*)$/)
-  const snippet = state.mode === "normal" && value.slice(0, cursor ?? value.length).match(/(?:^|\s)#([^\s#]*)$/)
-  if (snippet) {
-    const query = snippet[1] ?? ""
-    return changed({ ...state, popover: { type: "snippet", query }, focus: "editor" }, [
-      ...setText,
-      { type: "popover.filter", popover: "snippet", query },
-    ])
-  }
   if (context) {
     const query = context[1] ?? ""
     return changed({ ...state, popover: { type: "context", query }, focus: "editor" }, [
       ...setText,
       { type: "popover.filter", popover: "context", query },
-    ])
-  }
-  if (skill) {
-    const query = skill[1] ?? ""
-    return changed({ ...state, popover: { type: "skill", query }, focus: "editor" }, [
-      ...setText,
-      { type: "popover.filter", popover: "skill", query },
     ])
   }
 
@@ -160,12 +142,7 @@ function openContext(state: ComposerInteractionState): ComposerEditorTransition 
 
 function queryChanged(state: ComposerInteractionState, query: string): ComposerEditorTransition {
   if (state.popover.type === "closed") return unchanged(state)
-  const popover =
-    state.popover.type === "context" || state.popover.type === "skill"
-      ? state.popover.type
-      : state.popover.type === "snippet"
-        ? "snippet"
-        : "command"
+  const popover = state.popover.type === "context" ? "context" : "command"
   return changed({ ...state, popover: { ...state.popover, query, activeID: undefined } }, [
     { type: "popover.filter", popover, query },
   ])
@@ -191,11 +168,15 @@ function suggestionSelected(
   const current = promptText(persisted)
   const commands: ComposerInteractionCommand[] = []
   if (item.kind === "command") {
-    commands.push(
-      state.popover.type === "command-menu"
-        ? { type: "draft.addText", value: `${item.label} `, at: 0 }
-        : { type: "draft.setText", value: replaceTrigger(current, "/", `${item.label} `) },
-    )
+    commands.push({
+      type: "draft.setText",
+      value:
+        state.popover.type === "command-menu"
+          ? current.trim()
+            ? `${item.label} ${current.trim()}`
+            : `${item.label} `
+          : replaceTrigger(current, "/", `${item.label} `),
+    })
   } else {
     commands.push({
       type: "mention.add",
@@ -248,7 +229,7 @@ function keyDown(
 }
 
 function promptText(persisted: ComposerPersistedState) {
-  return persisted.prompt.map((part) => ("content" in part ? part.content : "")).join("")
+  return persisted.prompt.map((part) => (part.type === "text" ? part.content : "")).join("")
 }
 
 function populated(persisted: ComposerPersistedState) {

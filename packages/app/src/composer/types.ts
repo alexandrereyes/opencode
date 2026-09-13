@@ -1,21 +1,8 @@
-import type {
-  AgentPart,
-  AppPart,
-  ComposerStore,
-  FileAttachmentPart,
-  ImageAttachmentPart,
-  Prompt,
-  SessionPart,
-  SkillPart,
-  SnippetPart,
-} from "./state"
+import type { AgentPart, ComposerStore, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillPart } from "./state"
 
 export type ComposerFilePart = FileAttachmentPart
 export type ComposerAgentPart = AgentPart
 export type ComposerSkillPart = SkillPart
-export type ComposerSnippetPart = SnippetPart
-export type ComposerAppPart = AppPart
-export type ComposerSessionPart = SessionPart
 export type ComposerAttachment = ImageAttachmentPart
 export type ComposerPrompt = Prompt
 export type ComposerComment = ComposerStore["context"]["items"][number]
@@ -41,22 +28,13 @@ export type ComposerOption = {
 
 export type ComposerSuggestion = {
   id: string
-  kind: "agent" | "command" | "file" | "reference" | "resource" | "skill" | "app" | "session" | "snippet"
+  kind: "agent" | "command" | "file" | "reference" | "resource" | "skill"
   label: string
   title?: string
   trigger?: string
   description?: string
-  search?: string
   path?: string
   keybind?: string[]
   recent?: boolean
-  detail?: string
-  kindLabel?: string
-  mention?:
-    | ComposerFilePart
-    | ComposerAgentPart
-    | ComposerSkillPart
-    | ComposerAppPart
-    | ComposerSessionPart
-    | ComposerSnippetPart
+  mention?: ComposerFilePart | ComposerAgentPart | ComposerSkillPart
 }

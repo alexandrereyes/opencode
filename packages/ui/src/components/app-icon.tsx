@@ -18,7 +18,6 @@ import xcode from "../assets/icons/app/xcode.png"
 import zed from "../assets/icons/app/zed.svg"
 import zedDark from "../assets/icons/app/zed-dark.svg"
 import sublimetext from "../assets/icons/app/sublimetext.svg"
-import rider from "../assets/icons/app/rider.svg"
 
 const icons = {
   vscode,
@@ -36,7 +35,6 @@ const icons = {
   textmate,
   powershell,
   "sublime-text": sublimetext,
-  rider,
 } satisfies Record<IconName, string>
 
 const themed: Partial<Record<IconName, { light: string; dark: string }>> = {

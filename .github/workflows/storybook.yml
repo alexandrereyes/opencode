@@ -8,8 +8,10 @@ on:
       - "package.json"
       - "bun.lock"
       - "packages/storybook/**"
-      - "packages/ui/**"
-      - "packages/session-ui/**"
+      # Storybook is a custom-web surface; upstream UI packages retain their unit checks.
+      - "packages/app-custom/**"
+      - "packages/ui-custom/**"
+      - "packages/session-ui-custom/**"
   pull_request:
     branches: [dev]
     paths:
@@ -17,8 +19,10 @@ on:
       - "package.json"
       - "bun.lock"
       - "packages/storybook/**"
-      - "packages/ui/**"
-      - "packages/session-ui/**"
+      # Storybook is a custom-web surface; upstream UI packages retain their unit checks.
+      - "packages/app-custom/**"
+      - "packages/ui-custom/**"
+      - "packages/session-ui-custom/**"
   workflow_dispatch:
 
 concurrency:

@@ -1,96 +1,37 @@
-import type { SessionInfo, SessionMessageInfo, SessionMessageUser } from "@opencode/client/promise"
+import type { SessionMessageUser } from "@opencode/client/promise"
 import { useComposerState } from "@/composer/persistence"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useLanguage } from "@/runtime/i18n/language"
 import { extractPromptComments, extractPromptFromMessage } from "@/composer/prompt"
-import { readChatQuotes } from "@/composer/chat-quote"
 import { showToast } from "@/shell/notifications/toast"
+import type { SessionModel } from "./model"
 
-type SessionApi = ReturnType<typeof useServerSDK>["api"]["session"]
-type RevertApi = Pick<SessionApi, "interrupt" | "wait"> & { revert: Pick<SessionApi["revert"], "stage"> }
-type RevertCascade = {
-  sessions: (input: { parentID: string; cursor?: string }) => Promise<{
-    data: SessionInfo[]
-    cursor: { next?: string | null }
-  }>
-  messages: (input: { sessionID: string; cursor?: string }) => Promise<{
-    data: SessionMessageInfo[]
-    cursor: { next?: string | null }
-  }>
-  status: (sessionID: string) => "idle" | "busy"
-}
-type RevertInput = {
-  session: {
-    identity: { params: { id?: string } }
-    history: { userMessages: () => SessionMessageUser[] }
-    data: { revertMessageID: () => string | undefined }
-  }
+export function createSessionRevert(input: {
+  session: SessionModel
   setActiveMessage: (message: SessionMessageUser | undefined) => void
-}
-type RevertEnvironment = {
-  prompt: Pick<ReturnType<typeof useComposerState>, "capture">
-  api: Pick<SessionApi, "interrupt" | "wait"> & {
-    revert: Pick<SessionApi["revert"], "stage" | "clear">
-    inbox: Pick<SessionApi["inbox"], "list" | "cancel">
-  }
-  pending: Pick<ReturnType<typeof useData>["session"]["pending"], "list">
-  directory: () => string
-  failed: (error: unknown) => void
-  cascade?: RevertCascade
-}
-
-export async function stageSessionRevert(
-  api: RevertApi,
-  input: { sessionID: string; messageID: SessionMessageUser["id"]; files?: boolean },
-) {
-  await api.interrupt({ sessionID: input.sessionID })
-  await api.wait({ sessionID: input.sessionID })
-  await api.revert.stage(input)
-}
-
-export function createSessionRevert(input: RevertInput) {
+}) {
   const prompt = useComposerState()
   const server = useServerSDK()
   const data = useData()
   const location = useWorkspaceLocation()
   const language = useLanguage()
-  return createSessionRevertActions(input, {
-    prompt,
-    api: server.api.session,
-    pending: data.session.pending,
-    directory: () => location().directory,
-    cascade: {
-      sessions: ({ parentID, cursor }) =>
-        server.api.session.list(cursor ? { cursor } : { parentID, limit: 100, order: "asc" }),
-      messages: ({ sessionID, cursor }) =>
-        server.api.message.list({ sessionID, cursor, limit: 200, order: "asc", type: "user" }),
-      status: (sessionID) => (data.session.status(sessionID) === "idle" ? "idle" : "busy"),
-    },
-    failed: (error) =>
-      showToast({
-        title: language.t("common.requestFailed"),
-        description: error instanceof Error ? error.message : String(error),
-      }),
-  })
-}
-
-export function createSessionRevertActions(input: RevertInput, environment: RevertEnvironment) {
-  const prompt = environment.prompt
 
   const request = async (action: () => Promise<unknown>) =>
     action()
       .then(() => true)
       .catch((error) => {
-        environment.failed(error)
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : String(error),
+        })
         return false
       })
   const restore = (target: ReturnType<typeof prompt.capture>, message: SessionMessageUser) => {
-    target.quotes.replace(readChatQuotes(message.metadata?.quotes))
     target.set(
       extractPromptFromMessage(message, {
-        directory: environment.directory(),
+        directory: location().directory,
       }),
     )
     target.context.replaceComments(
@@ -105,180 +46,79 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
     )
   }
 
-  const stage = async (sessionID: string, message: SessionMessageUser) => {
-    await cascadeRevert(sessionID, message.time.created, environment)
-    if (!(await request(() => stageSessionRevert(environment.api, { sessionID, messageID: message.id })))) return false
-    // Pending prompts were written against the history being rewound. Keep
-    // their conservative cutoff and finish cancelling the captured set before
-    // releasing submissions waiting on this revert.
+  const stage = async (message: SessionMessageUser, previous: SessionMessageUser | undefined) => {
+    const sessionID = input.session.identity.params.id
+    if (!sessionID) return
+    const owner = input.session.ownership.capture()
+    const target = prompt.capture()
+    if (data.session.status(sessionID) === "running") {
+      await server.api.session.interrupt({ sessionID }).catch(() => undefined)
+    }
+    if (!(await request(() => server.api.session.revert.stage({ sessionID, messageID: message.id })))) return
+    // Reverting to a previous prompt discards the pending queue (and pending
+    // steers): they were written against the history being rewound. Cancel
+    // the authoritative inbox merged with the local snapshot, fire-and-forget
+    // so a slow request cannot delay restoring the composer. The cutoff keeps
+    // the asynchronous sweep away from prompts admitted after the revert; an
+    // old admission still in flight when the list is fetched can survive it,
+    // and fully closing that race needs a server-side revert-discards-inbox
+    // rule.
     const cutoff = Date.now()
-    const local = environment.pending
+    const local = data.session.pending
       .list(sessionID)
       .filter((item) => item.type === "user")
       .map((item) => item.id)
-    const authoritative = await environment.api.inbox
+    void server.api.session.inbox
       .list({ sessionID })
       .then((rows) => rows.filter((row) => row.type === "user" && row.timeCreated <= cutoff).map((row) => row.id))
       .catch(() => [])
-    await Promise.all(
-      [...new Set([...local, ...authoritative])].map((inboxID) =>
-        environment.api.inbox.cancel({ sessionID, inboxID }).catch(() => undefined),
-      ),
-    )
-    return true
-  }
-
-  const project = (message: SessionMessageUser, previous: SessionMessageUser | undefined) => {
-    const target = prompt.capture()
-    target.revert.prepare()
+      .then((authoritative) => {
+        new Set([...local, ...authoritative]).forEach(
+          (inboxID) => void server.api.session.inbox.cancel({ sessionID, inboxID }).catch(() => undefined),
+        )
+      })
     restore(target, message)
-    input.setActiveMessage(previous)
-    return target.revert
+    owner.run(() => input.setActiveMessage(previous))
   }
 
-  const to = (messageID: string) => {
-    const sessionID = input.session.identity.params.id
-    if (!sessionID) return Promise.resolve(false)
+  const to = async (messageID: string) => {
     const messages = input.session.history.userMessages()
     const index = messages.findIndex((message) => message.id === messageID)
     const message = messages[index]
-    if (!message) return Promise.resolve(false)
-    return project(message, messages[index - 1]).schedule(message.id, () => stage(sessionID, message))
+    if (!message) return
+    await stage(message, messages[index - 1])
   }
 
-  const undo = () => {
-    const sessionID = input.session.identity.params.id
-    if (!sessionID) return Promise.resolve(false)
+  const undo = async () => {
     const messages = input.session.history.userMessages()
-    const reverted = effectiveBoundary(messages)
-    const boundaryIndex = reverted ? messages.findIndex((message) => message.id === reverted) : messages.length
-    if (boundaryIndex <= 0) return Promise.resolve(false)
-    const message = messages[boundaryIndex - 1]
-    if (!message) return Promise.resolve(false)
-    return project(message, messages[boundaryIndex - 2]).schedule(message.id, () => stage(sessionID, message))
+    const reverted = input.session.data.revertMessageID()
+    const boundary = reverted ? messages.findIndex((message) => message.id === reverted) : messages.length
+    if (boundary <= 0) return
+    const message = messages[boundary - 1]
+    if (message) await stage(message, messages[boundary - 2])
   }
 
-  const redo = () => {
+  const redo = async () => {
     const sessionID = input.session.identity.params.id
+    const reverted = input.session.data.revertMessageID()
+    if (!sessionID || !reverted) return
+    const messages = input.session.history.userMessages()
+    const boundary = messages.findIndex((message) => message.id === reverted)
+    if (boundary < 0) return
+    const next = messages[boundary + 1]
+    if (next) {
+      await stage(next, messages[boundary])
+      return
+    }
+    const owner = input.session.ownership.capture()
     const target = prompt.capture()
-    const messages = input.session.history.userMessages()
-    const reverted = effectiveBoundary(messages)
-    if (!sessionID || !reverted) return Promise.resolve(false)
-    const boundaryIndex = messages.findIndex((message) => message.id === reverted)
-    if (boundaryIndex < 0) return Promise.resolve(false)
-    const next = messages[boundaryIndex + 1]
-    if (next) return project(next, messages[boundaryIndex]).schedule(next.id, () => stage(sessionID, next))
-    target.revert.prepare()
+    if (!(await request(() => server.api.session.revert.clear({ sessionID })))) return
     target.reset()
     target.context.replaceComments([])
-    input.setActiveMessage(messages.at(-1))
-    return target.revert.schedule(undefined, async () => {
-      await cascadeClear(sessionID, environment)
-      if (!(await request(() => environment.api.revert.clear({ sessionID })))) return false
-      return true
-    })
+    owner.run(() => input.setActiveMessage(messages.at(-1)))
   }
 
-  const effectiveBoundary = (messages = input.session.history.userMessages()) =>
-    prompt
-      .capture()
-      .revert.boundary(input.session.data.revertMessageID(), (messageID) =>
-        messages.some((message) => message.id === messageID),
-      )
-  const canUndo = () => {
-    if (!input.session.identity.params.id) return false
-    const messages = input.session.history.userMessages()
-    const reverted = effectiveBoundary(messages)
-    return (reverted ? messages.findIndex((message) => message.id === reverted) : messages.length) > 0
-  }
-
-  return {
-    to,
-    undo,
-    redo,
-    pending: () => prompt.capture().revert.pending(),
-    wait: () => prompt.capture().revert.wait(),
-    boundary: effectiveBoundary,
-    canUndo,
-  }
+  return { to, undo, redo }
 }
 
 export type SessionRevert = ReturnType<typeof createSessionRevert>
-
-async function cascadeRevert(rootID: string, cutoff: number, environment: RevertEnvironment) {
-  const cascade = environment.cascade
-  if (!cascade) return
-  const descendants = await descendantSessions(rootID, environment)
-  for (const session of descendants) {
-    try {
-      const message = await firstUserMessageAtOrAfter(session.id, cutoff, cascade)
-      if (!message) continue
-      if (cascade.status(session.id) !== "idle") {
-        await environment.api.interrupt({ sessionID: session.id })
-        await environment.api.wait({ sessionID: session.id })
-      }
-      await environment.api.revert.stage({ sessionID: session.id, messageID: message.id, files: false })
-    } catch (error) {
-      environment.failed(error)
-    }
-  }
-}
-
-async function cascadeClear(rootID: string, environment: RevertEnvironment) {
-  const cascade = environment.cascade
-  if (!cascade) return
-  const descendants = await descendantSessions(rootID, environment)
-  for (const session of descendants) {
-    if (!session.revert) continue
-    try {
-      if (cascade.status(session.id) !== "idle") {
-        await environment.api.interrupt({ sessionID: session.id })
-        await environment.api.wait({ sessionID: session.id })
-      }
-      await environment.api.revert.clear({ sessionID: session.id })
-    } catch (error) {
-      environment.failed(error)
-    }
-  }
-}
-
-async function descendantSessions(rootID: string, environment: RevertEnvironment) {
-  if (!environment.cascade) return []
-  const result: SessionInfo[] = []
-  const pending = [rootID]
-  const visited = new Set(pending)
-  for (const parentID of pending) {
-    const children: SessionInfo[] = []
-    try {
-      let cursor: string | undefined
-      do {
-        const page = await environment.cascade.sessions({ parentID, cursor })
-        children.push(
-          ...page.data.filter((session) => {
-            if (visited.has(session.id)) return false
-            visited.add(session.id)
-            return true
-          }),
-        )
-        cursor = page.cursor.next ?? undefined
-      } while (cursor)
-    } catch (error) {
-      environment.failed(error)
-    }
-    result.push(...children)
-    pending.push(...children.map((session) => session.id))
-  }
-  return result
-}
-
-async function firstUserMessageAtOrAfter(sessionID: string, cutoff: number, cascade: RevertCascade) {
-  let cursor: string | undefined
-  do {
-    const page = await cascade.messages({ sessionID, cursor })
-    const message = page.data.find(
-      (item): item is SessionMessageUser => item.type === "user" && item.time.created >= cutoff,
-    )
-    if (message) return message
-    cursor = page.cursor.next ?? undefined
-  } while (cursor)
-}

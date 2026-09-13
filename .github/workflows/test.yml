@@ -49,7 +49,9 @@ jobs:
             echo "app=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          bun x turbo@2.10.2 ls --affected --filter=@opencode/app --output=json > affected.json
+          # Full-app browser coverage follows the custom distribution. Upstream UI packages
+          # remain covered by the affected unit-test job.
+          bun x turbo@2.10.2 ls --affected --filter=@opencode/app-custom --output=json > affected.json
           bun -e 'const result = await Bun.file("affected.json").json(); console.log(`app=${result.packages.count > 0}`)' >> "$GITHUB_OUTPUT"
 
   unit:
@@ -229,24 +231,24 @@ jobs:
 
       - name: Install Playwright system dependencies
         if: env.E2E_ENABLED == 'true' && runner.os == 'Linux'
-        working-directory: packages/app
+        working-directory: packages/app-custom
         run: bunx playwright install-deps chromium
 
       - name: Install Playwright browsers
         if: env.E2E_ENABLED == 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: packages/app
+        working-directory: packages/app-custom
         run: bunx playwright install chromium
 
       - name: Run app e2e tests against production build
         if: env.E2E_ENABLED == 'true'
-        run: bun --cwd packages/app test:e2e:built
+        run: bun --cwd packages/app-custom test:e2e:built
         env:
           CI: true
         timeout-minutes: 30
 
       - name: Verify service worker precaching and upgrades
         if: env.E2E_ENABLED == 'true'
-        working-directory: packages/app
+        working-directory: packages/app-custom
         run: bunx playwright test --config e2e/service-worker/playwright.config.ts
         timeout-minutes: 5
 
@@ -258,5 +260,5 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
           path: |
-            packages/app/e2e/test-results
-            packages/app/e2e/playwright-report
+            packages/app-custom/e2e/test-results
+            packages/app-custom/e2e/playwright-report

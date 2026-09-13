@@ -85,10 +85,10 @@ benchmark.describe("performance: home and tab navigation", () => {
     await expectSessionTitle(page, fixture.expected.sourceTitle)
     await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
     const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
-    const close = tab.locator("..").getByRole("button", { name: "Close tab", exact: true })
+    const close = tab.locator("..").locator('[data-component="icon-button-v2"]')
     await expect(close).toBeVisible()
     const result = await measureNavigationMilestones(page, {
-      triggerSelector: '[data-slot="titlebar-tabs"] button[aria-label="Close tab"]',
+      triggerSelector: '[data-slot="titlebar-tabs"] [data-component="icon-button-v2"]',
       milestones: {
         home: { selector: homeShell },
         row: { selector: homeRow },

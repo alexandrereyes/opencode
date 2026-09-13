@@ -2,7 +2,6 @@ import type { OpenCodeEvent } from "@opencode/client/promise"
 import { createClientConnection, createPtyClient, type ClientConnectionStatus } from "@opencode/client/solid"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { type Accessor, createEffect, on, onCleanup } from "solid-js"
-import { createStore } from "solid-js/store"
 import { createApiForServer, type ServerApi } from "@/runtime/server/api"
 import { usePlatform } from "@/runtime/platform/platform"
 import { ServerConnection } from "./registry"
@@ -24,7 +23,6 @@ type OpenCodeEventSource = OpenCodeEventStream & {
 
 export function createOpenCodeEventSource() {
   const emitter = createGlobalEmitter<OpenCodeEventMap>()
-  const [state, setState] = createStore({ connectionEpoch: 0 })
 
   function stream(directory?: string): OpenCodeEventStream {
     return {
@@ -52,9 +50,7 @@ export function createOpenCodeEventSource() {
 
   return {
     event,
-    connectionEpoch: () => state.connectionEpoch,
     publish(event: OpenCodeEvent) {
-      if (event.type === "server.connected") setState("connectionEpoch", (epoch) => epoch + 1)
       emitter.emit(event.type, event)
     },
   }
@@ -71,7 +67,6 @@ type ServerSDKBase = {
     status: Accessor<ServerConnectionStatus>
     attempt: Accessor<number>
     error: Accessor<string | undefined>
-    epoch: Accessor<number>
   }
   event: OpenCodeEventSource
 }
@@ -119,7 +114,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     get pty() {
       return transport.pty
     },
-    connection: { ...connection, epoch: events.connectionEpoch },
+    connection,
     event: events.event,
   }
 }

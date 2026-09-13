@@ -60,7 +60,7 @@ describe("composer persistence schemas", () => {
       prompt: [
         text,
         { type: "agent", content: "@build", start: 5, end: 11, name: "build" },
-        { type: "skill", content: "$effect", start: 11, end: 18, id: "effect", name: "Effect" },
+        { type: "skill", content: "@effect", start: 11, end: 18, id: "effect", name: "Effect" },
         { type: "agent", content: "@broken", start: 18, end: 25, name: 42 },
         {
           type: "file",
@@ -136,58 +136,12 @@ describe("composer persistence schemas", () => {
     ).toEqual(value)
   })
 
-  test("preserves existing app mentions through canonical round trips", () => {
-    const decode = Schema.decodeUnknownSync(
-      Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
-    )
-    const prompt = [
-      {
-        type: "app",
-        content: "@Safari",
-        start: 0,
-        end: 7,
-        app: {
-          server: "open-computer-use",
-          name: "Safari",
-          bundleID: "com.apple.Safari",
-          running: true,
-        },
-      },
-      {
-        type: "app",
-        content: "@Preview",
-        start: 8,
-        end: 16,
-        app: {
-          server: "codex-computer-use",
-          name: "Preview",
-          path: "/Applications/Preview.app/",
-          bundleID: "com.apple.Preview",
-          running: false,
-        },
-      },
-    ] satisfies ComposerStore["prompt"]
-    const value = decode({ prompt })
-    expect(value.prompt).toEqual(prompt)
-    expect(value.prompt[0]).not.toHaveProperty("app.path")
-    expect(value.prompt[1]).toHaveProperty("app.path", "/Applications/Preview.app/")
-    const roundTrip = decode(Schema.encodeSync(ComposerStore)(value))
-    expect(roundTrip.prompt).toEqual(prompt)
-    expect(roundTrip.prompt[0]).not.toHaveProperty("app.path")
-    expect(roundTrip.prompt[1]).toHaveProperty("app.path", "/Applications/Preview.app/")
-  })
-
   test("migrates inline images but never encodes dataUrl or unresolved references", () => {
     const value = Schema.decodeUnknownSync(
       Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
     )({
       prompt: [
-        {
-          ...image,
-          dataUrl: "data:image/png;base64,YQ==",
-          sourcePath: "/image.png",
-          mention: { text: "[image.png]", start: 0, end: 11 },
-        },
+        { ...image, dataUrl: "data:image/png;base64,YQ==", sourcePath: "/image.png" },
         { ...image, blob: { id: "data:image/png;base64,Yg==" } },
         { ...image, blob: { id: "hash", url: "blob:hydrated" } },
         { ...image, blob: { id: "missing" } },
@@ -199,7 +153,6 @@ describe("composer persistence schemas", () => {
     expect(value.prompt[0]).toEqual({
       ...image,
       sourcePath: "/image.png",
-      mention: { text: "[image.png]", start: 0, end: 11 },
       blob: { id: "data:image/png;base64,YQ==", url: "data:image/png;base64,YQ==" },
     })
     const encoded = Schema.encodeSync(ComposerStore)(value)

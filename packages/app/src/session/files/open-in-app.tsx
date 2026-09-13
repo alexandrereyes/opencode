@@ -7,9 +7,8 @@ import { showToast } from "@/shell/notifications/toast"
 import { useServer } from "@/runtime/server/current"
 import { Schema } from "effect"
 import { Persistence } from "@/runtime/persistence/schema"
-import { useServerSDK } from "@/runtime/server/client"
-import { NativeApps } from "@opencode/plugin-app-custom/native-apps/rpc"
-import { createNativeAppAvailability } from "./open-in-app-availability"
+import { fileManagerApp } from "@/home/projects/file-manager"
+import { openInAppParentPath } from "@/session/files/open-in-app-path"
 
 export const OPEN_APPS = [
   "vscode",
@@ -26,7 +25,6 @@ export const OPEN_APPS = [
   "android-studio",
   "powershell",
   "sublime-text",
-  "rider",
 ] as const
 
 export type OpenApp = (typeof OPEN_APPS)[number]
@@ -47,7 +45,6 @@ export const MAC_OPEN_APPS = [
   },
   { id: "cursor", label: "session.header.open.app.cursor", icon: "cursor", openWith: "Cursor" },
   { id: "zed", label: "session.header.open.app.zed", icon: "zed", openWith: "Zed" },
-  { id: "rider", label: "session.header.open.app.rider", icon: "rider", openWith: "Rider" },
   { id: "textmate", label: "session.header.open.app.textmate", icon: "textmate", openWith: "TextMate" },
   {
     id: "antigravity",
@@ -114,6 +111,10 @@ export function detectOpenAppOS(platform: ReturnType<typeof usePlatform>): OpenA
   return "unknown"
 }
 
+export function openAppFileManager(os: OpenAppOS) {
+  return fileManagerApp(os)
+}
+
 export function openAppsForOS(os: OpenAppOS) {
   if (os === "macos") return MAC_OPEN_APPS
   if (os === "windows") return WINDOWS_OPEN_APPS
@@ -132,22 +133,14 @@ export function useOpenInApp(input: { path: () => string }) {
   const platform = usePlatform()
   const server = useServer()
   const language = useLanguage()
-  const sdk = useServerSDK()
-  const nativeApps = createNativeAppAvailability({
-    platform: () => platform.platform,
-    local: () => server.isLocal,
-    server: () => server.key,
-    location: input.path,
-    status: sdk.connection.status,
-    list: (directory) => sdk.api.rpc(NativeApps.Definition).list({}, { location: { directory } }),
+
+  const os = createMemo(() => detectOpenAppOS(platform))
+  const apps = createMemo(() => openAppsForOS(os()))
+  const fileManager = createMemo(() => openAppFileManager(os()))
+
+  const [exists, setExists] = createStore<Partial<Record<OpenApp, boolean>>>({
+    finder: true,
   })
-
-  const os = createMemo(() =>
-    platform.platform === "desktop" ? detectOpenAppOS(platform) : (nativeApps.value()?.os ?? "unknown"),
-  )
-  const apps = createMemo(() => openAppsForOS(os()).filter((app) => app.id === "vscode" || app.id === "rider"))
-
-  const [exists, setExists] = createStore<Partial<Record<OpenApp, boolean>>>({})
 
   createEffect(() => {
     if (platform.platform !== "desktop") return
@@ -165,25 +158,27 @@ export function useOpenInApp(input: { path: () => string }) {
   })
 
   const options = createMemo(() => {
-    const available = nativeApps.value()?.apps
-    return apps()
-      .filter((app) => (platform.platform === "desktop" ? exists[app.id] : available?.some((id) => id === app.id)))
-      .map((app) => ({ ...app, label: language.t(app.label) }))
+    return [
+      { id: "finder", label: language.t(fileManager().label), icon: fileManager().icon },
+      ...apps()
+        .filter((app) => exists[app.id])
+        .map((app) => ({ ...app, label: language.t(app.label) })),
+    ] as const
   })
 
-  const [prefs, setPrefs] = persisted(Persist.global("open.app"), OpenAppPreferences, { app: "vscode" })
+  const [prefs, setPrefs] = persisted(Persist.global("open.app"), OpenAppPreferences, { app: "finder" })
   const [menu, setMenu] = createStore({ open: false })
   const [openRequest, setOpenRequest] = createStore({
     app: undefined as OpenApp | undefined,
   })
 
-  const canOpen = createMemo(
+  const canOpen = createMemo(() => platform.platform === "desktop" && !!platform.openPath && server.isLocal)
+  const current = createMemo(
     () =>
-      server.isLocal &&
-      options().length > 0 &&
-      (platform.platform === "desktop" ? !!platform.openPath : nativeApps.value()?.os === "macos"),
+      options().find((o) => o.id === prefs.app) ??
+      options()[0] ??
+      ({ id: "finder", label: fileManager().label, icon: fileManager().icon } as const),
   )
-  const current = createMemo(() => options().find((o) => o.id === prefs.app) ?? options().at(0))
   const opening = createMemo(() => openRequest.app !== undefined)
 
   const selectApp = (app: OpenApp | "finder") => {
@@ -192,27 +187,19 @@ export function useOpenInApp(input: { path: () => string }) {
   }
 
   const openPath = (app: OpenApp | "finder", target = input.path(), reveal = false) => {
-    if (opening() || !canOpen()) return
+    if (opening() || !canOpen() || !platform.openPath) return
     if (!target) return
 
+    const open = (path: string, openWith?: string) => platform.openPath!(path, openWith)
     const item = options().find((o) => o.id === app)
-    if (!item) return
+    const openWith = item && "openWith" in item ? item.openWith : undefined
     setOpenRequest("app", app)
     const request =
-      platform.platform === "desktop"
-        ? platform.openPath!(target, item.openWith)
-        : sdk.api
-            .rpc(NativeApps.Definition)
-            .open({ app: item.id, path: target, reveal }, { location: { directory: input.path() } })
+      app === "finder" && reveal && platform.revealPath
+        ? platform.revealPath(target).then((revealed) => (revealed ? undefined : open(openInAppParentPath(target))))
+        : open(target, openWith)
     request
-      .catch((err: unknown) => {
-        if (platform.platform === "desktop") return showRequestError(language, err)
-        showToast({
-          variant: "error",
-          title: language.t("common.requestFailed"),
-          description: language.t("session.header.open.failed", { app: item.label }),
-        })
-      })
+      .catch((err: unknown) => showRequestError(language, err))
       .finally(() => {
         setOpenRequest("app", undefined)
       })

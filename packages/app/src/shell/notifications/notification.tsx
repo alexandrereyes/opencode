@@ -283,7 +283,7 @@ export function createServerNotificationState(input: {
   const unsub = input.sdk.event.listen((event) => {
     if (event.type !== "session.execution.succeeded" && event.type !== "session.execution.failed") return
 
-    const time = event.created
+    const time = Date.now()
     if (event.type === "session.execution.failed") {
       handleSessionError(event.data.sessionID, event.data.error, event.id, time)
       return

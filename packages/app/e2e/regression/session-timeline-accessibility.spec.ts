@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test"
-import { timelinePresets } from "@opencode/session-ui/timeline/detail"
 import {
   assistantMessage,
   setupTimeline,
@@ -10,9 +9,6 @@ import {
 
 test("space activates a focused timeline button instead of scrolling", async ({ page }) => {
   const shellID = "prt_space_button_shell"
-  await page.addInitScript(() => {
-    localStorage.setItem("opencode.global.dat:layout", JSON.stringify({ review: { panelOpened: false } }))
-  })
   await setupTimeline(page, {
     messages: [
       userMessage(),
@@ -24,7 +20,7 @@ test("space activates a focused timeline button instead of scrolling", async ({ 
         ),
       ]),
     ],
-    settings: { timelineDetail: timelinePresets[2].value },
+    settings: { shellToolPartsExpanded: false },
     reducedMotion: true,
     seedHistory: true,
   })
@@ -33,12 +29,12 @@ test("space activates a focused timeline button instead of scrolling", async ({ 
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight))
     .toBeGreaterThan(300)
+  await trigger.scrollIntoViewIfNeeded()
   await scroller.hover()
-  await page.mouse.wheel(0, -500)
+  await page.mouse.wheel(0, -100)
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
     .toBeGreaterThan(50)
-  await trigger.scrollIntoViewIfNeeded()
   await expect(trigger).toBeInViewport()
   await trigger.focus()
   await expect(trigger).toBeFocused()

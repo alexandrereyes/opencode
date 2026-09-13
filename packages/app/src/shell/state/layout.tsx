@@ -59,23 +59,16 @@ export type TabPanes = {
   terminalHeight: Accessor<number | undefined>
   setTerminalHeight(height: number): void
   reviewOpened: Accessor<boolean>
-  reviewConfigured: Accessor<boolean>
   setReviewOpened(opened: boolean): void
+  sessionWidth: Accessor<number | undefined>
+  setSessionWidth(width: number): void
 }
 
 export type LayoutRoute =
   | { type: "home" }
   | { type: "settings" }
-  | { type: "agent-dashboard" }
   | { type: "draft"; draftID: string }
   | { type: "session"; sessionId: string; server: ServerConnection.Key }
-
-// Panel selection belongs to the Session, even while its Location is resolving or moving.
-export function sessionPanelKey(key: string) {
-  const route = SessionStateKey.route(key)
-  const id = route.split("/")[1]
-  return id ? `${SessionStateKey.scope(key)}\u0000/${id}` : key
-}
 
 const sessionPath = (key: string) => {
   const dir = SessionStateKey.route(key).split("/")[0]
@@ -113,7 +106,6 @@ export const currentRoute = (pathname: string, search: string): LayoutRoute => {
   const parts = pathname.split("/").filter(Boolean)
   if (parts.length === 0) return { type: "home" }
   if (parts[0] === "settings") return { type: "settings" }
-  if (parts[0] === "agent-dashboard") return { type: "agent-dashboard" }
 
   if (parts[0] === "new-session") {
     const draftID = new URLSearchParams(search).get("draftId")
@@ -222,7 +214,7 @@ export const layoutPersistence = Persistence.migrate(
         sessionTabs: Object.fromEntries(
           Object.entries(value.sessionTabs)
             .filter(([key]) => SessionStateKey.is(key))
-            .map(([key, tabs]) => [sessionPanelKey(key), normalizeStoredSessionTabs(key, tabs)]),
+            .map(([key, tabs]) => [key, normalizeStoredSessionTabs(key, tabs)]),
         ),
         sessionView: Object.fromEntries(Object.entries(value.sessionView).filter(([key]) => SessionStateKey.is(key))),
       })),
@@ -522,9 +514,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         )
         const reviewPanelOpened =
           panes?.reviewOpened ?? createMemo(() => store.review?.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED)
-        const reviewPanelConfigured = panes?.reviewConfigured ?? (() => store.review?.panelOpened !== undefined)
-        // The divider is a local layout preference shared by every Session.
-        const sessionWidth = createMemo(() => store.session.width)
+        const sessionWidth = createMemo(() =>
+          panes ? (panes.sessionWidth() ?? DEFAULT_SESSION_WIDTH) : store.session.width,
+        )
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
 
         function setTerminalOpened(next: boolean) {
@@ -601,10 +593,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           },
           reviewPanel: {
             opened: reviewPanelOpened,
-            configured: reviewPanelConfigured,
             source: reviewPanelSource,
             width: sessionWidth,
             resize(width: number) {
+              if (panes) {
+                panes.setSessionWidth(width)
+                return
+              }
               setStore("session", "width", width)
             },
             open(source: ReviewPanelSource = "other") {
@@ -683,9 +678,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         }
       },
       tabs(sessionKey: string | Accessor<string>) {
-        const routeKey = typeof sessionKey === "function" ? sessionKey : () => sessionKey
-        const key = createSessionKeyReader(() => sessionPanelKey(routeKey()), ensureKey)
-        const path = createMemo(() => sessionPath(routeKey()))
+        const key = createSessionKeyReader(sessionKey, ensureKey)
+        const path = createMemo(() => sessionPath(key()))
         const tabs = createMemo(() => store.sessionTabs[key()] ?? { all: [] })
         const normalize = (tab: string) => normalizeSessionTab(path(), tab)
         const normalizeAll = (all: string[]) => normalizeSessionTabList(path(), all)

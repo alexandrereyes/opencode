@@ -5,16 +5,13 @@ import { Event } from "@opencode/schema/event"
 import type { Accessor } from "solid-js"
 import type { PromptHistoryComment } from "./history/entry"
 import type { ImageAttachmentPart, Prompt } from "./state"
-import { clonePrompt, expandSnippets, promptLength } from "./prompt-parts"
+import { clonePrompt, promptLength } from "./prompt-parts"
 import type { ComposerAdapter, ComposerDelivery, ComposerSelection, ComposerSession } from "./adapter"
 import { createComposerSubmission } from "./submission-state"
-import { buildPromptRequest, formatAppContext } from "./request"
+import { buildPromptRequest } from "./request"
 import { setCursorPosition } from "./editor/dom"
 import { blobDataUrl } from "@/runtime/persistence/drafts"
 import type { ModelSelection } from "@/providers/models/selection"
-import type { ChatQuote } from "./schema"
-import { formatChatQuotes } from "./chat-quote"
-import { formatSessionContexts } from "./session-reference"
 
 const submitting = new WeakSet<object>()
 
@@ -27,7 +24,6 @@ type ComposerSubmission = {
   images: ImageAttachmentPart[]
   selection: ComposerSelection
   delivery: ComposerDelivery
-  quotes: ChatQuote[]
 }
 
 type ComposerSubmitInput = {
@@ -49,7 +45,6 @@ type ComposerSubmitInput = {
   comments: {
     capture: () => PromptHistoryComment[]
     clear: () => void
-    current?: () => object
     restore: (comments: PromptHistoryComment[]) => void
   }
 }
@@ -73,51 +68,22 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
     }
     if (submitting.has(input.adapter.state)) return
     submitting.add(input.adapter.state)
-    const delayed = input.adapter.submissionBarrier?.pending() ?? false
     const comments = input.comments.capture()
     // Capture command intent before starting a session in a worktree whose catalog has not loaded.
-    const command =
-      value.mode === "normal"
-        ? findCommand(input.commands(), value.prompt.map((part) => ("content" in part ? part.content : "")).join(""))
-        : undefined
+    const command = value.mode === "normal" ? findCommand(input.commands(), value.text) : undefined
     if (value.mode === "normal" && !command) value.prompt = withSlashSkill(value.prompt, input.skills())
-    const active = input.adapter.kind === "active-session" ? input.adapter.session() : undefined
-    const ownsView = () => input.adapter.kind !== "active-session" || (input.adapter.active?.() ?? true)
-    const clearedComments = delayed
-      ? (() => {
-          input.addToHistory(value.prompt, value.mode)
-          input.resetHistory()
-          if (value.mode === "normal" && !command) {
-            submission.context
-              .filter((item) => !!item.comment?.trim())
-              .forEach((item) => submission.target().context.remove(item.key))
-            input.comments.clear()
-          }
-          if (value.mode === "normal") value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
-          clearSubmission(input, submission)
-          return input.comments.current?.()
-        })()
-      : undefined
 
     try {
-      if (input.adapter.submissionBarrier && !(await input.adapter.submissionBarrier.wait())) {
-        if (delayed && (!input.comments.current || input.comments.current() === clearedComments))
-          restoreSubmission(input, submission, value, comments, ownsView)
-        return
-      }
-      const started = active
-        ? { session: active, cleanupReady: Promise.resolve() }
-        : input.adapter.kind === "new-session"
-          ? await input.adapter.start(value.selection, submission, handoffMessage(value))
-          : undefined
+      const started =
+        input.adapter.kind === "active-session"
+          ? { session: input.adapter.session(), cleanupReady: Promise.resolve() }
+          : await input.adapter.start(value.selection, submission, handoffMessage(value))
       if (!started) return
       const session = started.session
 
-      if (!delayed) {
-        input.addToHistory(value.prompt, value.mode)
-        input.resetHistory()
-      }
-      const restore = () => restoreSubmission(input, submission, value, comments, ownsView)
+      input.addToHistory(value.prompt, value.mode)
+      input.resetHistory()
+      const restore = () => restoreSubmission(input, submission, value, comments)
 
       if (value.mode === "normal" && !command) {
         session.handoff?.set(handoffMessage(value))
@@ -133,15 +99,12 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
         )
         await started.cleanupReady
         await started.complete?.()
-        if (ownsView()) input.adapter.submitted()
-        if (!delayed) {
-          submission.context
-            .filter((item) => !!item.comment?.trim())
-            .forEach((item) => submission.target().context.remove(item.key))
-          input.comments.clear()
-          value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
-          clearSubmission(input, submission)
-        }
+        input.adapter.submitted()
+        submission.context
+          .filter((item) => !!item.comment?.trim())
+          .forEach((item) => submission.target().context.remove(item.key))
+        input.comments.clear()
+        clearSubmission(input, submission)
         void sending.then((result) => {
           if (!result.ok)
             failSubmission(input, session, "prompt", result.error, restore, value.id, () => {
@@ -153,19 +116,16 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 
       await started.cleanupReady
       await started.complete?.()
-      if (ownsView()) input.adapter.submitted()
+      input.adapter.submitted()
 
       if (value.mode === "shell") {
-        if (!delayed) clearSubmission(input, submission)
+        clearSubmission(input, submission)
         void sendShell(session, value).catch((error) => failSubmission(input, session, "shell", error, restore))
         return
       }
 
       if (command) {
-        if (!delayed) {
-          value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
-          clearSubmission(input, submission)
-        }
+        clearSubmission(input, submission)
         void sendCommand(session, value, command, input.adapter.controls().model.selection.trackSessionCommit).catch(
           (error) => failSubmission(input, session, "command", error, restore, value.id),
         )
@@ -183,25 +143,18 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 }
 
 function handoffMessage(value: ComposerSubmission): SessionMessageUser {
-  const imageMentions = new Map(
-    expandSnippets(value.prompt).flatMap((part) => (part.type === "image" ? [[part.id, part.mention] as const] : [])),
-  )
   return {
     id: value.id,
     type: "user",
-    text: [value.text, formatChatQuotes(value.quotes)].filter(Boolean).join("\n\n"),
+    text: value.text,
     files: value.images.map((image) => ({
       data: "",
       mime: image.mime,
       source: { type: "uri", uri: image.blob.url },
       name: image.sourcePath ?? image.filename,
-      mention: imageMentions.get(image.id),
     })),
     metadata: {
       displayText: value.text,
-      quotes: value.quotes,
-      apps: value.prompt.filter((part) => part.type === "app"),
-      sessions: value.prompt.filter((part) => part.type === "session"),
       comments: value.context.flatMap((item) =>
         item.comment?.trim()
           ? [
@@ -231,15 +184,12 @@ function readSubmission(
   context: ComposerSubmission["context"],
   alternate: boolean,
 ): ComposerSubmission | undefined {
-  const text = expandSnippets(prompt)
-    .map((part) => ("content" in part ? part.content : ""))
-    .join("")
+  const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
   const mode = input.mode()
   if (mode === "shell" && !text.trim()) return
   const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
   const comments = context.filter((item) => !!item.comment?.trim()).length
-  const quotes = mode === "normal" ? input.adapter.state.quotes.all().map((quote) => ({ ...quote })) : []
-  if (!text.trim() && images.length === 0 && comments === 0 && quotes.length === 0) return
+  if (!text.trim() && images.length === 0 && comments === 0) return
 
   const controls = input.adapter.controls()
   const model = controls.model.selection.current()
@@ -272,7 +222,6 @@ function readSubmission(
       variant,
     },
     delivery: input.delivery?.(alternate) ?? "steer",
-    quotes,
   }
 }
 
@@ -288,16 +237,11 @@ function restoreSubmission(
   submission: ReturnType<typeof createComposerSubmission>,
   value: ComposerSubmission,
   comments: PromptHistoryComment[],
-  ownsView: () => boolean = () => true,
 ) {
   const restored = submission.restore()
   if (!restored) return false
   restored.target.set(restored.prompt, promptLength(restored.prompt))
   restored.target.mode.set(value.mode)
-  restored.target.quotes.replace([
-    ...value.quotes,
-    ...restored.target.quotes.all().filter((item) => !value.quotes.some((quote) => quote.id === item.id)),
-  ])
   restored.target.context.replaceComments(
     restored.context
       .filter((item) => !!item.comment?.trim())
@@ -322,8 +266,8 @@ function restoreSubmission(
     })
   }
   if (!submission.current(input.adapter.state)) return true
+
   input.comments.restore(comments)
-  if (!ownsView()) return true
   input.setMode(value.mode)
   input.closePopover()
   requestAnimationFrame(() => {
@@ -381,16 +325,7 @@ async function sendCommand(
   await session.api.command({
     sessionID: session.id,
     command: command.command,
-    text: [
-      value.prompt.some((part) => part.type === "snippet")
-        ? request.displayText.split(" ").slice(1).join(" ")
-        : command.arguments,
-      ...request.apps.map(formatAppContext),
-      ...formatSessionContexts(request.sessions),
-      formatChatQuotes(value.quotes),
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    text: command.arguments,
     files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     agents: request.agents,
     skills: request.skills,
@@ -446,10 +381,7 @@ async function sendPrompt(
     skills: request.skills,
     metadata: {
       displayText: request.displayText,
-      apps: request.apps,
-      sessions: request.sessions,
       comments: request.comments,
-      quotes: request.quotes,
       agent: value.selection.agent,
       model: {
         ...value.selection.model,
@@ -475,7 +407,6 @@ async function buildSubmissionRequest(session: ComposerSession, value: ComposerS
     images,
     text: value.text,
     sessionDirectory: session.directory,
-    quotes: value.quotes,
   })
   return request
 }

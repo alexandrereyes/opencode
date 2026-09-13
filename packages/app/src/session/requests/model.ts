@@ -1,4 +1,4 @@
-import { createEffect, createMemo, untrack } from "solid-js"
+import { createEffect, createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { FormInfo, PermissionRequest } from "@opencode/client/promise"
 import { useParams } from "@solidjs/router"
@@ -11,7 +11,6 @@ import { sessionPermissionRequest, sessionFormRequest, sessionTreeIDs } from "@/
 import { createWebSearchRequest } from "./websearch"
 import { createSessionBackground } from "@/session/requests/background"
 import { useData } from "@/runtime/server/current"
-import { syncSessionBackgroundShells } from "./background-shells"
 
 export function createSessionRequestModel() {
   const params = useParams()
@@ -24,13 +23,7 @@ export function createSessionRequestModel() {
     const id = params.id
     if (!id || serverSDK.connection.status() !== "connected") return
     void Promise.all([
-      syncSessionBackgroundShells({
-        sessionID: id,
-        current: sdk().ref,
-        known: untrack(() => data.shell.listBySession(id).map((shell) => shell.location)),
-        message: serverSDK.api.message,
-        sync: (location) => data.shell.sync(location),
-      }),
+      data.shell.sync({ directory: sdk().directory }),
       data.session.permission.sync(id),
     ]).catch(() => undefined)
   })
@@ -88,11 +81,7 @@ export function createSessionRequestModel() {
     messages: data.session.message.list,
     sessions: data.session.list,
     status: data.session.status,
-    shells: () => (params.id ? data.shell.listBySession(params.id) : []),
-  })
-  createEffect(() => {
-    if (serverSDK.connection.status() !== "connected") return
-    background.unresolved().forEach((sessionID) => void data.session.sync(sessionID).catch(() => undefined))
+    shells: () => data.shell.list({ directory: sdk().directory }),
   })
   const moveToBackground = async () => {
     if (!primary()) return

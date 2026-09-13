@@ -13,9 +13,9 @@ const password = await Bun.file(`${root}/password`).text()
 const plugin = path.resolve("packages/plugin-app-custom/dist")
 const assets: AssetMap = Object.fromEntries(
   await Promise.all(
-    Array.from(new Bun.Glob("**/*").scanSync({ cwd: "packages/app/dist", onlyFiles: true })).map(async (name) => [
+    Array.from(new Bun.Glob("**/*").scanSync({ cwd: "packages/app-custom/dist", onlyFiles: true })).map(async (name) => [
       name,
-      new Uint8Array(await Bun.file(`packages/app/dist/${name}`).arrayBuffer()),
+      new Uint8Array(await Bun.file(`packages/app-custom/dist/${name}`).arrayBuffer()),
     ]),
   ),
 )

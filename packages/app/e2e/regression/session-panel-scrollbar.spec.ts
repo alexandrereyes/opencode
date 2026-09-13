@@ -16,7 +16,7 @@ for (const reducedMotion of [false, true]) {
     await expect(thumb).toHaveAttribute("data-visible", "true")
     await expect(thumb).toHaveCSS("visibility", "visible")
 
-    for (const opened of [false, true]) {
+    for (const opened of [true, false]) {
       await toggle.hover()
       await page.mouse.down()
       await expect(thumb).toHaveCSS("visibility", "hidden")

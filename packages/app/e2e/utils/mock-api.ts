@@ -21,12 +21,6 @@ const Query = Schema.Struct({
   type: Schema.optional(Schema.String),
 })
 const SessionParams = { sessionID: Schema.String }
-const RpcParams = { rpcID: Schema.String, method: Schema.String }
-const RpcQuery = Schema.Struct({
-  location: Schema.optional(
-    Schema.Struct({ directory: Schema.optional(Schema.String), workspace: Schema.optional(Schema.String) }),
-  ),
-})
 const NoContent = HttpApiSchema.NoContent
 
 export class MockNotFound extends Schema.TaggedError<MockNotFound>()("MockNotFound", {
@@ -74,17 +68,25 @@ const Group = HttpApiGroup.make("mock")
   .add(HttpApiEndpoint.get("skill", "/api/skill", { success: Json }))
   .add(HttpApiEndpoint.get("plugin", "/api/plugin", { success: Json }))
   .add(HttpApiEndpoint.get("mcp", "/api/mcp", { success: Json }))
+  .add(HttpApiEndpoint.get("mcpResource", "/api/mcp/resource", { success: Json }))
+  .add(HttpApiEndpoint.get("projectList", "/api/project", { success: Json }))
   .add(
-    HttpApiEndpoint.post("rpcCall", "/api/rpc/:rpcID/:method", {
-      params: RpcParams,
-      query: RpcQuery,
+    HttpApiEndpoint.patch("projectUpdate", "/api/project/:projectID", {
+      params: { projectID: Schema.String },
       payload: JsonPayload,
       success: Json,
     }),
   )
-  .add(HttpApiEndpoint.get("mcpResource", "/api/mcp/resource", { success: Json }))
-  .add(HttpApiEndpoint.get("projectList", "/api/project", { success: Json }))
   .add(HttpApiEndpoint.get("projectCurrent", "/api/project/current", { success: Json }))
+  .add(HttpApiEndpoint.get("configPreferences", "/api/config/preferences", { success: Json }))
+  .add(
+    HttpApiEndpoint.patch("configUpdatePreferences", "/api/config/preferences", {
+      payload: JsonPayload,
+      success: Json,
+    }),
+  )
+  .add(HttpApiEndpoint.get("configShells", "/api/config/shell", { success: Json }))
+  .add(HttpApiEndpoint.get("websearchProviders", "/api/websearch/provider", { success: Json }))
   .add(
     HttpApiEndpoint.get("worktreeList", "/api/worktree", {
       success: Json,
@@ -241,12 +243,6 @@ const Group = HttpApiGroup.make("mock")
   )
   .add(
     HttpApiEndpoint.post("sessionInterrupt", "/api/session/:sessionID/interrupt", {
-      params: SessionParams,
-      success: Json,
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("sessionWait", "/api/session/:sessionID/wait", {
       params: SessionParams,
       success: NoContent,
     }),

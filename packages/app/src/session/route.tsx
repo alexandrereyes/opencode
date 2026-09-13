@@ -4,13 +4,13 @@ import { DataProvider } from "@opencode/session-ui/context"
 import { SessionUserMessage } from "@opencode/session-ui/message"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { CommentsProvider } from "@/composer/comments"
+import { readPromptPresentation } from "@/composer/comment-note"
 import { FileProvider } from "@/workspaces/files/model"
 import { LocationProvider } from "@/workspaces/location"
 import { ModelsProvider } from "@/providers/models/models"
 import { useProviders } from "@/providers/catalog/providers"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useNotification } from "@/shell/notifications/notification"
-import { createSessionViewed } from "@/shell/notifications/session-viewed"
 import { ComposerPersistenceProvider } from "@/composer/persistence"
 import { useData, useServer } from "@/runtime/server/current"
 import { ServerConnection } from "@/runtime/server/registry"
@@ -27,7 +27,6 @@ import { SessionErrorFallback } from "./route-error"
 import { createSessionResolution } from "./session-resolution"
 import { SessionScreen } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
-import { userPresentation } from "./user-presentation"
 
 export function TargetSessionRouteContent() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -54,7 +53,6 @@ export function TargetSessionRouteContent() {
 function PreparingSession(props: { sessionID: string; pending: PendingSession }) {
   const language = useLanguage()
   const providers = useProviders(() => props.pending.draft.directory)
-  const presentation = createMemo(() => userPresentation(props.pending.message))
   return (
     <SessionStatePanel>
       <DataProvider
@@ -72,11 +70,7 @@ function PreparingSession(props: { sessionID: string; pending: PendingSession })
             <SessionUserMessage
               sessionID={props.sessionID}
               message={props.pending.message}
-              displayText={presentation().displayText}
-              copyText={presentation().copyText}
-              comments={presentation().comments}
-              quotes={presentation().quotes}
-              sessions={presentation().sessions}
+              comments={readPromptPresentation(props.pending.message.metadata)?.comments}
               historicalAgent={props.pending.selection.agent}
               historicalModel={{
                 id: props.pending.selection.model.modelID,
@@ -192,16 +186,6 @@ function SessionPage() {
 
 function MarkSessionNotificationsViewed(props: { sessionID: () => string | undefined }) {
   const notification = useNotification()
-  const server = useServer()
-  const data = useData()
-  createSessionViewed({
-    session: () => {
-      const id = props.sessionID()
-      return id ? data.session.get(id) : undefined
-    },
-    view: (input) => server.ctx.sdk.api.session.view(input),
-    remember: data.session.remember,
-  })
   createEffect(() => {
     const sessionID = props.sessionID()
     if (!notification.ready() || !sessionID) return

@@ -9,12 +9,6 @@ export type SessionUserComment = {
   }
 }
 
-export type SessionUserQuote = {
-  id: string
-  text: string
-  comment: string
-}
-
 export type SessionUserActions = {
   openAttachment?: (file: PromptFileAttachment) => void
   revert?: (input: { sessionID: string; messageID: string }) => Promise<void> | void

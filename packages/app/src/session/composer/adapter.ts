@@ -9,7 +9,6 @@ export function createActiveComposerAdapter(input: {
   sessionID: string
   controls: Accessor<ComposerControls>
   submitted: () => void
-  active: () => boolean
   setEditor: (element: HTMLDivElement) => void
 }) {
   const id = input.sessionID
@@ -26,11 +25,7 @@ export function createActiveComposerAdapter(input: {
     ready: prompt.ready,
     controls: input.controls,
     working: () => data.session.status(id) === "running",
-    submitted: () => {
-      if (input.active()) input.submitted()
-    },
-    active: input.active,
-    submissionBarrier: state.revert,
+    submitted: input.submitted,
     setEditor: input.setEditor,
     session: () => ({
       id,

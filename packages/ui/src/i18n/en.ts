@@ -149,10 +149,8 @@ const source = {
   "ui.promptInput.removeAttachment": "Remove attachment",
   "ui.promptInput.label": "Prompt",
   "ui.promptInput.placeholder.shell": "Enter shell command…",
-  "ui.promptInput.placeholder.normal":
-    "Ask anything, {{slash}} for commands, {{at}} for context, {{skill}} for skills…",
-  "ui.promptInput.placeholder.followUp":
-    "Add follow-up, {{slash}} for commands, {{at}} for context, {{skill}} for skills…",
+  "ui.promptInput.placeholder.normal": "Ask anything, {{slash}} for commands, {{at}} for context…",
+  "ui.promptInput.placeholder.followUp": "Add follow-up, {{slash}} for commands, {{at}} for context…",
   "ui.promptInput.add": "Add images and files",
   "ui.promptInput.attachments": "Images and files",
   "ui.promptInput.context": "Context",
@@ -233,9 +231,6 @@ const source = {
 
   "ui.message.expand": "Expand message",
   "ui.message.collapse": "Collapse message",
-  "ui.message.quote.caption": "Quoted from an earlier message",
-  "ui.message.quote.expand": "Expand quote",
-  "ui.message.quote.collapse": "Collapse quote",
   "ui.message.copy": "Copy",
   "ui.message.copyMessage": "Copy message",
   "ui.message.forkMessage": "Fork to new session",
@@ -244,7 +239,6 @@ const source = {
   "ui.message.copied": "Copied",
   "ui.message.thought": "Thought",
   "ui.message.duration.seconds": "{{count}}s",
-  "ui.message.tokensPerSecond": "{{count}} tok/s",
   "ui.message.duration.minutesSeconds": "{{minutes}}m {{seconds}}s",
   "ui.message.interrupted": "Interrupted",
   "ui.sessionTimeline.notice.model": "Model",

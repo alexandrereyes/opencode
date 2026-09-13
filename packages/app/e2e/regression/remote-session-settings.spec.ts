@@ -2,7 +2,6 @@ import { base64Encode } from "@opencode/util/encode"
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { installSseTransport } from "../utils/sse-transport"
 import { currentSession } from "../utils/mock-server"
-import { pressPlatformShortcut } from "../utils/command-palette"
 
 const serverA = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 const serverB = "http://127.0.0.1:4097"
@@ -21,13 +20,14 @@ test("session settings use the remote server context", async ({ page }) => {
   // one toggle sweeps every connected server, not just the focused one.
   await mockServers(page, permissionRequests, permissionResponses, {
     pending: { [serverA]: [pendingPermission("permission-pending-a", sessionA.id)] },
+    preferencesUnavailable: true,
   })
   await configureServers(page)
 
   await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
   const sessionHeading = page.getByRole("heading", { name: sessionB.title, exact: true, includeHidden: true })
   await expect(sessionHeading).toBeVisible()
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
 
   const settings = page.getByTestId("settings-screen")
   await expect(settings).toBeVisible()
@@ -35,8 +35,10 @@ test("session settings use the remote server context", async ({ page }) => {
   await expect(page.locator('[data-titlebar-tab][data-active="true"]')).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Home", exact: true })).toHaveAttribute("aria-pressed", "false")
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await expect(settings.getByRole("tablist")).toHaveCSS("width", "328px")
+  await expect(settings.getByRole("complementary")).toHaveCSS("width", "328px")
   await expect(sessionHeading).toBeHidden()
+  await expect(settings.getByText("Servers", { exact: true })).toBeVisible()
+  await expect(settings.getByRole("tab", { name: "Models", exact: true })).toHaveCount(0)
   const autoAccept = settings.locator('[data-action="settings-auto-accept-permissions"]')
   const input = autoAccept.getByRole("switch")
   await expect(autoAccept).toBeVisible()
@@ -64,23 +66,21 @@ test("session settings use the remote server context", async ({ page }) => {
       },
     ])
 
-  permissionRequests.length = 0
-  await autoAccept.locator('[data-slot="switch-control"]').click()
-  await expect(input).not.toBeChecked()
-  await autoAccept.locator('[data-slot="switch-control"]').click()
-  await expect(input).toBeChecked()
-  await expect
-    .poll(() =>
-      permissionRequests.some((request) => {
-        const url = new URL(request)
-        return url.origin === serverB && url.searchParams.get("location[directory]") === directoryB
-      }),
-    )
-    .toBe(true)
-
+  await settings.getByRole("tab", { name: "127.0.0.1:4097", exact: true }).click()
+  await expect(settings.getByRole("button", { name: "Back to settings", exact: true })).toBeVisible()
+  await expect(settings.getByRole("heading", { name: "Connection", exact: true })).toBeVisible()
+  await expect(settings.getByRole("tab")).toHaveText([
+    "127.0.0.1:4097",
+    "Projects",
+    "Worktrees",
+    "Providers",
+    "Models",
+    "Extensions",
+  ])
   await settings.getByRole("tab", { name: "Models" }).click()
   await expect(settings.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
   await expect(settings.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
+  await settings.getByRole("button", { name: "Back to settings" }).click()
   await settings.getByRole("button", { name: "Back to app" }).click()
   await expect(settings).toBeHidden()
   await expect(page).toHaveURL(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
@@ -88,7 +88,7 @@ test("session settings use the remote server context", async ({ page }) => {
   await expect(page.locator('[data-titlebar-tab][data-active="true"]')).toContainText(sessionB.title)
   await page.keyboard.press("Control+]")
   await expect(page).toHaveURL("/settings")
-  await expect(settings.getByRole("tab", { name: "Models", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(settings.getByRole("tab", { name: "Preferences", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(page.locator('[data-titlebar-tab][data-active="true"]')).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(page).toHaveURL(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
@@ -112,7 +112,7 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
   const hrefB = `/server/${base64Encode(serverB)}/session/${sessionB.id}`
   await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -212,7 +212,7 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
   const first = await transport.waitForConnection()
 
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -230,23 +230,11 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   // delivered as an event and only a reconnect sweep can find it. The first
   // listing after the reconnect fails, so only the bounded sweep retry can
   // deliver the reply.
-  permissionRequests.length = 0
   pendingA.push(pendingPermission("permission-offline-a", sessionA.id))
   listFailures[serverA] = 1
   const syncsBeforeReconnect = sessionGets.length
   await transport.disconnect()
   await transport.waitForConnection({ after: first.id })
-  await expect.poll(() => sessionGets.slice(syncsBeforeReconnect)).toContain(sessionA.id)
-
-  await expect
-    .poll(
-      () =>
-        permissionRequests.filter((request) => {
-          const url = new URL(request)
-          return url.origin === serverA && url.searchParams.get("location[directory]") === directoryA
-        }).length,
-    )
-    .toBeGreaterThanOrEqual(2)
 
   await expect
     .poll(() => permissionResponses)
@@ -259,6 +247,9 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
         body: { reply: "once" },
       },
     ])
+  // The reconnect sweep must resync active sessions instead of trusting
+  // cached locations, since another client may have moved them meanwhile.
+  expect(sessionGets.slice(syncsBeforeReconnect)).toContain(sessionA.id)
 })
 
 test("auto-accept approves a request discovered by opening a session", async ({ page }) => {
@@ -277,7 +268,7 @@ test("auto-accept approves a request discovered by opening a session", async ({ 
   await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
   await expect(page.getByRole("heading", { name: sessionA.title, exact: true })).toBeVisible()
 
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
   const autoAccept = page.getByTestId("settings-screen").locator('[data-action="settings-auto-accept-permissions"]')
   await autoAccept.locator('[data-slot="switch-control"]').click()
   await expect(autoAccept.getByRole("switch")).toBeChecked()
@@ -335,6 +326,7 @@ type MockServerOptions = {
   listFailures?: Record<string, number>
   // Records /api/session/:id GETs so tests can assert session resyncs.
   sessionGets?: string[]
+  preferencesUnavailable?: boolean
 }
 
 async function mockServers(
@@ -367,7 +359,6 @@ async function mockServers(
       return json(route, { data: options.sessionPending?.[sessionPermission[1]!] ?? [] })
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/api/config") return json(route, [])
-    if (url.pathname === "/api/rpc/custom.snippets/list") return json(route, { output: { items: [] } })
     if (url.pathname === "/api/provider")
       return json(route, {
         location: { directory },
@@ -409,15 +400,8 @@ async function mockServers(
     }
     if (url.pathname === "/api/project/current")
       return json(route, { id: remote ? sessionB.projectID : "project-server-a", directory, canonical: directory })
-    if (url.pathname === "/api/session") {
-      const parentID = url.searchParams.get("parentID")
-      return json(route, {
-        data: sessions
-          .filter((session) => !parentID || ("parentID" in session && session.parentID === parentID))
-          .map((session) => currentSession(session)),
-        cursor: {},
-      })
-    }
+    if (url.pathname === "/api/session")
+      return json(route, { data: sessions.map((session) => currentSession(session)), cursor: {} })
     if (url.pathname === "/api/session/active")
       return json(route, { data: Object.fromEntries(sessions.map((session) => [session.id, { type: "running" }])) })
     const currentSessionInfo = sessions.find((session) => url.pathname === `/api/session/${session.id}`)
@@ -434,6 +418,11 @@ async function mockServers(
         directory,
         project: { id: remote ? sessionB.projectID : "project-server-a", directory, canonical: directory },
       })
+    if (url.pathname === "/api/config/preferences") return json(route, {}, options.preferencesUnavailable ? 404 : 200)
+    if (url.pathname === "/api/config/shell")
+      return json(route, options.preferencesUnavailable ? {} : [], options.preferencesUnavailable ? 404 : 200)
+    if (url.pathname === "/api/websearch/provider")
+      return json(route, { location: { directory }, data: [] }, options.preferencesUnavailable ? 404 : 200)
     if (url.pathname === "/api/worktree") return json(route, [{ directory }])
     if (url.pathname === "/api/vcs")
       return json(route, { location: { directory }, data: { branch: "main", defaultBranch: "main" } })

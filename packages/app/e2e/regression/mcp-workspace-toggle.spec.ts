@@ -1,8 +1,7 @@
 import { base64Encode } from "@opencode/util/encode"
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test } from "@playwright/test"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
-import { pressPlatformShortcut } from "../utils/command-palette"
 
 const directory = "C:\\OpenCode\\main"
 const workspace = "C:\\OpenCode\\worktree"
@@ -60,7 +59,9 @@ for (const shared of [true, false]) {
     await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
     await expectSessionTitle(page, title)
     await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toBeEditable()
-    const dialog = await openMcpDialog(page)
+    await page.getByRole("button", { name: "Session details", exact: true }).click()
+    await page.getByRole("button", { name: "MCP", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "MCP", exact: true })
     await expect(dialog.getByText("figma-desktop", { exact: true })).toBeVisible()
     const toggle = dialog.getByRole("switch")
     await expect(toggle).not.toBeChecked()
@@ -92,7 +93,7 @@ for (const surface of ["popover", "dialog"] as const) {
     const state = { fail: true, status: surface === "popover" ? "failed" : "disabled" }
     const requests: { path: string; directory: string }[] = []
     await page.addInitScript(() => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { showStatus: true } }))
+      localStorage.setItem("settings.v3", JSON.stringify({ keybinds: { "mcp.toggle": "ctrl+;" } }))
     })
     await mockOpenCodeServer(page, {
       directory,
@@ -113,6 +114,10 @@ for (const surface of ["popover", "dialog"] as const) {
       const url = new URL(route.request().url())
       const target = url.searchParams.get("location[directory]") ?? directory
       requests.push({ path: url.pathname, directory: target })
+      if (url.pathname === "/api/mcp/figma-desktop/disconnect") {
+        state.status = "disabled"
+        return route.fulfill({ status: 204 })
+      }
       if (url.pathname === "/api/mcp/figma-desktop/connect") {
         state.status = state.fail ? "failed" : "connected"
         // Connection failures are reported by the refreshed status, not the HTTP response.
@@ -137,17 +142,19 @@ for (const surface of ["popover", "dialog"] as const) {
     await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
     await expectSessionTitle(page, title)
     await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toBeEditable()
-    if (surface === "popover") await page.getByRole("button", { name: "Status", exact: true }).click()
-    if (surface === "dialog") await openMcpDialog(page)
-    const panel =
-      surface === "popover"
-        ? page.getByRole("tabpanel", { name: /^(?:\d+ )?MCP$/ })
-        : page.getByRole("dialog", { name: "MCPs", exact: true })
-    const toggle =
-      surface === "popover"
-        ? panel.getByRole("button", { name: "figma-desktop", exact: true }).getByRole("switch")
-        : panel.getByRole("switch")
+    if (surface === "popover") {
+      await page.getByRole("button", { name: "Session details", exact: true }).click()
+      await page.getByRole("button", { name: "MCP", exact: true }).click()
+    }
+    if (surface === "dialog") await page.keyboard.press("Control+;")
+    const panel = page.getByRole("dialog", { name: surface === "popover" ? "MCP" : "MCPs", exact: true })
+    const toggle = panel.getByRole("switch")
     await expect(panel.getByText("figma-desktop", { exact: true })).toBeVisible()
+    await expect(toggle).toBeEnabled()
+    if (surface === "popover") {
+      await expect(toggle).toBeChecked()
+      await panel.getByText("figma-desktop", { exact: true }).click()
+    }
     await expect(toggle).not.toBeChecked()
     await expect(toggle).toBeEnabled()
     requests.length = 0
@@ -157,7 +164,7 @@ for (const surface of ["popover", "dialog"] as const) {
       .getByRole("listitem", { includeHidden: true })
       .filter({ has: page.getByText("Request failed", { exact: true }) })
     await expect(toast.getByText(`figma-desktop: ${error}`, { exact: true })).toBeVisible()
-    await expect(toggle).not.toBeChecked()
+    await expect(toggle).toBeChecked({ checked: surface === "popover" })
     await expect(toggle).toBeEnabled()
     expect(requests.filter((request) => request.path.endsWith("/connect"))).toEqual([
       { path: "/api/mcp/figma-desktop/connect", directory: workspace },
@@ -172,26 +179,21 @@ for (const surface of ["popover", "dialog"] as const) {
     await toast.getByRole("button", { name: "Dismiss", exact: true }).click()
     await expect(toast).toBeHidden()
     state.fail = false
-    if (surface === "popover") await page.getByRole("button", { name: "Status", exact: true }).click()
-    if (surface === "dialog") await openMcpDialog(page)
+    if (surface === "popover") {
+      await expect(page.getByRole("dialog", { name: "Session details", exact: true })).toBeHidden()
+      await page.getByRole("button", { name: "Session details", exact: true }).click()
+      await page.getByRole("button", { name: "MCP", exact: true }).click()
+    }
+    if (surface === "dialog") await page.keyboard.press("Control+;")
     await expect(toggle).toBeEnabled()
+    if (surface === "popover") {
+      await panel.getByText("figma-desktop", { exact: true }).click()
+      await expect(toggle).not.toBeChecked()
+      await expect(toggle).toBeEnabled()
+    }
     await panel.locator('[data-slot="switch-control"]').click()
     await expect(toggle).toBeChecked()
     await expect(toggle).toBeEnabled()
     await expect(toast).toBeHidden()
   })
-}
-
-async function openMcpDialog(page: Page) {
-  await pressPlatformShortcut(page, "Shift+P")
-  const palette = page.getByRole("dialog")
-  const search = palette.getByRole("textbox")
-  await expect(search).toBeFocused()
-  await search.fill("Toggle MCPs")
-  const command = palette.getByRole("option", { name: /^Toggle MCPs/ })
-  await expect(command).toHaveAttribute("aria-selected", "true")
-  await search.press("Enter")
-  const dialog = page.getByRole("dialog", { name: "MCPs", exact: true })
-  await expect(dialog).toBeVisible()
-  return dialog
 }

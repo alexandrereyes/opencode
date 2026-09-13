@@ -1,4 +1,4 @@
-import type { Platform } from "../../../../../app/src/runtime/platform/platform"
+import type { Platform } from "../../../../../app-custom/src/runtime/platform/platform"
 import { createComponent, createContext, useContext, type ParentProps } from "solid-js"
 
 const value: Platform = {

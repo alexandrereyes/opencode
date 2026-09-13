@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import type { OpenCodeEvent } from "@opencode/client/promise"
 import { base64Encode } from "@opencode/util/encode"
-import { expectComposerText } from "../utils/composer"
-import { pressPlatformShortcut } from "../utils/command-palette"
 import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible } from "../utils/waits"
 
@@ -82,10 +80,10 @@ for (const viewport of [
     const editor = page.locator('[data-component="composer-editor"]')
     await draftFollowUp(page)
     await expect(page.locator('[data-action="composer-submit"]')).toBeDisabled()
-    await editor.press(viewport.name === "desktop" ? "Enter" : "Shift+Enter")
-    await pressPlatformShortcut(page, "Enter")
+    await editor.press("Enter")
+    await editor.press("ControlOrMeta+Enter")
     await page.locator('[data-component="composer"]').dispatchEvent("submit")
-    await expectComposerText(editor, followUp)
+    await expect(editor).toHaveText(followUp)
     await expect(editor).toBeInViewport()
 
     expect(mock.worktreeRequests).toEqual([expect.objectContaining({ from: directory })])
@@ -137,7 +135,7 @@ for (const viewport of [
       await expect(pending.message).toHaveAttribute("data-timeline-part-id", `${pending.messageID}:text:0`)
       await expect(pending.shimmer).toHaveAttribute("data-active", "true")
       await expect(pending.title).toHaveText("Session")
-      await expectComposerText(editor, followUp)
+      await expect(editor).toHaveText(followUp)
       expect(mock.calls).toEqual(["worktree"])
 
       await page.locator(`[data-titlebar-tab-link][href="${sessionPath}${otherID}"]`).click()
@@ -172,7 +170,7 @@ for (const viewport of [
     await expect(pending.message).toHaveCount(1)
     await expect(pending.message.locator('[data-slot="user-message-text"]')).toHaveText(text)
     await expect(pending.message).toHaveAttribute("data-timeline-part-id", `${pending.messageID}:text:0`)
-    await expectComposerText(editor, followUp)
+    await expect(editor).toHaveText(followUp)
     await expect(page.locator('[data-action="composer-submit"]')).toBeEnabled()
     expect(mock.prompts).toHaveLength(1)
     await page.locator('[data-action="composer-submit"]').click()
@@ -187,11 +185,11 @@ for (const viewport of [
 
 for (const direction of ["ltr", "rtl"]) {
   test(`keeps the title and message stable through worktree creation in ${direction}`, async ({ page }) => {
-    const mock = await openDraft(page, { reviewClosed: true })
+    const mock = await openDraft(page)
     await page.locator("html").evaluate((element, direction) => element.setAttribute("dir", direction), direction)
     const pending = await submitPending(page, mock)
     await draftFollowUp(page)
-    await pressPlatformShortcut(page, "Home")
+    await page.locator('[data-component="composer-editor"]').press("ControlOrMeta+Home")
     const title = page.locator("[data-session-title]").getByRole("heading", { level: 1 })
     const before = await title.boundingBox()
     const messageBefore = await pending.message.boundingBox()
@@ -205,12 +203,12 @@ for (const direction of ["ltr", "rtl"]) {
         const spinner = document.querySelector(
           '[data-titlebar-tab-slot][data-active="true"] [data-component="session-progress-indicator-v2"]',
         )
-        const editor = document.querySelector<HTMLElement>('[data-component="composer-editor"]')
+        const editor = document.querySelector('[data-component="composer-editor"]')
         frames.push({
           title: title?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }) ? title.textContent : null,
           message: !!message?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }),
           spinner: !!spinner?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }),
-          draft: editor?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }) ? editor.innerText : null,
+          draft: editor?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true }) ? editor.textContent : null,
         })
         frame = requestAnimationFrame(sample)
       }
@@ -229,7 +227,7 @@ for (const direction of ["ltr", "rtl"]) {
     await expect(pending.shimmer).toHaveCount(0)
     await expect(pending.message.locator('[data-slot="user-message-text"]')).toHaveText(text)
     await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
-    await expectComposerText(page.locator('[data-component="composer-editor"]'), followUp)
+    await expect(page.locator('[data-component="composer-editor"]')).toHaveText(followUp)
     await expect(page.locator('[data-component="composer-editor"]')).toBeFocused()
     const frames = await observation.evaluate((observation) => observation.stop())
     await observation.dispose()
@@ -249,7 +247,7 @@ for (const direction of ["ltr", "rtl"]) {
     expect(after?.height).toBe(before?.height)
     expect(messageAfter).toEqual(messageBefore)
     await page.locator('[data-component="composer-editor"]').pressSequentially("Also: ")
-    await expectComposerText(page.locator('[data-component="composer-editor"]'), `Also: ${followUp}`)
+    await expect(page.locator('[data-component="composer-editor"]')).toHaveText(`Also: ${followUp}`)
     expect(mock.calls).toEqual(["worktree", "session", "prompt"])
   })
 }
@@ -267,7 +265,7 @@ for (const failure of ["worktree", "session"]) {
     )
 
     await expect(page).toHaveURL(draftPath)
-    await expectComposerText(page.locator('[data-component="composer-editor"]'), `${text}\n\n${followUp}`)
+    await expect(page.locator('[data-component="composer-editor"]')).toHaveText(`${text}\n\n${followUp}`)
     await expect(page.locator('[data-action="composer-submit"]')).toBeEnabled()
     await expect(pending.shimmer).toHaveCount(0)
     expect(mock.prompts).toEqual([])
@@ -289,7 +287,7 @@ test("preserves both inputs when the initial prompt cannot be sent", async ({ pa
   mock.worktree.resolve({ status: 200, json: { directory: workspace } })
 
   await expect(pending.shimmer).toHaveCount(0)
-  await expectComposerText(page.locator('[data-component="composer-editor"]'), `${text}\n\n${followUp}`)
+  await expect(page.locator('[data-component="composer-editor"]')).toHaveText(`${text}\n\n${followUp}`)
   await expect(page.locator('[data-action="composer-submit"]')).toBeEnabled()
   await expect.poll(() => mock.calls).toEqual(["worktree", "session", "prompt", "prompt"])
   expect(mock.prompts).toEqual([])
@@ -348,11 +346,7 @@ test("restores the draft after closing and revisiting a pending session that fai
   await draftFollowUp(page)
   const tab = page.locator(`[data-titlebar-tab-link][href="${sessionPath}${pending.sessionID}"]`)
 
-  await page
-    .locator("[data-titlebar-tab-slot]")
-    .filter({ has: tab })
-    .getByRole("button", { name: "Close tab", exact: true })
-    .click()
+  await page.locator("[data-titlebar-tab-slot]").filter({ has: tab }).locator('[data-slot="tab-close"] button').click()
 
   await expect(page).toHaveURL(`${sessionPath}${otherID}`)
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
@@ -370,14 +364,14 @@ test("restores the draft after closing and revisiting a pending session that fai
   await expect(pending.shimmer).toBeVisible()
   await expect(pending.shimmer).toContainText("Creating worktree")
   await expect(pending.shimmer).toHaveAttribute("data-active", "true")
-  await expectComposerText(page.locator('[data-component="composer-editor"]'), followUp)
+  await expect(page.locator('[data-component="composer-editor"]')).toHaveText(followUp)
   expect(mock.calls).toEqual(["worktree"])
 
   mock.worktree.resolve({ status: 500, json: { message: "Worktree creation failed after revisiting the session" } })
 
   await expect(page).toHaveURL(draftPath)
   await expect(page.getByText("Failed to create worktree", { exact: true })).toBeVisible()
-  await expectComposerText(page.locator('[data-component="composer-editor"]'), `${text}\n\n${followUp}`)
+  await expect(page.locator('[data-component="composer-editor"]')).toHaveText(`${text}\n\n${followUp}`)
   await expect(page.locator('[data-action="composer-submit"]')).toBeEnabled()
   await expect(page.getByRole("button", { name: "New worktree", exact: true })).toBeVisible()
   await expect(page.locator(`[data-titlebar-tab-link][href="${draftPath}"]`)).toHaveCount(1)
@@ -434,7 +428,7 @@ test("executes a selected slash command after creating its worktree", async ({ p
     ])
   await expect(pending.shimmer).toHaveCount(0)
   await expect(page.locator('[data-slot="user-message-text"]')).toHaveText(expanded)
-  await expectComposerText(editor, followUp)
+  await expect(editor).toHaveText(followUp)
   await expect(page.locator('[data-action="composer-submit"]')).toBeEnabled()
   expect(mock.creates).toEqual([expect.objectContaining({ id: pending.sessionID, location: { directory: workspace } })])
   expect(mock.prompts).toEqual([])
@@ -452,18 +446,12 @@ async function draftFollowUp(page: Page) {
   await editor.fill("")
   await page.evaluate((text) => navigator.clipboard.writeText(text), followUp)
   await editor.press("ControlOrMeta+V")
-  await expectComposerText(editor, followUp)
+  await expect(editor).toHaveText(followUp)
 }
 
 async function openDraft(
   page: Page,
-  options?: {
-    failSessionCreate?: boolean
-    untitled?: boolean
-    command?: boolean
-    events?: () => OpenCodeEvent[]
-    reviewClosed?: boolean
-  },
+  options?: { failSessionCreate?: boolean; untitled?: boolean; command?: boolean; events?: () => OpenCodeEvent[] },
 ) {
   const worktree = Promise.withResolvers<{ status: number; json: { directory?: string; message?: string } }>()
   const calls: string[] = []
@@ -575,7 +563,7 @@ async function openDraft(
     )
   }
   await page.addInitScript(
-    ({ directory, draftID, otherID, server, reviewClosed }) => {
+    ({ directory, draftID, otherID, server }) => {
       localStorage.setItem(
         "opencode.global.dat:server",
         JSON.stringify({
@@ -590,15 +578,8 @@ async function openDraft(
           { type: "session", sessionId: otherID, server },
         ]),
       )
-      if (reviewClosed) {
-        localStorage.setItem("settings.v3", JSON.stringify({ appearance: { tabLayout: "horizontal" } }))
-        localStorage.setItem(
-          "opencode.window.browser.dat:tabs.panes",
-          JSON.stringify({ [`draft:${draftID}`]: { review: false } }),
-        )
-      }
     },
-    { directory, draftID, otherID, server, reviewClosed: options?.reviewClosed },
+    { directory, draftID, otherID, server },
   )
   await page.goto(draftPath)
   await expectAppVisible(page.locator('[data-component="composer-editor"]'))

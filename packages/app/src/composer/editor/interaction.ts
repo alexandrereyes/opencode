@@ -10,7 +10,6 @@ import type {
   ComposerHistoryEntry,
   ComposerOption,
   ComposerPersistedState,
-  ComposerPrompt,
   ComposerSuggestion,
 } from "../types"
 import {
@@ -21,27 +20,12 @@ import {
 } from "../suggestions/machine"
 import { clonePrompt, promptLength } from "../prompt-parts"
 import type { ComposerQueue } from "../adapter"
-import { parseSessionReferences } from "../session-reference"
-import { getCursorPosition, getSelectionRange, setCursorPosition } from "./dom"
 
 export type ComposerSelectControl = {
   options: Accessor<ComposerOption[]>
   current: Accessor<string>
   onSelect: (id: string) => void
   keybind?: Accessor<string[]>
-}
-
-type ComposerEditorBinding = {
-  sync: () => void
-  setText: (value: string) => void
-  addText: (value: string, at?: number) => void
-  addMention: (
-    mention: Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>,
-    range?: { start: number; end: number },
-  ) => void
-  replacePrompt: (prompt: ComposerPrompt, range: { start: number; end: number }, order?: number) => void
-  removeAttachment: (id: string) => boolean
-  trackSelection: () => { current: () => { start: number; end: number }; order: number; release: () => void }
 }
 
 export type ComposerEditorView = {
@@ -76,9 +60,7 @@ export function createComposerEditor(input: {
   history?: ComposerHistory
   commands: Accessor<ComposerSuggestion[]>
   context: Accessor<ComposerSuggestion[]>
-  snippets?: Accessor<ComposerSuggestion[]>
   searchContextFiles: (query: string) => ComposerSuggestion[] | Promise<ComposerSuggestion[]>
-  server?: Accessor<string>
   openAttachment?: (attachment: ComposerAttachment) => void
   openContext?: (key: string) => void
   onContextRemove?: (item: ComposerComment) => void
@@ -88,22 +70,13 @@ export function createComposerEditor(input: {
   attachments?: ComposerAttachmentConfig
 }) {
   let editor: HTMLElement | undefined
-  let editorBinding: ComposerEditorBinding | undefined
   let fileInput: HTMLInputElement | undefined
   const draft = createComposerEditorActions(input.store)
   const [state, setState] = input.state ?? createComposerEditorState(draft.state.mode)
   function addPart(part: ComposerPersistedState["prompt"][number]) {
     if (part.type === "image") return false
-    if (part.type !== "text") {
-      if (editorBinding) {
-        editorBinding.addMention(part)
-        return true
-      }
+    if (part.type === "file" || part.type === "agent") {
       draft.addMention(part)
-      return true
-    }
-    if (editorBinding) {
-      editorBinding.addText(part.content)
       return true
     }
     draft.addText(part.content)
@@ -115,23 +88,7 @@ export function createComposerEditor(input: {
         capture: () => ({
           current: () => draft.state.prompt,
           cursor: () => draft.state.cursor,
-          set: (prompt, cursor) => {
-            draft.setPrompt(prompt, cursor)
-            editorBinding?.sync()
-          },
-          replace: (prompt, range, order) => {
-            if (editorBinding) {
-              editorBinding.replacePrompt(prompt, range, order)
-              return
-            }
-            draft.replaceRange(prompt, range)
-          },
-          selection: () =>
-            (editor && getSelectionRange(editor)) ?? {
-              start: draft.state.cursor ?? promptLength(draft.state.prompt),
-              end: draft.state.cursor ?? promptLength(draft.state.prompt),
-            },
-          trackSelection: () => editorBinding?.trackSelection(),
+          set: (prompt, cursor) => draft.setPrompt(prompt, cursor),
         }),
         editor: () => editor,
         focusEditor: () => editor?.focus(),
@@ -148,7 +105,7 @@ export function createComposerEditor(input: {
   }
   const contextList = useFilteredList<ComposerSuggestion>({
     items: async (query) => {
-      const fixed = input.context().filter((item) => item.kind !== "file" && item.kind !== "skill")
+      const fixed = input.context().filter((item) => item.kind !== "file")
       const recent = input.context().filter((item) => item.kind === "file" && item.recent)
       if (!query.trim()) return [...fixed, ...recent]
       const seen = new Set(recent.map((item) => item.id))
@@ -156,83 +113,44 @@ export function createComposerEditor(input: {
       return [...fixed, ...recent, ...files]
     },
     key: (item) => item.id,
-    filterKeys: ["label", "search"],
+    filterKeys: ["label"],
     skipFilter: (item) => item.kind === "file" && !item.recent,
     groupBy: (item) => {
       if (item.kind === "reference") return "reference"
-      if (item.kind === "session") return "session"
-      if (item.kind === "app") return "app"
+      if (item.kind === "skill") return "skill"
       if (item.kind === "agent") return "agent"
       if (item.kind === "resource") return "resource"
       if (item.recent) return "recent"
       return "file"
     },
     sortGroupsBy: (a, b) => {
-      const order = ["session", "app", "reference", "agent", "resource", "recent", "file"]
+      const order = ["reference", "skill", "agent", "resource", "recent", "file"]
       return order.indexOf(a.category) - order.indexOf(b.category)
     },
-  })
-  const skillList = useFilteredList<ComposerSuggestion>({
-    items: () => input.context().filter((item) => item.kind === "skill"),
-    key: (item) => item.id,
-    filterKeys: ["label"],
   })
   const commandList = useFilteredList<ComposerSuggestion>({
     items: () => input.commands(),
     key: (item) => item.id,
     filterKeys: ["trigger", "title"],
   })
-  const snippetList = useFilteredList<ComposerSuggestion>({
-    items: () => input.snippets?.() ?? [],
-    key: (item) => item.id,
-    filterKeys: ["search", "label"],
-  })
-  const list = () =>
-    state.popover.type === "context"
-      ? contextList
-      : state.popover.type === "skill"
-        ? skillList
-        : state.popover.type === "snippet"
-          ? snippetList
-          : commandList
+  const list = () => (state.popover.type === "context" ? contextList : commandList)
   const suggestions = () => list().flat()
 
   const execute = (command: ComposerInteractionCommand) => {
     if (command.type === "draft.setText") {
-      if (editorBinding) {
-        editorBinding.setText(command.value)
-        return
-      }
       draft.setText(command.value)
       return
     }
     if (command.type === "draft.addText") {
-      if (editorBinding) {
-        editorBinding.addText(command.value, command.at)
-        return
-      }
-      draft.addText(command.value, command.at)
+      draft.addText(command.value)
       return
     }
     if (command.type === "mention.add") {
-      if (command.item.mention) {
-        if (editorBinding) {
-          editorBinding.addMention(command.item.mention, command.range)
-          return
-        }
-        draft.addMention(command.item.mention, command.range)
-      }
+      if (command.item.mention) draft.addMention(command.item.mention, command.range)
       return
     }
     if (command.type === "popover.filter") {
-      ;(command.popover === "command"
-        ? commandList
-        : command.popover === "skill"
-          ? skillList
-          : command.popover === "snippet"
-            ? snippetList
-            : contextList
-      ).onInput(command.query)
+      ;(command.popover === "command" ? commandList : contextList).onInput(command.query)
       return
     }
     if (command.type === "suggestion.select") {
@@ -240,7 +158,7 @@ export function createComposerEditor(input: {
       if (item) dispatch({ type: "popover.select", item })
       return
     }
-    if (command.type === "focus.editor") editor?.focus()
+    if (command.type === "focus.editor") requestAnimationFrame(() => editor?.focus())
   }
 
   function dispatch(event: ComposerInteractionEvent) {
@@ -271,7 +189,6 @@ export function createComposerEditor(input: {
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.isComposing || event.keyCode === 229 || event.key === "Dead") return true
     if (
       state.mode === "normal" &&
       (event.metaKey || event.ctrlKey) &&
@@ -336,7 +253,7 @@ export function createComposerEditor(input: {
   const restoreFocus = (cursor = draft.state.cursor ?? promptLength(draft.state.prompt)) => {
     requestAnimationFrame(() => {
       editor?.focus()
-      if (editor) setCursorPosition(editor, cursor)
+      setEditorCursor(editor, cursor)
     })
   }
 
@@ -344,15 +261,14 @@ export function createComposerEditor(input: {
     input.history?.restore?.(entry.metadata)
     const cursor = position === "start" ? 0 : promptLength(entry.prompt)
     draft.setPrompt(clonePrompt(entry.prompt), cursor)
-    editorBinding?.sync()
     restoreFocus(cursor)
   }
   const navigateHistory = (direction: "up" | "down") => {
     if (!input.history || !editor) return false
-    const selection = getSelectionRange(editor)
-    if (!selection || selection.start !== selection.end) return false
+    const selection = window.getSelection()
+    if (!selection?.isCollapsed || !editor.contains(selection.anchorNode)) return false
     const text = draft.state.prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    if (!canNavigateHistory(direction, text, getCursorPosition(editor), state.historyIndex >= 0)) return false
+    if (!canNavigateHistory(direction, text, editorCursor(editor), state.historyIndex >= 0)) return false
     const entries = input.history.entries(state.mode)
     if (direction === "up") {
       if (entries.length === 0 || state.historyIndex >= entries.length - 1) return false
@@ -392,9 +308,6 @@ export function createComposerEditor(input: {
     parts() {
       return draft.state.prompt
     },
-    cursor() {
-      return draft.state.cursor ?? promptLength(draft.state.prompt)
-    },
     contextItem(id: string) {
       return draft.state.context.items.find((item) => item.key === id)
     },
@@ -418,7 +331,6 @@ export function createComposerEditor(input: {
       input.openAttachment?.(attachment)
     },
     removeAttachment(id: string) {
-      if (editorBinding?.removeAttachment(id)) return
       draft.removeAttachment(id)
     },
     canSubmit() {
@@ -429,13 +341,11 @@ export function createComposerEditor(input: {
         return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
       }
       if (persisted.prompt.some((part) => part.type === "image")) return true
-      if (persisted.quotes?.length) return true
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
       return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
     },
-    setEditor(element: HTMLElement, binding?: ComposerEditorBinding) {
+    setEditor(element: HTMLElement) {
       editor = element
-      editorBinding = binding
       input.onEditor?.(element)
     },
     restoreFocus,
@@ -443,9 +353,6 @@ export function createComposerEditor(input: {
       if (prompt) draft.setPrompt(prompt, cursor)
       if (input.view.draftOnly) return
       dispatch({ type: "input.changed", value, persist: !prompt })
-    },
-    normalize(prompt: ComposerPrompt, cursor: number) {
-      draft.setPrompt(prompt, cursor)
     },
     onCursor(cursor: number) {
       draft.setCursor(cursor)
@@ -486,16 +393,28 @@ export function createComposerEditor(input: {
       }
       const text = clipboard?.getData("text/plain").replace(/\r\n?/g, "\n")
       if (!text) return
-      const references = input.server ? parseSessionReferences(text, input.server()) : undefined
-      if (!references) return
       event.preventDefault()
-      const range = (editor && getSelectionRange(editor)) ?? {
-        start: draft.state.cursor ?? 0,
-        end: draft.state.cursor ?? 0,
-      }
-      if (editorBinding) editorBinding.replacePrompt(references, range)
-      if (!editorBinding) draft.replaceRange(references, range)
-      restoreFocus()
+      // insertText emits input events per line, repeatedly parsing and saving the draft.
+      // Escaped HTML inserts multiline text once and preserves native selection and undo.
+      const multiline = text.includes("\n")
+      const value = multiline ? text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;") : text
+      if (
+        typeof document.execCommand === "function" &&
+        document.execCommand(multiline ? "insertHTML" : "insertText", false, value)
+      )
+        return
+      const target = event.currentTarget
+      const selection = window.getSelection()
+      if (!(target instanceof HTMLElement) || !selection?.rangeCount || !target.contains(selection.anchorNode)) return
+      const range = selection.getRangeAt(0)
+      range.deleteContents()
+      const node = document.createTextNode(text)
+      range.insertNode(node)
+      range.setStartAfter(node)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: text }))
     },
     onDragEnter(event: DragEvent) {
       event.preventDefault()
@@ -536,4 +455,34 @@ function canNavigateHistory(direction: "up" | "down", text: string, cursor: numb
   if (inHistory) return position === 0 || position === text.length
   if (direction === "up") return position === 0 && text.length === 0
   return position === text.length
+}
+
+function editorCursor(editor: HTMLElement) {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) return editor.textContent?.length ?? 0
+  const range = selection.getRangeAt(0).cloneRange()
+  range.selectNodeContents(editor)
+  range.setEnd(selection.anchorNode!, selection.anchorOffset)
+  return range.toString().length
+}
+
+function setEditorCursor(editor: HTMLElement | undefined, cursor: number) {
+  if (!editor) return
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
+  let remaining = cursor
+  let node = walker.nextNode()
+  while (node) {
+    const length = node.textContent?.length ?? 0
+    if (remaining <= length) {
+      const range = document.createRange()
+      range.setStart(node, remaining)
+      range.collapse(true)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return
+    }
+    remaining -= length
+    node = walker.nextNode()
+  }
 }

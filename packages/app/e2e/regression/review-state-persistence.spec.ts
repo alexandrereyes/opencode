@@ -17,12 +17,13 @@ test("restores review mode and selected file per session", async ({ page }) => {
   await setup(page)
   await page.goto(sessionHref(sessionA))
   await expectSessionTitle(page, titleA)
-  await page.locator("#session-side-panel-review-tab").click()
+  await page.getByRole("button", { name: "Toggle review" }).click()
 
   await selectFile(page, "alpha.ts")
 
   await switchSession(page, titleB)
-  await page.locator("#session-side-panel-review-tab").click()
+  await page.getByRole("button", { name: "Toggle review" }).click()
+  await expect(page.getByRole("button", { name: "Git changes" })).toBeVisible()
   await selectFile(page, "gamma.ts")
 
   await switchSession(page, titleA)
@@ -43,14 +44,17 @@ for (const tab of ["Context", "Open file", "README.md"]) {
     await setup(page)
     await page.goto(sessionHref(sessionA))
     await expectSessionTitle(page, titleA)
+    await page.getByRole("button", { name: "Toggle review" }).click()
 
     const panel = page.locator("#review-panel")
+    if (tab === "Context") await page.getByRole("button", { name: "View context usage" }).click()
     if (tab !== "Context") await panel.getByRole("button", { name: "Open file" }).click()
     if (tab === "README.md") await panel.getByRole("button", { name: "README.md" }).click()
     await expect(panel.getByRole("tab", { name: tab, selected: true })).toBeVisible()
 
     await switchSession(page, titleB)
-    await expect(panel.getByRole("tab", { name: "Context", selected: true })).toBeVisible()
+    await page.getByRole("button", { name: "Toggle review" }).click()
+    await expect(panel.locator("#session-side-panel-review-tab")).toHaveAttribute("aria-selected", "true")
 
     await switchSession(page, titleA)
     await expect(panel.getByRole("tab", { name: tab, selected: true })).toBeVisible()
@@ -71,13 +75,12 @@ for (const tab of ["Context", "Open file", "README.md"]) {
     await expect(selected).toHaveAttribute("aria-selected", "true")
 
     await switchSession(page, titleB)
-    await expect(panel.getByRole("tab", { name: "Context", selected: true })).toBeVisible()
+    await expect(review).toHaveAttribute("aria-selected", "true")
     await switchSession(page, titleA)
     await expect(selected).toHaveAttribute("aria-selected", "true")
     await selected.press("Control+w")
     await expect(selected).toHaveCount(0)
-    if (tab === "Context") await expect(review).toHaveAttribute("aria-selected", "true")
-    if (tab !== "Context") await expect(panel.getByRole("tab", { name: "Context", selected: true })).toBeVisible()
+    await expect(review).toHaveAttribute("aria-selected", "true")
   })
 }
 

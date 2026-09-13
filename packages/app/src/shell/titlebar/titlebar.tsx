@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, mapArray, Match, Show, Switch, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
@@ -15,7 +15,6 @@ import { useSettings } from "@/settings/model"
 import { WindowsAppMenu } from "./windows-menu"
 import { applyPath, backPath, forwardPath, type HistoryLocation } from "./history"
 import { TitlebarTabStrip } from "@/shell/titlebar/tab-strip"
-import { SessionSidebar } from "./sidebar"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createMediaQuery } from "@solid-primitives/media"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/shell/titlebar/session-events"
@@ -28,16 +27,12 @@ import { newTabTooltipKeybind } from "@/shell/commands/tooltip-keybind"
 import { TitlebarRightMount } from "@/shell/titlebar/right-slot"
 import { MobileDrawer, MobileDrawerContent, MobileDrawerLabel, MobileDrawerTrigger } from "@/shell/mobile-drawer"
 import { sessionTabTitle } from "./tab-title"
-import { MobileTabProvider } from "./mobile-tab-actions"
-import { useDialog } from "@opencode/ui/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
-import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-progress-indicator-v2"
 import { projectForSession } from "@/shell/layout/helpers"
 import { useSettingsDialog } from "@/settings/command"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
-import prodIcon from "../../../../desktop/icons/prod/64x64.png"
 
 const titlebarHeight = 36
 const windowsTitlebarHeight = 44 // Includes the content inset; matches the native Windows overlay.
@@ -63,7 +58,6 @@ export function Titlebar(props: {
   const language = useLanguage()
   const settings = useSettings()
   const openSettings = useSettingsDialog()
-  const dialog = useDialog()
   const navigate = useNavigate()
   const location = useLocation()
   const mobile = createMediaQuery("(max-width: 767px)")
@@ -306,7 +300,6 @@ export function Titlebar(props: {
                   void tabs.newDraft({ server: activeTab.server, directory: activeTab.directory }, "", model)
                   return
                 }
-                case "agent-dashboard":
                 case "settings":
                 case "home": {
                   const selection = layout.home.selection()
@@ -419,32 +412,6 @@ export function Titlebar(props: {
             })
 
             const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false })
-            const mobileTabActivity = mapArray(
-              () => (mobile() ? tabsStore : []),
-              (tab) => {
-                if (tab.type === "draft") return () => ({ tab, unread: false, updated: 0 })
-                const state = useSessionTabAvatarState(
-                  () => tab.server,
-                  () => tab.sessionId,
-                  () => true,
-                )
-                return () => {
-                  const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-                  const value = conn ? global.ensureServerCtx(conn).data.session.get(tab.sessionId) : undefined
-                  return {
-                    tab,
-                    unread: state.unread(),
-                    updated: value?.time.updated ?? value?.time.created ?? 0,
-                  }
-                }
-              },
-            )
-            const orderedMobileTabs = createMemo(() =>
-              mobileTabActivity()
-                .map((activity) => activity())
-                .sort((a, b) => Number(b.unread) - Number(a.unread) || b.updated - a.updated)
-                .map((item) => item.tab),
-            )
             const currentProject = createMemo(() => {
               const tab = currentTab()
               const value = session()
@@ -453,7 +420,6 @@ export function Titlebar(props: {
               return projectForSession(value, conn ? global.ensureServerCtx(conn).projects.list() : [])
             })
             const currentTitle = () => {
-              if (layout.route().type === "agent-dashboard") return language.t("dashboard.title")
               const tab = currentTab()
               if (!tab) return language.t("home.title")
               if (tab.type === "draft") return language.t("session.tab.session")
@@ -493,8 +459,6 @@ export function Titlebar(props: {
                   fallback={
                     <MobileDrawer
                       open={mobileTabs.open}
-                      suspended={!!dialog.active}
-                      closeOnOutsideFocus={false}
                       onOpenChange={(open) => setMobileTabs("open", open)}
                       onContentPresentChange={(present) => {
                         if (present || !mobileTabs.settings) return
@@ -548,37 +512,26 @@ export function Titlebar(props: {
                         <span data-slot="mobile-tab-title" dir="auto" class="min-w-0 flex-1 truncate text-start">
                           {currentTitle()}
                         </span>
+                        <span class="shrink-0 text-v2-text-text-muted">{tabsStore.length}</span>
                       </MobileDrawerTrigger>
-                      <button
-                        type="button"
-                        data-action="mobile-titlebar-new-session"
-                        class="flex h-7 shrink-0 items-center rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
-                        onClick={() => {
-                          openNewTab()
-                          setMobileTabs("open", false)
-                        }}
-                      >
-                        {language.t("command.session.new")}
-                      </button>
-                      <MobileDrawerContent suspended={!!dialog.active}>
+                      <MobileDrawerContent>
                         <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                         <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
                           <div data-slot="mobile-tabs-drawer-list">
-                            <MobileTabProvider open={mobileTabs.open}>
-                              <TitlebarTabStrip
-                                orientation="vertical"
-                                tabs={orderedMobileTabs()}
-                                currentTab={currentTab()}
-                                onNavigate={(tab) => {
-                                  tabs.select(tab)
-                                  setMobileTabs("open", false)
-                                }}
-                                onClose={(tab) => {
-                                  const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
-                                  if (index !== -1) tabsStoreActions.closeTab(index)
-                                }}
-                              />
-                            </MobileTabProvider>
+                            <TitlebarTabStrip
+                              orientation="vertical"
+                              tabs={tabsStore}
+                              currentTab={currentTab()}
+                              onNavigate={(tab) => {
+                                tabs.select(tab)
+                                setMobileTabs("open", false)
+                              }}
+                              onClose={(tab) => {
+                                const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
+                                if (index !== -1) tabsStoreActions.closeTab(index)
+                              }}
+                              onReorder={(keys) => tabsStoreActions.reorder(keys)}
+                            />
                           </div>
                           <button
                             type="button"
@@ -689,45 +642,48 @@ export function Titlebar(props: {
                                 data-tauri-drag-region
                               />
                             </Show>
-                            <SessionSidebar
-                              currentTab={currentTab()}
-                              header={<ChannelIndicator sidebar debugTools={props.debugTools} />}
+                            <Show when={!windows()}>
+                              <ChannelIndicator sidebar debugTools={props.debugTools} />
+                            </Show>
+                            {homeButton(true)}
+                            <button
+                              type="button"
+                              data-action="vertical-tabs-new-session"
+                              class="group flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base"
+                              onClick={openNewTab}
+                              aria-label={language.t("command.session.new")}
                             >
-                              {homeButton(true)}
-                              <button
-                                type="button"
-                                data-action="vertical-tabs-new-session"
-                                class="group flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base"
-                                onClick={openNewTab}
-                                aria-label={language.t("command.session.new")}
+                              <Icon name="edit" class="shrink-0" />
+                              <span class="min-w-0 truncate">{language.t("command.session.new")}</span>
+                              <span
+                                class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
+                                aria-hidden="true"
                               >
-                                <Icon name="edit" class="shrink-0" />
-                                <span class="min-w-0 truncate">{language.t("command.session.new")}</span>
-                                <span
-                                  class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
-                                  aria-hidden="true"
-                                >
-                                  <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
-                                </span>
-                              </button>
-                              <button
-                                type="button"
-                                data-action="agent-dashboard"
-                                data-state={layout.route().type === "agent-dashboard" ? "pressed" : undefined}
-                                class="group mt-1 flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base data-[state=pressed]:bg-v2-background-bg-layer-02 data-[state=pressed]:text-v2-text-text-base"
-                                onClick={() => navigate("/agent-dashboard")}
-                                aria-current={layout.route().type === "agent-dashboard" ? "page" : undefined}
-                              >
-                                <Icon name="gauge" class="shrink-0" />
-                                <span class="min-w-0 truncate">{language.t("dashboard.title")}</span>
-                              </button>
-                            </SessionSidebar>
-                            <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col gap-2">
-                              <TitlebarRightMount vertical />
-                              <Show when={updateState().visible}>
-                                <TitlebarUpdateIconButton state={updateState()} vertical />
-                              </Show>
+                                <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
+                              </span>
+                            </button>
+                            <div class="h-4 w-full shrink-0" aria-hidden="true" />
+                            <div class="flex min-h-0 flex-1 flex-col gap-1">
+                              <TitlebarTabStrip
+                                orientation="vertical"
+                                tabs={tabsStore}
+                                currentTab={currentTab()}
+                                onNavigate={(tab, el) => {
+                                  tabs.select(tab)
+                                  el?.scrollIntoView({ behavior: "instant", block: "nearest" })
+                                }}
+                                onClose={(tab) => {
+                                  const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
+                                  if (index !== -1) tabsStoreActions.closeTab(index)
+                                }}
+                                onReorder={(keys) => tabsStoreActions.reorder(keys)}
+                              />
                             </div>
+                            <Show when={updateState().visible}>
+                              <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col">
+                                <TitlebarUpdateIconButton state={updateState()} vertical />
+                              </div>
+                            </Show>
                           </Portal>
                         )}
                       </Show>
@@ -831,16 +787,15 @@ function ChannelIndicator(props: {
   const language = useLanguage()
   const platform = usePlatform()
   const channel = import.meta.env.VITE_OPENCODE_CHANNEL
-  if ((!channel || channel === "prod") && !props.sidebar) return null
+  if (!channel || channel === "prod") return null
 
-  const label = () =>
-    !channel || channel === "prod" ? language.t("sidebar.brand") : language.t(`titlebar.channel.${channel}`)
+  const label = () => language.t(`titlebar.channel.${channel}`)
   const debug = () => (channel === "dev" ? props.debugTools : undefined)
   return (
     <Tooltip
       placement={props.sidebar ? "right" : "bottom"}
       value={label()}
-      class={`shrink-0 [app-region:no-drag] ${props.sidebar ? "ms-0.5 self-start" : ""} ${props.horizontal ? "me-1.5" : ""} ${props.horizontal && platform.platform === "web" ? "ps-2.5" : ""}`}
+      class={`shrink-0 [app-region:no-drag] ${props.sidebar ? "mb-4 ms-0.5 self-start" : ""} ${props.horizontal ? "me-1.5" : ""} ${props.horizontal && platform.platform === "web" ? "ps-2.5" : ""}`}
     >
       <Dynamic
         component={debug() ? "button" : "div"}
@@ -858,7 +813,7 @@ function ChannelIndicator(props: {
         aria-pressed={debug()?.visible}
       >
         <img
-          src={channel === "beta" ? betaIcon : channel === "dev" || channel === "local" ? devIcon : prodIcon}
+          src={channel === "beta" ? betaIcon : devIcon}
           alt={debug() ? "" : label()}
           class="shrink-0 rounded-[4px] shadow-[var(--v2-elevation-raised)]"
           classList={{ "size-6": props.sidebar, "size-5": !props.sidebar }}

@@ -2,15 +2,12 @@ import { batch, untrack, type Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
 import type {
   ComposerAgentPart,
-  ComposerAppPart,
   ComposerFilePart,
   ComposerSkillPart,
-  ComposerSnippetPart,
   ComposerPersistedState,
   ComposerPrompt,
-  ComposerSessionPart,
 } from "../types"
-import { normalizeComposerCursor, normalizeComposerPrompt, normalizeComposerText, promptLength } from "../prompt-parts"
+import { promptLength } from "../prompt-parts"
 
 export type ComposerStateStore = [
   Store<ComposerPersistedState> | Accessor<Store<ComposerPersistedState>>,
@@ -35,15 +32,8 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       return store()
     },
     setPrompt(prompt: ComposerPrompt, cursor?: number) {
-      const next = normalizeComposerPrompt(prompt)
       // Persisted setters encode on every call, even inside a reactive batch.
-      batch(() =>
-        setStore()({
-          prompt: next,
-          ...(cursor !== undefined ? { cursor: normalizeComposerCursor(prompt, cursor) } : {}),
-          retry: undefined,
-        }),
-      )
+      batch(() => setStore()({ prompt, ...(cursor !== undefined ? { cursor } : {}), retry: undefined }))
     },
     setCursor(cursor: number) {
       if (untrack(() => store().cursor) === cursor) return
@@ -54,181 +44,104 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       setStore()({ mode, retry: undefined })
     },
     setText(content: string) {
-      const value = normalizeComposerText(content)
       batch(() =>
         setStore()((state) => ({
           prompt: [
-            { type: "text", content: value, start: 0, end: value.length },
-            ...state.prompt.filter((part) => part.type === "image" && !part.mention),
+            { type: "text", content, start: 0, end: content.length },
+            ...state.prompt.filter((part) => part.type === "image"),
           ],
-          cursor: value.length,
+          cursor: content.length,
           retry: undefined,
         })),
       )
     },
-    addText(content: string, cursor = store().cursor ?? promptLength(store().prompt)) {
-      const value = normalizeComposerText(content)
+    addText(content: string) {
+      const cursor = store().cursor ?? promptLength(store().prompt)
       batch(() =>
-        setStore()((state) => {
-          const position = normalizeComposerCursor(state.prompt, cursor)
-          return {
-            prompt: insertText(normalizeComposerPrompt(state.prompt), position, value),
-            cursor: position + value.length,
-            retry: undefined,
-          }
-        }),
+        setStore()((state) => ({
+          prompt: insertText(state.prompt, cursor, content),
+          cursor: cursor + content.length,
+          retry: undefined,
+        })),
       )
-    },
-    replaceRange(content: ComposerPrompt, range: { start: number; end: number }) {
-      const prompt = store().prompt
-      const start = normalizeComposerCursor(prompt, Math.min(range.start, range.end))
-      const end = normalizeComposerCursor(prompt, Math.max(range.start, range.end))
-      const replacement = normalizeComposerPrompt(content)
-      setStore()({
-        prompt: replacePromptRange(normalizeComposerPrompt(prompt), start, end, replacement),
-        cursor: start + promptLength(replacement),
-        retry: undefined,
-      })
     },
     removeContext(key: string) {
       setStore()("context", "items", (items) => items.filter((item) => item.key !== key))
       clearRetry()
     },
     addMention(
-      mention:
-        | ComposerFilePart
-        | ComposerAgentPart
-        | ComposerSkillPart
-        | ComposerAppPart
-        | ComposerSessionPart
-        | ComposerSnippetPart,
+      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
       range?: { start: number; end: number },
     ) {
-      const prompt = normalizeComposerPrompt(store().prompt)
-      const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-      const end = range
-        ? normalizeComposerCursor(store().prompt, range.end)
-        : normalizeComposerCursor(store().prompt, store().cursor ?? promptLength(store().prompt))
-      const trigger = mention.type === "snippet" ? "#" : mention.type === "skill" ? "$" : "@"
-      const start = range
-        ? normalizeComposerCursor(store().prompt, range.start)
-        : text.slice(0, end).lastIndexOf(trigger)
-      setStore()({
-        prompt: insertMention(prompt, start < 0 ? end : start, end, mention),
-        cursor: (start < 0 ? end : start) + mention.content.length + 1,
-        retry: undefined,
-      })
+      const text = store()
+        .prompt.map((part) => ("content" in part ? part.content : ""))
+        .join("")
+      const end = range?.end ?? store().cursor ?? text.length
+      const start = range?.start ?? text.slice(0, end).lastIndexOf("@")
+      setStore()("prompt", insertMention(store().prompt, start < 0 ? end : start, end, mention))
+      setStore()("cursor", (start < 0 ? end : start) + mention.content.length + 1)
+      clearRetry()
     },
     removeAttachment(id: string) {
-      setStore()("prompt", (parts) => {
-        const attachment = parts.find((part) => part.type === "image" && part.id === id)
-        const remaining = parts.filter((part) => part.type !== "image" || part.id !== id)
-        if (!attachment || attachment.type !== "image" || !attachment.mention) return remaining
-        return replacePromptRange(remaining, attachment.mention.start, attachment.mention.end, [])
-      })
+      setStore()("prompt", (parts) => parts.filter((part) => part.type !== "image" || part.id !== id))
       clearRetry()
     },
   }
 }
 
 function insertText(prompt: ComposerPrompt, cursor: number, content: string): ComposerPrompt {
-  return replacePromptRange(prompt, cursor, cursor, [{ type: "text", content, start: 0, end: content.length }])
-}
-
-function replacePromptRange(
-  prompt: ComposerPrompt,
-  start: number,
-  end: number,
-  content: ComposerPrompt,
-): ComposerPrompt {
-  const before: ComposerPrompt = []
-  const after: ComposerPrompt = []
-  const insertedLength = promptLength(content)
-  const images = prompt.flatMap((part) => {
-    if (part.type !== "image") return []
-    if (!part.mention) return [part]
-    const overlaps =
-      start === end
-        ? start > part.mention.start && start < part.mention.end
-        : start < part.mention.end && end > part.mention.start
-    if (overlaps) return []
-    if (part.mention.end <= start) return [part]
-    const delta = insertedLength - (end - start)
-    return [
-      {
-        ...part,
-        mention: { ...part.mention, start: part.mention.start + delta, end: part.mention.end + delta },
-      },
-    ]
-  })
   let position = 0
-  prompt.forEach((part) => {
-    if (part.type === "image") return
-    const partStart = position
+  let inserted = false
+  const parts = prompt.flatMap<ComposerPrompt[number]>((part) => {
+    if (part.type === "image") return [part]
+    const start = position
     position += part.content.length
-    if (position <= start) {
-      before.push(part)
-      return
+    if (inserted) return [part]
+    if (part.type === "text" && cursor >= start && cursor <= position) {
+      inserted = true
+      const offset = cursor - start
+      return [{ ...part, content: part.content.slice(0, offset) + content + part.content.slice(offset) }]
     }
-    if (partStart >= end) {
-      after.push(part)
-      return
-    }
-    const prefix = part.content.slice(0, Math.max(0, start - partStart))
-    const suffix = part.content.slice(Math.max(0, end - partStart))
-    if (prefix) before.push({ type: "text", content: prefix, start: 0, end: 0 })
-    if (suffix) after.push({ type: "text", content: suffix, start: 0, end: 0 })
+    if (cursor > start) return [part]
+    inserted = true
+    return [{ type: "text", content, start: 0, end: 0 }, part]
   })
-  return withOffsets([
-    ...before,
-    ...content.map((part) =>
-      part.type === "image" && part.mention
-        ? {
-            ...part,
-            mention: {
-              ...part.mention,
-              start: part.mention.start + start,
-              end: part.mention.end + start,
-            },
-          }
-        : part,
-    ),
-    ...after,
-    ...images,
-  ])
+  if (!inserted) parts.push({ type: "text", content, start: 0, end: 0 })
+  return withOffsets(parts)
 }
 
 function insertMention(
   prompt: ComposerPrompt,
   start: number,
   end: number,
-  mention:
-    | ComposerFilePart
-    | ComposerAgentPart
-    | ComposerSkillPart
-    | ComposerAppPart
-    | ComposerSessionPart
-    | ComposerSnippetPart,
+  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
 ): ComposerPrompt {
-  return replacePromptRange(prompt, start, end, [mention, { type: "text", content: " ", start: 0, end: 0 }])
+  if (start === 0 && end === 0) {
+    return withOffsets([mention, { type: "text", content: " ", start: 0, end: 0 }, ...prompt])
+  }
+  let position = 0
+  const parts = prompt.flatMap<ComposerPrompt[number]>((part) => {
+    if (part.type === "image") return [part]
+    const partStart = position
+    position += part.content.length
+    if (part.type !== "text" || start < partStart || end > position) return [part]
+    const before = part.content.slice(0, start - partStart)
+    const after = part.content.slice(end - partStart)
+    return [
+      ...(before ? [{ type: "text" as const, content: before, start: 0, end: 0 }] : []),
+      mention,
+      { type: "text" as const, content: ` ${after}`, start: 0, end: 0 },
+    ]
+  })
+  return withOffsets(parts)
 }
 
 function withOffsets(prompt: ComposerPrompt): ComposerPrompt {
   let offset = 0
-  return prompt
-    .reduce<ComposerPrompt>((result, part) => {
-      const previous = result.at(-1)
-      if (part.type === "text" && previous?.type === "text") {
-        result[result.length - 1] = { ...previous, content: previous.content + part.content }
-        return result
-      }
-      result.push(part)
-      return result
-    }, [])
-    .map((part) => {
-      if (part.type === "image") return part
-      const next = { ...part, start: offset, end: offset + part.content.length }
-      offset = next.end
-      return next
-    })
+  return prompt.map((part) => {
+    if (part.type === "image") return part
+    const next = { ...part, start: offset, end: offset + part.content.length }
+    offset = next.end
+    return next
+  })
 }

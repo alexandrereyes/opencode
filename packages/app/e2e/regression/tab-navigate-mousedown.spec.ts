@@ -1,7 +1,6 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
 import { base64Encode } from "@opencode/util/encode"
-import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
-import { pressPlatformShortcut } from "../utils/command-palette"
+import { currentSession } from "../utils/mock-server"
 
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 const sessionA = session("ses_tab_a", "Tab A session")
@@ -179,40 +178,22 @@ test("vertical tabs show project details, resize, and navigate", async ({ page }
   await page.goto(hrefA)
 
   const sidebar = page.locator('[data-slot="vertical-tabs-sidebar"]')
-  await sidebar.getByRole("button", { name: "Attention view", exact: true }).click()
-  await expect(sidebar.getByRole("navigation", { name: "Sessions", exact: true })).toHaveAttribute(
-    "data-mode",
-    "projects",
-  )
-  const tabA = sidebar
-    .locator(`[data-titlebar-tab-link][href="${hrefA}"]`)
-    .filter({ has: page.locator('[data-slot="tab-project"]') })
-  const tabB = sidebar
-    .locator(`[data-titlebar-tab-link][href="${hrefB}"]`)
-    .filter({ has: page.locator('[data-slot="tab-project"]') })
+  const tabA = sidebar.locator(`[data-titlebar-tab-link][href="${hrefA}"]`)
+  const tabB = sidebar.locator(`[data-titlebar-tab-link][href="${hrefB}"]`)
   await expect(sidebar).toHaveCSS("width", "260px")
   await expect(tabA).toContainText(sessionA.title)
   await expect(tabB).toContainText(sessionB.title)
-  await expect(sidebar.getByRole("button", { name: "tab-project", exact: true })).toBeVisible()
+  await expect(tabB.locator('[data-slot="tab-project"]')).toHaveText("tab-project")
   await expect(
     sidebar.getByRole("button", { name: "Home", exact: true }).getByText("Home", { exact: true }),
   ).toBeVisible()
-  const newSession = sidebar.locator('[data-action="vertical-tabs-new-session"]')
-  await expect(newSession).toBeVisible()
-  await expect(sidebar.locator('[data-slot="vertical-tabs-footer"]')).toBeVisible()
-  const status = sidebar.getByRole("button", { name: "Status", exact: true })
-  await expect(status).toBeVisible()
-  await expect
-    .poll(async () => {
-      const bounds = await sidebar.boundingBox()
-      const button = await status.boundingBox()
-      return !!bounds && !!button && button.x >= bounds.x && button.x - bounds.x <= 12
-    })
-    .toBe(true)
+  await expect(sidebar.getByRole("button", { name: "New session" })).toBeVisible()
+  await expect(sidebar.locator('[data-slot="vertical-tabs-footer"]')).toHaveCount(0)
+  await expect(sidebar.getByRole("button", { name: "Status", exact: true })).toHaveCount(0)
   await expect(page.locator('[data-slot="titlebar-v2"]')).toBeHidden()
   await expect
     .poll(async () => {
-      const button = await newSession.boundingBox()
+      const button = await sidebar.getByRole("button", { name: "New session" }).boundingBox()
       const tab = await tabA.boundingBox()
       return !!button && !!tab && button.y + button.height < tab.y
     })
@@ -228,7 +209,7 @@ test("vertical tabs show project details, resize, and navigate", async ({ page }
   await page.mouse.move(box.x + box.width / 2 - 80, box.y + box.height / 2)
   await page.mouse.up()
   await expect(sidebar).toHaveCSS("width", "180px")
-  await expect(sidebar.getByRole("button", { name: "tab-project", exact: true })).toBeVisible()
+  await expect(tabB.locator('[data-slot="tab-project"]')).toHaveText("tab-project")
 
   const resized = await handle.boundingBox()
   if (!resized) throw new Error("resized vertical tab handle has no bounding box")
@@ -312,7 +293,7 @@ for (const count of [0, 26]) {
 }
 
 for (const direction of ["ltr", "rtl"]) {
-  test(`vertical tabs keep Status pinned without Settings in ${direction}`, async ({ page }, testInfo) => {
+  test(`vertical tabs scroll without the retired Status footer in ${direction}`, async ({ page }, testInfo) => {
     await mockServer(page)
     await page.addInitScript(
       ({ server, sessionA, sessionB, directory }) => {
@@ -341,62 +322,43 @@ for (const direction of ["ltr", "rtl"]) {
     const sidebar = page.locator('[data-slot="vertical-tabs-sidebar"]')
     const settings = sidebar.getByRole("button", { name: "Settings", exact: true })
     const status = sidebar.getByRole("button", { name: "Status", exact: true })
-    const scroll = sidebar.getByRole("navigation", { name: "Sessions", exact: true })
-    const lastDraft = sidebar.locator('a[href="/new-session?draftId=draft_scroll_23"]')
-    await expect(sidebar.locator("[data-titlebar-tab-slot]")).toHaveCount(24)
-    await expect(status).toHaveText("Status")
+    const scroll = sidebar.locator('[data-slot="vertical-tabs-scroll"]')
+    const hrefB = `/server/${base64Encode(server)}/session/${sessionB.id}`
+    const tabB = sidebar.locator(`[data-titlebar-tab-link][href="${hrefB}"]`)
+    await expect(sidebar.locator("[data-titlebar-tab-slot]")).toHaveCount(26)
+    await expect(status).toHaveCount(0)
     await expect(settings).toHaveCount(0)
-    await expect(status.locator('[data-slot="status-indicator"]')).toBeVisible()
     await page.evaluate((direction) => document.documentElement.setAttribute("dir", direction), direction)
 
     for (const width of [1280, 800]) {
       await page.setViewportSize({ width, height: 360 })
       await expect(sidebar).toHaveCSS("padding-inline-start", "10px")
       await expect(sidebar).toHaveCSS("padding-bottom", "10px")
-      await expect(sidebar.locator('[data-slot="vertical-tabs-footer"]')).toHaveCSS("margin-top", "8px")
-      await expect(status).toBeInViewport({ ratio: 1 })
-      await expect(status).toHaveCSS("height", "28px")
-      await expect
-        .poll(() =>
-          sidebar.locator('[data-slot="vertical-tabs-footer"]').evaluate((element) => {
-            const content = Math.max(
-              0,
-              ...Array.from(element.children, (child) => child.getBoundingClientRect().height),
-            )
-            return element.getBoundingClientRect().height - content
-          }),
-        )
-        .toBe(0)
-      await expect(scroll).toHaveCSS("overflow-y", "auto")
+      await expect(sidebar.locator('[data-slot="vertical-tabs-footer"]')).toHaveCount(0)
+      await expect(scroll).toHaveCSS("mask-image", /linear-gradient/)
       await scroll.evaluate((element) => element.scrollTo(0, 0))
       await expect(scroll).toHaveJSProperty("scrollTop", 0)
-      const pinnedStatus = await status.boundingBox()
       await scroll.hover()
       await page.mouse.wheel(0, 200)
       await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
-      await expect.poll(() => status.boundingBox()).toEqual(pinnedStatus)
-      await testInfo.attach(`vertical-tabs-status-${width}`, {
+      await expect(status).toHaveCount(0)
+      await testInfo.attach(`vertical-tabs-scroll-${width}`, {
         body: await sidebar.screenshot(),
         contentType: "image/png",
       })
 
-      await lastDraft.scrollIntoViewIfNeeded()
-      await expect(lastDraft).toBeInViewport({ ratio: 1 })
+      await scroll.evaluate((element) => element.scrollTo(0, element.scrollHeight))
+      await expect(tabB).toBeInViewport({ ratio: 1 })
       await expect
         .poll(async () => {
-          const tab = await lastDraft.boundingBox()
+          const tab = await tabB.boundingBox()
           const viewport = await scroll.boundingBox()
           return !!tab && !!viewport && tab.y + tab.height <= viewport.y + viewport.height - 16
         })
         .toBe(true)
-      await expect.poll(() => status.boundingBox()).toEqual(pinnedStatus)
+      await expect(status).toHaveCount(0)
       await expect(settings).toHaveCount(0)
     }
-
-    await status.click()
-    await expect(status).toHaveAttribute("aria-expanded", "true")
-    await status.press("Escape")
-    await expect(status).toHaveAttribute("aria-expanded", "false")
   })
 }
 
@@ -484,7 +446,7 @@ test("dedicated experimental settings control vertical tab details", async ({ pa
 
   await page.goto("/")
   await expect(page.locator('[data-slot="titlebar-tabs"] [data-titlebar-tab-link]')).toBeVisible()
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
 
   const settings = page.getByTestId("settings-screen")
   await expect(settings).toBeVisible()
@@ -505,18 +467,13 @@ test("dedicated experimental settings control vertical tab details", async ({ pa
   await expect(layout).toContainText("Vertical")
   await expect(page.locator('[data-slot="vertical-tabs-sidebar"]')).toBeVisible()
   await expect(page.locator('[data-slot="titlebar-tabs"]')).toHaveCount(0)
-  const sidebar = page.locator('[data-slot="vertical-tabs-sidebar"]')
-  await sidebar.getByRole("button", { name: "Attention view", exact: true }).click()
-  await expect(sidebar.getByRole("navigation", { name: "Sessions", exact: true })).toHaveAttribute(
-    "data-mode",
-    "projects",
-  )
-  const project = sidebar.getByRole("button", { name: "tab-project", exact: true })
-  await expect(project).toBeVisible()
+  const projectNames = page.locator('[data-slot="vertical-tabs-sidebar"] [data-slot="tab-project"]')
+  await expect(projectNames).toHaveCount(0)
   const projectNameSwitch = settings.getByRole("switch", { name: "Show project names", exact: true })
   await settings.locator('[data-action="settings-show-project-name"] [data-slot="switch-control"]').click()
   await expect(projectNameSwitch).toBeChecked()
-  await expect(settings.getByRole("tablist")).toHaveCSS("width", "240px")
+  await expect(projectNames).toHaveText(["tab-project"])
+  await expect(settings.getByRole("complementary")).toHaveCSS("width", "240px")
 
   await page.setViewportSize({ width: 920, height: 720 })
   await expect(page.locator('[data-slot="vertical-tabs-sidebar"]')).toHaveCSS("width", "260px")
@@ -561,14 +518,12 @@ test("dedicated experimental settings control vertical tab details", async ({ pa
     page
       .locator('[data-slot="vertical-tabs-sidebar"]')
       .locator(`[data-titlebar-tab-link][href="${href}"]`)
-      .filter({ has: page.locator('[data-slot="tab-project"]') })
       .getByText(sessionA.title, { exact: true }),
   ).toBeVisible()
   await expect(page.locator('[data-slot="titlebar-tabs"]')).toHaveCount(0)
-  await pressPlatformShortcut(page, ",")
+  await page.keyboard.press("Control+,")
   await settings.getByRole("tab", { name: "Experimental", exact: true }).click()
   await expect(layout).toContainText("Vertical")
-  await expect(projectNameSwitch).toBeChecked()
 })
 
 test("vertical tab preference uses the drawer on mobile", async ({ page }) => {
@@ -614,28 +569,66 @@ function session(id: string, title: string) {
 
 async function mockServer(page: Page) {
   const sessions = [sessionA, sessionB, sessionC]
-  await mockOpenCodeServer(page, {
-    sessions,
-    directory: sessionA.directory,
-    project: {
-      id: sessionA.projectID,
-      worktree: sessionA.directory,
-      name: "tab-project",
-      vcs: "git",
-      time: { created: 1, updated: 1 },
-      sandboxes: [],
-    },
-    provider: { all: [], connected: [] },
-    pageMessages: () => ({ items: [] }),
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.origin !== server) return route.fallback()
+    if (url.pathname === `/api/session/${unresolvedSessionID}`) return new Promise(() => {})
+    if (url.pathname === "/api/event") return sse(route)
+    if (url.pathname === "/api/config") return json(route, [])
+    if (url.pathname === "/api/session")
+      return json(route, { data: sessions.map((session) => currentSession(session)), cursor: {} })
+    if (url.pathname === "/api/session/active") return json(route, { data: {} })
+    const currentSessionInfo = sessions.find((item) => url.pathname === `/api/session/${item.id}`)
+    if (currentSessionInfo) return json(route, { data: currentSession(currentSessionInfo) })
+    if (sessions.some((item) => url.pathname === `/api/session/${item.id}/message`))
+      return json(route, { data: [], cursor: {} })
+    if (sessions.some((item) => url.pathname === `/api/session/${item.id}/inbox`)) return json(route, { data: [] })
+    if (["/api/agent", "/api/provider", "/api/model", "/api/command", "/api/reference"].includes(url.pathname))
+      return json(route, { location: { directory: sessionA.directory }, data: [] })
+    if (url.pathname === "/api/model/default")
+      return json(route, { location: { directory: sessionA.directory }, data: null })
+    if (url.pathname === "/api/permission/request" || url.pathname === "/api/form/request")
+      return json(route, { location: { directory: sessionA.directory }, data: [] })
+    if (url.pathname === "/api/mcp") return json(route, { location: { directory: sessionA.directory }, data: [] })
+    if (url.pathname === "/api/mcp/resource")
+      return json(route, { location: { directory: sessionA.directory }, data: { resources: [], templates: [] } })
+    if (url.pathname === "/api/project" || url.pathname === "/api/project/current") {
+      const project = {
+        id: sessionA.projectID,
+        canonical: sessionA.directory,
+        vcs: "git",
+        time: { created: 1, updated: 1 },
+        sandboxes: [],
+      }
+      return json(
+        route,
+        url.pathname === "/api/project" ? [project] : { id: project.id, directory: sessionA.directory },
+      )
+    }
+    if (url.pathname === "/api/location")
+      return json(route, {
+        directory: sessionA.directory,
+        project: { id: sessionA.projectID, directory: sessionA.directory, canonical: sessionA.directory },
+      })
+    if (url.pathname === "/api/worktree") return json(route, [{ directory: sessionA.directory }])
+    if (url.pathname === "/api/vcs")
+      return json(route, {
+        location: { directory: sessionA.directory },
+        data: { branch: "main", defaultBranch: "main" },
+      })
+    return json(route, {})
   })
-  await page.route("**/api/rpc/custom.navigation/list*", (route) =>
-    route.fulfill({
-      json: {
-        output: {
-          data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
-        },
-      },
-    }),
-  )
-  await page.route(`**/api/session/${unresolvedSessionID}`, () => new Promise(() => {}))
+}
+
+function json(route: Route, body: unknown, status = 200) {
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    headers: { "access-control-allow-origin": "*" },
+    body: JSON.stringify(body),
+  })
+}
+
+function sse(route: Route) {
+  return route.fulfill({ status: 200, contentType: "text/event-stream", body: ": ok\n\n" })
 }

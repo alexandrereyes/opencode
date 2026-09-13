@@ -1,6 +1,6 @@
 {
   "name": "@opencode/app",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "",
   "type": "module",
   "exports": {
@@ -57,9 +57,6 @@
     "vite-plugin-solid": "2.11.14"
   },
   "dependencies": {
-    "@codemirror/commands": "6.11.0",
-    "@codemirror/state": "6.7.1",
-    "@codemirror/view": "6.43.9",
     "@corvu/drawer": "catalog:",
     "@dnd-kit/abstract": "0.5.0",
     "@dnd-kit/dom": "0.5.0",
@@ -68,9 +65,8 @@
     "@ibm/plex": "6.4.1",
     "@kobalte/core": "catalog:",
     "@opencode/client": "workspace:*",
-    "@opencode/plugin-app-custom": "workspace:*",
-    "@opencode/plugin-browser": "workspace:*",
     "@opencode/schema": "workspace:*",
+    "@opencode/plugin-browser": "workspace:*",
     "@opencode/session-ui": "workspace:*",
     "@opencode/ui": "workspace:*",
     "@opencode/util": "workspace:*",
@@ -88,6 +84,7 @@
     "@solidjs/router": "catalog:",
     "@tanstack/solid-query": "5.91.4",
     "@tanstack/solid-virtual": "catalog:",
+    "core-js": "3.50.0",
     "effect": "catalog:",
     "fuzzysort": "catalog:",
     "ghostty-web": "github:anomalyco/ghostty-web#83c0a07b8628b748aed073b232cb4b52a6ca11c1",

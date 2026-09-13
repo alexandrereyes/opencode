@@ -378,15 +378,7 @@ test.describe("smoke: session timeline", () => {
 })
 
 async function configureSmokePage(page: Page, directory: string) {
-  await page.route("**/api/rpc/custom.snippets/list", (route) => route.fulfill({ json: { output: { items: [] } } }))
-  await page.route("**/api/rpc/custom.native-apps/list**", (route) =>
-    route.fulfill({ json: { output: { os: null, apps: [] } } }),
-  )
-  await page.route("**/api/rpc/custom.subscriptions/list?*", (route) =>
-    route.fulfill({ json: { output: { status: "unconfigured", accounts: [] } } }),
-  )
   await page.addInitScript(() => {
-    localStorage.setItem("opencode.global.dat:layout", JSON.stringify({ review: { panelOpened: false } }))
     localStorage.setItem(
       "settings.v3",
       JSON.stringify({
@@ -535,7 +527,7 @@ async function expectCanScrollToStart(
   let current = await timelineState(page)
   let unchangedAtTop = 0
 
-  for (let attempt = 0; attempt < 1_600; attempt++) {
+  for (let attempt = 0; attempt < 800; attempt++) {
     collectSeen(current, seenParts, seenMessages)
     samples.push(sampleTraversal(current, seenParts.size, seenMessages.size))
     expectNoSmokeErrors(errors, current.errorToasts, current.forbiddenText)

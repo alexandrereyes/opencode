@@ -4,21 +4,21 @@ Production Solid components are tested through their existing Storybook stories 
 
 Keep each spec in the package that owns its production component:
 
-- `packages/session-ui/component-tests/` owns timeline, tool, notice, reasoning, lifecycle, and review coverage.
-- `packages/app/component-tests/` owns Composer and other app-only component coverage.
+- `packages/session-ui-custom/component-tests/` owns timeline, tool, notice, reasoning, lifecycle, and review coverage.
+- `packages/app-custom/component-tests/` owns Composer and other app-only component coverage.
 - `packages/storybook/playwright/` owns the shared Storybook startup configuration and `story` mount fixture.
 
 Run a package's isolated browser suite from that package:
 
 ```sh
 # Session UI components.
-cd packages/session-ui
+cd packages/session-ui-custom
 bun run test:components
 bun run test:components -- component-tests/session-timeline.spec.ts
 bun run test:components:ui
 
 # App-owned components.
-cd packages/app
+cd packages/app-custom
 bun run test:components
 bun run test:components -- component-tests/composer.spec.ts
 ```
@@ -26,11 +26,11 @@ bun run test:components -- component-tests/composer.spec.ts
 Both suites are separately filterable Turbo tasks:
 
 ```sh
-bun turbo test:components --filter=@opencode/session-ui
-bun turbo test:components --filter=@opencode/app
+bun turbo test:components --filter=@opencode/session-ui-custom
+bun turbo test:components --filter=@opencode/app-custom
 ```
 
-Component browser coverage deliberately remains separate from each package's default `test` script and from `packages/app`'s `test:e2e`, so expensive Storybook checks can be scheduled independently from required unit and full-app journey CI. Set `PLAYWRIGHT_STORYBOOK_URL` to reuse an existing Storybook instance or `PLAYWRIGHT_STORYBOOK_PORT` to choose its port.
+Component browser coverage deliberately remains separate from each package's default `test` script and from `packages/app-custom`'s `test:e2e`, so expensive Storybook checks can be scheduled independently from required unit and full-app journey CI. Set `PLAYWRIGHT_STORYBOOK_URL` to reuse an existing Storybook instance or `PLAYWRIGHT_STORYBOOK_PORT` to choose its port.
 
 ## Adding a test
 
@@ -54,7 +54,7 @@ story("preserves collapsed state while a tool completes", async ({ mount }) => {
 
 The story ID is the Storybook component ID followed by `--` and the kebab-cased story export. Open the same story in Storybook to inspect exactly the scenario covered by the browser test. Preserve an original-source-path comment for every migrated E2E case.
 
-Keep cross-route navigation, remote-server ownership, persistent session state, full-app virtualization, and workflows spanning independent surfaces in `packages/app/e2e/`.
+Keep cross-route navigation, remote-server ownership, persistent session state, full-app virtualization, and workflows spanning independent surfaces in `packages/app-custom/e2e/`.
 
 Component rendering and integration coverage can be complementary. A local story control that installs a completed message does not test event delivery, production reducer cleanup, or a live stream. Keep those original checks in E2E, including stream/chunk identity, compaction and retry events, independent lifecycle transitions, and the real app scroll owner. A provenance comment records the source of a component assertion; it is not evidence that its integration counterpart can be deleted.
 

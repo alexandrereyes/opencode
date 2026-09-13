@@ -10,7 +10,6 @@ import { createSessionComposerRegionController } from "./session-composer-region
 export function createSessionComposerController(input: {
   sessionID: string
   controls: Accessor<ComposerControls>
-  active: () => boolean
   dock: Parameters<typeof createSessionComposerRegionController>[0]
 }) {
   const settings = useSettings()
@@ -20,7 +19,6 @@ export function createSessionComposerController(input: {
     sessionID: input.sessionID,
     controls: input.controls,
     submitted: region.onResponseSubmit,
-    active: input.active,
     setEditor: (element) => {
       editor = element
       region.setPromptRef(element)

@@ -152,9 +152,7 @@ export function createActiveSessionRegion(input: {
     session: input.session,
     setActiveMessage: input.timeline.actions.setActiveMessage,
   })
-  const revertMessage: NonNullable<SessionUserActions["revert"]> = async ({ messageID }) => {
-    await revert.to(messageID)
-  }
+  const revertMessage: NonNullable<SessionUserActions["revert"]> = ({ messageID }) => revert.to(messageID)
   useComposerCommands()
   useSessionCommands({
     session: input.session,
@@ -189,15 +187,7 @@ export function createActiveSessionRegion(input: {
   const active = createMemo(
     on(
       () => (input.visible() ? input.session.identity.sessionID() : undefined),
-      (sessionID) =>
-        sessionID
-          ? createSessionComposerController({
-              sessionID,
-              controls,
-              active: () => input.session.identity.sessionID() === sessionID,
-              dock,
-            })
-          : undefined,
+      (sessionID) => (sessionID ? createSessionComposerController({ sessionID, controls, dock }) : undefined),
     ),
   )
 

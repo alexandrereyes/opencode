@@ -6,30 +6,17 @@ type TimeKey =
 
 type Translate = (key: TimeKey, params?: Record<string, string | number>) => string
 
-export function getRelativeTime(dateString: string | number, t: Translate, now = Date.now()): string {
-  const elapsed = elapsedTime(dateString, now)
-  if (!elapsed) return ""
-  if (elapsed.unit === "seconds") return t("common.time.justNow")
-  return t(`common.time.${elapsed.unit}Ago.short`, { count: elapsed.count })
-}
+export function getRelativeTime(dateString: string, t: Translate): string {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffSeconds = Math.floor(diffMs / 1000)
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  const diffHours = Math.floor(diffMinutes / 60)
+  const diffDays = Math.floor(diffHours / 24)
 
-type CompactTimeKey = `common.time.${"seconds" | "minutes" | "hours" | "days"}.compact`
-
-export function getCompactRelativeTime(
-  date: string | number,
-  plural: (key: CompactTimeKey, count: number) => string,
-  now = Date.now(),
-): string {
-  const elapsed = elapsedTime(date, now)
-  if (!elapsed) return ""
-  return plural(`common.time.${elapsed.unit}.compact`, elapsed.count)
-}
-
-function elapsedTime(date: string | number, now: number) {
-  const seconds = Math.max(0, Math.floor((now - new Date(date).getTime()) / 1000))
-  if (!Number.isFinite(seconds)) return
-  if (seconds < 60) return { unit: "seconds" as const, count: seconds }
-  if (seconds < 3600) return { unit: "minutes" as const, count: Math.floor(seconds / 60) }
-  if (seconds < 86400) return { unit: "hours" as const, count: Math.floor(seconds / 3600) }
-  return { unit: "days" as const, count: Math.floor(seconds / 86400) }
+  if (diffSeconds < 60) return t("common.time.justNow")
+  if (diffMinutes < 60) return t("common.time.minutesAgo.short", { count: diffMinutes })
+  if (diffHours < 24) return t("common.time.hoursAgo.short", { count: diffHours })
+  return t("common.time.daysAgo.short", { count: diffDays })
 }

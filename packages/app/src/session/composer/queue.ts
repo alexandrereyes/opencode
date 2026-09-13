@@ -8,12 +8,7 @@ import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import { clonePrompt, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
-import { extractPromptSessions, extractSessionPrompt } from "@/composer/prompt"
-import { formatSessionContext } from "@/composer/session-reference"
-import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
-import type { ChatQuote } from "@/composer/schema"
 import { blobDataUrl } from "@/runtime/persistence/drafts"
-import { uuid } from "@/runtime/persistence/uuid"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
@@ -27,7 +22,6 @@ type EditStash = {
   cursor: number
   mode: "normal" | "shell"
   retry: ReturnType<ComposerStateTarget["retry"]["current"]>
-  quotes: ChatQuote[]
 }
 
 export function createSessionQueue(input: {
@@ -56,7 +50,6 @@ export function createSessionQueue(input: {
             prompt: Prompt
             text: string
             delivery: ComposerDelivery
-            quotes: ChatQuote[]
           },
     ) => {
       if (change.type === "reorder") return rewrite(change.inboxIDs)
@@ -66,7 +59,6 @@ export function createSessionQueue(input: {
         change.item,
         change.prompt,
         change.text,
-        change.quotes,
       )
       // Admit before cancelling so a failed replacement never discards the original.
       const admitted = await data.session.prompt({
@@ -150,7 +142,7 @@ export function createSessionQueue(input: {
   }
 
   const edit = (id: string) => {
-    if (mutation.isPending || input.draft.revert.pending()) return false
+    if (mutation.isPending) return false
     if (state.editing?.id === id) return true
     const item = queued().find((entry) => entry.id === id)
     if (!item) return false
@@ -163,14 +155,12 @@ export function createSessionQueue(input: {
         cursor: input.draft.cursor() ?? promptLength(draft),
         mode: input.draft.mode.current(),
         retry: input.draft.retry.current(),
-        quotes: input.draft.quotes.all().map((quote) => ({ ...quote })),
       },
     })
-    const prompt = queuedPrompt(item)
+    const text = queuedPromptText(item)
     input.draft.mode.set("normal")
-    input.draft.quotes.replace(readChatQuotes(item.payload.metadata?.quotes))
-    input.draft.set(prompt, promptLength(prompt))
-    input.restoreFocus(promptLength(prompt))
+    input.draft.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
+    input.restoreFocus(text.length)
     return true
   }
   const cancelEdit = () => {
@@ -181,23 +171,17 @@ export function createSessionQueue(input: {
     // the retry marker.
     input.draft.mode.set(editing.stash.mode)
     input.draft.set(editing.stash.prompt, editing.stash.cursor)
-    input.draft.quotes.replace(editing.stash.quotes)
     if (editing.stash.retry) input.draft.retry.set(editing.stash.retry)
     input.restoreFocus(editing.stash.cursor)
   }
   const confirmEdit = (delivery: ComposerDelivery) => {
     const editing = state.editing
-    if (!editing || mutation.isPending || input.draft.revert.pending()) return
+    if (!editing || mutation.isPending) return
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    const quotes = input.draft.quotes.all().map((quote) => ({ ...quote }))
-    if (!text.trim() && !prompt.some((part) => part.type === "image") && !quotes.length) return cancelEdit()
+    if (!text.trim() && !prompt.some((part) => part.type === "image")) return cancelEdit()
     const item = queued().find((entry) => entry.id === editing.id)
-    const pristine =
-      item &&
-      text.trim() === queuedPromptText(item) &&
-      !prompt.some((part) => part.type === "image") &&
-      JSON.stringify(quotes) === JSON.stringify(readChatQuotes(item.payload.metadata?.quotes))
+    const pristine = item && text.trim() === queuedPromptText(item) && !prompt.some((part) => part.type === "image")
     if (pristine && delivery === "queue") return cancelEdit()
     mutation.mutate({
       type: "edit",
@@ -208,10 +192,8 @@ export function createSessionQueue(input: {
       prompt,
       text,
       delivery,
-      quotes,
     })
   }
-  onCleanup(input.draft.revert.onProject(cancelEdit))
   const editFirst = () => {
     const first = queued()[0]
     if (!first) return false
@@ -231,7 +213,7 @@ export function createSessionQueue(input: {
     cancelEdit,
     editFirst,
     rows,
-    busy: () => mutation.isPending || input.draft.revert.pending(),
+    busy: () => mutation.isPending,
     working: input.working,
     steer,
     remove,
@@ -254,66 +236,28 @@ export function queuedPromptRows(items: QueuedPrompt[], replacement?: { original
     .filter((item) => !replaced || item.id !== replacement.original)
     .map((item) => ({
       id: item.id,
-      text: queuedPromptText(item) || formatChatQuotes(readChatQuotes(item.payload.metadata?.quotes)),
+      text: queuedPromptText(item),
       attachments: item.payload.files?.length ?? 0,
     }))
 }
 
 export function queuedPromptText(item: QueuedPrompt) {
   const display = item.payload.metadata?.["displayText"]
-  return typeof display === "string" ? display : item.payload.text
-}
-
-export function queuedPrompt(item: QueuedPrompt): Prompt {
-  const text = queuedPromptText(item)
-  return [
-    ...extractSessionPrompt(text, item.payload.metadata),
-    ...(item.payload.files?.flatMap((file) => {
-      const mention = queuedImageMention(file, text)
-      if (!mention) return []
-      const filename = mention.text.slice(1, -1)
-      return [
-        {
-          type: "image" as const,
-          id: uuid(),
-          filename,
-          sourcePath: file.name && file.name !== filename ? file.name : undefined,
-          mime: file.mime,
-          blob: {
-            id: `data:${file.mime};base64,${file.data}`,
-            url: `data:${file.mime};base64,${file.data}`,
-          },
-          mention,
-        },
-      ]
-    }) ?? []),
-  ]
-}
-
-function queuedImageMention(file: NonNullable<QueuedPrompt["payload"]["files"]>[number], text: string) {
-  const mention = file.mention
-  if (!file.mime.startsWith("image/") || !file.data || !mention) return undefined
-  if (!/^\[[^[\]\r\n]+\]$/.test(mention.text)) return undefined
-  if (mention.text.slice(1, -1).trim() !== mention.text.slice(1, -1)) return undefined
-  if (!Number.isInteger(mention.start) || !Number.isInteger(mention.end)) return undefined
-  if (mention.start < 0 || mention.end <= mention.start || mention.end > text.length) return undefined
-  if (text.slice(mention.start, mention.end) !== mention.text) return undefined
-  return { text: mention.text, start: mention.start, end: mention.end }
+  return typeof display === "string" && display.length > 0 ? display : item.payload.text
 }
 
 // Confirming an edit submits the current composer content as the replacement:
 // mentions and images added during the edit are parsed like a normal
-// submission. Original cited images are reconstructed in the editor and replaced
-// from that state; uncited stored attachments and review-comment notes survive.
+// submission, the original's stored attachments are preserved, and the
+// review-comment notes appended to the original's model-visible text survive.
 // Ambient composer context (open review comments) stays out: it belongs to
 // the next fresh prompt, not to a queued edit.
-export async function editedPromptInput(
+async function editedPromptInput(
   sessionID: string,
   directory: string,
   item: QueuedPrompt | undefined,
   prompt: Prompt,
   text: string,
-  quotes: ChatQuote[],
 ) {
   const images = await Promise.all(
     prompt
@@ -323,17 +267,7 @@ export async function editedPromptInput(
   const request = buildPromptRequest({ prompt, context: [], images, text, sessionDirectory: directory })
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
-  const previousQuotes = formatChatQuotes(readChatQuotes(payload?.metadata?.quotes))
-  const original =
-    previousQuotes && payload?.text.endsWith(previousQuotes)
-      ? payload.text.slice(0, -previousQuotes.length).trimEnd()
-      : payload?.text
-  const notes = original?.startsWith(display) ? original.slice(display.length) : ""
-  const retainedNotes = extractPromptSessions(payload?.metadata).reduce(
-    (value, session) =>
-      value.replace(`\n${formatSessionContext(session)}`, "").replace(formatSessionContext(session), ""),
-    notes,
-  )
+  const notes = payload && display && payload.text.startsWith(display) ? payload.text.slice(display.length) : ""
   const mention = (value: { start: number; end: number; text: string } | undefined) => {
     if (!value) return undefined
     const start = text.indexOf(value.text)
@@ -361,23 +295,18 @@ export async function editedPromptInput(
   ]
   return {
     sessionID,
-    text: [request.text + retainedNotes, formatChatQuotes(quotes)].filter(Boolean).join("\n"),
+    text: request.text + notes,
     files: [
-      ...(payload?.files?.flatMap((file) => {
-        if (queuedImageMention(file, display)) return []
-        return [
-          {
-            uri: `data:${file.mime};base64,${file.data}`,
-            name: file.name,
-            description: file.description,
-            mention: mention(file.mention),
-          },
-        ]
-      }) ?? []),
+      ...(payload?.files?.map((file) => ({
+        uri: `data:${file.mime};base64,${file.data}`,
+        name: file.name,
+        description: file.description,
+        mention: mention(file.mention),
+      })) ?? []),
       ...request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),
     skills: skills.map((skill) => ({ id: skill.id, mention: mention(skill.mention) })),
-    metadata: { ...payload?.metadata, displayText: request.displayText, sessions: request.sessions, quotes },
+    metadata: { ...payload?.metadata, displayText: request.displayText },
   }
 }

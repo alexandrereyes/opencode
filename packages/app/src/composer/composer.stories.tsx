@@ -3,7 +3,6 @@ import { createStore } from "solid-js/store"
 import type { ModelSelection } from "@/providers/models/selection"
 import { STORY_MODEL, emptySessionDocument, pendingAndQueuedDocument } from "@opencode/session-ui/storybook"
 import { Composer } from "./composer"
-import { ComposerEditor } from "./editor/editor"
 import type { ComposerModel } from "./model"
 import { createComposerEditor } from "./editor/interaction"
 import type { ComposerPersistedState, ComposerSuggestion } from "./types"
@@ -11,10 +10,7 @@ import { buildPromptRequest } from "./request"
 import { promptLength } from "./prompt-parts"
 import { SessionPreview } from "@/session/story-model"
 import { Skill } from "@opencode/schema/skill"
-import { Session } from "@opencode/schema/session"
 import { resolveSessionComposerSelection } from "@/session/composer/selection"
-import { snippetSuggestions } from "@/settings/snippets/model"
-import { blobDataUrl, createBlobReference } from "@/runtime/persistence/drafts"
 
 const selectedModel = {
   id: STORY_MODEL.id,
@@ -61,12 +57,7 @@ function ComposerStory(props: {
   continueOnStop?: boolean
   longLabels?: boolean
   alternate?: "queue" | "steer"
-  externalDraft?: string
-  includeSessions?: boolean
-  accessControls?: boolean
-  deferredAttachments?: boolean
 }) {
-  const attachmentResolvers: (() => void)[] = []
   const [draft, setDraft] = createStore<ComposerPersistedState>({
     prompt: props.prompt ?? [{ type: "text", content: "", start: 0, end: 0 }],
     cursor: props.prompt ? promptLength(props.prompt) : 0,
@@ -76,9 +67,6 @@ function ComposerStory(props: {
   const [story, setStory] = createStore({
     activity: props.label ?? "Ready",
     variant: STORY_MODEL.variant,
-    disabled: false,
-    readOnly: false,
-    pendingAttachments: 0,
   })
   const modelOption = createMemo(() => ({
     ...selectedModel,
@@ -108,25 +96,6 @@ function ComposerStory(props: {
   ]
   const context: ComposerSuggestion[] = [
     {
-      id: "app:codex-computer-use:com.apple.Safari",
-      kind: "app",
-      label: "Safari",
-      description: "Computer use",
-      mention: {
-        type: "app",
-        content: "@Safari",
-        start: 0,
-        end: 0,
-        app: {
-          server: "codex-computer-use",
-          name: "Safari",
-          path: "/Applications/Safari.app/",
-          bundleID: "com.apple.Safari",
-          running: true,
-        },
-      },
-    },
-    {
       id: "file:src/app.tsx",
       kind: "file",
       label: "src/app.tsx",
@@ -142,13 +111,13 @@ function ComposerStory(props: {
     {
       id: "skill:effect",
       kind: "skill",
-      label: "$effect",
+      label: "@effect",
       description: "Build Effect applications",
       mention: {
         type: "skill",
         id: Skill.ID.make("effect"),
         name: Skill.Name.make("Effect"),
-        content: "$effect",
+        content: "@effect",
         start: 0,
         end: 0,
       },
@@ -158,27 +127,9 @@ function ComposerStory(props: {
     store: [draft, setDraft],
     commands: () => commands,
     context: () => context,
-    server: () => "http://localhost:4096",
-    snippets: () =>
-      snippetSuggestions([
-        {
-          id: "review",
-          name: "code-review",
-          description: "Review for correctness and clarity",
-          aliases: ["audit", "quality"],
-          content: "Review this code for correctness.\nSuggest concrete improvements.",
-        },
-        {
-          id: "tests",
-          name: "tests",
-          description: "Run focused tests",
-          aliases: ["verify"],
-          content: "Run the focused tests and report the results.",
-        },
-      ]),
     searchContextFiles: () => [],
     view: {
-      placeholder: () => "Ask anything, / for commands, @ for context, $ for skills...",
+      placeholder: () => "Ask anything, / for commands, @ for context...",
       agent: {
         options: () => [
           { id: "build", label: props.longLabels ? "Build agent with an unusually long name" : "build" },
@@ -210,20 +161,13 @@ function ComposerStory(props: {
               editFirst: () => false,
             }
           : undefined,
-        onSubmit: async () => {
-          const value = draft.prompt.map((part) => ("content" in part ? part.content : "")).join("")
-          const images = await Promise.all(
-            draft.prompt.flatMap((part) =>
-              part.type === "image"
-                ? [blobDataUrl(part.blob, part.mime).then((dataUrl) => ({ ...part, dataUrl }))]
-                : [],
-            ),
-          )
+        onSubmit: () => {
+          const value = draft.prompt.map((part) => ("content" in part ? part.content : `[${part.filename}]`)).join("")
           const request = props.inspectRequest
             ? buildPromptRequest({
                 prompt: draft.prompt,
                 context: draft.context.items,
-                images,
+                images: [],
                 text: value,
                 sessionDirectory: "C:/repo",
               })
@@ -238,35 +182,12 @@ function ComposerStory(props: {
           setStory(
             "activity",
             request
-              ? JSON.stringify({
-                  text: request.text,
-                  files: request.files,
-                  agents: request.agents,
-                  skills: request.skills,
-                  apps: request.apps,
-                  ...(props.includeSessions ? { displayText: request.displayText, sessions: request.sessions } : {}),
-                })
+              ? JSON.stringify({ files: request.files, agents: request.agents, skills: request.skills })
               : `Submitted: ${value}`,
           )
         },
         onStop: () =>
           setStory("activity", props.continueOnStop ? "POST /interrupt · continue: true" : "Stop requested"),
-      },
-    },
-    attachments: {
-      directory: () => "C:/repo",
-      isDialogActive: () => false,
-      warn: () => setStory("activity", "Unsupported attachment"),
-      duplicate: () => setStory("activity", "Duplicate attachment"),
-      onError: () => setStory("activity", "Attachment failed"),
-      store: async (file) => {
-        if (props.deferredAttachments) {
-          await new Promise<void>((resolve) => {
-            attachmentResolvers.push(resolve)
-            setStory("pendingAttachments", attachmentResolvers.length)
-          })
-        }
-        return createBlobReference(file)
       },
     },
   })
@@ -285,74 +206,7 @@ function ComposerStory(props: {
       <output class="text-12-regular text-text-weak" aria-live="polite">
         {story.activity}
       </output>
-      <Show when={props.externalDraft}>
-        {(value) => (
-          <button
-            type="button"
-            data-action="restore-external-draft"
-            onClick={() => {
-              setDraft("prompt", text(value()))
-              setDraft("cursor", value().length)
-              editor.dispatch({ type: "mode.shell" })
-            }}
-          >
-            Restore draft
-          </button>
-        )}
-      </Show>
-      <Show when={props.deferredAttachments}>
-        <div>
-          <button
-            type="button"
-            data-action="complete-attachment"
-            disabled={story.pendingAttachments === 0}
-            onClick={() => {
-              attachmentResolvers.shift()?.()
-              setStory("pendingAttachments", attachmentResolvers.length)
-            }}
-          >
-            Complete attachment
-          </button>
-          <button
-            type="button"
-            data-action="complete-latest-attachment"
-            disabled={story.pendingAttachments === 0}
-            onClick={() => {
-              attachmentResolvers.pop()?.()
-              setStory("pendingAttachments", attachmentResolvers.length)
-            }}
-          >
-            Complete latest attachment
-          </button>
-        </div>
-      </Show>
-      <Show when={props.accessControls}>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            data-action="toggle-composer-disabled"
-            onClick={() => setStory("disabled", (value) => !value)}
-          >
-            Toggle disabled
-          </button>
-          <button
-            type="button"
-            data-action="toggle-composer-readonly"
-            onClick={() => setStory("readOnly", (value) => !value)}
-          >
-            Toggle read only
-          </button>
-        </div>
-      </Show>
-      <Show when={props.accessControls} fallback={<Composer model={model} borderUnderlay />}>
-        <ComposerEditor
-          controller={model}
-          disabled={story.disabled}
-          readOnly={story.readOnly}
-          borderUnderlay
-          modelControlsVisible={false}
-        />
-      </Show>
+      <Composer model={model} borderUnderlay />
     </div>
   )
 }
@@ -368,13 +222,6 @@ export default {
 }
 
 export const EmptyDraft = { render: () => <ComposerStory /> }
-
-export const Snippets = {
-  parameters: { layout: "fullscreen" },
-  render: () => (
-    <ComposerStory inspectRequest label="Type #audit, select a snippet, then send to inspect its expansion." />
-  ),
-}
 
 export const TextDraft = { render: () => <ComposerStory prompt={text("Explain this change")} /> }
 
@@ -395,7 +242,7 @@ export const MixedAttachments = {
           type: "skill",
           id: Skill.ID.make("effect"),
           name: Skill.Name.make("Effect"),
-          content: "$effect",
+          content: "@effect",
           start: 37,
           end: 44,
         },
@@ -420,69 +267,11 @@ export const MixedAttachments = {
   ),
 }
 
-export const CrLfReference = {
-  render: () => (
-    <ComposerStory
-      inspectRequest
-      prompt={[
-        { type: "text", content: "before\r\n", start: 0, end: 8 },
-        {
-          type: "skill",
-          id: Skill.ID.make("effect"),
-          name: Skill.Name.make("Effect"),
-          content: "$effect",
-          start: 8,
-          end: 15,
-        },
-        { type: "text", content: "\r\nafter", start: 15, end: 22 },
-      ]}
-    />
-  ),
-}
-
-export const SessionReference = {
-  render: () => (
-    <ComposerStory
-      inspectRequest
-      includeSessions
-      prompt={[
-        {
-          type: "session",
-          session: {
-            id: Session.ID.make("ses_reference_12345678901234567890"),
-            server: "http://localhost:4096",
-            title: "Shared",
-            directory: "/repo/shared",
-          },
-          content: "@Shared",
-          start: 0,
-          end: 7,
-        },
-      ]}
-    />
-  ),
-}
-
-export const ExternalDraftDuringComposition = {
-  render: () => <ComposerStory externalDraft={"restored\r\ndraft"} />,
-}
-
-export const MutableEditorAccess = {
-  render: () => <ComposerStory prompt={text("abc")} accessControls />,
-}
-
-export const DelayedImagePaste = { render: () => <ComposerStory deferredAttachments /> }
-
 export const ModelAndVariant = { render: () => <ComposerStory prompt={text("Compare both variants")} /> }
 
 export const SlashSuggestions = { render: () => <ComposerStory suggestions="command" /> }
 
 export const ContextSuggestions = { render: () => <ComposerStory suggestions="context" /> }
-
-export const ComputerUseApps = {
-  parameters: { layout: "fullscreen" },
-  render: () => <ComposerStory suggestions="context" inspectRequest label="Fixture: select Safari, then submit" />,
-}
 
 export const RunningAndStopping = { render: () => <ComposerStory working stopping label="Session is running" /> }
 
@@ -538,9 +327,9 @@ export const DemoFirstClassSkillIDs = {
   render: () => (
     <DemoFrame
       title="First-class skill IDs"
-      description="Choose $effect, then Send. The output shows the durable skill ID sent to the prompt API."
+      description="Choose @effect, then Send. The output shows the durable skill ID sent to the prompt API."
     >
-      <ComposerStory inspectRequest label="Type $effect to select the skill" />
+      <ComposerStory suggestions="context" inspectRequest label="Select a skill from the context menu" />
     </DemoFrame>
   ),
 }
@@ -564,7 +353,7 @@ export const DemoStructuredCustomCommand = {
             type: "skill",
             id: Skill.ID.make("effect"),
             name: Skill.Name.make("Effect"),
-            content: "$effect",
+            content: "@effect",
             start: 29,
             end: 36,
           },

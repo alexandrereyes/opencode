@@ -41,11 +41,6 @@ export type ComposerSelection = {
 
 export type ComposerDelivery = "steer" | "queue"
 
-export type ComposerSubmissionBarrier = {
-  pending: () => boolean
-  wait: () => Promise<boolean>
-}
-
 // Contract between the composer and the session prompt queue. The session
 // owns the queue (pending inbox items); the composer only asks which delivery
 // a submit should use and delegates edit confirmation while a queued prompt
@@ -94,13 +89,11 @@ type ComposerAdapterBase = {
   controls: Accessor<ComposerControls>
   working: Accessor<boolean>
   submitted: () => void
-  submissionBarrier?: ComposerSubmissionBarrier
 }
 
 export type ActiveComposerAdapter = ComposerAdapterBase & {
   kind: "active-session"
   session: () => ComposerSession
-  active?: () => boolean
   interrupt: () => Promise<void>
   setEditor: (element: HTMLDivElement) => void
 }

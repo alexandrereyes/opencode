@@ -1,9 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { createMediaQuery } from "@solid-primitives/media"
-import { history, historyKeymap, isolateHistory, standardKeymap } from "@codemirror/commands"
-import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state"
-import { drawSelection, EditorView, keymap } from "@codemirror/view"
 import { FileIcon } from "@opencode/ui/file-icon"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
@@ -18,7 +14,7 @@ import { ScrollView } from "@opencode/ui/scroll-view"
 import { AttachmentCard } from "@opencode/session-ui/attachment-card"
 import { CommentCard } from "@opencode/session-ui/comment-card"
 import { typeLabel } from "@opencode/session-ui/message-file"
-import { useLanguage } from "@/runtime/i18n/language"
+import { Skill } from "@opencode/schema/skill"
 import type {
   ComposerAttachment,
   ComposerComment,
@@ -28,18 +24,6 @@ import type {
   ComposerSuggestion,
 } from "../types"
 import type { ComposerEditorModel, ComposerSelectControl } from "./interaction"
-import { bindComposerEditor } from "./dom"
-import {
-  composerEditorTheme,
-  composerPromptFromDocument,
-  composerReferenceHistory,
-  composerReferences,
-  composerReferencesFromPrompt,
-  copyComposerText,
-  mapComposerReferences,
-  setComposerReferences,
-} from "./codemirror"
-import { normalizeComposerCursor, normalizeComposerPrompt } from "../prompt-parts"
 import "../attachments/attachments.css"
 import "./editor.css"
 
@@ -52,8 +36,6 @@ export type {
 } from "../types"
 
 export type ComposerMode = "normal" | "shell"
-
-const pasteOrder = Annotation.define<number>()
 
 export type ComposerEditorProps = {
   controller: ComposerEditorModel
@@ -71,15 +53,10 @@ export type ComposerEditorProps = {
 
 export function ComposerEditor(props: ComposerEditorProps) {
   const i18n = useI18n()
-  const language = useLanguage()
-  const touch = createMediaQuery("(pointer: coarse)")
   const state = props.controller.state
-  const autocorrect = createMemo(() => touch() && state.mode === "normal")
   const view = props.controller.view
-  let editorHost!: HTMLDivElement
-  let editorView: EditorView | undefined
-  const trackedSelections = new Set<{ start: number; end: number; order: number }>()
-  let nextTrackedSelectionOrder = 0
+  let editor: HTMLDivElement | undefined
+  let viewport: HTMLDivElement | undefined
   let controlsViewport!: HTMLDivElement
   let controlsContent!: HTMLDivElement
   const [overflow, setOverflow] = createStore({ start: false, end: false })
@@ -97,6 +74,11 @@ export function ComposerEditor(props: ComposerEditorProps) {
     updateOverflow()
     onCleanup(() => observer.disconnect())
   })
+  let localInput = false
+  const updateCursor = () => {
+    if (!editor || !window.getSelection()?.isCollapsed) return
+    props.controller.onCursor(composerCursor(editor))
+  }
   const mode = createMemo(() => state.mode)
   const buttons = createMemo(() => ({
     opacity: mode() === "normal" ? 1 : 0,
@@ -104,320 +86,14 @@ export function ComposerEditor(props: ComposerEditorProps) {
     transition: "opacity 200ms ease",
   }))
 
-  const editable = () => !props.disabled && !props.readOnly
-  const editableCompartment = new Compartment()
-  const attributesCompartment = new Compartment()
-  const labels = () => ({ app: language.t("promptInput.computerUse"), session: language.t("promptInput.session") })
-  const editorAttributes = () => ({
-    "data-component": "composer-editor",
-    role: "textbox",
-    "aria-multiline": "true",
-    "aria-label": i18n.t("ui.promptInput.label"),
-    dir: state.mode === "normal" ? "auto" : "ltr",
-    style: state.mode === "normal" ? "unicode-bidi: plaintext; text-align: start" : "text-align: start",
-    autocapitalize: autocorrect() ? "sentences" : "none",
-    autocorrect: autocorrect() ? "on" : "off",
-    spellcheck: String(autocorrect()),
-    autocomplete: "off",
-  })
-  const editorAccess = () => [EditorView.editable.of(editable()), EditorState.readOnly.of(!editable())]
-  const syncFromController = () => {
-    const current = editorView
-    if (!current || current.compositionStarted) return
-    const source = props.controller.parts()
-    const prompt = normalizeComposerPrompt(source)
-    const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    const references = composerReferencesFromPrompt(prompt, labels())
-    const existing = current.state.field(composerReferences)
-    const cursor = normalizeComposerCursor(source, props.controller.cursor())
-    const sameText = current.state.doc.toString() === text
-    if (sameText && JSON.stringify(existing) === JSON.stringify(references)) {
-      if (JSON.stringify(source) !== JSON.stringify(prompt) || props.controller.cursor() !== cursor) {
-        props.controller.normalize(prompt, cursor)
-      }
+  createEffect(() => {
+    const parts = props.controller.parts()
+    if (!editor) return
+    if (localInput) {
+      localInput = false
       return
     }
-    current.dispatch({
-      ...(sameText
-        ? {}
-        : {
-            changes: { from: 0, to: current.state.doc.length, insert: text },
-            selection: { anchor: cursor },
-          }),
-      effects: setComposerReferences.of(references),
-      annotations: Transaction.addToHistory.of(false),
-      scrollIntoView: current.hasFocus,
-    })
-  }
-  const replaceEditorRange = (prompt: ComposerPrompt, range: { start: number; end: number }, order?: number) => {
-    const current = editorView
-    if (!current) return
-    const start = Math.min(Math.max(Math.min(range.start, range.end), 0), current.state.doc.length)
-    const end = Math.min(Math.max(Math.max(range.start, range.end), 0), current.state.doc.length)
-    const content = normalizeComposerPrompt(prompt)
-    const insert = content.map((part) => ("content" in part ? part.content : "")).join("")
-    const changes = current.state.changes({ from: start, to: end, insert })
-    const insertedLength = changes.newLength - (current.state.doc.length - (end - start))
-    const references = [
-      ...mapComposerReferences(current.state.field(composerReferences), changes),
-      ...composerReferencesFromPrompt(content, labels()).map((reference) => ({
-        ...reference,
-        from: reference.from + start,
-        to: reference.to + start,
-        part:
-          reference.part.type === "image"
-            ? {
-                ...reference.part,
-                mention: {
-                  text: reference.part.mention?.text ?? "",
-                  start: reference.from + start,
-                  end: reference.to + start,
-                },
-              }
-            : {
-                ...reference.part,
-                start: reference.from + start,
-                end: reference.to + start,
-              },
-      })),
-    ].toSorted((a, b) => a.from - b.from)
-    current.dispatch({
-      changes,
-      selection: { anchor: start + insertedLength },
-      effects: setComposerReferences.of(references),
-      annotations: [
-        Transaction.addToHistory.of(true),
-        isolateHistory.of("full"),
-        ...(order === undefined ? [] : [pasteOrder.of(order)]),
-      ],
-      scrollIntoView: true,
-    })
-  }
-  const configureEditor = () => {
-    const current = editorView
-    if (!current || current.compositionStarted) return
-    current.dispatch({
-      effects: [
-        editableCompartment.reconfigure(editorAccess()),
-        attributesCompartment.reconfigure(EditorView.contentAttributes.of(editorAttributes())),
-      ],
-    })
-  }
-  onMount(() => {
-    const source = props.controller.parts()
-    const prompt = normalizeComposerPrompt(source)
-    const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    let deferredEnter = { shiftKey: false, ctrlKey: false, metaKey: false }
-    let deferredEnterTimer: number | undefined
-    const clearDeferredEnter = () => {
-      deferredEnter = { shiftKey: false, ctrlKey: false, metaKey: false }
-      if (deferredEnterTimer !== undefined) window.clearTimeout(deferredEnterTimer)
-      deferredEnterTimer = undefined
-    }
-    const interceptKey = (event: KeyboardEvent) => {
-      if (event.key === "Enter") {
-        const synthetic = !!(event as KeyboardEvent & { synthetic?: boolean }).synthetic
-        if (synthetic) {
-          if (deferredEnter.shiftKey) Object.defineProperty(event, "shiftKey", { value: true })
-          if (deferredEnter.ctrlKey) Object.defineProperty(event, "ctrlKey", { value: true })
-          if (deferredEnter.metaKey) Object.defineProperty(event, "metaKey", { value: true })
-          clearDeferredEnter()
-        } else {
-          clearDeferredEnter()
-          deferredEnter = { shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey }
-          deferredEnterTimer = window.setTimeout(clearDeferredEnter, 500)
-        }
-      }
-      if (editorView?.composing || event.isComposing || event.keyCode === 229 || event.key === "Dead") return false
-      if (!view.draftOnly && props.controller.onKeyDown(event)) return true
-      const mod = event.metaKey || event.ctrlKey
-      if (mod && event.key === "ArrowUp" && !event.shiftKey && !event.altKey) {
-        if (view.submit.queue?.editFirst()) event.preventDefault()
-        return event.defaultPrevented
-      }
-      const desktop = window.matchMedia("(min-width: 768px)").matches
-      if (event.key !== "Enter" || (mod ? event.shiftKey : event.shiftKey === desktop)) return false
-      event.preventDefault()
-      if (!event.repeat) props.controller.submit(mod ? { alternate: true } : undefined)
-      return true
-    }
-    editorView = new EditorView({
-      parent: editorHost,
-      state: EditorState.create({
-        doc: text,
-        selection: { anchor: normalizeComposerCursor(source, props.controller.cursor()) },
-        extensions: [
-          history(),
-          drawSelection(),
-          EditorView.lineWrapping,
-          composerEditorTheme,
-          composerReferences.init(() => composerReferencesFromPrompt(prompt, labels())),
-          composerReferenceHistory,
-          Prec.highest(keymap.of([{ any: (_view, event) => interceptKey(event) }])),
-          keymap.of([...standardKeymap, ...historyKeymap]),
-          editableCompartment.of(editorAccess()),
-          attributesCompartment.of(EditorView.contentAttributes.of(editorAttributes())),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const insertedOrder = update.transactions.reduce<number | undefined>(
-                (found, transaction) => found ?? transaction.annotation(pasteOrder),
-                undefined,
-              )
-              trackedSelections.forEach((range) => {
-                if (range.start === range.end) {
-                  const association = insertedOrder !== undefined && range.order > insertedOrder ? 1 : -1
-                  const position = update.changes.mapPos(range.start, association)
-                  range.start = position
-                  range.end = position
-                  return
-                }
-                const start = update.changes.mapPos(range.start, 1)
-                const end = update.changes.mapPos(range.end, -1)
-                if (start > end) {
-                  const position = insertedOrder !== undefined && range.order < insertedOrder ? end : start
-                  range.start = position
-                  range.end = position
-                  return
-                }
-                range.start = start
-                range.end = end
-              })
-            }
-            const selection = update.state.selection.main
-            const referencesChanged =
-              update.startState.field(composerReferences) !== update.state.field(composerReferences)
-            if (update.docChanged || referencesChanged) {
-              const images = props.controller.parts().filter((part) => part.type === "image")
-              const next = composerPromptFromDocument(
-                update.state.doc.toString(),
-                update.state.field(composerReferences),
-                images,
-              )
-              props.controller.onInput(update.state.doc.toString(), next, selection.head)
-              return
-            }
-            if (update.selectionSet) props.controller.onCursor(selection.head)
-          }),
-          EditorView.domEventHandlers({
-            focus: () => {
-              props.controller.dispatch({ type: "focus.editor" })
-              return false
-            },
-            paste: (event) => {
-              props.controller.onPaste(event)
-              return event.defaultPrevented
-            },
-            copy: (event, current) => {
-              const selection = current.state.selection.main
-              if (!event.clipboardData || selection.empty) return false
-              const copied = copyComposerText(
-                current.state.doc.toString(),
-                current.state.field(composerReferences),
-                selection.from,
-                selection.to,
-              )
-              if (copied === undefined) return false
-              event.preventDefault()
-              event.clipboardData.setData("text/plain", copied)
-              return true
-            },
-            compositionend: () => {
-              queueMicrotask(() => {
-                configureEditor()
-                syncFromController()
-              })
-              return false
-            },
-          }),
-        ],
-      }),
-    })
-    const content = editorView.contentDOM
-    const unbind = bindComposerEditor(content, {
-      selection: () => {
-        const selection = editorView?.state.selection.main
-        return selection ? { start: selection.from, end: selection.to } : { start: 0, end: 0 }
-      },
-      setSelection: (start, end) => {
-        const length = editorView?.state.doc.length ?? 0
-        editorView?.dispatch({
-          selection: {
-            anchor: Math.min(Math.max(start, 0), length),
-            head: Math.min(Math.max(end, 0), length),
-          },
-          scrollIntoView: true,
-        })
-      },
-    })
-    props.controller.setEditor(content, {
-      sync: syncFromController,
-      setText: (value) => {
-        replaceEditorRange([{ type: "text", content: value, start: 0, end: value.length }], {
-          start: 0,
-          end: editorView?.state.doc.length ?? 0,
-        })
-      },
-      addText: (value, at) => {
-        const position = at ?? editorView?.state.selection.main.head ?? 0
-        replaceEditorRange([{ type: "text", content: value, start: 0, end: value.length }], {
-          start: position,
-          end: position,
-        })
-      },
-      addMention: (mention, range) => {
-        const current = editorView
-        if (!current) return
-        const end = range?.end ?? current.state.selection.main.head
-        const trigger = mention.type === "snippet" ? "#" : mention.type === "skill" ? "$" : "@"
-        const start = range?.start ?? current.state.doc.sliceString(0, end).lastIndexOf(trigger)
-        replaceEditorRange([mention, { type: "text", content: " ", start: 0, end: 1 }], {
-          start: start < 0 ? end : start,
-          end,
-        })
-      },
-      replacePrompt: replaceEditorRange,
-      removeAttachment: (id) => {
-        const current = editorView
-        if (!current) return false
-        const reference = current.state
-          .field(composerReferences)
-          .find((item) => item.part.type === "image" && item.part.id === id)
-        if (!reference) return false
-        current.dispatch({
-          changes: { from: reference.from, to: reference.to },
-          selection: { anchor: reference.from },
-          annotations: [Transaction.addToHistory.of(true), isolateHistory.of("full")],
-          scrollIntoView: true,
-        })
-        return true
-      },
-      trackSelection: () => {
-        const selection = editorView?.state.selection.main
-        const range = { start: selection?.from ?? 0, end: selection?.to ?? 0, order: nextTrackedSelectionOrder++ }
-        trackedSelections.add(range)
-        return {
-          current: () => ({ start: range.start, end: range.end }),
-          order: range.order,
-          release: () => trackedSelections.delete(range),
-        }
-      },
-    })
-    onCleanup(() => {
-      clearDeferredEnter()
-      unbind()
-      editorView?.destroy()
-      editorView = undefined
-    })
-  })
-  createEffect(() => {
-    props.controller.parts()
-    labels()
-    syncFromController()
-  })
-  createEffect(() => {
-    editable()
-    editorAttributes()
-    configureEditor()
+    renderComposerEditor(editor, parts)
   })
 
   return (
@@ -487,18 +163,69 @@ export function ComposerEditor(props: ComposerEditorProps) {
           data-component="composer-scroll"
           class="min-h-[60px] max-h-[180px]"
           viewportRef={(element) => {
+            viewport = element
             element.tabIndex = -1
           }}
         >
           <div
-            ref={editorHost}
-            data-slot="composer-editor-host"
-            class="relative z-10 min-h-[60px] w-full bg-transparent text-[13px] font-[440] leading-5 text-v2-text-text-base [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
+            ref={(element) => {
+              editor = element
+              props.controller.setEditor(element)
+            }}
+            data-component="composer-editor"
+            role="textbox"
+            aria-multiline="true"
+            aria-label={i18n.t("ui.promptInput.label")}
+            dir={state.mode === "normal" ? "auto" : "ltr"}
+            contenteditable={!props.disabled && !props.readOnly}
+            autocapitalize={state.mode === "normal" ? "sentences" : "off"}
+            autocorrect={state.mode === "normal" ? "on" : "off"}
+            spellcheck={state.mode === "normal"}
+            // @ts-expect-error
+            autocomplete="off"
+            class="relative z-10 block min-h-[60px] w-full whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
             classList={{ "font-mono!": state.mode === "shell", "opacity-50": props.disabled }}
             style={{
               "unicode-bidi": state.mode === "normal" ? "plaintext" : undefined,
               "text-align": "start",
             }}
+            onInput={(event) => {
+              const cursor = composerCursor(event.currentTarget)
+              const prompt = parseComposerEditor(event.currentTarget)
+              const images = props.controller.parts().filter((part) => part.type === "image")
+              localInput = true
+              props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+            }}
+            onKeyDown={(event) => {
+              if (!view.draftOnly && props.controller.onKeyDown(event)) return
+              const mod = event.metaKey || event.ctrlKey
+              if (mod && event.key === "ArrowUp" && !event.shiftKey && !event.altKey) {
+                if (view.submit.queue?.editFirst()) event.preventDefault()
+                return
+              }
+              if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+                event.preventDefault()
+                if (event.repeat) return
+                props.controller.submit(mod ? { alternate: true } : undefined)
+              }
+            }}
+            onKeyUp={updateCursor}
+            onPointerUp={updateCursor}
+            onPaste={(event) => {
+              props.controller.onPaste(event)
+              // Programmatic multiline insertion does not reliably reveal the caret.
+              requestAnimationFrame(() => {
+                const selection = window.getSelection()
+                if (!editor || !viewport || !selection?.isCollapsed || !selection.rangeCount) return
+                if (!editor.contains(selection.anchorNode)) return
+                const caret = selection.getRangeAt(0).getBoundingClientRect()
+                if (!caret.height) return
+                const bounds = viewport.getBoundingClientRect()
+                if (caret.bottom > bounds.bottom - 8) viewport.scrollTop += caret.bottom - bounds.bottom + 8
+                if (caret.top < bounds.top + 8) viewport.scrollTop += caret.top - bounds.top - 8
+              })
+            }}
+            onFocus={() => props.controller.dispatch({ type: "focus.editor" })}
           />
           <Show when={!props.controller.value()}>
             <div
@@ -510,7 +237,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
               {view.placeholder?.() ??
                 (state.mode === "shell"
                   ? i18n.t("ui.promptInput.placeholder.shell")
-                  : i18n.t("ui.promptInput.placeholder.normal", { slash: "/", at: "@", skill: "$" }))}
+                  : i18n.t("ui.promptInput.placeholder.normal", { slash: "/", at: "@" }))}
             </div>
           </Show>
         </ScrollView>
@@ -616,6 +343,137 @@ export function ComposerEditor(props: ComposerEditorProps) {
   )
 }
 
+const mentionParts = new WeakMap<HTMLElement, Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>>()
+
+function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt) {
+  const active = document.activeElement === editor
+  editor.replaceChildren(
+    ...prompt.flatMap<Node>((part) => {
+      if (part.type === "image") return []
+      if (part.type === "text") return [document.createTextNode(part.content)]
+      const mention = document.createElement("span")
+      mentionParts.set(mention, part)
+      mention.textContent = part.content
+      mention.contentEditable = "false"
+      mention.dir = "auto"
+      mention.style.unicodeBidi = "isolate"
+      mention.dataset.mention =
+        part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
+      if (part.type === "agent") mention.dataset.name = part.name
+      if (part.type === "skill") {
+        mention.dataset.id = part.id
+        mention.dataset.name = part.name
+      }
+      if (part.type === "file") {
+        mention.dataset.path = part.path
+        if (part.mime) mention.dataset.mime = part.mime
+        if (part.filename) mention.dataset.filename = part.filename
+      }
+      return [mention]
+    }),
+  )
+  if (!active) return
+  const selection = window.getSelection()
+  const range = document.createRange()
+  range.selectNodeContents(editor)
+  range.collapse(false)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
+function parseComposerEditor(editor: HTMLDivElement) {
+  const parts: Exclude<ComposerPrompt[number], ComposerAttachment>[] = []
+  let buffer = ""
+  let position = 0
+
+  const flush = () => {
+    if (!buffer) return
+    parts.push({ type: "text", content: buffer, start: position, end: position + buffer.length })
+    position += buffer.length
+    buffer = ""
+  }
+  const mention = (element: HTMLElement) => {
+    flush()
+    const content = element.textContent ?? ""
+    const original = mentionParts.get(element)
+    if (element.dataset.mention === "agent") {
+      parts.push({
+        ...(original?.type === "agent" ? original : {}),
+        type: "agent",
+        name: element.dataset.name ?? content.slice(1),
+        content,
+        start: position,
+        end: position + content.length,
+      })
+      position += content.length
+      return
+    }
+    if (element.dataset.mention === "skill") {
+      parts.push({
+        ...(original?.type === "skill" ? original : {}),
+        type: "skill",
+        id: Skill.ID.make(element.dataset.id ?? content.slice(1)),
+        name: Skill.Name.make(element.dataset.name ?? content.slice(1)),
+        content,
+        start: position,
+        end: position + content.length,
+      })
+      position += content.length
+      return
+    }
+    parts.push({
+      ...(original?.type === "file" ? original : {}),
+      type: "file",
+      path: element.dataset.path ?? content.slice(1),
+      content,
+      start: position,
+      end: position + content.length,
+      ...(element.dataset.mime ? { mime: element.dataset.mime } : {}),
+      ...(element.dataset.filename ? { filename: element.dataset.filename } : {}),
+    })
+    position += content.length
+  }
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      buffer += node.textContent ?? ""
+      return
+    }
+    if (!(node instanceof HTMLElement)) return
+    if (node.dataset.mention) {
+      mention(node)
+      return
+    }
+    if (node.tagName === "BR") {
+      buffer += "\n"
+      return
+    }
+    Array.from(node.childNodes).forEach(visit)
+  }
+
+  Array.from(editor.childNodes).forEach((node, index, nodes) => {
+    visit(node)
+    if (node instanceof HTMLElement && ["DIV", "P"].includes(node.tagName) && index < nodes.length - 1) buffer += "\n"
+  })
+  flush()
+  if (
+    parts.every((part) => part.type === "text") &&
+    parts.every((part) => part.content.replace(/[\n\u200B]/g, "") === "")
+  ) {
+    return [{ type: "text" as const, content: "", start: 0, end: 0 }]
+  }
+  if (parts.length > 0) return parts
+  return [{ type: "text" as const, content: "", start: 0, end: 0 }]
+}
+
+function composerCursor(editor: HTMLDivElement) {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) return editor.textContent?.length ?? 0
+  const range = selection.getRangeAt(0).cloneRange()
+  range.selectNodeContents(editor)
+  range.setEnd(selection.anchorNode!, selection.anchorOffset)
+  return range.toString().length
+}
+
 export function ComposerAttachments(props: {
   attachments: ComposerAttachment[]
   comments?: ComposerComment[]
@@ -664,7 +522,7 @@ export function ComposerAttachments(props: {
           </For>
           <For each={props.attachments}>
             {(attachment) => (
-              <div class="relative group shrink-0" data-attachment-id={attachment.id}>
+              <div class="relative group shrink-0">
                 <Tooltip value={attachment.filename} placement="top" contentClass="break-all">
                   <Show
                     when={attachment.mime.startsWith("image/")}
@@ -685,8 +543,6 @@ export function ComposerAttachments(props: {
                 </Tooltip>
                 <button
                   type="button"
-                  data-action="remove-attachment"
-                  data-attachment-id={attachment.id}
                   onClick={() => props.onAttachmentRemove(attachment)}
                   class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   aria-label={props.removeLabel}
@@ -864,37 +720,8 @@ export function ComposerEditorPopover(props: {
   onActiveChange: (item: ComposerSuggestion) => void
   onSelect: (item: ComposerSuggestion) => void
 }) {
-  let element: HTMLDivElement | undefined
-  onMount(() => {
-    if (!element) return
-    const popover = element
-    const ancestors: HTMLElement[] = []
-    for (let parent = popover.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
-    const update = () => {
-      const anchor = popover.parentElement?.getBoundingClientRect().top ?? 0
-      const top = Math.max(
-        window.visualViewport?.offsetTop ?? 0,
-        ...ancestors
-          .filter((parent) => getComputedStyle(parent).overflowY !== "visible")
-          .map((parent) => parent.getBoundingClientRect().top),
-      )
-      // The popup opens upward inside clipped page panels, below the title bar.
-      popover.style.maxHeight = `${Math.max(0, Math.min(320, anchor - top - 16))}px`
-    }
-    const observer = new ResizeObserver(update)
-    ancestors.forEach((parent) => observer.observe(parent))
-    window.addEventListener("scroll", update, true)
-    window.visualViewport?.addEventListener("resize", update)
-    update()
-    onCleanup(() => {
-      observer.disconnect()
-      window.removeEventListener("scroll", update, true)
-      window.visualViewport?.removeEventListener("resize", update)
-    })
-  })
   return (
     <div
-      ref={element}
       data-component="composer-suggestions"
       class="absolute inset-x-0 -top-2 z-40 flex max-h-80 -translate-y-full flex-col overflow-auto rounded-xl bg-v2-background-bg-base p-2 shadow-[var(--v2-elevation-raised)] no-scrollbar"
       onMouseDown={(event) => event.preventDefault()}
@@ -925,65 +752,20 @@ export function ComposerEditorPopover(props: {
               type="button"
               data-suggestion-id={item.id}
               data-active={props.activeID === item.id ? "" : undefined}
-              aria-label={
-                item.kind === "session"
-                  ? [item.kindLabel, item.label, item.description, item.detail].filter(Boolean).join(", ")
-                  : undefined
-              }
-              class="flex w-full items-center gap-2 px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
-              classList={{
-                "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id,
-                "rounded-full": item.kind === "app",
-                "rounded-md": item.kind !== "app",
-              }}
+              class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
+              classList={{ "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id }}
               onPointerMove={() => props.onActiveChange(item)}
               onClick={() => props.onSelect(item)}
             >
               <div class="flex min-w-0 flex-1 items-center gap-2">
                 <ComposerSuggestionIcon item={item} />
-                <Show
-                  when={item.kind === "session"}
-                  fallback={
-                    <>
-                      <bdi
-                        dir="auto"
-                        class="text-v2-text-text-base"
-                        classList={{ "shrink-0": item.kind !== "app", "min-w-0 truncate": item.kind === "app" }}
-                      >
-                        {item.label}
-                      </bdi>
-                      <Show when={item.description}>
-                        <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
-                      </Show>
-                    </>
-                  }
-                >
-                  <div class="flex min-w-0 flex-1 flex-col">
-                    <bdi dir="auto" class="truncate text-v2-text-text-base leading-4">
-                      {item.label}
-                    </bdi>
-                    <span
-                      dir="ltr"
-                      class="flex min-w-0 items-center gap-1 text-left text-[12px] leading-4 text-v2-text-text-muted"
-                    >
-                      <span class="min-w-0 truncate" title={item.description}>
-                        {item.description}
-                      </span>
-                      <Show when={item.detail}>
-                        <span class="shrink-0" aria-hidden="true">
-                          ·
-                        </span>
-                        <span class="shrink-0" title={item.detail}>
-                          {item.detail?.slice(-8)}
-                        </span>
-                      </Show>
-                    </span>
-                  </div>
+                <bdi dir="auto" class="shrink-0 text-v2-text-text-base">
+                  {item.label}
+                </bdi>
+                <Show when={item.description}>
+                  <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
                 </Show>
               </div>
-              <Show when={item.kind === "session"}>
-                <span class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted">{item.kindLabel}</span>
-              </Show>
               <Show when={item.keybind?.length}>
                 <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>
               </Show>
@@ -1077,10 +859,6 @@ export function ComposerEditorSubmitButton(props: {
 }
 
 function ComposerSuggestionIcon(props: { item: ComposerSuggestion }) {
-  if (props.item.kind === "snippet") return <Icon name="code" size="small" class="shrink-0 text-v2-icon-icon-accent" />
-  if (props.item.kind === "session")
-    return <Icon name="bubble-5" size="small" class="shrink-0 text-v2-icon-icon-accent" />
-  if (props.item.kind === "app") return <Icon name="monitor" size="small" class="shrink-0" />
   if (props.item.kind === "agent") return <Icon name="brain" size="small" class="shrink-0 text-icon-info-active" />
   if (props.item.kind === "skill") return <Icon name="post-skill" size="small" class="shrink-0" />
   if (props.item.kind === "command") return null

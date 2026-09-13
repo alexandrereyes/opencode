@@ -460,11 +460,6 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
   await expect(used).toHaveAttribute("aria-expanded", "false")
   await used.click()
   await expect(used).toHaveAttribute("aria-expanded", "true")
-  await expect(backgroundCard).toContainText("Background task (background)")
-  await expect(backgroundCard.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
-  await expect(
-    page.locator('[data-timeline-part-id="call_shell_backgrounded"] [data-component="text-shimmer"]'),
-  ).toHaveAttribute("data-active", "true")
   await page.getByRole("button", { name: "Session details" }).click()
   const summary = page.getByRole("button", { name: "2 background tasks running", exact: true })
   await expect(summary).toContainText("2")
@@ -473,6 +468,12 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
   await expect(list).toContainText("Background task")
   await expect(list).toContainText("sleep 120")
   await expect(list).not.toContainText("Foreground task")
+  await expect(backgroundCard).toContainText("Background task (background)")
+  await expect(backgroundCard.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
+  await expect(
+    page.locator('[data-timeline-part-id="call_shell_backgrounded"] [data-component="text-shimmer"]'),
+  ).toHaveAttribute("data-active", "true")
+
   await timeline.transport.send({
     id: "evt_background_succeeded",
     created: Date.now(),

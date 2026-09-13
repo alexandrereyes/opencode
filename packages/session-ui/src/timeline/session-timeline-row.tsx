@@ -8,7 +8,7 @@ import { useI18n } from "@opencode/ui/context/i18n"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
+import type { SessionUserActions, SessionUserComment } from "../actions"
 import { useData } from "../context"
 import { TimelineSeparator } from "../components/timeline-separator"
 import {
@@ -24,7 +24,7 @@ import type { ContextGroupPart } from "../tools/tool-renderer"
 import { SessionRetry } from "../components/session-retry"
 import { SessionError } from "../components/session-error"
 import { timelineCategory, type TimelineDetail } from "./detail"
-import { currentToolFailed, currentToolInput } from "../message/current-tool-state"
+import { currentToolFailed } from "../message/current-tool-state"
 import {
   createReactiveTimelineProjection,
   Timeline,
@@ -40,10 +40,7 @@ type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, TimelineRow.TurnGap>
 
 export type SessionUserPresentation = {
   displayText?: string
-  copyText?: string
   comments?: SessionUserComment[]
-  quotes?: SessionUserQuote[]
-  sessions?: Array<{ start: number; end: number }>
 }
 
 export function createSessionTimelineRowRenderer(input: {
@@ -89,7 +86,18 @@ export function createSessionTimelineRowRenderer(input: {
   })
   const workingTurn = (messageID: string) =>
     input.status().type !== "idle" && input.projection.activeMessageID() === messageID
-  const messages = createMemo(() => [...input.projection.messageByID().values()])
+  const duration = (messageID: string) => {
+    const user = input.projection.messageByID().get(messageID)
+    if (user?.type !== "user") return null
+    const completed = (input.projection.assistantMessagesByParent().get(messageID) ?? emptyAssistantMessages).reduce<
+      number | undefined
+    >((latest, message) => {
+      if (message.time.completed === undefined) return latest
+      return latest === undefined ? message.time.completed : Math.max(latest, message.time.completed)
+    }, undefined)
+    if (completed === undefined || completed < user.time.created) return undefined
+    return completed - user.time.created
+  }
   const copyContentID = (messageID: string) => {
     if (workingTurn(messageID)) return null
     const message = input.projection
@@ -209,10 +217,6 @@ export function createSessionTimelineRowRenderer(input: {
       })
       const firstPath = createMemo(() => {
         const tool = tools()[0]
-        if (tool?.name === "write") {
-          const input = currentToolInput(tool)
-          return typeof input.path === "string" ? input.path : undefined
-        }
         if (!tool || !("metadata" in tool.state)) return undefined
         const files = tool.state.metadata?.files
         if (!Array.isArray(files)) return undefined
@@ -228,7 +232,7 @@ export function createSessionTimelineRowRenderer(input: {
             const open = input.disclosure.value(`${row().group.key}:file:${path}`)
             if (open !== undefined) return open
             if (input.timelineDetail) return input.timelineDetail().edit.details === "expanded"
-            if (!["edit", "write"].includes(tools()[0]?.name ?? "") || path !== firstPath()) return false
+            if (tools()[0]?.name !== "edit" || path !== firstPath()) return false
             return input.disclosure.value(row().group.key) ?? input.editToolDefaultOpen()
           }}
           onFileOpenChange={(path, open) => input.disclosure.set(`${row().group.key}:file:${path}`, open)}
@@ -254,49 +258,23 @@ export function createSessionTimelineRowRenderer(input: {
       const item = content()
       return item ? contentDefaultOpen(item) : undefined
     })
-    const finalAnswer = createMemo(() => {
-      if (content()?.type !== "text") return false
-      const current = message()
-      if (current?.finish !== "stop" || current.time.completed === undefined || current.error || current.retry)
-        return false
-      if (input.projection.assistantMessagesByParent().get(row().userMessageID)?.at(-1)?.id !== current.id) return false
-      if (current.content.find((part) => part.type === "text" && !!part.text.trim()) !== content()) return false
-      const rows = input.projection.rows()
-      // Use projected rows so separate/grouped notices count, but hidden activity does not.
-      for (let index = input.projection.messageRowIndex().get(row().userMessageID) ?? 0; index < rows.length; index++) {
-        const previous = rows[index]
-        if (previous.userMessageID !== row().userMessageID || TimelineRow.key(previous) === TimelineRow.key(row()))
-          return false
-        if (previous._tag !== "UserMessage" && previous._tag !== "TurnGap") return true
-      }
-      return false
-    })
     const disclosureKey = () => (content()?.type === "reasoning" ? ref()!.partID : row().group.key)
     return (
       <Show when={message()}>
         {(message) => (
           <Show when={content()}>
             {(content) => (
-              <>
-                <Show when={finalAnswer()}>
-                  <div
-                    data-slot="session-final-answer-divider"
-                    aria-hidden="true"
-                    class="mb-3 h-px w-full bg-v2-border-border-strong"
-                  />
-                </Show>
-                <SessionAssistantContent
-                  message={message()}
-                  content={content()}
-                  contentID={ref()!.partID}
-                  showAssistantCopyPartID={copyContentID(row().userMessageID)}
-                  messages={messages()}
-                  defaultOpen={defaultOpen()}
-                  toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
-                  onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
-                  onContentRendered={onSizeChange}
-                />
-              </>
+              <SessionAssistantContent
+                message={message()}
+                content={content()}
+                contentID={ref()!.partID}
+                showAssistantCopyPartID={copyContentID(row().userMessageID)}
+                turnDurationMs={duration(row().userMessageID)}
+                defaultOpen={defaultOpen()}
+                toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
+                onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
+                onContentRendered={onSizeChange}
+              />
             )}
           </Show>
         )}
@@ -604,7 +582,7 @@ export function createSessionTimelineRowRenderer(input: {
         <Frame row={current()}>
           <Show when={message()}>
             {(message) => {
-              const presentation = createMemo(() => input.presentation(message()))
+              const presentation = () => input.presentation(message())
               return (
                 <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
                   <div data-slot="session-turn-message-content" aria-live="off">
@@ -612,15 +590,7 @@ export function createSessionTimelineRowRenderer(input: {
                       sessionID={input.sessionID()}
                       message={message()}
                       displayText={presentation()?.displayText}
-                      copyText={presentation()?.copyText}
                       comments={presentation()?.comments}
-                      quotes={presentation()?.quotes}
-                      quoteOpen={(id) => input.disclosure.value(`${message().id}:quote:${id}`)}
-                      onQuoteOpenChange={(id, open) => {
-                        input.disclosure.set(`${message().id}:quote:${id}`, open)
-                        onSizeChange?.()
-                      }}
-                      sessions={presentation()?.sessions}
                       historicalAgent={context()?.agent ?? ""}
                       historicalModel={context()?.model ?? { id: "", providerID: "" }}
                       actions={input.actions}

@@ -1,15 +1,16 @@
 import { useGlobal, useServerCtx } from "@/runtime/server/runtime"
 import { type HomeProjectSelection, useLayout } from "@/shell/state/layout"
 import { ServerConnection, useServers } from "@/runtime/server/registry"
-import { useProjectNavigation } from "@/workspaces/project-actions"
+import { useTabs } from "@/shell/tabs/tabs"
 import { toggleHomeProjectSelection } from "@/shell/layout/helpers"
-import { createEffect, createMemo } from "solid-js"
+import { createEffect, createMemo, startTransition } from "solid-js"
+import type { SessionInfo } from "@opencode/client/promise"
 
 export function createHomeController() {
   const layout = useLayout()
   const global = useGlobal()
   const servers = useServers()
-  const navigation = useProjectNavigation()
+  const tabs = useTabs()
   const selection = layout.home.selection
   const focusedServer = createMemo<ServerConnection.Any | undefined>(
     () => servers.visible.find((conn) => ServerConnection.key(conn) === selection().server) ?? servers.visible[0],
@@ -44,6 +45,25 @@ export function createHomeController() {
 
   function setSelection(next: HomeProjectSelection) {
     layout.home.setSelection(next)
+  }
+
+  function openProjectNewSession(conn: ServerConnection.Any, directory: string) {
+    const ctx = global.ensureServerCtx(conn)
+    ctx.projects.open(directory)
+    ctx.projects.touch(directory)
+    void tabs.newDraft({ server: ServerConnection.key(conn), directory })
+  }
+
+  function openProjectSession(conn: ServerConnection.Any, directory: string, session: SessionInfo) {
+    const ctx = global.ensureServerCtx(conn)
+    void ctx.data.session.message.sync(session.id).catch(() => undefined)
+    void startTransition(() => {
+      const tab = tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
+      tabs.select(tab)
+      ctx.data.session.remember(session)
+      ctx.projects.open(directory)
+      ctx.projects.touch(directory)
+    })
   }
 
   return {
@@ -103,9 +123,10 @@ export function createHomeController() {
         const conn = focusedServer()
         const project = newSessionProject()
         if (!conn || !project) return
-        void navigation.openProjectNewSession(conn, project.worktree)
+        openProjectNewSession(conn, project.worktree)
       },
-      ...navigation,
+      openProjectNewSession,
+      openProjectSession,
     },
   }
 }

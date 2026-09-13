@@ -841,7 +841,7 @@ export function CurrentFileToolGroup(props: {
         return files.map((value, index) => ({ key: `${tool.id}:${index}`, toolID: tool.id, value }))
       if (tool.name !== "write") return []
       const input = currentToolInput(tool)
-      if (typeof input.path !== "string" || typeof input.content !== "string") return []
+      if (typeof input.path !== "string" || typeof input.content !== "string" || !input.content) return []
       return [
         {
           key: `${tool.id}:0`,
@@ -849,11 +849,9 @@ export function CurrentFileToolGroup(props: {
           value: {
             file: input.path,
             patch: createTwoFilesPatch(input.path, input.path, "", input.content),
-            additions: input.content
-              ? input.content.split("\n").length - Number(input.content.endsWith("\n"))
-              : 0,
+            additions: input.content.split("\n").length - Number(input.content.endsWith("\n")),
             deletions: 0,
-            status: input.content ? "modified" : "added",
+            status: "modified",
           },
         },
       ]
@@ -1947,7 +1945,7 @@ ToolRegistry.register({
     const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, path()))
     return (
       <div data-component="write-tool">
-        <Show when={path()}>
+        <Show when={content() && path()}>
           <ToolFileAccordion
             path={path()}
             defaultOpen={props.defaultOpen}

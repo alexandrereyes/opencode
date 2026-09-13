@@ -16,7 +16,10 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const roots = [path.resolve(here, "../../session-ui/src/components"), path.resolve(here, "../../ui/src/components")]
+const roots = [
+  path.resolve(here, "../../session-ui-custom/src/components"),
+  path.resolve(here, "../../ui-custom/src/components"),
+]
 
 const ENDPOINT = "/__playground/apply-css"
 

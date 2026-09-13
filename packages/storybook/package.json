@@ -10,8 +10,8 @@
   "devDependencies": {
     "@opencode/client": "workspace:*",
     "@tailwindcss/vite": "catalog:",
-    "@opencode/session-ui": "workspace:*",
-    "@opencode/ui": "workspace:*",
+    "@opencode/session-ui-custom": "workspace:*",
+    "@opencode/ui-custom": "workspace:*",
     "@playwright/test": "catalog:",
     "@solidjs/meta": "catalog:",
     "@storybook/addon-a11y": "10.4.4",

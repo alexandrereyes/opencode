@@ -18,6 +18,13 @@ Follow this order while preserving existing behavior, data, and runtime guarante
 - Document remaining integration points, measure overlap against a fixed upstream base, and verify behavioral parity with meaningful tests.
 - Keep unrelated upstream fixes outside the customization scope.
 
+## Web UI Customizations
+
+- Put all custom web product work in `packages/app-custom`, `packages/ui-custom`, and `packages/session-ui-custom`. Keep the upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` trees identical to the upstream revision integrated as the branch's current baseline; never make direct custom edits there.
+- Keep shared backend and API contracts in the main monorepo packages, including Client, Schema, Protocol, Server, utilities, and custom plugins. Do not duplicate the backend dependency closure into the custom UI packages.
+- Port useful upstream UI improvements into the custom packages deliberately and manually; do not merge upstream UI trees over the custom paths.
+- The custom web development, build, deployment, and custom-server asset path is `packages/app-custom`. Upstream desktop continues to consume `@opencode/app`, `@opencode/ui`, and `@opencode/session-ui` unless a separate desktop customization is explicitly requested.
+
 ## Live V2 TUI Testing
 
 - Run `bun run dev:live` from a development worktree to test its TUI against the currently elected `opencode` background server and live sessions.

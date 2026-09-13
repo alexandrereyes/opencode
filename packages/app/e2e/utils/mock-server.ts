@@ -6,15 +6,16 @@ import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { MockApi, MockBadRequest, MockNotFound } from "./mock-api"
 
 export interface MockServerConfig {
+  server?: string
   provider: unknown | (() => unknown)
   integrationMethods?: Record<string, unknown[]>
   onConnectKey?: (input: { integrationID: string; body: unknown }) => void
+  preferences?: Record<string, unknown>
+  shells?: unknown[]
+  websearchProviders?: unknown[]
   directory: string
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
-  mcpServers?: unknown[]
-  appMentions?: unknown[]
-  subscriptions?: unknown
   pageMessages: (
     sessionId: string,
     limit: number,
@@ -50,7 +51,9 @@ type MockStreamWindow = Window & {
 }
 
 export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
-  const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
+  const server =
+    config.server ??
+    `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
   await page.addInitScript(
     ({ server, retry }) => {
@@ -188,13 +191,14 @@ export function createMockServerHandler(config: MockServerConfig) {
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
-  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-expose-headers": "x-next-cursor",
 }
 
 function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, string>; nextCursor: number }) {
   const noContent = Effect.succeed(HttpApiSchema.NoContent.make())
   const delay = config.messageDelay === undefined ? Effect.void : Effect.sleep(Duration.millis(config.messageDelay))
+  const preferences = { current: config.preferences ?? {} }
   return HttpApiBuilder.group(MockApi, "mock", (handlers) =>
     handlers
       .handleRaw("event", () => {
@@ -266,39 +270,20 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         command: () => Effect.succeed({ location: location(config), data: [] }),
         skill: () => Effect.succeed({ location: location(config), data: [] }),
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
-        mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
-        rpcCall: (ctx) => {
-          if (ctx.params.rpcID === "custom.snippets" && ctx.params.method === "list") {
-            return Effect.succeed({ output: { items: [] } })
-          }
-          if (ctx.params.rpcID === "custom.subscriptions" && ctx.params.method === "list") {
-            return Effect.succeed({
-              output: config.subscriptions ?? { status: "unavailable", accounts: [] },
-            })
-          }
-          if (ctx.params.rpcID === "custom.navigation" && ctx.params.method === "list") {
-            const payload = ctx.payload as { input?: { sessionID?: string } }
-            const sessionID = payload.input?.sessionID
-            return Effect.succeed({
-              output: {
-                data: config.sessions
-                  .filter((session) => !sessionID || session.id === sessionID)
-                  .map((session) => {
-                    const current = currentSession(session, config.directory)
-                    return { session: current, messageAt: current.time.updated }
-                  }),
-              },
-            })
-          }
-          if (ctx.params.rpcID !== "custom.app-mentions" || ctx.params.method !== "list") {
-            return Effect.succeed({ output: {} })
-          }
-          return Effect.succeed({ output: { apps: config.appMentions ?? [] } })
-        },
+        mcp: () => Effect.succeed({ location: location(config), data: [] }),
         mcpResource: () => Effect.succeed({ location: location(config), data: { resources: [], templates: [] } }),
         projectList: () => {
           const project = config.project as typeof config.project & { canonical?: string; worktree?: string }
           return Effect.succeed([{ ...project, canonical: project.canonical ?? project.worktree ?? config.directory }])
+        },
+        projectUpdate: (ctx) => {
+          const project = config.project as { canonical?: string }
+          return Effect.succeed({
+            ...project,
+            ...ctx.payload,
+            id: ctx.params.projectID,
+            canonical: project.canonical ?? config.directory,
+          })
         },
         projectCurrent: () =>
           Effect.succeed({
@@ -306,6 +291,14 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
             directory: config.directory,
             canonical: config.directory,
           }),
+        configPreferences: () => Effect.succeed(preferences.current),
+        configUpdatePreferences: (ctx) =>
+          Effect.sync(() => {
+            preferences.current = { ...preferences.current, ...ctx.payload }
+            return preferences.current
+          }),
+        configShells: () => Effect.succeed(config.shells ?? []),
+        websearchProviders: () => Effect.succeed({ location: location(config), data: config.websearchProviders ?? [] }),
         worktreeList: () =>
           Effect.succeed([
             { directory: config.directory },
@@ -489,8 +482,7 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         },
         sessionPermissionReply: () => noContent,
         sessionRename: () => noContent,
-        sessionInterrupt: () => Effect.succeed({ interrupted: false }),
-        sessionWait: () => noContent,
+        sessionInterrupt: () => noContent,
         sessionRevertStage: (ctx) => {
           const payload = record(ctx.payload) ? ctx.payload : {}
           const messageID = payload.messageID

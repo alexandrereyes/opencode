@@ -5,9 +5,9 @@ import tailwindcss from "@tailwindcss/vite"
 import { playgroundCss } from "./playground-css-plugin.ts"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const ui = path.resolve(here, "../../ui")
-const sessionUi = path.resolve(here, "../../session-ui")
-const app = path.resolve(here, "../../app/src")
+const ui = path.resolve(here, "../../ui-custom")
+const sessionUi = path.resolve(here, "../../session-ui-custom")
+const app = path.resolve(here, "../../app-custom/src")
 const mocks = path.resolve(here, "./mocks")
 
 export default defineMain({
@@ -22,11 +22,11 @@ export default defineMain({
     "@storybook/addon-a11y",
     "@storybook/addon-vitest",
   ],
-  staticDirs: [path.resolve(here, "../../app/public")],
+  staticDirs: [path.resolve(here, "../../app-custom/public")],
   stories: [
-    "../../ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
-    "../../session-ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
-    "../../app/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../ui-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../session-ui-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../app-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
   ],
   async viteFinal(config) {
     const { mergeConfig, searchForWorkspaceRoot } = await import("vite")

@@ -1,6 +1,5 @@
 import { createSimpleContext } from "@opencode/ui/context"
-import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner, onCleanup } from "solid-js"
-import { createStore } from "solid-js/store"
+import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner } from "solid-js"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
 import { useServerHealth } from "@/runtime/server/health"
@@ -18,9 +17,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "./errors"
 import { useSettings } from "@/settings/model"
-import { createServerSnippets } from "@/settings/snippets/server"
 import { timelinePreset } from "@opencode/session-ui/timeline/detail"
-import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -30,24 +27,8 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       () => server.list,
       () => true,
     )
-    const [store, setStore] = createStore({
-      settings: {
-        serverKey: undefined as ServerConnection.Key | undefined,
-      },
-    })
     const models = createGlobalModels()
     const notificationCoordinator = createNotificationCoordinator()
-
-    const settingsServer = createMemo(() => {
-      const list = server.list
-      return list.find((conn) => ServerConnection.key(conn) === store.settings.serverKey) ?? list[0]
-    })
-
-    createEffect(() => {
-      const conn = settingsServer()
-      const key = conn ? ServerConnection.key(conn) : undefined
-      if (store.settings.serverKey !== key) setStore("settings", "serverKey", key)
-    })
 
     const serverCtxs = new Map<ServerConnection.Key, ReturnType<typeof createServerController>>()
     const serverCtxDisposers = new Map<ServerConnection.Key, () => void>()
@@ -87,17 +68,6 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       servers: {
         list: () => server.list,
         health: serverHealth,
-      },
-      settings: {
-        server: {
-          get key() {
-            return store.settings.serverKey
-          },
-          selected: settingsServer,
-          set(key: ServerConnection.Key) {
-            if (store.settings.serverKey !== key) setStore("settings", "serverKey", key)
-          },
-        },
       },
       models,
       ensureServerCtx(conn: ServerConnection.Any) {
@@ -141,7 +111,6 @@ function createServerController(
   const settings = useSettings()
   const connKey = ServerConnection.key(conn)
   const sdk = createServerSdkContext(conn, scope)
-  const snippets = createServerSnippets(sdk)
   const source = createData({
     api: () => sdk.api,
     initialMessageLimit: () => (timelinePreset(settings.general.timelineDetail())?.id === "compact" ? 40 : 20),
@@ -163,15 +132,6 @@ function createServerController(
     data: source,
     remove: (sessionID) => sdk.api.session.remove({ sessionID }),
   })
-  // Each descendant has its own event, including sessions whose ancestry is not cached locally.
-  const hideSession = (sessionID: string) =>
-    notifySessionTabsRemoved({
-      server: connKey,
-      directory: data.session.get(sessionID)?.location.directory ?? "",
-      sessionIDs: [sessionID],
-    })
-  onCleanup(data.on("session.archived", (event) => hideSession(event.data.sessionID)))
-  onCleanup(data.on("session.deleted", (event) => hideSession(event.data.sessionID)))
   const sync = createServerSyncContext(sdk, data)
   createPermissionAutoApprover({ sdk, data })
   const notification = createServerNotificationState({ sdk, data, key: connKey, coordinator: notificationCoordinator })
@@ -209,7 +169,6 @@ function createServerController(
   return {
     data,
     sdk,
-    snippets,
     sync,
     isLocal,
     projects: {
