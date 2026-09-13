@@ -195,14 +195,24 @@ test("archive keeps focus while pending and can retry a failure", async ({ page 
   const target = row(page, fixture.expected.targetTitle)
   const release = Promise.withResolvers<void>()
   const mutations: string[] = []
-  await page.route(`**/api/session/${fixture.targetID}/archive`, async (route) => {
+  await page.route("**/api/rpc/custom.archive/archive", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ input: { sessionID: fixture.targetID } })
     mutations.push(route.request().method())
     if (mutations.length === 1) {
       await release.promise
-      await route.fulfill({ status: 500, body: "Archive failed", headers: { "access-control-allow-origin": "*" } })
+      await route.fulfill({
+        status: 400,
+        json: {
+          _tag: "RpcError",
+          type: "operation_failed",
+          message: "Archive failed",
+          data: { message: "Archive failed" },
+        },
+        headers: { "access-control-allow-origin": "*" },
+      })
       return
     }
-    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+    await route.fulfill({ json: { output: {} }, headers: { "access-control-allow-origin": "*" } })
   })
   await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
   const archive = target.getByRole("button", { name: "Archive", exact: true })
@@ -217,11 +227,9 @@ test("archive keeps focus while pending and can retry a failure", async ({ page 
   await expect(archive).toBeFocused()
   await expect(target).toBeVisible()
   await expect(page.getByText("Request failed", { exact: true })).toBeVisible()
-  const archived = page.waitForResponse((response) =>
-    response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
-  )
+  const archived = page.waitForResponse((response) => response.url().endsWith("/api/rpc/custom.archive/archive"))
   await archive.press("Enter")
-  expect((await archived).status()).toBe(204)
+  expect((await archived).status()).toBe(200)
   await expect(target).toHaveCount(0)
   expect(mutations).toEqual(["POST", "POST"])
   await expect(page).toHaveURL(href(fixture.sourceID))

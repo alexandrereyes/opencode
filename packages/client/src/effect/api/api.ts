@@ -285,10 +285,6 @@ export type SessionRenameInput = { readonly sessionID: Session.ID; readonly titl
 export type SessionRenameOutput = void
 export type SessionRenameOperation<E = never> = (input: SessionRenameInput) => Effect.Effect<SessionRenameOutput, E>
 
-export type SessionArchiveInput = { readonly sessionID: Session.ID }
-export type SessionArchiveOutput = void
-export type SessionArchiveOperation<E = never> = (input: SessionArchiveInput) => Effect.Effect<SessionArchiveOutput, E>
-
 export type SessionMoveInput = {
   readonly sessionID: Session.ID
   readonly directory: AbsolutePath
@@ -1191,7 +1187,6 @@ export interface SessionApi<E = never> {
   readonly switchAgent: SessionSwitchAgentOperation<E>
   readonly switchModel: SessionSwitchModelOperation<E>
   readonly rename: SessionRenameOperation<E>
-  readonly archive: SessionArchiveOperation<E>
   readonly move: SessionMoveOperation<E>
   readonly prompt: SessionPromptOperation<E>
   readonly command: SessionCommandOperation<E>

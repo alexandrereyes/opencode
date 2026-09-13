@@ -38,12 +38,11 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
           }),
         )
       }, layout)
-      await page.route("**/api/session/*/archive", async (route) => {
-        const id = new URL(route.request().url()).pathname.split("/").at(-2)
+      await page.route("**/api/rpc/custom.archive/archive", async (route) => {
         expect(route.request().method()).toBe("POST")
-        expect(id).toBe(fixture.targetID)
+        expect(route.request().postDataJSON()).toEqual({ input: { sessionID: fixture.targetID } })
         mutations.push("archive")
-        await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+        await route.fulfill({ json: { output: {} }, headers: { "access-control-allow-origin": "*" } })
       })
       page.on("request", (request) => {
         if (request.method() === "DELETE") mutations.push("delete")
@@ -101,12 +100,10 @@ for (const layout of ["horizontal", "vertical", "mobile"] as const) {
       await expect(tab).toBeVisible()
       if (layout === "vertical") await tab.hover()
       else await more.click()
-      const archived = page.waitForResponse((response) =>
-        response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
-      )
+      const archived = page.waitForResponse((response) => response.url().endsWith("/api/rpc/custom.archive/archive"))
       if (layout === "vertical") await tab.getByRole("button", { name: "Archive", exact: true }).click()
       else await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
-      expect((await archived).status()).toBe(204)
+      expect((await archived).status()).toBe(200)
       await expect(tab).toHaveCount(0)
       expect(mutations).toEqual(["archive"])
       await expect(page).toHaveURL(stressSessionHref(fixture.sourceID))

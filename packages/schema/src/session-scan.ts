@@ -9,6 +9,7 @@ export const Input = Schema.Struct({
   after: Session.ID.pipe(optional),
   limit: PositiveInt.pipe(optional),
   sessionID: Session.ID.pipe(optional),
+  parentID: Schema.NullOr(Session.ID).pipe(optional),
   archived: Schema.Boolean.pipe(optional),
 }).annotate({ identifier: "SessionScan.Input" })
 

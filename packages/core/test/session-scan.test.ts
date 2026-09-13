@@ -100,6 +100,49 @@ it.effect("scans stable ID pages with message activity and tri-state archive fil
   }),
 )
 
+it.effect("filters roots and direct children independently of archive state", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const sessions = yield* SessionStore.Service
+    yield* database.db
+      .insert(ProjectTable)
+      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/repo"), sandboxes: [] })
+      .run()
+    yield* database.db
+      .insert(SessionTable)
+      .values([
+        {
+          id: Session.ID.make("ses_root"),
+          project_id: Project.ID.global,
+          slug: "root",
+          directory: AbsolutePath.make("/repo"),
+          version: "test",
+          time_created: 1,
+          time_updated: 1,
+        },
+        {
+          id: Session.ID.make("ses_child"),
+          project_id: Project.ID.global,
+          parent_id: Session.ID.make("ses_root"),
+          slug: "child",
+          directory: AbsolutePath.make("/repo"),
+          version: "test",
+          time_created: 1,
+          time_updated: 1,
+          time_archived: 2,
+        },
+      ])
+      .run()
+
+    expect((yield* sessions.scan({ parentID: null })).data.map((item) => item.session.id)).toEqual([
+      Session.ID.make("ses_root"),
+    ])
+    expect(
+      (yield* sessions.scan({ parentID: Session.ID.make("ses_root") })).data.map((item) => item.session.id),
+    ).toEqual([Session.ID.make("ses_child")])
+  }),
+)
+
 it.effect("defaults scan pages to 200 rows and caps them at 1000", () =>
   Effect.gen(function* () {
     const database = yield* Database.Service

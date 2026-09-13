@@ -128,4 +128,5 @@ export type SessionDomain = Pick<
 > & {
   readonly hook: ModelHooks<SessionHooks>
   readonly scan: (input?: SessionScan.Input) => Effect.Effect<SessionScan.Page>
+  readonly archive: (input: { readonly sessionID: Session.ID }) => Effect.Effect<void, unknown>
 }

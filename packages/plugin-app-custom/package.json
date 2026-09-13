@@ -23,7 +23,8 @@
     "./native-apps/rpc": "./src/native-apps/rpc.ts",
     "./subscriptions/rpc": "./src/subscriptions/rpc.ts",
     "./worktrees/rpc": "./src/worktrees/rpc.ts",
-    "./navigation/rpc": "./src/navigation/rpc.ts"
+    "./navigation/rpc": "./src/navigation/rpc.ts",
+    "./archive/rpc": "./src/archive/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

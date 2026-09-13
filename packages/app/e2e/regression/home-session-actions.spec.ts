@@ -114,23 +114,20 @@ test("archives a home session through its visible actions menu", async ({ page }
     project: fixture.project,
     pageMessages,
   })
-  await page.route("**/api/session/*/archive", async (route) => {
-    const id = new URL(route.request().url()).pathname.split("/").at(-2)
-    expect(id).toBe(fixture.targetID)
-    const session = sessions.find((item) => item.id === id)
+  await page.route("**/api/rpc/custom.archive/archive", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ input: { sessionID: fixture.targetID } })
+    const session = sessions.find((item) => item.id === fixture.targetID)
     if (!session) throw new Error("Missing fixture session")
     Object.assign(session.time, { archived: Date.now() })
-    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+    await route.fulfill({ json: { output: {} }, headers: { "access-control-allow-origin": "*" } })
   })
   await page.goto("/")
   const row = page.locator(`[data-component="home-session-row-container"][data-session-id="${fixture.targetID}"]`)
   await expect(row).toBeVisible()
   await row.getByRole("button", { name: "More options", exact: true }).click()
-  const archived = page.waitForResponse((response) =>
-    response.url().endsWith(`/api/session/${fixture.targetID}/archive`),
-  )
+  const archived = page.waitForResponse((response) => response.url().endsWith("/api/rpc/custom.archive/archive"))
   await page.getByRole("menuitem", { name: "Archive", exact: true }).click()
-  expect((await archived).status()).toBe(204)
+  expect((await archived).status()).toBe(200)
   await expect(row).toHaveCount(0)
   await page.reload()
   await expect(

@@ -3978,10 +3978,6 @@ export type SessionRenameInput = {
 
 export type SessionRenameOutput = void
 
-export type SessionArchiveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionArchiveOutput = void
-
 export type SessionMoveInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly directory: {

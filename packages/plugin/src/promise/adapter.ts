@@ -607,6 +607,7 @@ export function fromPromise(plugin: Plugin) {
                   Effect.flatMap(Schema.encodeEffect(SessionScan.Page)),
                 ),
               ),
+            archive: (input) => run(host.session.archive(input)),
           },
           shell: {
             hook: (name, callback) =>

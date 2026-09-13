@@ -1,4 +1,5 @@
 import type { SessionInfo } from "@opencode/client/promise"
+import { Archive } from "@opencode/plugin-app-custom/archive/rpc"
 import { Button } from "@opencode/ui/button"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui/dialog"
@@ -38,11 +39,13 @@ export function useSessionLifecycleActions() {
     const ctx = global.ensureServerCtx(conn)
     if (ctx.sdk.connection.status() !== "connected") throw new Error(language.t("session.bulk.unavailable"))
     return Promise.resolve()
-      .then(() =>
-        action === "archive"
-          ? ctx.sdk.api.session.archive({ sessionID: session.id })
-          : ctx.data.session.remove(session.id),
-      )
+      .then(async () => {
+        if (action === "archive") {
+          await ctx.sdk.api.rpc(Archive.Definition).archive({ sessionID: session.id })
+          return
+        }
+        await ctx.data.session.remove(session.id)
+      })
       .then(async () => {
         if (action === "archive") {
           const archived = Date.now()

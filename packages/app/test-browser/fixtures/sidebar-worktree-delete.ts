@@ -95,16 +95,21 @@ function fixture() {
         await state.deleteGate?.promise
         return Response.json({ output: { directory: "/repo/feature" } })
       }
-      if (url.pathname.endsWith("/archive")) {
-        const sessionID = url.pathname.split("/").at(-2)
+      if (url.pathname === "/api/rpc/custom.archive/archive") {
+        const sessionID = rpcSessionID(await request.json())
         if (sessionID) state.archives.push(decodeURIComponent(sessionID))
         await state.archiveGate?.promise
         if (state.archiveError)
           return Response.json(
-            { _tag: "SessionNotFoundError", sessionID: sessionID ?? "missing", message: state.archiveError.message },
-            { status: 404 },
+            {
+              _tag: "RpcError",
+              type: "operation_failed",
+              message: state.archiveError.message,
+              data: { message: state.archiveError.message },
+            },
+            { status: 400 },
           )
-        return new Response(null, { status: 204 })
+        return Response.json({ output: {} })
       }
       return Response.json({ message: `Unexpected ${request.method} ${url.pathname}` }, { status: 500 })
     },
@@ -131,6 +136,14 @@ function fixture() {
     },
   }
   return { state, ctx }
+}
+
+function rpcSessionID(value: unknown) {
+  if (typeof value !== "object" || value === null || !("input" in value)) throw new Error("Missing RPC input")
+  const input = value.input
+  if (typeof input !== "object" || input === null || !("sessionID" in input) || typeof input.sessionID !== "string")
+    throw new Error("Missing RPC session ID")
+  return input.sessionID
 }
 
 function Harness() {

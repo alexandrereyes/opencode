@@ -350,12 +350,11 @@ const layer = Layer.effect(
         yield* bus.remove(sessionID)
       }),
       archive: Effect.fn("Session.archive")(function* (sessionID) {
-        const current = yield* result.get(sessionID)
+        yield* result.get(sessionID)
         yield* execution.interrupt(sessionID)
         yield* execution.awaitIdle(sessionID)
         yield* transport.close(sessionID)
-        const children = yield* result.list({ parentID: sessionID })
-        yield* Effect.forEach(children.data, (child) => result.archive(child.id), { concurrency: 1, discard: true })
+        const current = yield* result.get(sessionID)
         if (!current.time.archived) yield* bus.publish(SessionEvent.Archived, { sessionID })
       }),
       list: Effect.fn("Session.list")(function* (input) {
