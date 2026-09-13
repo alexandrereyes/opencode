@@ -1,6 +1,7 @@
 export * as SessionRevert from "./revert.js"
 
-import { Effect } from "effect"
+import { and, asc, eq, gt } from "drizzle-orm"
+import { Effect, Schema } from "effect"
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
 import { Instance } from "../instance/service.js"
@@ -10,19 +11,19 @@ import { SessionEvent } from "./event.js"
 import { MessageNotFoundError } from "./error.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
-import { SessionRevertFiles } from "./revert-files.js"
+import { SessionMessageTable } from "./sql.js"
 
 export { MessageNotFoundError }
+
+interface BoundaryInput {
+  readonly sessionID: SessionSchema.ID
+  readonly messageID: SessionMessage.ID
+}
 
 export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
   session: SessionSchema.Info
   messageID: SessionMessage.ID
   files?: boolean
-  children?: readonly {
-    readonly sessionID: SessionSchema.ID
-    readonly messageID?: SessionMessage.ID
-    readonly pendingIDs: readonly SessionMessage.ID[]
-  }[]
 }) {
   const instances = yield* Instance.Service
   const database = yield* Database.Service
@@ -33,14 +34,7 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
     const original = input.session.revert?.snapshot
       ? Snapshot.ID.make(input.session.revert.snapshot)
       : yield* snapshot.capture()
-    const next =
-      input.files === false
-        ? new Map<RelativePath, Snapshot.ID>()
-        : yield* SessionRevertFiles.plan(database.db, {
-            session: input.session,
-            messageID: input.messageID,
-            children: input.children,
-          })
+    const next = yield* plan(database.db, { sessionID: input.session.id, messageID: input.messageID })
     const restore = new Map<RelativePath, Snapshot.ID>()
     if (original) {
       for (const file of input.session.revert?.files ?? []) restore.set(RelativePath.make(file.file), original)
@@ -55,7 +49,6 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
       messageID: input.messageID,
       snapshot: original,
       files,
-      children: input.children?.slice(),
     } satisfies SessionSchema.Info["revert"]
     yield* bus.publish(SessionEvent.RevertEvent.Staged, {
       sessionID: input.session.id,
@@ -88,4 +81,36 @@ export const commit = Effect.fn("SessionRevert.commit")(function* (bus: Bus.Inte
     sessionID: session.id,
     to: session.revert.messageID,
   })
+})
+
+const plan = Effect.fn("SessionRevert.plan")(function* (db: Database.Interface["db"], input: BoundaryInput) {
+  const boundary = yield* db
+    .select({ seq: SessionMessageTable.seq })
+    .from(SessionMessageTable)
+    .where(and(eq(SessionMessageTable.session_id, input.sessionID), eq(SessionMessageTable.id, input.messageID)))
+    .get()
+    .pipe(Effect.orDie)
+  if (!boundary) return yield* new MessageNotFoundError(input)
+  const rows = yield* db
+    .select()
+    .from(SessionMessageTable)
+    .where(
+      and(
+        eq(SessionMessageTable.session_id, input.sessionID),
+        eq(SessionMessageTable.type, "assistant"),
+        gt(SessionMessageTable.seq, boundary.seq),
+      ),
+    )
+    .orderBy(asc(SessionMessageTable.seq))
+    .all()
+    .pipe(Effect.orDie)
+  const decode = Schema.decodeUnknownEffect(SessionMessage.Info)
+  const files = new Map<RelativePath, Snapshot.ID>()
+  for (const row of rows) {
+    const message = yield* decode({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie)
+    if (message.type !== "assistant" || !message.snapshot?.start) continue
+    for (const file of message.snapshot.files ?? [])
+      if (!files.has(file)) files.set(file, Snapshot.ID.make(message.snapshot.start))
+  }
+  return files
 })

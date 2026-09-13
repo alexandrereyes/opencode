@@ -1,6 +1,0 @@
-{
-  "name": "@opencode/poc-ui-undo",
-  "private": true,
-  "type": "module",
-  "exports": "./index.ts"
-}

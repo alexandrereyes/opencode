@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessageUser } from "@opencode/client/promise"
+import type { SessionInfo, SessionMessageInfo, SessionMessageUser } from "@opencode/client/promise"
 import { createMemoryComposerState } from "@/composer/state"
 import { createSessionRevertActions, stageSessionRevert } from "./revert"
 
 const user = (id: string): SessionMessageUser => ({ id, type: "user", text: id, time: { created: 0 } })
+const timedUser = (id: string, created: number): SessionMessageUser => ({
+  id,
+  type: "user",
+  text: id,
+  time: { created },
+})
+const session = (id: string, parentID?: string, reverted = false) =>
+  ({ id, parentID, revert: reverted ? { messageID: `${id}-boundary` } : undefined }) as SessionInfo
 
 function setupRevert(messages = [user("message-a"), user("message-b"), user("message-c")]) {
   const composer = createMemoryComposerState()
@@ -251,5 +259,183 @@ describe("session revert requests", () => {
     await stageRedo
     fixture.gates[2]?.resolve()
     await redo
+  })
+})
+
+describe("session revert cascade", () => {
+  function setup(input?: {
+    sessions?: SessionInfo[]
+    children?: Record<string, SessionInfo[]>
+    messages?: Record<string, SessionMessageInfo[]>
+    active?: string[]
+    failStage?: string[]
+    serverBoundary?: string
+  }) {
+    const composer = createMemoryComposerState()
+    const calls: Array<{ action: string; sessionID: string; messageID?: string; files?: boolean }> = []
+    const failed: unknown[] = []
+    const sessions = input?.sessions ?? []
+    const messages = input?.messages ?? {}
+    let serverBoundary = input?.serverBoundary
+    const actions = createSessionRevertActions(
+      {
+        session: {
+          identity: { params: { id: "parent" } },
+          history: { userMessages: () => [timedUser("parent-user", 100)] },
+          data: { revertMessageID: () => serverBoundary },
+        },
+        setActiveMessage() {},
+      },
+      {
+        prompt: composer,
+        directory: () => "/repo",
+        failed: (error) => failed.push(error),
+        pending: { list: () => [] },
+        api: {
+          interrupt: async ({ sessionID }) => {
+            calls.push({ action: "interrupt", sessionID })
+            return { interrupted: true }
+          },
+          wait: async ({ sessionID }) => {
+            calls.push({ action: "wait", sessionID })
+          },
+          revert: {
+            stage: async ({ sessionID, messageID, files }) => {
+              calls.push({ action: "stage", sessionID, messageID, files })
+              if (input?.failStage?.includes(sessionID)) throw new Error(`failed ${sessionID}`)
+              if (sessionID === "parent") serverBoundary = messageID
+              return { messageID }
+            },
+            clear: async ({ sessionID }) => {
+              calls.push({ action: "clear", sessionID })
+              if (sessionID === "parent") serverBoundary = undefined
+            },
+          },
+          inbox: {
+            list: async () => [],
+            cancel: async () => undefined,
+          },
+        },
+        cascade: {
+          sessions: async ({ parentID }) => ({
+            data: input?.children?.[parentID] ?? sessions.filter((item) => item.parentID === parentID),
+            cursor: {},
+          }),
+          messages: async ({ sessionID }) => ({ data: messages[sessionID] ?? [], cursor: {} }),
+          status: (sessionID) => (input?.active?.includes(sessionID) ? "busy" : "idle"),
+        },
+      },
+    )
+    return { actions, calls, composer, failed }
+  }
+
+  test("reverts children and grandchildren at the first user message on or after the cutoff", async () => {
+    const fixture = setup({
+      sessions: [session("child", "parent"), session("grandchild", "child")],
+      messages: {
+        child: [timedUser("child-before", 99), timedUser("child-equal", 100), timedUser("child-after", 101)],
+        grandchild: [timedUser("grandchild-after", 120)],
+      },
+    })
+
+    await fixture.actions.to("parent-user")
+
+    expect(fixture.calls.filter((call) => call.action === "stage")).toEqual([
+      { action: "stage", sessionID: "child", messageID: "child-equal", files: false },
+      { action: "stage", sessionID: "grandchild", messageID: "grandchild-after", files: false },
+      { action: "stage", sessionID: "parent", messageID: "parent-user", files: undefined },
+    ])
+    expect(fixture.composer.current()).toEqual([{ type: "text", content: "parent-user", start: 0, end: 11 }])
+  })
+
+  test("does not use an assistant message as a descendant boundary", async () => {
+    const fixture = setup({
+      sessions: [session("child", "parent")],
+      messages: {
+        child: [{ id: "assistant", type: "assistant", time: { created: 100 } } as SessionMessageInfo],
+      },
+    })
+
+    await fixture.actions.to("parent-user")
+
+    expect(fixture.calls.filter((call) => call.action === "stage").map((call) => call.sessionID)).toEqual(["parent"])
+  })
+
+  test("visits duplicate descendants once and terminates a cycle back to the parent", async () => {
+    const child = session("child", "parent")
+    const grandchild = session("grandchild", "child")
+    const fixture = setup({
+      children: {
+        parent: [child, child],
+        child: [grandchild, session("parent", "grandchild")],
+        grandchild: [child],
+      },
+      messages: {
+        child: [timedUser("child-user", 100)],
+        grandchild: [timedUser("grandchild-user", 100)],
+      },
+    })
+
+    await fixture.actions.to("parent-user")
+
+    expect(fixture.calls.filter((call) => call.action === "stage").map((call) => call.sessionID)).toEqual([
+      "child",
+      "grandchild",
+      "parent",
+    ])
+  })
+
+  test("continues with other descendants and the parent when one descendant fails", async () => {
+    const fixture = setup({
+      sessions: [session("broken", "parent"), session("healthy", "parent")],
+      messages: {
+        broken: [timedUser("broken-user", 100)],
+        healthy: [timedUser("healthy-user", 100)],
+      },
+      failStage: ["broken"],
+    })
+
+    expect(await fixture.actions.to("parent-user")).toBe(true)
+    expect(fixture.calls.filter((call) => call.action === "stage").map((call) => call.sessionID)).toEqual([
+      "broken",
+      "healthy",
+      "parent",
+    ])
+    expect(fixture.failed).toHaveLength(1)
+  })
+
+  test("interrupts an active descendant before reverting it without restoring its files", async () => {
+    const fixture = setup({
+      sessions: [session("child", "parent")],
+      messages: { child: [timedUser("child-user", 100)] },
+      active: ["child"],
+    })
+
+    await fixture.actions.to("parent-user")
+
+    expect(fixture.calls.slice(0, 3)).toEqual([
+      { action: "interrupt", sessionID: "child" },
+      { action: "wait", sessionID: "child" },
+      { action: "stage", sessionID: "child", messageID: "child-user", files: false },
+    ])
+  })
+
+  test("clears marked descendants before clearing the parent", async () => {
+    const fixture = setup({
+      sessions: [session("child", "parent", true), session("grandchild", "child", true)],
+      serverBoundary: "parent-user",
+      active: ["grandchild"],
+    })
+
+    await fixture.actions.redo()
+
+    expect(fixture.calls.filter((call) => call.action === "clear").map((call) => call.sessionID)).toEqual([
+      "child",
+      "grandchild",
+      "parent",
+    ])
+    expect(fixture.calls.findIndex((call) => call.action === "interrupt" && call.sessionID === "grandchild")).toBeLessThan(
+      fixture.calls.findIndex((call) => call.action === "clear" && call.sessionID === "grandchild"),
+    )
   })
 })

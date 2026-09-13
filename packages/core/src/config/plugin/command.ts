@@ -17,7 +17,6 @@ import { SubagentJob } from "../../session/subagent-job.js"
 import { ShellSelect } from "../../shell/select.js"
 import { FSUtil } from "@opencode/util/fs-util"
 import { ConfigMarkdown } from "../markdown.js"
-import { SessionMessage } from "../../session/message.js"
 
 const decodeCommand = Schema.decodeUnknownOption(ConfigCommand.Info)
 
@@ -105,17 +104,9 @@ export const Plugin = define({
                     agent: selected.id,
                     model: model ?? selected.info?.model ?? parent.model,
                   })
-                  const inputID = SessionMessage.ID.create()
-                  const origin = {
-                    parentSessionID: parent.id,
-                    messageID: SessionMessage.ID.create(),
-                    toolCallID: `command:${name}`,
-                  }
                   yield* sessions.prompt({
                     ...input.prompt,
-                    id: inputID,
                     sessionID: child.id,
-                    causal: origin,
                     text: ["You are a subagent spawned by another session.", text].join("\n"),
                     resume: false,
                   })
@@ -126,8 +117,7 @@ export const Plugin = define({
                     agent: selected.id,
                     description: command.description ?? name,
                   }
-                  const started = yield* subagents.start(recovery, origin)
-                  if (started.status === "cancelled") return
+                  yield* subagents.start(recovery)
                   yield* subagents.background(recovery)
                   return
                 }

@@ -3,7 +3,6 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { Navigation } from "@opencode/plugin-app-custom/navigation/rpc"
 import type { ServerCtx } from "@/runtime/server/runtime"
 import { loadNavigation, navigationPage, type SessionNavigationInfo } from "./sidebar-model"
-import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { createRecentClock, createRecentOrder } from "./sidebar-order"
 
 export function createSidebarIndex(
@@ -117,13 +116,6 @@ export function createSidebarIndex(
         "sessionID" in event.data ? event.data.sessionID : "form" in event.data ? event.data.form.sessionID : undefined
       if (typeof id !== "string" || id === "global") return
       invalidate(id)
-      // Causal undo changes descendant projections without a separate child revert event.
-      if (event.type.startsWith("session.revert.")) {
-        sessionTreeIDs(
-          Object.values(state.rows).map((row) => row.session),
-          id,
-        ).forEach(invalidate)
-      }
       if (work.timer === undefined) work.timer = setTimeout(refresh, 100)
     })
     setState({ loading: true, error: false })

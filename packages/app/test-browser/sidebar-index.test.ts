@@ -188,16 +188,64 @@ function mount(session: {
     ...state,
     cache,
     remembered,
-    emit(type: "session.execution.started" | "session.execution.succeeded" | "session.deleted", sessionID: string) {
+    emit(
+      type:
+        | "session.execution.started"
+        | "session.execution.succeeded"
+        | "session.deleted"
+        | "session.revert.staged",
+      sessionID: string,
+    ) {
       const base = { id: `${type}:${sessionID}`, created: 100, data: { sessionID } }
       const event: OpenCodeEvent =
         type === "session.deleted"
           ? { ...base, type, durable: { aggregateID: sessionID, seq: 1, version: 2 } }
+          : type === "session.revert.staged"
+            ? {
+                ...base,
+                type,
+                durable: { aggregateID: sessionID, seq: 1, version: 1 },
+                data: { sessionID, revert: { messageID: "message-boundary" } },
+              }
           : { ...base, type, durable: { aggregateID: sessionID, seq: 1, version: 1 } }
       listeners.forEach((listener) => listener(event))
     },
   }
 }
+
+test("revert events refresh only the session named by each event", async () => {
+  const parent = row("parent", 10)
+  const child = {
+    ...row("child", 20),
+    session: { ...row("child", 20).session, parentID: "parent" },
+  }
+  const reads: (string | undefined)[] = []
+  const refreshed = new Map([
+    ["parent", Promise.withResolvers<void>()],
+    ["child", Promise.withResolvers<void>()],
+  ])
+  const ui = mount({
+    active: async () => ({}),
+    list: async (input) => {
+      reads.push(input.sessionID)
+      if (!input.sessionID) return { data: [parent, child] }
+      refreshed.get(input.sessionID)?.resolve()
+      return { data: [input.sessionID === "parent" ? parent : child] }
+    },
+  })
+  try {
+    await Bun.sleep(0)
+    ui.emit("session.revert.staged", "parent")
+    await refreshed.get("parent")!.promise
+    expect(reads).toEqual([undefined, "parent"])
+
+    ui.emit("session.revert.staged", "child")
+    await refreshed.get("child")!.promise
+    expect(reads).toEqual([undefined, "parent", "child"])
+  } finally {
+    ui.dispose()
+  }
+})
 
 test("active snapshot establishes A's phase before navigation: start B, settle A, then finish navigation", async () => {
   const navigation = Promise.withResolvers<SessionNavigationPage>()

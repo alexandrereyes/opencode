@@ -1,4 +1,4 @@
-import type { SessionMessageUser } from "@opencode/client/promise"
+import type { SessionInfo, SessionMessageInfo, SessionMessageUser } from "@opencode/client/promise"
 import { useComposerState } from "@/composer/persistence"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
@@ -10,6 +10,17 @@ import { showToast } from "@/shell/notifications/toast"
 
 type SessionApi = ReturnType<typeof useServerSDK>["api"]["session"]
 type RevertApi = Pick<SessionApi, "interrupt" | "wait"> & { revert: Pick<SessionApi["revert"], "stage"> }
+type RevertCascade = {
+  sessions: (input: { parentID: string; cursor?: string }) => Promise<{
+    data: SessionInfo[]
+    cursor: { next?: string | null }
+  }>
+  messages: (input: { sessionID: string; cursor?: string }) => Promise<{
+    data: SessionMessageInfo[]
+    cursor: { next?: string | null }
+  }>
+  status: (sessionID: string) => "idle" | "busy"
+}
 type RevertInput = {
   session: {
     identity: { params: { id?: string } }
@@ -27,11 +38,12 @@ type RevertEnvironment = {
   pending: Pick<ReturnType<typeof useData>["session"]["pending"], "list">
   directory: () => string
   failed: (error: unknown) => void
+  cascade?: RevertCascade
 }
 
 export async function stageSessionRevert(
   api: RevertApi,
-  input: { sessionID: string; messageID: SessionMessageUser["id"] },
+  input: { sessionID: string; messageID: SessionMessageUser["id"]; files?: boolean },
 ) {
   await api.interrupt({ sessionID: input.sessionID })
   await api.wait({ sessionID: input.sessionID })
@@ -49,6 +61,13 @@ export function createSessionRevert(input: RevertInput) {
     api: server.api.session,
     pending: data.session.pending,
     directory: () => location().directory,
+    cascade: {
+      sessions: ({ parentID, cursor }) =>
+        server.api.session.list(cursor ? { cursor } : { parentID, limit: 100, order: "asc" }),
+      messages: ({ sessionID, cursor }) =>
+        server.api.message.list({ sessionID, cursor, limit: 200, order: "asc", type: "user" }),
+      status: (sessionID) => (data.session.status(sessionID) === "idle" ? "idle" : "busy"),
+    },
     failed: (error) =>
       showToast({
         title: language.t("common.requestFailed"),
@@ -87,6 +106,7 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
   }
 
   const stage = async (sessionID: string, message: SessionMessageUser) => {
+    await cascadeRevert(sessionID, message.time.created, environment)
     if (!(await request(() => stageSessionRevert(environment.api, { sessionID, messageID: message.id })))) return false
     // Pending prompts were written against the history being rewound. Keep
     // their conservative cutoff and finish cancelling the captured set before
@@ -153,6 +173,7 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
     target.context.replaceComments([])
     input.setActiveMessage(messages.at(-1))
     return target.revert.schedule(undefined, async () => {
+      await cascadeClear(sessionID, environment)
       if (!(await request(() => environment.api.revert.clear({ sessionID })))) return false
       return true
     })
@@ -183,3 +204,81 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
 }
 
 export type SessionRevert = ReturnType<typeof createSessionRevert>
+
+async function cascadeRevert(rootID: string, cutoff: number, environment: RevertEnvironment) {
+  const cascade = environment.cascade
+  if (!cascade) return
+  const descendants = await descendantSessions(rootID, environment)
+  for (const session of descendants) {
+    try {
+      const message = await firstUserMessageAtOrAfter(session.id, cutoff, cascade)
+      if (!message) continue
+      if (cascade.status(session.id) !== "idle") {
+        await environment.api.interrupt({ sessionID: session.id })
+        await environment.api.wait({ sessionID: session.id })
+      }
+      await environment.api.revert.stage({ sessionID: session.id, messageID: message.id, files: false })
+    } catch (error) {
+      environment.failed(error)
+    }
+  }
+}
+
+async function cascadeClear(rootID: string, environment: RevertEnvironment) {
+  const cascade = environment.cascade
+  if (!cascade) return
+  const descendants = await descendantSessions(rootID, environment)
+  for (const session of descendants) {
+    if (!session.revert) continue
+    try {
+      if (cascade.status(session.id) !== "idle") {
+        await environment.api.interrupt({ sessionID: session.id })
+        await environment.api.wait({ sessionID: session.id })
+      }
+      await environment.api.revert.clear({ sessionID: session.id })
+    } catch (error) {
+      environment.failed(error)
+    }
+  }
+}
+
+async function descendantSessions(rootID: string, environment: RevertEnvironment) {
+  if (!environment.cascade) return []
+  const result: SessionInfo[] = []
+  const pending = [rootID]
+  const visited = new Set(pending)
+  for (const parentID of pending) {
+    const children: SessionInfo[] = []
+    try {
+      let cursor: string | undefined
+      do {
+        const page = await environment.cascade.sessions({ parentID, cursor })
+        children.push(
+          ...page.data.filter((session) => {
+            if (visited.has(session.id)) return false
+            visited.add(session.id)
+            return true
+          }),
+        )
+        cursor = page.cursor.next ?? undefined
+      } while (cursor)
+    } catch (error) {
+      environment.failed(error)
+    }
+    result.push(...children)
+    pending.push(...children.map((session) => session.id))
+  }
+  return result
+}
+
+async function firstUserMessageAtOrAfter(sessionID: string, cutoff: number, cascade: RevertCascade) {
+  let cursor: string | undefined
+  do {
+    const page = await cascade.messages({ sessionID, cursor })
+    const message = page.data.find(
+      (item): item is SessionMessageUser => item.type === "user" && item.time.created >= cutoff,
+    )
+    if (message) return message
+    cursor = page.cursor.next ?? undefined
+  } while (cursor)
+}

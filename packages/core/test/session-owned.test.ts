@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { Agent } from "@opencode/schema/agent"
 import { Event } from "@opencode/schema/event"
@@ -15,7 +15,6 @@ import { Bus } from "../src/bus.js"
 import { Database } from "../src/database/database.js"
 import { EventTable } from "../src/event/sql.js"
 import { Image } from "../src/image.js"
-import { Job } from "../src/job.js"
 import { Instance } from "../src/instance/service.js"
 import { Location } from "../src/location.js"
 import { Plugin } from "../src/plugin.js"
@@ -33,7 +32,7 @@ import { SessionRevert } from "../src/session/revert.js"
 import { SessionRunCoordinator } from "../src/session/run-coordinator.js"
 import { SessionSchema } from "../src/session/schema.js"
 import { Session } from "../src/session/session.js"
-import { SessionMessageTable, SessionTable } from "../src/session/sql.js"
+import { SessionTable } from "../src/session/sql.js"
 import { SessionStore } from "../src/session/store.js"
 import { Shell } from "../src/shell.js"
 import { Skill } from "../src/skill.js"
@@ -41,8 +40,6 @@ import { Snapshot } from "../src/snapshot.js"
 import { tempGlobalLayer } from "./fixture/global"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
-import { plan } from "../../plugin-app-custom/src/causal-undo/index.js"
-import { CausalRevert } from "@opencode/plugin/session-revert"
 
 const it = testEffect(
   LayerNode.compile(
@@ -53,7 +50,6 @@ const it = testEffect(
       SessionStore.node,
       SessionInbox.node,
       FSUtil.node,
-      Job.node,
     ]),
     {
       replacements: [Bus.node.replace(Bus.configured({ persist: true })), Global.node.replace(tempGlobalLayer)],
@@ -76,8 +72,6 @@ const setup = Effect.fnUntraced(function* (options?: {
   shell?: Layer.Layer<Shell.Service>
   skills?: (ref: Location.Ref) => Layer.Layer<Skill.Service>
   snapshot?: (ref: Location.Ref) => Layer.Layer<Snapshot.Service>
-  causal?: boolean
-  activation?: (ref: Location.Ref) => Effect.Effect<void>
 }) {
   const database = yield* Database.Service
   const bus = yield* Bus.Service
@@ -98,12 +92,6 @@ const setup = Effect.fnUntraced(function* (options?: {
     }),
   )
   const hooks = yield* PluginHooks.Service.pipe(Effect.provide(LayerNode.compile(PluginHooks.node)))
-  if (options?.causal)
-    yield* hooks.register("session", "revert.plan", (event) =>
-      Effect.sync(() => {
-        event.plan = plan(event.facts)
-      }),
-    )
   const locations: Location.Ref[] = []
   const activationWaits: Location.Ref[] = []
   const resumes: SessionSchema.ID[] = []
@@ -152,7 +140,7 @@ const setup = Effect.fnUntraced(function* (options?: {
       Layer.mock(Plugin.Service, {
         awaitActivation: Effect.sync(() => {
           activationWaits.push(ref)
-        }).pipe(Effect.andThen(options?.activation?.(ref) ?? Effect.void)),
+        }),
       }),
     ).pipe(Layer.fresh)
   }
@@ -169,7 +157,6 @@ const setup = Effect.fnUntraced(function* (options?: {
       | Instance.Service
       | SessionExecution.Service
       | SessionInbox.Service
-      | Job.Service
       | Scope.Scope
     >(),
     Effect.provideService(Instance.Service, instances),
@@ -745,8 +732,8 @@ describe("Session-owned handles", () => {
       yield* handle.revert.clear()
 
       expect(captures).toEqual([source, destination])
-      expect(fixture.locations).toEqual([source, source, destination, destination, destination])
-      expect(fixture.activationWaits).toEqual([source, destination])
+      expect(fixture.locations).toEqual([source, destination, destination])
+      expect(fixture.activationWaits).toEqual([])
       expect((yield* handle.get()).revert).toBeUndefined()
     }),
   )
@@ -778,483 +765,6 @@ describe("SessionPrompt preparation", () => {
 })
 
 describe("SessionRevert operations", () => {
-  it.live("defaults new stages to root-only without reading assistant content", () =>
-    Effect.gen(function* () {
-      const fixture = yield* setup({
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = yield* fixture.sessions.forSession(otherID).prompt({
-        text: "causal child",
-        resume: false,
-        causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "child" },
-      })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-      const assistantMessageID = SessionMessage.ID.create()
-      yield* fixture.bus.publish(SessionEvent.Step.Started, {
-        sessionID,
-        assistantMessageID,
-        agent: Agent.ID.make("build"),
-        model: { id: Model.ID.make("test-model"), providerID: Provider.ID.make("test-provider") },
-      })
-      yield* fixture.db.run(sql`UPDATE ${SessionMessageTable} SET data = 'not-json' WHERE id = ${assistantMessageID}`)
-
-      const staged = yield* fixture.sessions
-        .forSession(sessionID)
-        .revert.stage({ messageID: boundary.id, files: false })
-      expect(staged.children).toEqual([])
-      yield* fixture.sessions.forSession(sessionID).revert.commit()
-      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).toContain(childInput.id)
-    }),
-  )
-
-  it.live("awaits root Location activation before collecting causal facts", () => {
-    let activate = Effect.void
-    return Effect.gen(function* () {
-      const fixture = yield* setup({
-        activation: () => activate,
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = yield* fixture.sessions.forSession(otherID).prompt({ text: "child", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-      yield* fixture.hooks.register("session", "revert.plan", (event) =>
-        Effect.sync(() => {
-          event.plan = plan(event.facts)
-        }),
-      )
-      activate = fixture.bus.publish(SessionEvent.SubagentInputAssigned, {
-        sessionID,
-        childSessionID: otherID,
-        inputID: childInput.id,
-        origin: { messageID: SessionMessage.ID.create(), toolCallID: "activation" },
-      })
-
-      const staged = yield* fixture.sessions
-        .forSession(sessionID)
-        .revert.stage({ messageID: boundary.id, files: false })
-      expect(staged.children).toEqual([{ sessionID: otherID, messageID: childInput.id, pendingIDs: [] }])
-    })
-  })
-
-  it.live("rejects an invalid plugin plan before snapshots or revert state mutate", () =>
-    Effect.gen(function* () {
-      let captures = 0
-      const fixture = yield* setup({
-        snapshot: () =>
-          Layer.mock(Snapshot.Service, {
-            capture: () =>
-              Effect.sync(() => {
-                captures++
-                return undefined
-              }),
-          }),
-      })
-      yield* fixture.hooks.register("session", "revert.plan", (event) =>
-        Effect.sync(() => {
-          expect(Object.isFrozen(event.facts)).toBe(true)
-          expect(Object.isFrozen(event.facts.boundary)).toBe(true)
-          expect(Object.isFrozen(event.facts.sessions)).toBe(true)
-          event.plan = CausalRevert.Plan.make({
-            participants: [
-              { sessionID: SessionSchema.ID.make("ses_unknown"), pendingIDs: [SessionMessage.ID.make("msg_unknown")] },
-            ],
-            origins: [],
-            pendingOrigins: [],
-            discardedSessionIDs: [],
-          })
-        }),
-      )
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-
-      const result = yield* fixture.sessions
-        .forSession(sessionID)
-        .revert.stage({ messageID: boundary.id, files: false })
-        .pipe(Effect.exit)
-      expect(Exit.isFailure(result) ? Cause.pretty(result.cause) : "").toContain("Invalid causal revert plan")
-      expect(captures).toBe(0)
-      expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
-    }),
-  )
-
-  it.live("replans outside locks when provenance changes after the first hook", () =>
-    Effect.gen(function* () {
-      const fixture = yield* setup({
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = yield* fixture.sessions.forSession(otherID).prompt({ text: "child", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-      const originMessageID = SessionMessage.ID.create()
-      let calls = 0
-      yield* fixture.hooks.register("session", "revert.plan", (event) =>
-        Effect.gen(function* () {
-          calls++
-          event.plan = plan(event.facts)
-          if (calls !== 1) return
-          yield* fixture.bus.publish(SessionEvent.SubagentInputAssigned, {
-            sessionID,
-            childSessionID: otherID,
-            inputID: childInput.id,
-            origin: { messageID: originMessageID, toolCallID: "late" },
-          })
-        }),
-      )
-
-      const staged = yield* fixture.sessions
-        .forSession(sessionID)
-        .revert.stage({ messageID: boundary.id, files: false })
-      expect(calls).toBe(2)
-      expect(staged.children).toEqual([{ sessionID: otherID, messageID: childInput.id, pendingIDs: [] }])
-    }),
-  )
-
-  it.live("uses a persisted family after its planner unloads", () =>
-    Effect.gen(function* () {
-      const fixture = yield* setup({
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const registration = yield* fixture.hooks.register("session", "revert.plan", (event) =>
-        Effect.sync(() => {
-          event.plan = plan(event.facts)
-        }),
-      )
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = yield* fixture.sessions.forSession(otherID).prompt({
-        text: "causal child",
-        resume: false,
-        causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "child" },
-      })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-      yield* fixture.sessions.forSession(sessionID).revert.stage({ messageID: boundary.id, files: false })
-      yield* registration.dispose
-
-      yield* fixture.sessions.forSession(otherID).synthetic({ text: "new child input", resume: false })
-      expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
-      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).not.toContain(childInput.id)
-    }),
-  )
-
-  it.live("clears and commits persisted families after planner unload", () =>
-    Effect.gen(function* () {
-      const fixture = yield* setup({
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const register = () =>
-        fixture.hooks.register("session", "revert.plan", (event) =>
-          Effect.sync(() => {
-            event.plan = plan(event.facts)
-          }),
-        )
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = yield* fixture.sessions.forSession(otherID).prompt({
-        text: "causal child",
-        resume: false,
-        causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "child" },
-      })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-
-      const clearRegistration = yield* register()
-      yield* fixture.sessions.forSession(sessionID).revert.stage({ messageID: boundary.id, files: false })
-      yield* clearRegistration.dispose
-      yield* fixture.sessions.forSession(otherID).revert.clear()
-      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).toContain(childInput.id)
-
-      const commitRegistration = yield* register()
-      yield* fixture.sessions.forSession(sessionID).revert.stage({ messageID: boundary.id, files: false })
-      yield* commitRegistration.dispose
-      yield* fixture.sessions.forSession(otherID).revert.commit()
-      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).not.toContain(childInput.id)
-      expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
-    }),
-  )
-
-  it.live("serializes clear restoration with a child prompt across the whole staged family", () =>
-    Effect.gen(function* () {
-      const restoring = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
-      const fixture = yield* setup({
-        causal: true,
-        snapshot: () =>
-          Layer.mock(Snapshot.Service, {
-            capture: () => Effect.succeed(Snapshot.ID.make("family-tree")),
-            diff: () => Effect.succeed([]),
-            restore: () => Deferred.succeed(restoring, undefined).pipe(Effect.andThen(Deferred.await(release))),
-          }),
-      })
-      yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      const childInput = SessionMessage.ID.create()
-      yield* fixture.sessions.forSession(otherID).prompt({
-        id: childInput,
-        text: "causal child",
-        resume: false,
-        causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "child" },
-      })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-      yield* fixture.sessions.forSession(sessionID).revert.stage({ messageID: boundary.id, files: false })
-
-      const clearing = yield* fixture.sessions.forSession(sessionID).revert.clear().pipe(Effect.forkScoped)
-      yield* Deferred.await(restoring)
-      const prompting = yield* fixture.sessions
-        .forSession(otherID)
-        .prompt({ text: "after clear", resume: false })
-        .pipe(Effect.forkScoped)
-      yield* Deferred.succeed(release, undefined)
-      yield* Fiber.join(clearing)
-      const next = yield* Fiber.join(prompting)
-
-      expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
-      expect((yield* fixture.store.context(otherID)).map((message) => message.id)).toContain(childInput)
-      expect((yield* fixture.sessions.forSession(otherID).inbox()).map((item) => item.id)).toEqual([next.id])
-    }),
-  )
-
-  it.live("suppresses a synthetic wake that races an idle root stage", () =>
-    Effect.gen(function* () {
-      const reading = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
-      const wakes: SessionSchema.ID[] = []
-      const store = yield* SessionStore.Service
-      const admission = yield* SessionInbox.Service
-      let armed = false
-      let admitted = false
-      let gated = false
-      const fixture = yield* setup({
-        snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-        execution: SessionExecution.Service.of({
-          active: Effect.succeed(new Set()),
-          isActive: () => Effect.succeed(false),
-          resume: () => Effect.void,
-          wake: (id) => Effect.sync(() => wakes.push(id)),
-          interrupt: () => Effect.succeed(false),
-          awaitIdle: () => Effect.void,
-        }),
-      }).pipe(
-        Effect.provideService(
-          SessionStore.Service,
-          SessionStore.Service.of({
-            ...store,
-            get: (id) => {
-              if (!armed || !admitted || gated || id !== sessionID) return store.get(id)
-              gated = true
-              return Deferred.succeed(reading, undefined).pipe(
-                Effect.andThen(Deferred.await(release)),
-                Effect.andThen(store.get(id)),
-              )
-            },
-          }),
-        ),
-        Effect.provideService(
-          SessionInbox.Service,
-          SessionInbox.Service.of({
-            ...admission,
-            admit: (request) =>
-              admission.admit(request).pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => {
-                    if (armed) admitted = true
-                  }),
-                ),
-              ),
-          }),
-        ),
-      )
-      const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-      yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      armed = true
-      const completion = yield* fixture.sessions
-        .forSession(sessionID)
-        .synthetic({ text: "guarded completion", resume: true })
-        .pipe(Effect.forkScoped)
-      yield* Deferred.await(reading)
-      const staging = yield* fixture.sessions
-        .forSession(sessionID)
-        .revert.stage({ messageID: boundary.id, files: false })
-        .pipe(Effect.forkScoped)
-      yield* Effect.yieldNow
-      yield* Deferred.succeed(release, undefined)
-      yield* Fiber.join(completion)
-      yield* Fiber.join(staging)
-
-      expect(wakes).toEqual([])
-      expect((yield* fixture.sessions.forSession(sessionID).get()).revert?.messageID).toBe(boundary.id)
-    }),
-  )
-
-  it.live(
-    "reacquires a grown staged family before concurrent child prompts commit the root",
-    () =>
-      Effect.gen(function* () {
-        const capture = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        const fixture = yield* setup({
-          causal: true,
-          snapshot: () =>
-            Layer.mock(Snapshot.Service, {
-              capture: () =>
-                Deferred.succeed(capture, undefined).pipe(
-                  Effect.andThen(Deferred.await(release)),
-                  Effect.as(undefined),
-                ),
-            }),
-        })
-        const secondChild = SessionSchema.ID.make("ses_owned_second_child")
-        yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-        yield* fixture.bus.publish(SessionEvent.Created, {
-          sessionID: secondChild,
-          parentID: sessionID,
-          projectID: Project.ID.global,
-          location: source,
-          slug: "second-child",
-          version: "test",
-        })
-        const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-        yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-        const firstInput = SessionMessage.ID.create()
-        yield* fixture.sessions.forSession(otherID).prompt({
-          id: firstInput,
-          text: "first causal",
-          resume: false,
-          causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "first" },
-        })
-        yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-        const secondInput = SessionMessage.ID.create()
-        yield* fixture.sessions.forSession(secondChild).prompt({
-          id: secondInput,
-          text: "second causal",
-          resume: false,
-          causal: { parentSessionID: sessionID, messageID: SessionMessage.ID.create(), toolCallID: "second" },
-        })
-        yield* SessionInbox.promote(fixture.db, fixture.bus, secondChild, "steer")
-
-        const staging = yield* fixture.sessions
-          .forSession(sessionID)
-          .revert.stage({ messageID: boundary.id, files: false })
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(capture)
-        const prompts = yield* Effect.all(
-          [
-            fixture.sessions.forSession(otherID).prompt({ text: "first next", resume: false }),
-            fixture.sessions.forSession(secondChild).prompt({ text: "second next", resume: false }),
-          ],
-          { concurrency: "unbounded" },
-        ).pipe(Effect.forkScoped)
-        yield* Deferred.succeed(release, undefined)
-        yield* Fiber.join(staging)
-        yield* Fiber.join(prompts)
-
-        expect((yield* fixture.sessions.forSession(sessionID).get()).revert).toBeUndefined()
-        expect(
-          (yield* fixture.sessions.forSession(otherID).inbox()).flatMap((item) =>
-            item.type === "user" ? [item.payload.text] : [],
-          ),
-        ).toEqual(["first next"])
-        expect(
-          (yield* fixture.sessions.forSession(secondChild).inbox()).flatMap((item) =>
-            item.type === "user" ? [item.payload.text] : [],
-          ),
-        ).toEqual(["second next"])
-      }),
-    { timeout: 3_000 },
-  )
-
-  it.live(
-    "does not wait for interrupted execution while holding its inbox lock",
-    () =>
-      Effect.gen(function* () {
-        const admitted = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        const interruptStarted = yield* Deferred.make<void>()
-        const interrupted = yield* Deferred.make<void>()
-        const blockingID = SessionMessage.ID.create()
-        const admission = yield* SessionInbox.Service
-        const fixture = yield* setup({
-          causal: true,
-          snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
-          execution: SessionExecution.Service.of({
-            active: Effect.succeed(new Set()),
-            isActive: () => Effect.succeed(false),
-            resume: () => Effect.void,
-            wake: () => Effect.void,
-            interrupt: (id) =>
-              Deferred.succeed(interruptStarted, undefined).pipe(
-                Effect.andThen(SessionInbox.serialized(id, Deferred.succeed(interrupted, undefined))),
-                Effect.as(true),
-              ),
-            awaitIdle: () => Effect.void,
-          }),
-        }).pipe(
-          Effect.provideService(
-            SessionInbox.Service,
-            SessionInbox.Service.of({
-              ...admission,
-              admit: (request) =>
-                admission
-                  .admit(request)
-                  .pipe(
-                    Effect.flatMap((result) =>
-                      request.id === blockingID && request.item.type === "user"
-                        ? Deferred.succeed(admitted, undefined).pipe(
-                            Effect.andThen(Deferred.await(release)),
-                            Effect.as(result),
-                          )
-                        : Effect.succeed(result),
-                    ),
-                  ),
-            }),
-          ),
-        )
-        yield* fixture.db.update(SessionTable).set({ parent_id: sessionID }).where(eq(SessionTable.id, otherID)).run()
-        const boundary = yield* fixture.sessions.forSession(sessionID).synthetic({ text: "boundary", resume: false })
-        yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-        const inputID = SessionMessage.ID.create()
-        yield* fixture.sessions.forSession(otherID).prompt({
-          id: inputID,
-          text: "causal child",
-          resume: false,
-          causal: {
-            parentSessionID: sessionID,
-            messageID: SessionMessage.ID.create(),
-            toolCallID: "causal-child",
-          },
-        })
-        yield* SessionInbox.promote(fixture.db, fixture.bus, otherID, "steer")
-        const recording = yield* fixture.sessions
-          .forSession(otherID)
-          .prompt({
-            id: blockingID,
-            text: "concurrent admission",
-            resume: false,
-          })
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(admitted)
-        const staging = yield* fixture.sessions
-          .forSession(sessionID)
-          .revert.stage({ messageID: boundary.id, files: false })
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(interruptStarted)
-        yield* Deferred.succeed(release, undefined)
-        yield* Fiber.join(recording)
-        yield* Fiber.join(staging)
-
-        expect(yield* Deferred.isDone(interrupted)).toBe(true)
-      }),
-    { timeout: 3_000 },
-  )
-
   it.live("captures snapshots when staging and restores them when clearing", () =>
     Effect.gen(function* () {
       const calls: string[] = []

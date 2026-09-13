@@ -6,17 +6,10 @@ import { Identifier } from "./id/id.js"
 import { KV } from "./kv.js"
 import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
-import { JobCausal, Origin } from "./job-causal.js"
-import { JobCausalAdapter } from "./job-causal-adapter.js"
-
-export { Origin }
 
 const Background = Schema.Struct({
   id: Schema.String,
-  started_at: Schema.optionalKey(Schema.Number),
-  generation: Schema.optionalKey(Schema.String),
   notificationID: SessionMessage.ID,
-  origins: Schema.optionalKey(Schema.Array(Origin)),
   recovery: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("shell"),
@@ -50,24 +43,21 @@ export type Info = {
   title?: string
   status: Status
   started_at: number
-  generation: string
   completed_at?: number
   output?: string
   error?: string
   metadata?: Record<string, unknown>
   notificationID?: SessionMessage.ID
-  origins: readonly Origin[]
 }
 
 type Active = {
-  info: Omit<Info, "origins">
+  info: Info
   done: Deferred.Deferred<Info>
   backgrounded: Deferred.Deferred<Info>
   scope: Scope.Closeable
   blockingSessions: Map<SessionSchema.ID, number>
   isBackgrounded: boolean
   recovery?: Recovery
-  origins: Map<string, Origin>
 }
 
 type State = {
@@ -86,10 +76,7 @@ type BackgroundResult = {
   backgrounded?: Deferred.Deferred<Info>
 }
 
-type StartResult =
-  | { type: "existing"; info: Info }
-  | { type: "started"; info: Info; scope: Scope.Closeable }
-  | { type: "invalid"; info: Info }
+type StartResult = { info: Info } | { info: Info; scope: Scope.Closeable }
 
 type BlockWait = {
   done: Deferred.Deferred<Info>
@@ -109,19 +96,11 @@ export type StartInput = {
   metadata?: Record<string, unknown>
   recovery?: Recovery
   notificationID?: SessionMessage.ID
-  origins?: readonly Origin[]
-  onInvalid?: Effect.Effect<void>
   run: Effect.Effect<string, unknown>
 }
 
-export type Generation = JobCausal.Generation
-export type Validity = JobCausal.Validity
-export type CausalInput = JobCausal.Input
-export type CausalPlan = JobCausal.Plan
-
 export type WaitInput = {
   id: string
-  generation?: string
   timeout?: number
 }
 
@@ -150,11 +129,6 @@ export interface Interface {
   readonly background: (id: string) => Effect.Effect<Info | undefined>
   readonly backgroundAll: (input: BackgroundAllInput) => Effect.Effect<Info[]>
   readonly cancel: (id: string) => Effect.Effect<Info | undefined>
-  readonly invalidateCausal: (input: CausalInput) => Effect.Effect<CausalPlan>
-  readonly revokeOrigins: (origins: readonly Origin[]) => Effect.Effect<void>
-  readonly cancelCausal: (plan: CausalPlan) => Effect.Effect<Info[]>
-  readonly isValid: (generation: Validity) => Effect.Effect<boolean>
-  readonly guard: <A, E, R>(generation: Validity, effect: Effect.Effect<A, E, R>) => Effect.Effect<A | undefined, E, R>
   readonly pendingBackground: Effect.Effect<readonly Background[]>
   readonly completeBackground: (notificationID: SessionMessage.ID) => Effect.Effect<void>
 }
@@ -164,7 +138,6 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Jo
 function snapshot(job: Active): Info {
   return {
     ...job.info,
-    origins: [...job.origins.values()],
     ...(job.info.metadata ? { metadata: { ...job.info.metadata } } : {}),
   }
 }
@@ -193,7 +166,6 @@ function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: Sessi
  */
 export const make = Effect.gen(function* () {
   const kv = yield* KV.Service
-  const causal = JobCausal.make()
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
     scope: yield* Scope.Scope,
@@ -201,16 +173,9 @@ export const make = Effect.gen(function* () {
 
   const persistBackground = Effect.fnUntraced(function* (job: Active) {
     if (!job.recovery || !job.info.notificationID) return
-    if (!causal.persists(job.info, [...job.origins.values()])) {
-      yield* kv.remove(`${backgroundPrefix}${job.info.notificationID}`)
-      return
-    }
     yield* kv.set(`${backgroundPrefix}${job.info.notificationID}`, {
       id: job.info.id,
-      started_at: job.info.started_at,
-      generation: job.info.generation,
       notificationID: job.info.notificationID,
-      origins: [...job.origins.values()],
       recovery: job.recovery,
       status: job.info.status,
       ...(job.info.output !== undefined ? { output: job.info.output } : {}),
@@ -265,38 +230,14 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = input.id ?? Identifier.ascending("job")
         const started_at = yield* Clock.currentTimeMillis
-        const generation = Identifier.create("jobgen", "ascending")
         const done = yield* Deferred.make<Info>()
         const backgrounded = yield* Deferred.make<Info>()
         const result = yield* SynchronizedRef.modifyEffect(
           state.jobs,
           Effect.fnUntraced(function* (jobs): Effect.fn.Return<readonly [StartResult, Map<string, Active>]> {
-            const origins = input.origins ?? []
             const existing = jobs.get(id)
-            if (!causal.accepts(origins)) {
-              const info = yield* causal.rejectStart({
-                id,
-                type: input.type,
-                title: input.title,
-                started_at,
-                generation,
-                metadata: input.metadata,
-                origins,
-              })
-              return [{ type: "invalid", info }, jobs]
-            }
             if (existing?.info.status === "running") {
-              const next = {
-                ...existing,
-                origins: new Map([
-                  ...existing.origins,
-                  ...origins.map((origin) => [JobCausal.originKey(origin), origin] as const),
-                ]),
-              }
-              if (next.origins.size === existing.origins.size)
-                return [{ type: "existing", info: snapshot(existing) }, jobs]
-              if (next.isBackgrounded) yield* persistBackground(next)
-              return [{ type: "existing", info: snapshot(next) }, new Map(jobs).set(id, next)]
+              return [{ info: snapshot(existing) }, jobs]
             }
             const scope = yield* Scope.fork(state.scope, "parallel")
             const job = {
@@ -306,7 +247,6 @@ export const make = Effect.gen(function* () {
                 title: input.title,
                 status: "running" as const,
                 started_at,
-                generation,
                 metadata: input.metadata,
                 ...(input.notificationID ? { notificationID: input.notificationID } : {}),
               },
@@ -316,16 +256,11 @@ export const make = Effect.gen(function* () {
               blockingSessions: new Map<SessionSchema.ID, number>(),
               isBackgrounded: false,
               recovery: input.recovery,
-              origins: new Map(origins.map((origin) => [JobCausal.originKey(origin), origin] as const)),
             }
-            return [{ type: "started", info: snapshot(job), scope }, new Map(jobs).set(id, job)]
+            return [{ info: snapshot(job), scope }, new Map(jobs).set(id, job)]
           }),
         )
-        if (result.type === "invalid") {
-          if (input.onInvalid) yield* input.onInvalid
-          return result.info
-        }
-        if (result.type === "started")
+        if ("scope" in result)
           yield* restore(input.run).pipe(
             Effect.exit,
             Effect.flatMap((exit) => settle(id, result.scope, exit)),
@@ -340,7 +275,6 @@ export const make = Effect.gen(function* () {
   const wait: Interface["wait"] = Effect.fn("Job.wait")(function* (input) {
     const job = (yield* SynchronizedRef.get(state.jobs)).get(input.id)
     if (!job) return { timedOut: false }
-    if (input.generation !== undefined && job.info.generation !== input.generation) return { timedOut: false }
     if (job.info.status !== "running") return { info: snapshot(job), timedOut: false }
     if (input.timeout === undefined) return { info: yield* Deferred.await(job.done), timedOut: false }
     if (input.timeout <= 0) return { info: snapshot(job), timedOut: true }
@@ -437,14 +371,13 @@ export const make = Effect.gen(function* () {
     return result.map((item) => item.info)
   })
 
-  const cancelGeneration = Effect.fnUntraced(function* (id: string, expected?: string) {
+  const cancel: Interface["cancel"] = Effect.fn("Job.cancel")(function* (id) {
     const completed_at = yield* Clock.currentTimeMillis
     const result = yield* SynchronizedRef.modifyEffect(
       state.jobs,
       Effect.fnUntraced(function* (jobs): Effect.fn.Return<readonly [FinishResult, Map<string, Active>]> {
         const job = jobs.get(id)
         if (!job) return [{}, jobs]
-        if (expected !== undefined && job.info.generation !== expected) return [{}, jobs]
         if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
         const next = {
           ...job,
@@ -464,8 +397,6 @@ export const make = Effect.gen(function* () {
     return result.info
   })
 
-  const cancel: Interface["cancel"] = Effect.fn("Job.cancel")((id) => cancelGeneration(id))
-
   const pendingBackground: Interface["pendingBackground"] = Effect.gen(function* () {
     const recovered: Background[] = []
     let after: string | undefined
@@ -477,36 +408,8 @@ export const make = Effect.gen(function* () {
     return recovered
   }).pipe(Effect.withSpan("Job.pendingBackground"))
 
-  const causalOperations = JobCausalAdapter.make(causal, {
-    jobs: state.jobs,
-    replaceOrigins: (job, origins) => ({ ...job, origins }),
-    persistBackground,
-    pending: pendingBackground.pipe(
-      Effect.map((jobs) =>
-        jobs.map((job) => ({
-          ...job,
-          generation: job.generation ?? job.notificationID,
-          origins: job.origins ?? [],
-        })),
-      ),
-    ),
-    removeNotification: (notificationID) => kv.remove(`${backgroundPrefix}${notificationID}`),
-    writeBackground: (background) => kv.set(`${backgroundPrefix}${background.notificationID}`, background),
-    cancel: (generation) => cancelGeneration(generation.id, generation.generation),
-  })
-
-  const invalidateCausal: Interface["invalidateCausal"] = Effect.fn("Job.invalidateCausal")(
-    causalOperations.invalidateCausal,
-  )
-  const revokeOrigins: Interface["revokeOrigins"] = Effect.fn("Job.revokeOrigins")(causalOperations.revokeOrigins)
-  const cancelCausal: Interface["cancelCausal"] = Effect.fn("Job.cancelCausal")(causalOperations.cancelCausal)
-  const isValid: Interface["isValid"] = Effect.fn("Job.isValid")(causalOperations.isValid)
-  const guard: Interface["guard"] = causalOperations.guard
-
   const completeBackground: Interface["completeBackground"] = Effect.fn("Job.completeBackground")((notificationID) =>
-    SynchronizedRef.modifyEffect(state.jobs, (jobs) =>
-      kv.remove(`${backgroundPrefix}${notificationID}`).pipe(Effect.as([undefined, jobs] as const)),
-    ),
+    kv.remove(`${backgroundPrefix}${notificationID}`),
   )
 
   return Service.of({
@@ -517,11 +420,6 @@ export const make = Effect.gen(function* () {
     background,
     backgroundAll,
     cancel,
-    invalidateCausal,
-    revokeOrigins,
-    cancelCausal,
-    isValid,
-    guard,
     pendingBackground,
     completeBackground,
   })

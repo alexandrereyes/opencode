@@ -5,7 +5,6 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { Permission } from "@opencode/schema/permission"
 import { Event } from "@opencode/schema/event"
-import type { CausalRevert } from "@opencode/schema/causal-revert"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Bus } from "../bus.js"
 import { Database } from "../database/database.js"
@@ -13,8 +12,10 @@ import { Instance } from "../instance/service.js"
 import { ShellResult } from "../shell/result.js"
 import type { Skill } from "../skill.js"
 import {
+  BusyError,
   CompactionConflictError,
   InboxConflictError,
+  MessageNotFoundError,
   NotFoundError,
   PromptConflictError,
   SyntheticConflictError,
@@ -25,17 +26,14 @@ import { SessionInbox } from "./inbox.js"
 import { SessionMessage } from "./message.js"
 import { SessionPrompt } from "./prompt.js"
 import { SessionRevert } from "./revert.js"
-import { SessionRevertCoordinator } from "./revert-coordinator.js"
 import { SessionShell } from "./shell.js"
 import { SessionSkill } from "./skill.js"
 import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
-import { Job } from "../job.js"
 
 type PromptRequest = SessionPrompt.Input & {
   id?: SessionMessage.ID
   resume?: boolean
-  causal?: CausalRevert.Origin
 }
 
 /**
@@ -48,22 +46,14 @@ export const make = Effect.fn("Session.make")(function* () {
   const store = yield* SessionStore.Service
   const instances = yield* Instance.Service
   const execution = yield* SessionExecution.Service
-  const jobs = yield* Job.Service
   const admission = yield* SessionInbox.Service
   const fs = yield* FSUtil.Service
   const scope = yield* Scope.Scope
+
   const get = Effect.fn("Session.get")(function* (sessionID: SessionSchema.ID) {
     const session = yield* store.get(sessionID)
     if (!session) return yield* new NotFoundError({ sessionID })
     return session
-  })
-  const reverts = SessionRevertCoordinator.make({
-    bus,
-    database,
-    instances,
-    execution,
-    jobs,
-    get,
   })
   const message = Effect.fn("Session.message")(function* (sessionID: SessionSchema.ID, messageID: SessionMessage.ID) {
     const stored = yield* store.message(messageID)
@@ -140,7 +130,7 @@ export const make = Effect.fn("Session.make")(function* () {
     inboxID: SessionMessage.ID,
   ) {
     yield* mutatePending(sessionID, inboxID, admission.steer)
-    yield* reverts.wakeIfReady(sessionID, true)
+    yield* execution.wake(sessionID)
   }, Effect.uninterruptible)
   const queueInbox = Effect.fn("Session.queueInbox")(
     (sessionID: SessionSchema.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.queue),
@@ -151,48 +141,31 @@ export const make = Effect.fn("Session.make")(function* () {
       Effect.gen(function* () {
         const session = yield* get(sessionID)
         const messageID = input.id ?? SessionMessage.ID.create()
-        const request = {
-          id: messageID,
-          sessionID: session.id,
-          type: "user" as const,
-          delivery: input.delivery ?? "steer",
-        }
-        const existing = yield* admission
-          .reconcile(request)
-          .pipe(
-            Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
+        const admitted = yield* Effect.gen(function* () {
+          const existing = yield* admission.reconcile({
+            id: messageID,
+            sessionID: session.id,
+            type: "user",
+            delivery: input.delivery ?? "steer",
+          })
+          if (existing) return existing
+          const item = yield* restore(
+            SessionPrompt.prepare({ session, messageID, input }).pipe(
+              Effect.provideService(Instance.Service, instances),
+              Effect.provideService(FSUtil.Service, fs),
+            ),
           )
-        if (existing) {
-          yield* reverts.wakeIfReady(sessionID, input.resume !== false)
-          return existing
-        }
-        const item = yield* restore(
-          SessionPrompt.prepare({ session, messageID, input }).pipe(
-            Effect.provideService(Instance.Service, instances),
-            Effect.provideService(FSUtil.Service, fs),
-          ),
+          // Commit a staged revert only after preparation succeeds, before admitting new work.
+          if (session.revert) yield* SessionRevert.commit(bus, session)
+          return yield* admission.admit({
+            id: messageID,
+            sessionID: session.id,
+            item,
+          })
+        }).pipe(
+          Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
         )
-        const related = input.causal ? [sessionID, input.causal.parentSessionID] : [sessionID]
-        const admitted = yield* reverts
-          .withFamily(related, (current) =>
-            Effect.gen(function* () {
-              const reconciled = yield* admission.reconcile(request)
-              if (reconciled) return reconciled
-              yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
-              if (input.causal)
-                yield* bus.publish(SessionEvent.SubagentInputAssigned, {
-                  sessionID: input.causal.parentSessionID,
-                  childSessionID: sessionID,
-                  inputID: messageID,
-                  origin: { messageID: input.causal.messageID, toolCallID: input.causal.toolCallID },
-                })
-              return yield* admission.admit({ id: messageID, sessionID, item })
-            }),
-          )
-          .pipe(
-            Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
-          )
-        yield* reverts.wakeIfReady(sessionID, input.resume !== false)
+        if (input.resume !== false) yield* execution.wake(sessionID)
         return admitted
       }),
     ),
@@ -268,23 +241,19 @@ export const make = Effect.fn("Session.make")(function* () {
     sessionID: SessionSchema.ID,
     input: { id?: SessionMessage.ID; delivery?: SessionInbox.Delivery },
   ) {
+    const session = yield* get(sessionID)
+    if (session.revert) yield* SessionRevert.commit(bus, session)
     const inputID = input.id ?? SessionMessage.ID.create()
-    const admitted = yield* reverts
-      .withFamily([sessionID], (current) =>
-        Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true }).pipe(
-          Effect.andThen(
-            admission.admitCompactionLocked({
-              id: inputID,
-              sessionID,
-              delivery: input.delivery ?? "steer",
-            }),
-          ),
-        ),
-      )
+    const admitted = yield* admission
+      .admitCompaction({
+        id: inputID,
+        sessionID,
+        delivery: input.delivery ?? "steer",
+      })
       .pipe(
         Effect.catchTag("SessionInbox.LifecycleConflict", () => new CompactionConflictError({ sessionID, inputID })),
       )
-    yield* reverts.wakeIfReady(sessionID, true)
+    yield* execution.wake(sessionID)
     return admitted
   })
   const wait = Effect.fn("Session.wait")(function* (sessionID: SessionSchema.ID) {
@@ -320,23 +289,19 @@ export const make = Effect.fn("Session.make")(function* () {
             }),
             delivery: SessionInbox.Delivery.make(input.delivery ?? "steer"),
           } satisfies SessionInbox.Item
-          const admitted = yield* reverts
-            .withFamily([sessionID], (current) =>
-              Effect.gen(function* () {
-                const request = { id: inputID, sessionID, type: "synthetic" as const, delivery: admittedInput.delivery }
-                const reconciled = yield* admission.reconcile(request)
-                if (reconciled) return reconciled
-                yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
-                return yield* admission.admit({ id: inputID, sessionID, item: admittedInput })
-              }),
-            )
+          const admitted = yield* admission
+            .admit({
+              id: inputID,
+              sessionID,
+              item: admittedInput,
+            })
             .pipe(
               Effect.catchTag(
                 "SessionInbox.LifecycleConflict",
                 () => new SyntheticConflictError({ sessionID, inputID }),
               ),
             )
-          yield* reverts.wakeIfReady(sessionID, input.resume !== false)
+          if (input.resume !== false && !(yield* get(sessionID)).revert) yield* execution.wake(sessionID)
           return admitted
         }),
       ),
@@ -345,7 +310,33 @@ export const make = Effect.fn("Session.make")(function* () {
     (sessionID: SessionSchema.ID, options?: { readonly continue?: boolean }) =>
       Effect.uninterruptible(execution.interrupt(sessionID, options)),
   )
-  const revert = { stage: reverts.stage, clear: reverts.clear, commit: reverts.commit }
+  const stage = Effect.fn("Session.revert.stage")(function* (
+    sessionID: SessionSchema.ID,
+    input: { messageID: SessionMessage.ID; files?: boolean },
+  ) {
+    const session = yield* get(sessionID)
+    if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
+    return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
+      Effect.provideService(Instance.Service, instances),
+      Effect.provideService(Database.Service, database),
+      Effect.provideService(Bus.Service, bus),
+    )
+  })
+  const clear = Effect.fn("Session.revert.clear")(function* (sessionID: SessionSchema.ID) {
+    const session = yield* get(sessionID)
+    if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
+    yield* SessionRevert.clear(session).pipe(
+      Effect.provideService(Instance.Service, instances),
+      Effect.provideService(Bus.Service, bus),
+    )
+    return yield* execution.wake(sessionID)
+  })
+  const commit = Effect.fn("Session.revert.commit")(function* (sessionID: SessionSchema.ID) {
+    const session = yield* get(sessionID)
+    if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
+    return yield* SessionRevert.commit(bus, session)
+  })
+  const revert = { stage, clear, commit }
   const operations = {
     get,
     message,

@@ -5,7 +5,6 @@
 Base: custom `a42d037c5`. Remove the periodic updater and its idle-maintenance
 support. Preserve the custom server entrypoint, UI/plugin loading, normal
 process supervision, and native Session/Job shutdown and restart recovery.
-The causal undo extensions are independent and must remain functional.
 
 ## OpenCode removal
 
@@ -17,8 +16,8 @@ The causal undo extensions are independent and must remain functional.
 - Retire the recurring `JobUpgrade` compatibility scan without abandoning
   `job.background.upgrade/` records. Use a narrowly scoped one-time migration
   or explicit versioned conversion, tested with legacy data and conflicts.
-- Preserve normal execution, permissions/forms, PTYs, shells, job generation
-  guards, session claims and startup recovery.
+- Preserve normal execution, permissions/forms, PTYs, shells, session claims,
+  and startup recovery.
 
 ## MyEnv operation
 
@@ -31,9 +30,9 @@ installed files, launchd state, global configuration, and live processes remain 
 Test normal startup/shutdown and recovery, including pending background
 notifications; legacy bridge conversion must preserve payload/identity and
 never silently overwrite conflicts. Verify removed HTTP routes, plugin loading,
-and causal undo regressions. Operator tests must prove that pending releases or
-controller-pointer changes do not cause automatic activation and that manual
-build/dev paths work without maintenance APIs.
+and normal Session revert behavior. Operator tests must prove that pending
+releases or controller-pointer changes do not cause automatic activation and
+that manual build/dev paths work without maintenance APIs.
 
 Measure the remaining diff against fixed upstream `0f26ad878`; remove only the
 updater-related changes and preserve unrelated work. Follow each repository's

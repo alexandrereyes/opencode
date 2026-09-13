@@ -24,7 +24,6 @@ import { Project } from "@opencode/schema/project"
 import { AbsolutePath, RelativePath } from "../schema.js"
 import type { SessionSchema } from "./schema.js"
 import { ProjectTable } from "../project/sql.js"
-import { SessionRevertPersistence } from "./revert-persistence.js"
 
 type DatabaseService = Database.Interface["db"]
 type MessageEvent = Exclude<
@@ -464,7 +463,6 @@ const layer = Layer.effectDiscard(
         if (!stored) return yield* Effect.die(new SessionAlreadyProjected())
       }),
     )
-    yield* SessionRevertPersistence.registerProvenance(db, bus)
     yield* bus.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)
@@ -719,11 +717,6 @@ const layer = Layer.effectDiscard(
     yield* bus.project(SessionEvent.RevertEvent.Staged, (event) =>
       Effect.gen(function* () {
         const revert = event.data.revert
-        yield* SessionRevertPersistence.prepareStage(db, {
-          sessionID: event.data.sessionID,
-          revert,
-          created: event.created,
-        })
         yield* db
           .update(SessionTable)
           .set({
@@ -736,19 +729,15 @@ const layer = Layer.effectDiscard(
       }),
     )
     yield* bus.project(SessionEvent.RevertEvent.Cleared, (event) =>
-      Effect.gen(function* () {
-        yield* SessionRevertPersistence.prepareClear(db, event.data.sessionID, event.created)
-        yield* db
-          .update(SessionTable)
-          .set({ revert: null, time_updated: event.created })
-          .where(eq(SessionTable.id, event.data.sessionID))
-          .run()
-          .pipe(Effect.orDie)
-      }),
+      db
+        .update(SessionTable)
+        .set({ revert: null, time_updated: event.created })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie, Effect.asVoid),
     )
     yield* bus.project(SessionEvent.RevertEvent.Committed, (event) =>
       Effect.gen(function* () {
-        const children = yield* SessionRevertPersistence.prepareCommit(db, event.data.sessionID)
         const boundary = yield* db
           .select({ seq: SessionMessageTable.seq })
           .from(SessionMessageTable)
@@ -758,7 +747,6 @@ const layer = Layer.effectDiscard(
           .get()
           .pipe(Effect.orDie)
         if (!boundary) return yield* Effect.die(new Error(`Revert boundary message not found: ${event.data.to}`))
-        yield* SessionRevertPersistence.commitChildren(db, children)
         yield* db
           .delete(SessionMessageTable)
           .where(
@@ -776,8 +764,6 @@ const layer = Layer.effectDiscard(
           )
           .run()
           .pipe(Effect.orDie)
-        yield* SessionRevertPersistence.deleteRootProvenance(db, event.data.sessionID, boundary.seq)
-        yield* SessionRevertPersistence.clearCommitted(db, event.data.sessionID, children, event.created)
         yield* db
           .update(SessionTable)
           .set({ revert: null, time_updated: event.created })

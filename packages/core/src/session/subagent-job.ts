@@ -8,9 +8,9 @@ import { SubagentCompletion } from "./subagent-completion.js"
 type Recovery = Extract<Job.Recovery, { kind: "subagent" }>
 
 interface Runner {
-  start: (recovery: Recovery, origin?: Job.Origin) => Effect.Effect<Job.Info>
+  start: (recovery: Recovery) => Effect.Effect<Job.Info>
   background: (recovery: Recovery) => Effect.Effect<void>
-  notify: (recovery: Recovery, generation: Job.Generation) => Effect.Effect<void>
+  notify: (recovery: Recovery, startedAt: number) => Effect.Effect<void>
 }
 
 export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | Scope.Scope> = Effect.gen(function* () {
@@ -20,12 +20,12 @@ export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | 
   // One observer per job generation, including continuations of the same child.
   const notifications = new Set<string>()
 
-  const notify = Effect.fn("SubagentJob.notify")(function* (recovery: Recovery, generation: Job.Generation) {
-    const key = generation.generation
+  const notify = Effect.fn("SubagentJob.notify")(function* (recovery: Recovery, startedAt: number) {
+    const key = `${recovery.childSessionID}:${startedAt}`
     if (notifications.has(key)) return
     notifications.add(key)
     yield* Effect.gen(function* () {
-      const info = (yield* jobs.wait({ id: generation.id, generation: generation.generation })).info
+      const info = (yield* jobs.wait({ id: recovery.childSessionID })).info
       if (info) yield* SubagentCompletion.deliver(sessions, jobs, { ...info, recovery })
     }).pipe(
       Effect.ensuring(Effect.sync(() => notifications.delete(key))),
@@ -34,14 +34,13 @@ export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | 
   })
 
   return {
-    start: (recovery: Recovery, origin?: Job.Origin) =>
+    start: (recovery: Recovery) =>
       jobs.start({
         id: recovery.childSessionID,
         type: "subagent",
         title: recovery.description,
         metadata: {},
         recovery,
-        origins: origin ? [origin] : [],
         run: Effect.gen(function* () {
           yield* sessions.resume(recovery.childSessionID)
           const messages = yield* sessions.messages({ sessionID: recovery.childSessionID, order: "desc", limit: 20 })
@@ -54,7 +53,7 @@ export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | 
       }),
     background: Effect.fn("SubagentJob.background")(function* (recovery: Recovery) {
       const info = yield* jobs.background(recovery.childSessionID)
-      if (info) yield* notify(recovery, info)
+      if (info) yield* notify(recovery, info.started_at)
     }),
     notify,
   }

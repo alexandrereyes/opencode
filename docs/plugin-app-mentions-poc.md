@@ -149,5 +149,4 @@ Validation completed:
   `/private/var` was reproduced in the original checkout and left untouched.
 
 This validates migration through a reusable plugin operation and existing RPC
-transport. It does not establish that causal undo can be implemented with
-ordinary lifecycle hooks; that requires its own contract and POC.
+transport.

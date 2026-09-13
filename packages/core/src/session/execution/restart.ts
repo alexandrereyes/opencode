@@ -4,7 +4,6 @@ import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Bus } from "../../bus.js"
 import { Job } from "../../job.js"
-import { Database } from "../../database/database.js"
 import { Session } from "../../session.js"
 import { SessionEvent } from "../event.js"
 import { SessionExecution } from "../execution.js"
@@ -71,7 +70,6 @@ export const layer = (options?: Options) =>
       const execution = yield* SessionExecution.Service
       const bus = yield* Bus.Service
       const jobs = yield* Job.Service
-      const database = yield* Database.Service
       const sessions = yield* Session.Service
       const scope = yield* Effect.scope
       const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
@@ -114,31 +112,24 @@ export const layer = (options?: Options) =>
                 ? (background.error ?? "Command failed")
                 : "Command cancelled"
 
-        yield* jobs.guard(
-          {
-            id: background.id,
-            generation: background.generation ?? background.notificationID,
-            origins: background.origins,
-          },
-          sessions
-            .synthetic({
-              id: background.notificationID,
-              sessionID: recovery.sessionID,
-              description: recovery.command,
-              ...ShellResult.notification({
-                jobID: background.id,
-                shellID: recovery.shellID,
-                command: recovery.command,
-                state,
-                text,
-              }),
-              ...(suspended.has(recovery.sessionID) ? { resume: false } : {}),
-            })
-            .pipe(
-              Effect.catchTag("Session.NotFoundError", () => Effect.void),
-              Effect.orDie,
-            ),
-        )
+        yield* sessions
+          .synthetic({
+            id: background.notificationID,
+            sessionID: recovery.sessionID,
+            description: recovery.command,
+            ...ShellResult.notification({
+              jobID: background.id,
+              shellID: recovery.shellID,
+              command: recovery.command,
+              state,
+              text,
+            }),
+            ...(suspended.has(recovery.sessionID) ? { resume: false } : {}),
+          })
+          .pipe(
+            Effect.catchTag("Session.NotFoundError", () => Effect.void),
+            Effect.orDie,
+          )
         yield* jobs.completeBackground(background.notificationID)
       })
 
@@ -155,9 +146,6 @@ export const layer = (options?: Options) =>
 
         const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error">) {
           yield* SubagentCompletion.deliver(sessions, jobs, {
-            id: background.id,
-            generation: background.generation ?? background.notificationID,
-            origins: background.origins ?? [],
             ...result,
             recovery,
             notificationID: background.notificationID,
@@ -175,12 +163,11 @@ export const layer = (options?: Options) =>
           return
         }
 
-        const job = yield* jobs.start({
+        yield* jobs.start({
           id: background.id,
           type: "subagent",
           title: recovery.description,
           notificationID: background.notificationID,
-          origins: background.origins,
           recovery,
           run: execution.resume(recovery.childSessionID).pipe(
             Effect.andThen(store.context(recovery.childSessionID)),
@@ -193,12 +180,8 @@ export const layer = (options?: Options) =>
             }),
           ),
         })
-        if (job.status === "cancelled") {
-          yield* jobs.completeBackground(background.notificationID)
-          return
-        }
         yield* jobs.background(background.id)
-        yield* jobs.wait({ id: job.id, generation: job.generation }).pipe(
+        yield* jobs.wait({ id: background.id }).pipe(
           Effect.flatMap((result) => (result.info ? notify(result.info) : Effect.void)),
           Effect.forkIn(scope),
         )
@@ -251,5 +234,5 @@ export const layer = (options?: Options) =>
 export const node = makeGlobalNode({
   service: Service,
   layer: layer(),
-  deps: [SessionStore.node, SessionExecution.node, Bus.node, Job.node, Session.node, Database.node],
+  deps: [SessionStore.node, SessionExecution.node, Bus.node, Job.node, Session.node],
 })
