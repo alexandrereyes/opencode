@@ -14,7 +14,7 @@ const { transformSync } = solid("@babel/core")
 Bun.plugin({
   name: "selection-solid-context",
   setup(build) {
-    build.onLoad({ filter: /[\\/]ui[\\/]src[\\/]context[\\/]helper\.tsx$/ }, async (args) => ({
+    build.onLoad({ filter: /[\\/]ui-custom[\\/]src[\\/]context[\\/]helper\.tsx$/ }, async (args) => ({
       contents: transformSync(await Bun.file(args.path).text(), {
         filename: args.path,
         presets: [solid.resolve("babel-preset-solid"), solid.resolve("@babel/preset-typescript")],
