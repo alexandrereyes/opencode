@@ -11,7 +11,6 @@ import {
   Layer,
   Schema,
   Scope,
-  Semaphore,
   SynchronizedRef,
 } from "effect"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
@@ -20,10 +19,10 @@ import { KV } from "./kv.js"
 import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
 import { Maintenance } from "./maintenance.js"
-import { CausalRevert } from "@opencode/schema/causal-revert"
+import { JobCausal, Origin } from "./job-causal.js"
+import { JobCausalAdapter } from "./job-causal-adapter.js"
 
-export const Origin = CausalRevert.Origin
-export type Origin = CausalRevert.Origin
+export { Origin }
 
 const Background = Schema.Struct({
   id: Schema.String,
@@ -128,19 +127,10 @@ export type StartInput = {
   run: Effect.Effect<string, unknown>
 }
 
-export type Generation = Pick<Info, "id" | "generation">
-export type Validity = Generation & { origins?: readonly Origin[] }
-
-export type CausalInput = {
-  origins?: readonly Origin[]
-  interruptSessionIDs?: readonly SessionSchema.ID[]
-  discardedSessionIDs?: readonly SessionSchema.ID[]
-}
-
-export type CausalPlan = {
-  jobs: readonly Generation[]
-  interruptSessionIDs: readonly SessionSchema.ID[]
-}
+export type Generation = JobCausal.Generation
+export type Validity = JobCausal.Validity
+export type CausalInput = JobCausal.Input
+export type CausalPlan = JobCausal.Plan
 
 export type WaitInput = {
   id: string
@@ -192,18 +182,6 @@ function snapshot(job: Active): Info {
   }
 }
 
-function originKey(origin: Origin) {
-  return `${origin.parentSessionID}\u0000${origin.messageID}\u0000${origin.toolCallID}`
-}
-
-function generationKey(generation: Generation) {
-  return `${generation.id}\u0000${generation.generation}`
-}
-
-function owningSession(recovery: Recovery) {
-  return recovery.kind === "shell" ? recovery.sessionID : recovery.parentSessionID
-}
-
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
   return String(error)
@@ -229,10 +207,7 @@ function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: Sessi
 export const make = Effect.gen(function* () {
   const kv = yield* KV.Service
   const activeScopes = new Set<Scope.Closeable>()
-  const invalidOrigins = new Set<string>()
-  const revokedOrigins = new Set<string>()
-  const invalidGenerations = new Set<string>()
-  const notificationLock = Semaphore.makeUnsafe(1)
+  const causal = JobCausal.make()
   yield* Maintenance.process.block(() => activeScopes.size > 0)
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
@@ -241,10 +216,7 @@ export const make = Effect.gen(function* () {
 
   const persistBackground = Effect.fnUntraced(function* (job: Active) {
     if (!job.recovery || !job.info.notificationID) return
-    if (
-      invalidGenerations.has(generationKey(job.info)) ||
-      [...job.origins.values()].some((origin) => invalidOrigins.has(originKey(origin)))
-    ) {
+    if (!causal.persists(job.info, [...job.origins.values()])) {
       yield* kv.remove(`${backgroundPrefix}${job.info.notificationID}`)
       return
     }
@@ -324,20 +296,16 @@ export const make = Effect.gen(function* () {
           Effect.fnUntraced(function* (jobs): Effect.fn.Return<readonly [StartResult, Map<string, Active>]> {
             const origins = input.origins ?? []
             const existing = jobs.get(id)
-            if (origins.some((origin) => [invalidOrigins, revokedOrigins].some((set) => set.has(originKey(origin))))) {
-              const completed_at = yield* Clock.currentTimeMillis
-              const info = {
+            if (!causal.accepts(origins)) {
+              const info = yield* causal.rejectStart({
                 id,
                 type: input.type,
                 title: input.title,
-                status: "cancelled" as const,
                 started_at,
                 generation,
-                completed_at,
                 metadata: input.metadata,
                 origins,
-              }
-              invalidGenerations.add(generationKey(info))
+              })
               return [{ type: "invalid", info }, jobs]
             }
             if (existing?.info.status === "running") {
@@ -345,7 +313,7 @@ export const make = Effect.gen(function* () {
                 ...existing,
                 origins: new Map([
                   ...existing.origins,
-                  ...origins.map((origin) => [originKey(origin), origin] as const),
+                  ...origins.map((origin) => [JobCausal.originKey(origin), origin] as const),
                 ]),
               }
               if (next.origins.size === existing.origins.size)
@@ -372,7 +340,7 @@ export const make = Effect.gen(function* () {
               blockingSessions: new Map<SessionSchema.ID, number>(),
               isBackgrounded: false,
               recovery: input.recovery,
-              origins: new Map(origins.map((origin) => [originKey(origin), origin] as const)),
+              origins: new Map(origins.map((origin) => [JobCausal.originKey(origin), origin] as const)),
             }
             return [{ type: "started", info: snapshot(job), scope }, new Map(jobs).set(id, job)]
           }),
@@ -532,126 +500,6 @@ export const make = Effect.gen(function* () {
 
   const cancel: Interface["cancel"] = Effect.fn("Job.cancel")((id) => cancelGeneration(id))
 
-  const invalidateCausal: Interface["invalidateCausal"] = Effect.fn("Job.invalidateCausal")(function* (input) {
-    return yield* notificationLock.withPermit(
-      Effect.gen(function* () {
-        const selected = yield* SynchronizedRef.modifyEffect(
-          state.jobs,
-          Effect.fnUntraced(function* (active) {
-            input.origins?.forEach((origin) => invalidOrigins.add(originKey(origin)))
-            const persisted = yield* pendingBackground
-            const candidates = [
-              ...[...active.values()].map((job) => ({
-                id: job.info.id,
-                generation: job.info.generation,
-                origins: [...job.origins.values()],
-                recovery: job.recovery,
-                notificationID: job.info.notificationID,
-              })),
-              ...persisted.map((job) => ({
-                id: job.id,
-                generation: job.generation ?? job.notificationID,
-                origins: job.origins ?? [],
-                recovery: job.recovery,
-                notificationID: job.notificationID,
-              })),
-            ]
-            const discardedSessions = new Set(input.discardedSessionIDs ?? [])
-            const interruptSessions = new Set([...(input.interruptSessionIDs ?? []), ...discardedSessions])
-            const jobs = new Map<string, (typeof candidates)[number]>()
-            const visit = (): void => {
-              const found = candidates.filter((job) => {
-                if (jobs.has(generationKey(job))) return false
-                if (job.origins.some((origin) => invalidOrigins.has(originKey(origin)))) return true
-                return job.recovery ? discardedSessions.has(owningSession(job.recovery)) : false
-              })
-              if (found.length === 0) return
-              found.forEach((job) => {
-                jobs.set(generationKey(job), job)
-                invalidGenerations.add(generationKey(job))
-                if (job.recovery?.kind !== "subagent") return
-                interruptSessions.add(job.recovery.childSessionID)
-                if (discardedSessions.has(job.recovery.parentSessionID))
-                  discardedSessions.add(job.recovery.childSessionID)
-              })
-              visit()
-            }
-            visit()
-            yield* Effect.forEach(
-              [...jobs.values()].flatMap((job) => (job.notificationID ? [job.notificationID] : [])),
-              (notificationID) => kv.remove(`${backgroundPrefix}${notificationID}`),
-              { discard: true },
-            )
-            return [
-              {
-                jobs: [...jobs.values()].map((job) => ({ id: job.id, generation: job.generation })),
-                interruptSessionIDs: [...interruptSessions],
-              },
-              active,
-            ] as const
-          }),
-        )
-        return selected
-      }),
-    )
-  })
-
-  const revokeOrigins: Interface["revokeOrigins"] = Effect.fn("Job.revokeOrigins")(function* (origins) {
-    const revoked = new Set(origins.map(originKey))
-    yield* SynchronizedRef.modifyEffect(
-      state.jobs,
-      Effect.fnUntraced(function* (jobs) {
-        revoked.forEach((origin) => revokedOrigins.add(origin))
-        const next = new Map(jobs)
-        yield* Effect.forEach(
-          [...jobs.entries()],
-          Effect.fnUntraced(function* ([id, job]) {
-            const retained = [...job.origins].filter(([key]) => !revoked.has(key))
-            if (retained.length === job.origins.size) return
-            const updated = { ...job, origins: new Map(retained) }
-            next.set(id, updated)
-            if (updated.isBackgrounded) yield* persistBackground(updated)
-          }),
-          { discard: true },
-        )
-        const activeNotifications = new Set(
-          [...next.values()].flatMap((job) => (job.info.notificationID ? [job.info.notificationID] : [])),
-        )
-        yield* Effect.forEach(
-          (yield* pendingBackground).filter((job) => !activeNotifications.has(job.notificationID)),
-          (job) =>
-            kv.set(`${backgroundPrefix}${job.notificationID}`, {
-              ...job,
-              origins: (job.origins ?? []).filter((origin) => !revoked.has(originKey(origin))),
-            }),
-          { discard: true },
-        )
-        return [undefined, next] as const
-      }),
-    )
-  })
-
-  const cancelCausal: Interface["cancelCausal"] = Effect.fn("Job.cancelCausal")(function* (plan) {
-    return yield* Effect.forEach(plan.jobs, (generation) => cancelGeneration(generation.id, generation.generation), {
-      concurrency: "unbounded",
-    }).pipe(Effect.map((results) => results.filter((info): info is Info => info !== undefined)))
-  })
-
-  const valid = Effect.fnUntraced(function* (generation: Validity) {
-    if (invalidGenerations.has(generationKey(generation))) return false
-    const current = (yield* SynchronizedRef.get(state.jobs)).get(generation.id)
-    const origins =
-      current?.info.generation === generation.generation ? [...current.origins.values()] : generation.origins
-    return !origins?.some((origin) => invalidOrigins.has(originKey(origin)))
-  })
-
-  const isValid: Interface["isValid"] = Effect.fn("Job.isValid")(valid)
-
-  const guard: Interface["guard"] = (generation, effect) =>
-    notificationLock.withPermit(
-      valid(generation).pipe(Effect.flatMap((valid) => (valid ? effect : Effect.succeed(undefined)))),
-    )
-
   const pendingBackground: Interface["pendingBackground"] = Effect.gen(function* () {
     const recovered: Background[] = []
     let after: string | undefined
@@ -662,6 +510,32 @@ export const make = Effect.gen(function* () {
     } while (after)
     return recovered
   }).pipe(Effect.withSpan("Job.pendingBackground"))
+
+  const causalOperations = JobCausalAdapter.make(causal, {
+    jobs: state.jobs,
+    replaceOrigins: (job, origins) => ({ ...job, origins }),
+    persistBackground,
+    pending: pendingBackground.pipe(
+      Effect.map((jobs) =>
+        jobs.map((job) => ({
+          ...job,
+          generation: job.generation ?? job.notificationID,
+          origins: job.origins ?? [],
+        })),
+      ),
+    ),
+    removeNotification: (notificationID) => kv.remove(`${backgroundPrefix}${notificationID}`),
+    writeBackground: (background) => kv.set(`${backgroundPrefix}${background.notificationID}`, background),
+    cancel: (generation) => cancelGeneration(generation.id, generation.generation),
+  })
+
+  const invalidateCausal: Interface["invalidateCausal"] = Effect.fn("Job.invalidateCausal")(
+    causalOperations.invalidateCausal,
+  )
+  const revokeOrigins: Interface["revokeOrigins"] = Effect.fn("Job.revokeOrigins")(causalOperations.revokeOrigins)
+  const cancelCausal: Interface["cancelCausal"] = Effect.fn("Job.cancelCausal")(causalOperations.cancelCausal)
+  const isValid: Interface["isValid"] = Effect.fn("Job.isValid")(causalOperations.isValid)
+  const guard: Interface["guard"] = causalOperations.guard
 
   const completeBackground: Interface["completeBackground"] = Effect.fn("Job.completeBackground")((notificationID) =>
     SynchronizedRef.modifyEffect(state.jobs, (jobs) =>

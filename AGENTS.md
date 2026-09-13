@@ -6,6 +6,18 @@
 - Default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and default pull requests to target `v2`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` ref may not exist; use `v2` or `origin/v2` for diffs.
 
+## Backend Customizations
+
+Follow this order while preserving existing behavior, data, and runtime guarantees:
+
+1. **Existing plugins first.** Use available plugin APIs without changing the backend. Keep custom features modular in `packages/plugin-app-custom`.
+2. **Extend plugins when necessary.** Add small, reusable extension points at the required backend boundaries. Keep feature-specific policy in the plugin.
+3. **Use backend aggregation when extension points are insufficient.** Isolate custom logic in dedicated backend modules that reuse native services, transactions, and lifecycle. Aim for zero overlap with upstream files; keep unavoidable edits small and localized.
+
+- Preserve upstream implementation bodies. Do not copy whole upstream modules or move their bodies merely to hide the diff.
+- Document remaining integration points, measure overlap against a fixed upstream base, and verify behavioral parity with meaningful tests.
+- Keep unrelated upstream fixes outside the customization scope.
+
 ## Live V2 TUI Testing
 
 - Run `bun run dev:live` from a development worktree to test its TUI against the currently elected `opencode` background server and live sessions.

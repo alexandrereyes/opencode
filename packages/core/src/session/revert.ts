@@ -1,6 +1,5 @@
 export * as SessionRevert from "./revert.js"
 
-import { and, eq, sql } from "drizzle-orm"
 import { Effect } from "effect"
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
@@ -11,14 +10,9 @@ import { SessionEvent } from "./event.js"
 import { MessageNotFoundError } from "./error.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
-import { SessionMessageTable, SessionTable } from "./sql.js"
+import { SessionRevertFiles } from "./revert-files.js"
 
 export { MessageNotFoundError }
-
-interface BoundaryInput {
-  readonly sessionID: SessionSchema.ID
-  readonly messageID: SessionMessage.ID
-}
 
 export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
   session: SessionSchema.Info
@@ -39,34 +33,14 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
     const original = input.session.revert?.snapshot
       ? Snapshot.ID.make(input.session.revert.snapshot)
       : yield* snapshot.capture()
-    // This stage owns one Snapshot service. Child file plans are therefore composable only
-    // while they share the root Location; history rollback still applies across Locations.
-    const fileChildren =
-      input.files === false
-        ? []
-        : yield* Effect.filter(
-            (input.children ?? []).flatMap((child) =>
-              child.messageID ? [{ sessionID: child.sessionID, messageID: child.messageID }] : [],
-            ),
-            (child) =>
-              database.db
-                .select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
-                .from(SessionTable)
-                .where(eq(SessionTable.id, child.sessionID))
-                .get()
-                .pipe(
-                  Effect.orDie,
-                  Effect.map(
-                    (row) =>
-                      row?.directory === input.session.location.directory &&
-                      (row.workspaceID ?? undefined) === input.session.location.workspaceID,
-                  ),
-                ),
-          )
     const next =
       input.files === false
         ? new Map<RelativePath, Snapshot.ID>()
-        : yield* plan(database.db, { sessionID: input.session.id, messageID: input.messageID }, fileChildren)
+        : yield* SessionRevertFiles.plan(database.db, {
+            session: input.session,
+            messageID: input.messageID,
+            children: input.children,
+          })
     const restore = new Map<RelativePath, Snapshot.ID>()
     if (original) {
       for (const file of input.session.revert?.files ?? []) restore.set(RelativePath.make(file.file), original)
@@ -114,60 +88,4 @@ export const commit = Effect.fn("SessionRevert.commit")(function* (bus: Bus.Inte
     sessionID: session.id,
     to: session.revert.messageID,
   })
-})
-
-const plan = Effect.fn("SessionRevert.plan")(function* (
-  db: Database.Interface["db"],
-  input: BoundaryInput,
-  children?: readonly {
-    readonly sessionID: SessionSchema.ID
-    readonly messageID: SessionMessage.ID
-  }[],
-) {
-  const boundaries = [
-    { sessionID: input.sessionID, seq: yield* messageBoundarySeq(db, input) },
-    ...(yield* Effect.forEach(children ?? [], (child) =>
-      messageBoundarySeq(db, { sessionID: child.sessionID, messageID: child.messageID }).pipe(
-        Effect.map((seq) => ({ sessionID: child.sessionID, seq })),
-      ),
-    )),
-  ]
-  const files = new Map<RelativePath, Snapshot.ID>()
-  const rows = (yield* Effect.forEach(boundaries, (boundary) =>
-    db
-      .all<{ readonly id: string; readonly timeCreated: number; readonly tree: string; readonly file: string }>(
-        sql`
-      SELECT
-        message.id AS id,
-        message.time_created AS timeCreated,
-        json_extract(message.data, '$.snapshot.start') AS tree,
-        file.value AS file
-      FROM ${SessionMessageTable} AS message,
-        json_each(message.data, '$.snapshot.files') AS file
-      WHERE message.session_id = ${boundary.sessionID}
-        AND message.type = 'assistant'
-        AND message.seq > ${boundary.seq}
-        AND json_extract(message.data, '$.snapshot.start') IS NOT NULL
-    `,
-      )
-      .pipe(Effect.orDie),
-  ))
-    .flat()
-    .toSorted((a, b) => a.timeCreated - b.timeCreated || a.id.localeCompare(b.id))
-  for (const row of rows) {
-    const file = RelativePath.make(row.file)
-    if (!files.has(file)) files.set(file, Snapshot.ID.make(row.tree))
-  }
-  return files
-})
-
-const messageBoundarySeq = Effect.fnUntraced(function* (db: Database.Interface["db"], input: BoundaryInput) {
-  const boundary = yield* db
-    .select({ seq: SessionMessageTable.seq })
-    .from(SessionMessageTable)
-    .where(and(eq(SessionMessageTable.session_id, input.sessionID), eq(SessionMessageTable.id, input.messageID)))
-    .get()
-    .pipe(Effect.orDie)
-  if (!boundary) return yield* new MessageNotFoundError(input)
-  return boundary.seq
 })
