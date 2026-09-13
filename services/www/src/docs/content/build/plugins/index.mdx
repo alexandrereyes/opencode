@@ -1269,6 +1269,39 @@ Keep prompt hooks retry-safe. They are not an exactly-once side-effect boundary:
 - Concurrent submissions can run hooks more than once, but only the first successful admission wins.
 - Prompt hooks transform input and do not expose a typed rejection API.
 
+#### Revert planning
+
+Use `revert.plan` to choose the derived Sessions and asynchronous origins included when a Session revert is staged.
+Import the canonical facts and plan contract from `@opencode/plugin/session-revert`.
+
+```ts
+import { CausalRevert } from "@opencode/plugin/session-revert"
+
+function selectRevertPlan(facts: CausalRevert.Facts): CausalRevert.Plan {
+  return {
+    participants: [],
+    origins: [],
+    pendingOrigins: [],
+    discardedSessionIDs: [],
+  }
+}
+
+await ctx.session.hook("revert.plan", (event) => {
+  event.plan = selectRevertPlan(event.facts)
+})
+```
+
+`facts` is an immutable snapshot containing the root boundary, Session ancestry and Locations, subagent input assignments,
+their current message or inbox state, and tool origins. The callback replaces `plan`; it should be deterministic and must
+not perform I/O or other side effects because OpenCode may invoke it again when provenance changes.
+
+- The root Session's Location plugins are ready before facts are collected, and only that Location plans the revert.
+- Planning runs outside Session locks and has no provider-scoping option. OpenCode validates the result before interruption,
+  job invalidation, snapshots, or persistence.
+- Without a registered planner, a newly staged revert affects only the root Session.
+- Staged participant plans are durable. Clear, commit, and automatic commit from a new prompt, synthetic input, or
+  compaction continue to use the stored plan after the planner unloads.
+
 #### Model requests
 
 Modify assembled system instructions, messages, tools, or request options immediately before model dispatch. Each
@@ -1412,6 +1445,7 @@ interface SessionHooks {
   "http.request": SessionHttpRequestHook
   "http.response": SessionHttpResponseHook
   retry: SessionRetryHook
+  "revert.plan": CausalRevert.PlanEvent
 }
 
 type RetryDecision = { retry: false } | { retry: true; delay: number }
@@ -1458,7 +1492,7 @@ interface SessionHookContext {
   hook<Name extends keyof SessionHooks>(
     name: Name,
     callback: (event: SessionHooks[Name]) => Promise<void> | void,
-    options?: Name extends "prompt" ? never : { providerID?: string },
+    options?: SessionHooks[Name] extends { readonly model: unknown } ? { providerID?: string } : never,
   ): Promise<Registration>
 }
 ```

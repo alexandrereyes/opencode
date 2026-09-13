@@ -5,6 +5,7 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { Permission } from "@opencode/schema/permission"
 import { Event } from "@opencode/schema/event"
+import type { CausalRevert } from "@opencode/schema/causal-revert"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Bus } from "../bus.js"
 import { Database } from "../database/database.js"
@@ -12,10 +13,8 @@ import { Instance } from "../instance/service.js"
 import { ShellResult } from "../shell/result.js"
 import type { Skill } from "../skill.js"
 import {
-  BusyError,
   CompactionConflictError,
   InboxConflictError,
-  MessageNotFoundError,
   NotFoundError,
   PromptConflictError,
   SyntheticConflictError,
@@ -26,22 +25,18 @@ import { SessionInbox } from "./inbox.js"
 import { SessionMessage } from "./message.js"
 import { SessionPrompt } from "./prompt.js"
 import { SessionRevert } from "./revert.js"
+import { SessionRevertCoordinator } from "./revert-coordinator.js"
 import { SessionShell } from "./shell.js"
 import { SessionSkill } from "./skill.js"
 import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
 import { Maintenance } from "../maintenance.js"
 import { Job } from "../job.js"
-import { Snapshot } from "../snapshot.js"
 
 type PromptRequest = SessionPrompt.Input & {
   id?: SessionMessage.ID
   resume?: boolean
-  causal?: {
-    parentSessionID: SessionSchema.ID
-    messageID: SessionMessage.ID
-    toolCallID: string
-  }
+  causal?: CausalRevert.Origin
 }
 
 /**
@@ -58,68 +53,18 @@ export const make = Effect.fn("Session.make")(function* () {
   const admission = yield* SessionInbox.Service
   const fs = yield* FSUtil.Service
   const scope = yield* Scope.Scope
-  const revertIntents = new Set<SessionSchema.ID>()
-
   const get = Effect.fn("Session.get")(function* (sessionID: SessionSchema.ID) {
     const session = yield* store.get(sessionID)
     if (!session) return yield* new NotFoundError({ sessionID })
     return session
   })
-  const family = Effect.fnUntraced(function* (sessionIDs: readonly SessionSchema.ID[]) {
-    const sessions = yield* Effect.forEach([...new Set(sessionIDs)], get)
-    const ownerIDs = sessions.flatMap((session) => (session.revert?.parentID ? [session.revert.parentID] : []))
-    const owners = yield* Effect.forEach([...new Set(ownerIDs)], get)
-    const all = [...sessions, ...owners]
-    return {
-      sessions: all,
-      ids: [
-        ...new Set([
-          ...all.map((session) => session.id),
-          ...all.flatMap((session) => session.revert?.children?.map((child) => child.sessionID) ?? []),
-        ]),
-      ],
-      owners: [
-        ...new Map(
-          all
-            .filter((session) => session.revert && !session.revert.parentID)
-            .map((session) => [session.id, session] as const),
-        ).values(),
-      ],
-    }
-  })
-  const causalConflict = Effect.fnUntraced(function* (
-    ownerID: SessionSchema.ID,
-    causal: Effect.Success<ReturnType<typeof SessionRevert.causal>>,
-  ) {
-    const children = yield* Effect.forEach(causal.children, (child) => get(child.sessionID))
-    return children.find((child) => child.revert && child.revert.parentID !== ownerID)
-  })
-  const criticalFamily = <A, E, R>(
-    sessionIDs: readonly SessionSchema.ID[],
-    use: (current: Effect.Success<ReturnType<typeof family>>) => Effect.Effect<A, E, R>,
-  ) =>
-    Effect.gen(function* () {
-      let locks = yield* family(sessionIDs)
-      while (true) {
-        const result = yield* SessionInbox.serializedAll(
-          locks.ids,
-          Effect.gen(function* () {
-            const current = yield* family(sessionIDs)
-            if (current.ids.some((id) => !locks.ids.includes(id))) return { type: "retry", family: current } as const
-            return { type: "ready", value: yield* use(current) } as const
-          }),
-        )
-        if (result.type === "ready") return result.value
-        locks = result.family
-      }
-      return yield* Effect.die(new Error("Unreachable Session family critical state"))
-    })
-  const wakeIfReady = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, resume: boolean) {
-    if (!resume) return
-    const session = yield* get(sessionID)
-    if (session.revert) return
-    if (revertIntents.has(sessionID)) return
-    yield* execution.wake(sessionID)
+  const reverts = SessionRevertCoordinator.make({
+    bus,
+    database,
+    instances,
+    execution,
+    jobs,
+    get,
   })
   const message = Effect.fn("Session.message")(function* (sessionID: SessionSchema.ID, messageID: SessionMessage.ID) {
     const stored = yield* store.message(messageID)
@@ -196,7 +141,7 @@ export const make = Effect.fn("Session.make")(function* () {
     inboxID: SessionMessage.ID,
   ) {
     yield* mutatePending(sessionID, inboxID, admission.steer)
-    yield* wakeIfReady(sessionID, true)
+    yield* reverts.wakeIfReady(sessionID, true)
   }, Effect.uninterruptible)
   const queueInbox = Effect.fn("Session.queueInbox")(
     (sessionID: SessionSchema.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.queue),
@@ -219,7 +164,7 @@ export const make = Effect.fn("Session.make")(function* () {
             Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
           )
         if (existing) {
-          yield* wakeIfReady(sessionID, input.resume !== false)
+          yield* reverts.wakeIfReady(sessionID, input.resume !== false)
           return existing
         }
         const item = yield* restore(
@@ -229,24 +174,26 @@ export const make = Effect.fn("Session.make")(function* () {
           ),
         )
         const related = input.causal ? [sessionID, input.causal.parentSessionID] : [sessionID]
-        const admitted = yield* criticalFamily(related, (current) =>
-          Effect.gen(function* () {
-            const reconciled = yield* admission.reconcile(request)
-            if (reconciled) return reconciled
-            yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
-            if (input.causal)
-              yield* bus.publish(SessionEvent.SubagentInputAssigned, {
-                sessionID: input.causal.parentSessionID,
-                childSessionID: sessionID,
-                inputID: messageID,
-                origin: { messageID: input.causal.messageID, toolCallID: input.causal.toolCallID },
-              })
-            return yield* admission.admit({ id: messageID, sessionID, item })
-          }),
-        ).pipe(
-          Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
-        )
-        yield* wakeIfReady(sessionID, input.resume !== false)
+        const admitted = yield* reverts
+          .withFamily(related, (current) =>
+            Effect.gen(function* () {
+              const reconciled = yield* admission.reconcile(request)
+              if (reconciled) return reconciled
+              yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
+              if (input.causal)
+                yield* bus.publish(SessionEvent.SubagentInputAssigned, {
+                  sessionID: input.causal.parentSessionID,
+                  childSessionID: sessionID,
+                  inputID: messageID,
+                  origin: { messageID: input.causal.messageID, toolCallID: input.causal.toolCallID },
+                })
+              return yield* admission.admit({ id: messageID, sessionID, item })
+            }),
+          )
+          .pipe(
+            Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
+          )
+        yield* reverts.wakeIfReady(sessionID, input.resume !== false)
         return admitted
       }),
     ),
@@ -323,17 +270,22 @@ export const make = Effect.fn("Session.make")(function* () {
     input: { id?: SessionMessage.ID; delivery?: SessionInbox.Delivery },
   ) {
     const inputID = input.id ?? SessionMessage.ID.create()
-    const admitted = yield* criticalFamily([sessionID], (current) =>
-      Effect.gen(function* () {
-        yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
-        return yield* admission.admitCompactionLocked({
-          id: inputID,
-          sessionID,
-          delivery: input.delivery ?? "steer",
-        })
-      }),
-    ).pipe(Effect.catchTag("SessionInbox.LifecycleConflict", () => new CompactionConflictError({ sessionID, inputID })))
-    yield* wakeIfReady(sessionID, true)
+    const admitted = yield* reverts
+      .withFamily([sessionID], (current) =>
+        Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true }).pipe(
+          Effect.andThen(
+            admission.admitCompactionLocked({
+              id: inputID,
+              sessionID,
+              delivery: input.delivery ?? "steer",
+            }),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.catchTag("SessionInbox.LifecycleConflict", () => new CompactionConflictError({ sessionID, inputID })),
+      )
+    yield* reverts.wakeIfReady(sessionID, true)
     return admitted
   })
   const wait = Effect.fn("Session.wait")(function* (sessionID: SessionSchema.ID) {
@@ -369,16 +321,23 @@ export const make = Effect.fn("Session.make")(function* () {
             }),
             delivery: SessionInbox.Delivery.make(input.delivery ?? "steer"),
           } satisfies SessionInbox.Item
-          const admitted = yield* criticalFamily([sessionID], () =>
-            admission.admit({
-              id: inputID,
-              sessionID,
-              item: admittedInput,
-            }),
-          ).pipe(
-            Effect.catchTag("SessionInbox.LifecycleConflict", () => new SyntheticConflictError({ sessionID, inputID })),
-          )
-          yield* wakeIfReady(sessionID, input.resume !== false)
+          const admitted = yield* reverts
+            .withFamily([sessionID], (current) =>
+              Effect.gen(function* () {
+                const request = { id: inputID, sessionID, type: "synthetic" as const, delivery: admittedInput.delivery }
+                const reconciled = yield* admission.reconcile(request)
+                if (reconciled) return reconciled
+                yield* Effect.forEach(current.owners, (owner) => SessionRevert.commit(bus, owner), { discard: true })
+                return yield* admission.admit({ id: inputID, sessionID, item: admittedInput })
+              }),
+            )
+            .pipe(
+              Effect.catchTag(
+                "SessionInbox.LifecycleConflict",
+                () => new SyntheticConflictError({ sessionID, inputID }),
+              ),
+            )
+          yield* reverts.wakeIfReady(sessionID, input.resume !== false)
           return admitted
         }),
       ),
@@ -387,104 +346,7 @@ export const make = Effect.fn("Session.make")(function* () {
     (sessionID: SessionSchema.ID, options?: { readonly continue?: boolean }) =>
       Effect.uninterruptible(execution.interrupt(sessionID, options)),
   )
-  const stage = Effect.fn("Session.revert.stage")(function* (
-    sessionID: SessionSchema.ID,
-    input: { messageID: SessionMessage.ID; files?: boolean },
-  ): Effect.fn.Return<
-    NonNullable<SessionSchema.Info["revert"]>,
-    BusyError | MessageNotFoundError | NotFoundError | Snapshot.Error
-  > {
-    revertIntents.add(sessionID)
-    return yield* Effect.gen(function* () {
-      const initialSession = yield* get(sessionID)
-      if (initialSession.revert?.parentID) return yield* new BusyError({ sessionID })
-      if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
-      let causal = yield* SessionRevert.causal(database.db, { sessionID, messageID: input.messageID })
-      const initialConflict = yield* causalConflict(sessionID, causal)
-      if (initialConflict) return yield* new BusyError({ sessionID: initialConflict.id })
-      while (true) {
-        const invalidated = yield* jobs.invalidateCausal({
-          origins: causal.origins,
-          interruptSessionIDs: causal.children.flatMap((child) => (child.messageID ? [child.sessionID] : [])),
-          discardedSessionIDs: causal.sessionIDs,
-        })
-        if (yield* execution.isActive(sessionID))
-          yield* execution
-            .interrupt(sessionID, { awaitSettlement: true })
-            .pipe(Effect.andThen(execution.awaitIdle(sessionID)))
-        yield* Effect.forEach(
-          invalidated.interruptSessionIDs,
-          (childID) =>
-            execution.interrupt(childID, { awaitSettlement: true }).pipe(Effect.andThen(execution.awaitIdle(childID))),
-          { discard: true },
-        )
-        yield* jobs.cancelCausal(invalidated)
-        const result = yield* SessionInbox.serializedAll(
-          [sessionID, ...causal.children.map((child) => child.sessionID)],
-          Effect.gen(function* () {
-            const session = yield* get(sessionID)
-            if (session.revert?.parentID) return yield* new BusyError({ sessionID })
-            const current = yield* SessionRevert.causal(database.db, { sessionID, messageID: input.messageID })
-            const conflict = yield* causalConflict(sessionID, current)
-            if (conflict) return yield* new BusyError({ sessionID: conflict.id })
-            const active = (yield* Effect.forEach(
-              current.children.filter((child) => child.messageID),
-              (child) => execution.isActive(child.sessionID),
-            )).some(Boolean)
-            if ((yield* execution.isActive(sessionID)) || active || causalKey(current) !== causalKey(causal))
-              return { type: "retry", causal: current } as const
-            yield* jobs.revokeOrigins(current.pendingOrigins)
-            return {
-              type: "ready",
-              revert: yield* SessionRevert.stage({
-                session,
-                messageID: input.messageID,
-                files: input.files,
-                children: current.children,
-              }).pipe(
-                Effect.provideService(Instance.Service, instances),
-                Effect.provideService(Database.Service, database),
-                Effect.provideService(Bus.Service, bus),
-              ),
-            } as const
-          }),
-        )
-        if (result.type === "ready") return result.revert
-        causal = result.causal
-      }
-      return yield* Effect.die(new Error("Unreachable causal stage state"))
-    }).pipe(Effect.ensuring(Effect.sync(() => revertIntents.delete(sessionID))))
-  })
-  const clear = Effect.fn("Session.revert.clear")(function* (sessionID: SessionSchema.ID) {
-    const session = yield* get(sessionID)
-    if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
-    const cleared = yield* criticalFamily([sessionID], (current) =>
-      Effect.gen(function* () {
-        const target = current.sessions.find((item) => item.id === sessionID) ?? session
-        const owner = current.owners[0] ?? target
-        if (yield* execution.isActive(owner.id)) return yield* new BusyError({ sessionID: owner.id })
-        yield* SessionRevert.clear(owner).pipe(
-          Effect.provideService(Instance.Service, instances),
-          Effect.provideService(Bus.Service, bus),
-        )
-        return { wake: owner.revert?.children?.length ? undefined : owner.id }
-      }),
-    )
-    if (cleared.wake) return yield* execution.wake(cleared.wake)
-  })
-  const commit = Effect.fn("Session.revert.commit")(function* (sessionID: SessionSchema.ID) {
-    const session = yield* get(sessionID)
-    if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
-    return yield* criticalFamily([sessionID], (current) =>
-      Effect.gen(function* () {
-        const target = current.sessions.find((item) => item.id === sessionID) ?? session
-        const owner = current.owners[0] ?? target
-        if (yield* execution.isActive(owner.id)) return yield* new BusyError({ sessionID: owner.id })
-        return yield* SessionRevert.commit(bus, owner)
-      }),
-    )
-  })
-  const revert = { stage, clear, commit }
+  const revert = { stage: reverts.stage, clear: reverts.clear, commit: reverts.commit }
   const operations = {
     get,
     message,
@@ -561,9 +423,5 @@ export const make = Effect.fn("Session.make")(function* () {
 })
 
 export type Handle = ReturnType<Effect.Success<ReturnType<typeof make>>["forSession"]>
-
-function causalKey(input: Effect.Success<ReturnType<typeof SessionRevert.causal>>) {
-  return JSON.stringify({ children: input.children, origins: input.origins, sessionIDs: input.sessionIDs })
-}
 
 // Mirrors the shell tool's in-memory preview safety limit.

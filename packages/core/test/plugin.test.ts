@@ -8,13 +8,33 @@ import { Credential } from "@opencode/core/credential"
 import { Integration } from "@opencode/core/integration"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginModule } from "@opencode/core/plugin/module"
+import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { fromPromise } from "@opencode/plugin/promise/adapter"
+import { CausalRevert } from "@opencode/plugin/session-revert"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
 const it = testEffect(PluginTestLayer)
+
+const revertFacts = CausalRevert.Facts.make({
+  boundary: {
+    sessionID: Session.ID.make("ses_hook"),
+    messageID: SessionMessage.ID.make("msg_hook"),
+    seq: 0,
+  },
+  sessions: [
+    {
+      sessionID: Session.ID.make("ses_hook"),
+      location: { directory: AbsolutePath.make("/project") },
+    },
+  ],
+  assignments: [],
+  tools: [],
+})
 
 for (const scenario of [
   {
@@ -468,6 +488,56 @@ it.effect("normalizes Promise plugin API inputs through JSON", () =>
     yield* plugins.awaitActivation
 
     expect(created).toEqual([true])
+  }),
+)
+
+it.effect("registers revert planning hooks through Effect and Promise plugins", () =>
+  Effect.gen(function* () {
+    const plugins = yield* Plugin.Service
+    const hooks = yield* PluginHooks.Service
+    const calls: string[] = []
+    yield* plugins.activate([
+      {
+        id: "effect-revert",
+        revision: "1",
+        effect: (ctx) =>
+          ctx.session.hook("revert.plan", (event) =>
+            Effect.sync(() => {
+              calls.push("effect")
+              event.plan = CausalRevert.Plan.make({
+                participants: [],
+                origins: [],
+                pendingOrigins: [],
+                discardedSessionIDs: [],
+              })
+            }),
+          ),
+      },
+      {
+        ...fromPromise({
+          id: "promise-revert",
+          async setup(ctx) {
+            await ctx.session.hook("revert.plan", (event) => {
+              calls.push("promise")
+              event.plan = CausalRevert.Plan.make({
+                participants: [],
+                origins: [],
+                pendingOrigins: [],
+                discardedSessionIDs: [],
+              })
+            })
+          },
+        }),
+        revision: "1",
+      },
+    ])
+    yield* plugins.awaitActivation
+
+    yield* hooks.trigger("session", "revert.plan", {
+      facts: revertFacts,
+      plan: CausalRevert.Plan.make({ participants: [], origins: [], pendingOrigins: [], discardedSessionIDs: [] }),
+    })
+    expect(calls).toEqual(["effect", "promise"])
   }),
 )
 

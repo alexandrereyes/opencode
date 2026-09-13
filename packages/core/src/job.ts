@@ -20,14 +20,10 @@ import { KV } from "./kv.js"
 import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
 import { Maintenance } from "./maintenance.js"
+import { CausalRevert } from "@opencode/schema/causal-revert"
 
-export const Origin = Schema.Struct({
-  parentSessionID: SessionSchema.ID,
-  messageID: SessionMessage.ID,
-  toolCallID: Schema.String,
-})
-
-export type Origin = typeof Origin.Type
+export const Origin = CausalRevert.Origin
+export type Origin = CausalRevert.Origin
 
 const Background = Schema.Struct({
   id: Schema.String,

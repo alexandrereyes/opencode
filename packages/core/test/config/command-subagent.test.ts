@@ -1,5 +1,7 @@
 import { describe, expect } from "bun:test"
 import path from "path"
+import { pathToFileURL } from "node:url"
+import fs from "node:fs/promises"
 import { Effect, Layer } from "effect"
 import { LanguageModel } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols/openai-chat"
@@ -169,15 +171,20 @@ function project(
   return Effect.gen(function* () {
     const tmp = yield* tmpdirScoped()
     const definition = { description: "Review code", template: "Review $ARGUMENTS: !`printf ready`", ...command }
-    yield* Effect.promise(() =>
-      Bun.write(
+    yield* Effect.promise(async () => {
+      await fs.mkdir(path.join(tmp.path, ".opencode", "plugins"), { recursive: true })
+      await Bun.write(
         path.join(tmp.path, "opencode.json"),
         JSON.stringify({
           agents: { reviewer: { mode: "subagent", model: "test/child" } },
           ...(format === "markdown" ? {} : { commands: { review: definition } }),
         }),
-      ),
-    )
+      )
+      await Bun.write(
+        path.join(tmp.path, ".opencode", "plugins", "app-custom.ts"),
+        `export { default } from ${JSON.stringify(pathToFileURL(path.resolve(import.meta.dir, "../../../plugin-app-custom/src/index.ts")).href)}\n`,
+      )
+    })
     if (format === "markdown")
       yield* Effect.promise(() =>
         Bun.write(

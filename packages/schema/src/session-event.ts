@@ -26,6 +26,7 @@ import { SessionInbox } from "./session-inbox.js"
 import { Project } from "./project.js"
 import { SessionFork } from "./session-fork.js"
 import { Permission } from "./permission.js"
+import { CausalRevert } from "./causal-revert.js"
 
 export { FileAttachment }
 
@@ -656,8 +657,8 @@ export const SubagentInputAssigned = Event.durable({
     childSessionID: SessionID,
     inputID: SessionMessage.ID,
     origin: Schema.Struct({
-      messageID: SessionMessage.ID,
-      toolCallID: Schema.String,
+      messageID: CausalRevert.Origin.fields.messageID,
+      toolCallID: CausalRevert.Origin.fields.toolCallID,
     }),
   },
 })
