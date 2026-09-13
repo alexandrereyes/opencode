@@ -220,11 +220,12 @@ it.live(
       yield* Deferred.await(notificationEntered).pipe(Effect.timeout("5 seconds"))
 
       yield* post("revert/stage", { messageID: completionBoundary.id })
-      yield* post("revert/commit", {}, 204)
       yield* Deferred.succeed(releaseNotification, undefined)
       yield* Deferred.await(notificationFinished)
+      expect((yield* sessions.get(parent.id)).revert?.messageID).toBe(completionBoundary.id)
       expect(yield* sessions.inbox(parent.id)).toEqual([])
       expect(yield* llm.requests()).toHaveLength(requestsBeforeUndo)
+      yield* post("revert/commit", {}, 204)
       yield* llm.serve(() => TestLLM.text("continued without obsolete output", "parent_after_completion_revert"))
       yield* post("prompt", { text: "continue-after-completion-undo", resume: false })
       yield* sessions.resume(parent.id)

@@ -12,7 +12,8 @@ import { Plugin } from "../plugin/service.js"
 import { MessageNotFoundError } from "./error.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
-import { SessionCausalTable, SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
+import { SessionCausalTable } from "./causal.sql.js"
+import { SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
 
 const decodePlan = Schema.decodeUnknownEffect(CausalRevert.Plan)
 

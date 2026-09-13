@@ -23,7 +23,8 @@ import { KeyedMutex } from "../effect/keyed-mutex.js"
 import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
-import { SessionInboxTable, SessionMessageTable, SessionTable } from "./sql.js"
+import { SessionInboxTable, SessionMessageTable } from "./sql.js"
+import { SessionRevertPersistence } from "./revert-persistence.js"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -412,13 +413,7 @@ export const nextPromotable = Effect.fn("SessionInbox.nextPromotable")(function*
   sessionID: SessionSchema.ID,
   promotable: Promotable,
 ) {
-  const session = yield* db
-    .select({ revert: SessionTable.revert })
-    .from(SessionTable)
-    .where(eq(SessionTable.id, sessionID))
-    .get()
-    .pipe(Effect.orDie)
-  if (session?.revert) return undefined
+  if (yield* SessionRevertPersistence.isStaged(db, sessionID)) return undefined
   const steer = (yield* pendingSteers(db, sessionID))[0]
   if (steer) return fromRow(steer)
   if (promotable !== "input") return undefined
@@ -512,13 +507,7 @@ export const promote = Effect.fn("SessionInbox.promote")(function* (
   return yield* serialized(
     sessionID,
     Effect.gen(function* () {
-      const session = yield* db
-        .select({ revert: SessionTable.revert })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if (session?.revert) return 0
+      if (yield* SessionRevertPersistence.isStaged(db, sessionID)) return 0
       const steers = yield* pendingSteers(db, sessionID)
       if (steers.length > 0 || scope === "steer") {
         const control = steers.findIndex((row) => row.type === "compaction" || row.type === "move")
