@@ -19,7 +19,6 @@ import {
   type WireTerminal,
 } from "./daemon.js"
 import { resolveBinary } from "#persistent-pty-binary"
-import { Maintenance } from "../maintenance.js"
 
 export type { Role, StreamEvent } from "./daemon.js"
 export { Handoff } from "@opencode/schema/persistent-pty"
@@ -347,8 +346,8 @@ const makeLayer = (options: Options = {}) =>
       return Service.of({
         list,
         get,
-        create: (sessionID, input) => Maintenance.process.run(create(sessionID, input)),
-        write: (id, data, attachmentID) => Maintenance.process.run(write(id, data, attachmentID)),
+        create,
+        write,
         resize,
         control,
         input,

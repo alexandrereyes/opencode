@@ -1,11 +1,7 @@
 # Custom macOS runtime
 
 Runtime source entrypoint: `packages/cli/script/custom-server.ts`.
-The maintenance API and Core activity barrier are maintained in this fork.
-
-The operational updater, autonomous Astra reviewer/worker pipeline, launchd deployment,
-and runbook are versioned in [alexandrereyes/my-env](https://github.com/alexandrereyes/my-env):
-`deploy/opencode-custom/` and `docs/opencode-custom.md`.
+The retired periodic updater and its maintenance API/Core admission barrier are not part of this fork.
 
 Every custom release carries and builds `@opencode/plugin-app-custom` in
 `packages/plugin-app-custom`. The runtime activates its release-owned `dist` directory
@@ -13,14 +9,30 @@ for every Location through the normal plugin configuration path. The obsolete
 project-local POC loader is not retained; do not configure a second global or
 project-local copy of this custom-only plugin.
 
-Backend source and production UI must come from the same release commit. The MyEnv
-controller owns isolated persistence, idle-leased activation, backups, and process handoff.
+Backend source and production UI must come from the same checkout. The custom entrypoint has no
+updater, deployment controller, release pointer, or automatic process replacement.
 
-Production is the main UI at **4096**; **4177 is ephemeral development only**, started on demand
-from a feature worktree based on `origin/custom`. First adoption of the old managed backend
-requires an explicit cold maintenance window: never stop the live service hosting a session.
-The main runtime may reuse the original database through `OPENCODE_CUSTOM_DB` and original
-configuration through `OPENCODE_CONFIG_DIR`, only after the MyEnv cold-adoption checks/backup.
+Build and run the custom server directly from a checkout:
+
+```sh
+bun install --frozen-lockfile
+bun --cwd packages/app run build
+bun --cwd packages/plugin-app-custom run build
+
+export OPENCODE_CUSTOM_HOME=/path/to/isolated/runtime
+export OPENCODE_CUSTOM_COMMIT="$(git rev-parse HEAD)"
+mkdir -p "$OPENCODE_CUSTOM_HOME/data/opencode" "$OPENCODE_CUSTOM_HOME/config/opencode"
+umask 077
+openssl rand -base64 48 > "$OPENCODE_CUSTOM_HOME/password"
+bun packages/cli/script/custom-server.ts
+```
+
+The password initialization above is only for a new isolated runtime; retain an existing runtime's
+password and persistence when starting it again.
+`OPENCODE_CUSTOM_PORT` defaults to `4177`. `OPENCODE_CUSTOM_DB` and
+`OPENCODE_CONFIG_DIR` may select explicit database and configuration paths. Do not point a
+development invocation at production persistence. Closing stdin or sending the process a normal
+termination signal shuts down the isolated server. Updating the checkout never restarts it.
 
 ## Agent dashboard
 

@@ -8,7 +8,7 @@ import { Instance } from "@opencode/core/instance/service"
 import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
 import { KVTable } from "@opencode/core/kv/sql"
-import { JobUpgrade } from "@opencode/core/job-upgrade"
+import { restoreBackgroundUpgrade } from "@opencode/core/database/migration/20260913000000_restore-background-upgrade"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import type { LocationServices } from "@opencode/core/location-services"
 import { Project } from "@opencode/core/project"
@@ -162,7 +162,7 @@ describe("SessionExecution lifecycle", () => {
     }),
   )
 
-  it.effect("restores an upgrade-archived cancelled child without rerunning it or losing its notification", () =>
+  it.effect("recovers a converted legacy cancelled child without rerunning it or losing its notification", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const parent = Session.ID.make("ses_cancelled_background_parent")
@@ -203,14 +203,13 @@ describe("SessionExecution lifecycle", () => {
       yield* Scope.close(scope, Exit.void)
 
       const marker = (yield* jobs.pendingBackground)[0]
-      const archivedKey = `${JobUpgrade.prefix}${marker.notificationID}`
+      const archivedKey = `job.background.upgrade/${marker.notificationID}`
       yield* database.db
         .update(KVTable)
         .set({ key: archivedKey })
         .where(eq(KVTable.key, `job.background/${marker.notificationID}`))
         .run()
-      expect(yield* jobs.pendingBackground).toEqual([])
-
+      yield* database.db.transaction(restoreBackgroundUpgrade)
       const restartedScope = yield* Scope.make()
       yield* Effect.addFinalizer(() => Scope.close(restartedScope, Exit.void))
       const restartedJobs = yield* Job.make.pipe(Scope.provide(restartedScope))
@@ -394,7 +393,7 @@ describe("SessionExecution lifecycle", () => {
 })
 
 describe("SessionRestart background recovery", () => {
-  it.effect("restores archived orphan shells and delivers recovered notices exactly once", () =>
+  it.effect("restores orphan shells and delivers recovered notices exactly once", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const store = yield* SessionStore.Service
@@ -412,18 +411,6 @@ describe("SessionRestart background recovery", () => {
       expect(yield* store.listSuspended()).toEqual([])
       expect(yield* jobs.pendingBackground).toHaveLength(2)
       const notifications = (yield* jobs.pendingBackground).map((record) => record.notificationID)
-      yield* database.db.transaction(
-        Effect.fnUntraced(function* (tx) {
-          for (const id of notifications)
-            yield* tx
-              .update(KVTable)
-              .set({ key: `${JobUpgrade.prefix}${id}` })
-              .where(eq(KVTable.key, `job.background/${id}`))
-              .run()
-        }),
-      )
-      expect(yield* jobs.pendingBackground).toHaveLength(0)
-
       const drained: Session.ID[] = []
       const scope = yield* Scope.make()
       yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))

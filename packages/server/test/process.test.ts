@@ -53,6 +53,13 @@ it.live("authenticates API and frontend requests while allowing browser prefligh
     expect(health.headers.get("access-control-allow-origin")).toBe("http://localhost:3000")
     expect(yield* Effect.promise(() => health.json())).toMatchObject({ version: "test-version" })
 
+    const openapi = yield* Effect.promise(() =>
+      fetch(new URL("/openapi.json", HttpServer.formatAddress(server.address)), {
+        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+      }).then((response) => response.text()),
+    )
+    expect(openapi).not.toContain("/api/server/maintenance")
+
     yield* Effect.forEach(
       ["http://192.168.1.10:3001", "https://example.com", "https://untrusted.example.com"],
       (origin) =>

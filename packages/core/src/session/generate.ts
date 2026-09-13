@@ -13,7 +13,6 @@ import { SessionProviderContext } from "./provider-context.js"
 import { SessionModelRequest } from "./model-request.js"
 import type { SessionRunnerModel } from "./runner/model.js"
 import type { SessionSchema } from "./schema.js"
-import { Maintenance } from "../maintenance.js"
 
 export type Error = AgentNotFoundError | Instructions.InitializationBlocked | SessionRunnerModel.Error | AIError
 
@@ -64,5 +63,5 @@ export const generate = Effect.fn("SessionGenerate.generate")(function* (input: 
     const response = yield* llm.generate(prepared.request, prepared.options)
     yield* Effect.logInfo("session generation usage diagnostic", { usage: response.usage })
     return response.text
-  }).pipe(instances.provide(input.session), Maintenance.process.run)
+  }).pipe(instances.provide(input.session))
 })
