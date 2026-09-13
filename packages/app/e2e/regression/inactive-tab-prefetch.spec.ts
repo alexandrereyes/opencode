@@ -37,13 +37,15 @@ test("inactive tabs load attention, but read transcript and inbox only on select
       ],
     }),
   })
-  await page.route("**/api/session/navigation?*", (route) =>
+  await page.route("**/api/rpc/custom.navigation/list*", (route) =>
     route.fulfill({
       json: {
-        data: fixture.sessions.map((session) => ({
-          session: currentSession(session),
-          messageAt: session.time.updated,
-        })),
+        output: {
+          data: fixture.sessions.map((session) => ({
+            session: currentSession(session),
+            messageAt: session.time.updated,
+          })),
+        },
       },
     }),
   )

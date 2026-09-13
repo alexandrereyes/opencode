@@ -1,4 +1,5 @@
 import { Tool } from "@opencode/schema/tool"
+import { SessionScan } from "@opencode/schema/session-scan"
 import type { Rpc } from "@opencode/schema/rpc"
 import type { RpcCallOptions, RpcEventPayload } from "@opencode/client/promise/api"
 import { Effect, Schema, SchemaAST, Stream } from "effect"
@@ -458,6 +459,9 @@ export function fromPromise(plugin: Plugin) {
             transform: transform(host.reference),
             reload: () => run(host.reference.reload()),
           },
+          request: {
+            pending: () => run(host.request.pending()),
+          },
           rpc: yield* rpcFromEffect(host.rpc, streams),
           skill: {
             list: adaptApiMethod(SkillEndpoints["skill.list"], host.skill.list),
@@ -596,6 +600,13 @@ export function fromPromise(plugin: Plugin) {
             move: adaptApiMethod(SessionEndpoints["session.move"], host.session.move),
             wait: adaptApiMethod(SessionEndpoints["session.wait"], host.session.wait),
             context: adaptApiMethod(SessionEndpoints["session.context"], host.session.context),
+            scan: (input) =>
+              run(
+                Schema.decodeUnknownEffect(SessionScan.Input)(input ?? {}).pipe(
+                  Effect.flatMap(host.session.scan),
+                  Effect.flatMap(Schema.encodeEffect(SessionScan.Page)),
+                ),
+              ),
           },
           shell: {
             hook: (name, callback) =>

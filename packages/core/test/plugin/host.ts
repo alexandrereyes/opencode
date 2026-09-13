@@ -122,6 +122,9 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       transform: () => Effect.die("unused reference.transform"),
       reload: () => Effect.die("unused reference.reload"),
     },
+    request: overrides.request ?? {
+      pending: () => Effect.die("unused request.pending"),
+    },
     skill: overrides.skill ?? {
       list: () => Effect.die("unused skill.list"),
       transform: () => Effect.die("unused skill.transform"),
@@ -181,6 +184,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       interrupt: overrides.session?.interrupt ?? (() => Effect.die("unused session.interrupt")),
       wait: overrides.session?.wait ?? (() => Effect.die("unused session.wait")),
       context: overrides.session?.context ?? (() => Effect.die("unused session.context")),
+      scan: overrides.session?.scan ?? (() => Effect.die("unused session.scan")),
     },
   }
 }

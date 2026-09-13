@@ -1,4 +1,5 @@
-import type { SessionInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionInfo } from "@opencode/client/promise"
+import type { SessionNavigationInfo } from "../titlebar/sidebar-model"
 
 export function latestAttention(...times: (number | undefined)[]) {
   const pending = times.filter((time): time is number => time !== undefined)

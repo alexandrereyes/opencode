@@ -85,6 +85,36 @@ setup(ctx) {
 }
 ```
 
+### Session metadata
+
+Use `ctx.session.scan()` to inspect bounded session metadata without loading transcripts. Pages are ordered by session ID;
+the default limit is 200 and the maximum is 1000.
+
+```ts
+const page = await ctx.session.scan({ limit: 500, archived: false })
+
+for (const item of page.data) {
+  console.log(item.session.id, item.messageAt, item.completionAt)
+}
+```
+
+Use `sessionID` to select one session. Omit `archived` to include all sessions, pass `false` for unarchived sessions, or
+`true` for archived sessions. `messageAt` is the latest user or assistant message timestamp, and `completionAt` is the
+latest durable succeeded or failed execution timestamp.
+
+### Live pending requests
+
+Use `ctx.request.pending()` to read raw pending permissions and forms grouped by Location.
+
+```ts
+const snapshots = await ctx.request.pending()
+const permissions = snapshots.flatMap((snapshot) => snapshot.permissions)
+const forms = snapshots.flatMap((snapshot) => snapshot.forms)
+```
+
+The snapshot examines only already-live Locations and never starts historical Locations. It is best-effort and is not an
+atomic transaction across Locations.
+
 ### Options
 
 Pass plugin options with the object form in `opencode.json(c)`.

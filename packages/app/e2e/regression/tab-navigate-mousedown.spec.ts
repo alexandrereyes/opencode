@@ -628,10 +628,12 @@ async function mockServer(page: Page) {
     provider: { all: [], connected: [] },
     pageMessages: () => ({ items: [] }),
   })
-  await page.route("**/api/session/navigation?*", (route) =>
+  await page.route("**/api/rpc/custom.navigation/list*", (route) =>
     route.fulfill({
       json: {
-        data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
+        output: {
+          data: sessions.map((session) => ({ session: currentSession(session), messageAt: session.time.updated })),
+        },
       },
     }),
   )

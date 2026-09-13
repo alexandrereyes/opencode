@@ -1,4 +1,5 @@
-import type { SessionMessageInfo, SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionMessageInfo } from "@opencode/client/promise"
+import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
 
 export type DashboardStatus = "running" | "attention" | "completed" | "error" | "idle"
 export type DashboardFilter = "recent" | "all" | DashboardStatus

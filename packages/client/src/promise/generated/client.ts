@@ -20,8 +20,6 @@ import type {
   PluginCheckOutput,
   PluginUpdateInput,
   PluginUpdateOutput,
-  SessionNavigationInput,
-  SessionNavigationOutput,
   SessionListInput,
   SessionListOutput,
   SessionStatsInput,
@@ -561,18 +559,6 @@ export function make(options: ClientOptions) {
         ),
     },
     session: {
-      navigation: (input?: SessionNavigationInput, requestOptions?: RequestOptions) =>
-        request<SessionNavigationOutput>(
-          {
-            method: "GET",
-            path: `/api/session/navigation`,
-            query: { after: input?.["after"], sessionID: input?.["sessionID"], limit: input?.["limit"] },
-            successStatus: 200,
-            declaredStatuses: [400, 401],
-            empty: false,
-          },
-          requestOptions,
-        ),
       list: (input?: SessionListInput, requestOptions?: RequestOptions) =>
         request<SessionListOutput>(
           {

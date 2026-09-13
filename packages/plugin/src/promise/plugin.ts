@@ -13,6 +13,7 @@ import type { MessageDomain } from "./message.js"
 import type { MCPDomain } from "./mcp.js"
 import type { PermissionDomain } from "./permission.js"
 import type { ReferenceDomain } from "./reference.js"
+import type { RequestDomain } from "./request.js"
 import type { RpcDomain } from "./rpc.js"
 import type { SessionDomain } from "./session.js"
 import type { ShellDomain } from "./shell.js"
@@ -42,6 +43,7 @@ export interface Context {
   readonly permission: PermissionDomain
   readonly plugin: Pick<PluginApi, "list">
   readonly reference: ReferenceDomain
+  readonly request: RequestDomain
   readonly rpc: RpcDomain
   readonly session: SessionDomain
   readonly shell: ShellDomain

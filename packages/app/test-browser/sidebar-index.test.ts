@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test"
 import { createEffect, createMemo, createRoot } from "solid-js"
-import type { OpenCodeEvent, SessionInfo, SessionNavigationInfo, SessionNavigationPage } from "@opencode/client/promise"
+import type { OpenCodeEvent, SessionInfo } from "@opencode/client/promise"
 import { createOpenCodeEventSource } from "@/runtime/server/client"
 import { createSidebarIndex } from "@/shell/titlebar/sidebar-index"
 import { dashboardStatus } from "@/agent-dashboard/model"
 import { createRecentClock } from "@/shell/titlebar/sidebar-order"
+import type { SessionNavigationInfo, SessionNavigationPage } from "@/shell/titlebar/sidebar-model"
 
 const cleanups: VoidFunction[] = []
 afterEach(() => cleanups.splice(0).forEach((dispose) => dispose()))
@@ -46,12 +47,15 @@ function fixture(initial: SessionNavigationInfo, next: SessionNavigationPage) {
         connection: { status: () => "connected" },
         event: events.event,
         api: {
-          session: {
-            active: async () => ({}),
-            navigation: async (input) => {
-              reads.push(input?.sessionID)
+          rpc: () => ({
+            list: async (input: { sessionID?: string }) => {
+              reads.push(input.sessionID)
               return snapshots[reads.length - 1]
             },
+            events: { subscribe: () => ({}) },
+          }),
+          session: {
+            active: async () => ({}),
           },
         },
       },
@@ -142,7 +146,10 @@ function row(id: string, updated: number): SessionNavigationInfo {
   }
 }
 
-function mount(session: Parameters<typeof createSidebarIndex>[0]["sdk"]["api"]["session"]) {
+function mount(session: {
+  active: () => Promise<Record<string, { type: "running" }>>
+  list: (input: { sessionID?: string }) => Promise<SessionNavigationPage>
+}) {
   const listeners = new Set<(event: OpenCodeEvent) => void>()
   const cache = new Map<string, SessionInfo>()
   const remembered: SessionInfo[] = []
@@ -159,7 +166,10 @@ function mount(session: Parameters<typeof createSidebarIndex>[0]["sdk"]["api"]["
           },
         },
         sdk: {
-          api: { session },
+          api: {
+            session: { active: session.active },
+            rpc: () => ({ list: session.list, events: { subscribe: () => ({}) } }),
+          },
           connection: { status: () => "connected" },
           event: {
             listen: (listener) => {
@@ -194,7 +204,7 @@ test("active snapshot establishes A's phase before navigation: start B, settle A
   const rows = [row("a", 10), row("b", 20)]
   const ui = mount({
     active: async () => ({ a: { type: "running" } }),
-    navigation: (input) =>
+    list: (input) =>
       input?.sessionID
         ? Promise.resolve({ data: rows.filter((row) => row.session.id === input.sessionID) })
         : navigation.promise,
@@ -228,7 +238,7 @@ test.each(["delete", "replace"] as const)(
     const calls = { count: 0 }
     const ui = mount({
       active: async () => ({}),
-      navigation: async (input) => {
+      list: async (input) => {
         if (!input?.sessionID) return { data: [original] }
         calls.count++
         if (calls.count === 1) {
@@ -272,7 +282,7 @@ test("request resolution invalidates an older read before its replacement starts
   const calls = { count: 0 }
   const ui = mount({
     active: async () => ({}),
-    navigation: async (input) => {
+    list: async (input) => {
       if (!input?.sessionID) return { data: [pending] }
       calls.count++
       if (calls.count === 1) {

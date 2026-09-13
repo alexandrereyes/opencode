@@ -5,11 +5,12 @@ import { createComponent, createRoot } from "solid-js"
 import { createStore } from "solid-js/store"
 import { render } from "solid-js/web"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
-import { OpenCode, type OpenCodeEvent, type SessionNavigationInfo } from "@opencode/client/promise"
+import { OpenCode, type OpenCodeEvent } from "@opencode/client/promise"
 import { createData } from "@opencode/client/solid"
 import { createWorktreeInventory, withWorktreeInventory } from "@/workspaces/inventory"
 import { ServerScope } from "@/runtime/server/scope"
 import type { Project } from "@/runtime/server/types"
+import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
 
 const require = createRequire(import.meta.url)
 const solid = createRequire(require.resolve("vite-plugin-solid"))
@@ -176,12 +177,16 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         },
       })
     }
-    if (url.pathname === "/api/session/navigation")
+    if (url.pathname === "/api/rpc/custom.navigation/list") {
+      const input = JSON.parse(
+        Buffer.concat((await Array.fromAsync(request)).map((chunk) => Buffer.from(chunk))).toString("utf8"),
+      ) as { input: { sessionID?: string } }
       return json({
-        data: backend[server].filter(
-          (row) => !url.searchParams.get("sessionID") || row.session.id === url.searchParams.get("sessionID"),
-        ),
+        output: {
+          data: backend[server].filter((row) => !input.input.sessionID || row.session.id === input.input.sessionID),
+        },
       })
+    }
     if (url.pathname === "/api/session/active") return json({ data: {} })
     if (url.pathname === "/api/worktree") {
       if (!server && directory === "/repo") await gates.inventory.promise

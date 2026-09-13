@@ -139,6 +139,37 @@ const page = await ctx.message.list({
 })
 ```
 
+## Scanning Sessions
+
+Use `ctx.session.scan` for bounded session metadata without loading transcripts. Results are ordered by session ID, with
+a default limit of 200 and a maximum of 1000; `after` continues that stable ordering and `sessionID` selects one session.
+
+```ts
+const page = await ctx.session.scan({
+  limit: 500,
+  archived: false,
+})
+
+for (const item of page.data) {
+  console.log(item.session.id, item.messageAt, item.completionAt)
+}
+```
+
+Omit `archived` to include all sessions, pass `false` for active history, or `true` for archived sessions. `messageAt` is
+the latest user or assistant message timestamp, while `completionAt` is the latest durable succeeded or failed execution
+timestamp. Promise-plugin session values use their browser-safe encoded form, including millisecond timestamps.
+
+## Reading Live Pending Requests
+
+`ctx.request.pending()` returns raw permission and form snapshots grouped by Location. It samples only Locations that are
+already live and never starts historical Locations; the result is best-effort and is not atomic across Locations.
+
+```ts
+const snapshots = await ctx.request.pending()
+const permissions = snapshots.flatMap((snapshot) => snapshot.permissions)
+const forms = snapshots.flatMap((snapshot) => snapshot.forms)
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

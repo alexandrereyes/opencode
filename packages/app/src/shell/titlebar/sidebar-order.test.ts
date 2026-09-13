@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import type { SessionNavigationInfo } from "@opencode/client/promise"
+import type { SessionNavigationInfo } from "./sidebar-model"
 import { createRecentClock, createRecentOrder } from "./sidebar-order"
 
 function row(id: string, updated: number, created = 1): SessionNavigationInfo {

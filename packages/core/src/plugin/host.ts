@@ -8,7 +8,7 @@ import type { Event } from "@opencode/schema/event"
 import { ServerConfig } from "@opencode/schema/mcp"
 import { MessagePage } from "@opencode/schema/session-message-page"
 import { App } from "../app.js"
-import { Effect, Schema, Stream } from "effect"
+import { Context, Effect, Option, RcMap, Schema, Stream } from "effect"
 import { Agent } from "../agent.js"
 import { AISDK } from "../aisdk.js"
 import { Catalog } from "../catalog.js"
@@ -35,6 +35,7 @@ import { WebSearch } from "../websearch.js"
 import { Worktree } from "../worktree.js"
 import { Generate } from "../generate.js"
 import { Permission } from "../permission.js"
+import { Form } from "../form.js"
 import { PluginHooks } from "./hooks.js"
 import type { Interface } from "../plugin.js"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -470,6 +471,26 @@ export const make = Effect.fn("PluginHost.make")(function* (
           })
         }),
     },
+    request: {
+      pending: Effect.fn("PluginHost.pendingRequests")(function* () {
+        const refs = yield* RcMap.keys(locations.rcMap)
+        return yield* Effect.forEach(refs, (ref) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const services = yield* locations.contextEffectOption(ref)
+              if (Option.isNone(services)) return undefined
+              const permissions = Context.get(services.value, Permission.Service)
+              const forms = Context.get(services.value, Form.Service)
+              return {
+                location: ref,
+                permissions: yield* permissions.list(),
+                forms: yield* forms.list(),
+              }
+            }),
+          ).pipe(Effect.orDie),
+        ).pipe(Effect.map((snapshots) => snapshots.filter((snapshot) => snapshot !== undefined)))
+      }),
+    },
     skill: {
       list: () => response(skill.list()),
       reload: skill.reload,
@@ -578,6 +599,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
           .pipe(Effect.map((interrupted) => ({ interrupted }))),
       wait: (input) => sessions.wait(input.sessionID),
       context: (input) => sessions.context(input.sessionID),
+      scan: sessions.scan,
     },
   }
   return context
@@ -603,6 +625,7 @@ export const requirements = LayerNode.group([
   Worktree.node,
   Generate.node,
   Permission.node,
+  Form.node,
   PluginHooks.node,
   Session.node,
   PersistentPty.node,
