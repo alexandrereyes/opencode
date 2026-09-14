@@ -8,6 +8,28 @@
   flex-direction: column;
 }
 
+[data-slot="vertical-tabs-sidebar"] [data-slot="session-sidebar"] {
+  scrollbar-color: var(--border-weak-base) transparent;
+  scrollbar-width: thin;
+}
+
+[data-slot="vertical-tabs-sidebar"] [data-slot="session-sidebar"]::-webkit-scrollbar {
+  width: 8px;
+}
+
+[data-slot="vertical-tabs-sidebar"] [data-slot="session-sidebar"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-slot="vertical-tabs-sidebar"] [data-slot="session-sidebar"]::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: var(--border-weak-base);
+}
+
+[data-slot="vertical-tabs-sidebar"] [data-slot="session-sidebar"]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-strong-base);
+}
+
 [data-slot="vertical-tabs-sidebar"] [data-slot="vertical-tabs-scroll"] {
   min-height: 0;
   /* Leave enough space to scroll the final tab clear of the fade above Settings. */
