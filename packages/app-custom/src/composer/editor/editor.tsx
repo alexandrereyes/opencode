@@ -40,6 +40,7 @@ import {
   setComposerReferences,
 } from "./codemirror"
 import { normalizeComposerCursor, normalizeComposerPrompt } from "../prompt-parts"
+import { preserveDelayedEnterModifiers } from "./delayed-enter"
 import "../attachments/attachments.css"
 import "./editor.css"
 
@@ -207,27 +208,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
     const source = props.controller.parts()
     const prompt = normalizeComposerPrompt(source)
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    let deferredEnter = { shiftKey: false, ctrlKey: false, metaKey: false }
-    let deferredEnterTimer: number | undefined
-    const clearDeferredEnter = () => {
-      deferredEnter = { shiftKey: false, ctrlKey: false, metaKey: false }
-      if (deferredEnterTimer !== undefined) window.clearTimeout(deferredEnterTimer)
-      deferredEnterTimer = undefined
-    }
+    const releaseDelayedEnter = preserveDelayedEnterModifiers(editorHost)
     const interceptKey = (event: KeyboardEvent) => {
-      if (event.key === "Enter") {
-        const synthetic = !!(event as KeyboardEvent & { synthetic?: boolean }).synthetic
-        if (synthetic) {
-          if (deferredEnter.shiftKey) Object.defineProperty(event, "shiftKey", { value: true })
-          if (deferredEnter.ctrlKey) Object.defineProperty(event, "ctrlKey", { value: true })
-          if (deferredEnter.metaKey) Object.defineProperty(event, "metaKey", { value: true })
-          clearDeferredEnter()
-        } else {
-          clearDeferredEnter()
-          deferredEnter = { shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey }
-          deferredEnterTimer = window.setTimeout(clearDeferredEnter, 500)
-        }
-      }
       if (editorView?.composing || event.isComposing || event.keyCode === 229 || event.key === "Dead") return false
       if (!view.draftOnly && props.controller.onKeyDown(event)) return true
       const mod = event.metaKey || event.ctrlKey
@@ -403,7 +385,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       },
     })
     onCleanup(() => {
-      clearDeferredEnter()
+      releaseDelayedEnter()
       unbind()
       editorView?.destroy()
       editorView = undefined
