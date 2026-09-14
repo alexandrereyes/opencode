@@ -77,6 +77,11 @@
   grid-row: 1;
 }
 
+[data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-project"]) [data-slot="tab-pin"] {
+  align-self: flex-start;
+  margin-block-start: calc((45px - 2 * var(--line-height-compact)) / 2);
+}
+
 [data-titlebar-tab][data-orientation="vertical"] [data-slot="tab-title"] {
   grid-column: 2;
   grid-row: 1;
