@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, For, Show, onCleanup, type JSX } from "solid-js"
+import { createEffect, createMemo, createResource, For, Show, on, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -26,6 +26,8 @@ import {
   subscriptionPool,
 } from "./subscription-pool"
 import { SubagentContext } from "./subagent-context"
+
+const SUBAGENT_PAGE_SIZE = 10
 
 function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
   return (
@@ -97,7 +99,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     status: data.session.status,
     shells: () => (layout.params.id ? data.shell.listBySession(layout.params.id) : []),
   })
-  const [clock, setClock] = createStore({ now: Date.now() })
+  const [state, setState] = createStore({ now: Date.now(), subagentLimit: SUBAGENT_PAGE_SIZE })
   const subscriptionSource = createMemo(
     () => (props.active ? { server: server.key, directory: directory() } : false),
     false,
@@ -156,13 +158,13 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     family.state === "ready" || family.state === "refreshing" ? family.latest : undefined
   const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id
   const familyFailed = () => !familyPending() && familyResult()?.ok === false
-  const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], clock.now))
-  const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], clock.now))
+  const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], state.now))
+  const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], state.now))
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
       return language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })
-    const minutes = Math.max(0, Math.floor((clock.now - at) / 60_000))
+    const minutes = Math.max(0, Math.floor((state.now - at) / 60_000))
     return language.t("context.overview.updated", {
       time: new Intl.RelativeTimeFormat(language.intl(), { numeric: "auto" }).format(
         minutes >= 60 ? -Math.floor(minutes / 60) : -minutes,
@@ -179,6 +181,9 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         .flatMap((session) => [session, ...descendants(session.id)])
     return id ? descendants(id) : []
   })
+  const visibleChildren = createMemo(() => children().slice(0, state.subagentLimit))
+  const hasMoreChildren = () => children().length > visibleChildren().length
+  createEffect(on(() => layout.params.id, () => setState("subagentLimit", SUBAGENT_PAGE_SIZE), { defer: true }))
   const money = (value: number) =>
     new Intl.NumberFormat(language.intl(), {
       style: "currency",
@@ -196,7 +201,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     data.location.mcp.server.list({ directory: directory() })?.toSorted((a, b) => a.name.localeCompare(b.name)),
   )
   const resetTime = (value: string) => {
-    const minutes = Math.ceil((Date.parse(value) - clock.now) / 60_000)
+    const minutes = Math.ceil((Date.parse(value) - state.now) / 60_000)
     if (minutes <= 0) return language.t("context.overview.resetPending")
     return new Intl.RelativeTimeFormat(language.intl(), { numeric: "always" }).format(
       minutes >= 1440 ? Math.ceil(minutes / 1440) : minutes >= 60 ? Math.ceil(minutes / 60) : minutes,
@@ -207,7 +212,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     if (!props.active) return
     const timer = setInterval(() => {
       if (document.hidden) return
-      setClock("now", Date.now())
+      setState("now", Date.now())
       void quota.refetch()
     }, 60_000)
     onCleanup(() => clearInterval(timer))
@@ -288,7 +293,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             </Show>
           }
         >
-          <For each={children()}>
+          <For each={visibleChildren()}>
             {(child) => (
               <A
                 href={sessionHref(server.key, child.id)}
@@ -317,6 +322,19 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
               </A>
             )}
           </For>
+          <Show when={hasMoreChildren() || visibleChildren().length > SUBAGENT_PAGE_SIZE}>
+            <button
+              type="button"
+              class="ms-2 block h-7 w-fit max-w-full rounded-[6px] px-1.5 text-start text-13-regular text-v2-text-text-muted hover:text-v2-text-text-base focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+              onClick={() =>
+                setState("subagentLimit", (limit) =>
+                  hasMoreChildren() ? limit + SUBAGENT_PAGE_SIZE : SUBAGENT_PAGE_SIZE,
+                )
+              }
+            >
+              {language.t(hasMoreChildren() ? "context.overview.subagents.more" : "context.overview.subagents.fewer")}
+            </button>
+          </Show>
         </Show>
       </Section>
       <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
@@ -329,7 +347,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
             disabled={subscriptions.loading}
             aria-label={language.t("context.overview.refresh")}
             onClick={() => {
-              setClock("now", Date.now())
+              setState("now", Date.now())
               void quota.refetch()
             }}
           />
@@ -433,7 +451,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                   <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
                   <For each={accounts()}>
                     {(account) => {
-                      const capacity = () => subscriptionCapacity(account, clock.now)
+                      const capacity = () => subscriptionCapacity(account, state.now)
                       const percentages = account.remaining === null ? null : subscriptionPercentages(account.remaining)
                       return (
                         <div

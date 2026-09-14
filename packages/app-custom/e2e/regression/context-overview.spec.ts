@@ -354,3 +354,38 @@ test("shows every background task inline, including tasks beyond the old ten-ite
   await dialog.getByRole("link", { name: "Open subagent", exact: true }).click()
   await expect(page).toHaveURL(/ses_background_11$/)
 })
+
+test("pages the subagent list in groups of ten and collapses it after reaching the end", async ({ page }) => {
+  const children = Array.from({ length: 21 }, (_, index) => ({
+    ...fixture.sessions[0],
+    id: `ses_paged_${index}`,
+    parentID: fixture.sourceID,
+    title: `Paged subagent ${index + 1}`,
+  }))
+  await mockOpenCodeServer(page, {
+    sessions: [...fixture.sessions.filter((session) => !session.parentID), ...children],
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages: (id) => ({ items: fixture.messages[id]?.slice(-2) ?? [] }),
+  })
+  await installStressSessionTabs(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expect(page.getByRole("tab", { name: "Context", exact: true })).toHaveAttribute("aria-selected", "true")
+
+  const overview = page.locator('[data-slot="context-overview"]')
+  const subagents = overview.getByRole("link", { name: /Paged subagent/ })
+  const more = overview.getByRole("button", { name: "Show more agents", exact: true })
+  await expect(subagents).toHaveCount(10)
+  await more.click()
+  await expect(subagents).toHaveCount(20)
+  await expect(more).toBeVisible()
+  await more.click()
+  await expect(subagents).toHaveCount(21)
+
+  const fewer = overview.getByRole("button", { name: "Show fewer agents", exact: true })
+  await expect(fewer).toBeVisible()
+  await fewer.click()
+  await expect(subagents).toHaveCount(10)
+  await expect(more).toBeVisible()
+})

@@ -176,6 +176,8 @@ export const dict = {
   "context.overview.stale": "Usage snapshot is out of date",
   "context.overview.noCapacity": "No capacity available",
   "context.overview.subagents": "Subagents",
+  "context.overview.subagents.more": "Show more agents",
+  "context.overview.subagents.fewer": "Show fewer agents",
   "context.overview.noSubagents": "No subagents in this session yet.",
   "context.overview.childrenFailed": "Could not load all subagents. Reopen this tab to retry.",
   "context.overview.running": "Running",
