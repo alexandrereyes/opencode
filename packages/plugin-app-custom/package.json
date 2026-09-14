@@ -24,7 +24,10 @@
     "./subscriptions/rpc": "./src/subscriptions/rpc.ts",
     "./worktrees/rpc": "./src/worktrees/rpc.ts",
     "./navigation/rpc": "./src/navigation/rpc.ts",
-    "./archive/rpc": "./src/archive/rpc.ts"
+    "./archive/rpc": "./src/archive/rpc.ts",
+    "./updates/rpc": "./src/updates/rpc.ts",
+    "./updates/client": "./src/updates/client.ts",
+    "./updates/runtime": "./src/updates/runtime.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -32,8 +35,10 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@opencode/client": "workspace:*",
     "@opencode/plugin": "workspace:*",
     "@opencode/schema": "workspace:*",
+    "@opencode/util": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

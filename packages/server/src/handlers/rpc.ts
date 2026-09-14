@@ -1,16 +1,26 @@
 import { Rpc } from "@opencode/core/rpc"
 import { Plugin } from "@opencode/core/plugin"
 import { RpcError, RpcInternalError } from "@opencode/protocol/errors"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
+import { AfterResponse } from "../after-response"
 
 export const RpcHandler = HttpApiBuilder.group(Api, "server.rpc", (handlers) =>
   handlers.handle("rpc.call", ({ params, payload }) =>
     Effect.gen(function* () {
       yield* Plugin.awaitActivation
       const rpc = yield* Rpc.Service
-      const output = yield* rpc.call(params.rpcID, params.method, payload.input)
+      const response = yield* Effect.serviceOption(AfterResponse)
+      const callbacks: Array<() => void> = []
+      const output = yield* rpc.call(
+        params.rpcID,
+        params.method,
+        payload.input,
+        Option.isSome(response) ? { afterResponse: (callback) => callbacks.push(callback) } : undefined,
+      )
+      // Only arm callbacks after Core has validated the handler's output.
+      if (Option.isSome(response)) callbacks.forEach(response.value)
       return output === undefined ? {} : { output }
     }).pipe(
       Effect.mapError((error) =>

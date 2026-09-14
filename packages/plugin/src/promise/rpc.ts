@@ -7,6 +7,8 @@ export type { RpcEventPayload } from "@opencode/client/promise/api"
 export interface RpcCallContext<M extends Rpc.Method> {
   readonly signal: AbortSignal
   readonly error: Rpc.ErrorFactory<M>
+  /** Runs after a successful HTTP response is flushed; absent for in-process calls. */
+  readonly afterResponse?: (callback: () => void) => void
 }
 
 export type RpcHandlers<D extends Rpc.PortableDefinition> = {
