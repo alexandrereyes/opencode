@@ -7,6 +7,13 @@
   "type": "module",
   "packageManager": "bun@1.4.2",
   "scripts": {
+    "custom:prepare": "bun packages/cli/script/custom-release.ts prepare",
+    "custom:activate": "bun packages/cli/script/custom-release.ts activate",
+    "custom:update": "bun packages/cli/script/custom-release.ts update",
+    "custom:rollback": "bun packages/cli/script/custom-release.ts rollback",
+    "custom:status": "bun packages/cli/script/custom-release.ts status",
+    "custom:migrate": "bun packages/cli/script/custom-release.ts migrate",
+    "custom:prune": "bun packages/cli/script/custom-release.ts prune",
     "dev": "bun run --cwd packages/cli src/index.ts",
     "dev:live": "sh -c 'OPENCODE_TUI_CHANNEL=dev OPENCODE_PASSWORD=\"$(opencode service get password)\" exec bun run dev \"$@\" --server \"$(opencode service status)\"' --",
     "dev:vite": "bun run --cwd packages/cli --conditions=browser dev/vite.ts",

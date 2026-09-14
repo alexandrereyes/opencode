@@ -64,7 +64,10 @@ if (!targets.length) throw new Error(`Unknown build target: ${requestedTarget}`)
 
 if (!skipInstall)
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]} @opencode-ai/pty@${pkg.dependencies["@opencode-ai/pty"]}`
-const appArchive = await buildAppArchive(Script.channel, { skipBuild: skipWebUi })
+const appArchive = await buildAppArchive(Script.channel, {
+  skipBuild: skipWebUi,
+  custom: process.argv.includes("--custom"),
+})
 const appAssetsPlugin: BunPlugin = {
   name: "opencode-app-assets",
   setup(build) {

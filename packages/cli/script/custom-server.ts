@@ -9,13 +9,16 @@ import path from "node:path"
 const root = process.env.OPENCODE_CUSTOM_HOME
 const version = process.env.OPENCODE_CUSTOM_COMMIT
 if (!root || !version) throw new Error("Set OPENCODE_CUSTOM_HOME and OPENCODE_CUSTOM_COMMIT")
+if (!/^[a-f0-9]{40}$/.test(version)) throw new Error("OPENCODE_CUSTOM_COMMIT must be the full source commit SHA")
 const password = await Bun.file(`${root}/password`).text()
-const plugin = path.resolve("packages/plugin-app-custom/dist")
+const source = path.resolve(import.meta.dirname, "../../..")
+const plugin = path.join(source, "packages/plugin-app-custom/dist")
+const web = path.join(source, "packages/app-custom/dist")
 const assets: AssetMap = Object.fromEntries(
   await Promise.all(
-    Array.from(new Bun.Glob("**/*").scanSync({ cwd: "packages/app-custom/dist", onlyFiles: true })).map(async (name) => [
+    Array.from(new Bun.Glob("**/*").scanSync({ cwd: web, onlyFiles: true })).map(async (name) => [
       name,
-      new Uint8Array(await Bun.file(`packages/app-custom/dist/${name}`).arrayBuffer()),
+      new Uint8Array(await Bun.file(path.join(web, name)).arrayBuffer()),
     ]),
   ),
 )
@@ -50,7 +53,8 @@ NodeRuntime.runMain(
         },
         transform,
       )
-      // stdin is the explicit lifecycle signal for scripts that supervise this process.
+      // launchd supplies /dev/null for stdin; source smoke supervisors still use EOF.
+      if (process.env.OPENCODE_CUSTOM_LAUNCHD === "1") return yield* server.shutdown
       const parentClosed = Effect.callback<void>((resume) => {
         const end = () => resume(Effect.void)
         process.stdin.once("end", end)

@@ -1,18 +1,174 @@
 # Custom macOS runtime
 
-Runtime source entrypoint: `packages/cli/script/custom-server.ts`.
-The retired periodic updater and its maintenance API/Core admission barrier are not part of this fork.
+## Manual releases
 
-Every custom release carries and builds `@opencode/plugin-app-custom` in
-`packages/plugin-app-custom`. The runtime activates its release-owned `dist` directory
-for every Location through the normal plugin configuration path. The obsolete
-project-local POC loader is not retained; do not configure a second global or
-project-local copy of this custom-only plugin.
+Run these commands from a clean, committed `custom` checkout on macOS:
 
-Backend source and production UI must come from the same checkout. The custom entrypoint has no
-updater, deployment controller, release pointer, or automatic process replacement.
+```sh
+bun run custom:prepare          # builds only; production keeps running
+bun run custom:status
+bun run custom:activate --dry-run
+bun run custom:activate         # explicit interruption + backup + replacement
 
-Build and run the custom server directly from a checkout:
+# Subsequent updates (does NOT fetch, pull, merge, commit or push Git):
+bun run custom:update           # prepare, then activate
+
+# Select an already-prepared release explicitly:
+bun run custom:activate <full-40-character-sha>
+```
+
+`OPENCODE_CUSTOM_HOME` defaults to `~/.local/share/opencode-custom-v2`. Preparation
+uses `git archive HEAD`, installs frozen dependencies in the snapshot, typechecks
+CLI/TUI, app-custom and plugin-app-custom, builds the plugin and compiles the CLI
+with `--custom` (embedding **app-custom**, not app). CLI `--version` and `--help`
+are checked with isolated XDG directories. No server is started during prepare.
+
+Each `releases/<sha>` contains:
+
+- `bin/opencode`: compiled CLI/TUI with version `0.0.0-custom.<sha>`;
+- `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
+- `server-config.json`: update disabled and the absolute release-owned plugin path;
+- `manual-release.json`: format 2, commit, version, platform, architecture and SHA-256 artifact hashes.
+
+Published directories are read-only and are never rebuilt in place. Source and installed
+dependencies exist only under `builds/prepare-*` while building and are removed after
+successful publication. Neither source nor node_modules ships in a release. Artifact
+hashes are verified before activation and reuse. Failed build directories are retained
+for diagnosis and can be removed manually. The binary serves its embedded custom web
+with `opencode serve`; there is no production source server or second Bun executable.
+Its compiled version is the health version; no environment variable substitutes a commit.
+
+Manual retention is explicit:
+
+```sh
+bun run custom:prune --dry-run --keep=3
+bun run custom:prune --keep=3
+```
+
+Pruning protects current/previous/prepared, the responding server version and the newest
+N manifests. It only prunes verified compact releases. It never runs during activation.
+
+`prepared`, `current` and `previous` are atomic symlinks. A `.manual-lock` directory
+serializes mutating manual commands; after a killed command, remove a stale lock only
+after confirming that no manual operation is running. `--dry-run` writes nothing,
+does not build and never changes launchd; migration may read `launchctl print` to
+validate the incumbent. A prepare/update dry-run still requires a
+clean `custom` checkout. Status performs only authenticated health reads and reports
+prepared/current/previous commits plus the live server version; it never prints the password.
+
+### Activation and persistence
+
+Existing `password`, database and configuration are required. Optional
+`<runtime>/manual.json` selects existing paths and service environment:
+
+```json
+{
+  "port": 4178,
+  "database": "/Users/you/.local/share/opencode-custom-v2/data/opencode/custom.db",
+  "config": "/Users/you/.local/share/opencode-custom-v2/config/opencode",
+  "environment": {
+    "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  }
+}
+```
+
+The defaults for a separately initialized runtime are port **4178**,
+`<runtime>/data/opencode/custom.db` and `<runtime>/config/opencode`. Migration instead
+copies the actual paths and environment from `environment.sh`. In the current installation
+these are `~/.local/share/opencode/opencode.db` and `~/.config/opencode`.
+The launcher preserves migrated XDG roots, falling back to runtime-specific roots. Identity/path variables
+override `environment`. Protect this file if it contains credentials. Never configure
+a second global or project-local copy of the custom plugin; every Location loads the
+release-owned plugin build through normal plugin configuration.
+
+Activation controls only `local.opencode.custom-manual`. It unloads that job, waits
+for the port to close, takes a consistent SQLite `.backup` using the system `sqlite3`
+and checks it with `PRAGMA quick_check`. Missing database, password or sqlite3 aborts
+the operation. Backups live under `backups/<timestamp>-<uuid>/database.sqlite` with an
+`activation.json` identifying the previous/target release and database path. These
+are database backups, not backups of config, credentials, external files or services.
+
+Then activation writes runtime-owned launchers, switches `current`, bootstraps the
+job and waits up to 90 checks for **authenticated HTTP 200 with the exact target
+version**. It preserves the password, database and config paths. This is an explicit
+service interruption; schedule it between active work where possible. Existing TUI
+processes keep their already-loaded version: reopen them with `opencode2` afterward.
+
+If startup fails, the attempted service is unloaded, `current` remains on the failed
+release, and `previous` plus the backup are retained. There is deliberately **no
+automatic downgrade**: startup may already have migrated the database. Inspect
+`<runtime>/logs/server.log`, fix forward, or review the migrations before rollback:
+
+```sh
+bun run custom:rollback --database-compatible
+# or choose a specific retained release:
+bun run custom:rollback <full-sha> --database-compatible
+```
+
+`--database-compatible` is the operator's assertion, not an automatic schema
+compatibility proof. Rollback backs up the current database and reuses it; it never
+silently restores an old snapshot. If a previous schema is required, stop all writers,
+retain the current database **and its WAL/SHM sidecars**, restore the selected consistent
+backup at the configured database path without stale WAL/SHM files, then run the
+explicit rollback. Restoring a snapshot discards later writes. A failure before the
+pointer switch leaves the old pointer intact, possibly with the service stopped;
+correct the reported problem and rerun activation.
+
+### One-time migration from the old installation
+
+Preparation is safe while the old service runs. Run the explicit migration in a
+maintenance window after reviewing its dry-run:
+
+```sh
+bun run custom:migrate --dry-run
+bun run custom:migrate --replace-launcher --stop-beta
+```
+
+It validates the legacy label, plist and loaded command against the known runtime's
+`bin/serve.sh`; parses the generated `environment.sh` without executing shell code;
+uses its actual `OPENCODE_DB`/`OPENCODE_CONFIG_DIR`; reads the existing credential from
+`config/opencode/service-custom.json`; and creates `password`/`manual.json` with mode 0600.
+It retires the known old LaunchAgent, preserves its plist and legacy pointer, activates
+the prepared release, and installs the stable launcher and login plist links. Existing
+launcher files are preserved in unique `.pre-custom-*` backups before atomic replacement.
+The 4096 proxy is untouched.
+The optional beta stop only accepts the exact `~/.opencode/bin/opencode2 serve --service`
+process listening on 4097; any unknown listener aborts migration. A retry reuses the
+same persistence and password and does not restart an already healthy target release.
+
+`serve` is intentionally foreground under launchd rather than `serve --service`: this
+keeps the legacy global configuration directory while using the preserved password
+without rewriting its managed-service configuration/registration or entering election.
+
+The stable TUI launcher resolves `current` once, reads the existing password into
+`OPENCODE_PASSWORD`, disables automatic CLI updates and always passes
+`--server http://127.0.0.1:4178`. It preserves the caller's working directory and
+arguments. Managed-service, standalone, upgrade and server-override commands are
+rejected; use `custom:*` for lifecycle. As in the native CLI, bare `service` is a reserved
+subcommand, so use `./service` for a project with that name. `service-project` works as
+an ordinary positional directory. The launcher also rejects `--` so the injected server
+flag cannot be hidden behind an end-of-options marker. It neither discovers nor elects a beta server.
+For non-default runtimes, adjust the paths above consistently.
+
+The retired periodic updater, maintenance API, admission barrier, controller and
+updater LaunchAgent are not part of this flow. Nothing polls Git or schedules updates.
+
+### Isolated source development
+
+Compact artifact verification is available from `packages/cli`:
+
+```sh
+bun script/custom-smoke.ts /absolute/path/to/compiled/custom/opencode
+```
+
+It bundles the real plugin, seals/verifies the four-file release, starts only a temporary
+server with a fresh database and random port, checks matching CLI/server versions,
+embedded web, plugin RPC save/list and invalid-input rejection, then stops its own process.
+The measured macOS arm64 fixture was **184,056,606 bytes (175.53 MiB)**, including the
+201.64 KB plugin. Builds from a dirty development checkout are fixture evidence only;
+production preparation always archives the committed SHA.
+
+The source entrypoint remains available for development:
 
 ```sh
 bun install --frozen-lockfile
@@ -27,12 +183,10 @@ openssl rand -base64 48 > "$OPENCODE_CUSTOM_HOME/password"
 bun packages/cli/script/custom-server.ts
 ```
 
-The password initialization above is only for a new isolated runtime; retain an existing runtime's
-password and persistence when starting it again.
-`OPENCODE_CUSTOM_PORT` defaults to `4177`. `OPENCODE_CUSTOM_DB` and
-`OPENCODE_CONFIG_DIR` may select explicit database and configuration paths. Do not point a
-development invocation at production persistence. Closing stdin or sending the process a normal
-termination signal shuts down the isolated server. Updating the checkout never restarts it.
+This password initialization is only for a **new isolated development runtime**.
+Direct source invocation defaults to port 4177. Do not point development at production
+persistence. Closing stdin shuts down source smoke invocations. This development
+entrypoint is not used by the compact production release.
 
 ## Agent dashboard
 
