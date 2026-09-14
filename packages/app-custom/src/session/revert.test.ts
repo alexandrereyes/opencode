@@ -267,6 +267,7 @@ describe("session revert cascade", () => {
     sessions?: SessionInfo[]
     children?: Record<string, SessionInfo[]>
     messages?: Record<string, SessionMessageInfo[]>
+    messagePages?: Record<string, SessionMessageInfo[][]>
     active?: string[]
     failStage?: string[]
     serverBoundary?: string
@@ -276,6 +277,13 @@ describe("session revert cascade", () => {
     const failed: unknown[] = []
     const sessions = input?.sessions ?? []
     const messages = input?.messages ?? {}
+    const messageRequests: Array<{
+      sessionID: string
+      cursor?: string
+      limit?: number
+      order?: "asc" | "desc"
+      type?: string
+    }> = []
     let serverBoundary = input?.serverBoundary
     const actions = createSessionRevertActions(
       {
@@ -321,12 +329,18 @@ describe("session revert cascade", () => {
             data: input?.children?.[parentID] ?? sessions.filter((item) => item.parentID === parentID),
             cursor: {},
           }),
-          messages: async ({ sessionID }) => ({ data: messages[sessionID] ?? [], cursor: {} }),
+          messages: async (request) => {
+            messageRequests.push(request)
+            const pages = input?.messagePages?.[request.sessionID]
+            if (!pages) return { data: messages[request.sessionID] ?? [], cursor: {} }
+            const index = request.cursor ? Number(request.cursor) : 0
+            return { data: pages[index] ?? [], cursor: { next: index + 1 < pages.length ? String(index + 1) : undefined } }
+          },
           status: (sessionID) => (input?.active?.includes(sessionID) ? "busy" : "idle"),
         },
       },
     )
-    return { actions, calls, composer, failed }
+    return { actions, calls, composer, failed, messageRequests }
   }
 
   test("reverts children and grandchildren at the first user message on or after the cutoff", async () => {
@@ -359,6 +373,26 @@ describe("session revert cascade", () => {
     await fixture.actions.to("parent-user")
 
     expect(fixture.calls.filter((call) => call.action === "stage").map((call) => call.sessionID)).toEqual(["parent"])
+  })
+
+  test("follows the user-message cursor without repeating first-page ordering", async () => {
+    const fixture = setup({
+      sessions: [session("child", "parent")],
+      messagePages: { child: [[timedUser("child-before", 99)], [timedUser("child-boundary", 100)]] },
+    })
+
+    await fixture.actions.to("parent-user")
+
+    expect(fixture.messageRequests).toEqual([
+      { sessionID: "child", limit: 200, order: "asc", type: "user" },
+      { sessionID: "child", cursor: "1", type: "user" },
+    ])
+    expect(fixture.calls.filter((call) => call.action === "stage")).toContainEqual({
+      action: "stage",
+      sessionID: "child",
+      messageID: "child-boundary",
+      files: false,
+    })
   })
 
   test("visits duplicate descendants once and terminates a cycle back to the parent", async () => {
