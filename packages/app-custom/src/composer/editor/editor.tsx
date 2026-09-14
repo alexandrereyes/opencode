@@ -872,14 +872,17 @@ export function ComposerEditorPopover(props: {
     for (let parent = popover.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
     const update = () => {
       const anchor = popover.parentElement?.getBoundingClientRect().top ?? 0
-      const top = Math.max(
-        window.visualViewport?.offsetTop ?? 0,
+      const clippedTop = Math.max(
+        0,
         ...ancestors
           .filter((parent) => getComputedStyle(parent).overflowY !== "visible")
           .map((parent) => parent.getBoundingClientRect().top),
       )
+      const available = anchor - Math.max(window.visualViewport?.offsetTop ?? 0, clippedTop) - 16
+      // Keep three two-line session suggestions visible when iOS pans its visual viewport for the keyboard.
+      const preferred = window.matchMedia("(pointer: coarse)").matches ? Math.max(136, available) : available
       // The popup opens upward inside clipped page panels, below the title bar.
-      popover.style.maxHeight = `${Math.max(0, Math.min(320, anchor - top - 16))}px`
+      popover.style.maxHeight = `${Math.max(0, Math.min(320, anchor - clippedTop - 16, preferred))}px`
     }
     const observer = new ResizeObserver(update)
     ancestors.forEach((parent) => observer.observe(parent))
