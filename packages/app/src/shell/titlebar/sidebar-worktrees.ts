@@ -91,7 +91,22 @@ export function sidebarWorktrees(
       groups.set(key, group)
     })
   // Directory order does not jump when branch metadata arrives or a session becomes active.
-  return { root, groups: [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)) }
+  return { root, groups: disambiguateWorktreeNames([...groups.values()].sort((a, b) => a.key.localeCompare(b.key))) }
+}
+
+function disambiguateWorktreeNames<T extends { directory: string; name: string }>(groups: T[]) {
+  const collisions = Map.groupBy(groups, (group) => group.name)
+  return groups.map((group) => {
+    const matching = collisions.get(group.name) ?? []
+    if (matching.length < 2) return group
+    const paths = matching.map((item) => pathKey(item.directory).split("/").filter(Boolean))
+    const parts = pathKey(group.directory).split("/").filter(Boolean)
+    const depth = Array.from({ length: parts.length }, (_, index) => index + 1).find((size) => {
+      const suffix = parts.slice(-size).join("/")
+      return paths.filter((path) => path.slice(-size).join("/") === suffix).length === 1
+    })
+    return { ...group, name: `${group.name} — ${parts.slice(-(depth ?? parts.length)).join("/")}` }
+  })
 }
 
 export function visibleWorktreeSessions(

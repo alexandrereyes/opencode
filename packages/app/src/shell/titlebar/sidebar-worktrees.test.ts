@@ -65,11 +65,7 @@ test("canonical root (on any branch), subdirectories, nested worktrees and safe 
 
 test("only inventory entries with a removal strategy authorize the worktree action", () => {
   const group = sidebarWorktrees(project, [row("outside", "/outside/main")], {
-    inventory: [
-      { directory: "/repo" },
-      { directory: "/clone" },
-      { directory: "/trees/main", strategy: "git" },
-    ],
+    inventory: [{ directory: "/repo" }, { directory: "/clone" }, { directory: "/trees/main", strategy: "git" }],
     location: () => undefined,
     branch: () => "main",
   })
@@ -95,12 +91,13 @@ test("incremental inventory/Location/branch never loses rows; unavailable and de
       rows.map((row) => row.key).sort(),
     )
   }
-  expect(located.groups.find((group) => group.directory === "/trees/feat")?.name).toBe("feat")
+  expect(located.groups.find((group) => group.directory === "/trees/feat")?.name).toBe("feat — trees/feat")
+  expect(located.groups.find((group) => group.directory === "/gone/feat")?.name).toBe("feat — gone/feat")
   expect(ready.groups.map((group) => group.directory)).toEqual(["/gone/feat", "/repo/nested", "/trees/feat"])
   expect(ready.groups.find((group) => group.directory === "/repo/nested")?.rows).toEqual([])
 })
 
-test("same basename/branch, foreign project/server and foreign Location metadata cannot merge", () => {
+test("same basename/branch gets distinct labels while identical directories and foreign rows cannot merge", () => {
   const other = ServerConnection.Key.make("https://remote.test")
   const rows = [
     row("a", "/a/feat"),
@@ -109,12 +106,12 @@ test("same basename/branch, foreign project/server and foreign Location metadata
     row("remote", "/a/feat", "repo", other),
   ]
   const group = sidebarWorktrees(project, rows, {
-    inventory: [{ directory: "/a/feat" }, { directory: "/b/feat" }],
+    inventory: [{ directory: "/a/feat" }, { directory: "/a/feat/" }, { directory: "/b/feat" }],
     branch: () => "same-branch",
     location: (directory) => ({ directory, project: { id: "other", canonical: "/other", directory: "/a/feat" } }),
   })
   expect(group.groups).toHaveLength(2)
-  expect(group.groups.map((group) => group.name)).toEqual(["same-branch", "same-branch"])
+  expect(group.groups.map((group) => group.name)).toEqual(["same-branch — a/feat", "same-branch — b/feat"])
   expect(new Set(group.groups.map((group) => group.key)).size).toBe(2)
   expect(group.groups.flatMap((group) => group.rows).map((row) => row.session.id)).toEqual(["a", "b"])
   expect(worktreeKey(project.key, "/a/feat/")).toBe(worktreeKey(project.key, "/a/feat"))
@@ -122,6 +119,24 @@ test("same basename/branch, foreign project/server and foreign Location metadata
   expect(worktreeKey(project.key, "/a/feat")).not.toBe(
     worktreeKey(projectKey(other, { id: "repo", worktree: "/repo" }), "/a/feat"),
   )
+  expect(
+    sidebarWorktrees(project, [row("a", "/a/feat")], {
+      inventory: [{ directory: "/a/feat" }],
+      branch: () => "same-branch",
+      location: () => undefined,
+    }).groups[0].name,
+  ).toBe("same-branch")
+})
+
+test("Codex worktree labels expose their stable UUID parent", () => {
+  const first = "/Users/test/.codex/worktrees/uuid-a/Agents2"
+  const second = "/Users/test/.codex/worktrees/uuid-b/Agents2"
+  const group = sidebarWorktrees(project, [row("a", first), row("b", second)], {
+    inventory: [{ directory: first }, { directory: second }],
+    branch: () => undefined,
+    location: () => undefined,
+  })
+  expect(group.groups.map((item) => item.name)).toEqual(["Agents2 — uuid-a/Agents2", "Agents2 — uuid-b/Agents2"])
 })
 
 test("visible order uses subgroup caps; subgroup collapse hides rows and project collapse retains the approved current escape", () => {
@@ -155,14 +170,13 @@ test("visible order uses subgroup caps; subgroup collapse hides rows and project
     "/repo/nested",
     "/trees/feat",
   ])
-  expect(sidebarWorktrees(project, rootSessions([child, archived]).rows, metadata).groups.map((item) => item.directory)).toEqual([
-    "/repo/nested",
-    "/trees/feat",
-  ])
+  expect(
+    sidebarWorktrees(project, rootSessions([child, archived]).rows, metadata).groups.map((item) => item.directory),
+  ).toEqual(["/repo/nested", "/trees/feat"])
 })
 
 test("non-git directories preserve existing grouping", () => {
   const rows = [row("note", "/notes", "global")]
-  const project = sidebarProjects(server, [], rows)[0]
+  const project = sidebarProjects(server, [{ worktree: "/notes" }], rows)[0]
   expect(sidebarWorktrees(project, rows, metadata)).toEqual({ root: rows, groups: [] })
 })

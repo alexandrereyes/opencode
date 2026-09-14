@@ -12,6 +12,7 @@ import {
   searchSessions,
   sessionKey,
   sidebarProjects,
+  sidebarSessionProject,
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
@@ -41,7 +42,11 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 describe("sidebar navigation", () => {
   test("occupied projects precede empty ones while each block retains manual order as sessions arrive and leave", () => {
     const known = ["a", "b", "c", "d"].map((id) => ({ id, worktree: `/${id}` }))
-    const session = (id: string) => ({ ...row(id), session: { ...row(id).session, projectID: id } })
+    const session = (id: string) => ({
+      ...row(id),
+      project: projectKey(server, { id, worktree: `/${id}` }),
+      session: { ...row(id).session, projectID: id, location: { directory: `/${id}` } },
+    })
     const manual = ["d", "c", "b", "a"].map((id) => projectKey(server, { id, worktree: `/${id}` }))
     const ordered = (ids: string[]) =>
       orderSidebarProjects(sidebarProjects(server, known, ids.map(session)), manual).map(
@@ -91,25 +96,50 @@ describe("sidebar navigation", () => {
     expect(searchSessions(roots.rows, "s", [])).toHaveLength(13)
   })
 
-  test("all known projects remain visible; only eligible roots make a project occupied", () => {
+  test("only selected projects remain visible and selected projects without sessions stay available", () => {
     const archived = row("archived")
     archived.session.projectID = "archive-project"
     archived.session.time.archived = 10
     const child = row("child", 20, 20, "missing")
     child.session.projectID = "child-project"
     const live = row("root", 1)
-    const known = ["empty", "archive-project", "child-project", "repo"].map((id) => ({ id, worktree: `/${id}` }))
+    const known = ["empty", "repo"].map((id) => ({ id, worktree: `/${id}` }))
     const projects = sidebarProjects(server, known, [archived, child, live])
-    expect(projects.map((project) => project.metadata?.id).sort()).toEqual([
-      "archive-project",
-      "child-project",
+    expect(projects.map((project) => project.metadata?.id).sort((a, b) => (a ?? "").localeCompare(b ?? ""))).toEqual([
       "empty",
       "repo",
     ])
     expect(projects.filter((project) => project.occupied).map((project) => project.metadata?.id)).toEqual(["repo"])
+    expect(projects.find((project) => project.metadata?.id === "empty")?.occupied).toBe(false)
     const roots = rootSessions([live]).rows
     expect(visibleSessions(roots, 0)).toEqual([])
-    expect(sidebarProjects(server, known, roots)).toHaveLength(4)
+    expect(sidebarProjects(server, known, roots)).toHaveLength(2)
+  })
+
+  test("selected project identity owns canonical subdirectories and worktrees without adopting foreign history", () => {
+    const selected = [
+      { id: "repo", worktree: "/repo", worktrees: [{ directory: "/trees/feature" }] },
+      { worktree: "/notes" },
+    ]
+    expect(sidebarSessionProject(server, row("repo").session, selected)).toBe(projectKey(server, selected[0]))
+    const worktree = row("worktree").session
+    worktree.location.directory = "/trees/feature/src"
+    expect(sidebarSessionProject(server, worktree, selected)).toBe(projectKey(server, selected[0]))
+    const note = row("note").session
+    note.projectID = "global"
+    note.location.directory = "/notes/drafts"
+    expect(sidebarSessionProject(server, note, selected)).toBe(projectKey(server, selected[1]))
+    const foreign = row("foreign").session
+    foreign.projectID = "other"
+    foreign.location.directory = "/elsewhere"
+    const foreignKey = sidebarSessionProject(server, foreign, selected)
+    expect(foreignKey).not.toBe(projectKey(server, selected[0]))
+    expect(foreignKey).not.toBe(projectKey(server, selected[1]))
+    const projects = sidebarProjects(server, selected, [{ ...row("foreign"), project: foreignKey, session: foreign }])
+    expect(projects.map((project) => project.key).toSorted()).toEqual(
+      selected.map((project) => projectKey(server, project)).toSorted(),
+    )
+    expect(projects.every((project) => !project.occupied)).toBe(true)
   })
 
   test("orphan/current children and their completions never become Priority rows", () => {
@@ -182,7 +212,7 @@ describe("sidebar navigation", () => {
     ).toEqual([older.key, newer.key])
   })
 
-  test("project groups keep canonical metadata ahead of local and session worktrees", () => {
+  test("project groups deduplicate selected project identity without deriving entries from sessions", () => {
     const worktree = row("worktree")
     worktree.session.location.directory = "/worktree"
     const known = [

@@ -6,6 +6,7 @@ import { pathKey } from "@/workspaces/path-key"
 import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
 import { latestAttention } from "@/shell/notifications/session-attention"
+import { containsDirectory } from "@/workspaces/paths"
 
 export type SessionNavigationInfo = Omit<Types.DeepMutable<Navigation.Info>, "session"> & { session: SessionInfo }
 export interface SessionNavigationPage {
@@ -36,29 +37,36 @@ export function projectKey(server: string, project: { id?: string; worktree: str
 
 export const sessionKey = (server: string, id: string) => JSON.stringify([server, id])
 
+export function sidebarSessionProject(
+  server: ServerConnection.Key,
+  session: SessionInfo,
+  projects: Omit<LocalProject, "expanded">[],
+) {
+  const direct = projects.find((project) => project.id && project.id !== "global" && project.id === session.projectID)
+  if (direct) return projectKey(server, direct)
+  const unresolved = projects.find(
+    (project) =>
+      (!project.id || project.id === "global") &&
+      [project.worktree, ...(project.sandboxes ?? []), ...(project.worktrees ?? []).map((item) => item.directory)].some(
+        (directory) => containsDirectory(directory, session.location.directory),
+      ),
+  )
+  return projectKey(server, unresolved ?? { id: session.projectID, worktree: session.location.directory })
+}
+
 export function sidebarProjects(
   server: ServerConnection.Key,
   known: Omit<LocalProject, "expanded">[],
-  sessions: SessionNavigationInfo[],
+  sessions: SidebarSession[],
 ) {
   const eligible = new Set(
-    sessions
-      .filter((row) => !row.session.parentID && !row.session.time.archived)
-      .map((row) => projectKey(server, { id: row.session.projectID, worktree: row.session.location.directory })),
+    sessions.filter((row) => !row.session.parentID && !row.session.time.archived).map((row) => row.project),
   )
-  const entries = [
-    ...known.map((project) => ({
-      project,
-      metadata: project.id && project.id !== "global" ? { ...project, expanded: true } : undefined,
-    })),
-    ...sessions
-      .filter((row) => !row.session.parentID && !row.session.time.archived)
-      .map((row) => ({
-        project: { id: row.session.projectID, worktree: row.session.location.directory },
-        metadata: undefined,
-      })),
-  ]
-  // The first known entry is canonical; session worktrees must not replace its destination or metadata.
+  const entries = known.map((project) => ({
+    project,
+    metadata: project.id && project.id !== "global" ? { ...project, expanded: true } : undefined,
+  }))
+  // The first selected entry is canonical when multiple opened directories resolve to the same project.
   return [
     ...new Map(
       entries

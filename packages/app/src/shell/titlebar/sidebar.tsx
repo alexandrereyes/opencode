@@ -38,12 +38,12 @@ import {
   attentionGroups,
   orderSidebarProjects,
   pinnedSessions,
-  projectKey,
   recentSessions,
   rootSessions,
   searchSessions,
   sessionKey,
   sidebarProjects,
+  sidebarSessionProject,
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
@@ -116,6 +116,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     rootSessions(
       indexes().flatMap(({ connection, ctx, index }) => {
         const server = ServerConnection.key(connection)
+        const selected = ctx.projects.list()
         const known = new Map(
           Object.values(index.state.rows)
             .filter(Boolean)
@@ -138,7 +139,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
             session,
             server,
             key: sessionKey(server, session.id),
-            project: projectKey(server, { id: session.projectID, worktree: session.location.directory }),
+            project: sidebarSessionProject(server, session, selected),
             recentRank: index.ranks[session.id],
             ...sessionAttention({
               ...row,
@@ -158,7 +159,13 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const projectGroups = createMemo(() =>
     indexes().flatMap(({ connection, ctx }) => {
       const server = ServerConnection.key(connection)
-      const known = [...ctx.sync.data.project.filter((project) => project.id !== "global"), ...ctx.projects.list()]
+      const known = ctx.projects.list().map((project) => ({
+        ...project,
+        worktree:
+          project.id && project.id !== "global"
+            ? (ctx.sync.data.project.find((metadata) => metadata.id === project.id)?.worktree ?? project.worktree)
+            : project.worktree,
+      }))
       return sidebarProjects(
         server,
         known,
@@ -209,6 +216,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   )
   createEffect(() => {
     if (!ready() || saved.attention || query()) return
+    // projects() is selected-only, so historical session projects cannot fan out inventory requests.
     projects()
       .filter((project) => !saved.collapsed[project.key])
       .forEach((project) => {
@@ -763,7 +771,9 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
                                                     directory: group().directory,
                                                     name: group().name,
                                                   }}
-                                                  pending={worktreeDelete.pending(group().directory) || lifecycle.pending()}
+                                                  pending={
+                                                    worktreeDelete.pending(group().directory) || lifecycle.pending()
+                                                  }
                                                   onDelete={() =>
                                                     worktreeDelete.show({
                                                       server: project().server,
