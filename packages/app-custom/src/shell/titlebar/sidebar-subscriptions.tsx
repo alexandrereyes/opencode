@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
@@ -11,7 +11,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import type { Tab } from "@/shell/tabs/tabs"
 import { subscriptionAccounts, subscriptionCapacity, subscriptionPool } from "@/session/files/subscription-pool"
 
-export function SidebarSubscriptions(props: { currentTab?: Tab }) {
+export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean; onOpenChange?: (open: boolean) => void }) {
   const global = useGlobal()
   const language = useLanguage()
   const [state, setState] = createStore({ open: false, now: Date.now() })
@@ -71,6 +71,7 @@ export function SidebarSubscriptions(props: { currentTab?: Tab }) {
   createEffect(() => {
     source()
     setState("open", false)
+    props.onOpenChange?.(false)
   })
   const timer = setInterval(() => {
     if (!document.hidden) refresh()
@@ -108,20 +109,15 @@ export function SidebarSubscriptions(props: { currentTab?: Tab }) {
       data-slot="sidebar-subscriptions"
       class="shrink-0 border-t border-border-weak-base pt-1.5 pb-1 [app-region:no-drag]"
     >
-      <Popover
+      <SubscriptionSurface
+        mobile={props.mobile}
         open={state.open}
-        onOpenChange={(open) => setState("open", open)}
-        placement="top-start"
-        gutter={8}
-        title={language.t("sidebar.proxy.title")}
-        class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
-        triggerAs="button"
-        triggerProps={{
-          type: "button",
-          "aria-label": language.t("sidebar.proxy.details"),
-          class:
-            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-12-regular text-v2-text-text-muted hover:bg-v2-background-bg-layer-02 focus-visible:outline-2 focus-visible:outline-border-active",
+        onOpenChange={(open) => {
+          setState("open", open)
+          props.onOpenChange?.(open)
         }}
+        title={language.t("sidebar.proxy.title")}
+        label={language.t("sidebar.proxy.details")}
         trigger={
           <>
             <Show when={subscription()} fallback={<Spinner class="size-3 shrink-0" />}>
@@ -325,9 +321,44 @@ export function SidebarSubscriptions(props: { currentTab?: Tab }) {
             </Show>
           </Show>
         </div>
-      </Popover>
+      </SubscriptionSurface>
     </div>
   )
+}
+
+function SubscriptionSurface(props: {
+  mobile?: boolean
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  label: string
+  trigger: JSX.Element
+  children: JSX.Element
+}) {
+  const language = useLanguage()
+  const triggerClass = "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-12-regular text-v2-text-text-muted hover:bg-v2-background-bg-layer-02 focus-visible:outline-2 focus-visible:outline-border-active"
+  return <Show when={props.mobile} fallback={
+    <Popover open={props.open} onOpenChange={props.onOpenChange} placement="top-start" gutter={8}
+      title={props.title}
+      class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
+      triggerAs="button" triggerProps={{ type: "button", "aria-label": props.label, class: `${triggerClass} h-8` }}
+      trigger={props.trigger}>{props.children}</Popover>
+  }>
+    <Show when={props.open} fallback={
+      <button type="button" aria-label={props.label} class={`${triggerClass} h-11`} onClick={() => props.onOpenChange(true)}>{props.trigger}</button>
+    }>
+      <div class="flex min-h-0 flex-col" data-slot="mobile-proxy-details">
+        <button type="button" class="flex h-11 shrink-0 items-center gap-2 px-2 text-13-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active" onClick={() => props.onOpenChange(false)}>
+          <Icon name="chevron-left" size="small" />
+          {language.t("sidebar.proxy.back")}
+        </button>
+        <div class="max-h-[65dvh] overflow-y-auto overscroll-contain px-2 pb-3">
+          <h2 class="mb-3 text-14-medium text-text-strong">{props.title}</h2>
+          {props.children}
+        </div>
+      </div>
+    </Show>
+  </Show>
 }
 
 function QuotaMeter(props: { value: number | null; label: string }) {

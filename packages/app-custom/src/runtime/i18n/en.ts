@@ -139,6 +139,7 @@ export const dict = {
   "sidebar.proxy.balance": "Pro · {{percent}}",
   "sidebar.proxy.unavailable": "Unavailable",
   "sidebar.proxy.accounts": "Accounts",
+  "sidebar.proxy.back": "Back to sessions",
   "sidebar.proxy.renewal": "Next Pro 20x weekly renewal",
   "sidebar.proxy.renewalDays.one": "{{count}}d",
   "sidebar.proxy.renewalDays.other": "{{count}}d",

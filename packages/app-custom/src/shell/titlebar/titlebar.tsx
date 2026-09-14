@@ -27,6 +27,7 @@ import "./titlebar.css"
 import { newTabTooltipKeybind } from "@/shell/commands/tooltip-keybind"
 import { TitlebarRightMount } from "@/shell/titlebar/right-slot"
 import { MobileDrawer, MobileDrawerContent, MobileDrawerLabel, MobileDrawerTrigger } from "@/shell/mobile-drawer"
+import { SidebarSubscriptions } from "./sidebar-subscriptions"
 import { sessionTabTitle } from "./tab-title"
 import { MobileTabProvider } from "./mobile-tab-actions"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
@@ -418,7 +419,7 @@ export function Titlebar(props: {
               ].filter((v) => v !== undefined)
             })
 
-            const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false })
+            const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false, proxy: false })
             const mobileTabActivity = mapArray(
               () => (mobile() ? tabsStore : []),
               (tab) => {
@@ -563,6 +564,7 @@ export function Titlebar(props: {
                       <MobileDrawerContent suspended={!!dialog.active}>
                         <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                         <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
+                          <Show when={!mobileTabs.proxy}>
                           <div data-slot="mobile-tabs-drawer-list">
                             <MobileTabProvider open={mobileTabs.open}>
                               <TitlebarTabStrip
@@ -592,6 +594,9 @@ export function Titlebar(props: {
                             <Icon name="plus" />
                             {language.t("command.session.new")}
                           </button>
+                          </Show>
+                          <SidebarSubscriptions mobile currentTab={currentTab()} onOpenChange={(open) => setMobileTabs("proxy", open)} />
+                          <Show when={!mobileTabs.proxy}>
                           <div class="flex shrink-0 flex-col gap-1 border-t border-v2-border-border-muted pt-2">
                             <button
                               type="button"
@@ -631,6 +636,7 @@ export function Titlebar(props: {
                               </button>
                             </div>
                           </div>
+                          </Show>
                         </div>
                       </MobileDrawerContent>
                     </MobileDrawer>
