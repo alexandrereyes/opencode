@@ -48,6 +48,7 @@ export function TabNavItem(props: {
   compact?: boolean
   timestamp?: { dateTime: string; title: string; label: string }
   sidebarActions?: boolean
+  showAvatar?: boolean
   closable?: boolean
   pinned?: boolean
   onTogglePin?: () => void
@@ -290,6 +291,7 @@ export function TabNavItem(props: {
       data-orientation={props.orientation ?? "horizontal"}
       data-sidebar-time={props.orientation === "vertical" && props.timestamp ? "" : undefined}
       data-sidebar-actions={sidebarActions() ? "" : undefined}
+      data-avatar={props.showAvatar === false ? "hidden" : undefined}
       data-title-overflow={titleOverflowing()}
       data-editing={editing()}
       data-session-actions
@@ -406,36 +408,38 @@ export function TabNavItem(props: {
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
         classList={{ "ps-[22px]": props.compact && !props.selectionMode && !props.pinned }}
       >
-        <span
-          data-slot="project-avatar-slot"
-          class="flex size-4 shrink-0 items-center justify-center"
-          classList={{ hidden: props.compact }}
-        >
-          <Show
-            when={props.session}
-            keyed
-            fallback={
-              <Show
-                when={props.preparing}
-                fallback={
-                  <span class="block size-4 rounded-[3px] border border-v2-border-border-muted" aria-hidden="true" />
-                }
-              >
-                <SessionProgressIndicatorV2 />
-              </Show>
-            }
+        <Show when={props.showAvatar !== false}>
+          <span
+            data-slot="project-avatar-slot"
+            class="flex size-4 shrink-0 items-center justify-center"
+            classList={{ hidden: props.compact }}
           >
-            {(session) => (
-              <SessionTabAvatar
-                project={project()}
-                directory={session.location.directory}
-                sessionId={session.id}
-                server={props.server}
-                unread={props.unread}
-              />
-            )}
-          </Show>
-        </span>
+            <Show
+              when={props.session}
+              keyed
+              fallback={
+                <Show
+                  when={props.preparing}
+                  fallback={
+                    <span class="block size-4 rounded-[3px] border border-v2-border-border-muted" aria-hidden="true" />
+                  }
+                >
+                  <SessionProgressIndicatorV2 />
+                </Show>
+              }
+            >
+              {(session) => (
+                <SessionTabAvatar
+                  project={project()}
+                  directory={session.location.directory}
+                  sessionId={session.id}
+                  server={props.server}
+                  unread={props.unread}
+                />
+              )}
+            </Show>
+          </span>
+        </Show>
         <span
           ref={(el) => {
             titleEl = el

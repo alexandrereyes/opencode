@@ -129,6 +129,30 @@
   white-space: nowrap;
 }
 
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"]:has([data-slot="tab-project"])
+  [data-slot="tab-link"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"][data-sidebar-time]:has(
+    [data-slot="tab-project"]
+  )
+  [data-slot="tab-link"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"] [data-slot="tab-title"] {
+  grid-column: 1;
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"] [data-slot="tab-project"] {
+  grid-column: 1 / -1;
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"] [data-slot="tab-time"] {
+  grid-column: 2;
+}
+
 [data-titlebar-tab]:not(:where([data-slot="mobile-tabs-drawer"] *)):is(
     :hover,
     :has(> [data-slot="tab-link"]:focus-visible)

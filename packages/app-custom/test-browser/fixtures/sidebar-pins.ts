@@ -483,15 +483,27 @@ test("horizontal and Home row consumers have no pin action without opting in", a
       createComponent(QueryClientProvider, {
         client: new QueryClient(),
         get children() {
-          return createComponent(TabNavItem, {
-            href: "/test",
-            server: ServerConnection.key(connections[0]),
-            session: row("ordinary", now).session,
-            preparing: false,
-            onClose: () => {},
-            onNavigate: () => {},
-            onRename: async () => {},
-          })
+          return [
+            createComponent(TabNavItem, {
+              href: "/test",
+              server: ServerConnection.key(connections[0]),
+              session: row("ordinary", now).session,
+              preparing: false,
+              onClose: () => {},
+              onNavigate: () => {},
+              onRename: async () => {},
+            }),
+            createComponent(TabNavItem, {
+              href: "/test-hidden-avatar",
+              server: ServerConnection.key(connections[0]),
+              session: row("hidden-avatar", now).session,
+              preparing: false,
+              showAvatar: false,
+              onClose: () => {},
+              onNavigate: () => {},
+              onRename: async () => {},
+            }),
+          ]
         },
       }),
     host,
@@ -509,6 +521,8 @@ test("horizontal and Home row consumers have no pin action without opting in", a
     ).toBe(false)
     expect(host.querySelector('[data-slot="tab-pin"]')).toBeNull()
     expect(host.querySelector('[data-slot="tab-time"]')).toBeNull()
+    expect(host.querySelectorAll('[data-slot="project-avatar-slot"]')).toHaveLength(1)
+    expect(host.querySelector('[data-avatar="hidden"] [data-slot="project-avatar-slot"]')).toBeNull()
   } finally {
     dispose()
     host.remove()

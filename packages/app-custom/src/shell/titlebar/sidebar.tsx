@@ -305,6 +305,7 @@ export function SessionSidebar(props: {
         preparing={false}
         orientation="vertical"
         sidebarActions
+        showAvatar={false}
         timestamp={
           time() ? { ...time()!, label: getCompactRelativeTime(time()!.at, language.plural, state.now) } : undefined
         }
@@ -378,7 +379,7 @@ export function SessionSidebar(props: {
     return (
       <Show when={rows().items.length}>
         <section ref={element} class="mt-4 first:mt-0">
-          <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">{props.title}</h2>
+          <h2 class="mb-1 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">{props.title}</h2>
           <div class="flex flex-col gap-1">
             <Key each={rows().items} by="key">
               {(item) => <Row item={item()} />}
@@ -658,7 +659,7 @@ export function SessionSidebar(props: {
                   </Show>
                 </Section>
                 <div ref={projectList} class="mt-4 flex flex-col gap-2">
-                  <h2 class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+                  <h2 class="px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
                     {language.t("sidebar.projects.heading")}
                   </h2>
                   <DragDropProvider
