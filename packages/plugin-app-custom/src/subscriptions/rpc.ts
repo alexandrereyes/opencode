@@ -20,6 +20,8 @@ export const Account = Schema.Struct({
   authenticated: Schema.Boolean,
   cooldownSeconds: Schema.Number,
   bankedResets: Schema.NullOr(BankedResets),
+  fiveHourRemaining: Schema.NullOr(Schema.Number),
+  fiveHourResetAt: Schema.NullOr(Schema.String),
   remaining: Schema.NullOr(Schema.Number),
   resetAt: Schema.NullOr(Schema.String),
   observedAt: Schema.NullOr(Schema.String),
