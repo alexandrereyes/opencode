@@ -185,6 +185,34 @@ export function recentSessions(rows: SidebarSession[]) {
   )
 }
 
+export function sidebarSelectableSessions(
+  view:
+    | {
+        mode: "attention"
+        priority: readonly SidebarSession[]
+        pinned: readonly SidebarSession[]
+        days: readonly { rows: readonly SidebarSession[] }[]
+        current: readonly SidebarSession[]
+      }
+    | {
+        mode: "projects"
+        pinned: readonly SidebarSession[]
+        recent: readonly SidebarSession[]
+        projects: readonly (readonly SidebarSession[])[]
+      },
+) {
+  const rows =
+    view.mode === "attention"
+      ? [...view.priority, ...view.pinned, ...view.days.flatMap((day) => day.rows), ...view.current]
+      : [...view.pinned, ...view.recent, ...view.projects.flatMap((rows) => rows)]
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    if (seen.has(row.key)) return false
+    seen.add(row.key)
+    return true
+  })
+}
+
 // Filter the complete, message-ordered root index before applying view limits.
 export function searchSessions(rows: SidebarSession[], query: string, projects: { key: string; name: string }[]) {
   const value = normalizeSearch(query)

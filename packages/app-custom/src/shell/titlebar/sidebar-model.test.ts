@@ -3,6 +3,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import {
   attentionGroups,
   orderSidebarProjects,
+  sidebarSelectableSessions,
   loadNavigation,
   localDays,
   pinnedSessions,
@@ -69,6 +70,39 @@ describe("sidebar navigation", () => {
     expect(pinnedSessions(rows, [rows[1].key, rows[0].key]).map((row) => row.session.id)).toEqual(["b", "a"])
     const remote = { ...rows[0], key: sessionKey("remote", "a") }
     expect(recentSessions([remote, rows[0]]).map((row) => row.key)).toEqual([rows[0].key, remote.key].sort())
+  })
+
+  test("projects mode uses pinned, recent and rendered project order with first-occurrence membership", () => {
+    const pinned = row("pinned", 40)
+    const current = row("current", 30)
+    const recent = row("recent", 20)
+    const project = row("project", 10)
+
+    expect(
+      sidebarSelectableSessions({
+        mode: "projects",
+        pinned: [pinned],
+        recent: [current, recent, pinned],
+        projects: [[recent, project], [current]],
+      }).map((item) => item.session.id),
+    ).toEqual(["pinned", "current", "recent", "project"])
+  })
+
+  test("attention mode uses priority, pinned, day rows and current fallback with first-occurrence membership", () => {
+    const priority = row("priority", 40, 40)
+    const pinned = row("pinned", 30)
+    const today = row("today", 20)
+    const current = row("current", 10)
+
+    expect(
+      sidebarSelectableSessions({
+        mode: "attention",
+        priority: [priority],
+        pinned: [pinned, priority],
+        days: [{ rows: [today, pinned] }, { rows: [current] }],
+        current: [current],
+      }).map((item) => item.session.id),
+    ).toEqual(["priority", "pinned", "today", "current"])
   })
 
   test("Recent windows preserve rank order, exclude pins/children and retain current across five-row pages", () => {

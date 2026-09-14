@@ -32,6 +32,7 @@ function SessionTabSlot(props: {
   onRename: (title: string) => Promise<void>
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
+  closable?: boolean
 }) {
   const sortable = useSortable({
     get id() {
@@ -68,6 +69,7 @@ function SessionTabSlot(props: {
         onRename={props.onRename}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
+        closable={props.closable}
         active={props.active}
         dragging={sortable.isDragSource()}
         orientation={props.orientation}
@@ -83,9 +85,12 @@ function SessionTabEntry(props: {
   active: boolean
   orientation: "horizontal" | "vertical"
   serverCtx: ServerCtx | undefined
+  session?: SessionInfo
   onVisibleChange: (visible: boolean) => void
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
+  closable?: boolean
+  open: boolean
 }) {
   const tabs = useTabs()
   const language = useLanguage()
@@ -95,7 +100,7 @@ function SessionTabEntry(props: {
   const persisted = createMemo(() => tabs.info[props.id])
   const [loadedSession] = createResource(
     () => {
-      if (pending()) return null
+      if (pending() || !props.open) return null
       const ctx = props.serverCtx
       return ctx ? { id: props.tab.sessionId, ctx } : null
     },
@@ -105,7 +110,7 @@ function SessionTabEntry(props: {
         .then(() => ctx.data.session.get(id))
         .catch(() => undefined),
   )
-  const session = createMemo(() => (pending() ? undefined : (cachedSession() ?? loadedSession())))
+  const session = createMemo(() => (pending() ? undefined : (props.session ?? cachedSession() ?? loadedSession())))
   const missingSession = createMemo(() => !pending() && !!props.serverCtx && !loadedSession.loading && !session())
   const visible = createMemo(() => !!pending() || !!session() || missingSession() || !!persisted()?.title)
 
@@ -131,6 +136,7 @@ function SessionTabEntry(props: {
   createEffect(() => props.onVisibleChange(visible()))
 
   createEffect(() => {
+    if (!props.open) return
     const ctx = props.serverCtx
     const value = session()
     if (!ctx || !value || props.active || ctx.sdk.connection.status() !== "connected") return
@@ -148,6 +154,7 @@ function SessionTabEntry(props: {
   })
 
   createEffect(() => {
+    if (!props.open) return
     const value = session()
     if (!value) return
     tabs.rememberSessionInfo(props.tab, value)
@@ -177,6 +184,7 @@ function SessionTabEntry(props: {
         onRename={rename}
         onNavigate={props.onNavigate}
         onClose={props.onClose}
+        closable={props.closable}
       />
     </Show>
   )
@@ -238,6 +246,9 @@ export function TitlebarTabStrip(props: {
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
   onClose: (tab: Tab) => void
+  closable?: (tab: Tab) => boolean
+  open?: (tab: SessionTab) => boolean
+  session?: (tab: SessionTab) => SessionInfo | undefined
   onReorder?: (keys: string[]) => void
 }) {
   const global = useGlobal()
@@ -366,12 +377,15 @@ export function TitlebarTabStrip(props: {
                       active={props.currentTab === tab}
                       orientation={vertical() ? "vertical" : "horizontal"}
                       serverCtx={serverCtx()}
+                      session={props.session?.(tab)}
                       onVisibleChange={(visible) => setVisibility(id, visible)}
                       onNavigate={(element) => {
                         ref = element
                         props.onNavigate(tab, element)
                       }}
                       onClose={() => props.onClose(tab)}
+                      closable={props.closable?.(tab)}
+                      open={props.open?.(tab) ?? true}
                     />
                   )
                 }

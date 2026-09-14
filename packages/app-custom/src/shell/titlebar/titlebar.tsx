@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, mapArray, Match, Show, Switch, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
@@ -32,10 +32,21 @@ import { sessionTabTitle } from "./tab-title"
 import { MobileTabProvider } from "./mobile-tab-actions"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
-import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
 import { projectForSession } from "@/shell/layout/helpers"
 import { useSettingsDialog } from "@/settings/command"
+import { usePreferences } from "@/preferences/context"
+import {
+  attentionGroups,
+  orderSidebarProjects,
+  pinnedSessions,
+  recentSessions,
+  sidebarSelectableSessions,
+  visibleSessions,
+} from "./sidebar-model"
+import { createSidebarSessions } from "./sidebar-sessions"
+import { visibleWorktreeSessions } from "./sidebar-worktrees"
+import { mobileSessionTabs, mobileTabIsOpen } from "./mobile-session-tabs"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
 import prodIcon from "../../../../desktop/icons/prod/64x64.png"
@@ -186,6 +197,7 @@ export function Titlebar(props: {
             const tabs = useTabs()
             const tabsStore = tabs.store
             const tabsStoreActions = tabs
+            const preferences = usePreferences()
             const preparing = createMemo(() => {
               const route = layout.route()
               return route.type === "session" && !!tabs.pendingSession(route.server, route.sessionId)
@@ -419,32 +431,106 @@ export function Titlebar(props: {
               ].filter((v) => v !== undefined)
             })
 
-            const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false, proxy: false })
-            const mobileTabActivity = mapArray(
-              () => (mobile() ? tabsStore : []),
-              (tab) => {
-                if (tab.type === "draft") return () => ({ tab, unread: false, updated: 0 })
-                const state = useSessionTabAvatarState(
-                  () => tab.server,
-                  () => tab.sessionId,
-                  () => true,
-                )
-                return () => {
-                  const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-                  const value = conn ? global.ensureServerCtx(conn).data.session.get(tab.sessionId) : undefined
-                  return {
-                    tab,
-                    unread: state.unread(),
-                    updated: value?.time.updated ?? value?.time.created ?? 0,
-                  }
-                }
-              },
+            const [mobileTabs, setMobileTabs] = createStore({
+              open: false,
+              settings: false,
+              proxy: false,
+              now: Date.now(),
+              limits: {} as Record<string, number>,
+            })
+            const mobileInventory = createSidebarSessions({ currentTab, enabled: mobile })
+            const mobileSessions = mobileInventory.sessions
+            const mobileOrder = () =>
+              preferences.canonical() ? preferences.profile().data.sidebarOrder : global.sidebar.store.order
+            const mobilePinList = () =>
+              preferences.canonical() ? preferences.profile().data.pinnedSessions : global.sidebar.store.pins
+            const mobileProjects = createMemo(() =>
+              orderSidebarProjects(mobileInventory.projectGroups(), mobileOrder()),
             )
+            createEffect(() => {
+              if (!mobile() || !global.sidebar.ready()) return
+              const missing = mobileProjects()
+                .map((project) => project.key)
+                .filter((key) => !mobileOrder().includes(key))
+              if (!missing.length) return
+              const order = [...mobileOrder(), ...missing]
+              global.sidebar.set("order", order)
+              void preferences.mutate({ type: "sidebar.order", order })
+            })
+            const mobileWorktrees = createMemo(
+              () =>
+                new Map(
+                  mobileProjects().map((project) => {
+                    const entry = mobileInventory
+                      .indexes()
+                      .find((item) => ServerConnection.key(item.connection) === project.server)!
+                    return [project.key, entry.worktrees.group(project, mobileSessions().rows)]
+                  }),
+                ),
+            )
+            createEffect(() => {
+              if (!mobile() || global.sidebar.store.attention) return
+              mobileProjects()
+                .filter((project) => !global.sidebar.store.collapsed[project.key])
+                .forEach((project) => {
+                  const entry = mobileInventory
+                    .indexes()
+                    .find((item) => ServerConnection.key(item.connection) === project.server)!
+                  void entry.worktrees.load(() => {
+                    if (!mobile() || global.sidebar.store.attention || global.sidebar.store.collapsed[project.key])
+                      return undefined
+                    const current = mobileProjects().find((item) => item.key === project.key)
+                    return current ? { project: current, rows: mobileSessions().rows } : undefined
+                  })
+                })
+            })
+            const mobileProjectRows = (key: string) =>
+              visibleWorktreeSessions(
+                mobileWorktrees().get(key)!,
+                key,
+                global.sidebar.store.collapsed,
+                mobileTabs.limits,
+                mobileSessions().current,
+              )
+            const mobileCanonicalRows = createMemo(() => {
+              const pins = new Set(mobilePinList())
+              if (global.sidebar.store.attention) {
+                const groups = attentionGroups(
+                  mobileSessions().rows,
+                  mobileTabs.now,
+                  mobileSessions().current,
+                  mobilePinList(),
+                )
+                return sidebarSelectableSessions({
+                  mode: "attention",
+                  priority: groups.priority,
+                  pinned: groups.pinned,
+                  days: groups.days,
+                  current: groups.current,
+                })
+              }
+              return sidebarSelectableSessions({
+                mode: "projects",
+                pinned: pinnedSessions(mobileSessions().rows, mobilePinList()),
+                recent: visibleSessions(
+                  recentSessions(mobileSessions().rows.filter((row) => !pins.has(row.key))),
+                  5,
+                  mobileSessions().current,
+                ),
+                projects: mobileProjects().map((project) => mobileProjectRows(project.key)),
+              })
+            })
             const orderedMobileTabs = createMemo(() =>
-              mobileTabActivity()
-                .map((activity) => activity())
-                .sort((a, b) => Number(b.unread) - Number(a.unread) || b.updated - a.updated)
-                .map((item) => item.tab),
+              mobileSessionTabs(tabsStore, mobileCanonicalRows(), (tab) => !!tabs.pendingSession(tab.server, tab.sessionId)),
+            )
+            const mobileCanonicalSessions = createMemo(
+              () =>
+                new Map(
+                  mobileCanonicalRows().map((row) => [
+                    tabKey({ type: "session", server: row.server, sessionId: row.session.id }),
+                    row.session,
+                  ]),
+                ),
             )
             const currentProject = createMemo(() => {
               const tab = currentTab()
@@ -496,7 +582,10 @@ export function Titlebar(props: {
                       open={mobileTabs.open}
                       suspended={!!dialog.active}
                       closeOnOutsideFocus={false}
-                      onOpenChange={(open) => setMobileTabs("open", open)}
+                      onOpenChange={(open) => {
+                        if (open) setMobileTabs("now", Date.now())
+                        setMobileTabs("open", open)
+                      }}
                       onContentPresentChange={(present) => {
                         if (present || !mobileTabs.settings) return
                         setMobileTabs("settings", false)
@@ -570,11 +659,14 @@ export function Titlebar(props: {
                               <TitlebarTabStrip
                                 orientation="vertical"
                                 tabs={orderedMobileTabs()}
+                                session={(tab) => mobileCanonicalSessions().get(tabKey(tab))}
                                 currentTab={currentTab()}
                                 onNavigate={(tab) => {
-                                  tabs.select(tab)
+                                  tabs.select(tab.type === "session" ? tabs.addSessionTab(tab) : tab)
                                   setMobileTabs("open", false)
                                 }}
+                                closable={(tab) => mobileTabIsOpen(tabsStore, tab)}
+                                open={(tab) => mobileTabIsOpen(tabsStore, tab)}
                                 onClose={(tab) => {
                                   const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
                                   if (index !== -1) tabsStoreActions.closeTab(index)

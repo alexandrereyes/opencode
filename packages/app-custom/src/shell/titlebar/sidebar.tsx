@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createUniqueId, For, mapArray, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js"
 import { Key } from "@solid-primitives/keyed"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -15,8 +15,6 @@ import { arrayMove } from "@dnd-kit/helpers"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useLayout } from "@/shell/state/layout"
-import { useSettings } from "@/settings/model"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
 import { useCommand } from "@/shell/commands/command"
@@ -24,28 +22,24 @@ import { getCompactRelativeTime } from "@/shell/time"
 import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
 import { TitlebarTabStrip } from "./tab-strip"
-import { createSidebarIndex } from "./sidebar-index"
 import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
 import { SidebarSubscriptions } from "./sidebar-subscriptions"
-import { createSidebarWorktrees, visibleWorktreeSessions } from "./sidebar-worktrees"
+import { visibleWorktreeSessions } from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
-import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import { usePreferences } from "@/preferences/context"
 import {
   attentionGroups,
   orderSidebarProjects,
   pinnedSessions,
   recentSessions,
-  rootSessions,
   searchSessions,
-  sessionKey,
-  sidebarProjects,
-  sidebarSessionProject,
+  sidebarSelectableSessions,
   visibleSessions,
   type SidebarSession,
 } from "./sidebar-model"
+import { createSidebarSessions } from "./sidebar-sessions"
 
 const RECENT_PAGE_SIZE = 5
 
@@ -57,9 +51,7 @@ export function SessionSidebar(props: {
   onDashboard: () => void
 }) {
   const global = useGlobal()
-  const layout = useLayout()
   const tabs = useTabs()
-  const settings = useSettings()
   const language = useLanguage()
   const dateFormat = createMemo(
     () => new Intl.DateTimeFormat(language.intl(), { dateStyle: "full", timeStyle: "long" }),
@@ -85,18 +77,11 @@ export function SessionSidebar(props: {
     query: "",
     searchOpen: false,
   })
-  const clock = createRecentClock()
-  const indexes = mapArray(global.servers.list, (connection) => {
-    const ctx = global.ensureServerCtx(connection)
-    return { connection, ctx, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
-  })
+  const inventory = createSidebarSessions({ currentTab: () => props.currentTab, clock: createRecentClock() })
+  const indexes = inventory.indexes
   const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
-  const current = () => {
-    const route = layout.route()
-    return route.type === "session" ? sessionKey(route.server, route.sessionId) : undefined
-  }
   command.register("sidebar-tab-cycle", () =>
     [-1, 1].map((offset) => ({
       id: offset === -1 ? "tab.prev" : "tab.next",
@@ -115,71 +100,8 @@ export function SessionSidebar(props: {
       },
     })),
   )
-  const sessions = createMemo(() =>
-    rootSessions(
-      indexes().flatMap(({ connection, ctx, index }) => {
-        const server = ServerConnection.key(connection)
-        const selected = ctx.projects.list()
-        const known = new Map(
-          Object.values(index.state.rows)
-            .filter(Boolean)
-            .map((row) => [row.session.id, row]),
-        )
-        const route = layout.route()
-        if (route.type === "session" && route.server === server && !known.has(route.sessionId)) {
-          const session = ctx.data.session.get(route.sessionId)
-          if (session) known.set(session.id, { session })
-        }
-        const tab = props.currentTab
-        if (tab?.type === "session" && tab.server === server && !known.has(tab.sessionId)) {
-          const session = ctx.data.session.get(tab.sessionId)
-          if (session) known.set(session.id, { session })
-        }
-        return [...known.values()].map((row): SidebarSession => {
-          const session = navigationSession(row, ctx.data.session.get(row.session.id))
-          return {
-            ...row,
-            session,
-            server,
-            key: sessionKey(server, session.id),
-            project: sidebarSessionProject(server, session, selected),
-            recentRank: index.ranks[session.id],
-            ...sessionAttention({
-              ...row,
-              session,
-              notifications: ctx.notification.session.unseen(session.id),
-              autoApprove: settings.permissions.autoApprove(),
-            }),
-          }
-        })
-      }),
-      current(),
-      props.currentTab?.type === "session"
-        ? sessionKey(props.currentTab.server, props.currentTab.sessionId)
-        : undefined,
-    ),
-  )
-  const projectGroups = createMemo(() =>
-    indexes().flatMap(({ connection, ctx }) => {
-      const server = ServerConnection.key(connection)
-      const known = ctx.projects.list().map((project) => ({
-        ...project,
-        worktree:
-          project.id && project.id !== "global"
-            ? (ctx.sync.data.project.find((metadata) => metadata.id === project.id)?.worktree ?? project.worktree)
-            : project.worktree,
-      }))
-      return sidebarProjects(
-        server,
-        known,
-        sessions().rows.filter((row) => row.server === server),
-      ).map((project) => ({
-        ...project,
-        connection,
-        serverName: serverName(connection),
-      }))
-    }),
-  )
+  const sessions = inventory.sessions
+  const projectGroups = inventory.projectGroups
   const projects = createMemo(() => orderSidebarProjects(projectGroups(), order()))
   let projectList: HTMLDivElement | undefined
   const projectOrder = createMemo(() => ({
@@ -235,16 +157,20 @@ export function SessionSidebar(props: {
     visibleWorktreeSessions(worktrees().get(key)!, key, saved.collapsed, state.limits, sessions().current)
   // Match rendered order, retaining the first occurrence of sessions repeated in project groups.
   const selectable = createMemo(() => {
-    const rows = query()
-      ? results()
-      : saved.attention
-        ? [...groups().priority, ...groups().pinned, ...groups().days.flatMap((day) => day.rows), ...groups().current]
-        : [...pinned(), ...recent(), ...projects().flatMap((project) => projectRows(project.key))]
-    const seen = new Set<string>()
-    return rows.filter((row) => {
-      if (seen.has(row.key)) return false
-      seen.add(row.key)
-      return true
+    if (query()) return results()
+    if (saved.attention)
+      return sidebarSelectableSessions({
+        mode: "attention",
+        priority: groups().priority,
+        pinned: groups().pinned,
+        days: groups().days,
+        current: groups().current,
+      })
+    return sidebarSelectableSessions({
+      mode: "projects",
+      pinned: pinned(),
+      recent: recent(),
+      projects: projects().map((project) => projectRows(project.key)),
     })
   })
   const selection = createSidebarSelection({
