@@ -20,6 +20,7 @@ const Settings = Schema.Struct({
   followUpBehavior: Schema.Literals(["queue", "steer"]),
   autoApprove: Schema.Boolean,
   autoSave: Schema.Boolean,
+  tabLayout: optional(Schema.Literals(["horizontal", "vertical"])),
   notifications: Schema.Struct({ agent: Schema.Boolean, permissions: Schema.Boolean, errors: Schema.Boolean }),
 })
 
@@ -79,6 +80,7 @@ export const Intent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("settings.followUpBehavior"), value: Schema.Literals(["queue", "steer"]) }),
   Schema.Struct({ type: Schema.Literal("settings.autoApprove"), value: Schema.Boolean }),
   Schema.Struct({ type: Schema.Literal("settings.autoSave"), value: Schema.Boolean }),
+  Schema.Struct({ type: Schema.Literal("settings.tabLayout"), value: Schema.Literals(["horizontal", "vertical"]) }),
   Schema.Struct({
     type: Schema.Literal("settings.notification"),
     notification: Schema.Literals(["agent", "permissions", "errors"]),

@@ -16,6 +16,7 @@ const profile: Preferences.Profile = {
       followUpBehavior: "steer",
       autoApprove: false,
       autoSave: true,
+      tabLayout: "horizontal",
       notifications: { agent: true, permissions: true, errors: false },
     },
   },
@@ -53,6 +54,16 @@ test("model and behavioral intents change only their owned preference", () => {
   ])
   expect(approved.data.settings.autoApprove).toBe(true)
   expect(approved.data.models).not.toHaveProperty("recent")
+})
+
+test("tab layout is global while profiles saved before it remain valid", () => {
+  const legacy = Schema.encodeSync(Preferences.Profile)(profile)
+  delete (legacy.data.settings as { tabLayout?: string }).tabLayout
+
+  expect(Schema.decodeUnknownSync(Preferences.Profile)(legacy).data.settings.tabLayout).toBeUndefined()
+  expect(applyIntent(profile, { type: "settings.tabLayout", value: "vertical" }).data.settings.tabLayout).toBe(
+    "vertical",
+  )
 })
 
 test("one-shot import never lets an empty or stale client replace remote data", () => {

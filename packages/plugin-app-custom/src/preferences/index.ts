@@ -17,6 +17,7 @@ const defaults: Preferences.Profile = {
       followUpBehavior: "steer",
       autoApprove: false,
       autoSave: true,
+      tabLayout: "vertical",
       notifications: { agent: true, permissions: true, errors: false },
     },
   },
@@ -79,6 +80,7 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
   if (intent.type === "settings.followUpBehavior") data.settings.followUpBehavior = intent.value
   if (intent.type === "settings.autoApprove") data.settings.autoApprove = intent.value
   if (intent.type === "settings.autoSave") data.settings.autoSave = intent.value
+  if (intent.type === "settings.tabLayout") data.settings.tabLayout = intent.value
   if (intent.type === "settings.notification") data.settings.notifications[intent.notification] = intent.value
   return { ...profile, revision: profile.revision + 1, data }
 }

@@ -31,6 +31,7 @@ const defaults: Preferences.Profile = {
       followUpBehavior: "steer",
       autoApprove: false,
       autoSave: true,
+      tabLayout: "vertical",
       notifications: { agent: true, permissions: true, errors: false },
     },
   },

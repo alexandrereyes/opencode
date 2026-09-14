@@ -74,7 +74,7 @@ describe("settings schema", () => {
         mono: "",
         sans: "",
         terminal: "",
-        tabLayout: "horizontal",
+        tabLayout: "vertical",
         showProjectName: false,
       },
       keybinds: {},

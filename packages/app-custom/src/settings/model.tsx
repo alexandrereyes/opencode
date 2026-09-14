@@ -260,7 +260,7 @@ export const defaultSettings: Settings = {
     followUpBehavior: "steer",
     experimentalBrowser: false,
   },
-  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "horizontal", showProjectName: false },
+  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "vertical", showProjectName: false },
   keybinds: {},
   permissions: { autoApprove: false },
   workspaces: { defaultDestination: "last-used", lastUsed: {} },
@@ -292,6 +292,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           followUpBehavior: store.general.followUpBehavior,
           autoApprove: store.permissions.autoApprove,
           autoSave: store.general.autoSave,
+          tabLayout: store.appearance.tabLayout,
           notifications: { ...store.notifications },
         },
       }),
@@ -303,6 +304,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       setStore("general", "followUpBehavior", value.followUpBehavior)
       setStore("general", "autoSave", value.autoSave)
       setStore("permissions", "autoApprove", value.autoApprove)
+      if (value.tabLayout) setStore("appearance", "tabLayout", value.tabLayout)
       setStore("notifications", { ...value.notifications })
     })
     const showFileTree = withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree)
@@ -427,9 +429,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
         },
-        tabLayout: withFallback(() => store.appearance?.tabLayout, defaultSettings.appearance.tabLayout),
+        tabLayout: withFallback(
+          () => remote()?.tabLayout ?? store.appearance?.tabLayout,
+          defaultSettings.appearance.tabLayout,
+        ),
         setTabLayout(value: TabLayout) {
           setStore("appearance", "tabLayout", value)
+          void preferences.mutate({ type: "settings.tabLayout", value })
         },
         showProjectName: withFallback(
           () => store.appearance?.showProjectName,
