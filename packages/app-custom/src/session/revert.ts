@@ -1,4 +1,4 @@
-import type { SessionInfo, SessionMessageInfo, SessionMessageUser } from "@opencode/client/promise"
+import type { SessionInfo, SessionMessageUser } from "@opencode/client/promise"
 import { useComposerState } from "@/composer/persistence"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
@@ -9,16 +9,14 @@ import { readChatQuotes } from "@/composer/chat-quote"
 import { showToast } from "@/shell/notifications/toast"
 
 type SessionApi = ReturnType<typeof useServerSDK>["api"]["session"]
+type MessageList = ReturnType<typeof useServerSDK>["api"]["message"]["list"]
 type RevertApi = Pick<SessionApi, "interrupt" | "wait"> & { revert: Pick<SessionApi["revert"], "stage"> }
 type RevertCascade = {
   sessions: (input: { parentID: string; cursor?: string }) => Promise<{
     data: SessionInfo[]
     cursor: { next?: string | null }
   }>
-  messages: (input: { sessionID: string; cursor?: string }) => Promise<{
-    data: SessionMessageInfo[]
-    cursor: { next?: string | null }
-  }>
+  messages: MessageList
   status: (sessionID: string) => "idle" | "busy"
 }
 type RevertInput = {
@@ -64,8 +62,7 @@ export function createSessionRevert(input: RevertInput) {
     cascade: {
       sessions: ({ parentID, cursor }) =>
         server.api.session.list(cursor ? { cursor } : { parentID, limit: 100, order: "asc" }),
-      messages: ({ sessionID, cursor }) =>
-        server.api.message.list({ sessionID, cursor, limit: 200, order: "asc", type: "user" }),
+      messages: server.api.message.list,
       status: (sessionID) => (data.session.status(sessionID) === "idle" ? "idle" : "busy"),
     },
     failed: (error) =>
@@ -274,7 +271,9 @@ async function descendantSessions(rootID: string, environment: RevertEnvironment
 async function firstUserMessageAtOrAfter(sessionID: string, cutoff: number, cascade: RevertCascade) {
   let cursor: string | undefined
   do {
-    const page = await cascade.messages({ sessionID, cursor })
+    const page = await cascade.messages(
+      cursor ? { sessionID, cursor, type: "user" } : { sessionID, limit: 200, order: "asc", type: "user" },
+    )
     const message = page.data.find(
       (item): item is SessionMessageUser => item.type === "user" && item.time.created >= cutoff,
     )
