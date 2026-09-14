@@ -21,6 +21,9 @@ import { useSettings } from "@/settings/model"
 import { createServerSnippets } from "@/settings/snippets/server"
 import { timelinePreset } from "@opencode/session-ui-custom/timeline/detail"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
+import { usePreferences } from "@/preferences/context"
+import { Schema } from "effect"
+import { Persistence } from "@/runtime/persistence/schema"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -36,6 +39,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
       },
     })
     const models = createGlobalModels()
+    const sidebar = createGlobalSidebar()
     const notificationCoordinator = createNotificationCoordinator()
 
     const settingsServer = createMemo(() => {
@@ -100,6 +104,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
         },
       },
       models,
+      sidebar,
       ensureServerCtx(conn: ServerConnection.Any) {
         return ensureServerCtx(conn)
       },
@@ -107,15 +112,70 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
   },
 })
 
+const SidebarState = Persistence.struct({
+  attention: Schema.Boolean,
+  order: Persistence.array(Schema.String),
+  collapsed: Persistence.record(Schema.Boolean),
+  pins: Persistence.array(Schema.String),
+})
+
+function createGlobalSidebar() {
+  const preferences = usePreferences()
+  const [store, set, raw, ready] = persisted(Persist.global("sidebar-navigation"), SidebarState, {
+    attention: true,
+    order: [],
+    collapsed: {},
+    pins: [],
+  })
+  preferences.legacy("sidebar", {
+    raw,
+    read: () => ({ sidebarOrder: [...store.order], pinnedSessions: [...store.pins] }),
+  })
+  createEffect(() => {
+    if (!preferences.canonical()) return
+    set("order", [...preferences.profile().data.sidebarOrder])
+    set("pins", [...preferences.profile().data.pinnedSessions])
+  })
+  return { store, set, ready }
+}
+
 function createGlobalModels() {
-  const [store, setStore, _, ready] = persisted(Persist.global("model"), ModelState, {
+  const preferences = usePreferences()
+  const [local, setLocal, raw, ready] = persisted(Persist.global("model"), ModelState, {
     user: [],
     recent: [],
     variant: {},
   })
+  preferences.legacy("models", {
+    raw,
+    read: () => ({
+      models: {
+        user: [...local.user],
+        variant: Object.fromEntries(
+          Object.entries(local.variant).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        ),
+      },
+    }),
+  })
+  createEffect(() => {
+    if (!preferences.canonical()) return
+    const remote = preferences.profile().data.models
+    setLocal(
+      "user",
+      remote.user.map((model) => ({ ...model })),
+    )
+    setLocal("variant", { ...remote.variant })
+  })
+  const store = new Proxy(local, {
+    get(target, property) {
+      if (property === "user" && preferences.canonical()) return preferences.profile().data.models.user
+      if (property === "variant" && preferences.canonical()) return preferences.profile().data.models.variant
+      return target[property as keyof typeof target]
+    },
+  }) as typeof local
   const [recent] = createResource(
     async () => {
-      const value = store.recent
+      const value = local.recent
       await ready.promise
       return value
     },
@@ -125,7 +185,8 @@ function createGlobalModels() {
 
   return {
     store,
-    set: setStore,
+    set: setLocal,
+    preferences,
     ready,
     recent: () => recent()!,
   }
