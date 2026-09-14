@@ -20,11 +20,11 @@
   gap: 4px;
 }
 
-[data-titlebar-tab][data-session-actions]:not([data-editing="true"]) [data-slot="tab-link"] {
+[data-titlebar-tab][data-session-actions]:not([data-sidebar-actions]):not([data-editing="true"])
+  [data-slot="tab-link"] {
   padding-inline-end: 48px;
 }
 
-/* Reserve the same two-button space at rest so the title and time never shift on reveal. */
 [data-titlebar-tab][data-sidebar-actions] [data-slot="tab-quick-actions"] {
   display: flex;
   gap: 4px;
@@ -32,15 +32,28 @@
   pointer-events: none;
 }
 
+[data-titlebar-tab][data-sidebar-actions]:not([data-editing="true"]) [data-slot="tab-link"] {
+  padding-inline-end: 0;
+}
+
 [data-titlebar-tab][data-sidebar-actions]:is(:hover, :focus-within) [data-slot="tab-quick-actions"] {
   opacity: 1;
   pointer-events: auto;
+}
+
+[data-titlebar-tab][data-sidebar-actions]:not([data-editing="true"]):is(:hover, :focus-within)
+  [data-slot="tab-link"] {
+  padding-inline-end: 48px;
 }
 
 @media (hover: none) {
   [data-titlebar-tab][data-sidebar-actions] [data-slot="tab-quick-actions"] {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  [data-titlebar-tab][data-sidebar-actions]:not([data-editing="true"]) [data-slot="tab-link"] {
+    padding-inline-end: 48px;
   }
 }
 

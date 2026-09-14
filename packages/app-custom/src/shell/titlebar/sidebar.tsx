@@ -87,7 +87,6 @@ export function SessionSidebar(props: {
     drag: undefined as string | undefined,
     query: "",
     searchOpen: false,
-    lastTouchedProject: undefined as string | undefined,
   })
   const clock = createRecentClock()
   const indexes = mapArray(global.servers.list, (connection) => {
@@ -736,23 +735,12 @@ export function SessionSidebar(props: {
                                       move(key, index() + (event.key === "ArrowUp" ? -1 : 1))
                                     }}
                                     aria-expanded={!collapsed()}
-                                    onClick={(event) => {
-                                      if (event.detail > 0 && gesture.dragged) return
-                                      setState("lastTouchedProject", key)
-                                      setSaved("collapsed", key, !collapsed())
-                                    }}
+                                     onClick={(event) => {
+                                       if (event.detail > 0 && gesture.dragged) return
+                                       setSaved("collapsed", key, !collapsed())
+                                     }}
                                   >
-                                    <Icon
-                                      name={
-                                        state.lastTouchedProject === key
-                                          ? collapsed()
-                                            ? "chevron-right"
-                                            : "chevron-down"
-                                          : "folder"
-                                      }
-                                      size="small"
-                                      class={state.lastTouchedProject === key && collapsed() ? "rtl:rotate-180" : ""}
-                                    />
+                                    <Icon name="folder" size="small" />
                                     <span dir="auto" class="min-w-0 truncate font-semibold" title={projectLabel(key)}>
                                       {projectLabel(key)}
                                     </span>
@@ -796,7 +784,7 @@ export function SessionSidebar(props: {
                                             )
                                       const id = createUniqueId()
                                       return (
-                                        <section data-worktree-key={group().key} class="ms-3 mt-2">
+                                        <section data-worktree-key={group().key} class="mt-2">
                                           <div class="group/worktree flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
                                             <button
                                               type="button"
@@ -806,12 +794,8 @@ export function SessionSidebar(props: {
                                               title={group().directory}
                                               onClick={() => setSaved("collapsed", group().key, !collapsed())}
                                             >
-                                              <Icon
-                                                name={collapsed() ? "chevron-right" : "chevron-down"}
-                                                size="small"
-                                                class={collapsed() ? "rtl:rotate-180" : ""}
-                                              />
-                                              <span dir="auto" class="min-w-0 truncate">
+                                              <Icon name="outline-worktree" size="small" />
+                                              <span dir="auto" class="min-w-0 truncate font-semibold">
                                                 {language.plural("sidebar.worktree.heading", group().rows.length, {
                                                   worktree: group().name,
                                                 })}

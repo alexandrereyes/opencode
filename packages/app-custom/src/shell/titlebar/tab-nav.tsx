@@ -404,8 +404,13 @@ export function TabNavItem(props: {
           props.onNavigate()
         }}
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
+        classList={{ "ps-[22px]": props.compact && !props.selectionMode && !props.pinned }}
       >
-        <span data-slot="project-avatar-slot" class="flex size-4 shrink-0 items-center justify-center">
+        <span
+          data-slot="project-avatar-slot"
+          class="flex size-4 shrink-0 items-center justify-center"
+          classList={{ hidden: props.compact }}
+        >
           <Show
             when={props.session}
             keyed

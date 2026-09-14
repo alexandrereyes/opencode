@@ -528,10 +528,10 @@ test("shared sidebar clock updates every view without reordering, remounting, lo
         expect(pinnedRow.querySelector('[aria-label="Archive"]')).not.toBeNull()
         expect(pinnedRow.querySelector('[aria-label="Delete"]')).not.toBeNull()
         expect(getComputedStyle(time).lineHeight).toBe("16px")
-        expect(getComputedStyle(compact.querySelector("a")!).paddingInlineEnd).toBe("48px")
+        expect(Number.parseFloat(getComputedStyle(compact.querySelector("a")!).paddingInlineEnd)).toBe(0)
         pinnedRow.dataset.titleOverflow = "true"
         pinnedRow.dataset.active = "true"
-        expect(getComputedStyle(pinnedRow.querySelector("a")!).paddingInlineEnd).toBe("48px")
+        expect(Number.parseFloat(getComputedStyle(pinnedRow.querySelector("a")!).paddingInlineEnd)).toBe(0)
         expect(getComputedStyle(pinnedRow.querySelector("a")!).gridTemplateColumns).toBe("16px minmax(0, 1fr) auto")
         expect(getComputedStyle(pinnedRow.querySelector('[data-slot="tab-title"]')!).textOverflow).toBe("ellipsis")
         const focused = link(recent, "row-0")
@@ -819,7 +819,7 @@ test("a lifecycle event during initial snapshot wins over its older active snaps
   }
 })
 
-test("sidebar quick actions reserve space and reveal on focus with real icons in LTR and RTL", async () => {
+test("sidebar quick actions take space only when revealed in LTR and RTL", async () => {
   const sheet = document.createElement("style")
   sheet.textContent = await Bun.file(new URL("../../src/shell/titlebar/tab-nav.css", import.meta.url)).text()
   document.head.append(sheet)
@@ -846,7 +846,7 @@ test("sidebar quick actions reserve space and reveal on focus with real icons in
         expect(getComputedStyle(cluster).opacity).toBe("0")
         expect(getComputedStyle(cluster).pointerEvents).toBe("none")
         const padding = getComputedStyle(link).paddingInlineEnd
-        expect(padding).toBe("48px")
+        expect(Number.parseFloat(padding)).toBe(0)
         expect(getComputedStyle(cluster.parentElement!).width).toBe("44px")
         row.removeAttribute("data-sidebar-time")
         row.dataset.titleOverflow = "true"
@@ -869,6 +869,12 @@ test("sidebar quick actions reserve space and reveal on focus with real icons in
               rule.cssText.includes(":hover, :focus-within") &&
               rule.cssText.includes("opacity: 1") &&
               rule.cssText.includes("pointer-events: auto"),
+          ),
+        ).toBe(true)
+        expect(
+          rules.some(
+            (rule) =>
+              rule.cssText.includes(":hover, :focus-within") && rule.cssText.includes("padding-inline-end: 48px"),
           ),
         ).toBe(true)
         expect(
