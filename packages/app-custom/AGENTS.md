@@ -14,10 +14,11 @@
 ## Local Dev
 
 - `opencode dev web` proxies `https://app.opencode.ai`, so local UI/CSS changes will not show there.
-- For local UI changes, run the backend and app dev servers separately.
-- Backend (from the repository root): `bun dev serve --port 4096`
-- App (from `packages/app-custom`): `bun dev -- --port 4444`
-- Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
+- When the change is frontend-only, reuse the authenticated backend already running at `http://localhost:4096`; do not start or restart a backend.
+- For frontend-only changes, run the app from `packages/app-custom` with `VITE_OPENCODE_SERVER_HOST=localhost VITE_OPENCODE_SERVER_PORT=4444 VITE_OPENCODE_SERVER_PROXY=http://localhost:4096 bun dev -- --port 4444`.
+- The proxy is required because the backend rejects browser requests whose origin is `http://localhost:4444`; it keeps API requests same-origin while preserving the existing backend data and authentication.
+- Only when the task includes backend changes, run a development backend from the repository root with `bun dev serve --port 4096`, then run the app from `packages/app-custom` with `bun dev -- --port 4444`.
+- Open `http://localhost:4444` to verify UI changes.
 
 ## SolidJS
 
