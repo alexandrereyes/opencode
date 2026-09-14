@@ -1,9 +1,9 @@
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit generated client files directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk` composes Client, Core, and Server.
-- Current implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required.
+- Shared backend and API implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required. Custom plugin policy belongs in `packages/plugin-app-custom`; custom web product work follows the package ownership rules below.
 - This repository does not use Changesets. Do not add `.changeset` files; follow the existing release workflow instead.
 - The default branch in this repo is `v2`.
-- Default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and default pull requests to target `v2`. Use another base or target branch when the requester explicitly instructs it.
+- For upstream-compatible work, default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and target pull requests to `v2`. For custom backend, plugin, or web product work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` ref may not exist; use `v2` or `origin/v2` for diffs.
 
 ## Backend Customizations
