@@ -1,11 +1,12 @@
 import { createSimpleContext } from "@opencode/ui-custom/context"
-import { batch, createMemo } from "solid-js"
+import { batch, createEffect, createMemo } from "solid-js"
 import { type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { pathKey } from "@/workspaces/path-key"
 import { ServerScope } from "@/runtime/server/scope"
 import { ServerHttp, ServerHttpBase, ServerKey, serverState } from "./persistence"
 import type { SshItem } from "@/servers/ssh/types"
+import { usePreferences } from "@/preferences/context"
 
 type ServerState = ReturnType<typeof serverState>["current"]["Type"]
 // The store retains more history than is displayed. Consumers filter recently closed entries
@@ -38,16 +39,23 @@ export function createServerProjects(input: {
   scope: () => ServerScope
   store: Store<ServerState>
   setStore: SetStoreFunction<ServerState>
+  preferences?: ReturnType<typeof usePreferences>
 }) {
   const setStore = input.setStore
-  const current = () => input.store.projects[input.scope()] ?? []
-  const currentClosed = () => input.store.recentlyClosed?.[input.scope()] ?? []
-  const remove = (directory: string) => {
+  const remote = () =>
+    input.preferences?.canonical() ? input.preferences.profile().data.projects[input.scope()] : undefined
+  const current = () => remote()?.projects ?? input.store.projects[input.scope()] ?? []
+  const currentClosed = () => remote()?.recentlyClosed ?? input.store.recentlyClosed?.[input.scope()] ?? []
+  const removeLocal = (directory: string) => {
     setStore(
       "projects",
       input.scope(),
       current().filter((project) => project.worktree !== directory),
     )
+  }
+  const remove = (directory: string) => {
+    removeLocal(directory)
+    void input.preferences?.mutate({ type: "project.remove", server: input.scope(), directory })
   }
   return {
     list: current,
@@ -66,25 +74,31 @@ export function createServerProjects(input: {
       }
       if (current().some((project) => project.worktree === directory)) return
       setStore("projects", scope, [{ worktree: directory, expanded: true }, ...current()])
+      void input.preferences?.mutate({ type: "project.open", server: scope, directory })
     },
     // User-initiated close: removes the project and records it in recently closed.
     // Internal, non-user removals (e.g. sandbox/worktree normalization) should use remove().
     close(directory: string) {
-      remove(directory)
+      removeLocal(directory)
       const key = pathKey(directory)
       const closed = [directory, ...currentClosed().filter((worktree) => pathKey(worktree) !== key)].slice(
         0,
         RECENTLY_CLOSED_HISTORY_LIMIT,
       )
       setStore("recentlyClosed", input.scope(), closed)
+      void input.preferences?.mutate({ type: "project.close", server: input.scope(), directory })
     },
     expand(directory: string) {
       const index = current().findIndex((project) => project.worktree === directory)
-      if (index !== -1) setStore("projects", input.scope(), index, "expanded", true)
+      if (index === -1) return
+      setStore("projects", input.scope(), index, "expanded", true)
+      void input.preferences?.mutate({ type: "project.expand", server: input.scope(), directory })
     },
     collapse(directory: string) {
       const index = current().findIndex((project) => project.worktree === directory)
-      if (index !== -1) setStore("projects", input.scope(), index, "expanded", false)
+      if (index === -1) return
+      setStore("projects", input.scope(), index, "expanded", false)
+      void input.preferences?.mutate({ type: "project.collapse", server: input.scope(), directory })
     },
     move(directory: string, toIndex: number) {
       const fromIndex = current().findIndex((project) => project.worktree === directory)
@@ -93,12 +107,14 @@ export function createServerProjects(input: {
       const [item] = next.splice(fromIndex, 1)
       next.splice(toIndex, 0, item)
       setStore("projects", input.scope(), next)
+      void input.preferences?.mutate({ type: "project.move", server: input.scope(), directory, toIndex })
     },
     last() {
-      return input.store.lastProject[input.scope()]
+      return remote()?.lastProject ?? input.store.lastProject[input.scope()]
     },
     touch(directory: string) {
       setStore("lastProject", input.scope(), directory)
+      void input.preferences?.mutate({ type: "project.touch", server: input.scope(), directory })
     },
   }
 }
@@ -205,7 +221,8 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
     canonicalLocalServer?: ServerConnection.Key
     servers?: Array<ServerConnection.Any>
   }) => {
-    const [store, setStore, _] = persisted(
+    const preferences = usePreferences()
+    const [store, setStore, raw] = persisted(
       {
         ...Persist.global("server"),
         sync: true,
@@ -214,6 +231,53 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
       serverState(() => props.canonicalLocalServer),
       { list: [], hidden: {}, projects: {}, lastProject: {}, recentlyClosed: {} },
     )
+    preferences.legacy("projects", {
+      raw,
+      read: () => {
+        const servers = new Set([
+          ...Object.keys(store.projects),
+          ...Object.keys(store.recentlyClosed),
+          ...Object.keys(store.lastProject),
+        ])
+        return {
+          projects: Object.fromEntries(
+            [...servers].map((server) => [
+              server,
+              {
+                projects: [...(store.projects[server] ?? [])],
+                recentlyClosed: [...(store.recentlyClosed[server] ?? [])],
+                lastProject: store.lastProject[server],
+              },
+            ]),
+          ),
+        }
+      },
+    })
+    createEffect(() => {
+      if (!preferences.canonical()) return
+      const projects = preferences.profile().data.projects
+      setStore(
+        "projects",
+        Object.fromEntries(
+          Object.entries(projects).map(([server, library]) => [
+            server,
+            library.projects.map((project) => ({ ...project })),
+          ]),
+        ),
+      )
+      setStore(
+        "recentlyClosed",
+        Object.fromEntries(Object.entries(projects).map(([server, library]) => [server, [...library.recentlyClosed]])),
+      )
+      setStore(
+        "lastProject",
+        Object.fromEntries(
+          Object.entries(projects).flatMap(([server, library]) =>
+            library.lastProject === undefined ? [] : [[server, library.lastProject]],
+          ),
+        ),
+      )
+    })
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
       return resolveServerList({ stored: store.list, props: props.servers })
@@ -251,7 +315,7 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
     const projectsForServer = (key: ServerConnection.Key) => {
       const existing = projectStores.get(key)
       if (existing) return existing
-      const next = createServerProjects({ scope: () => scope(key), store, setStore })
+      const next = createServerProjects({ scope: () => scope(key), store, setStore, preferences })
       projectStores.set(key, next)
       return next
     }

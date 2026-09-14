@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createUniqueId, For, mapArray, onCleanup, Show, type JSX } from "solid-js"
 import { Key } from "@solid-primitives/keyed"
 import { createStore } from "solid-js/store"
-import { Schema } from "effect"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
@@ -18,8 +17,6 @@ import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useLayout } from "@/shell/state/layout"
 import { useSettings } from "@/settings/model"
-import { Persist, persisted } from "@/runtime/persistence/storage"
-import { Persistence } from "@/runtime/persistence/schema"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
 import { useCommand } from "@/shell/commands/command"
@@ -34,6 +31,7 @@ import { createSidebarWorktrees, visibleWorktreeSessions } from "./sidebar-workt
 import { createSidebarSelection } from "./sidebar-selection"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
 import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
+import { usePreferences } from "@/preferences/context"
 import {
   attentionGroups,
   orderSidebarProjects,
@@ -48,12 +46,6 @@ import {
   type SidebarSession,
 } from "./sidebar-model"
 
-const SidebarState = Persistence.struct({
-  attention: Schema.Boolean,
-  order: Persistence.array(Schema.String),
-  collapsed: Persistence.record(Schema.Boolean),
-  pins: Persistence.array(Schema.String),
-})
 const RECENT_PAGE_SIZE = 5
 
 export function SessionSidebar(props: {
@@ -73,13 +65,17 @@ export function SessionSidebar(props: {
   )
   const command = useCommand()
   const lifecycle = useSessionLifecycleActions()
+  const preferences = usePreferences()
   const worktreeDelete = useSidebarWorktreeDelete(lifecycle.archiveMany, lifecycle.pending)
-  const [saved, setSaved, , ready] = persisted(Persist.global("sidebar-navigation"), SidebarState, {
-    attention: true,
-    order: [],
-    collapsed: {},
-    pins: [],
-  })
+  const saved = global.sidebar.store
+  const setSaved = global.sidebar.set
+  const ready = global.sidebar.ready
+  const order = () => (preferences.canonical() ? preferences.profile().data.sidebarOrder : saved.order)
+  const pinList = () => (preferences.canonical() ? preferences.profile().data.pinnedSessions : saved.pins)
+  const setOrder = (value: readonly string[]) => {
+    setSaved("order", [...value])
+    void preferences.mutate({ type: "sidebar.order", order: [...value] })
+  }
   const [state, setState] = createStore({
     now: Date.now(),
     limits: {} as Record<string, number>,
@@ -183,7 +179,7 @@ export function SessionSidebar(props: {
       }))
     }),
   )
-  const projects = createMemo(() => orderSidebarProjects(projectGroups(), saved.order))
+  const projects = createMemo(() => orderSidebarProjects(projectGroups(), order()))
   let projectList: HTMLDivElement | undefined
   const projectOrder = createMemo(() => ({
     keys: projects().map((project) => project.key),
@@ -199,13 +195,13 @@ export function SessionSidebar(props: {
     if (!ready()) return
     const missing = projects()
       .map((group) => group.key)
-      .filter((key) => !saved.order.includes(key))
-    if (missing.length) setSaved("order", [...saved.order, ...missing])
+      .filter((key) => !order().includes(key))
+    if (missing.length) setOrder([...order(), ...missing])
   })
-  const pins = createMemo(() => new Set(saved.pins))
+  const pins = createMemo(() => new Set(pinList()))
   // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
-  const pinned = createMemo(() => pinnedSessions(sessions().rows, saved.pins))
-  const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, saved.pins))
+  const pinned = createMemo(() => pinnedSessions(sessions().rows, pinList()))
+  const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, pinList()))
   const recentRows = createMemo(() => recentSessions(sessions().rows.filter((row) => !pins().has(row.key))))
   const recent = createMemo(() => visibleSessions(recentRows(), state.recentLimit, sessions().current))
   const recentMore = () => recentRows().length > recent().length
@@ -271,17 +267,16 @@ export function SessionSidebar(props: {
   }
   const move = (key: string, to: number) => {
     const focused = document.activeElement
-    const order = projects().map((group) => group.key)
-    const from = order.indexOf(key)
-    if (from < 0 || to < 0 || to >= order.length) return
-    order.splice(from, 1)
-    order.splice(to, 0, key)
-    setSaved(
-      "order",
+    const nextOrder = projects().map((group) => group.key)
+    const from = nextOrder.indexOf(key)
+    if (from < 0 || to < 0 || to >= nextOrder.length) return
+    nextOrder.splice(from, 1)
+    nextOrder.splice(to, 0, key)
+    setOrder(
       mergeVisibleTabOrder(
-        saved.order,
+        [...order()],
         projects().map((project) => project.key),
-        order,
+        nextOrder,
       ),
     )
     queueMicrotask(() => {
@@ -326,11 +321,14 @@ export function SessionSidebar(props: {
         onTogglePin={
           ready()
             ? () =>
-                setSaved("pins", (keys) =>
-                  keys.includes(props.item.key)
-                    ? keys.filter((key) => key !== props.item.key)
-                    : [...keys, props.item.key],
-                )
+                (() => {
+                  const pinned = !pins().has(props.item.key)
+                  setSaved(
+                    "pins",
+                    pinned ? [...pinList(), props.item.key] : pinList().filter((key) => key !== props.item.key),
+                  )
+                  void preferences.mutate({ type: "sidebar.pin", session: props.item.key, pinned })
+                })()
             : undefined
         }
         onNavigate={() =>
@@ -678,10 +676,9 @@ export function SessionSidebar(props: {
                       setState("drag", undefined)
                       const source = event.operation.source
                       if (event.canceled || !isSortable(source)) return
-                      setSaved(
-                        "order",
+                      setOrder(
                         mergeVisibleTabOrder(
-                          saved.order,
+                          [...order()],
                           projects().map((project) => project.key),
                           arrayMove(
                             projects().map((project) => project.key),
@@ -735,10 +732,10 @@ export function SessionSidebar(props: {
                                       move(key, index() + (event.key === "ArrowUp" ? -1 : 1))
                                     }}
                                     aria-expanded={!collapsed()}
-                                     onClick={(event) => {
-                                       if (event.detail > 0 && gesture.dragged) return
-                                       setSaved("collapsed", key, !collapsed())
-                                     }}
+                                    onClick={(event) => {
+                                      if (event.detail > 0 && gesture.dragged) return
+                                      setSaved("collapsed", key, !collapsed())
+                                    }}
                                   >
                                     <Icon name="folder" size="small" />
                                     <span dir="auto" class="min-w-0 truncate font-semibold" title={projectLabel(key)}>

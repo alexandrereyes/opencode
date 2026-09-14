@@ -21,6 +21,7 @@ import { SshProvider } from "@/servers/ssh/context"
 import { SshRestore } from "@/servers/ssh/restore"
 import { ErrorPage } from "@/shell/errors/error"
 import { AppRoutes, File, preloadRoute } from "@/shell/routes/routes"
+import { PreferencesProvider } from "@/preferences/context"
 
 export { preloadRoute }
 
@@ -124,16 +125,18 @@ export function AppInterface(props: {
   )
 
   return (
-    <ServersProvider
-      defaultServer={props.defaultServer}
-      canonicalLocalServer={props.canonicalLocalServer}
-      servers={props.servers}
-    >
-      <SettingsProvider>
-        <Dynamic component={props.router ?? Router} root={Root}>
-          <AppRoutes />
-        </Dynamic>
-      </SettingsProvider>
-    </ServersProvider>
+    <PreferencesProvider authority={props.servers?.[0]}>
+      <ServersProvider
+        defaultServer={props.defaultServer}
+        canonicalLocalServer={props.canonicalLocalServer}
+        servers={props.servers}
+      >
+        <SettingsProvider>
+          <Dynamic component={props.router ?? Router} root={Root}>
+            <AppRoutes />
+          </Dynamic>
+        </SettingsProvider>
+      </ServersProvider>
+    </PreferencesProvider>
   )
 }

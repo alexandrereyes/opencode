@@ -19,6 +19,7 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
   const models = useGlobal().models
   const store = models.store
   const setStore = models.set
+  const preferences = models.preferences
 
   const available = createMemo(() =>
     providers.connected().flatMap((p) =>
@@ -90,9 +91,11 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     const index = store.user.findIndex((x) => x.modelID === model.modelID && x.providerID === model.providerID)
     if (index >= 0) {
       setStore("user", index, (current) => ({ ...current, visibility: state }))
+      void preferences.mutate({ type: "model.visibility", ...model, visibility: state })
       return
     }
     setStore("user", store.user.length, { ...model, visibility: state })
+    void preferences.mutate({ type: "model.visibility", ...model, visibility: state })
   }
 
   const visible = (model: ModelKey) => {
@@ -123,9 +126,11 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     const key = variantKey(model)
     if (!store.variant) {
       setStore("variant", { [key]: value ?? "default" })
+      void preferences.mutate({ type: "model.variant", ...model, variant: value ?? "default" })
       return
     }
     setStore("variant", key, value ?? "default")
+    void preferences.mutate({ type: "model.variant", ...model, variant: value ?? "default" })
   }
 
   return {

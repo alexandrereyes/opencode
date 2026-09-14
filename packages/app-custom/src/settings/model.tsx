@@ -2,10 +2,16 @@ import { reconcile, unwrap } from "solid-js/store"
 import { createEffect, createMemo } from "solid-js"
 import { Effect, Option, Schema, SchemaGetter } from "effect"
 import { createSimpleContext } from "@opencode/ui-custom/context"
-import { timelinePresets, type TimelineCategory, type TimelineDetail } from "@opencode/session-ui-custom/timeline/detail"
+import {
+  timelinePresets,
+  type TimelineCategory,
+  type TimelineDetail,
+} from "@opencode/session-ui-custom/timeline/detail"
 import { persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import { ScopedKey, type ServerScope } from "@/runtime/server/scope"
+import { usePreferences } from "@/preferences/context"
+import { preferenceAutoApprove } from "@/preferences/bootstrap"
 
 export type Settings = typeof settingsSchema.Type
 export type WorkspaceDefaultDestination = Settings["workspaces"]["defaultDestination"]
@@ -277,7 +283,28 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   name: "Settings",
   gate: false,
   init: () => {
-    const [store, setStore, , ready] = persisted({ key: "settings.v3" }, settingsPersistence, defaultSettings)
+    const preferences = usePreferences()
+    const [store, setStore, raw, ready] = persisted({ key: "settings.v3" }, settingsPersistence, defaultSettings)
+    preferences.legacy("settings", {
+      raw,
+      read: () => ({
+        settings: {
+          followUpBehavior: store.general.followUpBehavior,
+          autoApprove: store.permissions.autoApprove,
+          autoSave: store.general.autoSave,
+          notifications: { ...store.notifications },
+        },
+      }),
+    })
+    const remote = () => (preferences.canonical() ? preferences.profile().data.settings : undefined)
+    createEffect(() => {
+      const value = remote()
+      if (!value || !preferences.canonical()) return
+      setStore("general", "followUpBehavior", value.followUpBehavior)
+      setStore("general", "autoSave", value.autoSave)
+      setStore("permissions", "autoApprove", value.autoApprove)
+      setStore("notifications", { ...value.notifications })
+    })
     const showFileTree = withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree)
     const showSearch = withFallback(() => store.general?.showSearch, defaultSettings.general.showSearch)
     const showStatus = withFallback(() => store.general?.showStatus, defaultSettings.general.showStatus)
@@ -302,9 +329,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         return store
       },
       general: {
-        autoSave: withFallback(() => store.general?.autoSave, defaultSettings.general.autoSave),
+        autoSave: withFallback(() => remote()?.autoSave ?? store.general?.autoSave, defaultSettings.general.autoSave),
         setAutoSave(value: boolean) {
           setStore("general", "autoSave", value)
+          void preferences.mutate({ type: "settings.autoSave", value })
         },
         releaseNotes: withFallback(() => store.general?.releaseNotes, defaultSettings.general.releaseNotes),
         setReleaseNotes(value: boolean) {
@@ -360,9 +388,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setTerminalPlacement(value: TerminalPlacement) {
           setStore("general", "terminalPlacement", value)
         },
-        followUpBehavior: withFallback(() => store.general?.followUpBehavior, defaultSettings.general.followUpBehavior),
+        followUpBehavior: withFallback(
+          () => remote()?.followUpBehavior ?? store.general?.followUpBehavior,
+          defaultSettings.general.followUpBehavior,
+        ),
         setFollowUpBehavior(value: FollowUpBehavior) {
           setStore("general", "followUpBehavior", value)
+          void preferences.mutate({ type: "settings.followUpBehavior", value })
         },
         experimentalBrowser: withFallback(
           () => store.general?.experimentalBrowser,
@@ -425,9 +457,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       permissions: {
-        autoApprove: withFallback(() => store.permissions?.autoApprove, defaultSettings.permissions.autoApprove),
+        autoApprove: withFallback(
+          () =>
+            preferenceAutoApprove(
+              { phase: preferences.phase(), profile: preferences.profile() },
+              store.permissions.autoApprove,
+            ),
+          defaultSettings.permissions.autoApprove,
+        ),
         setAutoApprove(value: boolean) {
           setStore("permissions", "autoApprove", value)
+          void preferences.mutate({ type: "settings.autoApprove", value })
         },
       },
       workspaces: {
@@ -454,17 +494,29 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       notifications: {
-        agent: withFallback(() => store.notifications?.agent, defaultSettings.notifications.agent),
+        agent: withFallback(
+          () => remote()?.notifications.agent ?? store.notifications?.agent,
+          defaultSettings.notifications.agent,
+        ),
         setAgent(value: boolean) {
           setStore("notifications", "agent", value)
+          void preferences.mutate({ type: "settings.notification", notification: "agent", value })
         },
-        permissions: withFallback(() => store.notifications?.permissions, defaultSettings.notifications.permissions),
+        permissions: withFallback(
+          () => remote()?.notifications.permissions ?? store.notifications?.permissions,
+          defaultSettings.notifications.permissions,
+        ),
         setPermissions(value: boolean) {
           setStore("notifications", "permissions", value)
+          void preferences.mutate({ type: "settings.notification", notification: "permissions", value })
         },
-        errors: withFallback(() => store.notifications?.errors, defaultSettings.notifications.errors),
+        errors: withFallback(
+          () => remote()?.notifications.errors ?? store.notifications?.errors,
+          defaultSettings.notifications.errors,
+        ),
         setErrors(value: boolean) {
           setStore("notifications", "errors", value)
+          void preferences.mutate({ type: "settings.notification", notification: "errors", value })
         },
       },
       sounds: {
