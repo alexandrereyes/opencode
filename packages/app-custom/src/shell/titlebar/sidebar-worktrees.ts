@@ -37,7 +37,7 @@ export function sidebarWorktrees(
   >()
   // Canonical placement is already authoritative before inventory discovery completes.
   // A linked worktree named main remains a subgroup; only directory identity matters.
-  const inventory = project.metadata?.vcs === "git" ? (metadata.inventory ?? []) : []
+  const inventory = project.metadata?.vcs && project.metadata.vcs !== "git" ? [] : (metadata.inventory ?? [])
   inventory
     .filter((item) => !sameDirectory(item.directory, project.directory))
     .forEach((item) => {
@@ -145,21 +145,20 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
   }
   const group = (project: Project, rows: SidebarSession[]) =>
     sidebarWorktrees(project, rows, {
-      inventory:
-        project.metadata?.vcs === "git"
-          ? state.loaded[project.key]
-            ? project.metadata.worktrees
-            : ctx.sync.worktrees.cached(project.directory)
-          : undefined,
-      location: (directory) => (project.metadata?.vcs === "git" ? ctx.data.location.info({ directory }) : undefined),
-      branch: (directory) =>
-        project.metadata?.vcs === "git" ? ctx.data.location.vcs.info({ directory })?.branch.current : undefined,
+      inventory: ctx.sync.worktrees.cached(project.directory) ?? project.metadata?.worktrees,
+      location: (directory) => ctx.data.location.info({ directory }),
+      branch: (directory) => ctx.data.location.vcs.info({ directory })?.branch.current,
     })
   return {
     group,
     async load(demand: () => { project: Project; rows: SidebarSession[] } | undefined) {
       const initial = demand()
-      if (!initial || initial.project.metadata?.vcs !== "git" || ctx.sdk.connection.status() !== "connected") return
+      if (
+        !initial ||
+        (initial.project.metadata?.vcs && initial.project.metadata.vcs !== "git") ||
+        ctx.sdk.connection.status() !== "connected"
+      )
+        return
       const project = initial.project
       await once(`inventory:${project.key}`, async () => {
         const inventory = await ctx.sync.worktrees.load(project.directory)

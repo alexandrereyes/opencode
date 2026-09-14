@@ -178,5 +178,24 @@ test("visible order uses subgroup caps; subgroup collapse hides rows and project
 test("non-git directories preserve existing grouping", () => {
   const rows = [row("note", "/notes", "global")]
   const project = sidebarProjects(server, [{ worktree: "/notes" }], rows)[0]
-  expect(sidebarWorktrees(project, rows, metadata)).toEqual({ root: rows, groups: [] })
+  expect(sidebarWorktrees(project, rows, { ...metadata, inventory: [{ directory: "/notes" }] })).toEqual({
+    root: rows,
+    groups: [],
+  })
+})
+
+test("inventory discovers worktrees before an opened checkout has project metadata", () => {
+  const root = row("root", "/repo-linked")
+  const project = sidebarProjects(server, [{ worktree: "/repo-linked" }], [root])[0]
+  root.project = project.key
+  const group = sidebarWorktrees(project, [root], {
+    inventory: [{ directory: "/repo" }, { directory: "/repo-linked" }, { directory: "/trees/idle" }],
+    location: () => undefined,
+    branch: (directory) => (directory === "/trees/idle" ? "idle" : undefined),
+  })
+  expect(group.root.map((item) => item.session.id)).toEqual(["root"])
+  expect(group.groups.map((item) => ({ directory: item.directory, name: item.name, rows: item.rows.length }))).toEqual([
+    { directory: "/repo", name: "repo", rows: 0 },
+    { directory: "/trees/idle", name: "idle", rows: 0 },
+  ])
 })
