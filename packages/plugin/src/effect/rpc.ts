@@ -6,10 +6,6 @@ import type { Registration } from "./registration.js"
 
 export interface RpcCallContext<M extends Rpc.Method> {
   readonly error: Rpc.ErrorFactory<M>
-  /** Runs after a successful HTTP response is flushed. Absent for in-process calls.
-   * This is not an acknowledgement from the client. Callbacks must not throw.
-   */
-  readonly afterResponse?: (callback: () => void) => void
 }
 
 export type RpcHandlers<D extends Rpc.Definition> = {

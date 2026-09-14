@@ -529,7 +529,7 @@ export const SettingsGeneral: Component<{
           </SettingsList>
         </section>
 
-        <Show when={desktop() || platform.updater}>
+        <Show when={desktop()}>
           <UpdatesSection />
         </Show>
 

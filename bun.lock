@@ -623,10 +623,8 @@
       "name": "@opencode/plugin-app-custom",
       "version": "2.0.0",
       "dependencies": {
-        "@opencode/client": "workspace:*",
         "@opencode/plugin": "workspace:*",
         "@opencode/schema": "workspace:*",
-        "@opencode/util": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

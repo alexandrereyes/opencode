@@ -30,7 +30,6 @@ const compiledEndpoints = new WeakMap<object, CompiledEndpoint>()
 const JsonInput = Schema.fromJsonString(Schema.Unknown)
 
 interface HostRpcCallContext {
-  readonly afterResponse?: (callback: () => void) => void
   readonly error: (type: string, message: string, data?: unknown) => unknown
 }
 
@@ -136,7 +135,6 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
                     input,
                     {
                       signal,
-                      afterResponse: context.afterResponse,
                       error: (type: string, message: string, data?: unknown) =>
                         new ReturnedRpcError(type, message, data),
                     },

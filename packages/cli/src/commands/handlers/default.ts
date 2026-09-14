@@ -11,7 +11,6 @@ import { UpdatePreflight } from "../../services/update-preflight"
 import { Npm } from "@opencode/util/npm"
 import { OPENCODE_ARTIFACT, OPENCODE_CHANNEL, OPENCODE_VERSION } from "../../version"
 import { Env } from "../../env"
-import { loadTuiUpdater } from "../../services/tui-updater"
 
 export default Runtime.handler(Commands, (input) =>
   Effect.gen(function* () {
@@ -48,11 +47,7 @@ export default Runtime.handler(Commands, (input) =>
       ),
     )
     const updater = yield* Updater.Service
-    const adapterPath = process.env.OPENCODE_TUI_UPDATER
-    const adapter = adapterPath
-      ? yield* Effect.tryPromise(() => loadTuiUpdater(adapterPath, server.endpoint))
-      : undefined
-    const update = yield* (adapter ? Effect.succeed(undefined) : updater.run()).pipe(Effect.forkScoped)
+    const update = yield* updater.run().pipe(Effect.forkScoped)
     preflight.loading()
     const config = yield* Config.Service
     const npm = yield* Npm.Service
@@ -88,7 +83,7 @@ export default Runtime.handler(Commands, (input) =>
         get: () => runPromise(config.get()),
         update: (update) => runPromise(config.update(update)),
       },
-      updater: adapter ?? {
+      updater: {
         remote: requestedServer !== undefined,
         subscribe: (notify, signal) =>
           runPromise(
