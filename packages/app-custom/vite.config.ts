@@ -33,15 +33,6 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     port: 3000,
-    proxy: process.env.VITE_OPENCODE_SERVER_PROXY
-      ? {
-          "/api": {
-            target: process.env.VITE_OPENCODE_SERVER_PROXY,
-            changeOrigin: true,
-            headers: { origin: process.env.VITE_OPENCODE_SERVER_PROXY },
-          },
-        }
-      : undefined,
   },
   build: {
     assetsDir: "_assets",
