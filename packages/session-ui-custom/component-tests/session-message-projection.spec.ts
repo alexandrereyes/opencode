@@ -52,10 +52,16 @@ story("renders aliased and long custom model notices", async ({ mount, page }) =
 })
 
 // Moved from packages/app/e2e/regression/session-timeline-projection.spec.ts
-story("renders user image, file attachment, file reference, and agent reference", async ({ mount }) => {
-  const timeline = await mount("current-session-timeline-rows--conversation", { args: { scenario: "attachments" } })
-  await expect(timeline.getByAltText("pixel.png")).toBeVisible()
-  await expect(timeline.getByText("tsconfig.json")).toBeVisible()
-  await expect(timeline.getByText("@src/a.ts", { exact: true })).toBeVisible()
-  await expect(timeline.getByText("@explore", { exact: true })).toBeVisible()
-})
+for (const width of [390, 1280]) {
+  story(`renders referenced user image and opens its preview at ${width}px`, async ({ mount, page }) => {
+    await page.setViewportSize({ width, height: 700 })
+    const timeline = await mount("current-session-timeline-rows--conversation", { args: { scenario: "attachments" } })
+    const image = timeline.getByRole("button", { name: "pixel.png" })
+    await expect(image).toBeVisible()
+    await expect(timeline.getByText("tsconfig.json")).toBeVisible()
+    await expect(timeline.getByText("@src/a.ts", { exact: true })).toBeVisible()
+    await expect(timeline.getByText("@explore", { exact: true })).toBeVisible()
+    await image.click()
+    await expect(page.getByRole("dialog").getByAltText("pixel.png")).toBeVisible()
+  })
+}

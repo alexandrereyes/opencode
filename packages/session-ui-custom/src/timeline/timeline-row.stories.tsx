@@ -549,7 +549,7 @@ const RichUserAttachments = {
           {
             id: "msg_story_rich_user",
             type: "user",
-            text: "Use @explore with @src/a.ts and inspect the attachments",
+            text: "Use @explore with @src/a.ts and inspect [pixel.png]",
             agents: [{ name: "explore", mention: { text: "@explore", start: 4, end: 12 } }],
             files: [
               {
@@ -557,6 +557,7 @@ const RichUserAttachments = {
                 mime: "image/png",
                 name: "pixel.png",
                 source: { type: "inline" },
+                mention: { text: "[pixel.png]", start: 40, end: 51 },
               },
               { data: "e30=", mime: "application/json", name: "tsconfig.json", source: { type: "inline" } },
               {

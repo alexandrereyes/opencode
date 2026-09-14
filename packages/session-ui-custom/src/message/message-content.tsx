@@ -221,7 +221,9 @@ export function CurrentUserMessageDisplay(props: {
   const dialog = useDialog()
   const i18n = useI18n()
   const [state, setState] = createStore({ copied: false, reverting: false })
-  const attachments = createMemo(() => (props.message.files ?? []).filter((file) => !file.mention))
+  const attachments = createMemo(() =>
+    (props.message.files ?? []).filter((file) => !file.mention || file.mime.startsWith("image/")),
+  )
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
   const comments = createMemo(() => props.comments ?? [])
@@ -263,14 +265,16 @@ export function CurrentUserMessageDisplay(props: {
               <Show
                 when={!image()}
                 fallback={
-                  <div
+                  <button
+                    type="button"
                     data-slot="user-message-attachment"
                     data-type="image"
                     data-clickable="true"
+                    aria-label={name()}
                     onClick={() => dialog.show(() => <ImagePreview src={url()} alt={name()} />)}
                   >
                     <img data-slot="user-message-attachment-image" src={url()} alt={name()} />
-                  </div>
+                  </button>
                 }
               >
                 <AttachmentCard

@@ -62,7 +62,13 @@
       position: relative;
       width: 58px;
       height: 46px;
+      padding: 0;
       border: none;
+
+      &:focus-visible {
+        outline: 2px solid var(--v2-border-border-focus);
+        outline-offset: 2px;
+      }
 
       /* inset box-shadows do not paint over <img> content, so the hairline is an overlay */
       &::after {
