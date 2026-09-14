@@ -31,8 +31,10 @@ export function subscriptionAccounts(accounts: readonly Subscriptions.Account[],
       return 0
     return 1
   }
+  const planRank = (account: Account) =>
+    account.plan === "pro" ? 0 : account.plan === "prolite" ? 1 : account.plan === "plus" ? 2 : 3
   // Preserve source order among equally ranked accounts.
-  return accounts.toSorted((a, b) => rank(a) - rank(b))
+  return accounts.toSorted((a, b) => planRank(a) - planRank(b) || rank(a) - rank(b))
 }
 
 export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now()) {

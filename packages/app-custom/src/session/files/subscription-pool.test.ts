@@ -128,7 +128,7 @@ test("rounds remaining once and derives used as its complement", () => {
   expect(subscriptionPercentages(59.5)).toEqual({ remaining: 60, used: 40 })
 })
 
-test("orders available inference accounts before unavailable and unsupported accounts without dropping accounts", () => {
+test("orders Pro 20x, Pro 5x, then Plus with available accounts first within each plan", () => {
   const accounts = [
     { ...account, id: "other", plan: "team" },
     { ...account, id: "plus", plan: "plus" },
@@ -142,14 +142,14 @@ test("orders available inference accounts before unavailable and unsupported acc
   ]
 
   expect(subscriptionAccounts(accounts).map((item) => item.id)).toEqual([
-    "plus",
-    "prolite",
     "available",
     "available-second",
     "stale",
     "cooldown",
     "unknown",
     "exhausted",
+    "prolite",
+    "plus",
     "other",
   ])
   expect(accounts.map((item) => item.id)).toEqual([

@@ -27,6 +27,7 @@ import { TitlebarTabStrip } from "./tab-strip"
 import { createSidebarIndex } from "./sidebar-index"
 import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
+import { SidebarSubscriptions } from "./sidebar-subscriptions"
 import { createSidebarWorktrees, visibleWorktreeSessions } from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
@@ -925,6 +926,7 @@ export function SessionSidebar(props: {
           </Show>
         </Show>
       </nav>
+      <SidebarSubscriptions currentTab={props.currentTab} />
     </>
   )
 }
