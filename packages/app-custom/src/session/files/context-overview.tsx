@@ -502,7 +502,6 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                   </div>
                 </summary>
                 <div class="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-weak-base pt-2">
-                  <p class="text-12-regular text-v2-text-text-muted">{language.t("context.overview.weekly")}</p>
                   <For each={accounts()}>
                     {(account) => {
                       const capacity = () => subscriptionCapacity(account, state.now)
@@ -530,6 +529,11 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                   })}
                             </bdi>
                           </div>
+                          <p class="text-12-regular text-v2-text-text-muted">
+                            {account.resetAt
+                              ? language.t("context.overview.weeklyReset", { time: resetTime(account.resetAt) })
+                              : language.t("context.overview.weekly")}
+                          </p>
                           <Meter
                             value={account.remaining}
                             remaining
@@ -576,21 +580,26 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                           </div>
                           <Show when={account.resetAt}>
                             {(reset) => (
-                              <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
-                                <time dir="auto" dateTime={reset()}>
-                                  {new Intl.DateTimeFormat(language.intl(), {
-                                    dateStyle: "medium",
-                                    timeStyle: "short",
-                                  }).format(new Date(reset()))}
-                                </time>
-                                <span>{resetTime(reset())}</span>
-                              </div>
+                              <time
+                                class="text-12-regular text-v2-text-text-muted tabular-nums"
+                                dir="auto"
+                                dateTime={reset()}
+                              >
+                                {new Intl.DateTimeFormat(language.intl(), {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                }).format(new Date(reset()))}
+                              </time>
                             )}
                           </Show>
                           <Show when={account.fiveHourRemaining !== null || account.fiveHourResetAt !== null}>
                             <div class="mt-1 flex flex-col gap-1.5">
                               <p class="text-12-regular text-v2-text-text-muted">
-                                {language.t("context.overview.fiveHour")}
+                                {account.fiveHourResetAt
+                                  ? language.t("context.overview.fiveHourReset", {
+                                      time: resetTime(account.fiveHourResetAt),
+                                    })
+                                  : language.t("context.overview.fiveHour")}
                               </p>
                               <Meter
                                 value={account.fiveHourRemaining}
@@ -599,15 +608,16 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                               />
                               <Show when={account.fiveHourResetAt}>
                                 {(reset) => (
-                                  <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
-                                    <time dir="auto" dateTime={reset()}>
-                                      {new Intl.DateTimeFormat(language.intl(), {
-                                        dateStyle: "medium",
-                                        timeStyle: "short",
-                                      }).format(new Date(reset()))}
-                                    </time>
-                                    <span>{resetTime(reset())}</span>
-                                  </div>
+                                  <time
+                                    class="text-12-regular text-v2-text-text-muted tabular-nums"
+                                    dir="auto"
+                                    dateTime={reset()}
+                                  >
+                                    {new Intl.DateTimeFormat(language.intl(), {
+                                      dateStyle: "medium",
+                                      timeStyle: "short",
+                                    }).format(new Date(reset()))}
+                                  </time>
                                 )}
                               </Show>
                             </div>
