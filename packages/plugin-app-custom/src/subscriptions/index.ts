@@ -17,6 +17,8 @@ const Status = Schema.Struct({
       }),
       usage: Schema.NullOr(
         Schema.Struct({
+          fiveHourPercent: Schema.optional(Schema.NullOr(Schema.Finite)),
+          fiveHourResetAt: Schema.optional(Schema.NullOr(Schema.String)),
           weeklyPercent: Schema.NullOr(Schema.Finite),
           weeklyResetAt: Schema.NullOr(Schema.String),
           observedAt: Schema.String,
@@ -62,6 +64,9 @@ export const read = Effect.fn("Subscriptions.read")(function* () {
         authenticated: item.account.authenticationState === "Authenticated",
         cooldownSeconds: item.cooldownSeconds,
         bankedResets: item.bankedResets ?? null,
+        fiveHourRemaining:
+          item.usage?.fiveHourPercent == null ? null : Math.max(0, Math.min(100, 100 - item.usage.fiveHourPercent)),
+        fiveHourResetAt: item.usage?.fiveHourResetAt ?? null,
         remaining:
           item.usage?.weeklyPercent == null ? null : Math.max(0, Math.min(100, 100 - item.usage.weeklyPercent)),
         resetAt: item.usage?.weeklyResetAt ?? null,

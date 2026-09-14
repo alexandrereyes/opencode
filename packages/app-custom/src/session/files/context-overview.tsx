@@ -442,28 +442,22 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                       {pool().total === 0
                         ? language.t("context.overview.noPool")
                         : pool().balance === "unknown"
-                          ? language.t("context.overview.unknownWeekly")
+                          ? language.t("context.overview.capacityUnconfirmed")
                           : pool().balance === "unavailable"
                             ? language.t("context.overview.noAvailableBalance")
-                            : language.t("context.overview.availablePoolRemaining", {
-                                percent: new Intl.NumberFormat(language.intl(), {
-                                  style: "percent",
-                                  maximumFractionDigits: 0,
-                                }).format((pool().availableRemaining ?? 0) / 100),
+                            : language.t("context.overview.availablePoolCapacity", {
+                                ready: pool().ready,
+                                total: pool().total,
                               })}
                     </span>
                   </div>
                   <Meter
-                    value={pool().availableRemaining}
-                    remaining
+                    value={pool().availablePercent}
                     label={language.t("context.overview.availablePool")}
                   />
                   <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
                     <span>
-                      {language.t("context.overview.availablePoolCapacity", {
-                        ready: pool().ready,
-                        total: pool().total,
-                      })}
+                      {language.t("context.overview.poolPlans")}
                     </span>
                     <span>{updated()}</span>
                   </div>
@@ -536,13 +530,22 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                   })}
                             </bdi>
                           </div>
-                          <Meter value={account.remaining} remaining label={account.name} />
+                          <Meter
+                            value={account.remaining}
+                            remaining
+                            label={language.t("context.overview.weeklyAccount", { account: account.name })}
+                          />
                           <div class="flex flex-wrap gap-1.5 text-12-regular text-v2-text-text-muted">
                             <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
                               {account.plan
                                 ? language.t("context.overview.plan", {
-                                    plan:
-                                      account.plan === "pro" ? "Pro" : account.plan === "plus" ? "Plus" : account.plan,
+                                    plan: account.plan === "pro"
+                                        ? "Pro 20x"
+                                        : account.plan === "prolite"
+                                          ? "Pro 5x"
+                                          : account.plan === "plus"
+                                            ? "Plus"
+                                            : account.plan,
                                   })
                                 : language.t("context.overview.planUnknown")}
                             </span>
@@ -554,6 +557,11 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                     account.bankedResets.available,
                                   )}
                             </span>
+                            <Show when={account.plan === "plus" || account.plan === "prolite"}>
+                              <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
+                                {language.t("context.overview.resetProOnly")}
+                              </span>
+                            </Show>
                             <span class="rounded-full bg-surface-raised-base px-2 py-0.5">
                               {language.t(
                                 capacity() === "outside"
@@ -579,6 +587,31 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                               </div>
                             )}
                           </Show>
+                          <Show when={account.fiveHourRemaining !== null || account.fiveHourResetAt !== null}>
+                            <div class="mt-1 flex flex-col gap-1.5">
+                              <p class="text-12-regular text-v2-text-text-muted">
+                                {language.t("context.overview.fiveHour")}
+                              </p>
+                              <Meter
+                                value={account.fiveHourRemaining}
+                                remaining
+                                label={language.t("context.overview.fiveHourAccount", { account: account.name })}
+                              />
+                              <Show when={account.fiveHourResetAt}>
+                                {(reset) => (
+                                  <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
+                                    <time dir="auto" dateTime={reset()}>
+                                      {new Intl.DateTimeFormat(language.intl(), {
+                                        dateStyle: "medium",
+                                        timeStyle: "short",
+                                      }).format(new Date(reset()))}
+                                    </time>
+                                    <span>{resetTime(reset())}</span>
+                                  </div>
+                                )}
+                              </Show>
+                            </div>
+                          </Show>
                           <p class="text-12-regular text-v2-text-text-muted">
                             {language.t(
                               !account.enabled
@@ -589,10 +622,10 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                                     ? "context.overview.cooldown"
                                     : account.stale || capacity() === "unconfirmed"
                                       ? "context.overview.capacityUnconfirmed"
-                                      : account.hasCapacity === false
-                                        ? "context.overview.noCapacity"
-                                        : account.plan !== "pro"
-                                          ? "context.overview.outsidePool"
+                                      : capacity() === "outside"
+                                        ? "context.overview.outsidePool"
+                                        : account.hasCapacity === false
+                                          ? "context.overview.noCapacity"
                                           : "context.overview.available",
                             )}
                           </p>
