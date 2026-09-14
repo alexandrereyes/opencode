@@ -337,6 +337,66 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           </Show>
         </Show>
       </Section>
+      <Section title={language.t("context.overview.background")} count={background.tasks().length}>
+        <Show
+          when={background.tasks().length}
+          fallback={<p class="text-v2-text-text-muted">{language.t("context.overview.noBackground")}</p>}
+        >
+          <ul class="flex min-w-0 flex-col gap-1" aria-label={language.t("context.overview.background")}>
+            <For each={background.tasks()}>
+              {(task) => (
+                <li class="min-w-0">
+                  <button
+                    type="button"
+                    class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-start hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                    onClick={() =>
+                      dialog.show(() => (
+                        <Dialog>
+                          <DialogHeader>
+                            <DialogTitle>{language.t("context.overview.backgroundTask")}</DialogTitle>
+                          </DialogHeader>
+                          <DialogBody>
+                            <div class="flex min-h-0 flex-col gap-3 px-4 pb-4">
+                              <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words text-13-regular text-text-strong [overflow-wrap:anywhere]">
+                                {task.label}
+                              </pre>
+                              <Show when={task.type === "subagent"}>
+                                <A
+                                  class="text-13-medium text-text-strong underline"
+                                  href={sessionHref(server.key, task.id)}
+                                  onClick={() => dialog.close()}
+                                >
+                                  {language.t("context.overview.openSubagent")}
+                                </A>
+                              </Show>
+                            </div>
+                          </DialogBody>
+                        </Dialog>
+                      ))
+                    }
+                  >
+                    <Icon
+                      name={task.type === "shell" ? "console" : "subagent"}
+                      size="small"
+                      class="mt-0.5 shrink-0 text-v2-text-text-muted"
+                    />
+                    <span class="min-w-0 flex-1 truncate">
+                      <TextShimmer
+                        text={task.label.replace(/\s+/g, " ").trim()}
+                        active
+                        class="max-w-full [&_[data-slot=text-shimmer-char]]:min-w-0 [&_[data-slot=text-shimmer-char-base]]:truncate [&_[data-slot=text-shimmer-char-shimmer]]:truncate"
+                      />
+                    </span>
+                    <span class="shrink-0 text-12-regular text-v2-text-text-muted">
+                      {language.t(task.type === "shell" ? "ui.tool.shell" : "ui.tool.agent.default")}
+                    </span>
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </Section>
       <section class="flex min-w-0 flex-col gap-2 border-b border-border-weak-base pb-3">
         <div class="flex min-h-8 items-center justify-between gap-2">
           <h2 class="text-14-medium text-text-strong">{language.t("context.overview.subscriptions")}</h2>
@@ -546,66 +606,6 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
           </Show>
         </Show>
       </section>
-      <Section title={language.t("context.overview.background")} count={background.tasks().length}>
-        <Show
-          when={background.tasks().length}
-          fallback={<p class="text-v2-text-text-muted">{language.t("context.overview.noBackground")}</p>}
-        >
-          <ul class="flex min-w-0 flex-col gap-1" aria-label={language.t("context.overview.background")}>
-            <For each={background.tasks()}>
-              {(task) => (
-                <li class="min-w-0">
-                  <button
-                    type="button"
-                    class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-start hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
-                    onClick={() =>
-                      dialog.show(() => (
-                        <Dialog>
-                          <DialogHeader>
-                            <DialogTitle>{language.t("context.overview.backgroundTask")}</DialogTitle>
-                          </DialogHeader>
-                          <DialogBody>
-                            <div class="flex min-h-0 flex-col gap-3 px-4 pb-4">
-                              <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words text-13-regular text-text-strong [overflow-wrap:anywhere]">
-                                {task.label}
-                              </pre>
-                              <Show when={task.type === "subagent"}>
-                                <A
-                                  class="text-13-medium text-text-strong underline"
-                                  href={sessionHref(server.key, task.id)}
-                                  onClick={() => dialog.close()}
-                                >
-                                  {language.t("context.overview.openSubagent")}
-                                </A>
-                              </Show>
-                            </div>
-                          </DialogBody>
-                        </Dialog>
-                      ))
-                    }
-                  >
-                    <Icon
-                      name={task.type === "shell" ? "console" : "subagent"}
-                      size="small"
-                      class="mt-0.5 shrink-0 text-v2-text-text-muted"
-                    />
-                    <span class="min-w-0 flex-1 truncate">
-                      <TextShimmer
-                        text={task.label.replace(/\s+/g, " ").trim()}
-                        active
-                        class="max-w-full [&_[data-slot=text-shimmer-char]]:min-w-0 [&_[data-slot=text-shimmer-char-base]]:truncate [&_[data-slot=text-shimmer-char-shimmer]]:truncate"
-                      />
-                    </span>
-                    <span class="shrink-0 text-12-regular text-v2-text-text-muted">
-                      {language.t(task.type === "shell" ? "ui.tool.shell" : "ui.tool.agent.default")}
-                    </span>
-                  </button>
-                </li>
-              )}
-            </For>
-          </ul>
-        </Show>
-      </Section>
       <Section
         title={language.t("status.popover.tab.mcp")}
         count={mcp() ? `${mcp()?.filter((item) => item.status.status === "connected").length}/${mcp()?.length}` : "—"}
