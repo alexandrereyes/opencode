@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
-import { chmod, mkdir, mkdtemp, readlink, realpath, rm, stat } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readlink, realpath, rename, rm, stat } from "node:fs/promises"
 import { migrate } from "../script/custom-migrate"
 import os from "node:os"
 import path from "node:path"
@@ -16,6 +16,8 @@ import {
   point,
   pointer,
   prune,
+  publish,
+  seal,
   scripts,
   settings,
 } from "../script/custom-release"
@@ -25,7 +27,12 @@ const second = "b".repeat(40)
 const homes: string[] = []
 
 afterEach(async () => {
-  await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })))
+  await Promise.all(
+    homes.splice(0).map(async (home) => {
+      await command(["chmod", "-R", "u+w", home])
+      await rm(home, { recursive: true, force: true })
+    }),
+  )
 })
 
 async function fixture() {
@@ -74,6 +81,41 @@ test("hash verification rejects an edited artifact before any lifecycle operatio
   await Bun.write(`${home}/releases/${second}/plugin/index.js`, "tampered")
   await expect(manifest(home, second)).rejects.toThrow("integrity check failed")
   await expect(activate(home, second, { dryRun: true })).rejects.toThrow("integrity check failed")
+})
+
+test("publication renames writable staging before making the entire release read-only", async () => {
+  const home = await fixture()
+  await mkdir(`${home}/builds`)
+  const staging = `${home}/builds/release`
+  await rename(`${home}/releases/${second}`, staging)
+  await seal(staging, second)
+  expect((await stat(staging)).mode & 0o200).toBe(0o200)
+  await publish(home, second, staging)
+  const release = await manifest(home, second)
+  for (const name of ["", "bin", "plugin", "manual-release.json", ...artifacts])
+    expect((await stat(path.join(release.directory, name))).mode & 0o222).toBe(0)
+  expect(await pointer(home, "prepared")).toBe(second)
+  expect(await Bun.file(`${staging}/manual-release.json`).exists()).toBe(false)
+})
+
+test("publication recovers writable releases without resealing modified artifacts", async () => {
+  const home = await fixture()
+  await point(home, "prepared", first)
+  const directory = `${home}/releases/${second}`
+  const original = await Bun.file(`${directory}/manual-release.json`).text()
+  expect((await stat(directory)).mode & 0o200).toBe(0o200)
+  await Bun.write(`${directory}/plugin/index.js`, "tampered")
+  await expect(publish(home, second)).rejects.toThrow("integrity check failed")
+  expect(await pointer(home, "prepared")).toBe(first)
+  expect(await Bun.file(`${directory}/manual-release.json`).text()).toBe(original)
+  expect((await stat(directory)).mode & 0o200).toBe(0o200)
+  await Bun.write(`${directory}/plugin/index.js`, "fixture")
+  await publish(home, second)
+  await publish(home, second)
+  expect((await stat(directory)).mode & 0o222).toBe(0)
+  expect((await manifest(home, second)).commit).toBe(second)
+  expect(await Bun.file(`${directory}/manual-release.json`).text()).toBe(original)
+  expect(await pointer(home, "prepared")).toBe(second)
 })
 
 test("manual pruning protects pointers and dry-run leaves all artifacts intact", async () => {

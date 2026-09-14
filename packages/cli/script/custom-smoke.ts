@@ -3,7 +3,7 @@
 import { chmod, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { artifacts, command, manifest, seal } from "./custom-release"
+import { artifacts, command, publish, seal } from "./custom-release"
 
 const binary = process.argv[2]
 if (!binary || !path.isAbsolute(binary))
@@ -50,7 +50,7 @@ await command(
 )
 await Bun.write(`${release}/server-config.json`, JSON.stringify({ update: "disable", plugins: [`${release}/plugin`] }))
 await seal(release, commit)
-await manifest(work, commit)
+await publish(work, commit)
 const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
 const port = listener.port
 listener.stop(true)

@@ -30,7 +30,14 @@ Each `releases/<sha>` contains:
 - `server-config.json`: update disabled and the absolute release-owned plugin path;
 - `manual-release.json`: format 2, commit, version, platform, architecture and SHA-256 artifact hashes.
 
-Published directories are read-only and are never rebuilt in place. Source and installed
+Published directories are read-only and are never rebuilt in place.
+Staging remains writable until its atomic rename; read-only permissions are applied
+at the published destination before selecting `prepared`. If preparation is interrupted
+after rename, the next run verifies the existing hashes, normalizes permissions and
+verifies again before selecting it. Corrupt artifacts are rejected without resealing.
+Failed build directories are not reused or moved by subsequent preparations.
+
+Source and installed
 dependencies exist only under `builds/prepare-*` while building and are removed after
 successful publication. Neither source nor node_modules ships in a release. Artifact
 hashes are verified before activation and reuse. Failed build directories are retained

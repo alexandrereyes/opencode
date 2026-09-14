@@ -93,7 +93,17 @@ export async function seal(directory: string, commit: string) {
       2,
     ),
   )
-  await command(["chmod", "-R", "a-w", directory])
+}
+
+export async function publish(home: string, commit: string, staging?: string) {
+  // macOS requires the staging directory to remain writable during rename.
+  if (staging) await rename(staging, path.join(home, "releases", commit))
+  const release = await manifest(home, commit)
+  // Also completes publication after a crash between rename and chmod. Never
+  // regenerate hashes here: a modified release must fail before normalization.
+  await command(["chmod", "-R", "a-w", release.directory])
+  await manifest(home, commit)
+  await point(home, "prepared", commit)
 }
 
 export async function prepare(home: string, dryRun = false) {
@@ -109,8 +119,7 @@ export async function prepare(home: string, dryRun = false) {
     return commit
   }
   if (await Bun.file(path.join(home, "releases", commit, "manual-release.json")).exists()) {
-    await manifest(home, commit)
-    await point(home, "prepared", commit)
+    await publish(home, commit)
     return commit
   }
   await mkdir(path.join(home, "releases"), { recursive: true })
@@ -177,10 +186,8 @@ export async function prepare(home: string, dryRun = false) {
     JSON.stringify({ update: "disable", plugins: [path.join(home, "releases", commit, "plugin")] }),
   )
   await seal(staging, commit)
-  await rename(staging, path.join(home, "releases", commit))
+  await publish(home, commit, staging)
   await rm(work, { recursive: true, force: true })
-  await manifest(home, commit)
-  await point(home, "prepared", commit)
   console.log(`Prepared ${commit}`)
   return commit
 }
