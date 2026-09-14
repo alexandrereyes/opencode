@@ -16,7 +16,12 @@ import { optional, statics } from "./schema.js"
 export interface Interface {
   readonly register: RpcDomain["register"]
   readonly client: <D extends Rpc.Definition>(definition: D) => RpcClient<D, Rpc.SystemError, never, unknown>
-  readonly call: (rpcID: string, method: string, input: unknown) => Effect.Effect<unknown, Rpc.Failure>
+  readonly call: (
+    rpcID: string,
+    method: string,
+    input: unknown,
+    transport?: { readonly afterResponse: (callback: () => void) => void },
+  ) => Effect.Effect<unknown, Rpc.Failure>
   readonly close: Effect.Effect<void>
 }
 
@@ -105,7 +110,12 @@ const layer = Layer.effect(
       }
     })
 
-    const call = Effect.fn("Rpc.call")(function* (rpcID: string, name: string, input: unknown) {
+    const call = Effect.fn("Rpc.call")(function* (
+      rpcID: string,
+      name: string,
+      input: unknown,
+      transport?: { readonly afterResponse: (callback: () => void) => void },
+    ) {
       if (yield* Deferred.isDone(closed))
         return yield* Effect.fail(failure("rpc.unavailable", `RPC is unavailable: ${rpcID}`))
       const entry = registrations.get(rpcID)?.at(-1)
@@ -119,7 +129,10 @@ const layer = Layer.effect(
       )
       const result = yield* Effect.suspend(() => {
         // The heterogeneous registry erases handlers after their selected schema validates input.
-        const execution: Effect.Effect<unknown, unknown> = Reflect.apply(handler, undefined, [parsed, callContext])
+        const execution: Effect.Effect<unknown, unknown> = Reflect.apply(handler, undefined, [
+          parsed,
+          { ...callContext, ...transport },
+        ])
         return execution
       }).pipe(
         Effect.catch((error) => encodeError(method, error)),

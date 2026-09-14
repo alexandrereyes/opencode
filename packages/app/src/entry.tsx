@@ -13,6 +13,9 @@ import zh from "@/runtime/i18n/zh"
 import { authFromToken } from "@/runtime/server/api"
 import pkg from "../package.json"
 import { ServerConnection } from "@/runtime/server/registry"
+import { CustomUpdater } from "@/shell/updates/custom"
+import type { UpdaterPlatform } from "@/shell/updates/types"
+import { createStore } from "solid-js/store"
 
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
@@ -92,15 +95,25 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
           },
         }
       : undefined
-    render(
-      () => (
-        <PlatformProvider value={web.platform}>
+    render(() => {
+      const [updates, setUpdates] = createStore<{ value?: UpdaterPlatform }>({})
+      const platform = {
+        ...web.platform,
+        get updater() {
+          return updates.value
+        },
+      }
+      return (
+        <PlatformProvider value={platform}>
           <AppBaseProviders locale={locale}>
             <AppInterface
               defaultServer={web.defaultServerUrl ? ServerConnection.Key.make(web.defaultServerUrl) : undefined}
               canonicalLocalServer={server ? ServerConnection.key(server) : undefined}
               servers={server ? [server] : []}
             >
+              {import.meta.env.VITE_OPENCODE_CUSTOM_UPDATES === "1" && server && (
+                <CustomUpdater server={server.http} ready={(value) => setUpdates("value", value)} />
+              )}
               <KeyboardInsets />
               {standalone && <PwaRoutePersistence />}
               {import.meta.env.VITE_OPENCODE_TEST_BUILD && (
@@ -114,8 +127,7 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
             </AppInterface>
           </AppBaseProviders>
         </PlatformProvider>
-      ),
-      root,
-    )
+      )
+    }, root)
   })
 }

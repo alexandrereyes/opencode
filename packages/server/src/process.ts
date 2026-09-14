@@ -1,6 +1,6 @@
 export * as ServerProcess from "./process"
 
-import { NodeHttpServer } from "@effect/platform-node"
+import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
 import { Bus } from "@opencode/core/bus"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { InstallationEvent } from "@opencode/schema/installation-event"
@@ -24,6 +24,7 @@ import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
 import { Status } from "./service-status"
 import type { ServerOptions } from "./options"
+import { AfterResponse, afterResponse } from "./after-response"
 
 export interface Lifecycle<E = never, R = never> {
   readonly onListen: (
@@ -197,7 +198,10 @@ function dispatch(
       !(yield* authorizedRequest(request, auth))
     )
       return unauthorized()
-    if (ready) return yield* app.value
+    if (ready)
+      return yield* app.value.pipe(
+        Effect.provideService(AfterResponse, afterResponse(NodeHttpServerRequest.toServerResponse(request))),
+      )
     return unavailable(state)
   })
 }
