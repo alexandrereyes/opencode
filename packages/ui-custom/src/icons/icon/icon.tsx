@@ -108,6 +108,10 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<path d="M3.53613 8.17857L6.39328 11.75L12.4647 4.25" stroke="currentColor"/>`,
   },
+  "checkbox-multiple": {
+    viewBox: "0 0 16 16",
+    body: `<rect x="2" y="3.5" width="9" height="9" rx="1" stroke="currentColor"/><path d="M4.5 8L6 9.5L9 6.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 1.5H14V10" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
   monitor: {
     viewBox: "0 0 16 16",
     body: `<path d="M4.05559 9.38889H0.500007C0.500007 9.38889 0.500017 8.59298 0.500017 7.61112V2.27778C0.500017 1.29594 0.500102 0.5 0.500102 0.5H13.3889C13.3889 0.5 13.3889 1.29594 13.3889 2.27778V7.61112C13.3889 8.59298 13.3889 9.38889 13.3889 9.38889H9.83336M4.05559 9.38889V11.6111H6.94448H9.83336V9.38889M4.05559 9.38889H9.83336" transform="translate(1.05556 1.94444)" stroke="currentColor"/>`,

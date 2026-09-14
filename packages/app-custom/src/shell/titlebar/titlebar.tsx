@@ -692,6 +692,8 @@ export function Titlebar(props: {
                             <SessionSidebar
                               currentTab={currentTab()}
                               header={<ChannelIndicator sidebar debugTools={props.debugTools} />}
+                              dashboardActive={layout.route().type === "agent-dashboard"}
+                              onDashboard={() => navigate("/agent-dashboard")}
                             >
                               {homeButton(true)}
                               <button
@@ -709,17 +711,6 @@ export function Titlebar(props: {
                                 >
                                   <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
                                 </span>
-                              </button>
-                              <button
-                                type="button"
-                                data-action="agent-dashboard"
-                                data-state={layout.route().type === "agent-dashboard" ? "pressed" : undefined}
-                                class="group mt-1 flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base data-[state=pressed]:bg-v2-background-bg-layer-02 data-[state=pressed]:text-v2-text-text-base"
-                                onClick={() => navigate("/agent-dashboard")}
-                                aria-current={layout.route().type === "agent-dashboard" ? "page" : undefined}
-                              >
-                                <Icon name="gauge" class="shrink-0" />
-                                <span class="min-w-0 truncate">{language.t("dashboard.title")}</span>
                               </button>
                             </SessionSidebar>
                             <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col gap-2">

@@ -56,6 +56,8 @@ export const dict = {
   "sidebar.search.results.one": "{{count}} matching session",
   "sidebar.search.results.other": "{{count}} matching sessions",
   "sidebar.selection.start": "Select sessions",
+  "sidebar.selection.exit": "Exit selection",
+  "sidebar.actions": "Sidebar actions",
   "sidebar.selection.session": "Select session {{name}}",
   "sidebar.selection.count.one": "{{count}} session selected",
   "sidebar.selection.count.other": "{{count}} sessions selected",
@@ -110,7 +112,8 @@ export const dict = {
   "sidebar.worktree.delete.pending": "Deleting worktree…",
   "sidebar.worktree.delete.failed.title": "Could not delete worktree",
   "sidebar.worktree.delete.partial.title": "Worktree deleted with cleanup errors",
-  "sidebar.worktree.delete.archiveBusy": "Its sessions could not be archived because another session action is in progress.",
+  "sidebar.worktree.delete.archiveBusy":
+    "Its sessions could not be archived because another session action is in progress.",
   "sidebar.worktree.delete.success": "Deleted {{worktree}} worktree",
   "sidebar.sessions.empty": "No recent sessions or pending requests",
   "sidebar.project.server": "{{project}} · {{server}}",
@@ -1539,7 +1542,8 @@ export const dict = {
 
   "session.delete.failed.title": "Failed to delete session",
   "session.delete.title": "Delete session",
-  "session.delete.confirmCascade": 'Delete session "{{name}}" and all its child sessions? This permanently deletes their messages and cannot be undone.',
+  "session.delete.confirmCascade":
+    'Delete session "{{name}}" and all its child sessions? This permanently deletes their messages and cannot be undone.',
   "session.delete.confirm": 'Delete session "{{name}}"?',
   "session.delete.button": "Delete session",
 

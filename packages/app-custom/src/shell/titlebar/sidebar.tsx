@@ -56,7 +56,13 @@ const SidebarState = Persistence.struct({
 })
 const RECENT_PAGE_SIZE = 5
 
-export function SessionSidebar(props: { header: JSX.Element; children: JSX.Element; currentTab?: Tab }) {
+export function SessionSidebar(props: {
+  header: JSX.Element
+  children: JSX.Element
+  currentTab?: Tab
+  dashboardActive: boolean
+  onDashboard: () => void
+}) {
   const global = useGlobal()
   const layout = useLayout()
   const tabs = useTabs()
@@ -80,6 +86,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
     recentLimit: RECENT_PAGE_SIZE,
     drag: undefined as string | undefined,
     query: "",
+    searchOpen: false,
     lastTouchedProject: undefined as string | undefined,
   })
   const clock = createRecentClock()
@@ -203,7 +210,7 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   const recentRows = createMemo(() => recentSessions(sessions().rows.filter((row) => !pins().has(row.key))))
   const recent = createMemo(() => visibleSessions(recentRows(), state.recentLimit, sessions().current))
   const recentMore = () => recentRows().length > recent().length
-  const query = createMemo(() => state.query.trim())
+  const query = createMemo(() => (state.searchOpen ? state.query.trim() : ""))
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
   const worktrees = createMemo(
     () =>
@@ -246,11 +253,12 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
   })
   const selection = createSidebarSelection({
     rows: selectable,
-    view: () => JSON.stringify([state.query, saved.attention]),
+    view: () => JSON.stringify([query(), saved.attention]),
     pending: lifecycle.pending,
   })
   const loading = () => indexes().some((entry) => entry.index.state.loading)
   const searchID = createUniqueId()
+  let searchButton: HTMLButtonElement | undefined
   let searchInput: HTMLInputElement | undefined
   let searchResults: HTMLDivElement | undefined
   const scroll = { attention: 0, projects: 0 }
@@ -410,60 +418,119 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
         </Tooltip>
       </div>
       {props.children}
-      <div class="shrink-0 pt-4 [app-region:no-drag]" onKeyDown={selection.escape}>
-        <TextInput
-          ref={searchInput}
-          type="search"
-          dir="auto"
-          class="!w-full"
-          leadingIcon={<Icon name="magnifying-glass" size="small" />}
-          value={state.query}
-          placeholder={language.t("sidebar.search.placeholder")}
-          aria-label={language.t("sidebar.search.label")}
-          aria-controls={query() ? searchID : undefined}
-          aria-describedby={`${searchID}-hint`}
-          showClearButton={!!state.query}
-          clearLabel={language.t("sidebar.search.clear")}
-          onClearClick={() => {
-            setState("query", "")
-            searchInput?.focus()
-          }}
-          onInput={(event) => setState("query", event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && selection.state.mode) {
-              selection.escape(event)
-              return
-            }
-            if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
-            if (event.key === "Escape" && state.query) {
+      <div
+        role="toolbar"
+        aria-label={language.t("sidebar.actions")}
+        class="flex h-7 shrink-0 items-center gap-1 pt-1 [app-region:no-drag]"
+      >
+        <Tooltip value={language.t("sidebar.search.placeholder")}>
+          <IconButton
+            ref={searchButton}
+            type="button"
+            variant="ghost-muted"
+            size="normal"
+            icon={<Icon name="magnifying-glass" />}
+            aria-label={language.t("sidebar.search.placeholder")}
+            aria-controls={state.searchOpen ? `${searchID}-panel` : undefined}
+            aria-expanded={state.searchOpen}
+            aria-pressed={state.searchOpen}
+            state={state.searchOpen ? "pressed" : undefined}
+            onClick={() => {
+              if (state.searchOpen) {
+                setState("searchOpen", false)
+                return
+              }
+              setState("searchOpen", true)
+              requestAnimationFrame(() => {
+                searchInput?.focus()
+                searchInput?.select()
+              })
+            }}
+          />
+        </Tooltip>
+        <Tooltip value={language.t(selection.state.mode ? "sidebar.selection.exit" : "sidebar.selection.start")}>
+          <IconButton
+            type="button"
+            variant="ghost-muted"
+            size="normal"
+            icon={<Icon name="checkbox-multiple" />}
+            aria-label={language.t(selection.state.mode ? "sidebar.selection.exit" : "sidebar.selection.start")}
+            aria-pressed={selection.state.mode}
+            state={selection.state.mode ? "pressed" : undefined}
+            onClick={() => (selection.state.mode ? selection.clear() : selection.start())}
+          />
+        </Tooltip>
+        <Tooltip value={language.t("dashboard.title")}>
+          <IconButton
+            type="button"
+            variant="ghost-muted"
+            size="normal"
+            icon={<Icon name="gauge" />}
+            data-action="agent-dashboard"
+            aria-label={language.t("dashboard.title")}
+            aria-current={props.dashboardActive ? "page" : undefined}
+            aria-pressed={props.dashboardActive}
+            state={props.dashboardActive ? "pressed" : undefined}
+            onClick={props.onDashboard}
+          />
+        </Tooltip>
+      </div>
+      <Show when={state.searchOpen}>
+        <div id={`${searchID}-panel`} class="shrink-0 pt-2 [app-region:no-drag]" onKeyDown={selection.escape}>
+          <TextInput
+            ref={searchInput}
+            type="search"
+            dir="auto"
+            class="!w-full"
+            leadingIcon={<Icon name="magnifying-glass" size="small" />}
+            value={state.query}
+            placeholder={language.t("sidebar.search.placeholder")}
+            aria-label={language.t("sidebar.search.label")}
+            aria-controls={query() ? searchID : undefined}
+            aria-describedby={`${searchID}-hint`}
+            showClearButton={!!state.query}
+            clearLabel={language.t("sidebar.search.clear")}
+            onClearClick={() => {
+              setState("query", "")
+              searchInput?.focus()
+            }}
+            onInput={(event) => setState("query", event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && selection.state.mode) {
+                selection.escape(event)
+                return
+              }
+              if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+              if (event.key === "Escape" && state.query) {
+                event.preventDefault()
+                event.stopPropagation()
+                setState("query", "")
+                return
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                event.stopPropagation()
+                setState("searchOpen", false)
+                searchButton?.focus()
+                return
+              }
+              if (!query() || (event.key !== "ArrowDown" && event.key !== "Enter")) return
+              const first = searchResults?.querySelector<HTMLAnchorElement>("[data-titlebar-tab-link]")
+              if (!first) return
               event.preventDefault()
               event.stopPropagation()
-              setState("query", "")
-              return
-            }
-            if (!query() || (event.key !== "ArrowDown" && event.key !== "Enter")) return
-            const first = searchResults?.querySelector<HTMLAnchorElement>("[data-titlebar-tab-link]")
-            if (!first) return
-            event.preventDefault()
-            event.stopPropagation()
-            first.focus()
-            first.scrollIntoView({ block: "nearest", inline: "nearest" })
-            if (event.key === "Enter") first.click()
-          }}
-        />
-        <span id={`${searchID}-hint`} class="sr-only">
-          {language.t("sidebar.search.hint")}
-        </span>
-      </div>
-      <div class="shrink-0 pt-2 [app-region:no-drag]" onKeyDown={selection.escape}>
-        <Show
-          when={selection.state.mode}
-          fallback={
-            <Button variant="ghost" size="small" onClick={selection.start}>
-              {language.t("sidebar.selection.start")}
-            </Button>
-          }
-        >
+              first.focus()
+              first.scrollIntoView({ block: "nearest", inline: "nearest" })
+              if (event.key === "Enter") first.click()
+            }}
+          />
+          <span id={`${searchID}-hint`} class="sr-only">
+            {language.t("sidebar.search.hint")}
+          </span>
+        </div>
+      </Show>
+      <Show when={selection.state.mode}>
+        <div class="shrink-0 pt-2 [app-region:no-drag]" onKeyDown={selection.escape}>
           <div
             data-slot="sidebar-selection"
             role="group"
@@ -505,8 +572,8 @@ export function SessionSidebar(props: { header: JSX.Element; children: JSX.Eleme
               {language.t("common.delete")}…
             </Button>
           </div>
-        </Show>
-      </div>
+        </div>
+      </Show>
       <nav
         onKeyDown={selection.escape}
         aria-label={language.t("sidebar.sessions")}
