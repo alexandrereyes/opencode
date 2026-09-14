@@ -442,22 +442,28 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
                       {pool().total === 0
                         ? language.t("context.overview.noPool")
                         : pool().balance === "unknown"
-                          ? language.t("context.overview.capacityUnconfirmed")
+                          ? language.t("context.overview.unknownWeekly")
                           : pool().balance === "unavailable"
                             ? language.t("context.overview.noAvailableBalance")
-                            : language.t("context.overview.availablePoolCapacity", {
-                                ready: pool().ready,
-                                total: pool().total,
+                            : language.t("context.overview.availablePoolRemaining", {
+                                percent: new Intl.NumberFormat(language.intl(), {
+                                  style: "percent",
+                                  maximumFractionDigits: 0,
+                                }).format((pool().availableRemaining ?? 0) / 100),
                               })}
                     </span>
                   </div>
                   <Meter
-                    value={pool().availablePercent}
+                    value={pool().availableRemaining}
+                    remaining
                     label={language.t("context.overview.availablePool")}
                   />
                   <div class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-12-regular text-v2-text-text-muted">
                     <span>
-                      {language.t("context.overview.poolPlans")}
+                      {language.t("context.overview.availablePoolCapacity", {
+                        ready: pool().ready,
+                        total: pool().total,
+                      })}
                     </span>
                     <span>{updated()}</span>
                   </div>

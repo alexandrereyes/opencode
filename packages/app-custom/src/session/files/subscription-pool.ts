@@ -36,22 +36,21 @@ export function subscriptionAccounts(accounts: readonly Subscriptions.Account[],
 }
 
 export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now()) {
-  const members = accounts.filter(
-    (account) => subscriptionPlanSupported(account.plan) && account.enabled && account.authenticated,
-  )
-  const pro = members.filter((account) => account.plan === "pro")
+  const members = accounts.filter((account) => account.plan === "pro" && account.enabled && account.authenticated)
   const measured = members.filter(
-    (account) => !account.stale && account.hasCapacity !== null && !renewalPassed(account, now),
+    (account) => !account.stale && account.remaining !== null && !renewalPassed(account, now),
   )
   const ready = members.filter(
     (account) =>
       !account.stale && account.hasCapacity === true && account.cooldownSeconds <= 0 && !renewalPassed(account, now),
   )
-  const uncertain = members.some((account) => subscriptionCapacity(account, now) === "unconfirmed")
+  const uncertain = members.some(
+    (account) => account.remaining === null || subscriptionCapacity(account, now) === "unconfirmed",
+  )
   const observations = measured.flatMap((account) =>
     account.observedAt === null ? [] : [Date.parse(account.observedAt)],
   )
-  const inventories = pro.flatMap((account) => (account.bankedResets ? [account.bankedResets] : []))
+  const inventories = members.flatMap((account) => (account.bankedResets ? [account.bankedResets] : []))
   const first = inventories.flatMap((inventory) =>
     inventory.earliestExpiresAt ? [Date.parse(inventory.earliestExpiresAt)] : [],
   )
@@ -60,7 +59,7 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
   )
   return {
     banked:
-      pro.length > 0 && inventories.length === pro.length
+      members.length > 0 && inventories.length === members.length
         ? {
             available: inventories.reduce((sum, inventory) => sum + inventory.available, 0),
             nonExpiring: inventories.reduce((sum, inventory) => sum + inventory.nonExpiring, 0),
@@ -72,7 +71,10 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
     measured: measured.length,
     ready: ready.length,
     balance: members.length === 0 ? "empty" : uncertain ? "unknown" : ready.length === 0 ? "unavailable" : "known",
-    availablePercent: members.length === 0 ? null : (ready.length / members.length) * 100,
+    availableRemaining:
+      !uncertain && ready.length > 0
+        ? ready.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / ready.length
+        : null,
     observedAt: observations.length > 0 && observations.length === measured.length ? Math.min(...observations) : null,
   }
 }

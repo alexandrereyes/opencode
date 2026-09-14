@@ -23,7 +23,7 @@ const account = {
   bankedResets: null,
 }
 
-test("includes active authenticated Pro, Pro 5x, and Plus accounts without treating rounded quota as availability", () => {
+test("averages only active authenticated Pro 20x accounts without treating rounded quota as availability", () => {
   expect(
     subscriptionPool([
       account,
@@ -33,11 +33,11 @@ test("includes active authenticated Pro, Pro 5x, and Plus accounts without treat
       { ...account, id: "disabled", enabled: false, remaining: 100 },
       { ...account, id: "unauthenticated", authenticated: false, remaining: 100 },
     ]),
-  ).toMatchObject({ total: 4, measured: 4, availablePercent: 100, ready: 4, balance: "known" })
+  ).toMatchObject({ total: 2, measured: 2, availableRemaining: 45, ready: 2, balance: "known" })
   expect(subscriptionPool([{ ...account, remaining: 0 }]).ready).toBe(1)
 })
 
-test("reports the share of inference accounts available now", () => {
+test("reports remaining balance only across Pro 20x accounts available now", () => {
   expect(
     subscriptionPool([
       { ...account, remaining: 0, hasCapacity: false },
@@ -47,42 +47,42 @@ test("reports the share of inference accounts available now", () => {
     total: 2,
     measured: 2,
     ready: 1,
-    availablePercent: 50,
+    availableRemaining: 59,
     balance: "known",
   })
 })
 
-test("unknown or stale capacity is reported without confusing it with missing quota percentages", () => {
+test("missing or stale measurements suppress the whole pool percentage", () => {
   expect(subscriptionCapacity({ ...account, remaining: null })).toBe("available")
   expect(subscriptionCapacity({ ...account, remaining: null, hasCapacity: false })).toBe("unavailable")
   expect(subscriptionPool([account, { ...account, remaining: null }])).toMatchObject({
     total: 2,
-    measured: 2,
+    measured: 1,
     ready: 2,
-    availablePercent: 100,
-    balance: "known",
+    availableRemaining: null,
+    balance: "unknown",
   })
   expect(subscriptionPool([account, { ...account, remaining: null, hasCapacity: false }])).toMatchObject({
     total: 2,
-    measured: 2,
+    measured: 1,
     ready: 1,
-    availablePercent: 50,
-    balance: "known",
+    availableRemaining: null,
+    balance: "unknown",
   })
   expect(subscriptionCapacity({ ...account, stale: true })).toBe("unconfirmed")
   expect(subscriptionPool([account, { ...account, stale: true }])).toMatchObject({
     total: 2,
     measured: 1,
     ready: 1,
-    availablePercent: 50,
+    availableRemaining: null,
     balance: "unknown",
   })
   expect(subscriptionCapacity({ ...account, hasCapacity: null })).toBe("unconfirmed")
   expect(subscriptionPool([account, { ...account, hasCapacity: null }])).toMatchObject({
     total: 2,
-    measured: 1,
+    measured: 2,
     ready: 1,
-    availablePercent: 50,
+    availableRemaining: null,
     balance: "unknown",
   })
   expect(subscriptionPool([])).toEqual({
@@ -90,7 +90,7 @@ test("unknown or stale capacity is reported without confusing it with missing qu
     measured: 0,
     ready: 0,
     balance: "empty",
-    availablePercent: null,
+    availableRemaining: null,
     observedAt: null,
     banked: null,
   })
@@ -107,7 +107,7 @@ test("treats a snapshot from before a completed renewal as unconfirmed", () => {
     measured: 0,
     ready: 0,
     balance: "unknown",
-    availablePercent: 0,
+    availableRemaining: null,
   })
   expect(subscriptionCapacity(renewing, Date.parse("2026-09-10T08:30:00Z"))).toBe("available")
 })
@@ -176,7 +176,7 @@ test("cooldown and capacity remove known accounts from the available balance", (
     measured: 2,
     ready: 0,
     balance: "unavailable",
-    availablePercent: 0,
+    availableRemaining: null,
     observedAt: Date.parse(account.observedAt),
     banked: null,
   })
