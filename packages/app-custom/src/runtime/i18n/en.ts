@@ -227,6 +227,7 @@ export const dict = {
   "settings.snippets.project": "Project",
   "settings.snippets.actions": "Actions for {{name}}",
   "promptInput.computerUse": "Computer use",
+  "promptInput.safariMcp": "Safari MCP",
   "promptInput.session": "Session",
   ...DESKTOP_NATIVE_ENGLISH,
   "ssh.label": "SSH",

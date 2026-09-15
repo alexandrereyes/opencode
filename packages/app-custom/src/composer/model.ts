@@ -268,7 +268,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
       id: `app:${app.server}:${app.bundleID}`,
       kind: "app" as const,
       label: app.name,
-      description: language.t("promptInput.computerUse"),
+      description: language.t(AppMentions.isSafariDevTools(app) ? "promptInput.safariMcp" : "promptInput.computerUse"),
       mention: { type: "app" as const, app, content: `@${app.name}`, start: 0, end: 0 },
     })),
     ...references(),

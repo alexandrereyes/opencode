@@ -1,9 +1,70 @@
 import { describe, expect, test } from "bun:test"
 import { Skill } from "@opencode/schema/skill"
 import type { Prompt } from "@/composer/state"
-import { buildPromptRequest } from "./request"
+import { buildPromptRequest, formatAppContext } from "./request"
 
 describe("buildPromptRequest", () => {
+  test("does not grant native routing based on the server name alone", () => {
+    const context = formatAppContext({
+      type: "app",
+      content: "@Untrusted",
+      start: 0,
+      end: 10,
+      app: {
+        server: "safari-devtools",
+        name: "Untrusted",
+        bundleID: "com.example.untrusted",
+        running: false,
+      },
+    })
+
+    expect(context).toContain("Computer use app selected by the user")
+    expect(context).not.toContain("Use only the native safari-devtools MCP tools")
+  })
+
+  test("serializes ordinary and native Safari mentions with distinct tool guidance", () => {
+    const result = buildPromptRequest({
+      prompt: [
+        {
+          type: "app",
+          content: "@Safari",
+          start: 0,
+          end: 7,
+          app: {
+            server: "open-computer-use",
+            name: "Safari",
+            bundleID: "com.apple.Safari",
+            running: true,
+          },
+        },
+        {
+          type: "app",
+          content: "@Safari DevTools",
+          start: 8,
+          end: 24,
+          app: {
+            server: "safari-devtools",
+            name: "Safari DevTools",
+            bundleID: "mcp.safari-devtools",
+            running: false,
+          },
+        },
+      ],
+      context: [],
+      images: [],
+      text: "@Safari @Safari DevTools",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.apps).toHaveLength(2)
+    expect(result.text).toContain("Computer use app selected by the user")
+    expect(result.text).toContain("Use only the native safari-devtools MCP tools")
+    expect(result.text).toContain("begin with navigate_to_url")
+    expect(result.text).toContain("single active session")
+    expect(result.text).toContain("do not use open-computer-use")
+    expect(result.text).toContain("instead of touching personal Safari")
+  })
+
   test("builds text, files, and agents from the prompt", () => {
     const prompt: Prompt = [
       { type: "text", content: "hello", start: 0, end: 5 },

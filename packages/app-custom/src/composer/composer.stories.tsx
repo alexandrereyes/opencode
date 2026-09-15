@@ -127,6 +127,24 @@ function ComposerStory(props: {
       },
     },
     {
+      id: "app:safari-devtools:mcp.safari-devtools",
+      kind: "app",
+      label: "Safari DevTools",
+      description: "Safari MCP",
+      mention: {
+        type: "app",
+        content: "@Safari DevTools",
+        start: 0,
+        end: 0,
+        app: {
+          server: "safari-devtools",
+          name: "Safari DevTools",
+          bundleID: "mcp.safari-devtools",
+          running: false,
+        },
+      },
+    },
+    {
       id: "file:src/app.tsx",
       kind: "file",
       label: "src/app.tsx",

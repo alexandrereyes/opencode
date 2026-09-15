@@ -5,6 +5,7 @@ import { WebUi } from "../src/services/web-ui"
 import type { AssetMap } from "../src/app-assets"
 import { HttpServer } from "effect/unstable/http"
 import path from "node:path"
+import { serverConfig } from "./custom-config"
 
 const root = process.env.OPENCODE_CUSTOM_HOME
 const version = process.env.OPENCODE_CUSTOM_COMMIT
@@ -37,7 +38,7 @@ NodeRuntime.runMain(
           config: {
             directory: process.env.OPENCODE_CONFIG_DIR ?? `${root}/config/opencode`,
             project: process.env.OPENCODE_CUSTOM_SMOKE !== "1",
-            content: JSON.stringify({ plugins: [plugin] }),
+            content: JSON.stringify(serverConfig(plugin)),
           },
           models: { fetch: process.env.OPENCODE_CUSTOM_SMOKE !== "1" },
         },

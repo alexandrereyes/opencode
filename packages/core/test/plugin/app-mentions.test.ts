@@ -19,6 +19,7 @@ const it = testEffect(PluginTestLayer)
 const mcp = (options?: {
   readonly missing?: boolean
   readonly error?: boolean
+  readonly native?: "connected" | "disabled" | "failed"
   readonly callTool?: Mcp.Interface["callTool"]
 }) =>
   Mcp.Service.of({
@@ -26,9 +27,22 @@ const mcp = (options?: {
     reload: () => Effect.die("unused mcp.reload"),
     servers: () =>
       Effect.succeed(
-        options?.missing
-          ? []
-          : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("open-computer-use"), status: { status: "connected" } })],
+        [
+          ...(options?.missing
+            ? []
+            : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("open-computer-use"), status: { status: "connected" } })]),
+          ...(options?.native
+            ? [
+                new Mcp.ServerInfo({
+                  name: Mcp.ServerName.make(AppMentions.SafariDevTools.server),
+                  status:
+                    options.native === "failed"
+                      ? { status: "failed" as const, error: "fixture failure" }
+                      : { status: options.native },
+                }),
+              ]
+            : []),
+        ],
       ),
     add: () => Effect.die("unused mcp.add"),
     connect: () => Effect.die("unused mcp.connect"),
@@ -118,6 +132,55 @@ describe("app mentions plugin integration", () => {
           }),
         ),
       ).toEqual({ apps: [] })
+    }),
+  )
+
+  it.effect("discovers native Safari independently from computer use", () =>
+    Effect.gen(function* () {
+      const safari = {
+        server: "safari-devtools",
+        name: "Safari DevTools",
+        bundleID: "mcp.safari-devtools",
+        running: false,
+      }
+      expect(yield* call(mcp({ missing: true, native: "connected" }))).toEqual({ apps: [safari] })
+      expect(yield* call(mcp())).toEqual({
+        apps: [
+          {
+            server: "open-computer-use",
+            name: "Safari",
+            bundleID: "com.apple.Safari",
+            running: true,
+          },
+        ],
+      })
+      expect(yield* call(mcp({ native: "connected" }))).toEqual({
+        apps: [
+          safari,
+          {
+            server: "open-computer-use",
+            name: "Safari",
+            bundleID: "com.apple.Safari",
+            running: true,
+          },
+        ],
+      })
+      expect(yield* call(mcp({ missing: true, native: "disabled" }))).toEqual({ apps: [] })
+      expect(yield* call(mcp({ missing: true, native: "failed" }))).toEqual({ apps: [] })
+    }),
+  )
+
+  it.effect("keeps native Safari when computer-use discovery fails", () =>
+    Effect.gen(function* () {
+      const result = yield* call(mcp({ native: "connected", error: true }))
+      expect(result.apps).toEqual([
+        {
+          server: "safari-devtools",
+          name: "Safari DevTools",
+          bundleID: "mcp.safari-devtools",
+          running: false,
+        },
+      ])
     }),
   )
 

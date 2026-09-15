@@ -3,6 +3,7 @@
 import { chmod, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { serverConfig } from "./custom-config"
 import { artifacts, command, publish, seal } from "./custom-release"
 
 const binary = process.argv[2]
@@ -48,7 +49,13 @@ await command(
   env,
   false,
 )
-await Bun.write(`${release}/server-config.json`, JSON.stringify({ update: "disable", plugins: [`${release}/plugin`] }))
+await Bun.write(`${release}/server-config.json`, JSON.stringify(serverConfig(`${release}/plugin`)))
+const config = await Bun.file(`${release}/server-config.json`).json()
+if (
+  config.mcp?.servers?.["safari-devtools"]?.type !== "local" ||
+  JSON.stringify(config.mcp.servers["safari-devtools"].command) !== JSON.stringify(["/usr/bin/safaridriver", "--mcp"])
+)
+  throw new Error("Release-owned Safari DevTools MCP config is missing")
 await seal(release, commit)
 await publish(work, commit)
 const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
