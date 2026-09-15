@@ -398,6 +398,29 @@ export namespace Timeline {
     })
     appendAssistantSegment(assistantSegment)
 
+    const finalAnswer = finalAnswerRef(assistantMessages, showReasoning, detail, isRenderable)
+    const finalAnswerIndex = finalAnswer
+      ? rows.findIndex(
+          (row) =>
+            row._tag === "AssistantPart" &&
+            (row.group.type === "part"
+              ? sameRef(row.group.ref, finalAnswer)
+              : row.group.refs.some((ref) => sameRef(ref, finalAnswer))),
+        )
+      : -1
+    const finalAnswerRow = rows[finalAnswerIndex]
+    if (
+      finalAnswerRow?._tag === "AssistantPart" &&
+      rows.slice(0, finalAnswerIndex).some((row) => row._tag !== "TurnGap" && row._tag !== "UserMessage")
+    ) {
+      rows[finalAnswerIndex] = new TimelineRow.AssistantPart({ ...finalAnswerRow, spacing: undefined })
+      rows.splice(
+        finalAnswerIndex,
+        0,
+        new TimelineRow.FinalAnswerDivider({ userMessageID: turnID, spacing: finalAnswerRow.spacing }),
+      )
+    }
+
     if (thinking && lastAssistant) {
       rows.push(
         new TimelineRow.Thinking({
@@ -426,6 +449,40 @@ export namespace Timeline {
       content,
     }))
   }
+}
+
+function finalAnswerRef(
+  messages: SessionMessageAssistant[],
+  showReasoning: boolean,
+  detail: TimelineDetail | undefined,
+  isRenderable: (content: Content, showReasoning: boolean, detail: TimelineDetail | undefined, partID: string) => boolean,
+) {
+  const texts = messages.flatMap((message) =>
+    Timeline.contentEntries(message).flatMap((entry) =>
+      entry.content.type === "text" ? [{ message, id: entry.id, content: entry.content }] : [],
+    ),
+  )
+  const explicit = texts.find(
+    (entry) =>
+      entry.content.state?.phase === "final_answer" &&
+      isRenderable(entry.content, showReasoning, detail, entry.id),
+  )
+  if (explicit) return { messageID: explicit.message.id, partID: explicit.id }
+  if (texts.some((entry) => typeof entry.content.state?.phase === "string")) return
+
+  const fallback = texts.find(
+    (entry) =>
+      entry.message.finish === "stop" &&
+      entry.message.time.completed !== undefined &&
+      !entry.message.error &&
+      !entry.message.retry &&
+      isRenderable(entry.content, showReasoning, detail, entry.id),
+  )
+  if (fallback) return { messageID: fallback.message.id, partID: fallback.id }
+}
+
+function sameRef(a: PartRef, b: PartRef) {
+  return a.messageID === b.messageID && a.partID === b.partID
 }
 
 function isInterrupted(error: SessionMessageAssistant["error"]) {

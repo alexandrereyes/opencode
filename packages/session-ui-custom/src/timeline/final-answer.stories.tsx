@@ -32,12 +32,25 @@ export const Divider = {
   }) => <FinalAnswerStory {...args} />,
 }
 
+export const LateSubagent = {
+  args: { earlier: "text", completed: true, finish: "stop", hideReasoning: false, notices: "separate", late: true },
+  render: (args: {
+    earlier: string
+    completed: boolean
+    finish: SessionMessageAssistant["finish"]
+    hideReasoning: boolean
+    notices: TimelinePlacement
+    late: boolean
+  }) => <FinalAnswerStory {...args} />,
+}
+
 function FinalAnswerStory(props: {
   earlier: string
   completed: boolean
   finish: SessionMessageAssistant["finish"]
   hideReasoning: boolean
   notices: TimelinePlacement
+  late?: boolean
 }) {
   const [state, setState] = createStore({ completed: props.completed })
   const document = createMemo(
@@ -111,10 +124,41 @@ function FinalAnswerStory(props: {
                 ]
               : []),
             { type: "text", text: "   " },
-            { type: "text", text: "The project configuration is consistent." },
+            {
+              type: "text",
+              text: "The project configuration is consistent.",
+              ...(state.completed && props.finish === "stop" ? { state: { phase: "final_answer" } } : {}),
+            },
             { type: "text", text: "No changes are needed." },
           ],
         },
+        ...(props.late
+          ? [
+              {
+                id: "msg_final_late_notice",
+                type: "synthetic" as const,
+                text: "The subagent completed after the first answer.",
+                description: "Late project inspection",
+                metadata: { source: "subagent", state: "completed", agent: "explore" },
+                time: { created: STORY_TIME + 500 },
+              },
+              {
+                id: "msg_final_late_answer",
+                type: "assistant" as const,
+                agent: "build",
+                model: STORY_MODEL,
+                finish: "stop" as const,
+                time: { created: STORY_TIME + 600, completed: STORY_TIME + 700 },
+                content: [
+                  {
+                    type: "text" as const,
+                    text: "The last agent added another detail.",
+                    state: { phase: "final_answer" },
+                  },
+                ],
+              },
+            ]
+          : []),
       ],
     }),
   )

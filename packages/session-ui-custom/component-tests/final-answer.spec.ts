@@ -9,12 +9,39 @@ for (const earlier of ["tool", "text", "reasoning"]) {
     await root.getByRole("button", { name: "Complete response", exact: true }).click()
     await expect(divider).toHaveCount(1)
     await expect(divider).toBeVisible()
-    await expect(divider.locator("..")).toContainText("The project configuration is consistent.")
-    await expect(divider.locator("..")).not.toContainText("No changes are needed.")
+    await expect(root.getByText("The project configuration is consistent.", { exact: true })).toBeVisible()
+    const dividerRow = root.locator('[data-timeline-row="FinalAnswerDivider"]')
+    const answerRow = root
+      .locator('[data-timeline-row="AssistantPart"]')
+      .filter({ hasText: "The project configuration is consistent." })
+    await expect(dividerRow).toHaveCSS("padding-top", "16px")
+    await expect(divider).toHaveCSS("margin-bottom", "12px")
+    await expect(answerRow).toHaveCSS("padding-top", "0px")
     await root.getByRole("button", { name: "Stream response", exact: true }).click()
     await expect(divider).toHaveCount(0)
   })
 }
+
+story("keeps the divider before the first final answer when a subagent finishes late", async ({ mount }) => {
+  const root = await mount("current-session-final-answer--late-subagent")
+  const divider = root.locator('[data-slot="session-final-answer-divider"]')
+  const first = root.getByText("The project configuration is consistent.", { exact: true })
+  const second = root.getByText("The last agent added another detail.", { exact: true })
+  await expect(divider).toHaveCount(1)
+  await expect(first).toBeVisible()
+  await expect(second).toBeVisible()
+  const dividerBounds = await root.locator('[data-timeline-row="FinalAnswerDivider"]').boundingBox()
+  const firstBounds = await root
+    .locator('[data-timeline-row="AssistantPart"]')
+    .filter({ hasText: "The project configuration is consistent." })
+    .boundingBox()
+  const secondBounds = await root
+    .locator('[data-timeline-row="AssistantPart"]')
+    .filter({ hasText: "The last agent added another detail." })
+    .boundingBox()
+  expect(dividerBounds!.y).toBeLessThan(firstBounds!.y)
+  expect(firstBounds!.y).toBeLessThan(secondBounds!.y)
+})
 
 const unseparated: Record<string, string | boolean>[] = [
   { earlier: "none" },

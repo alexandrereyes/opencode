@@ -254,49 +254,23 @@ export function createSessionTimelineRowRenderer(input: {
       const item = content()
       return item ? contentDefaultOpen(item) : undefined
     })
-    const finalAnswer = createMemo(() => {
-      if (content()?.type !== "text") return false
-      const current = message()
-      if (current?.finish !== "stop" || current.time.completed === undefined || current.error || current.retry)
-        return false
-      if (input.projection.assistantMessagesByParent().get(row().userMessageID)?.at(-1)?.id !== current.id) return false
-      if (current.content.find((part) => part.type === "text" && !!part.text.trim()) !== content()) return false
-      const rows = input.projection.rows()
-      // Use projected rows so separate/grouped notices count, but hidden activity does not.
-      for (let index = input.projection.messageRowIndex().get(row().userMessageID) ?? 0; index < rows.length; index++) {
-        const previous = rows[index]
-        if (previous.userMessageID !== row().userMessageID || TimelineRow.key(previous) === TimelineRow.key(row()))
-          return false
-        if (previous._tag !== "UserMessage" && previous._tag !== "TurnGap") return true
-      }
-      return false
-    })
     const disclosureKey = () => (content()?.type === "reasoning" ? ref()!.partID : row().group.key)
     return (
       <Show when={message()}>
         {(message) => (
           <Show when={content()}>
             {(content) => (
-              <>
-                <Show when={finalAnswer()}>
-                  <div
-                    data-slot="session-final-answer-divider"
-                    aria-hidden="true"
-                    class="mb-3 h-px w-full bg-v2-border-border-strong"
-                  />
-                </Show>
-                <SessionAssistantContent
-                  message={message()}
-                  content={content()}
-                  contentID={ref()!.partID}
-                  showAssistantCopyPartID={copyContentID(row().userMessageID)}
-                  messages={messages()}
-                  defaultOpen={defaultOpen()}
-                  toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
-                  onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
-                  onContentRendered={onSizeChange}
-                />
-              </>
+              <SessionAssistantContent
+                message={message()}
+                content={content()}
+                contentID={ref()!.partID}
+                showAssistantCopyPartID={copyContentID(row().userMessageID)}
+                messages={messages()}
+                defaultOpen={defaultOpen()}
+                toolOpen={input.disclosure.value(disclosureKey()) ?? defaultOpen()}
+                onToolOpenChange={(open) => input.disclosure.set(disclosureKey(), open)}
+                onContentRendered={onSizeChange}
+              />
             )}
           </Show>
         )}
@@ -373,12 +347,20 @@ export function createSessionTimelineRowRenderer(input: {
       id={props.row._tag === "UserMessage" ? input.anchor?.(props.row.userMessageID) : undefined}
       data-message-id={props.row.userMessageID}
       data-timeline-row={props.row._tag}
-      data-timeline-spacing={props.row._tag === "AssistantPart" ? props.row.spacing : undefined}
+      data-timeline-spacing={
+        props.row._tag === "AssistantPart" || props.row._tag === "FinalAnswerDivider"
+          ? props.row.spacing
+          : undefined
+      }
       classList={{
         "min-w-0 w-full max-w-full": true,
         "md:max-w-[1000px] md:mx-auto": input.centered?.(),
-        "pt-2": props.row._tag === "AssistantPart" && props.row.spacing === "tool",
-        "pt-4": props.row._tag === "AssistantPart" && props.row.spacing === "content",
+        "pt-2":
+          (props.row._tag === "AssistantPart" || props.row._tag === "FinalAnswerDivider") &&
+          props.row.spacing === "tool",
+        "pt-4":
+          (props.row._tag === "AssistantPart" || props.row._tag === "FinalAnswerDivider") &&
+          props.row.spacing === "content",
       }}
     >
       <div data-component="session-turn" class="min-w-0 w-full relative" style={{ height: "auto" }}>
@@ -671,6 +653,24 @@ export function createSessionTimelineRowRenderer(input: {
                 <TimelineSeparator label={i18n.t("ui.message.interrupted")} />
               </div>
             </div>
+          </div>
+        </Frame>
+      )
+    }
+    if (row()._tag === "FinalAnswerDivider") {
+      const current = () => {
+        const value = row()
+        if (value._tag !== "FinalAnswerDivider") throw new Error("Expected a final-answer-divider timeline row")
+        return value
+      }
+      return (
+        <Frame row={current()}>
+          <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
+            <div
+              data-slot="session-final-answer-divider"
+              aria-hidden="true"
+              class="mb-3 h-px w-full bg-v2-border-border-strong"
+            />
           </div>
         </Frame>
       )

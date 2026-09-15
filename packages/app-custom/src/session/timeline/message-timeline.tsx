@@ -489,7 +489,7 @@ function MessageTimelineView(
     onUserScroll: props.onUserScroll,
     onHistoryScroll: props.onHistoryScroll,
     canRenderImmediately: (row, disclosure) => {
-      if (row._tag === "TurnGap" || row._tag === "TurnDivider") return true
+      if (row._tag === "TurnGap" || row._tag === "TurnDivider" || row._tag === "FinalAnswerDivider") return true
       if (row._tag === "Notice") {
         const message = messageByID().get(row.messageID)
         return (

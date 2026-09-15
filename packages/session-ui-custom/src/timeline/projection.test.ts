@@ -6,6 +6,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client/promise"
 import { createStore } from "solid-js/store"
+import { timelinePresets, type TimelineDetail } from "./detail"
 import { createTimelineProjection, reuseTimelineRows, Timeline, TimelineRow, type PartGroup } from "./projection"
 
 const context = (key: string, partIDs: string[], identity: { userMessageID?: string; messageID?: string } = {}) =>
@@ -256,6 +257,135 @@ describe("createTimelineProjection", () => {
     expect(result.messageLastRowIndex.get("user-1")).toBe(3)
     expect(result.lastAssistantGroupKey.get("user-1")).toBe("part:assistant-1:assistant-1:text:0")
     expect(result.rowByKey.get("user-message:user-1")).toBe(result.rows[2])
+  })
+
+  describe("final answer divider", () => {
+    const assistant = (
+      id: string,
+      text: string,
+      options: { finish?: SessionMessageAssistant["finish"]; phase?: string; completed?: boolean } = {},
+    ): SessionMessageAssistant => ({
+      id,
+      type: "assistant",
+      agent: "build",
+      model: { id: "model", providerID: "provider" },
+      finish: options.finish,
+      content: [{ type: "text", text, ...(options.phase ? { state: { phase: options.phase } } : {}) }],
+      time: { created: 2, ...(options.completed === false ? {} : { completed: 3 }) },
+    })
+    const project = (entries: SessionMessageInfo[], detail: TimelineDetail = timelinePresets[0].value) =>
+      createTimelineProjection({
+        sessionMessages: [{ id: "user-1", type: "user", text: "question", time: { created: 1 } }, ...entries],
+        status: { type: "idle" },
+        reasoningMode: "full",
+        timelineDetail: detail,
+      }).rows
+
+    test("keeps the divider before the first explicit final answer when late activity and another answer follow", () => {
+      const rows = project([
+        assistant("assistant-commentary", "Checking the repository.", { finish: "tool-calls" }),
+        assistant("assistant-final-1", "My understanding: the issue is confirmed.", {
+          finish: "stop",
+          phase: "final_answer",
+        }),
+        {
+          id: "notice-late",
+          type: "synthetic",
+          text: "The subagent completed.",
+          description: "Late result",
+          metadata: { source: "subagent", state: "completed" },
+          time: { created: 4 },
+        },
+        assistant("assistant-final-2", "The last agent added another detail.", {
+          finish: "stop",
+          phase: "final_answer",
+        }),
+      ])
+
+      expect(keys(rows)).toEqual([
+        "user-message:user-1",
+        "assistant-part:part:part:assistant-commentary:assistant-commentary:text:0",
+        "final-answer-divider:user-1",
+        "assistant-part:part:part:assistant-final-1:assistant-final-1:text:0",
+        "notice:notice-late",
+        "assistant-part:part:part:assistant-final-2:assistant-final-2:text:0",
+      ])
+      expect(rows[2]).toMatchObject({ _tag: "FinalAnswerDivider", spacing: "content" })
+      expect(rows[3]).toMatchObject({ _tag: "AssistantPart", spacing: undefined })
+    })
+
+    test("explicit phases take precedence over an earlier legacy stop", () => {
+      const rows = project([
+        assistant("assistant-legacy", "A completed commentary message.", { finish: "stop" }),
+        assistant("assistant-final", "The explicit final answer.", { finish: "stop", phase: "final_answer" }),
+      ])
+
+      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(2)
+      expect(keys(rows)[3]).toContain("assistant-final")
+    })
+
+    test("uses the first completed stop with visible text when the turn has no phases", () => {
+      const rows = project([
+        assistant("assistant-activity", "Working on it.", { finish: "tool-calls" }),
+        assistant("assistant-stop-1", "First completed answer.", { finish: "stop" }),
+        assistant("assistant-stop-2", "Later completed answer.", { finish: "stop" }),
+      ])
+
+      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(2)
+      expect(keys(rows)[3]).toContain("assistant-stop-1")
+    })
+
+    test("suppresses legacy fallback when an explicit non-final phase is present", () => {
+      const rows = project([
+        assistant("assistant-activity", "Working on it.", { finish: "tool-calls" }),
+        assistant("assistant-stop", "Commentary stop.", { finish: "stop" }),
+        assistant("assistant-phase", "Still commentary.", { finish: "stop", phase: "commentary" }),
+      ])
+
+      expect(keys(rows)).not.toContain("final-answer-divider:user-1")
+    })
+
+    test("does not count hidden activity before a final answer", () => {
+      const reasoning: SessionMessageAssistant = {
+        ...assistant("assistant-reasoning", "", { finish: "tool-calls" }),
+        content: [{ type: "reasoning", text: "Hidden thought", time: { created: 2, completed: 3 } }],
+      }
+      const notice: SessionMessageInfo = {
+        id: "notice-hidden",
+        type: "synthetic",
+        text: "Hidden notice",
+        description: "Hidden notice",
+        time: { created: 3 },
+      }
+      const rows = project([reasoning, notice, assistant("assistant-final", "Only visible content.", { phase: "final_answer" })], {
+        ...timelinePresets[4].value,
+      })
+
+      expect(keys(rows)).not.toContain("final-answer-divider:user-1")
+    })
+
+    test("keeps a grouped visible notice on the activity side of the boundary", () => {
+      const rows = project(
+        [
+          {
+            id: "notice-grouped",
+            type: "synthetic",
+            text: "Visible notice",
+            description: "Visible notice",
+            time: { created: 2 },
+          },
+          assistant("assistant-final", "Final answer.", { phase: "final_answer" }),
+        ],
+        timelinePresets[2].value,
+      )
+
+      expect(keys(rows)).toEqual([
+        "user-message:user-1",
+        "assistant-part:context:message:notice-grouped",
+        "final-answer-divider:user-1",
+        "assistant-part:part:part:assistant-final:assistant-final:text:0",
+      ])
+    })
   })
 
   test("reuses a stable projected row array", () => {
