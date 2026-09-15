@@ -20,7 +20,7 @@ import { toggleMcp } from "./global-sync/mcp"
 import { createConnectionSync, reconnectOrder } from "./server-sync/connection"
 import { usePlatform } from "@/runtime/platform/platform"
 import type { Data } from "@opencode/client/solid"
-import { createWorktreeInventory, withWorktreeInventory } from "@/workspaces/inventory"
+import { createWorktreeInventory, updateWorktreeInventory, withWorktreeInventory } from "@/workspaces/inventory"
 import { sameDirectory } from "@/workspaces/paths"
 
 type GlobalStore = {
@@ -85,12 +85,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     scope: serverSDK.scope,
     queryClient,
     api: () => serverSDK.api.worktree,
-    updated: (directory, items) =>
-      setGlobalStore("project", (projects) =>
-        projects.map((project) =>
-          sameDirectory(project.worktree, directory) ? withWorktreeInventory(project, items) : project,
-        ),
-      ),
+    updated: (projectID, directory, items) =>
+      setGlobalStore("project", (projects) => updateWorktreeInventory(projects, projectID, directory, items)),
   })
   const bootstrap = useQuery(() => ({
     queryKey: [serverSDK.scope, "bootstrap"],
@@ -212,7 +208,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
       projects.map((project) =>
         project.id === update.id
           ? // The wire payload carries no worktrees; keep the inventory this project already loaded.
-            withWorktreeInventory(updateProjectInfo(project, update), worktrees.cached(update.canonical))
+            withWorktreeInventory(updateProjectInfo(project, update), worktrees.cached(update.id, update.canonical))
           : project,
       ),
     )
@@ -223,7 +219,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     if (event.type === "project.updated") applyProjectUpdate(event.data)
     if (event.type === "worktree.updated") {
       const root = globalStore.project.find((project) => project.id === event.data.projectID)?.worktree
-      if (root) void worktrees.refresh(root)
+      if (root) void worktrees.refresh(event.data.projectID, root)
       void bootstrap.refetch()
       return
     }

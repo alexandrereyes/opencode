@@ -29,15 +29,7 @@ export function createSidebarSessions(options: {
     () => (options.enabled?.() === false ? [] : global.servers.list()),
     (connection) => {
       const ctx = global.ensureServerCtx(connection)
-      const projects = createMemo(() =>
-        ctx.projects.list().map((project) => ({
-          ...project,
-          worktree:
-            project.id && project.id !== "global"
-              ? (ctx.sync.data.project.find((metadata) => metadata.id === project.id)?.worktree ?? project.worktree)
-              : project.worktree,
-        })),
-      )
+      const projects = createMemo(() => ctx.projects.list())
       return { connection, ctx, projects, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
     },
   )

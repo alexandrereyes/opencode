@@ -243,6 +243,19 @@ test("non-git directories preserve existing grouping", () => {
   })
 })
 
+test("inventory does not infer workspace ownership before project metadata", () => {
+  const root = row("root", "/repo-linked")
+  const project = sidebarProjects(server, [{ worktree: "/repo-linked" }], [root])[0]
+  root.project = project.key
+  const group = sidebarWorktrees(project, [root], {
+    cachedInventory: [{ directory: "/repo" }, { directory: "/repo-linked" }, { directory: "/trees/idle" }],
+    location: () => undefined,
+    branch: (directory) => (directory === "/trees/idle" ? "idle" : undefined),
+  })
+  expect(group.root.map((item) => item.session.id)).toEqual(["root"])
+  expect(group.groups).toEqual([])
+})
+
 test("non-git explicit worktrees and sandboxes keep preparing and real rows in the same group", () => {
   for (const source of ["worktree", "sandbox"] as const) {
     const directory = source === "worktree" ? "/repository" : "/sandbox"

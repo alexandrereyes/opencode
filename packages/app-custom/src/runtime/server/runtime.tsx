@@ -3,6 +3,7 @@ import { Accessor, createEffect, createMemo, createResource, createRoot, getOwne
 import { createStore } from "solid-js/store"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
+import { resolveProjectMetadata } from "./project-metadata"
 import { useServerHealth } from "@/runtime/server/health"
 import { createServerSdkContext } from "./client"
 import { createServerSyncContext } from "./sync"
@@ -239,10 +240,12 @@ function createServerController(
 
   function enrich(project: { worktree: string; expanded: boolean }) {
     const [childStore] = sync.child(project.worktree, { bootstrap: false })
-    const projectID = childStore.project
-    const metadata = projectID
-      ? sync.data.project.find((x) => x.id === projectID)
-      : sync.data.project.find((x) => x.worktree === project.worktree)
+    const metadata = resolveProjectMetadata(
+      project,
+      childStore.project,
+      data.location.info({ directory: project.worktree }),
+      sync.data.project,
+    )
 
     // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
     // Without this, different subdirectories of the same git repo would share the same

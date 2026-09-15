@@ -112,18 +112,18 @@ export function sidebarWorktrees(
   >()
   const workspaces = project.metadata ? sidebarProjectWorkspaces(project.metadata) : []
   workspaces.forEach((item) => {
-      const key = worktreeKey(project.key, item.directory)
-      const branch = metadata.branch(item.directory)
-      const cached = metadata.cachedInventory?.find((entry) => sameDirectory(entry.directory, item.directory))
-      groups.set(key, {
-        key,
-        directory: item.directory,
-        resolved: true,
-        removable: (item.strategy ?? cached?.strategy) === "git",
-        explicit: true,
-        name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(item.directory)) || item.directory,
-        rows: [],
-      })
+    const key = worktreeKey(project.key, item.directory)
+    const branch = metadata.branch(item.directory)
+    const cached = metadata.cachedInventory?.find((entry) => sameDirectory(entry.directory, item.directory))
+    groups.set(key, {
+      key,
+      directory: item.directory,
+      resolved: true,
+      removable: (item.strategy ?? cached?.strategy) === "git",
+      explicit: true,
+      name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(item.directory)) || item.directory,
+      rows: [],
+    })
   })
   const candidates = [
     ...workspaces.map((item) => item.directory),
@@ -224,9 +224,16 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
     requests.set(key, request)
     return request
   }
+  const inventoryIdentity = (project: Project) => {
+    const location = ctx.data.location.info({ directory: project.directory })?.project
+    return { id: location?.id ?? project.metadata?.id, directory: location?.canonical ?? project.directory }
+  }
   const group = (project: Project, rows: SidebarSession[]) =>
     sidebarWorktrees(project, rows, {
-      cachedInventory: ctx.sync.worktrees.cached(project.directory),
+      cachedInventory: (() => {
+        const identity = inventoryIdentity(project)
+        return identity.id ? ctx.sync.worktrees.cached(identity.id, identity.directory) : undefined
+      })(),
       location: (directory) => ctx.data.location.info({ directory }),
       branch: (directory) => ctx.data.location.vcs.info({ directory })?.branch.current,
     })
@@ -241,8 +248,15 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
       )
         return
       const project = initial.project
-      await once(`inventory:${project.key}`, async () => {
-        const inventory = await ctx.sync.worktrees.load(project.directory)
+      await once(`project-location:${pathKey(project.directory)}`, () =>
+        ctx.data.location.syncInfo({ directory: project.directory }),
+      )
+      if (lifetime.disposed) return
+      const identity = inventoryIdentity(project)
+      const projectID = identity.id
+      if (!projectID) return
+      await once(`inventory:${projectID}:${pathKey(identity.directory)}`, async () => {
+        const inventory = await ctx.sync.worktrees.load(projectID, identity.directory)
         if (inventory && !lifetime.disposed) setState("loaded", project.key, true)
       })
       if (lifetime.disposed) return
@@ -250,11 +264,16 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
       if (!locations || ctx.sdk.connection.status() !== "connected") return
       // Inventory containment resolves subdirectories without a request per session. Only
       // unmatched directories need Location's authoritative worktree root (no full bootstrap).
-      const inventory = ctx.sync.worktrees.cached(locations.project.directory)
+      const currentIdentity = inventoryIdentity(locations.project)
+      const inventory = currentIdentity.id
+        ? ctx.sync.worktrees.cached(currentIdentity.id, currentIdentity.directory)
+        : undefined
       await Promise.all(
         [
           ...new Set(
-            locations.rows.filter((row) => row.project === project.key).map((row) => row.session.location.directory),
+            locations.rows
+              .filter((row) => row.project === locations.project.key)
+              .map((row) => row.session.location.directory),
           ),
         ]
           .filter(

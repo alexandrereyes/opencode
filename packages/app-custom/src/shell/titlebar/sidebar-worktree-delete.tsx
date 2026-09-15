@@ -80,8 +80,9 @@ export function useSidebarWorktreeDelete(archive: Archive, lifecyclePending: () 
         },
         { location: { directory: target.projectDirectory } },
       )
-      target.ctx.sync.worktrees.remove(target.projectDirectory, target.directory)
-      await target.ctx.sync.worktrees.refresh(target.projectDirectory)
+      const canonical = target.ctx.data.location.info({ directory: target.projectDirectory })?.project.canonical ?? target.projectDirectory
+      target.ctx.sync.worktrees.remove(target.projectID, canonical, target.directory)
+      await target.ctx.sync.worktrees.refresh(target.projectID, canonical)
       tabs.store.forEach((tab) => {
         if (tab.type !== "draft" || tab.server !== target.server) return
         const directoryMatches = containsDirectory(target.directory, tab.directory)

@@ -19,7 +19,7 @@ function setup(list: (directory: string) => Promise<WorktreeDirectory[]>) {
         return list(directory)
       },
     }),
-    updated: (directory, items) => updates.push([directory, items]),
+    updated: (_projectID, directory, items) => updates.push([directory, items]),
   })
   return { client, calls, updates, inventory }
 }
@@ -31,27 +31,27 @@ describe("createWorktreeInventory", () => {
       await gate.promise
       return [{ directory }, { directory: `${directory}/feature`, strategy: "git" }]
     })
-    const first = setupResult.inventory.load("/repo")
-    const second = setupResult.inventory.load("/repo/")
+    const first = setupResult.inventory.load("project", "/repo")
+    const second = setupResult.inventory.load("project", "/repo/")
     expect(setupResult.calls).toEqual(["/repo"])
     gate.resolve()
     expect(await first).toHaveLength(2)
     expect(await second).toHaveLength(2)
-    await setupResult.inventory.load("/repo")
+    await setupResult.inventory.load("project", "/repo")
     expect(setupResult.calls).toEqual(["/repo"])
     expect(setupResult.updates).toEqual([
       ["/repo", [{ directory: "/repo" }, { directory: "/repo/feature", strategy: "git" }]],
     ])
-    expect(setupResult.inventory.cached("/repo/")).toHaveLength(2)
+    expect(setupResult.inventory.cached("project", "/repo/")).toHaveLength(2)
     setupResult.client.clear()
   })
 
   test("refreshes only inventories a view already loaded", async () => {
     const setupResult = setup(async (directory) => [{ directory }])
-    await setupResult.inventory.refresh("/never-opened")
+    await setupResult.inventory.refresh("project", "/never-opened")
     expect(setupResult.calls).toEqual([])
-    await setupResult.inventory.load("/opened")
-    await setupResult.inventory.refresh("/opened")
+    await setupResult.inventory.load("project", "/opened")
+    await setupResult.inventory.refresh("project", "/opened")
     expect(setupResult.calls).toEqual(["/opened", "/opened"])
     setupResult.client.clear()
   })
@@ -62,10 +62,10 @@ describe("createWorktreeInventory", () => {
       if (fail) throw new Error("Location unavailable")
       return [{ directory }]
     })
-    expect(await setupResult.inventory.load("/repo")).toBeUndefined()
-    expect(setupResult.inventory.cached("/repo")).toBeUndefined()
+    expect(await setupResult.inventory.load("project", "/repo")).toBeUndefined()
+    expect(setupResult.inventory.cached("project", "/repo")).toBeUndefined()
     fail = false
-    expect(await setupResult.inventory.load("/repo")).toEqual([{ directory: "/repo" }])
+    expect(await setupResult.inventory.load("project", "/repo")).toEqual([{ directory: "/repo" }])
     expect(setupResult.calls).toEqual(["/repo", "/repo"])
     setupResult.client.clear()
   })
@@ -76,12 +76,12 @@ describe("createWorktreeInventory", () => {
       if (fail) throw new Error("Service unavailable")
       return [{ directory }, { directory: `${directory}/feature`, strategy: "git" }]
     })
-    await setupResult.inventory.load("/repo")
-    setupResult.inventory.remove("/repo", "/repo/feature")
+    await setupResult.inventory.load("project", "/repo")
+    setupResult.inventory.remove("project", "/repo", "/repo/feature")
     fail = true
-    await setupResult.inventory.refresh("/repo")
+    await setupResult.inventory.refresh("project", "/repo")
 
-    expect(setupResult.inventory.cached("/repo")).toEqual([{ directory: "/repo" }])
+    expect(setupResult.inventory.cached("project", "/repo")).toEqual([{ directory: "/repo" }])
     expect(setupResult.updates.at(-1)).toEqual(["/repo", [{ directory: "/repo" }]])
     expect(setupResult.calls).toEqual(["/repo", "/repo"])
     setupResult.client.clear()
@@ -95,23 +95,28 @@ describe("createWorktreeInventory", () => {
       if (calls > 1) await gate.promise
       return [{ directory }, { directory: `${directory}/feature`, strategy: "git" }]
     })
-    await setupResult.inventory.load("/repo")
-    const refresh = setupResult.inventory.refresh("/repo")
-    setupResult.inventory.remove("/repo", "/repo/feature")
+    await setupResult.inventory.load("project", "/repo")
+    const refresh = setupResult.inventory.refresh("project", "/repo")
+    setupResult.inventory.remove("project", "/repo", "/repo/feature")
     gate.resolve()
     await refresh
 
-    expect(setupResult.inventory.cached("/repo")).toEqual([{ directory: "/repo" }])
+    expect(setupResult.inventory.cached("project", "/repo")).toEqual([{ directory: "/repo" }])
     expect(setupResult.updates.at(-1)).toEqual(["/repo", [{ directory: "/repo" }]])
     setupResult.client.clear()
   })
 
   test("keys are partitioned by server and normalized by path", () => {
     const remote = "https://remote.example" as typeof ServerScope.local
-    expect(worktreeInventoryKey(ServerScope.local, "C:\\Repo\\")).toEqual(
-      worktreeInventoryKey(ServerScope.local, "C:/Repo"),
+    expect(worktreeInventoryKey(ServerScope.local, "project", "C:\\Repo\\")).toEqual(
+      worktreeInventoryKey(ServerScope.local, "project", "C:/Repo"),
     )
-    expect(worktreeInventoryKey(ServerScope.local, "/repo")).not.toEqual(worktreeInventoryKey(remote, "/repo"))
+    expect(worktreeInventoryKey(ServerScope.local, "project", "/repo")).not.toEqual(
+      worktreeInventoryKey(remote, "project", "/repo"),
+    )
+    expect(worktreeInventoryKey(ServerScope.local, "project", "/repo")).not.toEqual(
+      worktreeInventoryKey(ServerScope.local, "historical", "/repo"),
+    )
   })
 })
 

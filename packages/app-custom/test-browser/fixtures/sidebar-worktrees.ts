@@ -219,6 +219,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       directory,
       project: directory.startsWith("/repository")
         ? { id: "repository", canonical: "/repository", directory: "/repository" }
+        : directory.startsWith("/empty")
+          ? { id: "empty", canonical: "/empty", directory: "/empty" }
+          : directory.startsWith("/second")
+            ? { id: "second", canonical: "/second", directory: "/second" }
         : { id: "repo", canonical: "/repo", directory: worktree },
     }
     if (url.pathname === "/api/location") {
@@ -317,7 +321,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         scope: ServerScope.fromServerKey(ServerConnection.key(connection)),
         queryClient: query,
         api: () => api.worktree,
-        updated: (directory, items) =>
+        updated: (_projectID, directory, items) =>
           setState("project", (projects) =>
             projects.map((project) =>
               project.worktree === directory ? withWorktreeInventory(project, items) : project,
@@ -415,6 +419,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       (item) => item.textContent === text || item.getAttribute("aria-label") === text,
     )!
   const toggle = () => host.querySelector<HTMLButtonElement>('[aria-label="Attention view"]')!.click()
+  const projectLocations = new Set(["/repo", "/repository", "/empty", "/second"])
   try {
     await wait()
     expect(
@@ -497,7 +502,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(
       calls.filter(
         (call) =>
-          !call.server && ["/api/location", "/api/vcs"].includes(call.path) && !call.directory.startsWith("/empty"),
+          !call.server &&
+          ["/api/location", "/api/vcs"].includes(call.path) &&
+          !call.directory.startsWith("/empty") &&
+          !projectLocations.has(call.directory),
       ),
     ).toEqual([])
     toggle()
@@ -505,7 +513,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(
       calls.filter(
         (call) =>
-          !call.server && ["/api/location", "/api/vcs"].includes(call.path) && !call.directory.startsWith("/empty"),
+          !call.server &&
+          ["/api/location", "/api/vcs"].includes(call.path) &&
+          !call.directory.startsWith("/empty") &&
+          !projectLocations.has(call.directory),
       ),
     ).toEqual([])
     header(projectElement()).click()
@@ -532,7 +543,12 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     await wait()
     expect(
       calls
-        .filter((call) => call.server && ["/api/location", "/api/vcs"].includes(call.path))
+        .filter(
+          (call) =>
+            call.server &&
+            ["/api/location", "/api/vcs"].includes(call.path) &&
+            !(call.path === "/api/location" && projectLocations.has(call.directory)),
+        )
         .map((call) => call.directory)
         .sort(),
     ).toEqual(["/empty/idle", "/other/feat", "/repository", "/trees/feat"])
@@ -579,7 +595,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(group("/trees/feature")).toBeDefined()
     expect(
       calls
-        .filter((call) => call.path === "/api/location")
+        .filter((call) => call.path === "/api/location" && !projectLocations.has(call.directory))
         .map((call) => call.directory)
         .sort(),
     ).toEqual(["/loose/feat/src", "/missing/feat", "/trees/feature"])

@@ -100,7 +100,7 @@ export async function bootstrapGlobal(input: {
           data.map((project) =>
             withWorktreeInventory(
               project,
-              input.queryClient.getQueryData(worktreeInventoryKey(input.scope, project.worktree)),
+              input.queryClient.getQueryData(worktreeInventoryKey(input.scope, project.id, project.worktree)),
             ),
           ),
         ),
