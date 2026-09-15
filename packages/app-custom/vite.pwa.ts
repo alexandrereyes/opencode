@@ -6,16 +6,16 @@ import { VitePWA } from "vite-plugin-pwa"
 export function serviceWorker(directory: string) {
   return VitePWA({
     strategies: "generateSW",
-    registerType: "prompt",
+    registerType: "autoUpdate",
     injectRegister: false,
     manifest: false,
     workbox: {
       // Workbox runs after Sentry's upload and cleanup, so do not publish an unuploaded map.
       sourcemap: false,
       globDirectory: directory,
-      clientsClaim: false,
-      // Keep each open tab on its complete build until all old clients close.
-      skipWaiting: false,
+      clientsClaim: true,
+      // Custom releases are activated manually as one immutable backend/web/plugin/TUI unit.
+      skipWaiting: true,
       inlineWorkboxRuntime: true,
       navigateFallback: "/index.html",
       navigateFallbackDenylist: [/^\/api(?:\/|$)/, /^\/(?:_assets|assets)(?:\/|$)/],

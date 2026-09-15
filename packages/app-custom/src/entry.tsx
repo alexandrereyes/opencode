@@ -13,6 +13,7 @@ import zh from "@/runtime/i18n/zh"
 import { authFromToken } from "@/runtime/server/api"
 import pkg from "../package.json"
 import { ServerConnection } from "@/runtime/server/registry"
+import { registerServiceWorker } from "@/runtime/platform/service-worker"
 
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
@@ -45,15 +46,6 @@ const clearAuthToken = () => {
 const build = import.meta.env.VITE_OPENCODE_DEV_BUILD ?? import.meta.env.VITE_OPENCODE_TEST_BUILD
 const web = createWebPlatform(build ?? pkg.version)
 
-if (
-  import.meta.env.PROD &&
-  !build &&
-  import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" &&
-  "serviceWorker" in navigator
-) {
-  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
-}
-
 if (import.meta.env.VITE_SENTRY_DSN) {
   init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
@@ -76,6 +68,13 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
   // Lazy chunks can import the entry chunk back under a distinct URL, so claim the root before async startup.
   root.dataset.opencodeMounted = ""
+  if (
+    import.meta.env.PROD &&
+    !build &&
+    import.meta.env.VITE_OPENCODE_DISABLE_SERVICE_WORKER !== "1" &&
+    "serviceWorker" in navigator
+  )
+    registerServiceWorker()
   void loadInitialLocale().then((locale) => {
     const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
     clearAuthToken()
