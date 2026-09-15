@@ -169,13 +169,40 @@ for (const width of [1440, 390]) {
         }),
       )
       .toBe(true)
+    await expect
+      .poll(() =>
+        comment.evaluate((element) => {
+          const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
+          const popup = document.querySelector('[data-component="composer-suggestions"]')!.getBoundingClientRect()
+          return anchor.top - popup.bottom
+        }),
+      )
+      .toBeCloseTo(8, 0)
     await page.screenshot({ path: info.outputPath(`chat-quote-snippets-${width}.png`) })
     if (width < 768) {
-      // Simulate keyboard panning independently of the layout viewport. There is less
-      // than 136px above the editor, and only visualViewport events notify the popup.
+      // WebKit reports client rects relative to the panned visual viewport, while
+      // fixed CSS coordinates retain the layout origin. Model that browser boundary
+      // for every element, not just the popup or the application's calculation.
+      await page.evaluate(() => {
+        const original = Element.prototype.getBoundingClientRect
+        Element.prototype.getBoundingClientRect = function () {
+          const rect = original.call(this)
+          return new DOMRect(rect.x, rect.y - (window.visualViewport?.offsetTop ?? 0), rect.width, rect.height)
+        }
+        window.addEventListener(
+          "restore-client-rects",
+          () => {
+            Element.prototype.getBoundingClientRect = original
+          },
+          { once: true },
+        )
+      })
       for (const event of ["resize", "scroll"]) {
         await comment.evaluate((element, event) => {
-          const top = element.getBoundingClientRect().top - (event === "resize" ? 120 : 100)
+          const top =
+            element.getBoundingClientRect().top +
+            (window.visualViewport?.offsetTop ?? 0) -
+            (event === "resize" ? 120 : 100)
           Object.defineProperties(window.visualViewport, {
             offsetTop: { configurable: true, value: top },
             height: { configurable: true, value: innerHeight - top },
@@ -187,19 +214,24 @@ for (const width of [1440, 390]) {
             snippet.evaluate((element) => {
               const box = element.closest('[data-component="composer-suggestions"]')!.getBoundingClientRect()
               const viewport = window.visualViewport!
-              return (
-                box.height > 0 &&
-                box.height < 136 &&
-                box.top >= viewport.offsetTop &&
-                box.bottom <= viewport.offsetTop + viewport.height
-              )
+              return box.height > 0 && box.height < 136 && box.top >= 0 && box.bottom <= viewport.height
             }),
           )
           .toBe(true)
+        await expect
+          .poll(() =>
+            comment.evaluate((element) => {
+              const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
+              const popup = document.querySelector('[data-component="composer-suggestions"]')!.getBoundingClientRect()
+              return anchor.top - popup.bottom
+            }),
+          )
+          .toBeCloseTo(8, 0)
       }
       await snippet.tap()
       await expect(comment).toBeFocused()
       await page.evaluate(() => {
+        window.dispatchEvent(new Event("restore-client-rects"))
         Reflect.deleteProperty(window.visualViewport!, "offsetTop")
         Reflect.deleteProperty(window.visualViewport!, "height")
         window.visualViewport?.dispatchEvent(new Event("resize"))

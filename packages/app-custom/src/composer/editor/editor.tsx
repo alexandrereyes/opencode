@@ -898,6 +898,21 @@ export function ComposerEditorPopover(props: {
     for (let parent = anchor.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
     const update = () => {
       const bounds = anchor.getBoundingClientRect()
+      if (props.floating) {
+        popover.style.left = "0px"
+        popover.style.top = "0px"
+        popover.style.width = `${bounds.width}px`
+        // With translateY(-100%), bottom at top:0 measures the fixed origin.
+        // WebKit pans client rects with the visual viewport but not fixed CSS
+        // coordinates. Measuring that origin also works in layout-relative browsers.
+        const origin = popover.getBoundingClientRect()
+        const edge = bounds.top - origin.bottom - 8
+        const available = edge - (window.visualViewport?.offsetTop ?? 0) - 8
+        popover.style.maxHeight = `${Math.max(0, Math.min(320, available))}px`
+        popover.style.left = `${bounds.left - origin.left}px`
+        popover.style.top = `${edge}px`
+        return
+      }
       const clippedTop = Math.max(
         0,
         ...ancestors
@@ -908,13 +923,8 @@ export function ComposerEditorPopover(props: {
       const top = viewport?.offsetTop ?? 0
       const bottom = top + (viewport?.height ?? window.innerHeight)
       const edge = Math.min(bounds.top - 8, bottom - 8)
-      // A viewport-fixed popup escapes ordinary overflow ancestors. Absolute popups do not.
-      const available = edge - Math.max(top, props.floating ? 0 : clippedTop) - 8
+      const available = edge - Math.max(top, clippedTop) - 8
       popover.style.maxHeight = `${Math.max(0, Math.min(320, available))}px`
-      if (!props.floating) return
-      popover.style.left = `${bounds.left}px`
-      popover.style.top = `${edge}px`
-      popover.style.width = `${bounds.width}px`
     }
     const observer = new ResizeObserver(update)
     observer.observe(anchor)
