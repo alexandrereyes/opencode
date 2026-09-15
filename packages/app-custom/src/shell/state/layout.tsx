@@ -25,6 +25,7 @@ export { createSessionKeyReader, ensureSessionKey, pruneSessionKeys }
 export type { ProjectAvatarVariant }
 
 const DEFAULT_SIDEBAR_WIDTH = 344
+const DEFAULT_VERTICAL_TABS_WIDTH = 260
 const DEFAULT_FILE_TREE_WIDTH = 200
 const DEFAULT_SESSION_WIDTH = 600
 const DEFAULT_TERMINAL_HEIGHT = 280
@@ -157,6 +158,7 @@ export const layoutSchema = Persistence.struct({
     workspaces: Persistence.record(Schema.Boolean),
     workspacesDefault: Schema.Boolean,
   }),
+  verticalTabs: Persistence.struct({ width: Schema.Finite }),
   terminal: Persistence.struct({ height: Schema.Finite, opened: Schema.Boolean }),
   review: Persistence.struct({
     diffStyle: Schema.Literals(["unified", "split"]),
@@ -234,6 +236,7 @@ export const layoutPersistence = Persistence.migrate(
 export function initialLayout(server?: ServerConnection.Key): typeof layoutSchema.Type {
   return {
     sidebar: { opened: false, width: DEFAULT_SIDEBAR_WIDTH, workspaces: {}, workspacesDefault: false },
+    verticalTabs: { width: DEFAULT_VERTICAL_TABS_WIDTH },
     terminal: { height: DEFAULT_TERMINAL_HEIGHT, opened: false },
     review: { diffStyle: "split", panelOpened: DEFAULT_REVIEW_PANEL_OPENED },
     fileTree: { opened: false, width: DEFAULT_FILE_TREE_WIDTH, tab: "changes" },
@@ -383,6 +386,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         selection: createMemo(() => store.home.selection),
         setSelection(selection: HomeProjectSelection) {
           setStore("home", "selection", reconcile(selection))
+        },
+      },
+      verticalTabs: {
+        width: createMemo(() => store.verticalTabs.width),
+        resize(width: number) {
+          setStore("verticalTabs", "width", width)
         },
       },
       terminal: {

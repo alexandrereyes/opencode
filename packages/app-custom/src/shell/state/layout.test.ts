@@ -17,11 +17,13 @@ describe("layout persistence", () => {
   test("uses supplied initial preferences after legacy migration", () => {
     const initial = initialLayout(ServerConnection.Key.make("remote"))
     initial.sidebar.width = 420
+    initial.verticalTabs.width = 380
     initial.fileTree.width = 300
     initial.review.panelOpened = true
     const restore = Schema.decodeUnknownSync(Persistence.withInitial(layoutPersistence, initial))
     expect(restore({})).toEqual(initial)
     expect(restore({ sidebar: { width: "bad" } }).sidebar.width).toBe(420)
+    expect(restore({ verticalTabs: { width: "bad" } }).verticalTabs.width).toBe(380)
     expect(restore({ fileTree: { width: 260 } }).fileTree.width).toBe(200)
     expect(restore({ fileTree: {} }).fileTree.width).toBe(300)
     expect(restore({ review: {}, fileTree: { opened: false } }).review.panelOpened).toBe(false)
@@ -32,6 +34,7 @@ describe("layout persistence", () => {
     const defaults = decode({})
     expect(defaults).toEqual({
       sidebar: { opened: false, width: 344, workspaces: {}, workspacesDefault: false },
+      verticalTabs: { width: 260 },
       terminal: { height: 280, opened: false },
       review: { diffStyle: "split", panelOpened: false },
       fileTree: { opened: false, width: 200, tab: "changes" },
@@ -63,9 +66,11 @@ describe("layout persistence", () => {
 
   test("preserves current panel preferences", () => {
     const value = decode({
+      verticalTabs: { width: 420 },
       review: { diffStyle: "unified", panelOpened: false },
       fileTree: { opened: true, width: 260, tab: "all" },
     })
+    expect(value.verticalTabs).toEqual({ width: 420 })
     expect(value.review).toEqual({ diffStyle: "unified", panelOpened: false })
     expect(value.fileTree).toEqual({ opened: true, width: 260, tab: "all" })
   })

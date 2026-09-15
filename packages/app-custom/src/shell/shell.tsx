@@ -9,6 +9,7 @@ import { TitlebarRightProvider } from "@/shell/titlebar/right-slot"
 import { useSettingsSurface } from "@/settings/surface"
 import { useSettings } from "@/settings/model"
 import { SshAuthentication } from "@/servers/ssh/authentication"
+import { useLayout } from "@/shell/state/layout"
 
 const DebugBar = lazy(() => import("@/shell/debug/debug-bar").then((module) => ({ default: module.DebugBar })))
 
@@ -16,10 +17,10 @@ export default function Layout(props: ParentProps) {
   const platform = usePlatform()
   const settings = useSettingsSurface()
   const preferences = useSettings()
+  const layout = useLayout()
   const mobile = createMediaQuery("(max-width: 767px)")
   const [state, setState] = createStore({
     debugTools: false,
-    tabsWidth: 260,
     tabsMount: undefined as HTMLElement | undefined,
   })
   const verticalTabs = () => preferences.appearance.tabLayout() === "vertical" && !mobile()
@@ -69,17 +70,17 @@ export default function Layout(props: ParentProps) {
               data-slot="vertical-tabs-sidebar"
               class="relative flex h-full min-h-0 shrink-0 flex-col bg-v2-background-bg-deep pe-0.5 ps-2.5 pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]"
               style={{
-                width: `${state.tabsWidth}px`,
+                width: `${layout.verticalTabs.width()}px`,
                 "padding-bottom": "max(10px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))",
               }}
             >
               <ResizeHandle
                 class="-end-2"
                 direction="horizontal"
-                size={state.tabsWidth}
+                size={layout.verticalTabs.width()}
                 min={140}
                 max={520}
-                onResize={(width) => setState("tabsWidth", width)}
+                onResize={layout.verticalTabs.resize}
               />
             </aside>
           </Show>
