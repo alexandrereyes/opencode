@@ -91,6 +91,21 @@ describe("Composer interaction machine", () => {
     expect(result.commands).toContainEqual({ type: "draft.setText", value: "" })
   })
 
+  test.each([
+    ["! #review", "snippet"],
+    ["! $audit", "skill"],
+  ] as const)("keeps an initial exclamation mark literal before %s when shell mode is disabled", (value, popover) => {
+    const result = transitionComposer(
+      createComposerInteractionState(),
+      { type: "input.changed", value, persist: false, shell: false },
+      persisted(value),
+    )
+
+    expect(result.state.mode).toBe("normal")
+    expect(result.state.popover.type).toBe(popover)
+    expect(result.commands).not.toContainEqual({ type: "draft.setText", value: "" })
+  })
+
   test("leaves shell mode with escape", () => {
     const state = { ...createComposerInteractionState(), mode: "shell" as const }
     const result = transitionComposer(

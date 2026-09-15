@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { Persistence } from "@/runtime/persistence/schema"
 import { SessionMessage } from "@opencode/schema/session-message"
+import { Skill } from "@opencode/schema/skill"
 import {
   CommentStore,
   ComposerStore,
@@ -98,6 +99,43 @@ describe("composer persistence schemas", () => {
         Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
       )(Schema.encodeSync(ComposerStore)(value)),
     ).toEqual(value)
+  })
+
+  test("keeps legacy quote comments and restores optional semantic comment parts", () => {
+    const decode = Schema.decodeUnknownSync(
+      Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
+    )
+    const quote = { id: "quote", messageID: "message", partID: "part", text: "Quoted", comment: "Explain" }
+
+    expect(decode({ quotes: [quote] }).quotes).toEqual([quote])
+    expect(
+      decode({
+        quotes: [
+          {
+            ...quote,
+            commentPrompt: [
+              {
+                type: "skill",
+                id: Skill.ID.make("audit"),
+                name: Skill.Name.make("Audit"),
+                content: "$audit",
+                start: 0,
+                end: 6,
+              },
+            ],
+          },
+        ],
+      }).quotes?.[0]?.commentPrompt,
+    ).toEqual([
+      {
+        type: "skill",
+        id: Skill.ID.make("audit"),
+        name: Skill.Name.make("Audit"),
+        content: "$audit",
+        start: 0,
+        end: 6,
+      },
+    ])
   })
 
   test("preserves file source variants through canonical round trips", () => {

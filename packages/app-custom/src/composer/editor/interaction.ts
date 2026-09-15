@@ -1,4 +1,4 @@
-import { createEffect, type Accessor } from "solid-js"
+import { createEffect, onCleanup, type Accessor } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useFilteredList } from "@opencode/ui-custom/hooks"
 import { createComposerAttachments, type ComposerAttachmentConfig } from "../attachments/attachments"
@@ -46,6 +46,7 @@ type ComposerEditorBinding = {
 
 export type ComposerEditorView = {
   draftOnly?: boolean
+  allowShell?: boolean
   placeholder?: Accessor<string>
   add?: {
     onAttach: () => void
@@ -84,6 +85,7 @@ export function createComposerEditor(input: {
   onContextRemove?: (item: ComposerComment) => void
   onEditor?: (element: HTMLElement) => void
   onSuggestionSelect?: (item: ComposerSuggestion) => (() => void) | void
+  onContextQuery?: (owner: symbol, query: string | undefined) => void
   view: ComposerEditorView
   attachments?: ComposerAttachmentConfig
 }) {
@@ -91,6 +93,7 @@ export function createComposerEditor(input: {
   let editorBinding: ComposerEditorBinding | undefined
   let fileInput: HTMLInputElement | undefined
   const draft = createComposerEditorActions(input.store)
+  const contextQueryOwner = Symbol()
   const [state, setState] = input.state ?? createComposerEditorState(draft.state.mode)
   function addPart(part: ComposerPersistedState["prompt"][number]) {
     if (part.type === "image") return false
@@ -240,7 +243,7 @@ export function createComposerEditor(input: {
       if (item) dispatch({ type: "popover.select", item })
       return
     }
-    if (command.type === "focus.editor") editor?.focus()
+    if (command.type === "focus.editor" && document.activeElement !== editor) editor?.focus()
   }
 
   function dispatch(event: ComposerInteractionEvent) {
@@ -332,6 +335,10 @@ export function createComposerEditor(input: {
     if (state.popover.activeID ? ids.includes(state.popover.activeID) : ids.length === 0) return
     dispatch({ type: "popover.results", ids })
   })
+  createEffect(() =>
+    input.onContextQuery?.(contextQueryOwner, state.popover.type === "context" ? state.popover.query : undefined),
+  )
+  onCleanup(() => input.onContextQuery?.(contextQueryOwner, undefined))
 
   const restoreFocus = (cursor = draft.state.cursor ?? promptLength(draft.state.prompt)) => {
     requestAnimationFrame(() => {
@@ -383,6 +390,12 @@ export function createComposerEditor(input: {
   return {
     state,
     view: input.view,
+    completion: {
+      context: input.context,
+      snippets: () => input.snippets?.() ?? [],
+      searchContextFiles: input.searchContextFiles,
+      onContextQuery: input.onContextQuery,
+    },
     suggestions,
     dispatch,
     onKeyDown,
@@ -442,7 +455,7 @@ export function createComposerEditor(input: {
     onInput(value: string, prompt?: ComposerPersistedState["prompt"], cursor?: number) {
       if (prompt) draft.setPrompt(prompt, cursor)
       if (input.view.draftOnly) return
-      dispatch({ type: "input.changed", value, persist: !prompt })
+      dispatch({ type: "input.changed", value, persist: !prompt, shell: input.view.allowShell !== false })
     },
     normalize(prompt: ComposerPrompt, cursor: number) {
       draft.setPrompt(prompt, cursor)

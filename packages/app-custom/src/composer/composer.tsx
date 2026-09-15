@@ -21,7 +21,9 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
   return (
     <div class="flex flex-col gap-3">
       <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
-        {(quotes) => <ChatQuotes quotes={quotes()} onDone={props.model.restoreFocus} />}
+        {(quotes) => (
+          <ChatQuotes quotes={quotes()} completion={props.model.completion} onDone={props.model.restoreFocus} />
+        )}
       </Show>
       <ComposerEditor
         controller={props.model}

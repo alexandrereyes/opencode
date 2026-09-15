@@ -49,24 +49,20 @@
     display: block;
     margin-block: 12px 4px;
   }
-  textarea {
+  [data-component="composer"][data-compact="true"] {
     display: block;
     width: 100%;
-    padding: 8px 10px;
     border: 1px solid var(--v2-border-border-base);
     border-radius: 6px;
     background: var(--v2-background-bg-base);
     color: var(--v2-text-text-base);
-    resize: vertical;
     min-height: 64px;
     max-height: 180px;
-    &::placeholder {
-      color: var(--v2-text-text-muted);
-    }
-    &:focus-visible {
-      outline: 2px solid var(--v2-border-border-focus);
-      outline-offset: 2px;
-    }
+    box-shadow: none;
+  }
+  [data-component="composer"][data-compact="true"]:focus-within {
+    outline: 2px solid var(--v2-border-border-focus);
+    outline-offset: 2px;
   }
 }
 

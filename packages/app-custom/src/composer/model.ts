@@ -2,6 +2,7 @@ import { ImagePreview } from "@opencode/ui-custom/image-preview"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import type { ReferenceInfo } from "@opencode/client/promise"
 import { createComponent, createEffect, createMemo, createResource, on, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
 import type { ComposerSuggestion } from "./types"
 import { createComposerEditor, createComposerEditorState, type ComposerEditorModel } from "./editor/interaction"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/workspaces/files/model"
@@ -51,6 +52,10 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   let editor: HTMLDivElement | undefined
 
   const interaction = createComposerEditorState(prompt.mode.current())
+  const [completionState, setCompletionState] = createStore({
+    contextQuery: undefined as string | undefined,
+    contextOwner: undefined as symbol | undefined,
+  })
   createEffect(
     on(
       () => (adapter.ready() ? prompt.mode.current() : undefined),
@@ -205,7 +210,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const skills = createMemo(() => data.location.skill.list({ directory: sdk().directory }) ?? [])
   const appSource = createMemo(
     () => {
-      if (interaction[0].popover.type !== "context" || !available()) return false
+      if (completionState.contextQuery === undefined || !available()) return false
       return { server: server.key, directory: sdk().directory }
     },
     false,
@@ -235,8 +240,8 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   })
   onCleanup(() => sessionSearch.dispose())
   const sessionSource = createMemo(() => {
-    if (interaction[0].popover.type !== "context" || !available()) return false
-    return interaction[0].popover.query.trim()
+    if (completionState.contextQuery === undefined || !available()) return false
+    return completionState.contextQuery.trim()
   })
   const [sessions] = createResource(sessionSource, (query) => sessionSearch.load(query), { initialValue: [] })
   const context = createMemo<ComposerSuggestion[]>(() => [
@@ -427,6 +432,14 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     snippets: () => {
       const project = sdk().current?.project.id
       return snippetSuggestions(server.ctx.snippets.list(), project)
+    },
+    onContextQuery: (owner, query) => {
+      if (query !== undefined) {
+        setCompletionState({ contextOwner: owner, contextQuery: query })
+        return
+      }
+      if (completionState.contextOwner === owner)
+        setCompletionState({ contextOwner: undefined, contextQuery: undefined })
     },
     searchContextFiles: async (query) =>
       (await files.searchFilesAndDirectories(query)).map((path) => ({

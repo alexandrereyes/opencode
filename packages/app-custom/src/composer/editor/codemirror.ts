@@ -261,3 +261,11 @@ export const composerEditorTheme = EditorView.theme({
     backgroundColor: "var(--v2-overlay-simple-overlay-pressed)",
   },
 })
+
+export const composerEditorCompactTheme = EditorView.theme({
+  "&": { minHeight: "64px" },
+  ".cm-content": {
+    minHeight: "64px",
+    padding: "8px 10px",
+  },
+})

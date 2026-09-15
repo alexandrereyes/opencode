@@ -68,14 +68,23 @@ const isSkillAttachment = (part: Prompt[number]): part is SkillPart => part.type
 
 export function buildPromptRequest(input: BuildPromptRequestInput): PromptRequest {
   const prompt = input.prompt.some((part) => part.type === "snippet") ? expandSnippets(input.prompt) : input.prompt
+  const quotePrompt = (input.quotes ?? []).flatMap((quote) =>
+    quote.commentPrompt?.some((part) => part.type === "snippet")
+      ? expandSnippets(quote.commentPrompt)
+      : (quote.commentPrompt ?? []),
+  )
   const text =
     prompt === input.prompt ? input.text : prompt.map((part) => ("content" in part ? part.content : "")).join("")
-  const apps = prompt.filter((part) => part.type === "app")
-  const sessions = prompt.filter((part) => part.type === "session")
+  const apps = [...prompt, ...quotePrompt].filter((part) => part.type === "app")
+  const sessions = [...prompt, ...quotePrompt].filter((part) => part.type === "session")
   const skills = prompt.filter(isSkillAttachment).map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
     mention: { start: attachment.start, end: attachment.end, text: attachment.content },
+  }))
+  const quoteSkills = quotePrompt.filter(isSkillAttachment).map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
   }))
   const files = prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)
@@ -86,13 +95,22 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       mention: { start: attachment.start, end: attachment.end, text: attachment.content },
     }
   })
+  const quoteFiles = quotePrompt.filter(isFileAttachment).map((attachment) => {
+    const path = absolute(input.sessionDirectory, attachment.path)
+    return {
+      uri: attachment.url ?? `file://${encodeFilePath(path)}${fileQuery(attachment.selection)}`,
+      mime: attachment.mime ?? "text/plain",
+      name: attachment.filename ?? getFilename(attachment.path),
+    }
+  })
 
   const agents = prompt.filter(isAgentAttachment).map((attachment) => ({
     name: attachment.name,
     mention: { start: attachment.start, end: attachment.end, text: attachment.content },
   }))
+  const quoteAgents = quotePrompt.filter(isAgentAttachment).map((attachment) => ({ name: attachment.name }))
 
-  const used = new Set(files.map((file) => file.uri))
+  const used = new Set([...files, ...quoteFiles].map((file) => file.uri))
   const comments: PromptComment[] = []
   const context = input.context.flatMap((item) => {
     const path = absolute(input.sessionDirectory, item.path)
@@ -139,9 +157,9 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
     ].join("\n"),
     displayText: text,
-    files: [...files, ...context, ...images],
-    agents,
-    skills,
+    files: [...files, ...quoteFiles, ...context, ...images],
+    agents: [...agents, ...quoteAgents],
+    skills: [...skills, ...quoteSkills],
     comments,
     apps,
     sessions,

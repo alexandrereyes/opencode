@@ -17,7 +17,7 @@ export type ComposerInteractionState = {
 }
 
 export type ComposerInteractionEvent =
-  | { type: "input.changed"; value: string; persist?: boolean }
+  | { type: "input.changed"; value: string; persist?: boolean; shell?: boolean }
   | { type: "commands.open" }
   | { type: "context.open" }
   | { type: "popover.query"; value: string }
@@ -64,7 +64,8 @@ export function transitionComposer(
   event: ComposerInteractionEvent,
   persisted: ComposerPersistedState,
 ): ComposerEditorTransition {
-  if (event.type === "input.changed") return inputChanged(state, event.value, event.persist !== false, persisted.cursor)
+  if (event.type === "input.changed")
+    return inputChanged(state, event.value, event.persist !== false, event.shell !== false, persisted.cursor)
   if (event.type === "commands.open") return openCommands(state, persisted)
   if (event.type === "context.open") return openContext(state)
   if (event.type === "popover.query") return queryChanged(state, event.value)
@@ -88,10 +89,11 @@ function inputChanged(
   state: ComposerInteractionState,
   value: string,
   persist: boolean,
+  shell: boolean,
   cursor: number | undefined,
 ): ComposerEditorTransition {
   const setText: ComposerInteractionCommand[] = persist ? [{ type: "draft.setText", value }] : []
-  if (state.mode === "normal" && value === "!") {
+  if (shell && state.mode === "normal" && value === "!") {
     return changed({ ...state, mode: "shell", popover: { type: "closed" }, focus: "editor" }, [
       { type: "draft.setText", value: "" },
     ])

@@ -102,6 +102,51 @@ describe("buildPromptRequest", () => {
     })
   })
 
+  test("preserves and expands semantic references from quote comments", () => {
+    const result = buildPromptRequest({
+      prompt: [{ type: "text", content: "Question", start: 0, end: 8 }],
+      context: [],
+      images: [],
+      text: "Question",
+      sessionDirectory: "/repo",
+      quotes: [
+        {
+          id: "quote",
+          messageID: "message",
+          partID: "part",
+          text: "Quoted text",
+          comment: "#review $audit @src/config.ts",
+          commentPrompt: [
+            {
+              type: "snippet",
+              id: "review",
+              name: "review",
+              expansion: "Expanded review instructions.",
+              content: "#review",
+              start: 0,
+              end: 7,
+            },
+            { type: "text", content: " ", start: 7, end: 8 },
+            {
+              type: "skill",
+              id: Skill.ID.make("audit"),
+              name: Skill.Name.make("Audit Skill"),
+              content: "$audit",
+              start: 8,
+              end: 14,
+            },
+            { type: "text", content: " ", start: 14, end: 15 },
+            { type: "file", path: "src/config.ts", content: "@src/config.ts", start: 15, end: 29 },
+          ],
+        },
+      ],
+    })
+
+    expect(result.text).toContain("User comment: Expanded review instructions. $audit @src/config.ts")
+    expect(result.skills).toEqual([{ id: "audit", name: "Audit Skill" }])
+    expect(result.files).toEqual([{ uri: "file:///repo/src/config.ts", mime: "text/plain", name: "config.ts" }])
+  })
+
   test("keeps multiple uploaded attachments in order", () => {
     const result = buildPromptRequest({
       prompt: [{ type: "text", content: "check these", start: 0, end: 11 }],

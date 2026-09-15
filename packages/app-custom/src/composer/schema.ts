@@ -179,6 +179,7 @@ export const ChatQuote = Persistence.struct({
   partID: Schema.String,
   text: Schema.String,
   comment: Schema.String,
+  commentPrompt: Persistence.optional(Prompt),
 })
 export type ChatQuote = typeof ChatQuote.Type
 

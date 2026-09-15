@@ -180,9 +180,9 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
         clearRetry()
         return quote.id
       },
-      update(id: string, comment: string) {
+      update(id: string, comment: string, commentPrompt?: Prompt) {
         if (!store.quotes) return
-        setStore("quotes", (item) => item.id === id, "comment", comment)
+        setStore("quotes", (item) => item.id === id, { comment, commentPrompt })
         clearRetry()
       },
       remove(id: string) {

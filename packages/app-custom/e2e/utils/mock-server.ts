@@ -14,6 +14,8 @@ export interface MockServerConfig {
   sessions: ({ id: string } & Record<string, unknown>)[]
   mcpServers?: unknown[]
   appMentions?: unknown[]
+  snippets?: unknown[]
+  skills?: unknown[]
   subscriptions?: unknown
   pageMessages: (
     sessionId: string,
@@ -264,16 +266,38 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
           ),
         credentialRemove: () => noContent,
         command: () => Effect.succeed({ location: location(config), data: [] }),
-        skill: () => Effect.succeed({ location: location(config), data: [] }),
+        skill: () => Effect.succeed({ location: location(config), data: config.skills ?? [] }),
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
         mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
         rpcCall: (ctx) => {
           if (ctx.params.rpcID === "custom.snippets" && ctx.params.method === "list") {
-            return Effect.succeed({ output: { items: [] } })
+            return Effect.succeed({ output: { items: config.snippets ?? [] } })
           }
           if (ctx.params.rpcID === "custom.subscriptions" && ctx.params.method === "list") {
             return Effect.succeed({
               output: config.subscriptions ?? { status: "unavailable", accounts: [] },
+            })
+          }
+          if (ctx.params.rpcID === "custom.preferences") {
+            return Effect.succeed({
+              output: {
+                version: 1,
+                revision: 0,
+                imported: true,
+                data: {
+                  projects: {},
+                  sidebarOrder: [],
+                  pinnedSessions: [],
+                  models: { user: [], variant: {} },
+                  settings: {
+                    followUpBehavior: "steer",
+                    autoApprove: false,
+                    autoSave: true,
+                    tabLayout: "vertical",
+                    notifications: { agent: true, permissions: true, errors: false },
+                  },
+                },
+              },
             })
           }
           if (ctx.params.rpcID === "custom.navigation" && ctx.params.method === "list") {

@@ -1,14 +1,22 @@
-import { createEffect, createUniqueId, For, Show } from "solid-js"
+import { createEffect, createUniqueId, For, on, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { useLanguage } from "@/runtime/i18n/language"
-import type { ComposerState } from "./state"
+import type { ComposerState, Prompt } from "./state"
+import { createMemoryComposerState } from "./state"
 import { flushPersisted } from "@/runtime/persistence/persist"
+import type { ChatQuote } from "./schema"
+import { ComposerEditor } from "./editor/editor"
+import { createComposerEditor, type ComposerEditorModel } from "./editor/interaction"
 import "./chat-quotes.css"
 
-export function ChatQuotes(props: { quotes: ComposerState["quotes"]; onDone: () => void }) {
+export function ChatQuotes(props: {
+  quotes: ComposerState["quotes"]
+  completion: ComposerEditorModel["completion"]
+  onDone: () => void
+}) {
   const language = useLanguage()
   const id = createUniqueId()
   const [state, setState] = createStore({ open: false, editing: "" })
@@ -58,25 +66,14 @@ export function ChatQuotes(props: { quotes: ComposerState["quotes"]; onDone: () 
                       </Show>
                     }
                   >
-                    <label for={`${id}-${quote.id}`}>{language.t("chatQuotes.userComment")}</label>
-                    <textarea
+                    <QuoteCommentEditor
+                      quote={quote}
                       id={`${id}-${quote.id}`}
-                      dir="auto"
-                      rows={2}
-                      ref={(element) => queueMicrotask(() => element.isConnected && element.focus())}
-                      value={quote.comment}
+                      label={language.t("chatQuotes.userComment")}
                       placeholder={language.t("chatQuotes.placeholder")}
-                      onInput={(event) => props.quotes.update(quote.id, event.currentTarget.value)}
-                      onKeyDown={(event) => {
-                        if (
-                          event.isComposing ||
-                          (event.key !== "Escape" && !(event.key === "Enter" && (event.metaKey || event.ctrlKey)))
-                        )
-                          return
-                        event.preventDefault()
-                        event.stopPropagation()
-                        done()
-                      }}
+                      completion={props.completion}
+                      onInput={(value, prompt) => props.quotes.update(quote.id, value, prompt)}
+                      onDone={done}
                     />
                   </Show>
                 </article>
@@ -98,5 +95,54 @@ export function ChatQuotes(props: { quotes: ComposerState["quotes"]; onDone: () 
         </Button>
       </section>
     </Show>
+  )
+}
+
+function QuoteCommentEditor(props: {
+  quote: ChatQuote
+  id: string
+  label: string
+  placeholder: string
+  completion: ComposerEditorModel["completion"]
+  onInput: (value: string, prompt: Prompt) => void
+  onDone: () => void
+}) {
+  const state = createMemoryComposerState()
+  state.set(
+    props.quote.commentPrompt ?? [
+      { type: "text", content: props.quote.comment, start: 0, end: props.quote.comment.length },
+    ],
+    props.quote.comment.length,
+  )
+  const editor = createComposerEditor({
+    store: state.store,
+    commands: () => [],
+    context: props.completion.context,
+    snippets: props.completion.snippets,
+    searchContextFiles: props.completion.searchContextFiles,
+    onContextQuery: props.completion.onContextQuery,
+    view: {
+      allowShell: false,
+      placeholder: () => props.placeholder,
+      submit: { stopping: () => false, onSubmit() {}, onStop() {} },
+    },
+  })
+  createEffect(on(editor.parts, (prompt) => props.onInput(editor.value(), prompt), { defer: true }))
+  return (
+    <>
+      <label
+        for={props.id}
+        onClick={(event) => {
+          event.preventDefault()
+          editor.restoreFocus()
+        }}
+      >
+        {props.label}
+      </label>
+      <ComposerEditor
+        controller={editor}
+        compact={{ id: props.id, ariaLabel: props.label, autofocus: true, onDone: props.onDone }}
+      />
+    </>
   )
 }
