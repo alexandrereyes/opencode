@@ -39,12 +39,14 @@ export function TabNavItem(props: {
   onNavigate: () => void
   active?: boolean
   unread?: boolean
+  activity?: "running" | "unread"
   suppressNavigation?: boolean
   dragging?: boolean
   pressed?: boolean
   hidden?: boolean
   orientation?: "horizontal" | "vertical"
   projectLabel?: string
+  projectMetadataIcon?: boolean
   compact?: boolean
   timestamp?: { dateTime: string; title: string; label: string }
   sidebarActions?: boolean
@@ -298,6 +300,8 @@ export function TabNavItem(props: {
       class="group relative flex h-7 w-full min-w-0 select-none flex-row items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-[6px] px-1.5 [container-type:inline-size]"
       classList={{ invisible: props.hidden }}
       data-active={props.active}
+      data-activity={props.activity}
+      data-project-metadata-icon={props.projectMetadataIcon ? "" : undefined}
       data-selected={props.selected}
       data-dragging={props.dragging}
       data-state={props.active || props.pressed || props.selected ? "pressed" : undefined}
@@ -344,7 +348,7 @@ export function TabNavItem(props: {
           {language.t("sidebar.selection.session", { name: title() ?? "" })}
         </Checkbox>
       </Show>
-      <Show when={props.pinned}>
+      <Show when={props.pinned && (!props.activity || props.selectionMode)}>
         <span
           data-slot="tab-pin"
           role="img"
@@ -353,6 +357,28 @@ export function TabNavItem(props: {
           class="flex shrink-0 items-center text-v2-icon-icon-muted"
         >
           <Icon name="pin" size="small" />
+        </span>
+      </Show>
+      <Show when={sidebarActions() && !props.selectionMode && (!props.pinned || !!props.activity)}>
+        <span class="flex size-4 shrink-0 items-center justify-center">
+          <Show when={props.activity}>
+            {(activity) => (
+              <span
+                role="img"
+                class="size-1.5 rounded-full"
+                classList={{
+                  "bg-icon-warning-base": activity() === "running",
+                  "bg-v2-icon-icon-accent": activity() === "unread",
+                }}
+                aria-label={language.t(
+                  activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending",
+                )}
+                title={language.t(
+                  activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending",
+                )}
+              />
+            )}
+          </Show>
         </span>
       </Show>
       <Menu.Context.Trigger
@@ -406,7 +432,6 @@ export function TabNavItem(props: {
           props.onNavigate()
         }}
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
-        classList={{ "ps-[22px]": props.compact && !props.selectionMode && !props.pinned }}
       >
         <Show when={props.showAvatar !== false}>
           <span
@@ -487,8 +512,13 @@ export function TabNavItem(props: {
           }
         >
           {(name) => (
-            <span data-slot="tab-project" dir="auto">
-              {name()}
+            <span data-slot="tab-project">
+              <Show when={props.projectMetadataIcon}>
+                <Icon name="folder" size="small" class="shrink-0" />
+              </Show>
+              <span dir="auto" class="min-w-0 truncate">
+                {name()}
+              </span>
             </span>
           )}
         </Show>

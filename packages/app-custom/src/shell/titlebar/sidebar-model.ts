@@ -24,6 +24,7 @@ export type SidebarSession = SessionNavigationInfo & {
   server: ServerConnection.Key
   key: string
   project: string
+  running?: boolean
   attention?: number
   recentRank?: number
 }
@@ -123,10 +124,12 @@ export function rootSessions(rows: SidebarSession[], current?: string, fallback?
     (currentRow ? root(currentRow)?.key : undefined) ??
     (fallbackRow && !fallbackRow.session.parentID ? fallback : current)
   const attention = new Map<string, number>()
+  const running = new Set<string>()
   byKey.forEach((row) => {
     if (row.session.time.archived) return
     const time = row.session.parentID ? latestAttention(row.permissionAt, row.questionAt) : row.attention
     const parent = root(row)
+    if (row.running && parent && !parent.session.time.archived) running.add(parent.key)
     if (time === undefined || !parent || parent.session.time.archived) return
     attention.set(parent.key, Math.max(attention.get(parent.key) ?? time, time))
   })
@@ -134,7 +137,7 @@ export function rootSessions(rows: SidebarSession[], current?: string, fallback?
     current: currentRoot,
     rows: [...byKey.values()]
       .filter((row) => !row.session.time.archived && !row.session.parentID)
-      .map((row) => ({ ...row, attention: attention.get(row.key) }))
+      .map((row) => ({ ...row, running: running.has(row.key) || undefined, attention: attention.get(row.key) }))
       .sort((a, b) => (b.messageAt ?? 0) - (a.messageAt ?? 0) || a.key.localeCompare(b.key)),
   }
 }

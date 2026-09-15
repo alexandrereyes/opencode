@@ -64,6 +64,7 @@ export function createSidebarSessions(options: {
             server,
             key: sessionKey(server, session.id),
             project: sidebarSessionProject(server, session, selected),
+            running: ctx.data.session.status(session.id) === "running",
             recentRank: index.ranks[session.id],
             ...sessionAttention({
               ...row,

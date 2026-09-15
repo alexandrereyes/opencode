@@ -36,6 +36,10 @@
   padding-inline-end: 0;
 }
 
+[data-titlebar-tab][data-activity]:not([data-active="true"]):not([data-editing="true"]) [data-slot="tab-link"] {
+  color: var(--v2-text-text-muted);
+}
+
 [data-titlebar-tab][data-sidebar-actions]:is(:hover, :focus-within) [data-slot="tab-quick-actions"] {
   opacity: 1;
   pointer-events: auto;
@@ -90,12 +94,19 @@
 [data-titlebar-tab][data-orientation="vertical"] [data-slot="tab-project"] {
   grid-column: 2;
   grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   overflow: hidden;
   color: var(--v2-text-text-muted);
   font-size: 13px;
   line-height: var(--line-height-compact);
   white-space: nowrap;
+}
+
+[data-titlebar-tab][data-project-metadata-icon] [data-slot="tab-project"] {
+  color: var(--v2-text-text-faint);
 }
 
 [data-titlebar-tab][data-orientation="vertical"] [data-slot="tab-close"] {

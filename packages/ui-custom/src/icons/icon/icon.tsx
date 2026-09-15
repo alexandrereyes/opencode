@@ -12,6 +12,10 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<circle cx="8" cy="8" r="6" stroke="currentColor"/><path d="M8 4.5V8H11" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
   },
+  history: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M3.25 5.25H6.25V2.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.75 5.25A5.75 5.75 0 1 1 2.5 9" stroke="currentColor" stroke-linecap="round"/><path d="M8 4.75V8L10.5 9.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
   hourglass: {
     viewBox: "0 0 16 16",
     body: `<path d="M4 2H12M4 14H12M5 2V4.5L8 8L11 4.5V2M5 14V11.5L8 8L11 11.5V14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,

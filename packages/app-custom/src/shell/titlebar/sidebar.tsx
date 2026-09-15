@@ -211,7 +211,7 @@ export function SessionSidebar(props: {
         focused.focus({ preventScroll: true })
     })
   }
-  const Row = (props: { item: SidebarSession; compact?: boolean }) => {
+  const Row = (props: { item: SidebarSession; compact?: boolean; projectMetadataIcon?: boolean }) => {
     // Recent's monotonic rank and metadata updates are not interaction timestamps.
     const at = createMemo(() => props.item.messageAt ?? props.item.session.time.created)
     const time = createMemo(() => {
@@ -237,10 +237,12 @@ export function SessionSidebar(props: {
           time() ? { ...time()!, label: getCompactRelativeTime(time()!.at, language.plural, state.now) } : undefined
         }
         compact={props.compact}
+        projectMetadataIcon={props.projectMetadataIcon}
         projectLabel={projectLabel(props.item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === props.item.key}
         unread={props.item.attention !== undefined}
+        activity={props.item.running ? "running" : props.item.attention !== undefined ? "unread" : undefined}
         pinned={pins().has(props.item.key)}
         selectionMode={selection.state.mode}
         selected={selection.state.keys.includes(props.item.key)}
@@ -291,7 +293,12 @@ export function SessionSidebar(props: {
       ? language.t("sidebar.project.server", { project: project.name, server: project.serverName })
       : project.name
   }
-  const Section = (props: { title: string; rows: SidebarSession[]; children?: JSX.Element }) => {
+  const Section = (props: {
+    title: JSX.Element
+    rows: SidebarSession[]
+    projectMetadataIcon?: boolean
+    children?: JSX.Element
+  }) => {
     let element: HTMLElement | undefined
     const rows = createMemo(() => ({
       items: props.rows,
@@ -306,10 +313,12 @@ export function SessionSidebar(props: {
     return (
       <Show when={rows().items.length}>
         <section ref={element} class="mt-4 first:mt-0">
-          <h2 class="mb-1 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">{props.title}</h2>
+          <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
+            {props.title}
+          </h2>
           <div class="flex flex-col gap-1">
             <Key each={rows().items} by="key">
-              {(item) => <Row item={item()} />}
+              {(item) => <Row item={item()} projectMetadataIcon={props.projectMetadataIcon} />}
             </Key>
           </div>
           {props.children}
@@ -567,7 +576,16 @@ export function SessionSidebar(props: {
             fallback={
               <>
                 <Section title={language.t("sidebar.sessions.pinned")} rows={pinned()} />
-                <Section title={language.t("sidebar.sessions.recent")} rows={recent()}>
+                <Section
+                  title={
+                    <>
+                      <Icon name="history" size="small" />
+                      <span>{language.t("sidebar.sessions.recent")}</span>
+                    </>
+                  }
+                  rows={recent()}
+                  projectMetadataIcon
+                >
                   <Show
                     when={
                       recentMore() ||
@@ -586,9 +604,6 @@ export function SessionSidebar(props: {
                   </Show>
                 </Section>
                 <div ref={projectList} class="mt-4 flex flex-col gap-2">
-                  <h2 class="px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
-                    {language.t("sidebar.projects.heading")}
-                  </h2>
                   <DragDropProvider
                     sensors={[
                       PointerSensor.configure({
@@ -669,10 +684,22 @@ export function SessionSidebar(props: {
                                     <span dir="auto" class="min-w-0 truncate font-semibold" title={projectLabel(key)}>
                                       {projectLabel(key)}
                                     </span>
-                                    <Show when={collapsed() && rows().some((row) => row.attention !== undefined)}>
+                                    <Show
+                                      when={
+                                        collapsed() && rows().some((row) => row.running || row.attention !== undefined)
+                                      }
+                                    >
                                       <span
-                                        class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
-                                        aria-label={language.t("sidebar.attention.pending")}
+                                        class="size-1.5 shrink-0 rounded-full"
+                                        classList={{
+                                          "bg-icon-warning-base": rows().some((row) => row.running),
+                                          "bg-v2-icon-icon-accent": !rows().some((row) => row.running),
+                                        }}
+                                        aria-label={language.t(
+                                          rows().some((row) => row.running)
+                                            ? "dashboard.status.running"
+                                            : "sidebar.attention.pending",
+                                        )}
                                       />
                                     </Show>
                                   </button>
@@ -727,12 +754,21 @@ export function SessionSidebar(props: {
                                               </span>
                                               <Show
                                                 when={
-                                                  collapsed() && group().rows.some((row) => row.attention !== undefined)
+                                                  collapsed() &&
+                                                  group().rows.some((row) => row.running || row.attention !== undefined)
                                                 }
                                               >
                                                 <span
-                                                  class="size-1.5 shrink-0 rounded-full bg-v2-icon-icon-accent"
-                                                  aria-label={language.t("sidebar.attention.pending")}
+                                                  class="size-1.5 shrink-0 rounded-full"
+                                                  classList={{
+                                                    "bg-icon-warning-base": group().rows.some((row) => row.running),
+                                                    "bg-v2-icon-icon-accent": !group().rows.some((row) => row.running),
+                                                  }}
+                                                  aria-label={language.t(
+                                                    group().rows.some((row) => row.running)
+                                                      ? "dashboard.status.running"
+                                                      : "sidebar.attention.pending",
+                                                  )}
                                                 />
                                               </Show>
                                             </button>

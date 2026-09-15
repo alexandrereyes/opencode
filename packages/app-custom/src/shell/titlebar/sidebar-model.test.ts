@@ -72,6 +72,15 @@ describe("sidebar navigation", () => {
     expect(recentSessions([remote, rows[0]]).map((row) => row.key)).toEqual([rows[0].key, remote.key].sort())
   })
 
+  test("root sessions inherit running activity from descendants", () => {
+    const parent = row("parent")
+    const child = row("child", undefined, undefined, "parent")
+    child.running = true
+
+    expect(rootSessions([parent, child]).rows).toMatchObject([{ session: { id: "parent" }, running: true }])
+    expect(rootSessions([parent]).rows[0].running).toBeUndefined()
+  })
+
   test("projects mode uses pinned, recent and rendered project order with first-occurrence membership", () => {
     const pinned = row("pinned", 40)
     const current = row("current", 30)
