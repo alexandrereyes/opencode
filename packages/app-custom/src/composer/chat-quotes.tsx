@@ -1,4 +1,4 @@
-import { createEffect, createUniqueId, For, on, Show } from "solid-js"
+import { createEffect, createUniqueId, For, on, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -15,18 +15,34 @@ import "./chat-quotes.css"
 export function ChatQuotes(props: {
   quotes: ComposerState["quotes"]
   completion: ComposerEditorModel["completion"]
+  onEditingChange: (editing: boolean) => void
   onDone: () => void
 }) {
   const language = useLanguage()
   const id = createUniqueId()
-  const [state, setState] = createStore({ open: false, editing: "" })
+  const [state, setState] = createStore({
+    open: false,
+    editing: "",
+    viewportHeight: typeof window === "undefined" ? 720 : (window.visualViewport?.height ?? window.innerHeight),
+  })
   let previous = new Set(props.quotes.all().map((quote) => quote.id))
   createEffect(() => {
     const quotes = props.quotes.all()
     const added = quotes.find((quote) => !previous.has(quote.id))
     previous = new Set(quotes.map((quote) => quote.id))
     if (added) setState({ open: true, editing: added.id })
+    if (state.editing && !quotes.some((quote) => quote.id === state.editing)) setState("editing", "")
   })
+  createEffect(() => props.onEditingChange(state.open && !!state.editing))
+  onMount(() => {
+    const viewport = window.visualViewport
+    const target = viewport ?? window
+    const update = () => setState("viewportHeight", viewport?.height ?? window.innerHeight)
+    update()
+    target.addEventListener("resize", update)
+    onCleanup(() => target.removeEventListener("resize", update))
+  })
+  onCleanup(() => props.onEditingChange(false))
   const done = () => {
     flushPersisted()
     setState({ editing: "", open: false })
@@ -34,12 +50,20 @@ export function ChatQuotes(props: {
   }
   return (
     <Show when={props.quotes.all().length}>
-      <section data-component="chat-quotes" data-prevent-autofocus>
+      <section
+        data-component="chat-quotes"
+        data-editing={state.open && !!state.editing}
+        data-prevent-autofocus
+        style={{
+          "--quote-editor-max-height":
+            state.open && state.editing ? `${Math.max(64, Math.min(180, state.viewportHeight * 0.25))}px` : undefined,
+        }}
+      >
         <Show when={state.open}>
           <div id={id} data-slot="chat-quotes-list">
             <For each={props.quotes.all()}>
               {(quote) => (
-                <article data-slot="chat-quote">
+                <article data-slot="chat-quote" data-editing={state.editing === quote.id}>
                   <header>
                     <span>{language.t("chatQuotes.source")}</span>
                     <div data-slot="chat-quote-actions">

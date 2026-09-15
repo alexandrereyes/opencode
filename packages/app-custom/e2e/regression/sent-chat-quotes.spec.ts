@@ -91,6 +91,10 @@ for (const variant of [
       await bubble.getByRole("button", { name: "Revert message", exact: true }).click()
       await expect.poll(() => reverted).toEqual([message.id])
       const composerQuotes = page.locator('[data-component="chat-quotes"]')
+      if (variant.width < 768) {
+        await expect(composerQuotes.getByRole("textbox", { name: "Your comment", exact: true })).toBeVisible()
+        await composerQuotes.getByRole("button", { name: "Done", exact: true }).click()
+      }
       await expect(
         composerQuotes.getByRole("button", { name: `Chat quotes · ${quotes.length}`, exact: true }),
       ).toBeVisible()

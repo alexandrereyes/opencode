@@ -92,6 +92,48 @@
 }
 
 @media (max-width: 767px) {
+  [data-component="composer-region"][data-editing-quote="true"] > .composer-main {
+    display: none;
+  }
+
+  [data-component="chat-quotes"][data-editing="true"] {
+    > button,
+    [data-slot="chat-quote"][data-editing="false"] {
+      display: none;
+    }
+
+    [data-slot="chat-quotes-list"] {
+      max-height: none;
+      overflow: visible;
+    }
+
+    [data-slot="chat-quote"] {
+      padding: 8px;
+    }
+
+    [data-slot="chat-quote-actions"] button {
+      min-width: 44px;
+      min-height: 44px;
+    }
+
+    blockquote {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      max-height: calc(3 * var(--line-height-base));
+      overflow: hidden;
+    }
+
+    label {
+      margin-block-start: 4px;
+    }
+
+    [data-component="composer"][data-compact="true"],
+    [data-component="composer-scroll"] {
+      max-height: var(--quote-editor-max-height);
+    }
+  }
+
   [data-component="chat-quote-selection"] {
     inset-inline: 12px;
     bottom: calc(8px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));

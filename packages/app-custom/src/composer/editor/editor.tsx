@@ -904,25 +904,30 @@ export function ComposerEditorPopover(props: {
           .filter((parent) => getComputedStyle(parent).overflowY !== "visible")
           .map((parent) => parent.getBoundingClientRect().top),
       )
-      const available = bounds.top - Math.max(window.visualViewport?.offsetTop ?? 0, clippedTop) - 16
-      // Keep three two-line session suggestions visible when iOS pans its visual viewport for the keyboard.
-      const preferred = window.matchMedia("(pointer: coarse)").matches ? Math.max(136, available) : available
-      // The popup opens upward inside clipped page panels, below the title bar.
-      popover.style.maxHeight = `${Math.max(0, Math.min(320, bounds.top - clippedTop - 16, preferred))}px`
+      const viewport = window.visualViewport
+      const top = viewport?.offsetTop ?? 0
+      const bottom = top + (viewport?.height ?? window.innerHeight)
+      const edge = Math.min(bounds.top - 8, bottom - 8)
+      // A viewport-fixed popup escapes ordinary overflow ancestors. Absolute popups do not.
+      const available = edge - Math.max(top, props.floating ? 0 : clippedTop) - 8
+      popover.style.maxHeight = `${Math.max(0, Math.min(320, available))}px`
       if (!props.floating) return
       popover.style.left = `${bounds.left}px`
-      popover.style.top = `${bounds.top - 8}px`
+      popover.style.top = `${edge}px`
       popover.style.width = `${bounds.width}px`
     }
     const observer = new ResizeObserver(update)
+    observer.observe(anchor)
     ancestors.forEach((parent) => observer.observe(parent))
     window.addEventListener("scroll", update, true)
     window.visualViewport?.addEventListener("resize", update)
+    window.visualViewport?.addEventListener("scroll", update)
     update()
     onCleanup(() => {
       observer.disconnect()
       window.removeEventListener("scroll", update, true)
       window.visualViewport?.removeEventListener("resize", update)
+      window.visualViewport?.removeEventListener("scroll", update)
     })
   })
   const content = () => (
@@ -1027,6 +1032,7 @@ export function ComposerEditorPopover(props: {
       </Show>
     </div>
   )
+  // The shell's contain-content main clips viewport-fixed descendants.
   return (
     <Show when={props.floating} fallback={content()}>
       <Portal>{content()}</Portal>

@@ -1,4 +1,5 @@
 import { Show, createMemo } from "solid-js"
+import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -17,18 +18,26 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const [state, setState] = createStore({ editingQuote: false })
 
   return (
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3" data-component="composer-region" data-editing-quote={state.editingQuote}>
       <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
         {(quotes) => (
-          <ChatQuotes quotes={quotes()} completion={props.model.completion} onDone={props.model.restoreFocus} />
+          <ChatQuotes
+            quotes={quotes()}
+            completion={props.model.completion}
+            onEditingChange={(editing) => setState("editingQuote", editing)}
+            onDone={() => {
+              if (window.matchMedia("(min-width: 768px)").matches) props.model.restoreFocus()
+            }}
+          />
         )}
       </Show>
       <ComposerEditor
         controller={props.model}
         borderUnderlay={props.borderUnderlay}
-        class={props.class}
+        class={`composer-main ${props.class ?? ""}`}
         modelControlsVisible={!props.model.model.loading}
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}
