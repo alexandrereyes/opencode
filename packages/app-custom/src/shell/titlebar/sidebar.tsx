@@ -360,7 +360,7 @@ export function SessionSidebar(props: {
           <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
             {props.title}
           </h2>
-          <div class="flex flex-col gap-1">
+          <div class="flex flex-col gap-0">
             <Key each={rows().items} by="key">
               {(item) => <Row item={item()} projectMetadataIcon={props.projectMetadataIcon} />}
             </Key>
@@ -595,7 +595,7 @@ export function SessionSidebar(props: {
                     ? language.plural("sidebar.search.results", results().length)
                     : language.t("sidebar.search.empty")}
             </p>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-0">
               <Key each={results()} by="key">
                 {(item) => <Row item={item()} />}
               </Key>
@@ -744,7 +744,7 @@ export function SessionSidebar(props: {
                                     metadata={project().metadata}
                                   />
                                 </div>
-                                <div class="flex flex-col gap-1">
+                                <div class="flex flex-col gap-0">
                                   <Show when={!collapsed()}>
                                     <PreparingStrip tabs={preparingGroups().get(key)?.root ?? []} />
                                   </Show>
@@ -847,7 +847,7 @@ export function SessionSidebar(props: {
                                               name={group().name}
                                             />
                                           </div>
-                                          <div id={id} class="flex flex-col gap-1">
+                                          <div id={id} class="flex flex-col gap-0">
                                             <Show when={!collapsed()}>
                                               <PreparingStrip
                                                 tabs={preparingGroups().get(key)?.groups.get(group().key) ?? []}
@@ -894,7 +894,7 @@ export function SessionSidebar(props: {
                   </p>
                 }
               >
-                <div class="flex flex-col gap-1">
+                <div class="flex flex-col gap-0">
                   <Key each={groups().priority} by="key">
                     {(item) => <Row item={item()} />}
                   </Key>

@@ -17,6 +17,10 @@
 - Backend (from the repository root): `bun dev serve --port 4096`
 - App (from `packages/app-custom`): `bun dev -- --port 4444`
 - Open `http://localhost:4444` to verify UI changes (it targets the backend at `http://localhost:4096`).
+- Before reusing port 4096, identify its process. Never restart an existing backend or proxy.
+- Check CORS with `curl -i -H 'Origin: http://localhost:4444' http://localhost:4096/api/health`. If it returns `403`, run a temporary CORS bridge on another port and point Vite to it with `VITE_OPENCODE_SERVER_PORT=<bridge-port>`.
+- The bridge must handle preflight, strip the forwarded `origin` and `host`, allow the exact Vite origin, and remove upstream `content-encoding` and `content-length` headers.
+- Before sharing the URL, open it in a browser and verify that a real session title loads. HTTP `200` checks alone are insufficient. Keep the test processes running for user review.
 
 ## SolidJS
 
