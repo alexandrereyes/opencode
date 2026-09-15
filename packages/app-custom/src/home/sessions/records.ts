@@ -2,17 +2,21 @@ import type { SessionInfo } from "@opencode/client/promise"
 import type { LocalProject } from "@/shell/state/layout"
 import { compareSessionTime, displayName } from "@/shell/layout/helpers"
 import { pathKey } from "@/workspaces/path-key"
+import { isChatDirectory } from "@/runtime/chats"
 
 export type HomeSessionRecord = {
   session: SessionInfo
   project: LocalProject
   projectName: string
+  chat?: boolean
 }
 
 export function buildHomeSessionRecords(input: {
   sessions: () => SessionInfo[]
   projectDirectories: () => string[] | undefined
   projects: () => LocalProject[]
+  chatRoot?: () => string | undefined
+  chatLabel?: () => string
 }) {
   const selected = input.projectDirectories()
   const directories = selected ? new Set(selected.map(pathKey)) : undefined
@@ -22,12 +26,18 @@ export function buildHomeSessionRecords(input: {
   return [...new Map(sessions.map((session) => [session.id, session] as const)).values()]
     .sort(compareSessionTime)
     .map((session) => {
+      const chat = isChatDirectory(session.location.directory, input.chatRoot?.())
       const project = homeProjectForSession(session, input.projects()) ?? {
         id: session.projectID,
         worktree: session.location.directory,
         expanded: false,
       }
-      return { session, project, projectName: displayName(project) }
+      return {
+        session,
+        project,
+        projectName: chat ? (input.chatLabel?.() ?? displayName(project)) : displayName(project),
+        chat: chat || undefined,
+      }
     })
 }
 

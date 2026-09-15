@@ -43,6 +43,8 @@ import {
   searchSessions,
   sidebarSelectableSessions,
   visibleSessions,
+  isChatDirectory,
+  chatActionServer,
   type SidebarSession,
 } from "./sidebar-model"
 import { createSidebarSessions } from "./sidebar-sessions"
@@ -55,6 +57,7 @@ export function SessionSidebar(props: {
   currentTab?: Tab
   dashboardActive: boolean
   onDashboard: () => void
+  onNewChat: (server: ServerConnection.Key) => void
 }) {
   const global = useGlobal()
   const tabs = useTabs()
@@ -83,8 +86,13 @@ export function SessionSidebar(props: {
     query: "",
     searchOpen: false,
   })
-  const inventory = createSidebarSessions({ currentTab: () => props.currentTab, clock: createRecentClock() })
+  const inventory = createSidebarSessions({
+    currentTab: () => props.currentTab,
+    clock: createRecentClock(),
+    tabs: () => tabs.store,
+  })
   const indexes = inventory.indexes
+  const chatTarget = createMemo(() => chatActionServer(props.currentTab?.server, inventory.chatRoots()))
   const gesture = { dragged: false }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
@@ -112,9 +120,14 @@ export function SessionSidebar(props: {
   const preparing = createMemo(() =>
     tabs.store
       .map((tab): SidebarPreparingTab | undefined => {
-        if (tab.type === "draft") return { tab, directory: sidebarPreparingDirectory(tab) }
+        if (tab.type === "draft") return { tab, directory: sidebarPreparingDirectory(tab), chat: !!tab.chat || undefined }
         const pending = tabs.pendingSession(tab.server, tab.sessionId)
-        if (pending) return { tab, directory: sidebarPreparingDirectory(pending.draft) }
+        if (pending)
+          return {
+            tab,
+            directory: sidebarPreparingDirectory(pending.draft),
+            chat: !!pending.draft.chat || undefined,
+          }
       })
       .filter((item): item is SidebarPreparingTab => !!item),
   )
@@ -139,10 +152,11 @@ export function SessionSidebar(props: {
   })
   const pins = createMemo(() => new Set(pinList()))
   // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
-  const pinned = createMemo(() => pinnedSessions(hierarchyRows(), pinList()))
+  const pinned = createMemo(() => pinnedSessions(hierarchyRows(), pinList()).filter((row) => !row.chat))
   const groups = createMemo(() => attentionGroups(hierarchyRows(), state.now, sessions().current, pinList()))
   const recentRows = createMemo(() => recentSessions(hierarchyRows().filter((row) => !pins().has(row.key))))
   const recent = createMemo(() => visibleSessions(recentRows(), state.recentLimit, sessions().current))
+  const chats = createMemo(() => hierarchyRows().filter((row) => row.chat))
   const recentMore = () => recentRows().length > recent().length
   const query = createMemo(() => (state.searchOpen ? state.query.trim() : ""))
   const results = createMemo(() => searchSessions(sessions().rows, query(), projectGroups()))
@@ -157,7 +171,7 @@ export function SessionSidebar(props: {
   )
   const preparingGroups = createMemo(() =>
     sidebarPreparingGroups(
-      preparing(),
+      preparing().filter((item) => !item.chat),
       projects().map((project) => ({
         key: project.key,
         server: project.server,
@@ -195,6 +209,7 @@ export function SessionSidebar(props: {
       })
     return sidebarSelectableSessions({
       mode: "projects",
+      chats: chats(),
       pinned: pinned(),
       recent: recent(),
       projects: projects().map((project) => projectRows(project.key)),
@@ -249,9 +264,7 @@ export function SessionSidebar(props: {
         shortcutIndex={(tab) => tabs.store.findIndex((item) => tabKey(item) === tabKey(tab))}
         onNavigate={(tab) => tabs.select(tab)}
         onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
-        onReorder={(keys) =>
-          tabs.reorder(mergeVisibleTabOrder(tabs.store.map(tabKey), strip.tabs.map(tabKey), keys))
-        }
+        onReorder={(keys) => tabs.reorder(mergeVisibleTabOrder(tabs.store.map(tabKey), strip.tabs.map(tabKey), keys))}
       />
     </Show>
   )
@@ -282,7 +295,9 @@ export function SessionSidebar(props: {
         }
         compact={props.compact}
         projectMetadataIcon={props.projectMetadataIcon}
-        projectLabel={projectLabel(props.item.project)}
+        chatMetadataIcon={props.item.chat && props.projectMetadataIcon}
+        chat={props.item.chat}
+        projectLabel={props.item.chat ? language.t("session.new.chats") : projectLabel(props.item.project)}
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === props.item.key}
         unread={props.item.attention !== undefined}
@@ -306,7 +321,13 @@ export function SessionSidebar(props: {
             : undefined
         }
         onNavigate={() =>
-          tabs.select(tabs.addSessionTab({ server: props.item.server, sessionId: props.item.session.id }))
+          tabs.select(
+            tabs.addSessionTab({
+              server: props.item.server,
+              sessionId: props.item.session.id,
+              chat: props.item.chat,
+            }),
+          )
         }
         onClose={() => {
           const index = tabs.store.findIndex((value) => tabKey(value) === tabKey(tab()))
@@ -607,7 +628,39 @@ export function SessionSidebar(props: {
             when={saved.attention}
             fallback={
               <>
-                <Section title={language.t("sidebar.sessions.pinned")} rows={pinned()} />
+                <section class="first:mt-0">
+                  <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
+                    <Icon name="speech-bubble" size="small" />
+                    <span>{language.t("sidebar.sessions.chats")}</span>
+                    <Tooltip value={language.t("sidebar.sessions.chats.new")}>
+                      <button
+                        type="button"
+                        class="ms-auto flex size-5 items-center justify-center rounded-sm hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none focus-visible:bg-v2-overlay-simple-overlay-hover"
+                        aria-label={language.t("sidebar.sessions.chats.new")}
+                        disabled={!chatTarget()}
+                        onClick={() => {
+                          const server = chatTarget()
+                          if (server) props.onNewChat(server)
+                        }}
+                      >
+                        <Icon name="plus" size="small" />
+                      </button>
+                    </Tooltip>
+                  </h2>
+                  <div class="flex flex-col gap-0">
+                    <PreparingStrip
+                      tabs={preparing()
+                        .filter(
+                          (item) =>
+                            item.chat || isChatDirectory(item.directory, inventory.chatRoots().get(item.tab.server)),
+                        )
+                        .map((item) => item.tab)}
+                    />
+                    <Key each={chats()} by="key">
+                      {(item) => <Row item={item()} />}
+                    </Key>
+                  </div>
+                </section>
                 <Section
                   title={
                     <>
@@ -615,7 +668,7 @@ export function SessionSidebar(props: {
                       <span>{language.t("sidebar.sessions.recent")}</span>
                     </>
                   }
-                  rows={recent()}
+                  rows={[...pinned(), ...recent()]}
                   projectMetadataIcon
                 >
                   <Show

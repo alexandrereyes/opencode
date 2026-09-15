@@ -8,11 +8,7 @@ import { Composer } from "@/composer/composer"
 import { ComposerDropzone } from "@/composer/dropzone"
 import type { ComposerModel } from "@/composer/model"
 import { PromptGitStatus, PromptWorkspaceSelector } from "@/new-session/workspace/selector"
-import {
-  PromptProjectAddButton,
-  PromptProjectSelector,
-  type PromptProjectController,
-} from "@/new-session/project/selector"
+import { PromptProjectSelector, type PromptProjectController } from "@/new-session/project/selector"
 import { StatusPopover } from "@/shell/status/status-popover"
 import { TitlebarRight } from "@/shell/titlebar/right-slot"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -66,12 +62,9 @@ export function NewSessionView(props: {
             <NewSessionWordmark />
             <div class="mt-8 flex flex-col gap-8">
               <Composer model={props.composer} />
-              <Show when={props.project.empty()}>
-                <PromptProjectAddButton controller={props.project} />
-              </Show>
-              <Show when={props.project.selected()}>
-                <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
-                  <PromptProjectSelector controller={props.project} placement="bottom" />
+              <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
+                <PromptProjectSelector controller={props.project} placement="bottom" />
+                <Show when={props.project.selected()}>
                   <Show
                     when={props.workspace.bar.visible()}
                     fallback={
@@ -96,8 +89,8 @@ export function NewSessionView(props: {
                       onViewAll={props.workspace.project.openAll}
                     />
                   </Show>
-                </div>
-              </Show>
+                </Show>
+              </div>
             </div>
           </div>
         </div>

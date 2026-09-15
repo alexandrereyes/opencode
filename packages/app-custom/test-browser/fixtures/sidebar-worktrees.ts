@@ -340,7 +340,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         notification: { session: { unseen: () => [] } },
         sdk: {
           api,
-          connection: { status: () => "connected" },
+          connection: { status: () => "connected", epoch: () => 0 },
           event: {
             listen: (listener: (event: OpenCodeEvent) => void) => {
               listeners.add(listener)
@@ -771,7 +771,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     const rootStrip = distributed.find((strip) => !strip.closest("[data-worktree-key]"))!
     const worktreeStrip = distributed.find((strip) => strip.closest("[data-worktree-key]"))!
     for (const strip of [rootStrip, worktreeStrip]) {
-      expect(strip.parentElement?.classList.contains("gap-1")).toBe(true)
+      expect(strip.parentElement?.classList.contains("gap-0")).toBe(true)
       const next = strip.nextElementSibling
       expect(next?.hasAttribute("data-titlebar-tab") || !!next?.querySelector("[data-titlebar-tab]")).toBe(true)
     }

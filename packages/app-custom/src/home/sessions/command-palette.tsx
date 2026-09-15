@@ -10,6 +10,8 @@ import {
   type CommandPaletteEntry,
 } from "@/shell/commands/palette"
 import { CommandPaletteView, matchesCommandPaletteEntry } from "@/shell/commands/dialog"
+import { chatCapability } from "@/runtime/chats"
+import { findSessionTab, useTabs } from "@/shell/tabs/tabs"
 
 export function HomeCommandPalette(props: {
   server: ServerConnection.Any
@@ -19,7 +21,10 @@ export function HomeCommandPalette(props: {
   const dialog = useDialog()
   const global = useGlobal()
   const language = useLanguage()
+  const tabs = useTabs()
   const server = global.ensureServerCtx(props.server)
+  const chats = chatCapability(server.sdk)
+  void chats.load()
   const state = { cleanup: undefined as (() => void) | void, committed: false }
   const commandEntries = createMemo(() => {
     const category = language.t("palette.group.commands")
@@ -33,6 +38,10 @@ export function HomeCommandPalette(props: {
     get: (sessionID, signal) => server.sdk.api.session.get({ sessionID }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
+    chatRoot: () => chats.state.root,
+    chatLabel: () => language.t("session.new.chats"),
+    isChat: (session) =>
+      !!findSessionTab(tabs.store, ServerConnection.key(props.server), session.id)?.chat,
   })
 
   const highlight = (item: CommandPaletteEntry | undefined) => {

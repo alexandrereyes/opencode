@@ -17,7 +17,7 @@ import {
 
 type Project = ReturnType<typeof sidebarProjects>[number]
 
-export type SidebarPreparingTab = { tab: Tab; directory: string }
+export type SidebarPreparingTab = { tab: Tab; directory: string; chat?: boolean }
 
 export function sidebarPreparingDirectory(draft: DraftTab) {
   if (draft.worktree && draft.worktree !== "main" && draft.worktree !== "create") return draft.worktree
@@ -37,6 +37,7 @@ export function sidebarPreparingGroups(
     projects.map((project) => [project.key, { root: [], groups: new Map(project.groups.map((group) => [group.key, []])) }]),
   )
   tabs.forEach((entry) => {
+    if (entry.chat) return
     const matching = projects.filter((project) => project.server === entry.tab.server)
     const explicit = sidebarExplicitWorkspace(
       entry.directory,
@@ -130,7 +131,7 @@ export function sidebarWorktrees(
     ...(project.metadata ? [project.directory] : []),
   ].toSorted((a, b) => b.length - a.length)
   rows
-    .filter((row) => row.project === project.key && !row.session.parentID && !row.session.time.archived)
+    .filter((row) => !row.chat && row.project === project.key && !row.session.parentID && !row.session.time.archived)
     .forEach((row) => {
       const directory = row.session.location.directory
       const explicit = sidebarExplicitWorkspace(directory, [

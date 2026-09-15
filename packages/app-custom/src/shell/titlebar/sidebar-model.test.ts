@@ -16,6 +16,8 @@ import {
   sidebarExplicitWorkspace,
   sidebarSessionProject,
   visibleSessions,
+  isChatDirectory,
+  chatActionServer,
   type SidebarSession,
 } from "./sidebar-model"
 import { latestAttention, navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
@@ -42,6 +44,22 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("new Chat targets the preferred capable server or the first capable fallback", () => {
+    const roots = new Map([
+      ["old", undefined],
+      ["remote", "/data/chats"],
+      ["local", "/local/chats"],
+    ])
+    expect(chatActionServer("local", roots)).toBe("local")
+    expect(chatActionServer("old", roots)).toBe("remote")
+  })
+
+  test("classifies chat directories with segment boundaries", () => {
+    expect(isChatDirectory("/data/opencode/chats/2026-09-15/session-1", "/data/opencode/chats")).toBe(true)
+    expect(isChatDirectory("/data/opencode/chats-copy/session-1", "/data/opencode/chats")).toBe(false)
+    expect(isChatDirectory("/data/opencode/chats", "/data/opencode/chats")).toBe(false)
+  })
+
   test("occupied projects precede empty ones while each block retains manual order as sessions arrive and leave", () => {
     const known = ["a", "b", "c", "d"].map((id) => ({ id, worktree: `/${id}` }))
     const session = (id: string) => ({
@@ -71,6 +89,7 @@ describe("sidebar navigation", () => {
     expect(pinnedSessions(rows, [rows[1].key, rows[0].key]).map((row) => row.session.id)).toEqual(["b", "a"])
     const remote = { ...rows[0], key: sessionKey("remote", "a") }
     expect(recentSessions([remote, rows[0]]).map((row) => row.key)).toEqual([rows[0].key, remote.key].sort())
+    expect(recentSessions([{ ...rows[0], chat: true }, rows[1]]).map((row) => row.session.id)).toEqual(["b"])
   })
 
   test("root sessions inherit running activity from descendants", () => {
@@ -83,6 +102,7 @@ describe("sidebar navigation", () => {
   })
 
   test("projects mode uses pinned, recent and rendered project order with first-occurrence membership", () => {
+    const chat = row("chat", 50)
     const pinned = row("pinned", 40)
     const current = row("current", 30)
     const recent = row("recent", 20)
@@ -91,11 +111,12 @@ describe("sidebar navigation", () => {
     expect(
       sidebarSelectableSessions({
         mode: "projects",
+        chats: [chat],
         pinned: [pinned],
         recent: [current, recent, pinned],
         projects: [[recent, project], [current]],
       }).map((item) => item.session.id),
-    ).toEqual(["pinned", "current", "recent", "project"])
+    ).toEqual(["chat", "pinned", "current", "recent", "project"])
   })
 
   test("attention mode uses priority, pinned, day rows and current fallback with first-occurrence membership", () => {

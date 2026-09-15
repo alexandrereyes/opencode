@@ -1,4 +1,4 @@
-import { createMemo, mapArray } from "solid-js"
+import { createMemo, createResource, mapArray } from "solid-js"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useSettings } from "@/settings/model"
@@ -9,17 +9,21 @@ import { createSidebarIndex } from "./sidebar-index"
 import { createRecentClock } from "./sidebar-order"
 import {
   rootSessions,
+  isChatDirectory,
   sessionKey,
   sidebarProjects,
   sidebarSessionProject,
   type SidebarSession,
 } from "./sidebar-model"
 import { createSidebarWorktrees } from "./sidebar-worktrees"
+import { chatRoot } from "@/runtime/chats"
+import { resolvedChatIdentity } from "@/runtime/chats"
 
 export function createSidebarSessions(options: {
   currentTab: () => Tab | undefined
   enabled?: () => boolean
   clock?: ReturnType<typeof createRecentClock>
+  tabs?: () => Tab[]
 }) {
   const global = useGlobal()
   const layout = useLayout()
@@ -30,7 +34,18 @@ export function createSidebarSessions(options: {
     (connection) => {
       const ctx = global.ensureServerCtx(connection)
       const projects = createMemo(() => ctx.projects.list())
-      return { connection, ctx, projects, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
+      const [chat] = createResource(
+        () => (ctx.sdk.connection.status() === "connected" ? ctx.sdk.connection.epoch() + 1 : undefined),
+        () => chatRoot(ctx.sdk),
+      )
+      return {
+        connection,
+        ctx,
+        projects,
+        index: createSidebarIndex(ctx, clock),
+        worktrees: createSidebarWorktrees(ctx),
+        chat,
+      }
     },
   )
   const current = () => {
@@ -67,6 +82,17 @@ export function createSidebarSessions(options: {
             project: sidebarSessionProject(server, session, selected),
             running: entry.ctx.data.session.status(session.id) === "running",
             recentRank: entry.index.ranks[session.id],
+            chat:
+              resolvedChatIdentity(
+                session.location.directory,
+                entry.chat(),
+                options
+                  .tabs?.()
+                  .some(
+                    (tab) =>
+                      tab.type === "session" && tab.server === server && tab.sessionId === session.id && !!tab.chat,
+                  ),
+              ) || undefined,
             ...sessionAttention({
               ...row,
               session,
@@ -85,11 +111,14 @@ export function createSidebarSessions(options: {
       const server = ServerConnection.key(entry.connection)
       return sidebarProjects(
         server,
-        entry.projects(),
+        entry.projects().filter((project) => !isChatDirectory(project.worktree, entry.chat())),
         sessions().rows.filter((row) => row.server === server),
       ).map((project) => ({ ...project, connection: entry.connection, serverName: serverName(entry.connection) }))
     }),
   )
 
-  return { indexes, sessions, projectGroups }
+  const chatRoots = createMemo(
+    () => new Map(indexes().map((entry) => [ServerConnection.key(entry.connection), entry.chat()])),
+  )
+  return { indexes, sessions, projectGroups, chatRoots }
 }

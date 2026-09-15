@@ -73,6 +73,7 @@ function SessionTabSlot(props: {
         active={props.active}
         dragging={sortable.isDragSource()}
         orientation={props.orientation}
+        chat={props.tab.chat}
       />
     </div>
   )

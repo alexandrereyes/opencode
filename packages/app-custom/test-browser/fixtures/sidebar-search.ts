@@ -124,6 +124,7 @@ mock.module("@/shell/titlebar/sidebar-sessions", () => ({
     indexes: () => [],
     sessions: () => ({ rows: [real], current: real.key }),
     projectGroups: () => [],
+    chatRoots: () => new Map(),
   }),
 }))
 

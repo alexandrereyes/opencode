@@ -206,7 +206,15 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       addSessionTab: (tab: Omit<SessionTab, "type">) => {
         const next = { type: "session" as const, ...tab }
         const existing = store.find((item) => tabKey(item) === tabKey(next))
-        if (existing) return existing
+        if (existing) {
+          if (next.chat && existing.type === "session" && !existing.chat)
+            setStore(
+              (item) => item === existing,
+              "chat",
+              true,
+            )
+          return existing
+        }
         void startTransition(() => {
           setStore(
             produce((tabs) => {
@@ -247,7 +255,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         return tab
       },
       updateDraft(draftID: string, draft: Partial<Omit<DraftTab, "type" | "draftID">>) {
-        void startTransition(() => {
+        return startTransition(() => {
           setStore(
             (tab) => tab.type === "draft" && tab.draftID === draftID,
             produce((tab) => Object.assign(tab, draft)),
@@ -448,6 +456,13 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         if (current && current.title === next.title && current.directory === next.directory) return
         console.debug("[tabs] update persisted session info", { key, sessionID: session.id, current, next })
         setInfo(key, next)
+      },
+      setSessionChat(server: ServerConnection.Key, sessionID: string, chat: boolean) {
+        setStore(
+          (tab) => tab.type === "session" && tab.server === server && tab.sessionId === sessionID,
+          "chat",
+          chat || undefined,
+        )
       },
       select: navigateTab,
       remember(tab: Tab) {

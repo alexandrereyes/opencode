@@ -32,12 +32,17 @@ export type PromptProjectControls = {
   available: PromptProject[]
   directory: string
   server?: string
+  chat: boolean
+  chatAvailable: boolean
+  pending: boolean
+  selectChat: () => Promise<void>
   select: (worktree: string, server?: string) => void
   add: (title: string, server?: string) => void
 }
 
 const actionPrefix = "action:"
 const projectPrefix = "project:"
+const chatKey = "chat"
 
 function projectKey(project: PromptProject) {
   return `${projectPrefix}${encodeURIComponent(project.server?.key ?? "")}:${encodeURIComponent(project.worktree)}`
@@ -65,11 +70,14 @@ export function createPromptProjectController(input: {
           (pathKey(project.worktree) === key || project.sandboxes?.some((sandbox) => pathKey(sandbox) === key)),
       )
   }
-  const selected = () => current() ?? input.controls().available[0]
+  const selected = () => (input.controls().chat ? undefined : (current() ?? input.controls().available[0]))
   const projects = () => {
     const search = store.search.trim().toLowerCase()
     if (!search) return input.controls().available
     return input.controls().available.filter((project) => displayName(project).toLowerCase().includes(search))
+  }
+  const chatVisible = () => {
+    return chatMatchesSearch(language.t("session.new.chats"), store.search, input.controls().chatAvailable)
   }
   const servers = () =>
     input
@@ -78,9 +86,14 @@ export function createPromptProjectController(input: {
       .filter((server, index, all) => server && all.findIndex((item) => item?.key === server.key) === index)
   const keys = () => {
     if (servers().length <= 1) {
-      return [...projects().map(projectKey), actionKey(servers()[0]?.key)]
+      return [
+        ...(chatVisible() ? [chatKey] : []),
+        ...projects().map(projectKey),
+        actionKey(servers()[0]?.key),
+      ]
     }
     return [
+      ...(chatVisible() ? [chatKey] : []),
       ...servers().flatMap((server) =>
         projects()
           .filter((project) => project.server?.key === server!.key)
@@ -90,6 +103,7 @@ export function createPromptProjectController(input: {
     ]
   }
   const initialActive = () => {
+    if (input.controls().chat) return chatKey
     const selectedKey = selected() ? projectKey(selected()!) : undefined
     const options = keys()
     if (selectedKey && options.includes(selectedKey)) return selectedKey
@@ -108,12 +122,20 @@ export function createPromptProjectController(input: {
     }
     close()
   }
+  const selectChat = () => {
+    if (!input.controls().chat && input.controls().chatAvailable) void input.controls().selectChat()
+    close()
+  }
   const add = (server?: string) => {
     setStore({ open: false, search: "", active: "" })
     input.controls().add(language.t("command.project.open"), server)
   }
   const setSearch = (value: string) => {
     const search = value.trim().toLowerCase()
+    if (search && input.controls().chatAvailable && language.t("session.new.chats").toLowerCase().includes(search)) {
+      setStore({ search: value, active: chatKey })
+      return
+    }
     const first = input
       .controls()
       .available.find((project) => !search || displayName(project).toLowerCase().includes(search))
@@ -125,7 +147,11 @@ export function createPromptProjectController(input: {
 
   return {
     selected,
-    empty: () => input.controls().available.length === 0,
+    chat: () => input.controls().chat,
+    chatAvailable: () => input.controls().chatAvailable,
+    chatVisible,
+    pending: () => input.controls().pending,
+    empty: () => false,
     projects,
     servers,
     projectKey,
@@ -138,9 +164,11 @@ export function createPromptProjectController(input: {
       clear: () => language.t("common.clear"),
       new: () => language.t("session.new.project.new"),
       search: () => language.t("session.new.project.search"),
+      chats: () => language.t("session.new.chats"),
     },
     add,
     select,
+    selectChat,
     setOpen(open: boolean) {
       if (open) {
         setStore({ open: true, active: initialActive() })
@@ -169,6 +197,9 @@ export function createPromptProjectController(input: {
         ? projects().find((project) => projectKey(project) === store.active)
         : undefined
     },
+    activeChat() {
+      return store.active === chatKey
+    },
     activeServer() {
       return store.active.startsWith(actionPrefix)
         ? decodeURIComponent(store.active.slice(actionPrefix.length)) || undefined
@@ -187,6 +218,12 @@ export function createPromptProjectController(input: {
       return handleDocumentSearchKeydown(searchRef, event, store.search, setSearch)
     },
   }
+}
+
+export function chatMatchesSearch(label: string, search: string, available: boolean) {
+  if (!available) return false
+  const value = search.trim().toLowerCase()
+  return !value || label.toLowerCase().includes(value)
 }
 
 export type PromptProjectController = ReturnType<typeof createPromptProjectController>
@@ -232,6 +269,10 @@ export function PromptProjectSelector(props: {
     dismiss.afterClose(() => props.controller.add(server))
   }
   const selectActive = () => {
+    if (props.controller.activeChat()) {
+      props.controller.selectChat()
+      return
+    }
     const project = props.controller.activeProject()
     if (project) {
       selectProject(project)
@@ -264,6 +305,7 @@ export function PromptProjectSelector(props: {
     })
   }
   const selectedValue = () => {
+    if (props.controller.chat()) return chatKey
     const project = props.controller.selected()
     return project ? props.controller.projectKey(project) : undefined
   }
@@ -360,6 +402,9 @@ export function PromptProjectSelector(props: {
                 when={props.controller.servers().length > 1}
                 fallback={
                   <Menu.RadioGroup value={selectedValue()}>
+                    <Show when={props.controller.chatVisible()}>
+                      <ChatItem controller={props.controller} />
+                    </Show>
                     <For each={props.controller.projects()}>
                       {(project) => (
                         <ProjectItem project={project} controller={props.controller} onSelect={selectProject} />
@@ -368,6 +413,11 @@ export function PromptProjectSelector(props: {
                   </Menu.RadioGroup>
                 }
               >
+                <Menu.RadioGroup value={selectedValue()}>
+                  <Show when={props.controller.chatVisible()}>
+                    <ChatItem controller={props.controller} />
+                  </Show>
+                </Menu.RadioGroup>
                 <For
                   each={props.controller
                     .servers()
@@ -441,6 +491,7 @@ export function PromptProjectAddButton(props: { controller: PromptProjectControl
     <button
       data-action="prompt-project"
       type="button"
+      disabled={props.controller.pending()}
       class="flex h-7 min-w-0 max-w-[160px] items-center gap-1.5 rounded-sm px-2 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
       onClick={() => props.controller.add()}
     >
@@ -459,6 +510,7 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
       {...rest}
       data-action="prompt-project"
       type="button"
+      disabled={local.controller.pending()}
       class="flex h-7 min-w-0 max-w-[203px] items-center gap-1.5 rounded-sm px-1.5 transition-colors focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
       classList={{
         ...local.classList,
@@ -477,22 +529,50 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
       }}
     >
       <Show
-        when={project()}
-        fallback={<Icon name="folder-add-left" size="small" class="shrink-0 text-v2-icon-icon-muted" />}
+        when={!local.controller.chat()}
+        fallback={<Icon name="speech-bubble" size="small" class="shrink-0 text-v2-icon-icon-muted" />}
       >
-        {(item) => (
-          <ProjectAvatar
-            fallback={displayName(item())}
-            src={getProjectAvatarSource(item().id, item().icon)}
-            variant={getProjectAvatarVariant(item().icon?.color)}
-          />
-        )}
+        <Show
+          when={project()}
+          fallback={<Icon name="folder-add-left" size="small" class="shrink-0 text-v2-icon-icon-muted" />}
+        >
+          {(item) => (
+            <ProjectAvatar
+              fallback={displayName(item())}
+              src={getProjectAvatarSource(item().id, item().icon)}
+              variant={getProjectAvatarVariant(item().icon?.color)}
+            />
+          )}
+        </Show>
       </Show>
       <span class="min-w-0 truncate leading-5">
-        {project() ? displayName(project()!) : local.controller.labels.new()}
+        {local.controller.chat()
+          ? local.controller.labels.chats()
+          : project()
+            ? displayName(project()!)
+            : local.controller.labels.new()}
       </span>
       <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
     </button>
+  )
+}
+
+function ChatItem(props: { controller: PromptProjectController }) {
+  return (
+    <Menu.RadioItem
+      id={chatKey}
+      value={chatKey}
+      data-option-key={chatKey}
+      class="h-7 gap-2 rounded-sm px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
+      classList={{ "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === chatKey }}
+      closeOnSelect
+      disabled={props.controller.pending()}
+      onMouseEnter={() => props.controller.setActive(chatKey)}
+      onSelect={props.controller.selectChat}
+    >
+      <Icon name="speech-bubble" size="small" />
+      <span class="min-w-0 truncate leading-5">{props.controller.labels.chats()}</span>
+    </Menu.RadioItem>
   )
 }
 

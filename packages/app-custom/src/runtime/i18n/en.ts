@@ -753,6 +753,11 @@ export const dict = {
     "This server is running OpenCode {{version}}, which isn't compatible with this app. Upgrade it to OpenCode V2 to continue.",
 
   "dialog.project.edit.title": "Edit project",
+  "session.new.chats": "Chats",
+  "session.new.chats.failed": "Couldn't create chat",
+  "session.new.chats.unavailable": "Chats aren't available on this server.",
+  "sidebar.sessions.chats": "Chats",
+  "sidebar.sessions.chats.new": "New chat",
   "dialog.project.edit.name": "Name",
   "dialog.project.edit.icon": "Icon",
   "dialog.project.edit.icon.alt": "Project icon",
