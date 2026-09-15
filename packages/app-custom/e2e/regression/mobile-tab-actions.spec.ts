@@ -36,7 +36,10 @@ test.beforeEach(async ({ page }) => {
     ({ server, sessions }) => {
       localStorage.setItem(
         "opencode.window.browser.dat:tabs",
-        JSON.stringify(sessions.map((session) => ({ type: "session", server, sessionId: session.id }))),
+        JSON.stringify([
+          { type: "draft", draftID: "draft_mobile", server, directory: sessions[0].directory },
+          ...sessions.map((session) => ({ type: "session", server, sessionId: session.id })),
+        ]),
       )
     },
     { server: fixture.serverKey, sessions },
@@ -79,19 +82,24 @@ for (const direction of ["ltr", "rtl"] as const) {
     await expect(source.locator("time")).toHaveText("3h ago")
     await expect(target.getByRole("button", { name: "Archive", exact: true })).toHaveCount(0)
     await expect(target.locator('[data-slot="mobile-tab-actions"]')).toHaveAttribute("inert")
-    await expect(target.locator('[data-slot="mobile-tab-actions"] button')).toHaveCount(2)
+    await expect(target.locator('[data-slot="mobile-tab-actions"]')).toHaveAttribute("data-action-count", "4")
+    await expect(target.locator('[data-slot="mobile-tab-actions"] button')).toHaveCount(4)
     await expect(target.locator('[data-slot="mobile-tab-actions"] button[tabindex="0"]')).toHaveCount(0)
-    await expect(target.getByRole("button", { name: "More options", exact: true })).toBeVisible()
-    await expect(target.getByRole("button", { name: "Close tab", exact: true })).toBeVisible()
+    await expect(target.locator('[data-slot="tab-close"]')).toHaveCount(0)
+    const draft = drawer(page).locator("[data-titlebar-tab]").filter({ hasText: "Session" })
+    await expect(draft.locator('[data-slot="mobile-tab-actions"]')).toHaveCount(0)
+    await expect(draft.getByRole("button", { name: "Close tab", exact: true })).toBeVisible()
     await swipe(page, link, delta)
     await expect(target).toHaveAttribute("data-revealed", "true")
     const actions = target.locator('[data-slot="mobile-tab-actions"]')
-    await expect(actions.getByRole("button")).toHaveCount(2)
+    await expect(actions.getByRole("button")).toHaveCount(4)
+    await expect(actions.getByRole("button", { name: "Rename", exact: true })).toHaveCSS("width", "44px")
     await expect(actions.getByRole("button", { name: "Archive", exact: true })).toHaveCSS("width", "44px")
     await expect(actions.getByRole("button", { name: "Delete", exact: true })).toHaveCSS("width", "44px")
+    await expect(actions.getByRole("button", { name: "Close tab", exact: true })).toHaveCSS("width", "44px")
     await expect(target.locator('[data-slot="mobile-tab-content"]')).toHaveCSS(
       "transform",
-      `matrix(1, 0, 0, 1, ${direction === "rtl" ? 88 : -88}, 0)`,
+      `matrix(1, 0, 0, 1, ${direction === "rtl" ? 176 : -176}, 0)`,
     )
     // Deliberately follow the swipe with compatibility events on the link.
     await link.dispatchEvent("mousedown", { button: 0, detail: 1 })
@@ -134,47 +142,37 @@ test("short, vertical and cancelled gestures cannot navigate", async ({ page }) 
   await expect(page).toHaveURL(href(fixture.targetID))
 })
 
-for (const cancelled of [false, true]) {
-  for (const action of ["Close tab", "More options"] as const) {
-    test(`${action} remains usable after ${cancelled ? "a cancelled gesture" : "a revealed swipe"}`, async ({
-      page,
-    }) => {
-      const target = row(page, fixture.expected.targetTitle)
-      const link = target.locator("[data-titlebar-tab-link]")
-      const button = target.getByRole("button", { name: action, exact: true })
-      await swipe(page, link, -110, 0, cancelled)
-      await expect(target).toHaveAttribute("data-revealed", String(!cancelled))
-      await link.dispatchEvent("mousedown", { button: 0, detail: 1 })
-      await link.dispatchEvent("click", { button: 0, detail: 1 })
-      await expect(page).toHaveURL(href(fixture.sourceID))
+test("rename opens the inline editor directly", async ({ page }) => {
+  const target = row(page, fixture.expected.targetTitle)
+  await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
+  await target.getByRole("button", { name: "Rename", exact: true }).tap()
+  const title = target.locator('[data-titlebar-tab-title][contenteditable="true"]')
+  await expect(title).toBeFocused()
+  await title.fill("Renamed from mobile drawer")
+  await drawer(page).locator('[contenteditable="true"]').press("Enter")
+  await expect(row(page, "Renamed from mobile drawer")).toBeVisible()
+  await expect(page).toHaveURL(href(fixture.sourceID))
+})
 
-      await button.tap()
-      if (action === "Close tab") {
-        await expect(target).toHaveCount(0)
-        await expect(page).toHaveURL(href(fixture.sourceID))
-        await drawer(page).getByRole("button", { name: "Home", exact: true }).tap()
-        await page.getByRole("button", { name: "Tabs", exact: true }).tap()
-        await expect(drawer(page).getByRole("button", { name: "Home", exact: true })).toBeVisible()
-        await expect(target).toHaveCount(0)
-        return
-      }
+test("close tab acts immediately and adjusts the reveal width", async ({ page }) => {
+  const target = row(page, fixture.expected.targetTitle)
+  await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
+  await target.getByRole("button", { name: "Close tab", exact: true }).tap()
+  await expect(page.getByRole("dialog", { name: "Close tab", exact: true })).toHaveCount(0)
+  await expect(target.locator('[data-slot="mobile-tab-actions"]')).toHaveAttribute("data-action-count", "3")
+  await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
+  await expect(target.locator('[data-slot="mobile-tab-content"]')).toHaveCSS(
+    "transform",
+    "matrix(1, 0, 0, 1, -132, 0)",
+  )
+})
 
-      await expect(page.getByRole("menuitem", { name: "Rename", exact: true })).toBeVisible()
-      await page.getByRole("menuitem", { name: "Rename", exact: true }).tap()
-      const title = target.locator('[data-titlebar-tab-title][contenteditable="true"]')
-      await expect(title).toBeFocused()
-      await expect(title).toHaveText(fixture.expected.targetTitle)
-      await expect(page).toHaveURL(href(fixture.sourceID))
-      await title.press("Escape")
-      await expect(target.locator('[contenteditable="true"]')).toHaveCount(0)
-      await expect(page).toHaveURL(href(fixture.sourceID))
-    })
-  }
-}
-
-test("vertical touch scroll stays inside the session list and does not dismiss the drawer", async ({ page }) => {
+test("vertical scroll stays inside the session list and does not dismiss the drawer", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 500 })
   const list = drawer(page).locator('[data-slot="vertical-tabs-scroll"]')
-  await swipe(page, row(page, fixture.expected.targetTitle).locator("[data-titlebar-tab-link]"), 0, -130)
+  await expect.poll(() => list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  await list.hover()
+  await page.mouse.wheel(0, 130)
   await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
   await expect(page.getByRole("button", { name: "Tabs", exact: true })).toHaveAttribute("aria-expanded", "true")
   await expect(page).toHaveURL(href(fixture.sourceID))
@@ -191,7 +189,7 @@ test("relative time refreshes when the drawer reopens", async ({ page }) => {
   await expect(row(page, fixture.expected.sourceTitle).locator("time")).toHaveText("4h ago")
 })
 
-test("archive keeps focus while pending and can retry a failure", async ({ page }) => {
+test("archive requires confirmation and can retry a failure", async ({ page }) => {
   const target = row(page, fixture.expected.targetTitle)
   const release = Promise.withResolvers<void>()
   const mutations: string[] = []
@@ -216,19 +214,22 @@ test("archive keeps focus while pending and can retry a failure", async ({ page 
   })
   await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
   const archive = target.getByRole("button", { name: "Archive", exact: true })
-  await archive.focus()
-  await archive.press("Enter")
-  await expect(archive).toHaveAttribute("aria-disabled", "true")
+  await archive.tap()
+  const dialog = page.getByRole("dialog", { name: "Archive session", exact: true })
+  await expect(dialog).toContainText(fixture.expected.targetTitle)
+  expect(mutations).toEqual([])
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).tap()
   await expect(archive).toBeFocused()
   await archive.press("Enter")
-  expect(mutations).toEqual(["POST"])
+  const confirm = dialog.getByRole("button", { name: "Archive session", exact: true })
+  await confirm.click()
+  await expect.poll(() => mutations).toEqual(["POST"])
   release.resolve()
-  await expect(archive).toHaveAttribute("aria-disabled", "false")
-  await expect(archive).toBeFocused()
+  await expect(confirm).toBeEnabled()
   await expect(target).toBeVisible()
   await expect(page.getByText("Request failed", { exact: true })).toBeVisible()
   const archived = page.waitForResponse((response) => response.url().endsWith("/api/rpc/custom.archive/archive"))
-  await archive.press("Enter")
+  await confirm.click()
   expect((await archived).status()).toBe(200)
   await expect(target).toHaveCount(0)
   expect(mutations).toEqual(["POST", "POST"])

@@ -1,10 +1,10 @@
-import { createContext, createEffect, createMemo, onCleanup, useContext, type ParentProps } from "solid-js"
+import { createContext, createEffect, createMemo, onCleanup, Show, useContext, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { useLanguage } from "@/runtime/i18n/language"
 
-const actionsWidth = 88
+const actionWidth = 44
 const intentThreshold = 8
 const MobileTabsContext = createContext<{
   open: () => boolean
@@ -46,12 +46,16 @@ export function MobileTabActions(
     tabKey: string
     enabled: boolean
     pending: boolean
+    closable: boolean
+    onRename: () => void
     onArchive: () => void
     onDelete: () => void
+    onClose: () => void
   }>,
 ) {
   const language = useLanguage()
   const revealed = createMemo(() => props.tabs.open() && props.tabs.revealed() === props.tabKey && props.enabled)
+  const actionsWidth = createMemo(() => actionWidth * (props.closable ? 4 : 3))
   let root!: HTMLDivElement
   let content!: HTMLDivElement
   let actions!: HTMLDivElement
@@ -75,7 +79,7 @@ export function MobileTabActions(
     // CSS direction can be overridden independently of the selected language.
     const direction = getComputedStyle(root).direction === "rtl" ? 1 : -1
     if (!open && actions.contains(document.activeElement) && props.tabs.open()) focusContent()
-    applyOffset(open ? direction * actionsWidth : 0)
+    applyOffset(open ? direction * actionsWidth() : 0)
     if (!props.tabs.open()) gesture = undefined
   })
   onCleanup(() => {
@@ -88,7 +92,7 @@ export function MobileTabActions(
     if (!current) return
     if (cancelled || current.axis) suppress = true
     if (!cancelled && current.axis === "x") {
-      if (Math.abs(offset) > actionsWidth / 2) props.tabs.reveal(props.tabKey)
+      if (Math.abs(offset) > actionsWidth() / 2) props.tabs.reveal(props.tabKey)
       else close()
     }
     if (!cancelled && !current.axis && revealed()) {
@@ -96,7 +100,7 @@ export function MobileTabActions(
       focusContent()
       close()
     }
-    applyOffset(revealed() ? current.direction * actionsWidth : 0)
+    applyOffset(revealed() ? current.direction * actionsWidth() : 0)
   }
   const blockNavigation = (event: MouseEvent) => {
     // TabNavItem navigates on mousedown, including compatibility mouse events
@@ -118,17 +122,50 @@ export function MobileTabActions(
         close()
       }}
     >
-      <div ref={actions} data-slot="mobile-tab-actions" aria-hidden={!revealed()} inert={!revealed()}>
+      <div
+        ref={actions}
+        data-slot="mobile-tab-actions"
+        data-action-count={props.closable ? 4 : 3}
+        style={{ "--mobile-tab-actions-width": `${actionsWidth()}px` }}
+        aria-hidden={!revealed()}
+        inert={!revealed()}
+      >
+        <IconButton
+          variant="ghost-muted"
+          icon={<Icon name="edit" />}
+          aria-label={language.t("common.rename")}
+          aria-disabled={props.pending}
+          tabIndex={revealed() ? 0 : -1}
+          onClick={() => {
+            if (props.pending) return
+            close()
+            props.onRename()
+          }}
+        />
         <IconButton
           variant="ghost-muted"
           icon={<Icon name="archive" />}
           aria-label={language.t("common.archive")}
           aria-disabled={props.pending}
           tabIndex={revealed() ? 0 : -1}
-          onClick={() => {
-            if (!props.pending) props.onArchive()
+          onClick={(event) => {
+            if (props.pending) return
+            event.currentTarget.focus({ preventScroll: true })
+            props.onArchive()
           }}
         />
+        <Show when={props.closable}>
+          <IconButton
+            variant="ghost-muted"
+            icon={<Icon name="xmark-small" />}
+            aria-label={language.t("common.closeTab")}
+            aria-disabled={props.pending}
+            tabIndex={revealed() ? 0 : -1}
+            onClick={() => {
+              if (!props.pending) props.onClose()
+            }}
+          />
+        </Show>
         <IconButton
           variant="ghost-muted"
           data-action="mobile-tab-delete"
@@ -179,7 +216,7 @@ export function MobileTabActions(
           content.setPointerCapture(event.pointerId)
           const distance = Math.max(
             0,
-            Math.min(actionsWidth, gesture.base * gesture.direction + dx * gesture.direction),
+            Math.min(actionsWidth(), gesture.base * gesture.direction + dx * gesture.direction),
           )
           applyOffset(distance * gesture.direction, true)
         }}

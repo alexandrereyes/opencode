@@ -112,6 +112,20 @@ export function useSessionLifecycleActions() {
     archive: async (server: ServerConnection.Key, session: SessionInfo) => {
       await run([{ server, session }], "archive")
     },
+    showArchive: (server: ServerConnection.Key, session: SessionInfo) =>
+      dialog.show(() => (
+        <SessionActionConfirmationDialog
+          title={language.t("session.archive.title")}
+          description={language.t("session.archive.confirm", {
+            name: sessionTitle(session.title) ?? language.t("command.session.new"),
+          })}
+          action={language.t("command.session.archive")}
+          onConfirm={async () => {
+            const result = await run([{ server, session }], "archive")
+            return !!result && !result.failed.length
+          }}
+        />
+      )),
     showDelete: (server: ServerConnection.Key, session: SessionInfo) =>
       dialog.show(() => (
         <SessionDeleteDialog
@@ -152,6 +166,40 @@ export function useSessionLifecycleActions() {
       })
     },
   }
+}
+
+function SessionActionConfirmationDialog(props: {
+  title: string
+  description: string
+  action: string
+  onConfirm: () => boolean | Promise<boolean>
+}) {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const [state, setState] = createStore({ pending: false })
+  const confirm = async () => {
+    if (state.pending) return
+    const active = dialog.active
+    setState("pending", true)
+    const success = await props.onConfirm()
+    setState("pending", false)
+    if (success && dialog.active === active) dialog.close()
+  }
+  return (
+    <Dialog fit>
+      <DialogHeader hideClose>
+        <DialogTitleGroup title={props.title} description={props.description} />
+      </DialogHeader>
+      <DialogFooter>
+        <Button variant="ghost" disabled={state.pending} onClick={() => dialog.close()}>
+          {language.t("common.cancel")}
+        </Button>
+        <Button variant="contrast" disabled={state.pending} onClick={confirm}>
+          {props.action}
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  )
 }
 
 function SessionBulkDeleteDialog(props: { targets: SessionLifecycleTarget[]; onConfirm: () => Promise<boolean> }) {
