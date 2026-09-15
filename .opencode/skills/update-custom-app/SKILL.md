@@ -43,12 +43,18 @@ owner for the operation.
   be diagnosed after the original service stops.
 - The initiating agent may report that the update was started, but must not claim it
   completed before the detached job verifies it.
+- Run the runner as the tmux session's command, without `remain-on-exit` or an
+  interactive shell. After verification and any success notification finish, the
+  runner must exit so tmux closes the session automatically. It must also exit and
+  close the tmux session after a failure, while preserving the private log.
 
 If the current OpenCode session ID is available from trusted harness context, the
 detached job should notify that exact session after a successful update. Do not infer
 the target from the most recent session. After `custom:update` exits successfully,
-run `bun run custom:status` and require `prepared`, `current`, and `running` to identify
-the target commit and `health` to equal `ready`. Then use the freshly activated
+run `bun run custom:status` and require `prepared` and `current` to equal the target
+commit, `running` to equal `0.0.0-custom.<target-commit>`, and `health` to equal
+`ready`. The `running` field is the full release version, not a bare commit SHA. Then
+use the freshly activated
 `~/.local/share/opencode-custom-v2/bin/opencode2` launcher to call
 `POST /api/session/:sessionID/prompt` with `resume: true` and a concise `text`
 value such as:
@@ -70,8 +76,9 @@ Check the installed release without changing it:
 cd ~/Dev/opencode2 && bun run custom:status
 ```
 
-Confirm that `prepared`, `current`, and `running` identify the expected commit and
-that `health` is `ready`. Never print or expose the runtime password.
+Confirm that `prepared` and `current` equal the expected commit, `running` equals
+`0.0.0-custom.<expected-commit>`, and `health` is `ready`. Never print or expose the
+runtime password.
 
 ## One-Time Legacy Migration
 
