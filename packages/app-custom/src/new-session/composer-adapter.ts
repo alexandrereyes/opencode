@@ -2,6 +2,7 @@ import { base64Encode } from "@opencode/util/encode"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { Session } from "@opencode/schema/session"
 import { startTransition } from "solid-js"
+import { createStore } from "solid-js/store"
 import type { NewSessionComposerAdapter } from "@/composer/adapter"
 import { useComposerState } from "@/composer/persistence"
 import { createComposerControls, createComposerModelSelection } from "@/composer/selection"
@@ -17,6 +18,7 @@ import { useSessionKey } from "@/session/session-layout"
 import { showToast } from "@/shell/notifications/toast"
 import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
 import { clearSessionMessageHandoff, setSessionMessageHandoff } from "@/session/handoff"
+import { claimChat, confirmChat } from "@/runtime/chats"
 
 export function createNewSessionComposerAdapter(props: {
   draftID: string
@@ -36,33 +38,59 @@ export function createNewSessionComposerAdapter(props: {
   const language = useLanguage()
   const model = createComposerModelSelection({ agent: () => local.agent.current() })
   const controls = createComposerControls({ sessionKey: route.sessionKey, model })
+  const [context, setContext] = createStore({ pending: false })
 
   const adapter: NewSessionComposerAdapter = {
     kind: "new-session",
     state,
     ready: prompt.ready,
     controls,
-    working: () => false,
+    working: () => context.pending,
     submitted: props.submitted,
     async start(selection, submission, message) {
+      if (managedSessionBlocked(context.pending)) return
       const draftID = props.draftID
+      const draft = tabs.draft(draftID)
       const projectDirectory = location().directory
       const worktree = props.worktree()
       const branch = props.branch()
-      const id = Session.ID.create()
-      const pending = tabs.prepareSession(draftID, { server: server.key, sessionId: id }, { message, selection })
+      const chat = draft.chat
+      const id = chat ? Session.ID.make(chat.sessionID) : Session.ID.create()
+      const pending = tabs.prepareSession(
+        draftID,
+        { server: server.key, sessionId: id, chat: !!chat || undefined },
+        { message, selection },
+      )
       await pending.ready
-      const sessionDirectory = await resolveSessionDirectory({
+      const sessionDirectory = await resolveManagedSessionDirectory({
+        chat: !!chat,
         projectDirectory,
-        worktree,
-        branch,
-        data,
-        serverSDK,
-        language,
+        resolve: () => resolveSessionDirectory({ projectDirectory, worktree, branch, data, serverSDK, language }),
       })
       if (!sessionDirectory) {
         await pending.rollback()
         return
+      }
+      if (chat) {
+        const claimed = await claimChat(serverSDK, {
+          id: chat.allocationID,
+          directory: sessionDirectory,
+          sessionID: id,
+        }).then(
+          () => true,
+          (error) => {
+            showToast({
+              variant: "error",
+              title: language.t("session.new.chats.failed"),
+              description: errorMessage(language, error),
+            })
+            return false
+          },
+        )
+        if (!claimed) {
+          await pending.rollback()
+          return
+        }
       }
 
       const created = data.session.create({
@@ -93,6 +121,13 @@ export function createNewSessionComposerAdapter(props: {
         }
         await pending.rollback(worktree === "create" ? sessionDirectory : undefined)
         return
+      }
+      if (chat) {
+        await confirmChat(serverSDK, {
+          id: chat.allocationID,
+          directory: sessionDirectory,
+          sessionID: id,
+        }).catch(() => undefined)
       }
       const afterCreation = async <T>(run: () => Promise<T>) => {
         const result = await creation
@@ -153,10 +188,26 @@ export function createNewSessionComposerAdapter(props: {
 
   return {
     adapter,
-    project: createComposerProjectControls({ draftId: props.draftID, worktree: props.worktree }),
+    project: createComposerProjectControls({
+      draftId: props.draftID,
+      pending: () => context.pending,
+      setPending: (pending) => setContext("pending", pending),
+    }),
     model,
     ready: prompt.ready,
   }
+}
+
+export function managedSessionBlocked(contextPending: boolean) {
+  return contextPending
+}
+
+export function resolveManagedSessionDirectory(input: {
+  chat: boolean
+  projectDirectory: string
+  resolve: () => Promise<string | void | undefined>
+}) {
+  return input.chat ? Promise.resolve(input.projectDirectory) : input.resolve()
 }
 
 function createMessageHandoff(key: string, sessionID: string, event: ServerSDK["event"]) {

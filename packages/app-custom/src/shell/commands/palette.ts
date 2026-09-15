@@ -10,8 +10,14 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useLayout, type LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useServerSDK } from "@/runtime/server/client"
-import { useTabs } from "@/shell/tabs/tabs"
+import { findSessionTab, useTabs } from "@/shell/tabs/tabs"
 import { displayName, projectForSession } from "@/shell/layout/helpers"
+import {
+  chatRoot,
+  isChatDirectory,
+  knownChatRoot,
+  shouldRegisterSessionProject,
+} from "@/runtime/chats"
 import { createSessionTabs } from "@/session/helpers"
 import { useSessionLayout } from "@/session/session-layout"
 import { useServer } from "@/runtime/server/current"
@@ -32,6 +38,7 @@ export type CommandPaletteEntry = {
   project?: LocalProject
   archived?: number
   updated?: number
+  chat?: boolean
 }
 
 const ENTRY_LIMIT = 5
@@ -151,7 +158,11 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     get: (sessionID, signal) => serverSDK.api.session.get({ sessionID }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
+    chatRoot: () => knownChatRoot(serverSDK),
+    chatLabel: () => language.t("session.new.chats"),
+    isChat: (session) => !!findSessionTab(appTabs.store, ServerConnection.key(serverSDK.server), session.id)?.chat,
   })
+  void chatRoot(serverSDK)
 
   const highlight = (item: CommandPaletteEntry | undefined) => {
     state.cleanup?.()
@@ -160,7 +171,7 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     state.cleanup = item.option?.onHighlight?.()
   }
 
-  const select = (item: CommandPaletteEntry | undefined) => {
+  const select = async (item: CommandPaletteEntry | undefined) => {
     if (!item) return
     state.committed = true
     state.cleanup = undefined
@@ -172,13 +183,17 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     if (item.type === "session") {
       if (!item.sessionID || !item.server) return
       const directory = item.project?.worktree ?? item.directory
-      if (directory) {
+      if (
+        directory &&
+        (await shouldRegisterSessionProject(serverSDK, item.directory ?? "", !!item.chat))
+      ) {
         serverCtx.projects.open(directory)
         serverCtx.projects.touch(directory)
       }
       const tab = appTabs.addSessionTab({
         server: item.server,
         sessionId: item.sessionID,
+        chat: item.chat,
       })
       appTabs.select(tab)
       return
@@ -226,6 +241,9 @@ export function createServerSessionEntries(props: {
   get: (sessionID: string, signal: AbortSignal) => Promise<SessionInfo>
   untitled: () => string
   category: () => string
+  chatRoot?: () => string | undefined
+  chatLabel?: () => string
+  isChat?: (session: SessionInfo) => boolean
 }) {
   let abort: AbortController | undefined
 
@@ -271,18 +289,25 @@ export function createServerSessionEntries(props: {
       [...new Map([...exact, ...listed].map((session) => [session.id, session] as const)).values()]
         .filter((session) => !session.time.archived)
         .map((session) => {
-          const project =
-            projectForSession(session, opened, openedByID) ?? projectForSession(session, stored, storedByID)
+          const chat = props.isChat?.(session) || isChatDirectory(session.location.directory, props.chatRoot?.())
+          const project = chat
+            ? undefined
+            : (projectForSession(session, opened, openedByID) ?? projectForSession(session, stored, storedByID))
           return {
             id: `session:${props.server}:${session.id}`,
             type: "session" as const,
             title: session.title || props.untitled(),
-            description: project ? displayName(project) : getFilename(session.location.directory),
+            description: chat
+              ? props.chatLabel?.()
+              : project
+                ? displayName(project)
+                : getFilename(session.location.directory),
             category: props.category(),
             directory: session.location.directory,
             sessionID: session.id,
             server: props.server,
             project,
+            chat: chat || undefined,
             updated: session.time.updated,
           }
         }),

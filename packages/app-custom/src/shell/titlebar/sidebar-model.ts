@@ -7,6 +7,9 @@ import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
 import { latestAttention } from "@/shell/notifications/session-attention"
 import { containsDirectory, sameDirectory } from "@/workspaces/paths"
+import { isChatDirectory } from "@/runtime/chats"
+
+export { isChatDirectory }
 
 export type SessionNavigationInfo = Omit<Types.DeepMutable<Navigation.Info>, "session"> & { session: SessionInfo }
 export interface SessionNavigationPage {
@@ -27,6 +30,7 @@ export type SidebarSession = SessionNavigationInfo & {
   running?: boolean
   attention?: number
   recentRank?: number
+  chat?: boolean
 }
 
 export function projectKey(server: string, project: { id?: string; worktree: string }) {
@@ -37,6 +41,11 @@ export function projectKey(server: string, project: { id?: string; worktree: str
 }
 
 export const sessionKey = (server: string, id: string) => JSON.stringify([server, id])
+
+export function chatActionServer<T extends string>(preferred: T | undefined, roots: ReadonlyMap<T, string | undefined>) {
+  if (preferred && roots.get(preferred)) return preferred
+  return [...roots].find(([, root]) => !!root)?.[0]
+}
 
 export function sidebarProjectWorkspaces(project: {
   worktree: string
@@ -56,10 +65,7 @@ export function sidebarProjectWorkspaces(project: {
 
 export function sidebarExplicitWorkspace<
   T extends { key: string; directory: string; workspaces: readonly WorktreeDirectory[] },
->(
-  directory: string,
-  projects: readonly T[],
-) {
+>(directory: string, projects: readonly T[]) {
   return projects
     .flatMap((project) =>
       project.workspaces
@@ -107,7 +113,9 @@ export function sidebarProjects(
   sessions: SidebarSession[],
 ) {
   const eligible = new Set(
-    sessions.filter((row) => !row.session.parentID && !row.session.time.archived).map((row) => row.project),
+    sessions
+      .filter((row) => !row.chat && !row.session.parentID && !row.session.time.archived)
+      .map((row) => row.project),
   )
   const entries = known.map((project) => ({
     project,
@@ -227,7 +235,7 @@ export function visibleSessions(rows: SidebarSession[], limit: number, current?:
 }
 
 export function recentSessions(rows: SidebarSession[]) {
-  return rows.toSorted(
+  return rows.filter((row) => !row.chat).toSorted(
     (a, b) =>
       (b.recentRank ?? (b.session.time.updated || b.session.time.created)) -
         (a.recentRank ?? (a.session.time.updated || a.session.time.created)) || a.key.localeCompare(b.key),
@@ -245,6 +253,7 @@ export function sidebarSelectableSessions(
       }
     | {
         mode: "projects"
+        chats?: readonly SidebarSession[]
         pinned: readonly SidebarSession[]
         recent: readonly SidebarSession[]
         projects: readonly (readonly SidebarSession[])[]
@@ -253,7 +262,7 @@ export function sidebarSelectableSessions(
   const rows =
     view.mode === "attention"
       ? [...view.priority, ...view.pinned, ...view.days.flatMap((day) => day.rows), ...view.current]
-      : [...view.pinned, ...view.recent, ...view.projects.flatMap((rows) => rows)]
+      : [...(view.chats ?? []), ...view.pinned, ...view.recent, ...view.projects.flatMap((rows) => rows)]
   const seen = new Set<string>()
   return rows.filter((row) => {
     if (seen.has(row.key)) return false

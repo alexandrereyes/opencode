@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Ref } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, onCleanup, Show, type Ref } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
@@ -24,6 +24,7 @@ import { MobileTabActions, useMobileTabs } from "./mobile-tab-actions"
 import { tabKey } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
 import "./tab-nav.css"
+import { chatRoot, resolvedChatIdentity } from "@/runtime/chats"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
 const MIDDLE_MOUSE_BUTTON = 1
@@ -48,6 +49,8 @@ export function TabNavItem(props: {
   orientation?: "horizontal" | "vertical"
   projectLabel?: string
   projectMetadataIcon?: boolean
+  chatMetadataIcon?: boolean
+  chat?: boolean
   compact?: boolean
   timestamp?: { dateTime: string; title: string; label: string }
   sidebarActions?: boolean
@@ -82,9 +85,19 @@ export function TabNavItem(props: {
   }
   const servers = useServers()
   const serverCtx = useServerCtx(() => servers.list.find((item) => ServerConnection.key(item) === props.server))
+  const [chatRootValue] = createResource(
+    () => {
+      const ctx = serverCtx()
+      return ctx?.sdk.connection.status() === "connected" ? ctx.sdk : undefined
+    },
+    chatRoot,
+  )
+  const chat = createMemo(() =>
+    resolvedChatIdentity(props.session?.location.directory ?? "", chatRootValue(), !!props.chat),
+  )
   const project = createMemo(() => {
     const session = props.session
-    if (!session) return
+    if (!session || chat()) return
     return projectForSession(session, serverCtx()?.projects.list() ?? [])
   })
   const title = createMemo(() => {
@@ -95,11 +108,11 @@ export function TabNavItem(props: {
   const projectName = createMemo(() => {
     const session = props.session
     if (!session) return
-    return displayName(project() ?? { worktree: session.location.directory })
+    return chat() ? language.t("session.new.chats") : displayName(project() ?? { worktree: session.location.directory })
   })
   const previewPath = createMemo(() => {
     const session = props.session
-    if (!session) return
+    if (!session || chat()) return
     const home = serverCtx()?.sync.data.path.home
     return home ? session.location.directory.replace(home, "~") : session.location.directory
   })
@@ -366,9 +379,7 @@ export function TabNavItem(props: {
                 aria-label={language.t(
                   activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending",
                 )}
-                title={language.t(
-                  activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending",
-                )}
+                title={language.t(activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending")}
               />
             )}
           </Show>
@@ -447,13 +458,18 @@ export function TabNavItem(props: {
               }
             >
               {(session) => (
-                <SessionTabAvatar
-                  project={project()}
-                  directory={session.location.directory}
-                  sessionId={session.id}
-                  server={props.server}
-                  unread={props.unread}
-                />
+                <Show
+                  when={!chat()}
+                  fallback={<Icon name="speech-bubble" class="text-v2-icon-icon-muted" />}
+                >
+                  <SessionTabAvatar
+                    project={project()}
+                    directory={session.location.directory}
+                    sessionId={session.id}
+                    server={props.server}
+                    unread={props.unread}
+                  />
+                </Show>
               )}
             </Show>
           </span>
@@ -513,8 +529,8 @@ export function TabNavItem(props: {
         >
           {(name) => (
             <span data-slot="tab-project">
-              <Show when={props.projectMetadataIcon}>
-                <Icon name="folder" size="small" class="shrink-0" />
+              <Show when={props.projectMetadataIcon || props.chatMetadataIcon}>
+                <Icon name={props.chatMetadataIcon ? "speech-bubble" : "folder"} size="small" class="shrink-0" />
               </Show>
               <span dir="auto" class="min-w-0 truncate">
                 {name()}

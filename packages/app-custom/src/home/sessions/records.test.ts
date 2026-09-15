@@ -13,6 +13,17 @@ const session = (id: string, directory: string, projectID: string) =>
   }) as SessionInfo
 
 describe("buildHomeSessionRecords", () => {
+  test("labels managed chats without treating the scratch directory as a project", () => {
+    const records = buildHomeSessionRecords({
+      sessions: () => [session("chat", "/data/chats/day/session-one", "global")],
+      projectDirectories: () => undefined,
+      projects: () => [],
+      chatRoot: () => "/data/chats",
+      chatLabel: () => "Chats",
+    })
+    expect(records[0]).toMatchObject({ chat: true, projectName: "Chats" })
+  })
+
   const opened = { id: "project-a", worktree: "/repo/a", expanded: true } as LocalProject
   const sessions = [session("a", "/repo/a", "project-a"), session("b", "/repo/b", "project-b")]
 

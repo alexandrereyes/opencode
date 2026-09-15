@@ -2,7 +2,7 @@ import type { SessionInfo } from "@opencode/client/promise"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
-import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
+import { type Accessor, createEffect, createMemo, createResource, type JSX, startTransition, untrack } from "solid-js"
 import { useCommand } from "@/shell/commands/command"
 import {
   HOME_SESSION_LIMIT,
@@ -13,7 +13,7 @@ import {
 import type { LocalProject } from "@/shell/state/layout"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection } from "@/runtime/server/registry"
-import { sessionHasOpenTab, useTabs } from "@/shell/tabs/tabs"
+import { findSessionTab, sessionHasOpenTab, useTabs } from "@/shell/tabs/tabs"
 import { errorMessage } from "@/shell/layout/helpers"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
@@ -24,6 +24,11 @@ import { sessionLabel } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, type HomeSessionRecord } from "./records"
+import {
+  chatRoot,
+  knownChatRoot,
+  shouldRegisterSessionProject,
+} from "@/runtime/chats"
 
 export type { HomeSessionRecord } from "./records"
 
@@ -45,6 +50,10 @@ export function createHomeSessionsController(home: HomeController) {
   const platform = usePlatform()
   const queryClient = useQueryClient()
   const lifecycle = useSessionLifecycleActions()
+  const [chat] = createResource(() => {
+    const ctx = home.server.focusedContext()
+    return ctx?.sdk.connection.status() === "connected" ? ctx.sdk : undefined
+  }, chatRoot)
   const projectDirectories = createMemo(() => {
     const selected = home.selection.value().directory
     if (!selected) return
@@ -84,6 +93,8 @@ export function createHomeSessionsController(home: HomeController) {
       sessions: indexedSessions,
       projectDirectories,
       projects: home.project.list,
+      chatRoot: () => chat(),
+      chatLabel: () => language.t("session.new.chats"),
     }),
   )
   const records = createMemo(() => allRecords().slice(0, HOME_SESSION_LIMIT))
@@ -118,15 +129,17 @@ export function createHomeSessionsController(home: HomeController) {
         void dialog.show(() => (
           <HomeCommandPalette
             server={conn}
-            onSelectSession={(entry) => {
+            onSelectSession={async (entry) => {
               if (!entry.sessionID || !entry.directory || !entry.server) return
               const sessionID = entry.sessionID
               const server = entry.server
               const directory = entry.project?.worktree ?? entry.directory
-              ctx.projects.open(directory)
-              ctx.projects.touch(directory)
+              if (await shouldRegisterSessionProject(ctx.sdk, entry.directory, !!entry.chat)) {
+                ctx.projects.open(directory)
+                ctx.projects.touch(directory)
+              }
               void startTransition(() => {
-                const tab = tabs.addSessionTab({ server, sessionId: sessionID })
+                const tab = tabs.addSessionTab({ server, sessionId: sessionID, chat: entry.chat })
                 tabs.select(tab)
               })
             }}
@@ -210,10 +223,12 @@ export function createHomeSessionsController(home: HomeController) {
           sessions: () => [result],
           projectDirectories,
           projects: home.project.list,
+          chatRoot: () => knownChatRoot(ctx.sdk),
+          chatLabel: () => language.t("session.new.chats"),
         })[0]
       },
       create: home.project.openNewSession,
-      open: (session: SessionInfo, options?: OpenSessionOptions) => {
+      open: async (session: SessionInfo, options?: OpenSessionOptions) => {
         const project = homeProjectForSession(session, home.project.list())
         const conn = home.server.focused()
         if (!conn) return
@@ -222,14 +237,22 @@ export function createHomeSessionsController(home: HomeController) {
         const ctx = home.server.focusedContext()
         if (!ctx) return
         if (!options?.background) void ctx.data.session.message.sync(session.id).catch(() => undefined)
+        const existing = findSessionTab(tabs.store, connKey, session.id)
+        const register = await shouldRegisterSessionProject(ctx.sdk, session.location.directory, !!existing?.chat)
         // Commit cache/project changes with navigation instead of rebuilding
         // the outgoing Home list before leaving it.
         void startTransition(() => {
-          const tab = tabs.addSessionTab({ server: connKey, sessionId: session.id })
+          const tab = tabs.addSessionTab({
+            server: connKey,
+            sessionId: session.id,
+            chat: !register || undefined,
+          })
           if (!options?.background) tabs.select(tab)
           ctx.data.session.remember(session)
-          ctx.projects.open(directory)
-          if (!options?.background) ctx.projects.touch(directory)
+          if (register) {
+            ctx.projects.open(directory)
+            if (!options?.background) ctx.projects.touch(directory)
+          }
         })
       },
       archive: async (session: SessionInfo) => {

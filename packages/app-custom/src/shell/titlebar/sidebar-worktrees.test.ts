@@ -55,6 +55,25 @@ const metadata = {
   branch: (directory: string) => (directory === "/trees/feat" ? "feat/payments" : undefined),
 }
 
+test("managed chat rows and drafts never enter ancestral project or worktree groups", () => {
+  const chat = { ...row("chat", "/repo/chats/session-one"), project: project.key, chat: true }
+  const grouped = sidebarWorktrees(project, [chat], metadata)
+  expect(grouped.root).toEqual([])
+  expect(grouped.groups.every((group) => group.rows.length === 0)).toBe(true)
+  const draft = {
+    type: "draft" as const,
+    draftID: "chat-draft",
+    server,
+    directory: "/repo/chats/session-two",
+    chat: { allocationID: "allocation", sessionID: "ses_chat" },
+  }
+  const preparing = sidebarPreparingGroups(
+    [{ tab: draft, directory: draft.directory, chat: true }],
+    [{ key: project.key, server, directory: project.directory, groups: [] }],
+  )
+  expect(preparing.get(project.key)).toEqual({ root: [], groups: new Map() })
+})
+
 test("canonical root and its subdirectories never acquire a main accordion across cold, loaded and reconnect snapshots", () => {
   const rows = [row("root", "/repo"), row("sub", "/repo/src"), row("linked-main", "/trees/main")]
   for (const inventory of [undefined, [{ directory: "/repo" }, { directory: "/trees/main" }], undefined]) {

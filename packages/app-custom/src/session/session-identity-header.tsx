@@ -7,7 +7,7 @@ import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useNavigate } from "@solidjs/router"
-import { createMemo, Show, type ParentProps } from "solid-js"
+import { createMemo, createResource, Show, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useServer } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -20,6 +20,7 @@ import { pathKey } from "@/workspaces/path-key"
 import { isProjectDirectory, isWorkspaceDirectory } from "@/workspaces/paths"
 import { sessionHref } from "@/shell/routes/session"
 import { showToast } from "@/shell/notifications/toast"
+import { chatRoot, isChatDirectory, resolvedChatIdentity } from "@/runtime/chats"
 import { sessionTitle } from "./title"
 import "./session-identity-header.css"
 
@@ -39,13 +40,32 @@ export function SessionProjectMenu(props: {
   directory?: string
   workspace: boolean
   showProjectIcon: boolean
+  chat?: boolean
 }) {
   const server = useServer()
+  const tabs = useTabs()
   const language = useLanguage()
   const dialog = useDialog()
   const platform = usePlatform()
   const layout = useLayout()
   const navigate = useNavigate()
+  const [chatRootValue] = createResource(
+    () => (server.ctx.sdk.connection.status() === "connected" ? server.ctx.sdk.connection.epoch() + 1 : undefined),
+    () => chatRoot(server.ctx.sdk),
+  )
+  const chat = createMemo(() =>
+    resolvedChatIdentity(
+      props.directory ?? "",
+      chatRootValue(),
+      !!props.chat ||
+        tabs.store.some(
+        (tab) =>
+          tab.server === server.key &&
+          !!tab.chat &&
+          (tab.type === "draft" ? tab.directory : tabs.info[tabKey(tab)]?.directory) === props.directory,
+        ),
+    ),
+  )
   const [state, setState] = createStore({
     open: false,
     projectTruncated: false,
@@ -72,7 +92,9 @@ export function SessionProjectMenu(props: {
   }
 
   return (
-    <Menu
+    <Show
+      when={chat()}
+      fallback={<Menu
       placement="bottom-start"
       gutter={4}
       shift={-10}
@@ -197,12 +219,26 @@ export function SessionProjectMenu(props: {
           </Menu.Item>
         </Menu.Content>
       </Menu.Portal>
-    </Menu>
+    </Menu>}
+    >
+      <Tooltip placement="bottom" value={language.t("session.new.chats")} class="flex shrink-0">
+        <span
+          class="flex size-7 items-center justify-center text-v2-icon-icon-muted"
+          aria-label={language.t("session.new.chats")}
+        >
+          <Icon name="speech-bubble" />
+        </span>
+      </Tooltip>
+    </Show>
   )
 }
 
 export function SessionIdentityHeader(props: { sessionID: string; session?: SessionInfo }) {
   const server = useServer()
+  const [chatRootValue] = createResource(
+    () => (server.ctx.sdk.connection.status() === "connected" ? server.ctx.sdk.connection.epoch() + 1 : undefined),
+    () => chatRoot(server.ctx.sdk),
+  )
   const tabs = useTabs()
   const language = useLanguage()
   const pending = createMemo(() => tabs.pendingSession(server.key, props.sessionID))
@@ -246,6 +282,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
       : sessionTitle(props.session?.title ?? (parentID() ? undefined : info()?.title)),
   )
   const project = createMemo(() => {
+    if (isChatDirectory(directory() ?? "", chatRootValue())) return
     const projects = server.ctx.projects.list()
     if (props.session)
       return (
@@ -263,6 +300,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
   const showProjectIcon = () =>
     import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && settings.general.showProjectIcon() && !!directory()
   const workspaceSession = createMemo(() => !!pending() || isWorkspaceDirectory(project(), directory() ?? ""))
+  const chat = createMemo(() => isChatDirectory(directory() ?? "", chatRootValue()))
   const navigateParent = () => {
     const id = parentID()
     const current = tab()
@@ -282,6 +320,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
                 directory={directory()}
                 workspace={workspaceSession()}
                 showProjectIcon={showProjectIcon()}
+                chat={!!tab()?.chat || undefined}
               />
               <Show when={parentTitle()}>
                 {(value) => (

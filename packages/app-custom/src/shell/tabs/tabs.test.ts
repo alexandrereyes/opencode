@@ -16,6 +16,30 @@ function sessionTab(sessionId: string): SessionTab {
 }
 
 describe("tab migration", () => {
+  test("preserves explicit managed chat identity across reload", () => {
+    expect(
+      decodeTabs([
+        {
+          type: "draft",
+          server,
+          draftID: "draft-chat",
+          directory: "/scratch/chat",
+          chat: { allocationID: "allocation", sessionID: "ses_chat" },
+        },
+        { ...sessionTab("ses_chat"), chat: true },
+      ]),
+    ).toEqual([
+      {
+        type: "draft",
+        server,
+        draftID: "draft-chat",
+        directory: "/scratch/chat",
+        chat: { allocationID: "allocation", sessionID: "ses_chat" },
+      },
+      { ...sessionTab("ses_chat"), chat: true },
+    ])
+  })
+
   test("drops null and malformed persisted tabs", () => {
     expect(
       decodeTabs([null, sessionTab("a"), { type: "session", server }, { type: "unknown", server }, "invalid"]),

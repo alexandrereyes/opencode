@@ -23,6 +23,7 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { tabKey, useTabs } from "@/shell/tabs/tabs"
 import type { ComposerState } from "@/composer/persistence"
+import type { PromptModel } from "@/composer/state"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "@/shell/commands/tooltip-keybind"
 import { TitlebarRightMount } from "@/shell/titlebar/right-slot"
@@ -47,6 +48,9 @@ import {
 import { createSidebarSessions } from "./sidebar-sessions"
 import { visibleWorktreeSessions } from "./sidebar-worktrees"
 import { mobileSessionTabs, mobileTabIsOpen } from "./mobile-session-tabs"
+import { newChatDraft } from "@/new-session/chats"
+import { showToast } from "@/shell/notifications/toast"
+import { resolveChatIdentity } from "@/runtime/chats"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
 import prodIcon from "../../../../desktop/icons/prod/64x64.png"
@@ -279,19 +283,55 @@ export function Titlebar(props: {
               }
             })
 
+            createEffect(() => {
+              const current = session()
+              const tab = currentTab()
+              if (!current || tab?.type !== "session") return
+              const connection = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+              if (!connection) return
+              const directory = current.location.directory
+              void resolveChatIdentity(global.ensureServerCtx(connection).sdk, directory, !!tab.chat).then((chat) => {
+                if (session()?.location.directory !== directory) return
+                tabs.setSessionChat(tab.server, tab.sessionId, chat)
+              })
+            })
+
             makeEventListener(window, SESSION_TABS_REMOVED_EVENT, (event) => {
               const detail = readSessionTabsRemovedDetail(event)
               if (!detail) return
               tabsStoreActions.removeSessions(detail)
             })
 
-            const openNewTab = () => {
+            const openChat = async (connection = global.servers.list()[0], model?: PromptModel) => {
+              if (!connection) return
+              const ctx = global.ensureServerCtx(connection)
+              await newChatDraft({ sdk: ctx.sdk, server: ServerConnection.key(connection), tabs, model }).catch((error) =>
+                showToast({
+                  variant: "error",
+                  title: language.t("session.new.chats.failed"),
+                  description: error instanceof Error ? error.message : language.t("common.requestFailed"),
+                }),
+              )
+            }
+            const openNewTab = async () => {
               const route = layout.route()
               switch (route.type) {
                 case "session": {
                   const pending = tabs.pendingSession(route.server, route.sessionId)
                   if (pending) {
                     const model = tabs.stateValue<ComposerState>(pending.draft, "prompt")?.model.current()
+                    const connection = global.servers.list().find(
+                      (item) => ServerConnection.key(item) === route.server,
+                    )
+                    if (
+                      connection &&
+                      (await resolveChatIdentity(
+                        global.ensureServerCtx(connection).sdk,
+                        pending.draft.directory,
+                        !!pending.draft.chat,
+                      ))
+                    )
+                      return openChat(connection, model)
                     void tabs.newDraft({ server: route.server, directory: pending.draft.directory }, "", model)
                     return
                   }
@@ -304,6 +344,18 @@ export function Titlebar(props: {
                     sessionId: activeSession.id,
                   }
                   const model = tabs.stateValue<ComposerState>(sessionTab, "prompt")?.model.current()
+                  const connection = global.servers.list().find(
+                    (item) => ServerConnection.key(item) === route.server,
+                  )
+                  if (
+                    connection &&
+                    (await resolveChatIdentity(
+                      global.ensureServerCtx(connection).sdk,
+                      activeSession.location.directory,
+                      !!currentTab()?.chat,
+                    ))
+                  )
+                    return openChat(connection, model)
                   void tabs.newDraft(
                     { server: sessionTab.server, directory: activeSession.location.directory },
                     "",
@@ -316,6 +368,18 @@ export function Titlebar(props: {
                   if (activeTab?.type !== "draft") return
 
                   const model = tabs.stateValue<ComposerState>(activeTab, "prompt")?.model.current()
+                  const connection = global.servers.list().find(
+                    (item) => ServerConnection.key(item) === activeTab.server,
+                  )
+                  if (
+                    connection &&
+                    (await resolveChatIdentity(
+                      global.ensureServerCtx(connection).sdk,
+                      activeTab.directory,
+                      !!activeTab.chat,
+                    ))
+                  )
+                    return openChat(connection, model)
                   void tabs.newDraft({ server: activeTab.server, directory: activeTab.directory }, "", model)
                   return
                 }
@@ -335,6 +399,7 @@ export function Titlebar(props: {
                     void tabs.newDraft({ server: ServerConnection.key(conn), directory: project.worktree }, "")
                     return
                   }
+                  await openChat(conn)
                 }
               }
             }
@@ -438,7 +503,7 @@ export function Titlebar(props: {
               now: Date.now(),
               limits: {} as Record<string, number>,
             })
-            const mobileInventory = createSidebarSessions({ currentTab, enabled: mobile })
+            const mobileInventory = createSidebarSessions({ currentTab, enabled: mobile, tabs: () => tabs.store })
             const mobileSessions = mobileInventory.sessions
             const mobileOrder = () =>
               preferences.canonical() ? preferences.profile().data.sidebarOrder : global.sidebar.store.order
@@ -511,7 +576,7 @@ export function Titlebar(props: {
               }
               return sidebarSelectableSessions({
                 mode: "projects",
-                pinned: pinnedSessions(mobileSessions().rows, mobilePinList()),
+                pinned: pinnedSessions(mobileSessions().rows, mobilePinList()).filter((row) => !row.chat),
                 recent: visibleSessions(
                   recentSessions(mobileSessions().rows.filter((row) => !pins.has(row.key))),
                   5,
@@ -792,6 +857,11 @@ export function Titlebar(props: {
                               header={<ChannelIndicator sidebar debugTools={props.debugTools} />}
                               dashboardActive={layout.route().type === "agent-dashboard"}
                               onDashboard={() => navigate("/agent-dashboard")}
+                              onNewChat={(server) =>
+                                void openChat(
+                                  global.servers.list().find((item) => ServerConnection.key(item) === server),
+                                )
+                              }
                             >
                               {homeButton(true)}
                               <button

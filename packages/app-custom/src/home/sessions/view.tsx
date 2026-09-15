@@ -215,12 +215,21 @@ function HomeSessionLeading(props: {
           style={{ right: "calc(100% + 4px)" }}
         />
       </Show>
-      <SessionTabAvatarView
-        project={props.record.project}
-        directory={props.record.session.location.directory}
-        unread={props.unread}
-        loading={props.loading}
-      />
+      <Show
+        when={!props.record.chat}
+        fallback={
+          <span class="flex size-4 items-center justify-center text-v2-icon-icon-muted">
+            <Icon name="speech-bubble" size="small" />
+          </span>
+        }
+      >
+        <SessionTabAvatarView
+          project={props.record.project}
+          directory={props.record.session.location.directory}
+          unread={props.unread}
+          loading={props.loading}
+        />
+      </Show>
     </div>
   )
 }

@@ -115,6 +115,10 @@ const hosts = connections.map((connection, i) => {
   const backend = i
     ? [row("same", now)]
     : [
+        {
+          ...row("chat", now + 1),
+          session: { ...row("chat", now + 1).session, projectID: "global", location: { directory: "/chats/day/chat" } },
+        },
         row("same", now),
         row("priority", now - 1, 1),
         row("old", 1),
@@ -177,7 +181,10 @@ const hosts = connections.map((connection, i) => {
       location: { info: () => undefined, vcs: { info: () => undefined, sync: async () => {} }, syncInfo: async () => {} },
     },
     sdk: {
-      connection: { status: () => (state.connected ? "connected" : "disconnected") },
+      connection: {
+        status: () => (state.connected ? "connected" : "disconnected"),
+        epoch: () => Number(state.connected),
+      },
       event: {
         listen: (listener: Listener) => {
           listeners.add(listener)
@@ -185,13 +192,16 @@ const hosts = connections.map((connection, i) => {
         },
       },
       api: {
-        rpc: () => ({
-          list: async (input: { sessionID?: string }) => ({
-            data: backend.filter(
-              (row) => !row.session.time.archived && (!input.sessionID || row.session.id === input.sessionID),
-            ),
-          }),
-        }),
+        rpc: (definition: { id: string }) =>
+          definition.id === "custom.chats"
+            ? { info: async () => ({ root: "/chats" }) }
+            : {
+                list: async (input: { sessionID?: string }) => ({
+                  data: backend.filter(
+                    (row) => !row.session.time.archived && (!input.sessionID || row.session.id === input.sessionID),
+                  ),
+                }),
+              },
         session: {
           active: async () => ({}),
           import: async (input: unknown) => {
@@ -426,6 +436,8 @@ test("legacy prefs, real menus, search, priorities, reload, disconnect, archive 
       collapsed: { [project]: true },
       pins: [],
     })
+    expect(first.host.querySelector("section h2")?.textContent).toBe("sidebar.sessions.chats")
+    expect(titles(section(first.host, "chats")!)).toEqual(["chat"])
     expect(section(first.host, "pinned")).toBeUndefined()
     setRoute("sessionId", "old")
     await wait()
@@ -444,9 +456,11 @@ test("legacy prefs, real menus, search, priorities, reload, disconnect, archive 
     first.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.search.clear"]')!.click()
     await pin(first.host, "old", "pin")
     await pin(first.host, "priority", "pin")
-    expect(titles(section(first.host, "pinned")!)).toEqual(["same", "same", "old", "priority"])
-    expect(titles(section(first.host, "recent")!)).toHaveLength(5)
-    expect(titles(section(first.host, "recent")!)).not.toContain("same")
+    expect(section(first.host, "pinned")).toBeUndefined()
+    expect(titles(section(first.host, "recent")!).slice(0, 4)).toEqual(["same", "same", "old", "priority"])
+    expect(titles(section(first.host, "recent")!)).toHaveLength(9)
+    expect(titles(section(first.host, "recent")!)).not.toContain("chat")
+    expect(titles(section(first.host, "recent")!).slice(4)).not.toContain("same")
     expect(titles(first.host.querySelector(`[data-project-key='${project}']`)!)).toEqual(["old"])
     first.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.attention.toggle"]')!.click()
     expect(titles(section(first.host, "priority")!)).toEqual(["priority"])

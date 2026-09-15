@@ -12,7 +12,10 @@ export const Session = Persistence.struct({
   sessionId: Schema.String,
   routeSessionId: Persistence.optional(Schema.String),
   routeParentId: Persistence.optional(Schema.String),
+  chat: Persistence.optional(Schema.Boolean),
 })
+
+export const Chat = Persistence.struct({ allocationID: Schema.String, sessionID: Schema.String })
 
 export const Draft = Persistence.struct({
   type: Schema.Literal("draft"),
@@ -21,6 +24,7 @@ export const Draft = Persistence.struct({
   directory: Schema.String,
   worktree: Persistence.optional(Schema.String),
   branch: Persistence.optional(Schema.String),
+  chat: Persistence.optional(Chat),
 })
 
 const SessionCodec = Session.pipe(
@@ -32,6 +36,7 @@ const SessionCodec = Session.pipe(
       ...(tab.routeSessionId && tab.routeSessionId !== tab.sessionId
         ? { routeSessionId: tab.routeSessionId, ...(tab.routeParentId ? { routeParentId: tab.routeParentId } : {}) }
         : {}),
+      ...(tab.chat ? { chat: true as const } : {}),
     })),
     encode: SchemaGetter.transform((tab) => tab),
   }),
