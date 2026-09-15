@@ -29,6 +29,19 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
   const clearRetry = () => {
     if (untrack(() => store().retry) !== undefined) setStore()("retry", undefined)
   }
+  const addText = (content: string, cursor = store().cursor ?? promptLength(store().prompt)) => {
+    const value = normalizeComposerText(content)
+    batch(() =>
+      setStore()((state) => {
+        const position = normalizeComposerCursor(state.prompt, cursor)
+        return {
+          prompt: insertText(normalizeComposerPrompt(state.prompt), position, value),
+          cursor: position + value.length,
+          retry: undefined,
+        }
+      }),
+    )
+  }
 
   return {
     get state() {
@@ -66,18 +79,13 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         })),
       )
     },
-    addText(content: string, cursor = store().cursor ?? promptLength(store().prompt)) {
-      const value = normalizeComposerText(content)
-      batch(() =>
-        setStore()((state) => {
-          const position = normalizeComposerCursor(state.prompt, cursor)
-          return {
-            prompt: insertText(normalizeComposerPrompt(state.prompt), position, value),
-            cursor: position + value.length,
-            retry: undefined,
-          }
-        }),
-      )
+    addText,
+    appendBlockquote(content: string) {
+      const end = promptLength(store().prompt)
+      const text = store()
+        .prompt.map((part) => ("content" in part ? part.content : ""))
+        .join("")
+      addText(formatBlockquoteAppend(text, content), end)
     },
     replaceRange(content: ComposerPrompt, range: { start: number; end: number }) {
       const prompt = store().prompt
@@ -129,6 +137,19 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       clearRetry()
     },
   }
+}
+
+export function formatBlockquote(content: string) {
+  return normalizeComposerText(content)
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n")
+}
+
+export function formatBlockquoteAppend(existing: string, content: string) {
+  if (!existing) return formatBlockquote(content)
+  const trailing = normalizeComposerText(existing).match(/\n*$/)?.[0].length ?? 0
+  return `${"\n".repeat(Math.max(0, 2 - trailing))}${formatBlockquote(content)}`
 }
 
 function insertText(prompt: ComposerPrompt, cursor: number, content: string): ComposerPrompt {

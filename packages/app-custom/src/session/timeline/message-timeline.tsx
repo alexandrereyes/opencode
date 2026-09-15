@@ -353,6 +353,7 @@ export function SessionSummaryPanel(props: {
 
 type MessageTimelineProps = {
   onQuote?: (quote: Omit<ChatQuote, "id" | "comment">) => void
+  onAddToInput?: (text: string) => void
   hideHeader?: boolean
   active?: boolean
   session: TimelineSessionSource
@@ -650,14 +651,22 @@ function MessageTimelineView(
     <>
       <ChatQuoteSelection
         root={quoteRoot.element}
-        active={props.active !== false && !!props.onQuote}
-        onQuote={(partID, text) => {
-          const row = projection
-            .rows()
-            .find((row) => row._tag === "AssistantPart" && row.group.type === "part" && row.group.ref.partID === partID)
-          if (row?._tag !== "AssistantPart" || row.group.type !== "part") return
-          props.onQuote?.({ messageID: row.group.ref.messageID, partID, text })
-        }}
+        active={props.active !== false}
+        onQuote={
+          props.onQuote
+            ? (partID, text) => {
+                const row = projection
+                  .rows()
+                  .find(
+                    (row) =>
+                      row._tag === "AssistantPart" && row.group.type === "part" && row.group.ref.partID === partID,
+                  )
+                if (row?._tag !== "AssistantPart" || row.group.type !== "part") return
+                props.onQuote?.({ messageID: row.group.ref.messageID, partID, text })
+              }
+            : undefined
+        }
+        onAddToInput={props.onAddToInput}
       />
       <VirtualizedTimeline
         workspaceSession={workspaceSession}

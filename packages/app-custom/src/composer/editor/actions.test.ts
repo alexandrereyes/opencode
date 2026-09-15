@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import { Skill } from "@opencode/schema/skill"
 import type { ComposerPersistedState } from "../types"
-import { createComposerEditorActions } from "./actions"
+import { createComposerEditorActions, formatBlockquoteAppend } from "./actions"
 
 const context = { key: "file:src/index.ts", type: "file" as const, path: "src/index.ts" }
 
@@ -27,6 +27,14 @@ function createPromptStore() {
 }
 
 describe("Composer store", () => {
+  test("formats blockquote appends with a clean boundary", () => {
+    expect(formatBlockquoteAppend("", "one\r\ntwo")).toBe("> one\n> two")
+    expect(formatBlockquoteAppend("existing", "quote")).toBe("\n\n> quote")
+    expect(formatBlockquoteAppend("existing\n", "quote")).toBe("\n> quote")
+    expect(formatBlockquoteAppend("existing\n\n", "quote")).toBe("> quote")
+    expect(formatBlockquoteAppend("existing\n\n\n", "quote")).toBe("> quote")
+  })
+
   test("accepts an accessor for the backing store", () => {
     const [state, setState] = createStore<ComposerPersistedState>({
       prompt: [{ type: "text", content: "", start: 0, end: 0 }],
@@ -79,6 +87,73 @@ describe("Composer store", () => {
       { type: "text", content: " B", start: 9, end: 11 },
     ])
     expect(prompt.state.cursor).toBe(5)
+  })
+
+  test("appends a multiline blockquote to an empty composer", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [{ type: "text", content: "", start: 0, end: 0 }],
+      cursor: 0,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.appendBlockquote("first line\r\nsecond line\n\nlast line")
+
+    expect(prompt.state.prompt).toEqual([
+      { type: "text", content: "> first line\n> second line\n> \n> last line", start: 0, end: 41 },
+    ])
+    expect(prompt.state.cursor).toBe(41)
+  })
+
+  test("appends a separated blockquote without flattening mentions or attachments", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [
+        { type: "text", content: "Ask ", start: 0, end: 4 },
+        { type: "file", path: "one", content: "@one", start: 4, end: 8 },
+        {
+          type: "image",
+          id: "attachment-1",
+          filename: "photo.png",
+          mime: "image/png",
+          blob: { id: "a", url: "blob:a" },
+        },
+      ],
+      cursor: 0,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.appendBlockquote("quoted\ntext")
+
+    expect(prompt.state.prompt).toEqual([
+      { type: "text", content: "Ask ", start: 0, end: 4 },
+      { type: "file", path: "one", content: "@one", start: 4, end: 8 },
+      { type: "text", content: "\n\n> quoted\n> text", start: 8, end: 25 },
+      {
+        type: "image",
+        id: "attachment-1",
+        filename: "photo.png",
+        mime: "image/png",
+        blob: { id: "a", url: "blob:a" },
+      },
+    ])
+    expect(prompt.state.cursor).toBe(25)
+  })
+
+  test("does not add redundant newlines when the composer already ends with them", () => {
+    const [state, setState] = createStore<ComposerPersistedState>({
+      prompt: [{ type: "text", content: "existing\n\n", start: 0, end: 10 }],
+      cursor: 0,
+      context: { items: [] },
+    })
+    const prompt = createComposerEditorActions([state, setState])
+
+    prompt.appendBlockquote("quoted")
+
+    expect(prompt.state.prompt).toEqual([
+      { type: "text", content: "existing\n\n> quoted", start: 0, end: 18 },
+    ])
+    expect(prompt.state.cursor).toBe(18)
   })
 
   test("turns a partially edited mention into text without dropping untouched characters", () => {

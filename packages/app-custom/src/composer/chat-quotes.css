@@ -73,8 +73,44 @@
 [data-component="chat-quote-selection"] {
   position: fixed;
   z-index: 90;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  max-width: calc(100vw - 16px);
   padding: 4px;
   border-radius: 8px;
   background: var(--v2-background-bg-layer-01);
   box-shadow: var(--v2-elevation-floating);
+  transform: translateX(-50%);
+
+  button {
+    min-width: 0;
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--v2-border-border-focus);
+    outline-offset: 2px;
+  }
+}
+
+@media (max-width: 767px) {
+  [data-component="chat-quote-selection"] {
+    inset-inline: 12px;
+    bottom: calc(8px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    top: auto !important;
+    left: auto !important;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+    border-radius: 12px;
+    transform: none;
+
+    button {
+      min-width: 0;
+      min-height: 44px;
+    }
+  }
 }

@@ -237,6 +237,7 @@ export function SessionScreen(props: { session: SessionModel }) {
         background={composer.requests.background}
         actions={composer.actions.timeline}
         onQuote={session.data.isChild() ? undefined : (quote) => composer.active()?.composer.quotes?.add(quote)}
+        onAddToInput={session.data.isChild() ? undefined : (text) => composer.active()?.composer.appendBlockquote(text)}
         scroll={timeline.scroll}
         history={timeline.history}
         onResumeScroll={timeline.actions.resume}

@@ -523,6 +523,12 @@ export function createComposerEditor(input: {
     addAttachments(files: File[]) {
       if (attachments) void attachments.addAttachments(files)
     },
+    appendBlockquote(content: string) {
+      dispatch({ type: "mode.normal" })
+      draft.appendBlockquote(content)
+      editorBinding?.sync()
+      restoreFocus()
+    },
     setQuery(value: string) {
       dispatch({ type: "popover.query", value })
     },

@@ -120,6 +120,8 @@ export const dict = {
   "sidebar.sessions.retry": "Couldn't load sessions from {{server}}. Retry",
   "sidebar.project.reorderHint": "Drag to reorder, or use Alt + Up/Down",
   "chatQuotes.comment": "Comment",
+  "chatQuotes.addToInput": "Add to input",
+  "chatQuotes.selectionActions": "Selected text actions",
   "chatQuotes.title.one": "Chat quotes · {{count}}",
   "chatQuotes.title.other": "Chat quotes · {{count}}",
   "chatQuotes.source": "Quoted from an earlier message",
