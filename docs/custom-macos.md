@@ -27,10 +27,22 @@ Each `releases/<sha>` contains:
 
 - `bin/opencode`: compiled CLI/TUI with version `0.0.0-custom.<sha>`;
 - `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
-- `server-config.json`: update disabled and the absolute release-owned plugin path;
+- `server-config.json`: update disabled, the absolute release-owned plugin path, and the
+  local `safari-devtools` MCP server (`/usr/bin/safaridriver --mcp`);
 - `manual-release.json`: format 2, commit, version, platform, architecture and SHA-256 artifact hashes.
 
 Published directories are read-only and are never rebuilt in place.
+The release config is loaded after discovered global, explicit, and project documents. User
+plugins and differently named MCP servers remain available, while the release-owned update
+policy and `safari-devtools` definition win if an earlier document uses the same keys. It does
+not edit `~/.config/opencode`.
+
+MCP services are Location-scoped and connect eagerly, so each materialized Location may retain
+one idle `safaridriver --mcp` process until that Location is invalidated or the server stops.
+Initialization and tool discovery do not create Safari's automation window or consume its one
+active WebDriver session. Once automation starts, Safari still permits only one active session
+across Locations; a concurrent Location must report the conflict rather than fall back to the
+user's ordinary Safari. The `@Safari DevTools` prompt context carries that instruction.
 Staging remains writable until its atomic rename; read-only permissions are applied
 at the published destination before selecting `prepared`. If preparation is interrupted
 after rename, the next run verifies the existing hashes, normalizes permissions and
@@ -168,8 +180,8 @@ Compact artifact verification is available from `packages/cli`:
 bun script/custom-smoke.ts /absolute/path/to/compiled/custom/opencode
 ```
 
-It bundles the real plugin, seals/verifies the four-file release, starts only a temporary
-server with a fresh database and random port, checks matching CLI/server versions,
+It bundles the real plugin, seals/verifies the four-file release, asserts the release-owned
+Safari MCP command, starts only a temporary server with a fresh database and random port, checks matching CLI/server versions,
 embedded web, plugin RPC save/list and invalid-input rejection, then stops its own process.
 The measured macOS arm64 fixture was **184,056,606 bytes (175.53 MiB)**, including the
 201.64 KB plugin. Builds from a dirty development checkout are fixture evidence only;
@@ -193,7 +205,8 @@ bun packages/cli/script/custom-server.ts
 This password initialization is only for a **new isolated development runtime**.
 Direct source invocation defaults to port 4177. Do not point development at production
 persistence. Closing stdin shuts down source smoke invocations. This development
-entrypoint is not used by the compact production release.
+entrypoint is not used by the compact production release, but it uses the same shared
+release config generator so its plugin, update policy, and native Safari MCP match production.
 
 ## Agent dashboard
 

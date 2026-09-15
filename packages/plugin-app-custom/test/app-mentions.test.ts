@@ -63,4 +63,26 @@ describe("app mentions", () => {
       running: true,
     })
   })
+
+  test("uses a stable non-colliding identity for native Safari", () => {
+    expect(AppMentions.SafariDevTools).toEqual({
+      server: "safari-devtools",
+      name: "Safari DevTools",
+      bundleID: "mcp.safari-devtools",
+    })
+    expect(AppMentions.SafariDevTools.bundleID).not.toBe("com.apple.Safari")
+    expect(
+      AppMentions.isSafariDevTools({
+        ...AppMentions.SafariDevTools,
+        running: false,
+      }),
+    ).toBe(true)
+    expect(
+      AppMentions.isSafariDevTools({
+        ...AppMentions.SafariDevTools,
+        bundleID: "com.example.untrusted",
+        running: false,
+      }),
+    ).toBe(false)
+  })
 })

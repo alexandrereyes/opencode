@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, readlink, realpath, rename, rm, stat } from "nod
 import { migrate } from "../script/custom-migrate"
 import os from "node:os"
 import path from "node:path"
+import { serverConfig } from "../script/custom-config"
 import {
   activate,
   artifacts,
@@ -25,6 +26,21 @@ import {
 const first = "a".repeat(40)
 const second = "b".repeat(40)
 const homes: string[] = []
+
+test("shared server config includes the native Safari DevTools MCP server", () => {
+  expect(serverConfig("/release/plugin")).toEqual({
+    update: "disable",
+    plugins: ["/release/plugin"],
+    mcp: {
+      servers: {
+        "safari-devtools": {
+          type: "local",
+          command: ["/usr/bin/safaridriver", "--mcp"],
+        },
+      },
+    },
+  })
+})
 
 afterEach(async () => {
   await Promise.all(

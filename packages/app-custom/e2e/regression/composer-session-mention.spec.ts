@@ -80,6 +80,12 @@ test("selects, copies, pastes, and submits a globally searched session reference
         bundleID: "com.example.shared-work",
         running: true,
       },
+      {
+        server: "safari-devtools",
+        name: "Safari DevTools",
+        bundleID: "mcp.safari-devtools",
+        running: false,
+      },
     ],
     pageMessages: () => ({ items: [] }),
     findFiles: () => [],
@@ -132,6 +138,9 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toContainText(
     "Shared work",
   )
+  const safariDevTools = page.locator('[data-suggestion-id="app:safari-devtools:mcp.safari-devtools"]')
+  await expect(safariDevTools).toContainText("Safari DevTools")
+  await expect(safariDevTools).toContainText("Safari MCP")
   expect(appMentionRequests).toHaveLength(1)
   expect(new URL(appMentionRequests[0].url).searchParams.get("location[directory]")).toBe(directory)
   expect(appMentionRequests[0].body).toEqual({ input: {} })

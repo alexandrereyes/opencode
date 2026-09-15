@@ -166,6 +166,18 @@ describe("composer persistence schemas", () => {
           running: false,
         },
       },
+      {
+        type: "app",
+        content: "@Safari DevTools",
+        start: 17,
+        end: 33,
+        app: {
+          server: "safari-devtools",
+          name: "Safari DevTools",
+          bundleID: "mcp.safari-devtools",
+          running: false,
+        },
+      },
     ] satisfies ComposerStore["prompt"]
     const value = decode({ prompt })
     expect(value.prompt).toEqual(prompt)

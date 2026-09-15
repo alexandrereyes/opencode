@@ -8,20 +8,30 @@ export const registerAppMentions = Effect.fn("AppMentions.register")(function* (
       list: () =>
         Effect.gen(function* () {
           const listed = yield* ctx.mcp.list().pipe(Effect.orElseSucceed(() => undefined))
+          // This is availability only; no Safari process or WebDriver session is implied.
+          const safari = listed?.data.some(
+            (candidate) =>
+              candidate.name === AppMentions.SafariDevTools.server && candidate.status.status === "connected",
+          )
+            ? [{ ...AppMentions.SafariDevTools, running: false }]
+            : []
           const server = ["open-computer-use", "codex-computer-use"].find((name) =>
             listed?.data.some((candidate) => candidate.name === name && candidate.status.status === "connected"),
           )
-          if (!server) return { apps: [] }
+          if (!server) return { apps: safari }
           const result = yield* ctx.mcp.callTool({ server, name: "list_apps", args: {} }).pipe(
             Effect.timeout("5 seconds"),
             Effect.orElseSucceed(() => undefined),
           )
-          if (!result || result.isError) return { apps: [] }
+          if (!result || result.isError) return { apps: safari }
           return {
-            apps: parseApps(
-              result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
-              result.server,
-            ),
+            apps: [
+              ...safari,
+              ...parseApps(
+                result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
+                result.server,
+              ),
+            ],
           }
         }),
     })

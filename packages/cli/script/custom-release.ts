@@ -4,6 +4,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readlink, realpath, rename, r
 import { randomUUID } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
+import { serverConfig } from "./custom-config"
 
 const repository = path.resolve(import.meta.dirname, "../../..")
 export const label = "local.opencode.custom-manual"
@@ -183,7 +184,7 @@ export async function prepare(home: string, dryRun = false) {
   )
   await Bun.write(
     `${staging}/server-config.json`,
-    JSON.stringify({ update: "disable", plugins: [path.join(home, "releases", commit, "plugin")] }),
+    JSON.stringify(serverConfig(path.join(home, "releases", commit, "plugin"))),
   )
   await seal(staging, commit)
   await publish(home, commit, staging)
