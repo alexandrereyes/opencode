@@ -2,34 +2,20 @@ import { describe, expect, test } from "bun:test"
 import { resolveNewSessionBranch, resolveNewSessionGit, resolveNewSessionWorktree } from "./controller"
 
 describe("new session workspace selection", () => {
-  test("uses main when the workspace bar is unavailable", () => {
-    expect(
-      resolveNewSessionWorktree({
-        enabled: false,
-        selected: "/project/feature",
-      }),
-    ).toBe("main")
+  test("keeps explicit destinations authoritative over availability and defaults", () => {
+    expect(resolveNewSessionWorktree({ enabled: false, selected: "/project/feature", fallback: "main" })).toBe(
+      "/project/feature",
+    )
+    expect(resolveNewSessionWorktree({ enabled: false, selected: "/project/feature", fallback: "create" })).toBe(
+      "/project/feature",
+    )
+    expect(resolveNewSessionWorktree({ enabled: true, selected: "main", fallback: "create" })).toBe("main")
+    expect(resolveNewSessionWorktree({ enabled: false, selected: "create", fallback: "main" })).toBe("create")
   })
 
-  test("uses the saved destination instead of the current worktree", () => {
-    expect(
-      resolveNewSessionWorktree({
-        enabled: true,
-        fallback: "create",
-      }),
-    ).toBe("create")
-    expect(
-      resolveNewSessionWorktree({
-        enabled: true,
-        fallback: "main",
-      }),
-    ).toBe("main")
-  })
-
-  test("keeps local selection when the cached project path is stale", () => {
-    const input = { enabled: true, directory: "C:/Projects/repo", projectWorktree: "D:/Projects/repo" }
-    expect(resolveNewSessionWorktree(input)).toBe("main")
-    expect(resolveNewSessionWorktree({ ...input, selected: "/worktree" })).toBe("/worktree")
+  test("uses availability and defaults only when the draft has no destination", () => {
+    expect(resolveNewSessionWorktree({ enabled: false, fallback: "create" })).toBe("main")
+    expect(resolveNewSessionWorktree({ enabled: true, fallback: "create" })).toBe("create")
   })
 
   test("resolves the branch from the active location", () => {

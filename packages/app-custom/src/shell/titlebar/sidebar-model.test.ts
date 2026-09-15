@@ -13,6 +13,7 @@ import {
   searchSessions,
   sessionKey,
   sidebarProjects,
+  sidebarExplicitWorkspace,
   sidebarSessionProject,
   visibleSessions,
   type SidebarSession,
@@ -183,6 +184,58 @@ describe("sidebar navigation", () => {
       selected.map((project) => projectKey(server, project)).toSorted(),
     )
     expect(projects.every((project) => !project.occupied)).toBe(true)
+  })
+
+  test("explicit workspace inventory owns conflicting backend projects with safe boundaries", () => {
+    const parent = { id: "5e5", worktree: "/opencode", worktrees: [{ directory: "/repository" }] }
+    const independent = { id: "f001", worktree: "/repository" }
+    const selected = [parent, independent]
+    const session = row("repository").session
+    session.projectID = "f001"
+    session.location.directory = "/repository"
+    expect(sidebarSessionProject(server, session, selected)).toBe(projectKey(server, parent))
+    session.location.directory = "/repository/packages/app"
+    expect(sidebarSessionProject(server, session, selected)).toBe(projectKey(server, parent))
+    session.location.directory = "/repository-sibling"
+    expect(
+      sidebarExplicitWorkspace("/repository-sibling", [
+        { key: projectKey(server, parent), directory: parent.worktree, workspaces: [{ directory: "/repository" }] },
+      ]),
+    ).toBeUndefined()
+    expect(sidebarSessionProject(server, session, selected)).toBe(projectKey(server, independent))
+
+    const foreign = row("foreign").session
+    foreign.projectID = "foreign"
+    foreign.location.directory = "/opencode/other"
+    expect(sidebarSessionProject(server, foreign, [parent])).toBe(
+      projectKey(server, { id: "foreign", worktree: "/opencode/other" }),
+    )
+
+    const selfInventory = { id: "self", worktree: "/self", worktrees: [{ directory: "/self" }] }
+    const child = { id: "child", worktree: "/self/child" }
+    const childSession = row("child-root").session
+    childSession.projectID = "child"
+    childSession.location.directory = "/self/child"
+    expect(sidebarSessionProject(server, childSession, [selfInventory, child])).toBe(projectKey(server, child))
+  })
+
+  test("explicit workspace resolution is server-scoped, most-specific and stable across input order", () => {
+    const broad = { key: "broad", directory: "/root", workspaces: [{ directory: "/trees" }] }
+    const specific = { key: "specific", directory: "/other", workspaces: [{ directory: "/trees/feature" }] }
+    expect(sidebarExplicitWorkspace("/trees/feature/src", [broad, specific])?.project.key).toBe("specific")
+
+    const alpha = { key: "alpha", directory: "/alpha", workspaces: [{ directory: "/shared" }] }
+    const beta = { key: "beta", directory: "/beta", workspaces: [{ directory: "/shared" }] }
+    expect(sidebarExplicitWorkspace("/shared/src", [beta, alpha])?.project.key).toBe("alpha")
+    expect(sidebarExplicitWorkspace("/shared/src", [alpha, beta])?.project.key).toBe("alpha")
+
+    const remote = ServerConnection.Key.make("https://remote.test")
+    const session = row("remote-owned").session
+    session.projectID = "different"
+    session.location.directory = "/shared/src"
+    const owner = { id: "alpha", worktree: "/alpha", worktrees: [{ directory: "/shared" }] }
+    expect(sidebarSessionProject(remote, session, [owner])).toBe(projectKey(remote, owner))
+    expect(sidebarSessionProject(remote, session, [owner])).not.toBe(projectKey(server, owner))
   })
 
   test("orphan/current children and their completions never become Priority rows", () => {

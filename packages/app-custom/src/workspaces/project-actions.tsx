@@ -11,17 +11,18 @@ import type { LocalProject } from "@/shell/state/layout"
 import { errorMessage } from "@/shell/layout/helpers"
 import { showToast } from "@/shell/notifications/toast"
 import { useSshAuthenticate } from "@/servers/ssh/authenticate"
+import { workspaceDraftTarget } from "./paths"
 
 // Shared navigation is deliberately independent of Home's selection and effects.
 export function useProjectNavigation() {
   const global = useGlobal()
   const tabs = useTabs()
   return {
-    openProjectNewSession(conn: ServerConnection.Any, directory: string) {
+    openProjectNewSession(conn: ServerConnection.Any, directory: string, projectDirectory = directory) {
       const ctx = global.ensureServerCtx(conn)
-      ctx.projects.open(directory)
-      ctx.projects.touch(directory)
-      return tabs.newDraft({ server: ServerConnection.key(conn), directory })
+      ctx.projects.open(projectDirectory)
+      ctx.projects.touch(projectDirectory)
+      return tabs.newDraft({ server: ServerConnection.key(conn), ...workspaceDraftTarget(directory, projectDirectory) })
     },
     openProjectSession(conn: ServerConnection.Any, directory: string, session: SessionInfo) {
       const ctx = global.ensureServerCtx(conn)
@@ -53,8 +54,8 @@ export function useProjectActions() {
     platform.platform === "desktop" && !!platform.openPath && ServerConnection.local(conn)
 
   return {
-    openNewSession(conn: ServerConnection.Any, directory: string) {
-      const open = () => void navigation.openProjectNewSession(conn, directory).catch(failed)
+    openNewSession(conn: ServerConnection.Any, directory: string, projectDirectory = directory) {
+      const open = () => void navigation.openProjectNewSession(conn, directory, projectDirectory).catch(failed)
       if (authenticate(conn, open)) return
       open()
     },

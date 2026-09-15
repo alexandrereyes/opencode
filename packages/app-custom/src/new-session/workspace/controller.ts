@@ -9,16 +9,14 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
 import { normalizeProjectInfo } from "@/runtime/server/global-sync/utils"
 import {
-  isWorkspaceDirectory,
-  isWorkspaceSelection,
   sameDirectory,
   workspaceDefaultSelection,
   workspaceSelectionDestination,
 } from "@/workspaces/paths"
 
 export function resolveNewSessionWorktree(input: { enabled: boolean; selected?: string; fallback?: string }) {
-  if (!input.enabled) return "main"
   if (input.selected) return input.selected
+  if (!input.enabled) return "main"
   return input.fallback ?? "main"
 }
 
@@ -111,16 +109,6 @@ export function createNewSessionWorkspaceController(input: {
       branch: data.location.vcs.info({ directory: sdk().directory })?.branch.current,
     }),
   )
-  const selected = createMemo(() => {
-    const project = currentProject()
-    const worktree = input.selectedWorktree()
-    if (!project || !worktree) return
-    if (isWorkspaceSelection(project, worktree)) return worktree
-    // A saved choice may only exist in the server inventory. Keep it until the list can confirm it,
-    // otherwise the selector falls back to Local while loading and a submit would target the wrong directory.
-    if (!worktreesLoaded()) return worktree
-    return worktreeDirectories().some((item) => sameDirectory(item, worktree)) ? worktree : undefined
-  })
   const fallback = createMemo(() => {
     const project = currentProject()
     if (!project) return "main"
@@ -132,7 +120,7 @@ export function createNewSessionWorkspaceController(input: {
   const value = createMemo(() =>
     resolveNewSessionWorktree({
       enabled: visible(),
-      selected: selected(),
+      selected: input.selectedWorktree(),
       fallback: fallback(),
     }),
   )
@@ -179,14 +167,7 @@ export function createNewSessionWorkspaceController(input: {
   return {
     selection: {
       value,
-      workspace: createMemo(() => {
-        const project = currentProject()
-        const current = value()
-        if (current === "create") return true
-        if (current === "main" || !project) return false
-        if (isWorkspaceDirectory(project, current) || !worktreesLoaded()) return true
-        return worktreeDirectories().some((item) => sameDirectory(item, current))
-      }),
+      workspace: createMemo(() => value() !== "main"),
       reset: () => {
         input.setSelectedWorktree(undefined)
         input.setSelectedBranch(undefined)

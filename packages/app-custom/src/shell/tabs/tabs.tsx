@@ -262,24 +262,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           }),
         )
       },
-      promoteDraft(draftID: string, session: Omit<SessionTab, "type">) {
-        // Keep the replacement and navigation atomic so /new-session never renders
-        // after its backing draft tab has been removed from the store.
-        const active = location.pathname === "/new-session" && location.query.draftId === draftID
-        const next = { type: "session" as const, ...session }
-        void startTransition(() => {
-          setStore(
-            produce((tabs) => {
-              const index = tabs.findIndex((tab) => tab.type === "draft" && tab.draftID === draftID)
-              if (index !== -1) tabs[index] = next
-            }),
-          )
-          if (recent.key === `draft:${draftID}`) setRecentKey(tabKey(next))
-          if (active) navigateTab(next)
-        })
-        memory.remove(`draft:${draftID}`)
-        removeDraftPersisted(draftID)
-      },
       pendingSession(server: ServerConnection.Key, sessionID: string): PendingSession | undefined {
         return pending[tabKey({ type: "session", server, sessionId: sessionID })]
       },

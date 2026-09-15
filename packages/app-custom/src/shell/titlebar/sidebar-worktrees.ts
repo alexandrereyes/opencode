@@ -2,12 +2,86 @@ import { createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { LocationGetOutput, WorktreeDirectory } from "@opencode/client/promise"
 import type { ServerCtx } from "@/runtime/server/runtime"
+import type { DraftTab, Tab } from "@/shell/tabs/tabs"
 import { getFilename } from "@opencode/util/path"
 import { pathKey } from "@/workspaces/path-key"
 import { containsDirectory, sameDirectory } from "@/workspaces/paths"
-import { sidebarProjects, visibleSessions, type SidebarSession } from "./sidebar-model"
+import {
+  sessionKey,
+  sidebarExplicitWorkspace,
+  sidebarProjectWorkspaces,
+  sidebarProjects,
+  visibleSessions,
+  type SidebarSession,
+} from "./sidebar-model"
 
 type Project = ReturnType<typeof sidebarProjects>[number]
+
+export type SidebarPreparingTab = { tab: Tab; directory: string }
+
+export function sidebarPreparingDirectory(draft: DraftTab) {
+  if (draft.worktree && draft.worktree !== "main" && draft.worktree !== "create") return draft.worktree
+  return draft.directory
+}
+
+export function sidebarPreparingGroups(
+  tabs: readonly SidebarPreparingTab[],
+  projects: readonly {
+    key: string
+    server: string
+    directory: string
+    groups: readonly { key: string; directory: string; explicit: boolean }[]
+  }[],
+) {
+  const result = new Map<string, { root: Tab[]; groups: Map<string, Tab[]> }>(
+    projects.map((project) => [project.key, { root: [], groups: new Map(project.groups.map((group) => [group.key, []])) }]),
+  )
+  tabs.forEach((entry) => {
+    const matching = projects.filter((project) => project.server === entry.tab.server)
+    const explicit = sidebarExplicitWorkspace(
+      entry.directory,
+      matching.map((project) => ({
+        ...project,
+        workspaces: project.groups.filter((group) => group.explicit).map((group) => ({ directory: group.directory })),
+      })),
+    )
+    const target = explicit
+      ? {
+          project: explicit.project.key,
+          directory: explicit.directory,
+          group: explicit.project.groups.find((group) => sameDirectory(group.directory, explicit.directory))?.key,
+        }
+      : matching
+          .flatMap<{ project: string; directory: string; group?: string }>((project) => [
+            { project: project.key, directory: project.directory },
+            ...project.groups.map((group) => ({ project: project.key, directory: group.directory, group: group.key })),
+          ])
+          .filter((candidate) => containsDirectory(candidate.directory, entry.directory))
+          .toSorted(
+            (a, b) =>
+              pathKey(b.directory).length - pathKey(a.directory).length ||
+              Number(!!a.group) - Number(!!b.group) ||
+              a.project.localeCompare(b.project),
+          )[0]
+    if (!target) return
+    const placement = result.get(target.project)!
+    if (!target.group) {
+      placement.root.push(entry.tab)
+      return
+    }
+    placement.groups.get(target.group)?.push(entry.tab)
+  })
+  return result
+}
+
+export function withoutPreparingSessions(rows: SidebarSession[], tabs: readonly SidebarPreparingTab[]) {
+  const preparing = new Set(
+    tabs.flatMap((entry) =>
+      entry.tab.type === "session" ? [sessionKey(entry.tab.server, entry.tab.sessionId)] : [],
+    ),
+  )
+  return rows.filter((row) => !preparing.has(row.key))
+}
 
 export function worktreeKey(project: string, directory: string) {
   const key = pathKey(directory)
@@ -18,7 +92,7 @@ export function sidebarWorktrees(
   project: Project,
   rows: SidebarSession[],
   metadata: {
-    inventory?: readonly WorktreeDirectory[]
+    cachedInventory?: readonly WorktreeDirectory[]
     location: (directory: string) => LocationGetOutput | undefined
     branch: (directory: string) => string | undefined
   },
@@ -32,34 +106,40 @@ export function sidebarWorktrees(
       name: string
       resolved: boolean
       removable: boolean
+      explicit: boolean
       rows: SidebarSession[]
     }
   >()
-  // Canonical placement is already authoritative before inventory discovery completes.
-  // A linked worktree named main remains a subgroup; only directory identity matters.
-  const inventory = project.metadata?.vcs && project.metadata.vcs !== "git" ? [] : (metadata.inventory ?? [])
-  inventory
-    .filter((item) => !sameDirectory(item.directory, project.directory))
-    .forEach((item) => {
+  const workspaces = project.metadata ? sidebarProjectWorkspaces(project.metadata) : []
+  workspaces.forEach((item) => {
       const key = worktreeKey(project.key, item.directory)
       const branch = metadata.branch(item.directory)
+      const cached = metadata.cachedInventory?.find((entry) => sameDirectory(entry.directory, item.directory))
       groups.set(key, {
         key,
         directory: item.directory,
         resolved: true,
-        removable: item.strategy === "git",
+        removable: (item.strategy ?? cached?.strategy) === "git",
+        explicit: true,
         name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(item.directory)) || item.directory,
         rows: [],
       })
-    })
+  })
   const candidates = [
-    ...inventory.map((item) => item.directory),
+    ...workspaces.map((item) => item.directory),
     ...(project.metadata ? [project.directory] : []),
   ].toSorted((a, b) => b.length - a.length)
   rows
     .filter((row) => row.project === project.key && !row.session.parentID && !row.session.time.archived)
     .forEach((row) => {
       const directory = row.session.location.directory
+      const explicit = sidebarExplicitWorkspace(directory, [
+        { key: project.key, directory: project.directory, workspaces },
+      ])
+      if (explicit) {
+        groups.get(worktreeKey(project.key, explicit.directory))!.rows.push(row)
+        return
+      }
       // Non-Git projects retain their existing directory grouping. A missing project record
       // is not evidence that all of its session directories are the canonical worktree.
       if (project.metadata && project.metadata.vcs !== "git") {
@@ -83,7 +163,8 @@ export function sidebarWorktrees(
         key,
         directory: worktree,
         resolved: known !== undefined,
-        removable: inventory.some((item) => sameDirectory(item.directory, worktree) && item.strategy === "git"),
+        removable: false,
+        explicit: false,
         name: branch && branch !== "HEAD" ? branch : getFilename(pathKey(worktree)) || worktree,
         rows: [],
       }
@@ -145,7 +226,7 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
   }
   const group = (project: Project, rows: SidebarSession[]) =>
     sidebarWorktrees(project, rows, {
-      inventory: ctx.sync.worktrees.cached(project.directory) ?? project.metadata?.worktrees,
+      cachedInventory: ctx.sync.worktrees.cached(project.directory),
       location: (directory) => ctx.data.location.info({ directory }),
       branch: (directory) => ctx.data.location.vcs.info({ directory })?.branch.current,
     })

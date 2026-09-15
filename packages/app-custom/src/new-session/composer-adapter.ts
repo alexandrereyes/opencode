@@ -50,11 +50,8 @@ export function createNewSessionComposerAdapter(props: {
       const worktree = props.worktree()
       const branch = props.branch()
       const id = Session.ID.create()
-      const pending =
-        worktree === "create"
-          ? tabs.prepareSession(draftID, { server: server.key, sessionId: id }, { message, selection })
-          : undefined
-      await pending?.ready
+      const pending = tabs.prepareSession(draftID, { server: server.key, sessionId: id }, { message, selection })
+      await pending.ready
       const sessionDirectory = await resolveSessionDirectory({
         projectDirectory,
         worktree,
@@ -64,7 +61,7 @@ export function createNewSessionComposerAdapter(props: {
         language,
       })
       if (!sessionDirectory) {
-        await pending?.rollback()
+        await pending.rollback()
         return
       }
 
@@ -88,11 +85,13 @@ export function createNewSessionComposerAdapter(props: {
           return { ok: false as const, error }
         },
       )
-      if (pending && !(await creation).ok) {
-        // Keep retries on the worktree that was already created, not another new checkout.
-        data.project.invalidate()
-        await data.project.sync().catch(() => undefined)
-        await pending.rollback(sessionDirectory)
+      if (!(await creation).ok) {
+        if (worktree === "create") {
+          // Keep retries on the worktree that was already created, not another new checkout.
+          data.project.invalidate()
+          await data.project.sync().catch(() => undefined)
+        }
+        await pending.rollback(worktree === "create" ? sessionDirectory : undefined)
         return
       }
       const afterCreation = async <T>(run: () => Promise<T>) => {
@@ -105,26 +104,24 @@ export function createNewSessionComposerAdapter(props: {
         SessionRouteKey.fromRoute(base64Encode(sessionDirectory), created.id),
       )
       const cleanupReady = startTransition(() => {
-        if (!pending) tabs.updateDraft(draftID, { worktree: undefined, branch: undefined })
         local.session.promote(sessionDirectory, created.id, {
           agent: selection.agent,
           model: selection.model,
           variant: selection.variant ?? null,
           choices: model.remembered(),
         })
-        if (!pending) tabs.promoteDraft(draftID, { server: server.key, sessionId: created.id })
         submission.retarget(
           prompt.capture(
             { dir: base64Encode(sessionDirectory), id: created.id },
             { server: server.key, scope: serverSDK.scope },
           ),
-          { preserveDraft: !!pending },
+          { preserveDraft: true },
         )
       })
 
       return {
         cleanupReady,
-        complete: pending ? () => pending.complete(submission.target()) : undefined,
+        complete: () => pending.complete(submission.target()),
         session: {
           id: created.id,
           directory: sessionDirectory,

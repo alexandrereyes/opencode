@@ -29,7 +29,16 @@ export function createSidebarSessions(options: {
     () => (options.enabled?.() === false ? [] : global.servers.list()),
     (connection) => {
       const ctx = global.ensureServerCtx(connection)
-      return { connection, ctx, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
+      const projects = createMemo(() =>
+        ctx.projects.list().map((project) => ({
+          ...project,
+          worktree:
+            project.id && project.id !== "global"
+              ? (ctx.sync.data.project.find((metadata) => metadata.id === project.id)?.worktree ?? project.worktree)
+              : project.worktree,
+        })),
+      )
+      return { connection, ctx, projects, index: createSidebarIndex(ctx, clock), worktrees: createSidebarWorktrees(ctx) }
     },
   )
   const current = () => {
@@ -39,37 +48,37 @@ export function createSidebarSessions(options: {
   const sessions = createMemo(() => {
     const currentTab = options.currentTab()
     return rootSessions(
-      indexes().flatMap(({ connection, ctx, index }) => {
-        const server = ServerConnection.key(connection)
-        const selected = ctx.projects.list()
+      indexes().flatMap((entry) => {
+        const server = ServerConnection.key(entry.connection)
+        const selected = entry.projects()
         const known = new Map(
-          Object.values(index.state.rows)
+          Object.values(entry.index.state.rows)
             .filter(Boolean)
             .map((row) => [row.session.id, row]),
         )
         const route = layout.route()
         if (route.type === "session" && route.server === server && !known.has(route.sessionId)) {
-          const session = ctx.data.session.get(route.sessionId)
+          const session = entry.ctx.data.session.get(route.sessionId)
           if (session) known.set(session.id, { session })
         }
         if (currentTab?.type === "session" && currentTab.server === server && !known.has(currentTab.sessionId)) {
-          const session = ctx.data.session.get(currentTab.sessionId)
+          const session = entry.ctx.data.session.get(currentTab.sessionId)
           if (session) known.set(session.id, { session })
         }
         return [...known.values()].map((row): SidebarSession => {
-          const session = navigationSession(row, ctx.data.session.get(row.session.id))
+          const session = navigationSession(row, entry.ctx.data.session.get(row.session.id))
           return {
             ...row,
             session,
             server,
             key: sessionKey(server, session.id),
             project: sidebarSessionProject(server, session, selected),
-            running: ctx.data.session.status(session.id) === "running",
-            recentRank: index.ranks[session.id],
+            running: entry.ctx.data.session.status(session.id) === "running",
+            recentRank: entry.index.ranks[session.id],
             ...sessionAttention({
               ...row,
               session,
-              notifications: ctx.notification.session.unseen(session.id),
+              notifications: entry.ctx.notification.session.unseen(session.id),
               autoApprove: settings.permissions.autoApprove(),
             }),
           }
@@ -80,20 +89,13 @@ export function createSidebarSessions(options: {
     )
   })
   const projectGroups = createMemo(() =>
-    indexes().flatMap(({ connection, ctx }) => {
-      const server = ServerConnection.key(connection)
-      const known = ctx.projects.list().map((project) => ({
-        ...project,
-        worktree:
-          project.id && project.id !== "global"
-            ? (ctx.sync.data.project.find((metadata) => metadata.id === project.id)?.worktree ?? project.worktree)
-            : project.worktree,
-      }))
+    indexes().flatMap((entry) => {
+      const server = ServerConnection.key(entry.connection)
       return sidebarProjects(
         server,
-        known,
+        entry.projects(),
         sessions().rows.filter((row) => row.server === server),
-      ).map((project) => ({ ...project, connection, serverName: serverName(connection) }))
+      ).map((project) => ({ ...project, connection: entry.connection, serverName: serverName(entry.connection) }))
     }),
   )
 

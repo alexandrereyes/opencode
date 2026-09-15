@@ -8,6 +8,7 @@ import {
   mergeWorkspaceSessionInventory,
   sessionsForWorkspace,
   workspaceInventory,
+  workspaceDraftTarget,
   workspaceSelectionDestination,
 } from "./paths"
 
@@ -52,6 +53,19 @@ describe("workspaceSelectionDestination", () => {
   test("preserves workspace intent without carrying project-specific paths", () => {
     expect(workspaceSelectionDestination("create", "/repo")).toBe("create")
     expect(workspaceSelectionDestination("/workspaces/feature", "/repo")).toBe("create")
+  })
+})
+
+describe("workspaceDraftTarget", () => {
+  test("keeps canonical context and records an existing worktree as the explicit destination", () => {
+    expect(workspaceDraftTarget("/trees/feature", "/repo")).toEqual({
+      directory: "/repo",
+      worktree: "/trees/feature",
+    })
+  })
+
+  test("records main explicitly for equivalent canonical paths", () => {
+    expect(workspaceDraftTarget("c:\\repo\\", "C:\\repo")).toEqual({ directory: "C:\\repo", worktree: "main" })
   })
 })
 

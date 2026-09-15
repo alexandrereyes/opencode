@@ -35,8 +35,12 @@ mock.module("@dnd-kit/solid/sortable", () => ({
   isSortable: () => false,
   useSortable: () => ({ ref: () => {}, handleRef: () => {}, isDragSource: () => false }),
 }))
+const [sidebarStore, setSidebarStore] = createStore({ attention: true, order: [] as string[], collapsed: {}, pins: [] as string[] })
 mock.module("@/runtime/server/runtime", () => ({
-  useGlobal: () => ({ servers: { list: () => [] } }),
+  useGlobal: () => ({
+    servers: { list: () => [] },
+    sidebar: { store: sidebarStore, set: setSidebarStore, ready: () => true },
+  }),
   useServerCtx: () => () => undefined,
 }))
 mock.module("@/shell/state/layout", () => ({
@@ -45,6 +49,9 @@ mock.module("@/shell/state/layout", () => ({
 }))
 mock.module("@/settings/model", () => ({
   useSettings: () => ({ keybinds: { get: () => undefined }, permissions: { autoApprove: () => false } }),
+}))
+mock.module("@/preferences/context", () => ({
+  usePreferences: () => ({ canonical: () => false, mutate: async () => {} }),
 }))
 mock.module("@/runtime/i18n/language", () => ({
   useLanguage: () => ({ t: (key: string) => key, plural: (key: string) => key, intl: () => "en" }),
@@ -60,6 +67,7 @@ mock.module("@/runtime/persistence/storage", () => ({
 mock.module("@/composer/persistence", () => ({ createTabComposerState: () => {} }))
 mock.module("@/shell/notifications/toast", () => ({ showToast: () => {} }))
 mock.module("@/session/lifecycle-actions", () => ({ useSessionLifecycleActions: () => ({ pending: () => false }) }))
+mock.module("@/shell/titlebar/sidebar-subscriptions", () => ({ SidebarSubscriptions: () => null }))
 mock.module("@/shell/titlebar/tab-nav", () => {
   const item = (props: { href: string }) => {
     const link = document.createElement("a")
@@ -73,20 +81,49 @@ mock.module("@/shell/titlebar/tab-nav", () => {
 const tabsModule = await import("@/shell/tabs/tabs")
 const { ServerConnection } = await import("@/runtime/server/registry")
 const server = ServerConnection.Key.make("http://localhost:1234")
-const draft: Tab = { type: "draft", draftID: "draft-search-test", server, directory: "/test" }
+const draft: Tab = { type: "draft", draftID: "draft-search-test", server, directory: "/test", worktree: "main" }
+const pendingDraft = {
+  type: "draft" as const,
+  draftID: "pending-search-test",
+  server,
+  directory: "/test",
+  worktree: "main",
+}
 const pending: Tab = {
   type: "session",
   server,
   sessionId: "ses_pending",
 }
 const selected: Tab[] = []
+const real = {
+  server,
+  key: JSON.stringify([server, pending.sessionId]),
+  project: "project",
+  attention: Date.now(),
+  session: {
+    id: pending.sessionId,
+    projectID: "project",
+    title: "Pending real session",
+    location: { directory: "/test" },
+    time: { created: 1, updated: 1 },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  },
+}
 mock.module("@/shell/tabs/tabs", () => ({
   ...tabsModule,
   useTabs: () => ({
     store: [draft, pending],
     info: {},
-    pendingSession: (_server: string, id: string) => id === pending.sessionId,
+    pendingSession: (_server: string, id: string) => (id === pending.sessionId ? { draft: pendingDraft } : undefined),
     select: (tab: Tab) => selected.push(tab),
+  }),
+}))
+mock.module("@/shell/titlebar/sidebar-sessions", () => ({
+  createSidebarSessions: () => ({
+    indexes: () => [],
+    sessions: () => ({ rows: [real], current: real.key }),
+    projectGroups: () => [],
   }),
 }))
 
@@ -111,11 +148,15 @@ test("Mod+1/2 survive search and clearing with focus in search or composer", asy
   )
   try {
     await Promise.resolve()
+    host.querySelector<HTMLButtonElement>('[aria-label="sidebar.search.placeholder"]')!.click()
+    await Promise.resolve()
     const input = host.querySelector<HTMLInputElement>('input[type="search"]')!
-    const strip = host.querySelector<HTMLElement>('[data-slot="vertical-tabs"]')!
+    const strip = () => host.querySelector<HTMLElement>('[data-slot="vertical-tabs"]')!
     const registrations = command.options.filter((option) => /^tab\.[12]$/.test(option.id))
     expect(registrations).toHaveLength(2)
-    expect(strip.querySelectorAll("a")).toHaveLength(2)
+    expect(strip().querySelectorAll("a")).toHaveLength(2)
+    expect(strip().closest("[hidden]")).toBeNull()
+    expect(host.querySelectorAll("a")).toHaveLength(2)
 
     for (const query of ["", "needle", ""]) {
       if (input.value) host.querySelector<HTMLButtonElement>('[aria-label="sidebar.search.clear"]')!.click()
@@ -126,14 +167,14 @@ test("Mod+1/2 survive search and clearing with focus in search or composer", asy
       await Promise.resolve()
 
       expect(input.value).toBe(query)
-      expect(host.querySelector('[data-slot="vertical-tabs"]') === strip).toBe(true)
-      expect(!!strip.closest("[hidden]")).toBe(!!query)
+      expect(strip().querySelectorAll("a")).toHaveLength(2)
+      expect(!!strip().closest("[hidden]")).toBe(!!query)
       if (query) {
         const results = document.getElementById(input.getAttribute("aria-controls")!)!
-        expect(results.contains(strip)).toBe(false)
+        expect(results.contains(strip())).toBe(false)
         expect(results.querySelectorAll("a")).toHaveLength(0)
       }
-      expect(command.options.filter((option) => /^tab\.[12]$/.test(option.id))).toEqual(registrations)
+      expect(command.options.filter((option) => /^tab\.[12]$/.test(option.id))).toHaveLength(2)
       expect(host.querySelector('[data-slot="session-sidebar"]')?.getAttribute("data-mode")).toBe(
         query ? "search" : "attention",
       )
@@ -155,6 +196,12 @@ test("Mod+1/2 survive search and clearing with focus in search or composer", asy
         }
       }
     }
+    input.value = "Pending real"
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    await Promise.resolve()
+    const results = document.getElementById(input.getAttribute("aria-controls")!)!
+    expect(results.querySelectorAll("a")).toHaveLength(1)
+    expect(strip().closest("[hidden]")).not.toBeNull()
     expect(selected).toHaveLength(12)
   } finally {
     dispose()

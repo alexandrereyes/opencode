@@ -25,7 +25,13 @@ import { TitlebarTabStrip } from "./tab-strip"
 import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
 import { SidebarSubscriptions } from "./sidebar-subscriptions"
-import { visibleWorktreeSessions } from "./sidebar-worktrees"
+import {
+  sidebarPreparingDirectory,
+  sidebarPreparingGroups,
+  visibleWorktreeSessions,
+  withoutPreparingSessions,
+  type SidebarPreparingTab,
+} from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
 import { usePreferences } from "@/preferences/context"
@@ -103,6 +109,16 @@ export function SessionSidebar(props: {
   const sessions = inventory.sessions
   const projectGroups = inventory.projectGroups
   const projects = createMemo(() => orderSidebarProjects(projectGroups(), order()))
+  const preparing = createMemo(() =>
+    tabs.store
+      .map((tab): SidebarPreparingTab | undefined => {
+        if (tab.type === "draft") return { tab, directory: sidebarPreparingDirectory(tab) }
+        const pending = tabs.pendingSession(tab.server, tab.sessionId)
+        if (pending) return { tab, directory: sidebarPreparingDirectory(pending.draft) }
+      })
+      .filter((item): item is SidebarPreparingTab => !!item),
+  )
+  const hierarchyRows = createMemo(() => withoutPreparingSessions(sessions().rows, preparing()))
   let projectList: HTMLDivElement | undefined
   const projectOrder = createMemo(() => ({
     keys: projects().map((project) => project.key),
@@ -123,9 +139,9 @@ export function SessionSidebar(props: {
   })
   const pins = createMemo(() => new Set(pinList()))
   // Resolve against eligible rows without pruning preferences when a server/index is unavailable.
-  const pinned = createMemo(() => pinnedSessions(sessions().rows, pinList()))
-  const groups = createMemo(() => attentionGroups(sessions().rows, state.now, sessions().current, pinList()))
-  const recentRows = createMemo(() => recentSessions(sessions().rows.filter((row) => !pins().has(row.key))))
+  const pinned = createMemo(() => pinnedSessions(hierarchyRows(), pinList()))
+  const groups = createMemo(() => attentionGroups(hierarchyRows(), state.now, sessions().current, pinList()))
+  const recentRows = createMemo(() => recentSessions(hierarchyRows().filter((row) => !pins().has(row.key))))
   const recent = createMemo(() => visibleSessions(recentRows(), state.recentLimit, sessions().current))
   const recentMore = () => recentRows().length > recent().length
   const query = createMemo(() => (state.searchOpen ? state.query.trim() : ""))
@@ -135,9 +151,20 @@ export function SessionSidebar(props: {
       new Map(
         projects().map((project) => {
           const entry = indexes().find((entry) => ServerConnection.key(entry.connection) === project.server)!
-          return [project.key, entry.worktrees.group(project, sessions().rows)]
+          return [project.key, entry.worktrees.group(project, hierarchyRows())]
         }),
       ),
+  )
+  const preparingGroups = createMemo(() =>
+    sidebarPreparingGroups(
+      preparing(),
+      projects().map((project) => ({
+        key: project.key,
+        server: project.server,
+        directory: project.directory,
+        groups: worktrees().get(project.key)!.groups,
+      })),
+    ),
   )
   createEffect(() => {
     if (!ready() || saved.attention || query()) return
@@ -149,7 +176,7 @@ export function SessionSidebar(props: {
         void entry.worktrees.load(() => {
           if (!ready() || saved.attention || query() || saved.collapsed[project.key]) return
           const current = projects().find((item) => item.key === project.key)
-          if (current) return { project: current, rows: sessions().rows }
+          if (current) return { project: current, rows: hierarchyRows() }
         })
       })
   })
@@ -211,6 +238,23 @@ export function SessionSidebar(props: {
         focused.focus({ preventScroll: true })
     })
   }
+  const PreparingStrip = (strip: { tabs: Tab[] }) => (
+    <Show when={strip.tabs.length}>
+      <TitlebarTabStrip
+        orientation="vertical"
+        distributed
+        shortcuts={false}
+        tabs={strip.tabs}
+        currentTab={props.currentTab}
+        shortcutIndex={(tab) => tabs.store.findIndex((item) => tabKey(item) === tabKey(tab))}
+        onNavigate={(tab) => tabs.select(tab)}
+        onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
+        onReorder={(keys) =>
+          tabs.reorder(mergeVisibleTabOrder(tabs.store.map(tabKey), strip.tabs.map(tabKey), keys))
+        }
+      />
+    </Show>
+  )
   const Row = (props: { item: SidebarSession; compact?: boolean; projectMetadataIcon?: boolean }) => {
     // Recent's monotonic rank and metadata updates are not interaction timestamps.
     const at = createMemo(() => props.item.messageAt ?? props.item.session.time.created)
@@ -516,28 +560,16 @@ export function SessionSidebar(props: {
         data-slot="session-sidebar"
         data-mode={query() ? "search" : saved.attention ? "attention" : "projects"}
       >
-        <Show
-          when={tabs.store.some(
-            (tab) => tab.type === "draft" || (tab.type === "session" && tabs.pendingSession(tab.server, tab.sessionId)),
-          )}
-        >
-          {/* Keep numbered tab shortcuts registered while search hides these rows. */}
-          <div hidden={!!query()}>
-            <TitlebarTabStrip
-              orientation="vertical"
-              shortcuts={false}
-              tabs={tabs.store.filter(
-                (tab) =>
-                  tab.type === "draft" || (tab.type === "session" && tabs.pendingSession(tab.server, tab.sessionId)),
-              )}
-              currentTab={props.currentTab}
-              onNavigate={(tab) => tabs.select(tab)}
-              onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
-              onReorder={(keys) => tabs.reorder(keys)}
-            />
+        {/* Search renders real rows while this hidden strip retains draft/pending shortcuts. */}
+        <Show when={query()}>
+          <div hidden>
+            <PreparingStrip tabs={preparing().map((item) => item.tab)} />
           </div>
         </Show>
-        <Show when={!query() && !sessions().rows.length && loading()}>
+        <Show when={!query() && saved.attention}>
+          <PreparingStrip tabs={preparing().map((item) => item.tab)} />
+        </Show>
+        <Show when={!query() && !hierarchyRows().length && loading()}>
           <p class="px-1.5 text-[13px] leading-4 text-v2-text-text-muted" role="status">
             {language.t("sidebar.sessions.loading")}
           </p>
@@ -644,7 +676,9 @@ export function SessionSidebar(props: {
                         const entry = indexes().find(
                           (entry) => ServerConnection.key(entry.connection) === project().server,
                         )!
-                        const rows = createMemo(() => sessions().rows.filter((row) => row.project === key))
+                        const projectSessionRows = createMemo(() =>
+                          hierarchyRows().filter((row) => row.project === key),
+                        )
                         const collapsed = () => saved.collapsed[key] ?? false
                         const tree = () => worktrees().get(key)!
                         const visible = () =>
@@ -686,17 +720,18 @@ export function SessionSidebar(props: {
                                     </span>
                                     <Show
                                       when={
-                                        collapsed() && rows().some((row) => row.running || row.attention !== undefined)
+                                        collapsed() &&
+                                        projectSessionRows().some((row) => row.running || row.attention !== undefined)
                                       }
                                     >
                                       <span
                                         class="size-1.5 shrink-0 rounded-full"
                                         classList={{
-                                          "bg-icon-warning-base": rows().some((row) => row.running),
-                                          "bg-v2-icon-icon-accent": !rows().some((row) => row.running),
+                                          "bg-icon-warning-base": projectSessionRows().some((row) => row.running),
+                                          "bg-v2-icon-icon-accent": !projectSessionRows().some((row) => row.running),
                                         }}
                                         aria-label={language.t(
-                                          rows().some((row) => row.running)
+                                          projectSessionRows().some((row) => row.running)
                                             ? "dashboard.status.running"
                                             : "sidebar.attention.pending",
                                         )}
@@ -710,6 +745,9 @@ export function SessionSidebar(props: {
                                   />
                                 </div>
                                 <div class="flex flex-col gap-1">
+                                  <Show when={!collapsed()}>
+                                    <PreparingStrip tabs={preparingGroups().get(key)?.root ?? []} />
+                                  </Show>
                                   <Key each={visible()} by="key">
                                     {(item) => <Row item={item()} compact />}
                                   </Key>
@@ -748,9 +786,12 @@ export function SessionSidebar(props: {
                                             >
                                               <Icon name="outline-worktree" size="small" />
                                               <span dir="auto" class="min-w-0 truncate font-semibold">
-                                                {language.plural("sidebar.worktree.heading", group().rows.length, {
-                                                  worktree: group().name,
-                                                })}
+                                                {language.plural(
+                                                  "sidebar.worktree.heading",
+                                                  group().rows.length +
+                                                    (preparingGroups().get(key)?.groups.get(group().key)?.length ?? 0),
+                                                  { worktree: group().name },
+                                                )}
                                               </span>
                                               <Show
                                                 when={
@@ -802,10 +843,16 @@ export function SessionSidebar(props: {
                                             <SidebarWorktreeNewSession
                                               connection={project().connection}
                                               directory={group().directory}
+                                              projectDirectory={project().directory}
                                               name={group().name}
                                             />
                                           </div>
                                           <div id={id} class="flex flex-col gap-1">
+                                            <Show when={!collapsed()}>
+                                              <PreparingStrip
+                                                tabs={preparingGroups().get(key)?.groups.get(group().key) ?? []}
+                                              />
+                                            </Show>
                                             <Key each={visible()} by="key">
                                               {(item) => <Row item={item()} compact />}
                                             </Key>

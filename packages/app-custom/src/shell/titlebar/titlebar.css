@@ -2,7 +2,7 @@
   user-select: none;
 }
 
-[data-slot="vertical-tabs-sidebar"] [data-slot="vertical-tabs"] {
+[data-slot="vertical-tabs-sidebar"] [data-slot="vertical-tabs"]:not([data-distributed="true"]) {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -30,7 +30,9 @@
   background-color: var(--border-strong-base);
 }
 
-[data-slot="vertical-tabs-sidebar"] [data-slot="vertical-tabs-scroll"] {
+[data-slot="vertical-tabs-sidebar"]
+  [data-slot="vertical-tabs"]:not([data-distributed="true"])
+  > [data-slot="vertical-tabs-scroll"] {
   min-height: 0;
   /* Leave enough space to scroll the final tab clear of the fade above Settings. */
   padding-block-end: 16px;

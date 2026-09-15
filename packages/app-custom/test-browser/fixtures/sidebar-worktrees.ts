@@ -32,8 +32,12 @@ mock.module("@/servers/ssh/authenticate", () => ({ useSshAuthenticate: () => () 
 mock.module("@/settings/model", () => ({
   useSettings: () => ({ permissions: { autoApprove: () => false }, appearance: { showProjectName: () => false } }),
 }))
+mock.module("@/preferences/context", () => ({
+  usePreferences: () => ({ canonical: () => false, mutate: async () => {} }),
+}))
 mock.module("@/shell/commands/command", () => ({ useCommand: () => ({ register: () => {} }) }))
 mock.module("@/shell/layout/session-tab-avatar", () => ({ SessionTabAvatar: () => null }))
+mock.module("@/shell/titlebar/sidebar-subscriptions", () => ({ SidebarSubscriptions: () => null }))
 mock.module("@/composer/persistence", () => ({ createTabComposerState: () => {} }))
 mock.module("@/shell/notifications/toast", () => ({ showToast: () => {} }))
 const archived: string[][] = []
@@ -61,7 +65,8 @@ const { ServerConnection } = registry
 const { projectKey, sessionKey } = await import("@/shell/titlebar/sidebar-model")
 const { worktreeKey } = await import("@/shell/titlebar/sidebar-worktrees")
 const tabsModule = await import("@/shell/tabs/tabs")
-const drafts: { server: string; directory?: string }[] = []
+const [sidebarStore, setSidebarStore] = createStore({ attention: true, order: [] as string[], collapsed: {}, pins: [] as string[] })
+const drafts: { server: string; directory: string; worktree?: string }[] = []
 const tabStore: Array<{
   type: "draft"
   draftID: string
@@ -75,7 +80,7 @@ mock.module("@/shell/tabs/tabs", () => ({
   useTabs: () => ({
     store: tabStore,
     pendingSession: () => false,
-    newDraft: async (input: { server: string; directory?: string }) => {
+    newDraft: async (input: { server: string; directory: string; worktree?: string }) => {
       drafts.push(input)
     },
     addSessionTab: () => {},
@@ -123,6 +128,7 @@ const backend = [
     row("missing", "/missing/feat", 50),
     row("prefix", "/trees/feature", 60),
     row("second", "/second", 70, "second"),
+    row("repository-owned", "/repository", -1, "repository"),
   ],
   [row("remote-root", "/repo", 80), row("remote-feat", "/trees/feat", 90)],
 ]
@@ -199,6 +205,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
               { directory: "/repo" },
               { directory: "/trees/feat", strategy: "git" },
               { directory: "/other/feat", strategy: "git" },
+              { directory: "/repository", strategy: "git" },
             ]
           : directory === "/empty"
             ? [{ directory: "/empty" }, { directory: "/empty/idle", strategy: "git" }].filter(
@@ -208,7 +215,12 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       )
     }
     const worktree = directory === "/loose/feat/src" ? "/loose/feat" : directory
-    const location = { directory, project: { id: "repo", canonical: "/repo", directory: worktree } }
+    const location = {
+      directory,
+      project: directory.startsWith("/repository")
+        ? { id: "repository", canonical: "/repository", directory: "/repository" }
+        : { id: "repo", canonical: "/repo", directory: worktree },
+    }
     if (url.pathname === "/api/location") {
       if (directory === "/missing/feat" || directory === "/trees/feature") return json({ message: "Unavailable" }, 400)
       return json(location)
@@ -285,6 +297,19 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
             sandboxes: [],
             time: { created: 1, updated: 1 },
           },
+          ...(server
+            ? []
+            : [
+                {
+                  id: "repository",
+                  worktree: "/repository",
+                  name: "Repository",
+                  vcs: null,
+                  worktrees: [{ directory: "/repository" }],
+                  sandboxes: [],
+                  time: { created: 1, updated: 1 },
+                },
+              ]),
         ] as Project[],
       })
       const query = new QueryClient()
@@ -303,7 +328,11 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       const ctx = {
         data,
         sync: { data: state, worktrees: inventory },
-        projects: { list: () => [], open: (directory: string) => opened.push(directory), touch: () => {} },
+        projects: {
+          list: () => state.project.map((project) => ({ ...project, expanded: true })),
+          open: (directory: string) => opened.push(directory),
+          touch: () => {},
+        },
         notification: { session: { unseen: () => [] } },
         sdk: {
           api,
@@ -332,6 +361,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
   mock.module("@/runtime/server/runtime", () => ({
     useGlobal: () => ({
       servers: { list: () => connections },
+      sidebar: { store: sidebarStore, set: setSidebarStore, ready: () => true },
       ensureServerCtx: (connection: ServerConnection.Any) =>
         roots[connections.indexOf(connection as (typeof connections)[number])].ctx,
     }),
@@ -341,12 +371,12 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
   const { SessionSidebar } = await import("@/shell/titlebar/sidebar")
   const { LanguageProvider } = await import("@/runtime/i18n/language")
   const { DialogProvider } = await import("@opencode/ui-custom/context/dialog")
-  const { flushPersisted } = await import("@/runtime/persistence/persist")
   const { Persist, removePersisted } = await import("@/runtime/persistence/storage")
   const storage = "opencode.global.dat:sidebar-navigation"
   const project = projectKey(ServerConnection.key(connections[0]), { id: "repo", worktree: "/repo" })
   const second = projectKey(ServerConnection.key(connections[0]), { id: "second", worktree: "/second" })
   localStorage.setItem(storage, JSON.stringify({ attention: true, order: [], collapsed: { [second]: true }, pins: [] }))
+  setSidebarStore({ attention: true, order: [], collapsed: { [second]: true }, pins: [] })
   const host = document.createElement("div")
   document.body.append(host)
   const query = new QueryClient()
@@ -381,7 +411,9 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
   const titles = (element: ParentNode) =>
     [...element.querySelectorAll("[data-titlebar-tab-title]")].map((item) => item.textContent)
   const button = (text: string) =>
-    [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === text)!
+    [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (item) => item.textContent === text || item.getAttribute("aria-label") === text,
+    )!
   const toggle = () => host.querySelector<HTMLButtonElement>('[aria-label="Attention view"]')!.click()
   try {
     await wait()
@@ -396,6 +428,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(calls.filter((call) => call.path === "/api/worktree").map((call) => [call.server, call.directory])).toEqual([
       [0, "/repo"],
       [1, "/repo"],
+      [0, "/repository"],
       [0, "/empty"],
       [1, "/empty"],
       [1, "/second"],
@@ -425,7 +458,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       type: "draft",
       draftID: "idle-draft",
       server: ServerConnection.key(connections[0]),
-      directory: "/empty/idle/src",
+      directory: "/empty",
       worktree: "/empty/idle",
       branch: "idle",
     })
@@ -502,7 +535,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
         .filter((call) => call.server && ["/api/location", "/api/vcs"].includes(call.path))
         .map((call) => call.directory)
         .sort(),
-    ).toEqual(["/empty/idle", "/other/feat", "/trees/feat"])
+    ).toEqual(["/empty/idle", "/other/feat", "/repository", "/trees/feat"])
     expect(projectElement(remoteProject)).toBeDefined()
     expect(header(projectElement(remoteProject)) === remoteHeader).toBe(true)
     expect(document.activeElement === remoteHeader).toBe(true)
@@ -525,6 +558,16 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     await wait()
     expect(document.activeElement === remoteHeader).toBe(true)
     const feature = group("/trees/feat")
+    const repositoryProject = projectKey(ServerConnection.key(connections[0]), {
+      id: "repository",
+      worktree: "/repository",
+    })
+    const repository = group("/repository")
+    expect(header(repository).textContent).toContain("repository (1)")
+    expect(titles(repository)).toEqual(["repository-owned"])
+    expect(titles(projectElement(repositoryProject))).not.toContain("repository-owned")
+    const recent = [...host.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")
+    expect(recent ? titles(recent) : []).toContain("repository-owned")
     const featureHeader = header(feature)
     const rootHeader = header(projectElement())
     expect(featureHeader.textContent).toContain("feat")
@@ -552,33 +595,41 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(header(projectElement(remoteProject)) === remoteHeader).toBe(true)
     expect(projectOrder().indexOf(remoteProject)).toBeLessThan(emptyIndex)
     expect(projectOrder().indexOf(remote)).toBeLessThan(projectOrder().indexOf(emptyProject))
-    expect(header(group("/loose/feat")).textContent).toBe("feat (1)")
+    expect(header(group("/loose/feat")).textContent).toBe("feat — loose/feat (1)")
     expect(
       calls
         .filter((call) => call.path === "/api/vcs" && !call.server)
         .map((call) => call.directory)
         .sort(),
-    ).toEqual(["/empty/idle", "/loose/feat", "/other/feat", "/trees/feat"])
+    ).toEqual(["/empty/idle", "/loose/feat", "/other/feat", "/repository", "/trees/feat"])
     for (const direction of ["ltr", "rtl"]) {
       host.dir = direction
       const create = feature.querySelector<HTMLButtonElement>('[data-action="sidebar-worktree-new-session"]')!
-      expect(create.getAttribute("aria-label")).toBe("New session in feat/payments")
+      expect(create.getAttribute("aria-label")).toBe("New session in feat/payments — trees/feat")
       expect(create.closest("button[aria-expanded]")).toBeNull()
       create.focus()
       // HappyDOM has no native keyboard activation: click represents the browser's Enter/Space default action.
       create.click()
       expect(featureHeader.getAttribute("aria-expanded")).toBe("true")
-      expect(drafts.at(-1)).toEqual({ server: ServerConnection.key(connections[0]), directory: "/trees/feat" })
-      expect(roots[0].opened.at(-1)).toBe("/trees/feat")
+      expect(drafts.at(-1)).toEqual({
+        server: ServerConnection.key(connections[0]),
+        directory: "/repo",
+        worktree: "/trees/feat",
+      })
+      expect(roots[0].opened.at(-1)).toBe("/repo")
     }
     group("/missing/feat").querySelector<HTMLButtonElement>('[data-action="sidebar-worktree-new-session"]')!.click()
-    expect(drafts.at(-1)?.directory).toBe("/missing/feat")
+    expect(drafts.at(-1)).toMatchObject({ directory: "/repo", worktree: "/missing/feat" })
     group("/trees/feat", remote)
       .querySelector<HTMLButtonElement>('[data-action="sidebar-worktree-new-session"]')!
       .click()
-    expect(drafts.at(-1)).toEqual({ server: ServerConnection.key(connections[1]), directory: "/trees/feat" })
+    expect(drafts.at(-1)).toEqual({
+      server: ServerConnection.key(connections[1]),
+      directory: "/repo",
+      worktree: "/trees/feat",
+    })
     projectElement().querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!.click()
-    expect(drafts.at(-1)?.directory).toBe("/repo")
+    expect(drafts.at(-1)).toMatchObject({ directory: "/repo", worktree: "main" })
     const before = calls.length
     roots[0].setState("project", 0, "name", "Renamed")
     roots[0].ctx.data.session.remember({ ...backend[0][0].session, title: "Live title" })
@@ -645,19 +696,19 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     button("Archive").click()
     expect(archived.at(-1)).not.toContain(sessionKey(ServerConnection.key(connections[0]), "feat-4"))
     expect(featureHeader.getAttribute("aria-expanded")).toBe("false")
-    flushPersisted()
-    expect(JSON.parse(localStorage.getItem(storage)!).collapsed[worktreeKey(project, "/trees/feat")]).toBe(true)
+    expect(sidebarStore.collapsed[worktreeKey(project, "/trees/feat")]).toBe(true)
     dispose()
     dispose = mount()
     await wait()
     expect(header(group("/trees/feat")).getAttribute("aria-expanded")).toBe("false")
-    expect(calls.filter((call) => call.path === "/api/worktree")).toHaveLength(7)
+    expect(calls.filter((call) => call.path === "/api/worktree")).toHaveLength(8)
     header(group("/trees/feat")).click()
     const more = [...group("/trees/feat").querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Show more",
     )!
     more.click()
     expect(titles(group("/trees/feat"))).toHaveLength(7)
+    host.querySelector<HTMLButtonElement>('[aria-label="Search sessions"]')!.click()
     const search = host.querySelector<HTMLInputElement>('input[type="search"]')!
     search.value = "feat-"
     search.dispatchEvent(new Event("input", { bubbles: true }))
@@ -681,6 +732,33 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(header(projectElement())).toBeDefined()
     expect(calls.some((call) => !call.server && call.directory === "/second")).toBe(false)
     expect(calls.some((call) => call.directory === "/empty")).toBe(true)
+    tabStore.push(
+      {
+        type: "draft",
+        draftID: "root-layout",
+        server: ServerConnection.key(connections[0]),
+        directory: "/repo",
+        worktree: "main",
+      },
+      {
+        type: "draft",
+        draftID: "worktree-layout",
+        server: ServerConnection.key(connections[0]),
+        directory: "/repo",
+        worktree: "/trees/feat",
+      },
+    )
+    dispose()
+    dispose = mount()
+    await wait()
+    const distributed = [...projectElement().querySelectorAll<HTMLElement>('[data-distributed="true"]')]
+    const rootStrip = distributed.find((strip) => !strip.closest("[data-worktree-key]"))!
+    const worktreeStrip = distributed.find((strip) => strip.closest("[data-worktree-key]"))!
+    for (const strip of [rootStrip, worktreeStrip]) {
+      expect(strip.parentElement?.classList.contains("gap-1")).toBe(true)
+      const next = strip.nextElementSibling
+      expect(next?.hasAttribute("data-titlebar-tab") || !!next?.querySelector("[data-titlebar-tab]")).toBe(true)
+    }
   } finally {
     gates.inventory.resolve()
     gates.remoteInventory.resolve()

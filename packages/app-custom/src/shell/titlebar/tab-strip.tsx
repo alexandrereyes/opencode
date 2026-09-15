@@ -250,6 +250,8 @@ export function TitlebarTabStrip(props: {
   open?: (tab: SessionTab) => boolean
   session?: (tab: SessionTab) => SessionInfo | undefined
   onReorder?: (keys: string[]) => void
+  shortcutIndex?: (tab: Tab) => number
+  distributed?: boolean
 }) {
   const global = useGlobal()
   const language = useLanguage()
@@ -294,6 +296,7 @@ export function TitlebarTabStrip(props: {
     <div
       data-slot={vertical() ? "vertical-tabs" : "titlebar-tabs"}
       data-orientation={vertical() ? "vertical" : "horizontal"}
+      data-distributed={props.distributed || undefined}
       class="relative min-w-0"
       classList={{ "min-h-0 overflow-hidden": vertical() }}
     >
@@ -362,7 +365,7 @@ export function TitlebarTabStrip(props: {
                 const id = tabKey(tab)
                 let ref!: HTMLDivElement
                 const visibleIndex = () => visibleTabs().findIndex((item) => tabKey(item) === id)
-                useTabShortcut(visibleIndex, () => props.onNavigate(tab, ref))
+                useTabShortcut(() => props.shortcutIndex?.(tab) ?? visibleIndex(), () => props.onNavigate(tab, ref))
                 const serverCtx = useServerCtx(() => {
                   if (tab.type !== "session") return
                   return global.servers.list().find((item) => ServerConnection.key(item) === tab.server)

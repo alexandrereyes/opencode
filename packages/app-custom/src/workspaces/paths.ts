@@ -99,6 +99,13 @@ export function sameDirectory(a: string, b: string) {
   return containsDirectory(a, b) && containsDirectory(b, a)
 }
 
+export function workspaceDraftTarget(directory: string, projectDirectory: string) {
+  return {
+    directory: projectDirectory,
+    worktree: sameDirectory(directory, projectDirectory) ? "main" : directory,
+  }
+}
+
 export function isWorkspaceSelection(project: WorkspaceProject | undefined, selection: string) {
   if (selection === "main" || selection === "create") return true
   if (!project) return false

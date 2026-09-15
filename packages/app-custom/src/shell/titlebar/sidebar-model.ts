@@ -1,12 +1,12 @@
 import type { Navigation } from "@opencode/plugin-app-custom/navigation/rpc"
-import type { SessionInfo } from "@opencode/client/promise"
+import type { SessionInfo, WorktreeDirectory } from "@opencode/client/promise"
 import type { Types } from "effect"
 import type { ServerConnection } from "@/runtime/server/registry"
 import { pathKey } from "@/workspaces/path-key"
 import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
 import { latestAttention } from "@/shell/notifications/session-attention"
-import { containsDirectory } from "@/workspaces/paths"
+import { containsDirectory, sameDirectory } from "@/workspaces/paths"
 
 export type SessionNavigationInfo = Omit<Types.DeepMutable<Navigation.Info>, "session"> & { session: SessionInfo }
 export interface SessionNavigationPage {
@@ -38,11 +38,57 @@ export function projectKey(server: string, project: { id?: string; worktree: str
 
 export const sessionKey = (server: string, id: string) => JSON.stringify([server, id])
 
+export function sidebarProjectWorkspaces(project: {
+  worktree: string
+  worktrees?: readonly WorktreeDirectory[]
+  sandboxes?: readonly string[]
+}): WorktreeDirectory[] {
+  return [
+    ...(project.worktrees ?? []),
+    ...(project.sandboxes ?? []).map((directory): WorktreeDirectory => ({ directory })),
+  ]
+    .filter((workspace) => !sameDirectory(workspace.directory, project.worktree))
+    .filter(
+      (workspace, index, workspaces) =>
+        workspaces.findIndex((item) => sameDirectory(item.directory, workspace.directory)) === index,
+    )
+}
+
+export function sidebarExplicitWorkspace<
+  T extends { key: string; directory: string; workspaces: readonly WorktreeDirectory[] },
+>(
+  directory: string,
+  projects: readonly T[],
+) {
+  return projects
+    .flatMap((project) =>
+      project.workspaces
+        .filter((workspace) => !sameDirectory(workspace.directory, project.directory))
+        .filter((workspace) => containsDirectory(workspace.directory, directory))
+        .map((workspace) => ({ project, directory: workspace.directory })),
+    )
+    .toSorted(
+      (a, b) =>
+        pathKey(b.directory).length - pathKey(a.directory).length ||
+        a.project.key.localeCompare(b.project.key) ||
+        pathKey(a.directory).localeCompare(pathKey(b.directory)),
+    )[0]
+}
+
 export function sidebarSessionProject(
   server: ServerConnection.Key,
   session: SessionInfo,
   projects: Omit<LocalProject, "expanded">[],
 ) {
+  const explicit = sidebarExplicitWorkspace(
+    session.location.directory,
+    projects.map((project) => ({
+      key: projectKey(server, project),
+      directory: project.worktree,
+      workspaces: sidebarProjectWorkspaces(project),
+    })),
+  )
+  if (explicit) return explicit.project.key
   const direct = projects.find((project) => project.id && project.id !== "global" && project.id === session.projectID)
   if (direct) return projectKey(server, direct)
   const unresolved = projects.find(
