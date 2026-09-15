@@ -7,6 +7,7 @@ import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Icon } from "@opencode/ui-custom/icon"
 import { Checkbox } from "@opencode/ui-custom/checkbox"
 import { Menu } from "@opencode/ui-custom/menu"
+import { TextShimmer } from "@opencode/ui-custom/text-shimmer"
 import { useServerCtx } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection, serverName, useServers } from "@/runtime/server/registry"
@@ -173,22 +174,14 @@ export function TabNavItem(props: {
     await rename.mutateAsync(next)
   }
 
-  createEffect(() => {
-    if (editing()) return
-    if (!titleEl) return
-    const value = title()
-    if (value === undefined) return
-    titleEl.textContent = value
-  })
-
   const openRename = (event?: MouseEvent) => {
     event?.preventDefault()
     event?.stopPropagation()
     if (lifecyclePending() || !canOpenTabRename(props.dragging, editing(), rename.isPending)) return
     const session = props.session
     if (!session) return
-    titleEl.textContent = session.title ?? ""
     setEditing(true)
+    titleEl.textContent = session.title ?? ""
 
     requestAnimationFrame(() => {
       titleEl.focus()
@@ -468,7 +461,6 @@ export function TabNavItem(props: {
         <span
           ref={(el) => {
             titleEl = el
-            titleEl.textContent = title() ?? ""
           }}
           data-slot="tab-title"
           data-titlebar-tab-title
@@ -503,7 +495,15 @@ export function TabNavItem(props: {
             if (!editing()) return
             event.preventDefault()
           }}
-        />
+        >
+          <Show when={sidebarActions() && props.activity === "running" && !editing()} fallback={title()}>
+            <TextShimmer
+              text={title() ?? ""}
+              active
+              class="max-w-full min-w-0 overflow-hidden [&_[data-slot=text-shimmer-char]]:min-w-0 [&_[data-slot=text-shimmer-char-base]]:truncate [&_[data-slot=text-shimmer-char-shimmer]]:truncate"
+            />
+          </Show>
+        </span>
         <Show
           when={
             !props.compact &&

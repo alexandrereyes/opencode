@@ -56,6 +56,10 @@ mock.module("@/settings/workspaces/project-dialog", () => ({
 mock.module("@/settings/model", () => ({
   useSettings: () => ({ permissions: { autoApprove: () => false }, appearance: { showProjectName: () => false } }),
 }))
+mock.module("@/preferences/context", () => ({
+  usePreferences: () => ({ canonical: () => false, mutate: async () => {} }),
+}))
+mock.module("@/shell/titlebar/sidebar-subscriptions", () => ({ SidebarSubscriptions: () => null }))
 mock.module("@/runtime/i18n/language", () => ({
   useLanguage: () => ({
     t: (key: string, params?: Record<string, string>) =>
@@ -128,10 +132,35 @@ const hosts = connections.map((connection, i) => {
   const opened: string[] = []
   const touched: string[] = []
   const imported: unknown[] = []
+  const project = {
+    id: "repo",
+    worktree: "/repo",
+    name: "Shared project",
+    vcs: "git",
+    worktrees: [{ directory: "/repo" }],
+    sandboxes: [],
+    time: { created: 1, updated: 1 },
+  }
+  const sync = {
+    data: { project: [project], path: {} },
+    worktrees: { cached: () => undefined, load: async () => [{ directory: "/repo" }] },
+  }
+  function selectedProjects() {
+    return [
+      ...ctx.sync.data.project.map((project) => ({ ...project, expanded: true })),
+      ...backend
+        .filter((row) => !ctx.sync.data.project.some((project) => project.id === row.session.projectID))
+        .map((row) => ({
+          id: row.session.projectID,
+          worktree: row.session.location.directory,
+          expanded: true,
+        })),
+    ]
+  }
   const ctx = {
-    sync: { data: { project: [{ id: "repo", worktree: "/repo", name: "Shared project" }], path: {} } },
+    sync,
     projects: {
-      list: () => [],
+      list: selectedProjects,
       open: (directory: string) => opened.push(directory),
       touch: (directory: string) => touched.push(directory),
     },
@@ -139,11 +168,13 @@ const hosts = connections.map((connection, i) => {
     data: {
       session: {
         get: (id: string) => cache[id],
+        status: () => "idle",
         remember: (session: SessionInfo) => setCache(session.id, session),
         permission: { list: (id: string) => attention.permissions[id] },
         form: { list: (id: string) => attention.forms[id] },
         message: { sync: async () => {} },
       },
+      location: { info: () => undefined, vcs: { info: () => undefined, sync: async () => {} }, syncInfo: async () => {} },
     },
     sdk: {
       connection: { status: () => (state.connected ? "connected" : "disconnected") },
@@ -175,10 +206,25 @@ const hosts = connections.map((connection, i) => {
 })
 mock.module("@/runtime/server/registry", () => ({ ...registry, useServers: () => ({ list: connections }) }))
 mock.module("@/runtime/server/runtime", () => ({
-  useGlobal: () => ({
-    servers: { list: () => connections },
-    ensureServerCtx: (connection: ServerConnection.Any) => hosts.find((host) => host.connection === connection)!.ctx,
-  }),
+  useGlobal: () => {
+    const saved = JSON.parse(localStorage.getItem("opencode.global.dat:sidebar-navigation") ?? "{}")
+    const [sidebar, setSidebar] = createStore({
+      attention: saved.attention ?? true,
+      order: saved.order ?? [],
+      collapsed: saved.collapsed ?? {},
+      pins: saved.pins ?? [],
+    })
+    const set = (...args: Parameters<typeof setSidebar>) => {
+      setSidebar(...args)
+      localStorage.setItem("opencode.global.dat:sidebar-navigation", JSON.stringify(sidebar))
+    }
+    localStorage.setItem("opencode.global.dat:sidebar-navigation", JSON.stringify(sidebar))
+    return {
+      servers: { list: () => connections },
+      sidebar: { store: sidebar, set, ready: () => true },
+      ensureServerCtx: (connection: ServerConnection.Any) => hosts.find((host) => host.connection === connection)!.ctx,
+    }
+  },
   useServerCtx: (connection: () => ServerConnection.Any) => () =>
     hosts.find((host) => host.connection === connection())?.ctx,
 }))
@@ -277,7 +323,7 @@ function mount(direction: "ltr" | "rtl" = "ltr") {
   }
 }
 
-test("project folders reset on mount; only the last toggled header has a chevron", async () => {
+test("project folders stay stable while headers collapse, reorder and remount", async () => {
   const keys = connections.map((connection) =>
     projectKey(ServerConnection.key(connection), { id: "repo", worktree: "/repo" }),
   )
@@ -300,20 +346,18 @@ test("project folders reset on mount; only the last toggled header has a chevron
       expect(header(keys[0]).querySelector("span[dir=auto]")?.classList.contains("font-semibold")).toBe(true)
       const first = header(keys[0])
       first.click()
-      expect(icon(keys[0])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
       expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       header(keys[1]).click()
       expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
       expect(header(keys[0]).getAttribute("aria-expanded")).toBe("false")
-      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       // Native buttons synthesize a detail=0 click for Enter/Space. HappyDOM does
       // not implement that default action, so dispatch it explicitly after the key.
       for (const key of ["Enter", " "]) {
         header(keys[1]).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
         header(keys[1]).dispatchEvent(new MouseEvent("click", { detail: 0, bubbles: true }))
-        expect(icon(keys[1])).toBe(
-          key === "Enter" ? "#opencode-v2-icon-chevron-down" : "#opencode-v2-icon-chevron-right",
-        )
+        expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       }
       expect(header(keys[0]).querySelector("[class*=rotate]")).toBeNull()
       first.focus()
@@ -323,14 +367,14 @@ test("project folders reset on mount; only the last toggled header has a chevron
       )
       await Promise.resolve()
       expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
-      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       const group = first.closest<HTMLElement>("[data-project-key]")!
       group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!.click()
       await projectMenu(group)
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
       await wait()
       expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
-      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       drag.start!()
       first.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }))
       expect(header(keys[0]).getAttribute("aria-expanded")).toBe("false")
@@ -338,8 +382,9 @@ test("project folders reset on mount; only the last toggled header has a chevron
       const session = structuredClone(hosts[0].backend[0].session)
       hosts[0].setCache(session.id, { ...session, title: "Header metadata churn" })
       expect(header(keys[0]) === first).toBe(true)
-      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       hosts[0].setCache(session.id, session)
+      ui.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.search.placeholder"]')!.click()
       const input = ui.host.querySelector<HTMLInputElement>('input[type="search"]')!
       input.value = "same"
       input.dispatchEvent(new Event("input", { bubbles: true }))
@@ -349,7 +394,7 @@ test("project folders reset on mount; only the last toggled header has a chevron
       toggle.click()
       toggle.click()
       expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
-      expect(icon(keys[1])).toBe("#opencode-v2-icon-chevron-right")
+      expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       flushPersisted()
       expect(JSON.parse(localStorage.getItem(storage)!)).not.toHaveProperty("lastTouchedProject")
     } finally {
@@ -385,6 +430,7 @@ test("legacy prefs, real menus, search, priorities, reload, disconnect, archive 
     setRoute("sessionId", "old")
     await wait()
     expect(titles(section(first.host, "recent")!)).toContain("old")
+    first.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.search.placeholder"]')!.click()
     const input = first.host.querySelector<HTMLInputElement>('input[type="search"]')!
     input.value = "same"
     input.dispatchEvent(new Event("input", { bubbles: true }))
@@ -536,7 +582,7 @@ test("quick actions opt in only for persisted sidebar rows and guard dragging an
   document.head.append(sheet)
   const host = document.createElement("div")
   document.body.append(host)
-  const [state, setState] = createStore({ sidebar: false, dragging: false, pending: false })
+  const [state, setState] = createStore({ sidebar: false, dragging: false, pending: false, running: false })
   const calls: string[] = []
   const props = {
     href: "/test",
@@ -561,6 +607,9 @@ test("quick actions opt in only for persisted sidebar rows and guard dragging an
     },
     get selectionPending() {
       return state.pending
+    },
+    get activity() {
+      return state.running ? ("running" as const) : undefined
     },
   }
   const dispose = render(
@@ -597,9 +646,16 @@ test("quick actions opt in only for persisted sidebar rows and guard dragging an
     expect(mobile.querySelector('[data-slot="mobile-tab-time"]')).not.toBeNull()
     expect(draft.querySelector('[aria-label="common.closeTab"]')).not.toBeNull()
     expect(rows.every((row) => !row.querySelector('[data-slot="tab-quick-actions"]'))).toBe(true)
+    expect(ordinary.querySelector('[data-component="text-shimmer"]')).toBeNull()
     setState("sidebar", true)
     expect(ordinary.querySelector('[aria-label="common.moreOptions"]')).toBeNull()
     expect(ordinary.querySelector('[aria-label="common.closeTab"]')).toBeNull()
+    setState("running", true)
+    expect(ordinary.querySelector('[data-component="text-shimmer"]')?.getAttribute("aria-label")).toBe("ordinary")
+    expect(ordinary.querySelector('[data-component="text-shimmer"]')?.getAttribute("data-active")).toBe("true")
+    expect(mobile.querySelector('[data-component="text-shimmer"]')).toBeNull()
+    setState("running", false)
+    expect(ordinary.querySelector('[data-component="text-shimmer"]')).toBeNull()
     const before = lifecycle.length
     for (const blocker of ["dragging", "pending"] as const) {
       setState(blocker, true)
@@ -748,9 +804,9 @@ test("project header actions preserve collapse/order and target canonical projec
     await projectMenu(remote, "command.session.new", true)
     await projectMenu(plain, "command.session.new")
     expect(drafts.slice(-3)).toEqual([
-      { server: ServerConnection.key(connections[0]), directory: "/repo" },
-      { server: ServerConnection.key(connections[1]), directory: "/repo" },
-      { server: ServerConnection.key(connections[0]), directory: "/plain" },
+      { server: ServerConnection.key(connections[0]), directory: "/repo", worktree: "main" },
+      { server: ServerConnection.key(connections[1]), directory: "/repo", worktree: "main" },
+      { server: ServerConnection.key(connections[0]), directory: "/plain", worktree: "main" },
     ])
     expect(header.getAttribute("aria-expanded")).toBe("false")
     expect(
@@ -764,7 +820,7 @@ test("project header actions preserve collapse/order and target canonical projec
     ])
     expect(await projectMenu(remote)).not.toContain("session.header.reveal.finder")
     expect(await projectMenu(plain)).not.toContain("dialog.project.edit.title")
-    expect(await projectMenu(unknown)).not.toContain("dialog.project.edit.title")
+    expect(await projectMenu(unknown)).toContain("dialog.project.edit.title")
     await projectMenu(remote, "dialog.project.edit.title")
     expect(edited.at(-1)).toMatchObject({
       server: connections[1],
@@ -868,7 +924,11 @@ test("project menu and focus survive session refreshes while project data stays 
     expect(group.querySelector("button[aria-expanded] span[dir=auto]")?.textContent).toContain("Renamed project")
     item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
     await wait()
-    expect(drafts.at(-1)).toEqual({ server: ServerConnection.key(connections[0]), directory: "/renamed" })
+    expect(drafts.at(-1)).toEqual({
+      server: ServerConnection.key(connections[0]),
+      directory: "/renamed",
+      worktree: "main",
+    })
     await projectMenu(group, "dialog.project.edit.title", true)
     expect(edited.at(-1)).toMatchObject({
       server: connections[0],
