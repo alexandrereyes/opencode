@@ -17,6 +17,7 @@ export function buildHomeSessionRecords(input: {
   projects: () => LocalProject[]
   chatRoot?: () => string | undefined
   chatLabel?: () => string
+  chatOnly?: () => boolean
 }) {
   const selected = input.projectDirectories()
   const directories = selected ? new Set(selected.map(pathKey)) : undefined
@@ -24,6 +25,7 @@ export function buildHomeSessionRecords(input: {
     ? input.sessions().filter((session) => directories.has(pathKey(session.location.directory)))
     : input.sessions()
   return [...new Map(sessions.map((session) => [session.id, session] as const)).values()]
+    .filter((session) => !input.chatOnly?.() || isChatDirectory(session.location.directory, input.chatRoot?.()))
     .sort(compareSessionTime)
     .map((session) => {
       const chat = isChatDirectory(session.location.directory, input.chatRoot?.())

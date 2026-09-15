@@ -3,7 +3,8 @@ import { type HomeProjectSelection, useLayout } from "@/shell/state/layout"
 import { ServerConnection, useServers } from "@/runtime/server/registry"
 import { useProjectNavigation } from "@/workspaces/project-actions"
 import { toggleHomeProjectSelection } from "@/shell/layout/helpers"
-import { createEffect, createMemo } from "solid-js"
+import { createEffect, createMemo, createResource } from "solid-js"
+import { chatRoot } from "@/runtime/chats"
 
 export function createHomeController() {
   const layout = useLayout()
@@ -15,6 +16,18 @@ export function createHomeController() {
     () => servers.visible.find((conn) => ServerConnection.key(conn) === selection().server) ?? servers.visible[0],
   )
   const focusedServerCtx = useServerCtx(focusedServer)
+  const [chat] = createResource(
+    () => {
+      const ctx = focusedServerCtx()
+      return ctx?.sdk.connection.status() === "connected" ? ctx.sdk : undefined
+    },
+    async (sdk) => ({ sdk, root: await chatRoot(sdk) }),
+  )
+  const chatInfo = createMemo(() => {
+    if (focusedServerCtx()?.sdk.connection.status() !== "connected") return
+    const result = chat()
+    return result?.sdk === focusedServerCtx()?.sdk ? result : undefined
+  })
   const focusedSync = () => focusedServerCtx()?.sync
   const projects = createMemo(() => focusedServerCtx()?.projects.list() ?? [])
   const recentlyClosed = createMemo(() => focusedServerCtx()?.projects.recentlyClosed() ?? [])
@@ -22,9 +35,11 @@ export function createHomeController() {
   const selectedProject = createMemo(() => projects().find((project) => project.worktree === selection().directory))
   const newSessionProject = createMemo(
     () =>
-      selectedProject() ??
-      projects().find((project) => project.worktree === focusedServerCtx()?.projects.last()) ??
-      projects()[0],
+      selection().chat
+        ? undefined
+        : (selectedProject() ??
+          projects().find((project) => project.worktree === focusedServerCtx()?.projects.last()) ??
+          projects()[0]),
   )
 
   createEffect(() => {
@@ -41,6 +56,12 @@ export function createHomeController() {
     const root = ctx.sync.data.project.find((project) => project.id === id)?.worktree
     if (root) void ctx.sync.worktrees.load(id, root)
   })
+  createEffect(() => {
+    const current = selection()
+    const info = chatInfo()
+    if (!current.chat || !info || info.root !== undefined) return
+    setSelection({ server: current.server })
+  })
 
   function setSelection(next: HomeProjectSelection) {
     layout.home.setSelection(next)
@@ -51,6 +72,10 @@ export function createHomeController() {
       value: selection,
       set: setSelection,
       focusServer: (conn: ServerConnection.Any) => setSelection({ server: ServerConnection.key(conn) }),
+      selectChat: (conn: ServerConnection.Any) => {
+        const server = ServerConnection.key(conn)
+        setSelection(selection().server === server && selection().chat ? { server } : { server, chat: true })
+      },
     },
     server: {
       list: () => servers.visible,
@@ -59,6 +84,10 @@ export function createHomeController() {
       focused: focusedServer,
       focusedContext: focusedServerCtx,
       focusedSync,
+    },
+    chat: {
+      root: () => chatInfo()?.root,
+      available: () => !!chatInfo()?.root,
     },
     project: {
       list: projects,

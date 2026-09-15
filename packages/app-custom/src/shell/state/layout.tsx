@@ -177,6 +177,7 @@ export const layoutSchema = Persistence.struct({
     selection: Persistence.struct({
       server: Schema.optional(TabStorage.ServerKey),
       directory: Schema.optional(Schema.String),
+      chat: Schema.optional(Schema.Boolean),
     }),
   }),
 })

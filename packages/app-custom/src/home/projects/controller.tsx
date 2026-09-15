@@ -55,6 +55,11 @@ export function createHomeProjectsController(home: HomeController) {
     },
     selection: {
       value: home.selection.value,
+      chatAvailable: home.chat.available,
+      selectChat: () => {
+        const conn = home.server.focused()
+        if (conn) home.selection.selectChat(conn)
+      },
     },
     server: {
       list: home.server.list,

@@ -38,6 +38,7 @@ export type HomeProjectsViewProps = {
   projects: LocalProject[]
   recentlyClosed: LocalProject[]
   selection: HomeProjectSelection
+  chatAvailable: boolean
   homedir: string
   serverHealth: (server: ServerConnection.Any) => ServerHealth | undefined
   projectsForServer: (server: ServerConnection.Any) => LocalProject[]
@@ -59,6 +60,7 @@ export type HomeProjectsViewProps = {
   onHideServer: (server: ServerConnection.Any) => void
   onMoveProject: (server: ServerConnection.Any, worktree: string, index: number) => void
   onSelectProject: (server: ServerConnection.Any, directory: string) => void
+  onSelectChat: () => void
   onAddProjects: (server: ServerConnection.Any, directories: string[]) => void
   onOpenProjectNewSession: (server: ServerConnection.Any, directory: string) => void
   canImportSession: boolean
@@ -91,13 +93,20 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
           aria-label={props.language.t("home.projects")}
           class="flex h-10 w-full min-w-0 items-center gap-2 rounded-[6px] bg-v2-background-bg-base px-1.5 text-start text-v2-text-text-base outline-none hover:bg-v2-background-bg-layer-01"
         >
-          <Show when={selected()} fallback={<Icon name="folder" size="small" />}>
-            {(project) => <HomeProjectAvatar project={project()} />}
+          <Show
+            when={!props.selection.chat}
+            fallback={<Icon name="speech-bubble" size="small" />}
+          >
+            <Show when={selected()} fallback={<Icon name="folder" size="small" />}>
+              {(project) => <HomeProjectAvatar project={project()} />}
+            </Show>
           </Show>
           <span class="flex min-w-0 flex-1 flex-col leading-[var(--line-height-compact)]">
             <bdi class="truncate">
-              <Show when={selected()} fallback={props.language.t("home.projects.all")}>
-                {(project) => displayName(project())}
+              <Show when={!props.selection.chat} fallback={props.language.t("session.new.chats")}>
+                <Show when={selected()} fallback={props.language.t("home.projects.all")}>
+                  {(project) => displayName(project())}
+                </Show>
               </Show>
             </bdi>
             <Show when={props.servers.length > 1 && server()}>
@@ -124,6 +133,10 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
               }}
               onFocusServer={(server) => {
                 props.onFocusServer(server)
+                setState("open", false)
+              }}
+              onSelectChat={() => {
+                props.onSelectChat()
                 setState("open", false)
               }}
               onAuthenticateServer={(server) => {
@@ -196,11 +209,24 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
           <HomeProjectNavButton
             type="button"
             class="mb-1"
-            data-selected={!props.selection.directory ? "" : undefined}
+            data-selected={!props.selection.directory && !props.selection.chat ? "" : undefined}
             onClick={() => props.onFocusServer(props.servers[0])}
           >
             <Icon name="folder" size="small" />
             <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.projects.all")}</span>
+          </HomeProjectNavButton>
+        </Show>
+        <Show when={props.chatAvailable}>
+          <HomeProjectNavButton
+            type="button"
+            class={props.dropdown ? "mb-1" : "mb-3"}
+            data-component="home-chats-row"
+            data-selected={props.selection.chat ? "" : undefined}
+            aria-current={props.selection.chat ? "page" : undefined}
+            onClick={props.onSelectChat}
+          >
+            <Icon name="speech-bubble" size="small" />
+            <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("session.new.chats")}</span>
           </HomeProjectNavButton>
         </Show>
         <Show
@@ -252,7 +278,11 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
                       server={item}
                       {...props}
                       {...contextMenuProps}
-                      selected={props.selection.server === ServerConnection.key(item) && !props.selection.directory}
+                       selected={
+                         props.selection.server === ServerConnection.key(item) &&
+                         !props.selection.directory &&
+                         !props.selection.chat
+                       }
                       collapsed={collapsed()}
                       health={props.serverHealth(item)}
                     />

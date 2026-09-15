@@ -15,6 +15,7 @@ export function HomeProjects(props: {
       projects={props.projects.project.list()}
       recentlyClosed={props.projects.project.recentlyClosed()}
       selection={props.projects.selection.value()}
+      chatAvailable={props.projects.selection.chatAvailable()}
       homedir={props.projects.project.homedir()}
       serverHealth={props.projects.server.health}
       projectsForServer={props.projects.server.projects}
@@ -36,6 +37,7 @@ export function HomeProjects(props: {
       onHideServer={props.projects.server.hide}
       onMoveProject={props.projects.project.move}
       onSelectProject={props.projects.project.select}
+      onSelectChat={props.projects.selection.selectChat}
       onAddProjects={props.projects.project.add}
       onOpenProjectNewSession={props.projects.project.openNewSession}
       canImportSession={props.projects.project.canImportSession}

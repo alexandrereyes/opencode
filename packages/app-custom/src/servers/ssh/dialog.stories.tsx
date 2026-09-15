@@ -220,6 +220,7 @@ function AuthenticationHome() {
         projects={projects}
         recentlyClosed={[]}
         selection={{ server: ServerConnection.key(server) }}
+        chatAvailable={false}
         homedir="/home/user"
         serverHealth={() => ({ healthy: ssh.servers[0]?.stage === "ready" })}
         projectsForServer={() => projects}
@@ -247,6 +248,7 @@ function AuthenticationHome() {
         onHideServer={() => {}}
         onMoveProject={() => {}}
         onSelectProject={() => {}}
+        onSelectChat={() => {}}
         onAddProjects={() => {}}
         onOpenProjectNewSession={() => {}}
         canImportSession={false}

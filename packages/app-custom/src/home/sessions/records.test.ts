@@ -48,6 +48,18 @@ describe("buildHomeSessionRecords", () => {
     expect(records.map((record) => record.session.id)).toEqual(["a"])
   })
 
+  test("filters sessions to managed chats", () => {
+    const records = buildHomeSessionRecords({
+      sessions: () => [...sessions, session("chat", "/data/chats/day/session-one", "global")],
+      projectDirectories: () => undefined,
+      projects: () => [opened],
+      chatRoot: () => "/data/chats",
+      chatOnly: () => true,
+    })
+
+    expect(records.map((record) => record.session.id)).toEqual(["chat"])
+  })
+
   test("labels a worktree session with its project before that project's inventory has loaded", () => {
     const records = buildHomeSessionRecords({
       sessions: () => [session("w", "/repo/a/.worktrees/feature", "project-a")],

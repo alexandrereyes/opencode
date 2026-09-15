@@ -2,7 +2,7 @@ import type { SessionInfo } from "@opencode/client/promise"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
-import { type Accessor, createEffect, createMemo, createResource, type JSX, startTransition, untrack } from "solid-js"
+import { type Accessor, createEffect, createMemo, type JSX, startTransition, untrack } from "solid-js"
 import { useCommand } from "@/shell/commands/command"
 import {
   HOME_SESSION_LIMIT,
@@ -25,10 +25,10 @@ import { showToast } from "@/shell/notifications/toast"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, type HomeSessionRecord } from "./records"
 import {
-  chatRoot,
   knownChatRoot,
   shouldRegisterSessionProject,
 } from "@/runtime/chats"
+import { newChatDraft } from "@/new-session/chats"
 
 export type { HomeSessionRecord } from "./records"
 
@@ -50,11 +50,8 @@ export function createHomeSessionsController(home: HomeController) {
   const platform = usePlatform()
   const queryClient = useQueryClient()
   const lifecycle = useSessionLifecycleActions()
-  const [chat] = createResource(() => {
-    const ctx = home.server.focusedContext()
-    return ctx?.sdk.connection.status() === "connected" ? ctx.sdk : undefined
-  }, chatRoot)
   const projectDirectories = createMemo(() => {
+    if (home.selection.value().chat) return
     const selected = home.selection.value().directory
     if (!selected) return
     const project = home.project.selected()
@@ -93,8 +90,9 @@ export function createHomeSessionsController(home: HomeController) {
       sessions: indexedSessions,
       projectDirectories,
       projects: home.project.list,
-      chatRoot: () => chat(),
+      chatRoot: home.chat.root,
       chatLabel: () => language.t("session.new.chats"),
+      chatOnly: () => !!home.selection.value().chat,
     }),
   )
   const records = createMemo(() => allRecords().slice(0, HOME_SESSION_LIMIT))
@@ -211,9 +209,9 @@ export function createHomeSessionsController(home: HomeController) {
       searchRecords: allRecords,
     },
     session: {
-      showProjectName: () => !home.project.selected(),
+      showProjectName: () => !home.project.selected() && !home.selection.value().chat,
       server: () => home.selection.value().server,
-      canCreate: () => !!home.project.newSession(),
+      canCreate: () => !!home.project.newSession() || (!!home.selection.value().chat && home.chat.available()),
       lookup: async (sessionID: string) => {
         const ctx = home.server.focusedContext()
         if (!ctx) return
@@ -225,9 +223,25 @@ export function createHomeSessionsController(home: HomeController) {
           projects: home.project.list,
           chatRoot: () => knownChatRoot(ctx.sdk),
           chatLabel: () => language.t("session.new.chats"),
+          chatOnly: () => !!home.selection.value().chat,
         })[0]
       },
-      create: home.project.openNewSession,
+      create: () => {
+        if (!home.selection.value().chat) {
+          home.project.openNewSession()
+          return
+        }
+        const conn = home.server.focused()
+        const ctx = home.server.focusedContext()
+        if (!conn || !ctx) return
+        void newChatDraft({ sdk: ctx.sdk, server: ServerConnection.key(conn), tabs }).catch((cause) =>
+          showToast({
+            variant: "error",
+            title: language.t("session.new.chats.failed"),
+            description: cause instanceof Error ? cause.message : language.t("common.requestFailed"),
+          }),
+        )
+      },
       open: async (session: SessionInfo, options?: OpenSessionOptions) => {
         const project = homeProjectForSession(session, home.project.list())
         const conn = home.server.focused()
