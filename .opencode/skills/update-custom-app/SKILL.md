@@ -36,9 +36,12 @@ owner for the operation.
   replace an existing session with that name.
 - Run both `git pull --ff-only origin custom` and `bun run custom:update` inside the
   tmux job. Do not restart the app or service separately.
-- Prefer a small runner in the approved temporary directory over a deeply quoted
-  inline shell command. Keep the repository checkout clean and do not write runtime
-  state into it.
+- Copy `scripts/run-update.zsh` to the approved temporary directory and use that
+  copy as the tmux command, passing the trusted current Session ID as its sole
+  optional argument. Do not generate an ad hoc runner or run the repository copy
+  directly: the pull may replace it while it is running. The runner writes its
+  private log under `$TMPDIR/opencode` and does not write runtime state into the
+  repository.
 - Preserve output in the tmux pane or a private temporary log so a failed update can
   be diagnosed after the original service stops.
 - The initiating agent may report that the update was started, but must not claim it
@@ -48,25 +51,21 @@ owner for the operation.
   runner must exit so tmux closes the session automatically. It must also exit and
   close the tmux session after a failure, while preserving the private log.
 
-If the current OpenCode session ID is available from trusted harness context, the
-detached job should notify that exact session after a successful update. Do not infer
-the target from the most recent session. After `custom:update` exits successfully,
-run `bun run custom:status` and require `prepared` and `current` to equal the target
-commit, `running` to equal `0.0.0-custom.<target-commit>`, and `health` to equal
-`ready`. The `running` field is the full release version, not a bare commit SHA. Then
-use the freshly activated
-`~/.local/share/opencode-custom-v2/bin/opencode2` launcher to call
-`POST /api/session/:sessionID/prompt` with `resume: true` and a concise `text`
-value such as:
+If the current OpenCode session ID is available from trusted harness context, pass
+that exact ID to the runner so it can notify the session after a successful update.
+Do not infer the target from the most recent session. The runner performs the status
+checks and uses the freshly activated launcher to call the prompt endpoint. If no
+trusted Session ID is available, omit the argument; the runner still updates and
+verifies the release but skips notification.
 
 ```text
 A atualização do OpenCode foi concluída com sucesso no commit <short-sha>. Apenas confirme o resultado ao usuário; não inicie outra atualização.
 ```
 
-This intentionally wakes the agent so the completion is visible immediately in the
-conversation. Send no success prompt when the update or verification fails. Never
-put the runtime password in the runner, command line, log, or message; the installed
-launcher supplies authenticated service discovery.
+The success prompt intentionally wakes the agent so completion is visible
+immediately in the conversation. The runner sends no success prompt when update or
+verification fails. Never put the runtime password in the command line, log, or
+message; the installed launcher supplies authenticated service discovery.
 
 ## Verification
 
