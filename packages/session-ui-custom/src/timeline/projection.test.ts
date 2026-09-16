@@ -324,25 +324,89 @@ describe("createTimelineProjection", () => {
       expect(keys(rows)[3]).toContain("assistant-final")
     })
 
-    test("uses the first completed stop with visible text when the turn has no phases", () => {
+    test("uses the last completed stop with visible text when the turn has no phases", () => {
       const rows = project([
         assistant("assistant-activity", "Working on it.", { finish: "tool-calls" }),
         assistant("assistant-stop-1", "First completed answer.", { finish: "stop" }),
         assistant("assistant-stop-2", "Later completed answer.", { finish: "stop" }),
       ])
 
-      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(2)
-      expect(keys(rows)[3]).toContain("assistant-stop-1")
+      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(3)
+      expect(keys(rows)[4]).toContain("assistant-stop-2")
     })
 
-    test("suppresses legacy fallback when an explicit non-final phase is present", () => {
+    test("keeps legacy fallback when an explicit non-final phase is present", () => {
       const rows = project([
         assistant("assistant-activity", "Working on it.", { finish: "tool-calls" }),
         assistant("assistant-stop", "Commentary stop.", { finish: "stop" }),
         assistant("assistant-phase", "Still commentary.", { finish: "stop", phase: "commentary" }),
       ])
 
-      expect(keys(rows)).not.toContain("final-answer-divider:user-1")
+      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(3)
+      expect(keys(rows)[4]).toContain("assistant-phase")
+    })
+
+    const boundary = (entries: SessionMessageInfo[]) => {
+      const rows = project(entries)
+      const dividers = rows.filter((row) => row._tag === "FinalAnswerDivider")
+      expect(dividers.length).toBeLessThanOrEqual(1)
+      const index = rows.findIndex((row) => row._tag === "FinalAnswerDivider")
+      const next = rows[index + 1]
+      return index >= 0 && next?._tag === "AssistantPart" && next.group.type === "part"
+        ? next.group.ref
+        : undefined
+    }
+
+    test("skips an explicit answer without preceding activity when a later answer completes", () => {
+      const entries: SessionMessageInfo[] = [
+        assistant("first", "Standalone", { finish: "stop", phase: "final_answer" }),
+      ]
+      expect(boundary(entries)).toBeUndefined()
+      entries.push(assistant("work", "More work", { finish: "tool-calls" }))
+      expect(boundary(entries)).toBeUndefined()
+      const answer = assistant("answer", "Final", { phase: "final_answer", completed: false })
+      entries.push(answer)
+      expect(boundary(entries)).toBeUndefined()
+      answer.finish = "stop"
+      answer.time.completed = 5
+      const expected = { messageID: "answer", partID: "answer:text:0" }
+      expect(boundary(entries)).toEqual(expected)
+      entries.push(assistant("later", "Later", { finish: "stop", phase: "final_answer" }))
+      expect(boundary(entries)).toEqual(expected)
+    })
+
+    for (const phase of [undefined, "final_answer"]) {
+      test(`requires a successful completed stop for ${phase ?? "legacy"} text`, () => {
+        const answer = assistant("answer", "Answer", { finish: "stop", phase })
+        const entries = [assistant("work", "Working", { finish: "tool-calls" }), answer]
+        expect(boundary(entries)?.messageID).toBe("answer")
+        answer.time.completed = undefined
+        expect(boundary(entries)).toBeUndefined()
+        answer.time.completed = 3
+        for (const finish of [undefined, "tool-calls", "length", "error"] as const) {
+          answer.finish = finish
+          expect(boundary(entries)).toBeUndefined()
+        }
+        answer.finish = "stop"
+        answer.error = { type: "Error", message: "Failed" }
+        expect(boundary(entries)).toBeUndefined()
+        answer.error = undefined
+        expect(boundary(entries)?.messageID).toBe("answer")
+        answer.retry = { attempt: 1, at: 10, error: { type: "ProviderError", message: "Retry" } }
+        expect(boundary(entries)).toBeUndefined()
+        answer.retry = undefined
+        expect(boundary(entries)?.messageID).toBe("answer")
+      })
+    }
+
+    test("places the explicit boundary between individual text parts in the same message", () => {
+      const answer = assistant("answer", "", { finish: "stop" })
+      answer.content = [
+        { type: "text", text: "   ", state: { phase: "final_answer" } },
+        { type: "text", text: "Commentary", state: { phase: "commentary" } },
+        { type: "text", text: "Final", state: { phase: "final_answer" } },
+      ]
+      expect(boundary([answer])).toEqual({ messageID: "answer", partID: "answer:text:2" })
     })
 
     test("does not count hidden activity before a final answer", () => {
@@ -357,9 +421,14 @@ describe("createTimelineProjection", () => {
         description: "Hidden notice",
         time: { created: 3 },
       }
-      const rows = project([reasoning, notice, assistant("assistant-final", "Only visible content.", { phase: "final_answer" })], {
-        ...timelinePresets[4].value,
-      })
+      const rows = project(
+        [
+          reasoning,
+          notice,
+          assistant("assistant-final", "Only visible content.", { finish: "stop", phase: "final_answer" }),
+        ],
+        timelinePresets[4].value,
+      )
 
       expect(keys(rows)).not.toContain("final-answer-divider:user-1")
     })
@@ -374,7 +443,7 @@ describe("createTimelineProjection", () => {
             description: "Visible notice",
             time: { created: 2 },
           },
-          assistant("assistant-final", "Final answer.", { phase: "final_answer" }),
+          assistant("assistant-final", "Final answer.", { finish: "stop", phase: "final_answer" }),
         ],
         timelinePresets[2].value,
       )

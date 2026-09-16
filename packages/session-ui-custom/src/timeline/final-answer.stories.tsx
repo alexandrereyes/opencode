@@ -127,7 +127,7 @@ function FinalAnswerStory(props: {
             {
               type: "text",
               text: "The project configuration is consistent.",
-              ...(state.completed && props.finish === "stop" ? { state: { phase: "final_answer" } } : {}),
+              ...(props.finish === "stop" ? { state: { phase: "final_answer" } } : {}),
             },
             { type: "text", text: "No changes are needed." },
           ],

@@ -398,21 +398,9 @@ export namespace Timeline {
     })
     appendAssistantSegment(assistantSegment)
 
-    const finalAnswer = finalAnswerRef(assistantMessages, showReasoning, detail, isRenderable)
-    const finalAnswerIndex = finalAnswer
-      ? rows.findIndex(
-          (row) =>
-            row._tag === "AssistantPart" &&
-            (row.group.type === "part"
-              ? sameRef(row.group.ref, finalAnswer)
-              : row.group.refs.some((ref) => sameRef(ref, finalAnswer))),
-        )
-      : -1
+    const finalAnswerIndex = finalAnswerRowIndex(assistantMessages, rows)
     const finalAnswerRow = rows[finalAnswerIndex]
-    if (
-      finalAnswerRow?._tag === "AssistantPart" &&
-      rows.slice(0, finalAnswerIndex).some((row) => row._tag !== "TurnGap" && row._tag !== "UserMessage")
-    ) {
+    if (finalAnswerRow?._tag === "AssistantPart") {
       rows[finalAnswerIndex] = new TimelineRow.AssistantPart({ ...finalAnswerRow, spacing: undefined })
       rows.splice(
         finalAnswerIndex,
@@ -451,38 +439,30 @@ export namespace Timeline {
   }
 }
 
-function finalAnswerRef(
+function finalAnswerRowIndex(
   messages: SessionMessageAssistant[],
-  showReasoning: boolean,
-  detail: TimelineDetail | undefined,
-  isRenderable: (content: Content, showReasoning: boolean, detail: TimelineDetail | undefined, partID: string) => boolean,
+  rows: TimelineRow.TimelineRow[],
 ) {
-  const texts = messages.flatMap((message) =>
-    Timeline.contentEntries(message).flatMap((entry) =>
-      entry.content.type === "text" ? [{ message, id: entry.id, content: entry.content }] : [],
-    ),
+  const eligible = new Map(
+    messages
+      .filter(
+        (message) =>
+          message.finish === "stop" && message.time.completed !== undefined && !message.error && !message.retry,
+      )
+      .map((message) => [message.id, message] as const),
   )
-  const explicit = texts.find(
-    (entry) =>
-      entry.content.state?.phase === "final_answer" &&
-      isRenderable(entry.content, showReasoning, detail, entry.id),
-  )
-  if (explicit) return { messageID: explicit.message.id, partID: explicit.id }
-  if (texts.some((entry) => typeof entry.content.state?.phase === "string")) return
-
-  const fallback = texts.find(
-    (entry) =>
-      entry.message.finish === "stop" &&
-      entry.message.time.completed !== undefined &&
-      !entry.message.error &&
-      !entry.message.retry &&
-      isRenderable(entry.content, showReasoning, detail, entry.id),
-  )
-  if (fallback) return { messageID: fallback.message.id, partID: fallback.id }
-}
-
-function sameRef(a: PartRef, b: PartRef) {
-  return a.messageID === b.messageID && a.partID === b.partID
+  // Text always owns an individual row; projected rows already account for visibility.
+  const texts = rows.flatMap((row, index) => {
+    if (row._tag !== "AssistantPart" || row.group.type !== "part") return []
+    const content = Timeline.resolveContent(eligible.get(row.group.ref.messageID), row.group.ref.partID)
+    return content?.type === "text" ? [{ index, messageID: row.group.ref.messageID, content }] : []
+  })
+  const activity = rows.findIndex((row) => row._tag !== "TurnGap" && row._tag !== "UserMessage")
+  const explicit = texts.find((entry) => entry.content.state?.phase === "final_answer" && entry.index > activity)
+  if (explicit) return explicit.index
+  // Phase is optional provider metadata, so it must not veto the legacy fallback.
+  const fallback = texts.find((entry) => entry.messageID === texts.at(-1)?.messageID)
+  return fallback && fallback.index > activity ? fallback.index : -1
 }
 
 function isInterrupted(error: SessionMessageAssistant["error"]) {
