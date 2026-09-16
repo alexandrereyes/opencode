@@ -82,6 +82,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const i18n = useI18n()
   const language = useLanguage()
   const touch = createMediaQuery("(pointer: coarse)")
+  const mobile = createMediaQuery("(max-width: 767px)")
   const state = props.controller.state
   const autocorrect = createMemo(() => touch() && state.mode === "normal")
   const view = props.controller.view
@@ -446,26 +447,31 @@ export function ComposerEditor(props: ComposerEditorProps) {
         />
       </Show>
       <Show when={!view.draftOnly && state.popover.type !== "closed"}>
-        <ComposerEditorPopover
-          floating={!!props.compact}
-          anchor={() => rootHost}
-          emptyLabel={i18n.t("ui.promptInput.noMatchingItems")}
-          items={props.controller.suggestions()}
-          activeID={state.popover.type === "closed" ? undefined : state.popover.activeID}
-          search={
-            state.popover.type === "command-menu"
-              ? {
-                  value: state.popover.query,
-                  label: i18n.t("ui.promptInput.commands"),
-                  placeholder: "/",
-                  onValueChange: props.controller.setQuery,
-                  onKeyDown: props.controller.onKeyDown,
-                }
-              : undefined
-          }
-          onActiveChange={(item) => props.controller.dispatch({ type: "popover.active", id: item.id })}
-          onSelect={(item) => props.controller.dispatch({ type: "popover.select", item })}
-        />
+        {/* Positioning observers belong to one popup node, including across layout changes. */}
+        <Show when={props.compact || mobile() ? "floating" : "inline"} keyed>
+          {(placement) => (
+            <ComposerEditorPopover
+              floating={placement === "floating"}
+              anchor={() => rootHost}
+              emptyLabel={i18n.t("ui.promptInput.noMatchingItems")}
+              items={props.controller.suggestions()}
+              activeID={state.popover.type === "closed" ? undefined : state.popover.activeID}
+              search={
+                state.popover.type === "command-menu"
+                  ? {
+                      value: state.popover.query,
+                      label: i18n.t("ui.promptInput.commands"),
+                      placeholder: "/",
+                      onValueChange: props.controller.setQuery,
+                      onKeyDown: props.controller.onKeyDown,
+                    }
+                  : undefined
+              }
+              onActiveChange={(item) => props.controller.dispatch({ type: "popover.active", id: item.id })}
+              onSelect={(item) => props.controller.dispatch({ type: "popover.select", item })}
+            />
+          )}
+        </Show>
       </Show>
       <form
         data-component="composer"

@@ -200,7 +200,105 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toHaveCount(0)
   expect(appMentionRequests).toHaveLength(3)
 
+  // Keep suggestions open across both layout breakpoints: their positioning
+  // lifecycle must follow the rendered popup when it enters or leaves a Portal.
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(editor).toHaveText("@")
+    await expect
+      .poll(() =>
+        editor.evaluate((element) => {
+          const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
+          const popup = document.querySelector('[data-component="composer-suggestions"]')!.getBoundingClientRect()
+          return {
+            fits: popup.height > 0 && popup.top >= 0 && popup.left >= 0 && popup.right <= innerWidth,
+            gap: Math.round(anchor.top - popup.bottom),
+          }
+        }),
+      )
+      .toEqual({ fits: true, gap: 8 })
+  }
+  await page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` }).click()
+  await expect(editor.locator(`[data-mention="session"][data-id="${secondID}"]`)).toHaveText("@Shared work")
+
   await page.setViewportSize({ width: 390, height: 844 })
+  await editor.fill("")
+  await expect(page.locator('[data-component="composer-suggestions"]')).toHaveCount(0)
+  await expect
+    .poll(() => editor.evaluate((element) => element.getBoundingClientRect().top > innerHeight - 200))
+    .toBe(true)
+  // Model WebKit's panned client rects with the keyboard open, retaining the
+  // layout origin for fixed CSS coordinates (the same boundary as quote comments).
+  await editor.evaluate((element) => {
+    const original = Element.prototype.getBoundingClientRect
+    const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
+    const offset = Math.max(1, anchor.top - 180)
+    Object.defineProperties(window.visualViewport, {
+      offsetTop: { configurable: true, value: offset },
+      height: { configurable: true, value: innerHeight - offset },
+    })
+    Element.prototype.getBoundingClientRect = function () {
+      const rect = original.call(this)
+      return new DOMRect(rect.x, rect.y - offset, rect.width, rect.height)
+    }
+    window.addEventListener(
+      "restore-client-rects",
+      () => {
+        Element.prototype.getBoundingClientRect = original
+      },
+      { once: true },
+    )
+  })
+  await editor.fill("@")
+  const suggestions = page.locator('[data-component="composer-suggestions"]')
+  await expect(suggestions).toBeVisible()
+  await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event("resize")))
+  await expect
+    .poll(() =>
+      suggestions.evaluate((element) => {
+        const bounds = element.getBoundingClientRect()
+        return bounds.top >= 8 && bounds.bottom <= window.visualViewport!.height
+      }),
+    )
+    .toBe(true)
+  await expect
+    .poll(() =>
+      suggestions.evaluate((element) => {
+        const viewport = window.visualViewport!
+        const popup = element.getBoundingClientRect()
+        return Array.from(element.querySelectorAll("[data-suggestion-id]")).filter((item) => {
+          const bounds = item.getBoundingClientRect()
+          return (
+            bounds.top >= Math.max(0, popup.top) &&
+            bounds.bottom <= Math.min(viewport.height, popup.bottom) &&
+            bounds.left >= popup.left &&
+            bounds.right <= popup.right
+          )
+        }).length
+      }),
+    )
+    .toBeGreaterThanOrEqual(3)
+  await expect
+    .poll(() =>
+      editor.evaluate((element) => {
+        const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
+        const popup = document.querySelector('[data-component="composer-suggestions"]')!.getBoundingClientRect()
+        return anchor.top - popup.bottom
+      }),
+    )
+    .toBeCloseTo(8, 0)
+  await expect(suggestions).toHaveCSS("overflow-y", "auto")
+  await expect.poll(() => suggestions.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  const olderSession = suggestions.getByRole("button", { name: `Session, Shared work, /repo/one, ${firstID}` })
+  await olderSession.scrollIntoViewIfNeeded()
+  await olderSession.click()
+  await expect(editor.locator(`[data-mention="session"][data-id="${firstID}"]`)).toHaveText("@Shared work")
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("restore-client-rects"))
+    Reflect.deleteProperty(window.visualViewport!, "offsetTop")
+    Reflect.deleteProperty(window.visualViewport!, "height")
+    window.visualViewport?.dispatchEvent(new Event("resize"))
+  })
   for (const value of [
     { query: "@AAAA", id: unbrokenID },
     { query: "@Long", id: multiwordID },
