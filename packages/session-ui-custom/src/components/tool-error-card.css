@@ -11,7 +11,7 @@
   /* Figma's leading-none would clip Inter descenders at 13px; keep the compact metric. */
   [data-slot="basic-tool-tool-title"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 530;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;
@@ -20,7 +20,7 @@
 
   [data-slot="basic-tool-tool-subtitle"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 440;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;
@@ -29,7 +29,7 @@
 
   [data-slot="tool-error-card-summary"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 440;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;
@@ -99,7 +99,7 @@
 
   [data-slot="tool-error-card-content"] [data-slot="card-description"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 440;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;

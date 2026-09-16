@@ -524,6 +524,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
           />
           <Show when={!props.controller.value()}>
             <div
+              data-slot="composer-placeholder"
               dir={state.mode === "normal" ? "auto" : "ltr"}
               class="pointer-events-none absolute inset-x-0 top-0 text-[13px] font-[440] leading-5 text-v2-text-text-faint"
               classList={{
@@ -542,7 +543,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
         </ScrollView>
 
         <Show when={!props.compact}>
-          <div class="flex h-11 items-center px-2">
+          <div data-slot="composer-toolbar" class="flex h-11 items-center px-2">
             <div
               class="flex shrink-0 items-center"
               aria-hidden={state.mode === "shell"}

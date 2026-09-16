@@ -223,6 +223,7 @@ export function SessionProjectMenu(props: {
     >
       <Tooltip placement="bottom" value={language.t("session.new.chats")} class="flex shrink-0">
         <span
+          data-slot="session-chat-trigger"
           class="flex size-7 items-center justify-center text-v2-icon-icon-muted"
           aria-label={language.t("session.new.chats")}
         >

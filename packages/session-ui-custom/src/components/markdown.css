@@ -13,7 +13,7 @@
   overflow-wrap: break-word;
   color: var(--v2-text-text-base);
   font-family: var(--font-family-sans);
-  font-size: var(--font-size-base); /* 14px */
+  font-size: var(--font-size-base);
   line-height: 160%;
 
   [data-markdown-word] {
@@ -58,7 +58,7 @@
   }
 
   h3 {
-    font-size: 13px;
+    font-size: var(--font-size-small);
     color: var(--v2-text-text-base);
     font-weight: var(--font-weight-medium);
     margin-top: 20px;
@@ -69,7 +69,7 @@
   h4,
   h5,
   h6 {
-    font-size: 13px;
+    font-size: var(--font-size-small);
     color: var(--v2-text-text-muted);
     font-weight: var(--font-weight-medium);
     margin-top: 20px;
@@ -183,7 +183,7 @@
   .shiki {
     background: var(--color-background-stronger);
     color: var(--text-base);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     padding: 12px;
     border-radius: 6px;
     border: 0.5px solid var(--v2-border-border-base);
@@ -382,4 +382,47 @@
 [data-component="markdown"] a.external-link:hover > code {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+@media (max-width: 47.999rem) {
+  [data-component="markdown"] {
+    line-height: 150%;
+
+    h1 {
+      font-size: 19px;
+      margin-top: 30px;
+      margin-bottom: 13px;
+    }
+
+    h2 {
+      font-size: 17px;
+      margin-top: 26px;
+      margin-bottom: 11px;
+    }
+
+    h3,
+    h4,
+    h5,
+    h6 {
+      font-size: var(--font-size-small);
+    }
+
+    p {
+      margin-bottom: 13px;
+    }
+
+    ul,
+    ol {
+      margin-bottom: 13px;
+      padding-inline-start: 34px;
+    }
+
+    li {
+      margin-bottom: 9px;
+    }
+
+    .shiki {
+      padding: 13px;
+    }
+  }
 }

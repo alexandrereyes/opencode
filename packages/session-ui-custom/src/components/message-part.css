@@ -291,7 +291,7 @@
   [data-component="markdown"] {
     margin-top: 0;
     font-style: normal;
-    font-size: 13px;
+    font-size: var(--font-size-small);
     line-height: var(--line-height-base);
     color: var(--v2-text-text-muted);
 
@@ -432,7 +432,7 @@
   [data-slot="bash-pre"] code {
     font-family: var(--font-family-mono);
     font-feature-settings: var(--font-family-mono--font-feature-settings);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     line-height: var(--line-height-large);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -530,8 +530,8 @@
   min-width: 0;
   width: 100%;
   font-family: var(--font-family-sans);
-  font-size: 13px;
-  line-height: 16px;
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
   color: var(--v2-text-text-muted);
 }
 
@@ -563,7 +563,7 @@
   cursor: pointer;
   width: fit-content;
   font-family: var(--font-family-sans);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   font-weight: var(--font-weight-regular, 440);
   line-height: var(--line-height-compact);
   letter-spacing: -0.04px;
@@ -627,7 +627,7 @@
     gap: 0;
     color: var(--v2-text-text-muted);
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 440;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;
@@ -695,7 +695,7 @@
     [data-slot="basic-tool-tool-arg"],
     [data-slot="context-tool-group-matches"] {
       font-family: var(--v2-font-family-sans);
-      font-size: 13px;
+      font-size: var(--font-size-small);
       font-weight: 440;
       line-height: var(--line-height-compact);
       letter-spacing: -0.04px;
@@ -833,7 +833,7 @@
 
   [data-slot="permission-header-title"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-base);
@@ -850,7 +850,7 @@
 
   [data-slot="permission-hint"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-muted);
@@ -875,7 +875,7 @@
     }
 
     code {
-      font-size: 14px;
+      font-size: var(--font-size-base);
       line-height: var(--line-height-large);
     }
   }
@@ -928,7 +928,7 @@
 
   [data-slot="question-header-title"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-base);
@@ -995,7 +995,7 @@
 
   [data-slot="question-text"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-base);
@@ -1007,7 +1007,7 @@
 
   [data-slot="question-hint"] {
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-muted);
@@ -1133,7 +1133,7 @@
 
   [data-slot="option-label"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-base);
@@ -1141,7 +1141,7 @@
 
   [data-slot="option-description"] {
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-muted);
@@ -1169,7 +1169,7 @@
     box-shadow: none;
     outline: none;
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-muted);
@@ -1239,7 +1239,7 @@
   [data-slot="question-minimized-summary"] {
     flex: 1;
     font-family: var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-large);
     color: var(--v2-text-text-base);
@@ -1256,7 +1256,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    font-size: 13px;
+    font-size: var(--font-size-small);
 
     [data-slot="question-text"] {
       color: var(--v2-text-text-muted);
@@ -1398,7 +1398,7 @@
   min-width: 0;
   max-width: 100%;
   font-family: var(--font-family-sans);
-  font-size: 13px;
+  font-size: var(--font-size-small);
   /* Loaded values truncate, so they require the full compact line box for descenders. */
   line-height: var(--line-height-compact);
   letter-spacing: -0.04px;

@@ -53,3 +53,26 @@
     opacity: 1;
   }
 }
+
+@media (max-width: 47.999rem) {
+  [data-session-title] {
+    background-image: linear-gradient(to bottom, var(--v2-background-bg-base) 52px, transparent);
+    padding-bottom: 18px;
+  }
+
+  [data-session-title] > div {
+    min-height: 52px;
+    height: 52px;
+  }
+
+  :is([data-slot="session-title-parent"], [data-slot="session-title-child"]) {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+  }
+
+  [data-slot="session-project-trigger"],
+  [data-slot="session-chat-trigger"] {
+    width: 32px;
+    height: 32px;
+  }
+}

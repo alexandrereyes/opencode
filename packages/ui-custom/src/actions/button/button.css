@@ -15,7 +15,7 @@
   border-radius: 6px;
   font-style: normal;
   font-weight: 530;
-  font-size: 13px;
+  font-size: var(--font-size-small);
   line-height: 20px;
   color: var(--v2-text-text-base);
   text-shadow: none;
@@ -36,18 +36,18 @@
 }
 
 [data-component="button-v2"][data-size="normal"] {
-  height: 28px;
+  height: var(--control-height-base);
   padding: 0 11px;
 }
 
 [data-component="button-v2"][data-size="small"] {
-  height: 24px;
+  height: var(--control-height-small);
   padding: 0 9px;
   border-radius: 4px;
 }
 
 [data-component="button-v2"][data-size="large"] {
-  height: 32px;
+  height: var(--control-height-large);
   padding: 0 15px;
 }
 

@@ -59,7 +59,7 @@
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
-    font-size: 13px;
+    font-size: var(--font-size-small);
   }
 
   [data-slot="basic-tool-tool-info-structured"] {
@@ -84,7 +84,7 @@
   [data-slot="basic-tool-tool-title"] {
     flex-shrink: 0;
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-style: normal;
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-compact);
@@ -109,7 +109,7 @@
     white-space: nowrap;
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-style: normal;
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-compact);
@@ -155,7 +155,7 @@
     white-space: nowrap;
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-style: normal;
     font-weight: var(--font-weight-regular);
     line-height: var(--line-height-compact);
@@ -184,7 +184,7 @@
 
   [data-slot="basic-tool-tool-title"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 530;
     /* Keep compact text on the shared metric; solid 13px line boxes clip Inter descenders. */
     line-height: var(--line-height-compact);
@@ -193,7 +193,7 @@
 
   [data-slot="basic-tool-tool-subtitle"] {
     font-family: var(--v2-font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-weight: 440;
     line-height: var(--line-height-compact);
     letter-spacing: -0.04px;
@@ -284,7 +284,7 @@
   [data-component="task-tool-title"] {
     flex-shrink: 0;
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-small);
     font-style: normal;
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-compact);
@@ -351,7 +351,7 @@
       font-family: var(--v2-font-family-sans, "Inter", sans-serif);
       font-style: normal;
       font-weight: 530;
-      font-size: 13px;
+      font-size: var(--font-size-small);
       line-height: 20px;
       letter-spacing: -0.04px;
       color: var(--v2-text-text-base);
@@ -363,7 +363,7 @@
       font-family: var(--v2-font-family-sans, "Inter", sans-serif);
       font-style: normal;
       font-weight: 440;
-      font-size: 13px;
+      font-size: var(--font-size-small);
       line-height: 20px;
       letter-spacing: -0.04px;
       color: var(--v2-text-text-base);

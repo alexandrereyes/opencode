@@ -177,8 +177,8 @@ export function Titlebar(props: {
         height:
           platform.platform === "web"
             ? bottom()
-              ? "calc(28px + max(8px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))"
-              : "calc(28px + max(8px, env(safe-area-inset-top, 0px)))"
+              ? `calc(${mobile() ? "32px" : "28px"} + max(8px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))`
+              : `calc(${mobile() ? "32px" : "28px"} + max(8px, env(safe-area-inset-top, 0px)))`
             : undefined,
         "padding-top": bottom() ? "0px" : "env(safe-area-inset-top, 0px)",
         "padding-bottom": bottom() ? "var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))" : "0px",
@@ -659,7 +659,7 @@ export function Titlebar(props: {
                     >
                       <MobileDrawerTrigger
                         data-slot="mobile-tabs-trigger"
-                        class="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base focus-visible:outline-none [app-region:no-drag]"
+                        class="flex h-[var(--control-height-base)] min-w-0 flex-1 items-center gap-2 rounded-[6px] px-2 text-sm leading-[var(--line-height-compact)] text-v2-text-text-base focus-visible:outline-none [app-region:no-drag]"
                         aria-label={language.t("titlebar.tabs")}
                       >
                         <Show when={currentTab()} fallback={<Icon name="grid-plus" class="shrink-0" />}>
@@ -707,7 +707,7 @@ export function Titlebar(props: {
                       <button
                         type="button"
                         data-action="mobile-titlebar-new-session"
-                        class="flex h-7 shrink-0 items-center rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
+                        class="flex h-[var(--control-height-base)] shrink-0 items-center rounded-[6px] px-2 text-sm leading-[var(--line-height-compact)] text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02 [app-region:no-drag]"
                         onClick={() => {
                           openNewTab()
                           setMobileTabs("open", false)

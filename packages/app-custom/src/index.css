@@ -588,3 +588,41 @@
     padding-block: 0;
   }
 }
+
+@media (max-width: 47.999rem) {
+  [data-slot="session-mobile-view-navigation"]
+    [data-slot="session-mobile-view-tabs"]
+    [data-slot="tabs-v2-trigger"] {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+  }
+
+  [data-slot="session-chat-panel"] {
+    font-size: var(--font-size-base);
+  }
+
+  [data-slot="session-chat-panel"]
+    :is(
+      [data-component="session-background-summary"],
+      [data-component="session-background-list-item"],
+      [data-component="session-working"],
+      [data-slot="session-timeline-notice"],
+      [data-slot="session-title-parent"],
+      [data-slot="session-title-child"]
+    ) {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+  }
+
+  [data-component="session-composer-dock"] {
+    padding-bottom: var(--mobile-space-block);
+  }
+
+  [data-component="session-composer-dock"] > div {
+    padding-inline: var(--mobile-space-inline);
+  }
+
+  [data-slot="session-chat-panel"] [data-slot="session-turn-list"] {
+    gap: 26px;
+  }
+}

@@ -5,10 +5,18 @@
     "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-family-mono--font-feature-settings: normal;
 
+  --font-size-x-small: 11px;
   --font-size-small: 13px;
   --font-size-base: 14px;
   --font-size-large: 16px;
   --font-size-x-large: 20px;
+  --control-height-small: 24px;
+  --control-height-base: 28px;
+  --control-height-large: 32px;
+  --icon-size-small: 14px;
+  --icon-size-base: 16px;
+  --icon-size-large: 20px;
+  --mobile-navigation-height: 36px;
   --font-weight-regular: 400;
   --font-weight-medium: 500;
   --line-height-normal: 130%;

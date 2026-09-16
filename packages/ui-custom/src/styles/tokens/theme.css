@@ -138,6 +138,27 @@
     --line-height-tight: 12px;
     --line-height-compact: 16px;
     --line-height-base: 20px;
+
+    /* Mobile comfort scale: one shared step for type, controls, icons, and rhythm. */
+    @media (max-width: 47.999rem) {
+      --font-size-x-small: 12px;
+      --font-size-small: 14px;
+      --font-size-base: 16px;
+      --font-size-large: 18px;
+      --font-size-x-large: 22px;
+      --line-height-tight: 14px;
+      --line-height-compact: 18px;
+      --line-height-base: 22px;
+      --control-height-small: 28px;
+      --control-height-base: 32px;
+      --control-height-large: 36px;
+      --icon-size-small: 15px;
+      --icon-size-base: 18px;
+      --icon-size-large: 22px;
+      --mobile-navigation-height: 40px;
+      --mobile-space-inline: 14px;
+      --mobile-space-block: 14px;
+    }
   }
 
   /* OS preference fallback (no JS needed) */

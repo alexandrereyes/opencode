@@ -50,7 +50,10 @@ export function SessionMobileViewTabs(props: {
       data-slot="session-mobile-view-navigation"
     >
       <Tabs value={props.current} variant="line" class="!h-auto min-w-0 flex-1" data-slot="session-mobile-view-tabs">
-        <Tabs.List aria-label={language.t("session.view.select")} class="!h-9 !gap-0 !px-0 before:!hidden">
+        <Tabs.List
+          aria-label={language.t("session.view.select")}
+          class="!h-[var(--mobile-navigation-height)] !gap-0 !px-0 before:!hidden"
+        >
           <For each={["session", "changes", "files", "usage"] as const}>
             {(view) => (
               <Tabs.Trigger

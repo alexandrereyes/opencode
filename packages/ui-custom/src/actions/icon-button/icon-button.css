@@ -28,19 +28,19 @@
 }
 
 [data-component="icon-button-v2"][data-size="small"] {
-  width: 20px;
-  height: 20px;
+  width: calc(var(--control-height-small) - 4px);
+  height: calc(var(--control-height-small) - 4px);
   border-radius: 4px;
 }
 
 [data-component="icon-button-v2"][data-size="normal"] {
-  width: 24px;
-  height: 24px;
+  width: calc(var(--control-height-base) - 4px);
+  height: calc(var(--control-height-base) - 4px);
 }
 
 [data-component="icon-button-v2"][data-size="large"] {
-  width: 28px;
-  height: 28px;
+  width: calc(var(--control-height-large) - 4px);
+  height: calc(var(--control-height-large) - 4px);
 }
 
 [data-component="icon-button-v2"] [data-slot="icon-svg"] {

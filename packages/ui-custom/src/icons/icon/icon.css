@@ -1,3 +1,18 @@
 :dir(rtl) [data-slot="icon-svg"][data-directional] {
   transform: scaleX(-1);
 }
+
+[data-slot="icon-svg"][width="14"] {
+  width: var(--icon-size-small);
+  height: var(--icon-size-small);
+}
+
+[data-slot="icon-svg"][width="16"] {
+  width: var(--icon-size-base);
+  height: var(--icon-size-base);
+}
+
+[data-slot="icon-svg"][width="20"] {
+  width: var(--icon-size-large);
+  height: var(--icon-size-large);
+}

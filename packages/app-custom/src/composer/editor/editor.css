@@ -78,3 +78,37 @@
 [data-color-scheme="dark"] [data-component="composer-suggestions"] [data-active] {
   background: var(--v2-alpha-light-10);
 }
+
+@media (max-width: 47.999rem) {
+  [data-component="composer"]:not([data-compact="true"]) {
+    min-height: 106px;
+  }
+
+  [data-component="composer-scroll"] {
+    min-height: 66px;
+  }
+
+  [data-slot="composer-editor-host"],
+  [data-slot="composer-placeholder"] {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
+  [data-slot="composer-editor-host"] > .cm-editor {
+    min-height: 66px;
+  }
+
+  [data-slot="composer-toolbar"] {
+    height: 48px;
+    padding-inline: 10px;
+  }
+
+  [data-slot="composer-controls"] {
+    margin-inline-start: 6px;
+    margin-inline-end: 14px;
+  }
+
+  [data-slot="composer-controls"] > div {
+    gap: 6px;
+  }
+}
