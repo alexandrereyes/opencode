@@ -238,9 +238,9 @@
 }
 
 [data-titlebar-tab]:not([data-sidebar-time])[data-title-overflow="true"]:not([data-editing="true"])
-  [data-slot="tab-link"],
+  [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)),
 [data-titlebar-tab]:not([data-sidebar-time]):is(:hover, [data-active="true"]):not([data-editing="true"])
-  [data-slot="tab-link"] {
+  [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)) {
   --tab-title-fade-offset: 4px;
   -webkit-mask-image: linear-gradient(
     to right,
@@ -259,9 +259,9 @@
 }
 
 [data-titlebar-tab]:not([data-sidebar-time])[data-title-overflow="true"]:not([data-editing="true"]):dir(rtl)
-  [data-slot="tab-link"],
+  [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)),
 [data-titlebar-tab]:not([data-sidebar-time]):is(:hover, [data-active="true"]):not([data-editing="true"]):dir(rtl)
-  [data-slot="tab-link"] {
+  [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)) {
   -webkit-mask-image: linear-gradient(
     to left,
     black 0,
@@ -312,9 +312,10 @@
     background: linear-gradient(var(--tab-overlay), var(--tab-overlay)), var(--tab-base);
   }
 
-  [data-titlebar-tab]:not([data-sidebar-time]):not([data-editing="true"]) [data-slot="tab-link"],
+  [data-titlebar-tab]:not([data-sidebar-time]):not([data-editing="true"])
+    [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)),
   [data-titlebar-tab]:not([data-sidebar-time])[data-title-overflow="true"]:not([data-editing="true"])
-    [data-slot="tab-link"] {
+    [data-slot="tab-link"]:not(:where([data-slot="mobile-tab-content"] *)) {
     --tab-title-fade-offset: 24px;
     --tab-title-fade-direction: to right;
     -webkit-mask-image: linear-gradient(
