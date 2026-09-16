@@ -40,6 +40,11 @@
   color: var(--v2-text-text-muted);
 }
 
+[data-titlebar-tab][data-sidebar-actions]:not([data-active="true"]):not([data-editing="true"])
+  [data-slot="tab-title"] {
+  color: var(--v2-text-text-muted);
+}
+
 [data-titlebar-tab][data-sidebar-actions]:is(:hover, :focus-within) [data-slot="tab-quick-actions"] {
   opacity: 1;
   pointer-events: auto;
