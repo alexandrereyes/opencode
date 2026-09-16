@@ -827,7 +827,7 @@ export function SessionSidebar(props: {
                                             )
                                       const id = createUniqueId()
                                       return (
-                                        <section data-worktree-key={group().key} class="mt-2">
+                                        <section data-worktree-key={group().key} class="ms-5 mt-2">
                                           <div class="group/worktree flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
                                             <button
                                               type="button"
