@@ -179,8 +179,8 @@ export function Titlebar(props: {
         height:
           platform.platform === "web"
             ? bottom()
-              ? `calc(${mobile() ? "32px" : "28px"} + max(8px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))`
-              : `calc(${mobile() ? "32px" : "28px"} + max(8px, env(safe-area-inset-top, 0px)))`
+              ? `calc(${mobile() ? "44px" : "28px"} + max(8px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))`
+              : `calc(${mobile() ? "44px" : "28px"} + max(8px, env(safe-area-inset-top, 0px)))`
             : undefined,
         "padding-top": bottom() ? "0px" : "env(safe-area-inset-top, 0px)",
         "padding-bottom": bottom() ? "var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))" : "0px",

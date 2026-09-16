@@ -331,6 +331,7 @@ export function PromptProjectSelector(props: {
       <Menu.Trigger as={ProjectTrigger} ref={setTriggerRef} controller={props.controller} />
       <Menu.Portal>
         <Menu.Content
+          data-mobile-menu="session-location"
           ref={contentRef}
           id="prompt-project-menu"
           class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none [&[data-closed]]:!animate-none"
@@ -471,7 +472,7 @@ export function PromptProjectSelector(props: {
                   <span class="min-w-0 flex-1 truncate leading-5">{props.controller.labels.add()}</span>
                 </Menu.SubTrigger>
                 <Menu.Portal>
-                  <Menu.SubContent class="max-h-[224px] min-w-[180px] overflow-y-auto rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none">
+                  <Menu.SubContent data-mobile-menu="session-location" class="max-h-[224px] min-w-[180px] overflow-y-auto rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none">
                     <For each={props.controller.servers()}>
                       {(server) => <ServerAction server={server!} onSelect={selectAction} />}
                     </For>

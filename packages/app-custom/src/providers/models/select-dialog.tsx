@@ -383,6 +383,7 @@ function ModelSelectorPopoverView(props: {
       <Menu.Trigger as={props.trigger} />
       <Menu.Portal>
         <Menu.Content
+          data-slot="composer-model-menu"
           ref={(element: HTMLDivElement) => (contentRef = element)}
           class="w-[284px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
           onPointerDownOutside={dismiss.preventTriggerRestore}
@@ -390,7 +391,7 @@ function ModelSelectorPopoverView(props: {
           onCloseAutoFocus={dismiss.onCloseAutoFocus}
         >
           <div class="flex flex-col p-0.5">
-            <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
+            <div data-slot="composer-model-search" class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" size="small" class="shrink-0" />
               <input
                 ref={(el) => (searchRef = el)}

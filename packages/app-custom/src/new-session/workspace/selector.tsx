@@ -109,7 +109,7 @@ export function PromptWorkspaceSelector(props: {
             <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
           </Menu.Trigger>
           <Menu.Portal>
-            <Menu.Content class="w-[200px]">
+            <Menu.Content data-mobile-menu="session-location" class="w-[200px]">
               <Menu.Group>
                 <Menu.GroupLabel>{language.t("session.new.workspace.runIn")}</Menu.GroupLabel>
                 <Menu.Item onSelect={() => select("main")}>
@@ -177,7 +177,7 @@ export function PromptWorkspaceSelector(props: {
                     </span>
                   </Menu.SubTrigger>
                   <Menu.Portal>
-                    <Menu.SubContent class="max-h-[66.667dvh] w-[200px] overflow-y-auto !pb-0 [&>[data-component=menu-v2-item]:last-child]:mb-0.5 [@media(max-height:600px)]:max-h-[calc(100dvh-48px)]">
+                    <Menu.SubContent data-mobile-menu="session-location" class="max-h-[66.667dvh] w-[200px] overflow-y-auto !pb-0 [&>[data-component=menu-v2-item]:last-child]:mb-0.5 [@media(max-height:600px)]:max-h-[calc(100dvh-48px)]">
                       <Show when={props.workspaces.length >= 10}>
                         <div class="flex h-7 items-center gap-2 rounded-sm ps-3 pe-2 text-v2-icon-icon-muted">
                           <Icon name="magnifying-glass" size="small" class="shrink-0" />
@@ -252,6 +252,7 @@ export function PromptWorkspaceSelector(props: {
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Content
+                data-mobile-menu="session-location"
                 class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
                 onOpenAutoFocus={(event) => {
                   event.preventDefault()

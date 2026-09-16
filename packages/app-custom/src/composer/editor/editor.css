@@ -80,6 +80,54 @@
 }
 
 @media (max-width: 47.999rem) {
+  :is([data-slot="composer-model-menu"], [data-slot="composer-option-menu"]) :is([role="menuitem"], [role="menuitemradio"], input) {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+    min-height: 40px;
+  }
+
+  [data-slot="composer-model-search"] {
+    height: 44px;
+  }
+
+  :is([data-slot="composer-model-menu"], [data-slot="composer-option-menu"]) [data-slot="menu-v2-item-content"] {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
+  [data-slot="composer-model-menu"] [data-slot="menu-v2-group-label"] {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+  }
+
+  [data-component="composer"] [data-action="composer-submit"][data-size] {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+  }
+
+  [data-action="composer-submit"] [data-slot="icon-svg"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  [data-component="composer-suggestions"],
+  [data-component="composer-suggestions"] input,
+  [data-slot="composer-suggestion-title"] {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
+  [data-component="composer-suggestions"] [data-suggestion-id] {
+    min-height: 44px;
+  }
+
+  [data-slot="composer-suggestion-detail"],
+  [data-slot="composer-suggestion-kind"] {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+  }
+
   [data-component="composer"]:not([data-compact="true"]) {
     min-height: 106px;
   }

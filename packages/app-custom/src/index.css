@@ -25,18 +25,6 @@
   font-display: swap;
 }
 
-@media (display-mode: standalone) {
-  /* WebKit excludes safe-area insets from dvh in installed apps. */
-  #root {
-    height: 100vh;
-  }
-}
-
-/* iOS can report navigator.standalone without matching display-mode. */
-#root[data-standalone="true"] {
-  height: 100vh;
-}
-
 @layer components {
   [data-slot="session-chat-panel"][data-scrollbar-hidden="true"]
     [data-slot="session-timeline-scroll"]
@@ -590,6 +578,32 @@
 }
 
 @media (max-width: 47.999rem) {
+  [data-mobile-menu="session-location"] {
+    min-width: min(280px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+  }
+
+  [data-mobile-menu="session-location"] :is([role="menuitem"], [role="menuitemradio"], input) {
+    min-height: 40px;
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
+  [data-mobile-menu="session-location"] [data-slot="menu-v2-item-content"] {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
+  [data-mobile-menu="session-location"] [data-slot="menu-v2-group-label"] {
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-compact);
+    min-height: 32px;
+  }
+
+  [data-mobile-menu="session-location"] div:has(> input) {
+    min-height: 44px;
+  }
+
   [data-slot="session-mobile-view-navigation"]
     [data-slot="session-mobile-view-tabs"]
     [data-slot="tabs-v2-trigger"] {

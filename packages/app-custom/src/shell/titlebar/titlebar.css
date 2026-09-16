@@ -107,11 +107,29 @@
 [data-slot="mobile-tabs-drawer"] [data-titlebar-tab] [data-slot="tab-title"] {
   color: var(--v2-text-text-base);
   font-weight: 530;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
 }
 
 [data-slot="mobile-tabs-drawer"] [data-titlebar-tab] [data-slot="tab-project"] {
   color: var(--v2-text-text-faint);
   font-weight: 440;
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
+}
+
+[data-slot="mobile-tabs-drawer"] [data-titlebar-tab][data-orientation="vertical"] {
+  min-height: 56px;
+}
+
+[data-slot="mobile-tabs-drawer"] [data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-project"]) [data-slot="tab-link"] {
+  grid-template-rows: var(--line-height-base) var(--line-height-compact);
+}
+
+[data-slot="mobile-tabs-drawer"] :is([data-action^="mobile-tabs-"], [data-action="mobile-refresh-app"]) {
+  height: 44px;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
 }
 
 [data-slot="mobile-tab-swipe"] {
@@ -164,7 +182,7 @@
   grid-column: 3;
   grid-row: 1 / -1;
   color: var(--v2-text-text-faint);
-  font-size: 11px;
+  font-size: var(--font-size-small);
   line-height: var(--line-height-compact);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -251,5 +269,33 @@
     animation: titlebar-tab-fade-right linear both;
     animation-timeline: --titlebar-tabs-scroll;
     animation-range: calc(100% - 1.1px) calc(100% - 1px);
+  }
+}
+[data-slot="mobile-proxy-details"] :is(.text-13-regular, .text-13-medium) {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+}
+
+[data-slot="mobile-proxy-details"] .text-12-regular,
+[data-slot="mobile-tabs-drawer"] [data-slot="sidebar-subscriptions"] > button {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
+}
+
+[data-slot="mobile-proxy-details"] h2 {
+  font-size: var(--font-size-large);
+  line-height: var(--line-height-base);
+}
+
+[data-slot="mobile-proxy-details"] summary,
+[data-slot="mobile-proxy-details"] [data-component="icon-button-v2"] {
+  min-height: 44px;
+}
+@media (max-width: 767px) {
+  [data-slot="mobile-tabs-trigger"],
+  [data-action="mobile-titlebar-new-session"] {
+    height: 44px;
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
   }
 }

@@ -1,9 +1,17 @@
 @media (max-width: 767px) {
+  [data-component="home-screen"],
+  [data-component="home-session-search"] input,
+  [data-component="home-session-title"],
+  [data-component="home-session-rename"] {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+  }
+
   [data-component="home-session-row-container"][data-project-name="true"],
   [data-component="home-session-row-container"][data-project-name="true"] [data-component="home-session-row"],
   [data-component="home-session-row-container"][data-project-name="true"] [data-slot="home-session-editor"],
   [data-component="home-session-search-row"][data-project-name="true"] {
-    height: 48px;
+    height: 60px;
     padding-block: 0;
   }
 
@@ -20,7 +28,10 @@
   [data-project-name="true"] [data-slot="home-session-labels"] > * {
     max-width: 100%;
     flex: none;
-    font-size: 13px;
+  }
+
+  [data-component="home-session-project-name"] {
+    font-size: var(--font-size-small);
     line-height: var(--line-height-compact);
   }
 }

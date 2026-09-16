@@ -862,7 +862,7 @@ export function ComposerEditorSelect(props: {
           </span>
         </Menu.Trigger>
         <Menu.Portal>
-          <Menu.Content>
+          <Menu.Content data-slot="composer-option-menu">
             <Menu.RadioGroup value={props.current} onChange={props.onSelect}>
               <For each={props.options}>
                 {(option) => (
@@ -1015,10 +1015,11 @@ export function ComposerEditorPopover(props: {
                   }
                 >
                   <div class="flex min-w-0 flex-1 flex-col">
-                    <bdi dir="auto" class="truncate text-v2-text-text-base leading-4">
+                    <bdi data-slot="composer-suggestion-title" dir="auto" class="truncate text-v2-text-text-base leading-4">
                       {item.label}
                     </bdi>
                     <span
+                      data-slot="composer-suggestion-detail"
                       dir="ltr"
                       class="flex min-w-0 items-center gap-1 text-left text-[12px] leading-4 text-v2-text-text-muted"
                     >
@@ -1038,7 +1039,7 @@ export function ComposerEditorPopover(props: {
                 </Show>
               </div>
               <Show when={item.kind === "session"}>
-                <span class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted">{item.kindLabel}</span>
+                <span data-slot="composer-suggestion-kind" class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted">{item.kindLabel}</span>
               </Show>
               <Show when={item.keybind?.length}>
                 <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>

@@ -250,7 +250,7 @@ export const composerEditorTheme = EditorView.theme({
     minHeight: "60px",
     padding: "16px 16px 8px",
     fontFamily: "inherit",
-    fontSize: "13px",
+    fontSize: "inherit",
     fontWeight: "440",
     lineHeight: "var(--line-height-base)",
     caretColor: "var(--v2-text-text-base)",
