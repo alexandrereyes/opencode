@@ -10,6 +10,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { Tab } from "@/shell/tabs/tabs"
 import { subscriptionAccounts, subscriptionCapacity, subscriptionPool } from "@/session/files/subscription-pool"
+import { formatSubscriptionDate } from "./subscription-date"
 
 export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean; onOpenChange?: (open: boolean) => void }) {
   const global = useGlobal()
@@ -82,11 +83,8 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
       style: "percent",
       maximumFractionDigits: 0,
     }).format(value / 100)
-  const date = (value: number | string) =>
-    new Intl.DateTimeFormat(language.intl(), {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value))
+  const date = (value: number | string, weekdayFirst = false) =>
+    formatSubscriptionDate(value, language.intl(), weekdayFirst)
   const updated = () => {
     const at = pool().observedAt
     if (at === null)
@@ -270,7 +268,7 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
                           <Show when={account.resetAt}>
                             {(reset) => (
                               <span class="text-12-regular text-v2-text-text-muted">
-                                {language.t("context.overview.weeklyReset", { time: date(reset()) })}
+                                {language.t("context.overview.weeklyReset", { time: date(reset(), true) })}
                               </span>
                             )}
                           </Show>
