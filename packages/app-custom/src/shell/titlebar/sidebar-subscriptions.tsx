@@ -49,13 +49,17 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
   }
   const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], state.now))
   const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], state.now))
-  const nextRenewal = createMemo(() => {
+  const renewals = createMemo(() => {
     const resets = accounts().flatMap((account) =>
       account.plan === "pro" && account.enabled && account.authenticated && account.resetAt
         ? [Date.parse(account.resetAt)]
         : [],
     )
-    return resets.length ? Math.max(0, Math.ceil((Math.min(...resets) - state.now) / 86_400_000)) : undefined
+    return resets.length ? { min: Math.min(...resets), max: Math.max(...resets) } : undefined
+  })
+  const nextRenewal = createMemo(() => {
+    const first = renewals()?.min
+    return first === undefined ? undefined : Math.max(0, Math.ceil((first - state.now) / 86_400_000))
   })
   const plus = createMemo(() => {
     const members = accounts().filter((account) => account.plan === "plus" && account.enabled && account.authenticated)
@@ -200,7 +204,22 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
                     </span>
                   </Show>
                 </div>
-                <div class="flex flex-col gap-1 border-t border-border-weak-base pt-3 text-12-regular text-v2-text-text-muted">
+                <hr class="border-0 border-t border-border-weak-base" />
+                <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
+                  <span>{language.t("context.overview.renewals")}</span>
+                  <span>
+                    {language.t("context.overview.renewalMin", {
+                      date: renewals() ? date(renewals()!.min) : language.t("sidebar.proxy.unavailable"),
+                    })}
+                  </span>
+                  <span>
+                    {language.t("context.overview.renewalMax", {
+                      date: renewals() ? date(renewals()!.max) : language.t("sidebar.proxy.unavailable"),
+                    })}
+                  </span>
+                </div>
+                <hr class="border-0 border-t border-border-weak-base" />
+                <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
                   <div class="flex items-center justify-between gap-2">
                     <span>{language.t("context.overview.banked")}</span>
                     <span class="tabular-nums text-text-base">
