@@ -31,7 +31,7 @@ describe("buildPromptRequest", () => {
           start: 0,
           end: 7,
           app: {
-            server: "open-computer-use",
+            server: "codex-computer-use",
             name: "Safari",
             bundleID: "com.apple.Safari",
             running: true,
@@ -61,7 +61,7 @@ describe("buildPromptRequest", () => {
     expect(result.text).toContain("Use only the native safari-devtools MCP tools")
     expect(result.text).toContain("begin with navigate_to_url")
     expect(result.text).toContain("single active session")
-    expect(result.text).toContain("do not use open-computer-use")
+    expect(result.text).toContain("do not use codex-computer-use")
     expect(result.text).toContain("instead of touching personal Safari")
   })
 

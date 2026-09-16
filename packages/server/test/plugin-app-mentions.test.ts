@@ -83,14 +83,6 @@ it.live(
                     APP_MENTION_FIXTURE_BUNDLE: "com.example.preferred",
                   },
                 },
-                "open-computer-use": {
-                  type: "local",
-                  command: [process.execPath, fixture],
-                  environment: {
-                    APP_MENTION_FIXTURE_NAME: "Legacy App",
-                    APP_MENTION_FIXTURE_BUNDLE: "com.example.legacy",
-                  },
-                },
               },
             },
           }),
@@ -111,7 +103,7 @@ it.live(
 
       yield* Effect.tryPromise(() => client.mcp.list({ location: firstLocation })).pipe(
         Effect.filterOrFail(
-          (result) => result.data.filter((entry) => entry.status.status === "connected").length === 2,
+          (result) => result.data.filter((entry) => entry.status.status === "connected").length === 1,
         ),
         Effect.retry(Schedule.max([Schedule.spaced("10 millis"), Schedule.recurs(200)])),
       )

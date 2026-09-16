@@ -19,7 +19,6 @@ const it = testEffect(PluginTestLayer)
 const mcp = (options?: {
   readonly missing?: boolean
   readonly error?: boolean
-  readonly official?: boolean
   readonly native?: "connected" | "disabled" | "failed"
   readonly callTool?: Mcp.Interface["callTool"]
 }) =>
@@ -29,12 +28,9 @@ const mcp = (options?: {
     servers: () =>
       Effect.succeed(
         [
-          ...(options?.official
-            ? [new Mcp.ServerInfo({ name: Mcp.ServerName.make("codex-computer-use"), status: { status: "connected" } })]
-            : []),
           ...(options?.missing
             ? []
-            : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("open-computer-use"), status: { status: "connected" } })]),
+            : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("codex-computer-use"), status: { status: "connected" } })]),
           ...(options?.native
             ? [
                 new Mcp.ServerInfo({
@@ -89,7 +85,7 @@ const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<
   Effect.gen(function* () {
     const service = yield* Mcp.Service
     yield* service.add(
-      "open-computer-use",
+      "codex-computer-use",
       new ConfigMCP.Local({
         type: "local",
         command: [
@@ -103,27 +99,12 @@ const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<
   }).pipe(Effect.provide(Mcp.layer()), Effect.provide(hostEnvironmentLayer))
 
 describe("app mentions plugin integration", () => {
-  it.effect("prefers the official Codex Computer Use bridge", () =>
-    Effect.gen(function* () {
-      expect(yield* call(mcp({ official: true }))).toEqual({
-        apps: [
-          {
-            server: "codex-computer-use",
-            name: "Safari",
-            bundleID: "com.apple.Safari",
-            running: true,
-          },
-        ],
-      })
-    }),
-  )
-
   it.live("runs the real plugin through PluginHost, RPC, and a fixture MCP server", () =>
     Effect.gen(function* () {
       expect(yield* withFixtureMcp(call)).toEqual({
         apps: [
           {
-            server: "open-computer-use",
+            server: "codex-computer-use",
             name: "Safari",
             bundleID: "com.apple.Safari",
             running: true,
@@ -143,7 +124,7 @@ describe("app mentions plugin integration", () => {
             callTool: () =>
               Effect.fail(
                 new Mcp.ToolCallError({
-                  server: Mcp.ServerName.make("open-computer-use"),
+                  server: Mcp.ServerName.make("codex-computer-use"),
                   tool: "list_apps",
                   message: "fixture failure",
                 }),
@@ -166,7 +147,7 @@ describe("app mentions plugin integration", () => {
       expect(yield* call(mcp())).toEqual({
         apps: [
           {
-            server: "open-computer-use",
+            server: "codex-computer-use",
             name: "Safari",
             bundleID: "com.apple.Safari",
             running: true,
@@ -177,7 +158,7 @@ describe("app mentions plugin integration", () => {
         apps: [
           safari,
           {
-            server: "open-computer-use",
+            server: "codex-computer-use",
             name: "Safari",
             bundleID: "com.apple.Safari",
             running: true,
@@ -203,13 +184,13 @@ describe("app mentions plugin integration", () => {
     }),
   )
 
-  it.effect("times out discovery after five seconds and cancels the MCP call", () =>
+  it.effect("times out official discovery after thirty seconds and cancels the MCP call", () =>
     Effect.gen(function* () {
       const interrupted = yield* Ref.make(false)
       const pending = yield* call(
         mcp({ callTool: () => Effect.never.pipe(Effect.ensuring(Ref.set(interrupted, true))) }),
       ).pipe(Effect.forkChild({ startImmediately: true }))
-      yield* TestClock.adjust("5 seconds")
+      yield* TestClock.adjust("30 seconds")
       expect(yield* Fiber.join(pending)).toEqual({ apps: [] })
       expect(yield* Ref.get(interrupted)).toBe(true)
     }),
@@ -225,7 +206,7 @@ describe("app mentions plugin integration", () => {
         ),
       )
       const fiber = yield* host.mcp
-        .callTool({ server: "open-computer-use", name: "list_apps" })
+        .callTool({ server: "codex-computer-use", name: "list_apps" })
         .pipe(Effect.forkChild({ startImmediately: true }))
       yield* Fiber.interrupt(fiber)
       expect(yield* Ref.get(interrupted)).toBe(true)
@@ -290,7 +271,7 @@ describe("app mentions plugin integration", () => {
           setup: async (ctx) => {
             const controller = new AbortController()
             const pending = ctx.mcp.callTool(
-              { server: "open-computer-use", name: "list_apps" },
+              { server: "codex-computer-use", name: "list_apps" },
               { signal: controller.signal },
             )
             controller.abort()
@@ -324,7 +305,7 @@ describe("app mentions plugin integration", () => {
         Plugin.define({
           id: "test.promise-mcp-unload",
           setup: async (ctx) => {
-            const pending = ctx.mcp.callTool({ server: "open-computer-use", name: "list_apps" }).catch(() => undefined)
+            const pending = ctx.mcp.callTool({ server: "codex-computer-use", name: "list_apps" }).catch(() => undefined)
             await Effect.runPromise(started.await)
             return async () => {
               await pending

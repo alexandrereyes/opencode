@@ -15,12 +15,12 @@ export const registerAppMentions = Effect.fn("AppMentions.register")(function* (
           )
             ? [{ ...AppMentions.SafariDevTools, running: false }]
             : []
-          const server = ["codex-computer-use", "open-computer-use"].find((name) =>
-            listed?.data.some((candidate) => candidate.name === name && candidate.status.status === "connected"),
-          )
-          if (!server) return { apps: safari }
+          const server = "codex-computer-use"
+          if (!listed?.data.some((candidate) => candidate.name === server && candidate.status.status === "connected")) {
+            return { apps: safari }
+          }
           const result = yield* ctx.mcp.callTool({ server, name: "list_apps", args: {} }).pipe(
-            Effect.timeout(server === "codex-computer-use" ? "30 seconds" : "5 seconds"),
+            Effect.timeout("30 seconds"),
             Effect.orElseSucceed(() => undefined),
           )
           if (!result || result.isError) return { apps: safari }
@@ -38,7 +38,7 @@ export const registerAppMentions = Effect.fn("AppMentions.register")(function* (
     .pipe(Effect.orDie)
 })
 
-// Open Computer Use: name — bundleID [flags]. Legacy Codex also includes an absolute .app path.
+// Codex Computer Use: name — optional absolute .app path — bundleID [flags].
 // Missing paths are never inferred from names or from the OpenCode host's filesystem.
 export function parseApps(text: string, server: string): AppMentions.App[] {
   const apps = text.split(/\r?\n/).flatMap((line) => {

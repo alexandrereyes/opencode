@@ -169,6 +169,6 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
 
 export function formatAppContext(part: Extract<Prompt[number], { type: "app" }>) {
   if (AppMentions.isSafariDevTools(part.app))
-    return `Safari DevTools selected by the user: ${JSON.stringify(part.app)}. Use only the native ${AppMentions.SafariDevTools.server} MCP tools, which operate in Safari's isolated automation window; do not use open-computer-use or silently fall back to the user's ordinary Safari. If no automation window exists, begin with navigate_to_url because list_tabs and create_tab may error before initial navigation. Safari WebDriver supports a single active session; if it is already in use, report a clear conflict instead of touching personal Safari.`
+    return `Safari DevTools selected by the user: ${JSON.stringify(part.app)}. Use only the native ${AppMentions.SafariDevTools.server} MCP tools, which operate in Safari's isolated automation window; do not use codex-computer-use or silently fall back to the user's ordinary Safari. If no automation window exists, begin with navigate_to_url because list_tabs and create_tab may error before initial navigation. Safari WebDriver supports a single active session; if it is already in use, report a clear conflict instead of touching personal Safari.`
   return `Computer use app selected by the user: ${JSON.stringify(part.app)}. Use its bundleID as the app argument to ${part.app.server} tools.`
 }

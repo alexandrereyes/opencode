@@ -75,7 +75,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
     ],
     appMentions: [
       {
-        server: "open-computer-use",
+        server: "codex-computer-use",
         name: "Shared work",
         bundleID: "com.example.shared-work",
         running: true,
@@ -135,7 +135,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
   recent.release.resolve()
   await expect(page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` })).toBeVisible()
   await expect(page.getByRole("button", { name: `Session, Shared work, /repo/one, ${firstID}` })).toBeVisible()
-  await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toContainText(
+  await expect(page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')).toContainText(
     "Shared work",
   )
   const safariDevTools = page.locator('[data-suggestion-id="app:safari-devtools:mcp.safari-devtools"]')
@@ -170,7 +170,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
 
   await editor.press("End")
   await editor.pressSequentially("@Shared")
-  const appSuggestion = page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')
+  const appSuggestion = page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')
   await expect(appSuggestion).toBeVisible()
   expect(appMentionRequests).toHaveLength(2)
   await appSuggestion.click()
@@ -183,7 +183,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
     metadata: {
       displayText: "@Shared work @Shared work ",
       sessions: [{ session: { id: secondID, server, title: "Shared work", directory: "/repo/two" } }],
-      apps: [{ app: { server: "open-computer-use", bundleID: "com.example.shared-work" } }],
+      apps: [{ app: { server: "codex-computer-use", bundleID: "com.example.shared-work" } }],
     },
   })
   expect(String(prompts[0]?.text)).toContain(`"sessionID":"${secondID}"`)
@@ -197,7 +197,7 @@ test("selects, copies, pastes, and submits a globally searched session reference
   rejectAppMentions = true
   await editor.fill("@")
   await expect(page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` })).toBeVisible()
-  await expect(page.locator('[data-suggestion-id="app:open-computer-use:com.example.shared-work"]')).toHaveCount(0)
+  await expect(page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')).toHaveCount(0)
   expect(appMentionRequests).toHaveLength(3)
 
   // Keep suggestions open across both layout breakpoints: their positioning

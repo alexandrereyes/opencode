@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import fixture from "./fixtures/open-computer-use-apps.json"
+import fixture from "./fixtures/codex-computer-use-apps.json"
 import { parseApps } from "../src/app-mentions"
 import { AppMentions } from "../src/rpc"
 
 describe("app mentions", () => {
-  test("parses Open Computer Use output without inventing paths", () => {
-    const apps = parseApps(fixture.content[0].text, "open-computer-use")
+  test("parses Computer Use output without inventing paths", () => {
+    const apps = parseApps(fixture.content[0].text, "codex-computer-use")
     expect(apps).toHaveLength(3)
     expect(apps[0]).toEqual({
-      server: "open-computer-use",
+      server: "codex-computer-use",
       name: "Safari",
       bundleID: "com.apple.Safari",
       running: true,
@@ -17,7 +17,7 @@ describe("app mentions", () => {
     expect(apps.every((app) => !("path" in app))).toBe(true)
   })
 
-  test("preserves legacy paths and deduplicates bundle IDs", () => {
+  test("preserves paths and deduplicates bundle IDs", () => {
     const apps = parseApps(
       [
         "Safari — /System/Applications/Safari.app/ — com.apple.Safari [running]",
@@ -51,13 +51,13 @@ describe("app mentions", () => {
   test("decodes persisted app references with an omitted path", () => {
     expect(
       Schema.decodeUnknownSync(AppMentions.App)({
-        server: "open-computer-use",
+        server: "codex-computer-use",
         name: "Safari",
         bundleID: "com.apple.Safari",
         running: true,
       }),
     ).toEqual({
-      server: "open-computer-use",
+      server: "codex-computer-use",
       name: "Safari",
       bundleID: "com.apple.Safari",
       running: true,

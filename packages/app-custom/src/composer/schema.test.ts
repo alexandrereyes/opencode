@@ -185,7 +185,7 @@ describe("composer persistence schemas", () => {
         start: 0,
         end: 7,
         app: {
-          server: "open-computer-use",
+          server: "codex-computer-use",
           name: "Safari",
           bundleID: "com.apple.Safari",
           running: true,

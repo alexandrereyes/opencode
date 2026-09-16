@@ -24,13 +24,11 @@ running: boolean }`. Optional `path` remains omitted when unavailable.
 ## Plugin behavior
 
 The plugin uses its public context only, with no Core/Server imports. In its
-Location, prefer connected `codex-computer-use`, backed by the official signed
-Codex Computer Use runtime, then connected `open-computer-use` as a legacy
-fallback. Invoke `list_apps` with empty arguments, preserve the
+Location, use connected `codex-computer-use`, backed by the official signed
+Codex Computer Use runtime. Invoke `list_apps` with empty arguments, preserve the
 existing parser and deduplication by bundle ID, and never infer an app path.
-Allow thirty seconds for the official bridge's signed broker startup, preserve
-the five-second legacy discovery timeout, and keep empty-list behavior for
-missing servers, failed calls, MCP error results, and unusable output.
+Allow thirty seconds for the official bridge's signed broker startup and keep
+empty-list behavior for missing servers, failed calls, MCP error results, and unusable output.
 Cancellation must propagate rather than leak work after plugin unload/request
 cancellation.
 
@@ -92,7 +90,7 @@ remain outside this POC.
 During the POC, this worktree included `.opencode/plugins/app-custom.ts` for
 project-local discovery. The loader was removed when activation moved into the
 custom runtime because retaining both sources would produce a duplicate plugin
-ID. With `codex-computer-use` (preferred) or `open-computer-use` connected,
+ID. With `codex-computer-use` connected,
 opening app autocomplete calls the plugin RPC in the active Location; without
 either server it returns no suggestions.
 
@@ -113,9 +111,9 @@ through a project-local loader.
 
 The POC integration test starts an ephemeral HTTP server and two real stdio MCP
 fixtures. Through the public `@opencode/client` RPC client it verifies normal
-`.opencode/plugins` discovery, official `codex-computer-use` preference over
-the legacy server, and an isolated second Location where the plugin RPC is
-unavailable. It also verifies that `GET /api/mcp/computer-use/app` returns 404.
+`.opencode/plugins` discovery through official `codex-computer-use` and an
+isolated second Location where the plugin RPC is unavailable. It also verifies
+that `GET /api/mcp/computer-use/app` returns 404.
 Separate host tests cover the discovery timeout and cancellation from Effect
 interruption, Promise request abort, and Promise plugin-scope closure.
 
