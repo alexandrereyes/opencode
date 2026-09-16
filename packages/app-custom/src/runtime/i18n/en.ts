@@ -119,6 +119,10 @@ export const dict = {
   "sidebar.project.server": "{{project}} · {{server}}",
   "sidebar.sessions.retry": "Couldn't load sessions from {{server}}. Retry",
   "sidebar.project.reorderHint": "Drag to reorder, or use Alt + Up/Down",
+  "sidebar.project.remove": "Remove from sidebar",
+  "sidebar.project.remove.title": "Remove {{project}} from the sidebar?",
+  "sidebar.project.remove.description":
+    "This only removes the project from your project list. Files and sessions are kept. You can reopen it from recently closed projects.",
   "chatQuotes.comment": "Comment",
   "chatQuotes.addToInput": "Add to input",
   "chatQuotes.selectionActions": "Selected text actions",

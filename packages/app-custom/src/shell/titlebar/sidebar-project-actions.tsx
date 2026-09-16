@@ -1,31 +1,60 @@
 import { Show } from "solid-js"
-import { createStore } from "solid-js/store"
+import { Button } from "@opencode/ui-custom/button"
+import { useDialog } from "@opencode/ui-custom/context/dialog"
+import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
-import { Menu } from "@opencode/ui-custom/menu"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { useLanguage } from "@/runtime/i18n/language"
-import { usePlatform } from "@/runtime/platform/platform"
+import { useGlobal } from "@/runtime/server/runtime"
 import type { ServerConnection } from "@/runtime/server/registry"
 import type { LocalProject } from "@/shell/state/layout"
 import { useProjectActions } from "@/workspaces/project-actions"
-import { fileManagerApp } from "@/home/projects/file-manager"
 
 export function SidebarProjectActions(props: {
   connection: ServerConnection.Any
   directory: string
+  name: string
   metadata?: LocalProject
 }) {
   const language = useLanguage()
-  const platform = usePlatform()
+  const global = useGlobal()
+  const dialog = useDialog()
   const actions = useProjectActions()
-  const [state, setState] = createStore({ open: false })
   const newSession = () => actions.openNewSession(props.connection, props.directory)
+  const remove = () => {
+    const projects = global.ensureServerCtx(props.connection).projects
+    const directory = props.directory
+    const name = props.name
+    void dialog.show(() => (
+      <Dialog fit>
+        <DialogHeader hideClose>
+          <DialogTitleGroup
+            title={language.t("sidebar.project.remove.title", { project: name })}
+            description={language.t("sidebar.project.remove.description")}
+          />
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              dialog.close()
+              projects.close(directory)
+            }}
+          >
+            {language.t("sidebar.project.remove")}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    ))
+  }
   return (
     <div
       data-slot="sidebar-project-actions"
-      data-menu={state.open}
-      class="hover-reveal me-1 flex shrink-0 items-center gap-1 group-hover/project:opacity-100 group-focus-within/project:opacity-100 data-[menu=true]:opacity-100"
+      class="hover-reveal me-1 flex shrink-0 items-center gap-1 group-hover/project:opacity-100 group-focus-within/project:opacity-100"
     >
       <Tooltip value={language.t("command.session.new")}>
         <IconButton
@@ -37,46 +66,31 @@ export function SidebarProjectActions(props: {
           onClick={newSession}
         />
       </Tooltip>
-      <Menu
-        modal={false}
-        placement="bottom-end"
-        gutter={6}
-        open={state.open}
-        onOpenChange={(open) => setState("open", open)}
-      >
-        <Menu.Trigger
-          as={IconButton}
-          data-action="sidebar-project-menu"
+      <Show when={props.metadata?.id && props.metadata.id !== "global" ? props.metadata : undefined}>
+        {(project) => (
+          <Tooltip value={language.t("dialog.project.edit.title")}>
+            <IconButton
+              data-action="sidebar-project-edit"
+              variant="ghost-muted"
+              size="small"
+              icon={<Icon name="settings-gear" />}
+              aria-label={language.t("dialog.project.edit.title")}
+              onClick={() => actions.edit(props.connection, project())}
+            />
+          </Tooltip>
+        )}
+      </Show>
+      <Tooltip value={language.t("sidebar.project.remove")}>
+        <IconButton
+          data-action="sidebar-project-remove"
           variant="ghost-muted"
           size="small"
-          icon={<Icon name="outline-dots" />}
-          aria-label={language.t("common.moreOptions")}
+          icon={<Icon name="trash" />}
+          style={{ color: "var(--v2-state-fg-danger)" }}
+          aria-label={language.t("sidebar.project.remove")}
+          onClick={remove}
         />
-        <Menu.Portal>
-          <Menu.Content>
-            <Menu.Item onSelect={newSession}>{language.t("command.session.new")}</Menu.Item>
-            <Show when={actions.canImportSession}>
-              <Menu.Item onSelect={() => actions.importSession(props.connection, { worktree: props.directory })}>
-                {language.t("command.session.import")}
-              </Menu.Item>
-            </Show>
-            <Show when={props.metadata?.id && props.metadata.id !== "global" ? props.metadata : undefined}>
-              {(project) => (
-                <Menu.Item onSelect={() => actions.edit(props.connection, project())}>
-                  {language.t("dialog.project.edit.title")}
-                </Menu.Item>
-              )}
-            </Show>
-            <Show when={actions.canReveal(props.connection)}>
-              <Menu.Item onSelect={() => actions.reveal(props.connection, { worktree: props.directory })}>
-                {language.t(
-                  fileManagerApp(platform.platform === "desktop" ? (platform.os ?? "unknown") : "unknown").actionLabel,
-                )}
-              </Menu.Item>
-            </Show>
-          </Menu.Content>
-        </Menu.Portal>
-      </Menu>
+      </Tooltip>
     </div>
   )
 }

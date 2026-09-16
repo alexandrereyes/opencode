@@ -512,7 +512,7 @@ test("shared sidebar clock updates every view without reordering, remounting, lo
         }
         const recent = recentSection(ui.host)
         const project = ui.host.querySelector<HTMLElement>("[data-project-key]")!
-        expect(project.querySelector('[data-action="sidebar-project-menu"]')).not.toBeNull()
+        expect(project.querySelector('[data-action="sidebar-project-remove"]')).not.toBeNull()
         const compact = findRows(project, "same")[0]
         const pinnedRow = findRows(ui.host, "same")[0]
         const time = pinnedRow.querySelector<HTMLTimeElement>("time")!

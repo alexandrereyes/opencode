@@ -380,7 +380,7 @@ test("project folders stay stable while headers collapse, reorder and remount", 
       expect(icon(keys[1])).toBe("#opencode-v2-icon-folder")
       const group = first.closest<HTMLElement>("[data-project-key]")!
       group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!.click()
-      await projectMenu(group)
+      await projectAction(group)
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
       await wait()
       expect(icon(keys[0])).toBe("#opencode-v2-icon-folder")
@@ -725,46 +725,21 @@ test("quick actions opt in only for persisted sidebar rows and guard dragging an
   }
 })
 
-async function projectMenu(group: HTMLElement, action?: string, keyboard = false) {
-  const trigger = group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-menu"]')!
-  trigger.focus()
-  trigger.dispatchEvent(
-    keyboard
-      ? new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
-      : new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
-  )
-  await wait()
-  expect(trigger.getAttribute("aria-expanded")).toBe("true")
-  const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!
-  const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-  const labels = items.map((item) => item.textContent)
+async function projectAction(group: HTMLElement, action?: string) {
+  const items = [...group.querySelectorAll<HTMLButtonElement>('[data-slot="sidebar-project-actions"] button')]
+  const labels = items.map((item) => item.getAttribute("aria-label"))
   if (action) {
-    const item = items.find((item) => item.textContent === action)
+    const item = items.find((item) => item.getAttribute("aria-label") === action)
     expect(item).toBeDefined()
     item!.focus()
-    item!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
-  }
-  if (!action) {
-    trigger.dispatchEvent(
-      new PointerEvent("pointerdown", { button: 0, pointerType: "mouse", bubbles: true, cancelable: true }),
-    )
+    item!.click()
   }
   await wait()
-  expect(trigger.getAttribute("aria-expanded")).toBe("false")
   return labels
 }
 
 test("project header actions preserve collapse/order and target canonical projects across servers", async () => {
   hosts[1].backend.push(row("remote-project-session", now))
-  platform.platform = "desktop"
-  platform.os = "macos"
-  const revealed: string[] = []
-  platform.openPath = async (directory) => {
-    revealed.push(directory)
-  }
-  platform.openAttachmentPickerDialog = async (_options, onFile) => {
-    await onFile(new File([JSON.stringify({ info: row("ses_exported", now).session, messages: [] })], "session.json"))
-  }
   hosts[0].backend.push({
     ...row("worktree", now),
     session: { ...row("worktree", now).session, location: { directory: "/repo-worktree" } },
@@ -815,8 +790,8 @@ test("project header actions preserve collapse/order and target canonical projec
     shortcut.focus()
     expect(document.activeElement).toBe(shortcut)
     shortcut.click()
-    await projectMenu(remote, "command.session.new", true)
-    await projectMenu(plain, "command.session.new")
+    await projectAction(remote, "command.session.new")
+    await projectAction(plain, "command.session.new")
     expect(drafts.slice(-3)).toEqual([
       { server: ServerConnection.key(connections[0]), directory: "/repo", worktree: "main" },
       { server: ServerConnection.key(connections[1]), directory: "/repo", worktree: "main" },
@@ -826,59 +801,21 @@ test("project header actions preserve collapse/order and target canonical projec
     expect(
       [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].map((group) => group.dataset.projectKey),
     ).toEqual(order)
-    expect(await projectMenu(local)).toEqual([
+    expect(await projectAction(local)).toEqual([
       "command.session.new",
-      "command.session.import",
       "dialog.project.edit.title",
-      "session.header.reveal.finder",
+      "sidebar.project.remove",
     ])
-    expect(await projectMenu(remote)).not.toContain("session.header.reveal.finder")
-    expect(await projectMenu(plain)).not.toContain("dialog.project.edit.title")
-    expect(await projectMenu(unknown)).toContain("dialog.project.edit.title")
-    await projectMenu(remote, "dialog.project.edit.title")
+    expect(await projectAction(remote)).toEqual(await projectAction(local))
+    expect(await projectAction(plain)).not.toContain("dialog.project.edit.title")
+    expect(await projectAction(unknown)).toContain("dialog.project.edit.title")
+    await projectAction(remote, "dialog.project.edit.title")
     expect(edited.at(-1)).toMatchObject({
       server: connections[1],
       project: { id: "repo", worktree: "/repo", name: "Shared project" },
     })
-    await projectMenu(local, "session.header.reveal.finder")
-    expect(revealed).toEqual(["/repo"])
-    await projectMenu(remote, "command.session.import")
-    expect(hosts[1].imported).toHaveLength(1)
-    expect(hosts[0].imported).toHaveLength(0)
-    expect(hosts[1].imported[0]).toMatchObject({ location: { directory: "/repo" } })
-    expect(selected.at(-1)).toMatchObject({ server: ServerConnection.key(connections[1]), sessionId: "ses_imported" })
-    expect(hosts[1].opened).toEqual(["/repo", "/repo"])
-    expect(hosts[1].touched).toEqual(["/repo", "/repo"])
-    platform.openPath = async () => {
-      throw new Error("reveal failed")
-    }
-    await projectMenu(local, "session.header.reveal.finder")
-    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "reveal failed" })
-    platform.openAttachmentPickerDialog = async () => {
-      throw new Error("picker failed")
-    }
-    await projectMenu(local, "command.session.import")
-    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "picker failed" })
-    const count = toasts.length
-    platform.openAttachmentPickerDialog = async (_options, onFile) => {
-      await onFile(new File(["{}"], "invalid.json"))
-    }
-    await projectMenu(local, "command.session.import")
-    expect(toasts).toHaveLength(count + 1)
-    expect(hosts[0].imported).toHaveLength(0)
-    platform.openAttachmentPickerDialog = async (_options, onFile) => {
-      await onFile(new File([JSON.stringify({ info: row("ses_exported", now).session, messages: [] })], "session.json"))
-    }
-    hosts[0].ctx.sdk.api.session.import = async () => {
-      throw new Error("import failed")
-    }
-    await projectMenu(local, "command.session.import")
-    expect(toasts.at(-1)).toMatchObject({ title: "common.requestFailed", description: "import failed" })
   } finally {
     ui.dispose()
-    platform.platform = "web"
-    platform.openPath = async () => {}
-    delete platform.openAttachmentPickerDialog
   }
   const web = mount()
   try {
@@ -886,13 +823,17 @@ test("project header actions preserve collapse/order and target canonical projec
     const local = [...web.host.querySelectorAll<HTMLElement>("[data-project-key]")].find(
       (group) => group.dataset.projectKey === key,
     )!
-    expect(await projectMenu(local)).toEqual(["command.session.new", "dialog.project.edit.title"])
+    expect(await projectAction(local)).toEqual([
+      "command.session.new",
+      "dialog.project.edit.title",
+      "sidebar.project.remove",
+    ])
   } finally {
     web.dispose()
   }
 }, 15_000)
 
-test("project menu and focus survive session refreshes while project data stays current", async () => {
+test("project actions and focus survive session refreshes while project data stays current", async () => {
   const previous = hosts[0].ctx.sync.data
   const [sync, setSync] = createStore(structuredClone(previous))
   hosts[0].ctx.sync.data = sync
@@ -907,14 +848,10 @@ test("project menu and focus survive session refreshes while project data stays 
     const group = [...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")].find(
       (group) => group.dataset.projectKey === key,
     )!
-    const trigger = group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-menu"]')!
+    const trigger = group.querySelector<HTMLButtonElement>('[data-action="sidebar-project-new-session"]')!
     trigger.focus()
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
     await wait()
-    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!
-    const item = menu.querySelector<HTMLElement>('[role="menuitem"]')!
-    item.focus()
-    expect(document.activeElement).toBe(item)
+    expect(document.activeElement).toBe(trigger)
 
     hosts[0].backend[hosts[0].backend.indexOf(background)] = {
       ...background,
@@ -926,24 +863,21 @@ test("project menu and focus survive session refreshes while project data stays 
     await wait()
     expect(hosts[0].ctx.data.session.get(background.session.id)?.time.updated).toBe(now + 1)
     expect(trigger.isConnected).toBe(true)
-    expect(trigger.getAttribute("aria-expanded")).toBe("true")
-    expect(document.getElementById(menu.id)).toBe(menu)
-    expect(document.activeElement).toBe(item)
+    expect(document.activeElement).toBe(trigger)
 
     setSync("project", (project) => project.id === "repo", { name: "Renamed project", worktree: "/renamed" })
     await wait()
     expect(trigger.isConnected).toBe(true)
-    expect(trigger.getAttribute("aria-expanded")).toBe("true")
-    expect(document.activeElement).toBe(item)
+    expect(document.activeElement).toBe(trigger)
     expect(group.querySelector("button[aria-expanded] span[dir=auto]")?.textContent).toContain("Renamed project")
-    item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    trigger.click()
     await wait()
     expect(drafts.at(-1)).toEqual({
       server: ServerConnection.key(connections[0]),
       directory: "/renamed",
       worktree: "main",
     })
-    await projectMenu(group, "dialog.project.edit.title", true)
+    await projectAction(group, "dialog.project.edit.title")
     expect(edited.at(-1)).toMatchObject({
       server: connections[0],
       project: { id: "repo", name: "Renamed project", worktree: "/renamed" },
@@ -954,7 +888,7 @@ test("project menu and focus survive session refreshes while project data stays 
       new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true }),
     )
     expect([...ui.host.querySelectorAll<HTMLElement>("[data-project-key]")][1]).toBe(group)
-    expect(group.querySelector('[data-action="sidebar-project-menu"]')).toBe(trigger)
+    expect(group.querySelector('[data-action="sidebar-project-new-session"]')).toBe(trigger)
   } finally {
     ui.dispose()
     hosts[0].ctx.sync.data = previous

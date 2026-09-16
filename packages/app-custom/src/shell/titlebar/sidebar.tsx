@@ -794,6 +794,7 @@ export function SessionSidebar(props: {
                                   <SidebarProjectActions
                                     connection={project().connection}
                                     directory={project().directory}
+                                    name={project().name}
                                     metadata={project().metadata}
                                   />
                                 </div>
