@@ -49,6 +49,12 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
   const uncertain = members.some(
     (account) => account.remaining === null || subscriptionCapacity(account, now) === "unconfirmed",
   )
+  // Match the balance's available accounts, using a linear seven-day quota window.
+  const pace = ready.flatMap((account) => {
+    const remaining = account.resetAt === null ? NaN : Date.parse(account.resetAt) - now
+    const week = 7 * 86_400_000
+    return remaining > 0 && remaining <= week ? [(remaining / week) * 100] : []
+  })
   const observations = measured.flatMap((account) =>
     account.observedAt === null ? [] : [Date.parse(account.observedAt)],
   )
@@ -76,6 +82,10 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
     availableRemaining:
       !uncertain && ready.length > 0
         ? ready.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / ready.length
+        : null,
+    expectedRemaining:
+      !uncertain && ready.length > 0 && pace.length === ready.length
+        ? pace.reduce((sum, value) => sum + value, 0) / pace.length
         : null,
     observedAt: observations.length > 0 && observations.length === measured.length ? Math.min(...observations) : null,
   }

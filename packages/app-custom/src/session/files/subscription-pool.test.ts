@@ -91,6 +91,7 @@ test("missing or stale measurements suppress the whole pool percentage", () => {
     ready: 0,
     balance: "empty",
     availableRemaining: null,
+    expectedRemaining: null,
     observedAt: null,
     banked: null,
   })
@@ -177,9 +178,36 @@ test("cooldown and capacity remove known accounts from the available balance", (
     ready: 0,
     balance: "unavailable",
     availableRemaining: null,
+    expectedRemaining: null,
     observedAt: Date.parse(account.observedAt),
     banked: null,
   })
+})
+
+test("pace averages the weekly time remaining for the same accounts as available balance", () => {
+  const now = Date.parse("2026-09-10T12:00:00Z")
+  const halfway = { ...account, resetAt: "2026-09-14T00:00:00Z" }
+  const full = { ...account, resetAt: "2026-09-17T12:00:00Z" }
+  expect(subscriptionPool([
+    halfway,
+    full,
+    { ...halfway, plan: "plus" },
+    { ...halfway, enabled: false },
+    { ...halfway, authenticated: false },
+    { ...halfway, cooldownSeconds: 60 },
+    { ...halfway, hasCapacity: false },
+  ], now).expectedRemaining).toBe(75)
+  expect(subscriptionPool([halfway], now).expectedRemaining).toBe(50)
+})
+
+test("pace is omitted for unknown balance or missing, expired, and out-of-window reset times", () => {
+  const now = Date.parse("2026-09-10T12:00:00Z")
+  const valid = { ...account, resetAt: "2026-09-14T00:00:00Z" }
+  for (const resetAt of [null, "invalid", "2026-09-10T12:00:00Z", "2026-09-18T12:00:00Z"]) {
+    expect(subscriptionPool([valid, { ...account, resetAt }], now).expectedRemaining).toBeNull()
+  }
+  expect(subscriptionPool([{ ...valid, stale: true }], now).expectedRemaining).toBeNull()
+  expect(subscriptionPool([{ ...valid, remaining: null }], now).expectedRemaining).toBeNull()
 })
 
 test("banked inventory totals the Pro pool and preserves unknown and non-expiring credits", () => {

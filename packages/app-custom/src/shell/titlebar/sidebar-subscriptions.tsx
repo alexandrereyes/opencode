@@ -186,7 +186,14 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
                               percent: percent(pool().availableRemaining ?? 0),
                             })}
                   </span>
-                  <QuotaMeter value={pool().availableRemaining} label={language.t("context.overview.availablePool")} />
+                  <QuotaMeter
+                    value={pool().availableRemaining}
+                    label={language.t("context.overview.availablePool")}
+                    pace={pool().expectedRemaining}
+                    paceLabel={pool().expectedRemaining === null ? undefined : language.t("context.overview.balancePace", {
+                      percent: percent(pool().expectedRemaining!),
+                    })}
+                  />
                   <Show when={pool().measured < pool().total && pool().observedAt !== null}>
                     <span class="text-12-regular text-v2-text-text-muted">
                       {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}
@@ -275,7 +282,11 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
                           <Show when={account.fiveHourRemaining !== null || account.fiveHourResetAt !== null}>
                             <span class="text-12-regular text-v2-text-text-muted">
                               {account.fiveHourResetAt
-                                ? language.t("context.overview.fiveHourReset", { time: date(account.fiveHourResetAt) })
+                                ? language.t("context.overview.fiveHourReset", {
+                                    time: new Intl.DateTimeFormat(language.intl(), {
+                                      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+                                    }).format(new Date(account.fiveHourResetAt)),
+                                  })
                                 : language.t("context.overview.fiveHour")}
                             </span>
                             <QuotaMeter
@@ -359,7 +370,7 @@ function SubscriptionSurface(props: {
   </Show>
 }
 
-function QuotaMeter(props: { value: number | null; label: string }) {
+function QuotaMeter(props: { value: number | null; label: string; pace?: number | null; paceLabel?: string }) {
   return (
     <div
       role="meter"
@@ -367,7 +378,9 @@ function QuotaMeter(props: { value: number | null; label: string }) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={props.value ?? undefined}
-      class="h-1 w-full overflow-hidden rounded-full bg-surface-raised-base"
+      aria-description={props.paceLabel}
+      title={props.paceLabel}
+      class="relative h-1 w-full rounded-full bg-surface-raised-base"
     >
       <div
         class="h-full rounded-full"
@@ -378,6 +391,14 @@ function QuotaMeter(props: { value: number | null; label: string }) {
         }}
         style={{ width: `${Math.max(0, Math.min(100, props.value ?? 0))}%` }}
       />
+      <Show when={props.value !== null && props.pace != null}>
+        <span
+          data-slot="quota-pace"
+          aria-hidden="true"
+          class="pointer-events-none absolute -top-1 h-3 w-0.5 rounded-full bg-icon-critical-base"
+          style={{ "inset-inline-start": `clamp(0px, calc(${props.pace}% - 1px), calc(100% - 2px))` }}
+        />
+      </Show>
     </div>
   )
 }
