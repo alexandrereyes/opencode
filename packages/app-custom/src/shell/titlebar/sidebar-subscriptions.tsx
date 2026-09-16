@@ -9,7 +9,7 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { Tab } from "@/shell/tabs/tabs"
-import { subscriptionAccounts, subscriptionCapacity, subscriptionPool } from "@/session/files/subscription-pool"
+import { subscriptionAccounts, subscriptionCapacity, subscriptionPace, subscriptionPool } from "@/session/files/subscription-pool"
 import { formatSubscriptionDate } from "./subscription-date"
 
 export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean; onOpenChange?: (open: boolean) => void }) {
@@ -49,6 +49,7 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
   }
   const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], state.now))
   const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], state.now))
+  const members = createMemo(() => accounts().filter((account) => account.plan === "pro" && account.enabled && account.authenticated))
   const renewals = createMemo(() => {
     const resets = accounts().flatMap((account) =>
       account.plan === "pro" && account.enabled && account.authenticated && account.resetAt
@@ -134,10 +135,10 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
             <span class="shrink-0 text-text-base">{language.t("sidebar.proxy.title")}</span>
             <span class="ms-auto min-w-0 truncate tabular-nums">
               {ready()
-                ? language.t("sidebar.proxy.balance", {
+                ? language.t("sidebar.proxy.quota", {
                     percent: pool().availableRemaining !== null
                       ? percent(pool().availableRemaining!)
-                      : pool().balance === "unavailable" ? percent(0) : "—",
+                       : "—",
                   })
                 : language.t(subscription() ? "sidebar.proxy.unavailable" : "common.loading")}
             </span>
@@ -175,29 +176,39 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
             <Show when={ready()} fallback={<p role="status">{status()}</p>}>
               <Show when={accounts().length} fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}>
                 <div class="flex flex-col gap-2">
-                  <span class="text-13-medium text-text-strong">{language.t("context.overview.availablePool")}</span>
+                  <span class="text-13-medium text-text-strong">{language.t("context.overview.weeklyPool")}</span>
                   <span>
                     {language.t("context.overview.availablePoolCapacity", { ready: pool().ready, total: pool().total })}
                   </span>
+                  <For each={members()}>
+                    {(account) => {
+                      const remaining = () => account.stale || subscriptionCapacity(account, state.now) === "unconfirmed" ? null : account.remaining
+                      const pace = () => subscriptionPace(account, state.now)
+                      return (
+                        <div class="flex min-w-0 flex-col gap-2 py-1">
+                          <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
+                            <bdi class="min-w-0 truncate" title={account.name}>{account.name}</bdi>
+                            <span class="shrink-0 tabular-nums">{remaining() === null ? "—" : percent(remaining()!)}</span>
+                          </div>
+                          <QuotaMeter
+                            value={remaining()}
+                            label={language.t("context.overview.weeklyAccount", { account: account.name })}
+                            pace={pace()}
+                            paceLabel={pace() === null ? undefined : language.t("context.overview.balancePace", { percent: percent(pace()!) })}
+                          />
+                        </div>
+                      )
+                    }}
+                  </For>
                   <span class="text-12-regular text-v2-text-text-muted">
                     {pool().total === 0
                       ? language.t("context.overview.noPool")
-                      : pool().balance === "unknown"
-                        ? language.t("context.overview.unknownWeekly")
-                        : pool().balance === "unavailable"
-                          ? language.t("context.overview.noAvailableBalance")
-                          : language.t("context.overview.availablePoolRemaining", {
-                              percent: percent(pool().availableRemaining ?? 0),
-                            })}
+                      : pool().availableRemaining === null
+                         ? language.t("context.overview.unknownWeekly")
+                        : language.t("context.overview.totalQuotaRemaining", {
+                            percent: percent(pool().availableRemaining ?? 0),
+                          })}
                   </span>
-                  <QuotaMeter
-                    value={pool().availableRemaining}
-                    label={language.t("context.overview.availablePool")}
-                    pace={pool().expectedRemaining}
-                    paceLabel={pool().expectedRemaining === null ? undefined : language.t("context.overview.balancePace", {
-                      percent: percent(pool().expectedRemaining!),
-                    })}
-                  />
                   <Show when={pool().measured < pool().total && pool().observedAt !== null}>
                     <span class="text-12-regular text-v2-text-text-muted">
                       {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}

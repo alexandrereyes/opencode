@@ -3,6 +3,7 @@ import {
   subscriptionAccounts,
   subscriptionCapacity,
   subscriptionPercentages,
+  subscriptionPace,
   subscriptionPool,
 } from "./subscription-pool"
 
@@ -37,7 +38,7 @@ test("averages only active authenticated Pro 20x accounts without treating round
   expect(subscriptionPool([{ ...account, remaining: 0 }]).ready).toBe(1)
 })
 
-test("reports remaining balance only across Pro 20x accounts available now", () => {
+test("keeps exhausted accounts in the combined quota denominator", () => {
   expect(
     subscriptionPool([
       { ...account, remaining: 0, hasCapacity: false },
@@ -47,7 +48,7 @@ test("reports remaining balance only across Pro 20x accounts available now", () 
     total: 2,
     measured: 2,
     ready: 1,
-    availableRemaining: 59,
+    availableRemaining: 29.5,
     balance: "known",
   })
 })
@@ -166,7 +167,7 @@ test("orders Pro 20x, Pro 5x, then Plus with available accounts first within eac
   ])
 })
 
-test("cooldown and capacity remove known accounts from the available balance", () => {
+test("cooldown and capacity do not remove known quota from the combined balance", () => {
   expect(
     subscriptionPool([
       { ...account, cooldownSeconds: 120 },
@@ -177,17 +178,21 @@ test("cooldown and capacity remove known accounts from the available balance", (
     measured: 2,
     ready: 0,
     balance: "unavailable",
-    availableRemaining: null,
+    availableRemaining: 45,
     expectedRemaining: null,
     observedAt: Date.parse(account.observedAt),
     banked: null,
   })
 })
 
-test("pace averages the weekly time remaining for the same accounts as available balance", () => {
+test("pace averages weekly time remaining across all pool members", () => {
   const now = Date.parse("2026-09-10T12:00:00Z")
   const halfway = { ...account, resetAt: "2026-09-14T00:00:00Z" }
   const full = { ...account, resetAt: "2026-09-17T12:00:00Z" }
+  expect(subscriptionPace(halfway, now)).toBe(50)
+  expect(subscriptionPace(full, now)).toBe(100)
+  expect(subscriptionPace({ ...halfway, cooldownSeconds: 60 }, now)).toBe(50)
+  expect(subscriptionPace({ ...halfway, stale: true }, now)).toBeNull()
   expect(subscriptionPool([
     halfway,
     full,
@@ -196,7 +201,7 @@ test("pace averages the weekly time remaining for the same accounts as available
     { ...halfway, authenticated: false },
     { ...halfway, cooldownSeconds: 60 },
     { ...halfway, hasCapacity: false },
-  ], now).expectedRemaining).toBe(75)
+  ], now).expectedRemaining).toBe(62.5)
   expect(subscriptionPool([halfway], now).expectedRemaining).toBe(50)
 })
 

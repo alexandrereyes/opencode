@@ -49,11 +49,9 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
   const uncertain = members.some(
     (account) => account.remaining === null || subscriptionCapacity(account, now) === "unconfirmed",
   )
-  // Match the balance's available accounts, using a linear seven-day quota window.
-  const pace = ready.flatMap((account) => {
-    const remaining = account.resetAt === null ? NaN : Date.parse(account.resetAt) - now
-    const week = 7 * 86_400_000
-    return remaining > 0 && remaining <= week ? [(remaining / week) * 100] : []
+  const pace = members.flatMap((account) => {
+    const value = subscriptionPace(account, now)
+    return value === null ? [] : [value]
   })
   const observations = measured.flatMap((account) =>
     account.observedAt === null ? [] : [Date.parse(account.observedAt)],
@@ -80,15 +78,22 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
     ready: ready.length,
     balance: members.length === 0 ? "empty" : uncertain ? "unknown" : ready.length === 0 ? "unavailable" : "known",
     availableRemaining:
-      !uncertain && ready.length > 0
-        ? ready.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / ready.length
+      !uncertain && members.length > 0
+        ? members.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / members.length
         : null,
     expectedRemaining:
-      !uncertain && ready.length > 0 && pace.length === ready.length
+      !uncertain && members.length > 0 && pace.length === members.length
         ? pace.reduce((sum, value) => sum + value, 0) / pace.length
         : null,
     observedAt: observations.length > 0 && observations.length === measured.length ? Math.min(...observations) : null,
   }
+}
+
+export function subscriptionPace(account: Account, now = Date.now()) {
+  if (account.remaining === null || subscriptionCapacity(account, now) === "unconfirmed") return null
+  const remaining = account.resetAt === null ? NaN : Date.parse(account.resetAt) - now
+  const week = 7 * 86_400_000
+  return remaining > 0 && remaining <= week ? (remaining / week) * 100 : null
 }
 
 function renewalPassed(account: Account, now: number) {
