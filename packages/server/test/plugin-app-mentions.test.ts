@@ -79,16 +79,16 @@ it.live(
                   type: "local",
                   command: [process.execPath, fixture],
                   environment: {
-                    APP_MENTION_FIXTURE_NAME: "Legacy App",
-                    APP_MENTION_FIXTURE_BUNDLE: "com.example.legacy",
+                    APP_MENTION_FIXTURE_NAME: "Preferred App",
+                    APP_MENTION_FIXTURE_BUNDLE: "com.example.preferred",
                   },
                 },
                 "open-computer-use": {
                   type: "local",
                   command: [process.execPath, fixture],
                   environment: {
-                    APP_MENTION_FIXTURE_NAME: "Preferred App",
-                    APP_MENTION_FIXTURE_BUNDLE: "com.example.preferred",
+                    APP_MENTION_FIXTURE_NAME: "Legacy App",
+                    APP_MENTION_FIXTURE_BUNDLE: "com.example.legacy",
                   },
                 },
               },
@@ -120,7 +120,7 @@ it.live(
       ).toEqual({
         apps: [
           {
-            server: "open-computer-use",
+            server: "codex-computer-use",
             name: "Preferred App",
             bundleID: "com.example.preferred",
             running: true,

@@ -15,12 +15,12 @@ export const registerAppMentions = Effect.fn("AppMentions.register")(function* (
           )
             ? [{ ...AppMentions.SafariDevTools, running: false }]
             : []
-          const server = ["open-computer-use", "codex-computer-use"].find((name) =>
+          const server = ["codex-computer-use", "open-computer-use"].find((name) =>
             listed?.data.some((candidate) => candidate.name === name && candidate.status.status === "connected"),
           )
           if (!server) return { apps: safari }
           const result = yield* ctx.mcp.callTool({ server, name: "list_apps", args: {} }).pipe(
-            Effect.timeout("5 seconds"),
+            Effect.timeout(server === "codex-computer-use" ? "30 seconds" : "5 seconds"),
             Effect.orElseSucceed(() => undefined),
           )
           if (!result || result.isError) return { apps: safari }

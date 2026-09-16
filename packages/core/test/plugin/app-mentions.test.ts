@@ -19,6 +19,7 @@ const it = testEffect(PluginTestLayer)
 const mcp = (options?: {
   readonly missing?: boolean
   readonly error?: boolean
+  readonly official?: boolean
   readonly native?: "connected" | "disabled" | "failed"
   readonly callTool?: Mcp.Interface["callTool"]
 }) =>
@@ -28,6 +29,9 @@ const mcp = (options?: {
     servers: () =>
       Effect.succeed(
         [
+          ...(options?.official
+            ? [new Mcp.ServerInfo({ name: Mcp.ServerName.make("codex-computer-use"), status: { status: "connected" } })]
+            : []),
           ...(options?.missing
             ? []
             : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("open-computer-use"), status: { status: "connected" } })]),
@@ -99,6 +103,21 @@ const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<
   }).pipe(Effect.provide(Mcp.layer()), Effect.provide(hostEnvironmentLayer))
 
 describe("app mentions plugin integration", () => {
+  it.effect("prefers the official Codex Computer Use bridge", () =>
+    Effect.gen(function* () {
+      expect(yield* call(mcp({ official: true }))).toEqual({
+        apps: [
+          {
+            server: "codex-computer-use",
+            name: "Safari",
+            bundleID: "com.apple.Safari",
+            running: true,
+          },
+        ],
+      })
+    }),
+  )
+
   it.live("runs the real plugin through PluginHost, RPC, and a fixture MCP server", () =>
     Effect.gen(function* () {
       expect(yield* withFixtureMcp(call)).toEqual({
