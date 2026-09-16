@@ -29,16 +29,14 @@ const fixture = test.extend<{ site: Site }, { builds: Record<string, Record<stri
           await mkdir(join(root, "public", "nested"), { recursive: true })
           await Promise.all(
             Object.entries({
-              "index.html": `<html><head><script>sessionStorage.setItem("loads", String(Number(sessionStorage.getItem("loads") ?? 0) + 1))</script></head><body><h1>Loading</h1><label>Draft<textarea></textarea></label><button>Load lazy</button><output></output><script type="module" src="/main.js"></script></body></html>`,
-              "main.js": `import { registerServiceWorker } from ${JSON.stringify(fileURLToPath(new URL("../../src/runtime/platform/service-worker.ts", import.meta.url)))};
+              "index.html": `<html><head></head><body><h1>Loading</h1><label>Draft<textarea></textarea></label><button>Load lazy</button><button>Refresh</button><output></output><script type="module" src="/main.js"></script></body></html>`,
+              "main.js": `import { refreshApplication, registerServiceWorker } from ${JSON.stringify(fileURLToPath(new URL("../../src/runtime/platform/service-worker.ts", import.meta.url)))};
             registerServiceWorker();
-            const draft = document.querySelector("textarea");
-            draft.value = localStorage.getItem("draft") ?? "";
-            draft.oninput = () => localStorage.setItem("draft", draft.value);
             document.querySelector("h1").textContent = "${version}";
             document.querySelector("button").onclick = async () => {
               document.querySelector("output").textContent = await (await import("./lazy.js")).load()
-            };`,
+            };
+            document.querySelectorAll("button")[1].onclick = refreshApplication;`,
               "lazy.js": `export async function load() { return (await import("./nested.js")).value }`,
               "nested.js": `export const value = "${version} nested lazy loaded"`,
               "public/nested/data.json": JSON.stringify({ version }),
@@ -83,31 +81,22 @@ const fixture = test.extend<{ site: Site }, { builds: Record<string, Record<stri
       const path = new URL(request.url ?? "/", "http://localhost").pathname
       requests.push(path)
       response.setHeader("cache-control", "no-store")
-      if (path === "/legacy.html" && state.legacy)
-        return void response.writeHead(200, { "content-type": "text/html" }).end(`
-          <html><head><script>sessionStorage.setItem("loads", String(Number(sessionStorage.getItem("loads") ?? 0) + 1))</script></head>
-          <body><h1>old</h1><label>Draft<textarea></textarea></label><button>Load lazy</button><output></output>
-          <script>
-            void navigator.serviceWorker.register("/sw.js");
-            const draft = document.querySelector("textarea");
-            draft.value = localStorage.getItem("draft") ?? "";
-            draft.oninput = () => localStorage.setItem("draft", draft.value);
-          </script></body></html>
-        `)
       if (path === "/observer.html")
         return void response.writeHead(200, { "content-type": "text/html" }).end("<title>Worker observer</title>")
       if (path === "/api/health")
         return void response.writeHead(200, { "content-type": "application/json" }).end('{"healthy":true}')
       if (path === "/sw.js" && state.legacy && state.version === "old") {
         // Model the shipped worker's shared precache name and cache-first navigation behavior.
-        const urls = ["/legacy.html"]
+        const urls = Object.keys(builds.old).filter(
+          (path) => path === "/index.html" || (path.startsWith("/_assets/") && path.endsWith(".js")),
+        )
         response.setHeader("content-type", "text/javascript")
         return void response.end(`
           self.addEventListener("install", event => event.waitUntil(
             caches.open("workbox-precache-v2-" + self.registration.scope).then(cache => cache.addAll(${JSON.stringify(urls)}))
           ));
           self.addEventListener("fetch", event => event.respondWith(
-            caches.match(event.request.mode === "navigate" ? "/legacy.html" : event.request)
+            caches.match(event.request.mode === "navigate" ? "/index.html" : event.request)
               .then(response => response || fetch(event.request))
           ));
         `)
@@ -159,30 +148,16 @@ const fixture = test.extend<{ site: Site }, { builds: Record<string, Record<stri
   },
 })
 
-async function install(page: Page, url: string, legacy = false) {
+async function install(page: Page, url: string) {
   await page.goto(url)
   await expect(page.getByRole("heading")).toHaveText("old")
-  if (legacy) {
-    await expect
-      .poll(() =>
-        page.evaluate(async () => {
-          const registration = await navigator.serviceWorker.getRegistration()
-          return {
-            active: registration?.active?.state,
-            installing: registration?.installing?.state,
-            waiting: registration?.waiting?.state,
-          }
-        }),
-      )
-      .toEqual({ active: "activated", installing: undefined, waiting: undefined })
-    await page.reload()
-  }
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register("/sw.js")
+    await navigator.serviceWorker.ready
+  })
+  await page.reload()
   await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.state)).toBe("activated")
   await expect(page.getByRole("heading")).toHaveText("old")
-}
-
-async function loads(page: Page) {
-  return page.evaluate(() => Number(sessionStorage.getItem("loads")))
 }
 
 async function update(page: Page) {
@@ -202,6 +177,12 @@ async function update(page: Page) {
     await registration.update()
     return found
   })
+}
+
+async function waiting(page: Page) {
+  await expect
+    .poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.waiting?.state))
+    .toBe("installed")
 }
 
 fixture(
@@ -242,32 +223,64 @@ fixture(
 )
 
 fixture(
-  "activates a complete build immediately and reloads every controlled tab",
-  async ({ page, context, site }) => {
+  "keeps drafts and removed old lazy chunks until every controlled tab closes",
+  async ({ page, context, site, builds }) => {
     await install(page, site.url)
-    expect(await loads(page)).toBe(1)
     const second = await context.newPage()
     await second.goto(site.url)
     await expect(second.getByRole("heading")).toHaveText("old")
-    expect(await loads(second)).toBe(1)
     await second.getByLabel("Draft").fill("Keep this unsent prompt")
 
     site.deploy()
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow")))
-    await expect(page.getByRole("heading")).toHaveText("new")
-    await expect(second.getByRole("heading")).toHaveText("new")
-    expect(await loads(page)).toBe(2)
-    expect(await loads(second)).toBe(2)
+    const created = context.waitForEvent("serviceworker")
+    const worker = await update(page)
+    const replacement = await created
+    await waiting(page)
+    expect(await worker.evaluate((worker) => worker.state)).toBe("installed")
     await expect(second.getByLabel("Draft")).toHaveValue("Keep this unsent prompt")
+    await page.close()
+    await waiting(second)
+    await expect(second.getByRole("heading")).toHaveText("old")
+    await expect(second.getByLabel("Draft")).toHaveValue("Keep this unsent prompt")
+
+    const removed = Object.keys(builds.old).find((path) => path.includes("/nested-") && path.endsWith(".js"))
+    expect(removed).toBeDefined()
+    expect((await second.request.get(`${site.url}${removed}`)).status()).toBe(404)
     await second.getByRole("button", { name: "Load lazy" }).click()
-    await expect(second.getByRole("status")).toHaveText("new nested lazy loaded")
+    await expect(second.getByRole("status")).toHaveText("old nested lazy loaded")
     await expect(second.getByLabel("Draft")).toHaveValue("Keep this unsent prompt")
-    const checks = site.requests.filter((path) => path === "/sw.js").length
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow")))
-    await expect.poll(() => site.requests.filter((path) => path === "/sw.js").length).toBeGreaterThan(checks)
-    expect(await loads(page)).toBe(2)
+    await second.close()
+
+    await expect
+      .poll(() =>
+        replacement.evaluate(() => {
+          const registration = (self as unknown as { registration: ServiceWorkerRegistration }).registration
+          return { waiting: !!registration.waiting, active: registration.active?.state }
+        }),
+      )
+      .toEqual({ waiting: false, active: "activated" })
+    await context.setOffline(true)
+    const observer = await context.newPage()
+    await observer.goto(`${site.url}/workspace/reopened`)
+    await expect(observer.getByRole("heading")).toHaveText("new")
+    await observer.getByRole("button", { name: "Load lazy" }).click()
+    await expect(observer.getByRole("status")).toHaveText("new nested lazy loaded")
   },
 )
+
+fixture("refreshes from the network without the service worker cache", async ({ page, site }) => {
+  await install(page, site.url)
+  site.deploy()
+  await update(page)
+  await waiting(page)
+  await expect(page.getByRole("heading")).toHaveText("old")
+
+  await page.getByRole("button", { name: "Refresh" }).click()
+  await expect(page.getByRole("heading")).toHaveText("new")
+  await expect
+    .poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state))
+    .toBe("activated")
+})
 
 for (const fault of ["failed", "html", "corrupt", "mixed-html"] as const) {
   fixture(`retains the old complete build when a precache download is ${fault}`, async ({ page, context, site }) => {
@@ -297,15 +310,16 @@ fixture("does not expose new HTML while a precache download is blocked", async (
   await second.goto(`${site.url}/workspace/during-install`)
   await expect(second.getByRole("heading")).toHaveText("old")
   site.release()
-  await expect(second.getByRole("heading")).toHaveText("new")
+  await waiting(page)
+  await second.reload()
+  await expect(second.getByRole("heading")).toHaveText("old")
 })
 
-fixture("upgrades the legacy shared precache immediately", async ({ page, context, site, builds }) => {
+fixture("upgrades the legacy shared precache only after old tabs close", async ({ page, context, site, builds }) => {
   site.legacy()
   const observer = await context.newPage()
   await observer.goto(`${site.url}/observer.html`)
-  await install(page, `${site.url}/legacy.html`, true)
-  expect(await loads(page)).toBe(2)
+  await install(page, site.url)
   await page.getByLabel("Draft").fill("Legacy unsent prompt")
   // A stale runtime-cache HTML response must not contaminate the new generated precache.
   const entry = Object.keys(builds.new).find((path) => path.includes("/index-") && path.endsWith(".js"))
@@ -315,18 +329,16 @@ fixture("upgrades the legacy shared precache immediately", async ({ page, contex
       await caches.open("opencode-assets")
     ).put(entry!, new Response("<html>stale fallback</html>", { headers: { "content-type": "text/html" } }))
   }, entry)
-  const controller = await page.evaluateHandle(() => navigator.serviceWorker.controller)
   site.deploy()
   await update(page)
-  await expect.poll(() => page.evaluate((previous) => navigator.serviceWorker.controller !== previous, controller)).toBe(true)
-  await expect(page.getByRole("heading")).toHaveText("old")
+  await waiting(page)
   await expect(page.getByLabel("Draft")).toHaveValue("Legacy unsent prompt")
-  expect(await loads(page)).toBe(2)
-  await page.reload()
-  await expect(page.getByRole("heading")).toHaveText("new")
-  expect(await loads(page)).toBe(3)
   await page.getByRole("button", { name: "Load lazy" }).click()
-  await expect(page.getByRole("status")).toHaveText("new nested lazy loaded")
+  await expect(page.getByRole("status")).toHaveText("old nested lazy loaded")
+  await page.close()
+  await expect
+    .poll(() => observer.evaluate(async () => !!(await navigator.serviceWorker.getRegistration())?.waiting))
+    .toBe(false)
   await context.setOffline(true)
   await observer.goto(`${site.url}/workspace/legacy-upgraded`)
   await expect(observer.getByRole("heading")).toHaveText("new")

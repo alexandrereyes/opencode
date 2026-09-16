@@ -51,6 +51,8 @@ import { mobileSessionTabs, mobileTabIsOpen } from "./mobile-session-tabs"
 import { newChatDraft } from "@/new-session/chats"
 import { showToast } from "@/shell/notifications/toast"
 import { resolveChatIdentity } from "@/runtime/chats"
+import { RefreshApp } from "./refresh-app"
+import { canRefreshApplication, refreshApplication } from "@/runtime/platform/service-worker"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
 import betaIcon from "../../../../desktop/icons/beta/64x64.png"
 import prodIcon from "../../../../desktop/icons/prod/64x64.png"
@@ -754,7 +756,7 @@ export function Titlebar(props: {
                           </Show>
                           <SidebarSubscriptions mobile currentTab={currentTab()} onOpenChange={(open) => setMobileTabs("proxy", open)} />
                           <Show when={!mobileTabs.proxy}>
-                          <div class="flex shrink-0 flex-col gap-1 border-t border-v2-border-border-muted pt-2">
+                          <div class="grid shrink-0 grid-cols-2 gap-1 border-t border-v2-border-border-muted pt-2">
                             <button
                               type="button"
                               data-action="mobile-tabs-home"
@@ -769,29 +771,28 @@ export function Titlebar(props: {
                               <Icon name="grid-plus" />
                               {language.t("home.title")}
                             </button>
-                            <div class="flex items-center gap-1">
-                              <button
-                                type="button"
-                                data-action="mobile-tabs-settings"
-                                class="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
-                                onClick={() => setMobileTabs({ open: false, settings: true })}
-                              >
-                                <Icon name="settings-gear" size="small" />
-                                {language.t("sidebar.settings")}
-                              </button>
-                              <button
-                                type="button"
-                                data-action="mobile-tabs-help"
-                                class="flex h-7 shrink-0 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
-                                onClick={() => {
-                                  setMobileTabs("open", false)
-                                  platform.openExternal("https://opencode.ai/desktop-feedback")
-                                }}
-                              >
-                                <Icon name="help" size="small" />
-                                {language.t("sidebar.help")}
-                              </button>
-                            </div>
+                            <RefreshApp />
+                            <button
+                              type="button"
+                              data-action="mobile-tabs-settings"
+                              class="flex h-7 min-w-0 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                              onClick={() => setMobileTabs({ open: false, settings: true })}
+                            >
+                              <Icon name="settings-gear" size="small" />
+                              {language.t("sidebar.settings")}
+                            </button>
+                            <button
+                              type="button"
+                              data-action="mobile-tabs-help"
+                              class="flex h-7 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                              onClick={() => {
+                                setMobileTabs("open", false)
+                                platform.openExternal("https://opencode.ai/desktop-feedback")
+                              }}
+                            >
+                              <Icon name="help" size="small" />
+                              {language.t("sidebar.help")}
+                            </button>
                           </div>
                           </Show>
                         </div>
@@ -995,30 +996,39 @@ function ChannelIndicator(props: {
   const label = () =>
     !channel || channel === "prod" ? language.t("sidebar.brand") : language.t(`titlebar.channel.${channel}`)
   const debug = () => (channel === "dev" ? props.debugTools : undefined)
+  const refresh = props.sidebar && platform.platform === "web" && canRefreshApplication()
+  const interactive = () => refresh || !!debug()
+  const actionLabel = () => (refresh ? language.t("titlebar.update") : label())
   return (
     <Tooltip
       placement={props.sidebar ? "right" : "bottom"}
-      value={label()}
+      value={actionLabel()}
       class={`shrink-0 [app-region:no-drag] ${props.sidebar ? "ms-0.5 self-start" : ""} ${props.horizontal ? "me-1.5" : ""} ${props.horizontal && platform.platform === "web" ? "ps-2.5" : ""}`}
     >
       <Dynamic
-        component={debug() ? "button" : "div"}
-        type={debug() ? "button" : undefined}
+        component={interactive() ? "button" : "div"}
+        type={interactive() ? "button" : undefined}
         data-slot="channel-indicator"
         class="flex h-7 shrink-0 items-center rounded-[6px] [app-region:no-drag]"
         classList={{
           "w-6": props.sidebar,
           "w-5": !props.sidebar,
           "cursor-pointer hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02":
-            !!debug(),
+            interactive(),
         }}
-        onClick={() => debug()?.toggle()}
-        aria-label={debug() ? language.t("titlebar.toggleDebugTools") : undefined}
+        onClick={() => {
+          if (refresh)
+            return void refreshApplication().catch(() =>
+              showToast({ variant: "error", title: language.t("common.requestFailed") }),
+            )
+          debug()?.toggle()
+        }}
+        aria-label={refresh ? actionLabel() : debug() ? language.t("titlebar.toggleDebugTools") : undefined}
         aria-pressed={debug()?.visible}
       >
         <img
           src={channel === "beta" ? betaIcon : channel === "dev" || channel === "local" ? devIcon : prodIcon}
-          alt={debug() ? "" : label()}
+          alt={interactive() ? "" : label()}
           class="shrink-0 rounded-[4px] shadow-[var(--v2-elevation-raised)]"
           classList={{ "size-6": props.sidebar, "size-5": !props.sidebar }}
           draggable={false}
