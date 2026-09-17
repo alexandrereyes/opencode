@@ -12,6 +12,16 @@ export function workspaceDirectories(project: WorkspaceProject) {
   return (project.sandboxes ?? []).filter((directory) => !sameDirectory(project.worktree, directory))
 }
 
+export function prioritizeDevWorkspaces(directories: readonly string[], home: string) {
+  if (!home) return [...directories]
+  const dev = `${pathKey(home)}/dev`.toLowerCase()
+  const priority = (directory: string) => {
+    const key = pathKey(directory)
+    return Number(key.slice(0, key.lastIndexOf("/")).toLowerCase() === dev)
+  }
+  return directories.toSorted((a, b) => priority(b) - priority(a))
+}
+
 export function managedWorkspaceDirectories(project: WorkspaceProject) {
   return (project.worktrees ?? [])
     .filter((worktree) => worktree.strategy !== undefined)

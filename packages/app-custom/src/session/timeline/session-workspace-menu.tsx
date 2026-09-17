@@ -6,10 +6,10 @@ import { createSignal, For, Show, type ComponentProps, type JSX } from "solid-js
 import type { Project } from "@/runtime/server/types"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
-import { useData } from "@/runtime/server/current"
+import { useData, useServer } from "@/runtime/server/current"
 import { pathKey } from "@/workspaces/path-key"
 import { showToast } from "@/shell/notifications/toast"
-import { containsDirectory, sameDirectory, workspaceDirectories } from "@/workspaces/paths"
+import { containsDirectory, prioritizeDevWorkspaces, sameDirectory, workspaceDirectories } from "@/workspaces/paths"
 import { createWorktree } from "@/workspaces/create"
 
 export function SessionWorkspaceMenu(props: {
@@ -27,12 +27,16 @@ export function SessionWorkspaceMenu(props: {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const data = useData()
+  const server = useServer()
   const [store, setStore] = createStore({ selected: undefined as string | undefined })
   const [directories, setDirectories] = createSignal(workspaceDirectories(props.project))
   const blocked = () => props.eligible === false || data.session.status(props.sessionID) === "running"
   const currentWorkspace = () => directories().find((workspace) => containsDirectory(workspace, props.directory))
   const workspaces = () =>
-    directories().filter((workspace) => pathKey(workspace) !== pathKey(currentWorkspace() ?? props.directory))
+    prioritizeDevWorkspaces(
+      directories().filter((workspace) => pathKey(workspace) !== pathKey(currentWorkspace() ?? props.directory)),
+      server.ctx.sync.data.path.home,
+    )
   const onOpenChange = (open: boolean) => {
     props.onOpenChange?.(open)
     if (!open) return

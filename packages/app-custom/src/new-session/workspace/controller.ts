@@ -3,12 +3,13 @@ import { createEffect, createMemo, createResource, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useServerSDK } from "@/runtime/server/client"
-import { useData } from "@/runtime/server/current"
+import { useData, useServer } from "@/runtime/server/current"
 import { useSettings } from "@/settings/model"
 import { useTabs } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
 import { normalizeProjectInfo } from "@/runtime/server/global-sync/utils"
 import {
+  prioritizeDevWorkspaces,
   sameDirectory,
   workspaceDefaultSelection,
   workspaceSelectionDestination,
@@ -45,6 +46,7 @@ export function createNewSessionWorkspaceController(input: {
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
   const data = useData()
+  const server = useServer()
   const settings = useSettings()
   const tabs = useTabs()
   const [state, setState] = createStore({ search: "" })
@@ -92,9 +94,12 @@ export function createNewSessionWorkspaceController(input: {
       ...project.worktrees.map((item) => item.directory),
       ...(project.sandboxes ?? []),
     ]
-    return directories
-      .filter((directory) => !sameDirectory(project.worktree, directory))
-      .filter((directory, index, items) => items.findIndex((item) => sameDirectory(item, directory)) === index)
+    return prioritizeDevWorkspaces(
+      directories
+        .filter((directory) => !sameDirectory(project.worktree, directory))
+        .filter((directory, index, items) => items.findIndex((item) => sameDirectory(item, directory)) === index),
+      server.ctx.sync.data.path.home,
+    )
   })
   const managedWorktrees = createMemo(() => {
     const project = currentProject()
