@@ -108,7 +108,6 @@ export function createComposerProjectControls(props: {
     directory: location().directory,
     server: servers.list.length > 1 ? ServerConnection.key(projectServer()) : undefined,
     chat: !!tabs.draft(props.draftId).chat,
-    chatAvailable: capability.state.status === "available",
     pending: props.pending(),
     selectChat: selection.select,
     select: selectProject,

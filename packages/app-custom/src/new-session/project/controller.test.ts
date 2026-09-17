@@ -29,9 +29,9 @@ describe("chat selection", () => {
   })
 
   test("search keeps Chats in the discriminated option list", () => {
-    expect(chatMatchesSearch("Chats", "chat", true)).toBe(true)
-    expect(chatMatchesSearch("Chats", "project", true)).toBe(false)
-    expect(chatMatchesSearch("Chats", "chat", false)).toBe(false)
+    expect(chatMatchesSearch("Chats", "")).toBe(true)
+    expect(chatMatchesSearch("Chats", "chat")).toBe(true)
+    expect(chatMatchesSearch("Chats", "project")).toBe(false)
   })
 
   test("uses the exact scratch directory without resolving a worktree", async () => {

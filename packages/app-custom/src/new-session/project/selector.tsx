@@ -33,7 +33,6 @@ export type PromptProjectControls = {
   directory: string
   server?: string
   chat: boolean
-  chatAvailable: boolean
   pending: boolean
   selectChat: () => Promise<void>
   select: (worktree: string, server?: string) => void
@@ -77,7 +76,7 @@ export function createPromptProjectController(input: {
     return input.controls().available.filter((project) => displayName(project).toLowerCase().includes(search))
   }
   const chatVisible = () => {
-    return chatMatchesSearch(language.t("session.new.chats"), store.search, input.controls().chatAvailable)
+    return chatMatchesSearch(language.t("session.new.chats"), store.search)
   }
   const servers = () =>
     input
@@ -123,7 +122,7 @@ export function createPromptProjectController(input: {
     close()
   }
   const selectChat = () => {
-    if (!input.controls().chat && input.controls().chatAvailable) void input.controls().selectChat()
+    if (!input.controls().chat) void input.controls().selectChat()
     close()
   }
   const add = (server?: string) => {
@@ -132,7 +131,7 @@ export function createPromptProjectController(input: {
   }
   const setSearch = (value: string) => {
     const search = value.trim().toLowerCase()
-    if (search && input.controls().chatAvailable && language.t("session.new.chats").toLowerCase().includes(search)) {
+    if (search && chatMatchesSearch(language.t("session.new.chats"), search)) {
       setStore({ search: value, active: chatKey })
       return
     }
@@ -148,7 +147,6 @@ export function createPromptProjectController(input: {
   return {
     selected,
     chat: () => input.controls().chat,
-    chatAvailable: () => input.controls().chatAvailable,
     chatVisible,
     pending: () => input.controls().pending,
     empty: () => false,
@@ -220,8 +218,7 @@ export function createPromptProjectController(input: {
   }
 }
 
-export function chatMatchesSearch(label: string, search: string, available: boolean) {
-  if (!available) return false
+export function chatMatchesSearch(label: string, search: string) {
   const value = search.trim().toLowerCase()
   return !value || label.toLowerCase().includes(value)
 }
