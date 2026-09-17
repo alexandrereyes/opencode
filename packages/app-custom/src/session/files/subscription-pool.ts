@@ -8,8 +8,7 @@ export function subscriptionPlanSupported(plan: string | null) {
 
 export function subscriptionCapacity(account: Account, now = Date.now()) {
   if (!subscriptionPlanSupported(account.plan)) return "outside" as const
-  if (account.stale || account.hasCapacity === null || renewalPassed(account, now))
-    return "unconfirmed" as const
+  if (account.stale || account.hasCapacity === null || renewalPassed(account, now)) return "unconfirmed" as const
   if (!account.hasCapacity) return "unavailable" as const
   return "available" as const
 }
@@ -37,8 +36,8 @@ export function subscriptionAccounts(accounts: readonly Subscriptions.Account[],
   return accounts.toSorted((a, b) => planRank(a) - planRank(b) || rank(a) - rank(b))
 }
 
-export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now()) {
-  const members = accounts.filter((account) => account.plan === "pro" && account.enabled && account.authenticated)
+export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now(), plan = "pro") {
+  const members = accounts.filter((account) => account.plan === plan && account.enabled && account.authenticated)
   const measured = members.filter(
     (account) => !account.stale && account.remaining !== null && !renewalPassed(account, now),
   )
@@ -80,6 +79,11 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
     availableRemaining:
       !uncertain && members.length > 0
         ? members.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / members.length
+        : null,
+    fiveHourRemaining:
+      members.length > 0 &&
+      members.every((account) => !account.stale && account.fiveHourRemaining !== null && !renewalPassed(account, now))
+        ? members.reduce((sum, account) => sum + (account.fiveHourRemaining ?? 0), 0) / members.length
         : null,
     expectedRemaining:
       !uncertain && members.length > 0 && pace.length === members.length

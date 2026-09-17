@@ -9,10 +9,19 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { Tab } from "@/shell/tabs/tabs"
-import { subscriptionAccounts, subscriptionCapacity, subscriptionPace, subscriptionPool } from "@/session/files/subscription-pool"
+import {
+  subscriptionAccounts,
+  subscriptionCapacity,
+  subscriptionPace,
+  subscriptionPool,
+} from "@/session/files/subscription-pool"
 import { formatSubscriptionDate } from "./subscription-date"
 
-export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function SidebarSubscriptions(props: {
+  currentTab?: Tab
+  mobile?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const global = useGlobal()
   const language = useLanguage()
   const [state, setState] = createStore({ open: false, now: Date.now() })
@@ -49,7 +58,12 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
   }
   const pool = createMemo(() => subscriptionPool(subscription()?.accounts ?? [], state.now))
   const accounts = createMemo(() => subscriptionAccounts(subscription()?.accounts ?? [], state.now))
-  const members = createMemo(() => accounts().filter((account) => account.plan === "pro" && account.enabled && account.authenticated))
+  const groups = createMemo(() =>
+    [...new Set(accounts().map((account) => account.plan))].map((plan) => ({
+      plan,
+      accounts: accounts().filter((account) => account.plan === plan),
+    })),
+  )
   const renewals = createMemo(() => {
     const resets = accounts().flatMap((account) =>
       account.plan === "pro" && account.enabled && account.authenticated && account.resetAt
@@ -61,13 +75,6 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
   const nextRenewal = createMemo(() => {
     const first = renewals()?.min
     return first === undefined ? undefined : Math.max(0, Math.ceil((first - state.now) / 86_400_000))
-  })
-  const plus = createMemo(() => {
-    const members = accounts().filter((account) => account.plan === "plus" && account.enabled && account.authenticated)
-    return {
-      total: members.length,
-      ready: members.filter((account) => account.cooldownSeconds <= 0 && subscriptionCapacity(account, state.now) === "available").length,
-    }
   })
   const ready = () => subscription()?.status === "ok"
   const refresh = () => {
@@ -136,19 +143,17 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
             <span class="ms-auto min-w-0 truncate tabular-nums">
               {ready()
                 ? language.t("sidebar.proxy.quota", {
-                    percent: pool().availableRemaining !== null
-                      ? percent(pool().availableRemaining!)
-                       : "—",
+                    percent: pool().availableRemaining !== null ? percent(pool().availableRemaining!) : "—",
                   })
                 : language.t(subscription() ? "sidebar.proxy.unavailable" : "common.loading")}
             </span>
-          <Show when={ready()}>
-            <Show when={nextRenewal() !== undefined}>
-              <span class="flex shrink-0 items-center gap-1 tabular-nums" title={language.t("sidebar.proxy.renewal")}>
-                <Icon name="clock" size="small" />
-                {language.plural("sidebar.proxy.renewalDays", nextRenewal() ?? 0)}
-              </span>
-            </Show>
+            <Show when={ready()}>
+              <Show when={nextRenewal() !== undefined}>
+                <span class="flex shrink-0 items-center gap-1 tabular-nums" title={language.t("sidebar.proxy.renewal")}>
+                  <Icon name="clock" size="small" />
+                  {language.plural("sidebar.proxy.renewalDays", nextRenewal() ?? 0)}
+                </span>
+              </Show>
               <span class="flex shrink-0 items-center gap-1 tabular-nums" title={language.t("context.overview.banked")}>
                 <Icon name="refresh" size="small" />
                 {pool().banked?.available ?? "—"}
@@ -175,192 +180,173 @@ export function SidebarSubscriptions(props: { currentTab?: Tab; mobile?: boolean
           <Show when={subscription()} fallback={<p role="status">{language.t("common.loading")}</p>}>
             <Show when={ready()} fallback={<p role="status">{status()}</p>}>
               <Show when={accounts().length} fallback={<p>{language.t("context.overview.noSubscriptions")}</p>}>
-                <div class="flex flex-col gap-2">
-                  <span class="text-13-medium text-text-strong">{language.t("context.overview.weeklyPool")}</span>
-                  <span>
-                    {language.t("context.overview.availablePoolCapacity", { ready: pool().ready, total: pool().total })}
-                  </span>
-                  <For each={members()}>
-                    {(account) => {
-                      const remaining = () => account.stale || subscriptionCapacity(account, state.now) === "unconfirmed" ? null : account.remaining
-                      const pace = () => subscriptionPace(account, state.now)
-                      return (
-                        <div class="flex min-w-0 flex-col gap-2 py-1">
-                          <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
-                            <bdi class="min-w-0 truncate" title={account.name}>{account.name}</bdi>
-                            <span class="shrink-0 tabular-nums">{remaining() === null ? "—" : percent(remaining()!)}</span>
-                          </div>
-                          <QuotaMeter
-                            value={remaining()}
-                            label={language.t("context.overview.weeklyAccount", { account: account.name })}
-                            pace={pace()}
-                            paceLabel={pace() === null ? undefined : language.t("context.overview.balancePace", { percent: percent(pace()!) })}
-                          />
-                        </div>
-                      )
-                    }}
-                  </For>
-                  <span class="text-12-regular text-v2-text-text-muted">
-                    {pool().total === 0
-                      ? language.t("context.overview.noPool")
-                      : pool().availableRemaining === null
-                         ? language.t("context.overview.unknownWeekly")
-                        : language.t("context.overview.totalQuotaRemaining", {
-                            percent: percent(pool().availableRemaining ?? 0),
-                          })}
-                  </span>
-                  <Show when={pool().measured < pool().total && pool().observedAt !== null}>
-                    <span class="text-12-regular text-v2-text-text-muted">
-                      {language.t("context.overview.measurements", { measured: pool().measured, total: pool().total })}
-                    </span>
-                  </Show>
-                </div>
-                <hr class="border-0 border-t border-border-weak-base" />
-                <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
-                  <span>{language.t("context.overview.renewals")}</span>
-                  <span>
-                    {language.t("context.overview.renewalMin", {
-                      date: renewals() ? date(renewals()!.min) : language.t("sidebar.proxy.unavailable"),
-                    })}
-                  </span>
-                  <span>
-                    {language.t("context.overview.renewalMax", {
-                      date: renewals() ? date(renewals()!.max) : language.t("sidebar.proxy.unavailable"),
-                    })}
-                  </span>
-                </div>
-                <hr class="border-0 border-t border-border-weak-base" />
-                <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
-                  <div class="flex items-center justify-between gap-2">
-                    <span>{language.t("context.overview.banked")}</span>
-                    <span class="tabular-nums text-text-base">
-                      {pool().banked?.available ?? language.t("context.overview.bankedUnknown")}
-                    </span>
-                  </div>
-                  <Show when={(pool().banked?.available ?? 0) > 0}>
-                    <span>
-                      {language.t("context.overview.expiryMin", {
-                        date:
-                          pool().banked?.earliest == null
-                            ? language.t("context.overview.noExpiry")
-                            : date(pool().banked!.earliest!),
-                      })}
-                    </span>
-                    <span>
-                      {language.t("context.overview.expiryMax", {
-                        date:
-                          (pool().banked?.nonExpiring ?? 0) > 0
-                            ? language.t("context.overview.noExpiry")
-                            : date(pool().banked?.latest ?? 0),
-                      })}
-                    </span>
-                  </Show>
-                </div>
-                <hr class="border-0 border-t border-border-weak-base" />
-                <span class="text-12-regular text-v2-text-text-muted">
-                  {language.t("sidebar.proxy.plusCapacity", { ready: plus().ready, total: plus().total })}
-                </span>
-                <details class="group border-t border-border-weak-base pt-2" data-slot="subscription-pool">
-                  <summary class="flex h-8 cursor-pointer list-none items-center gap-2 rounded-sm text-13-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active [&::-webkit-details-marker]:hidden">
-                    <Icon name="chevron-down" size="small" class="-rotate-90 group-open:rotate-0" />
-                    {language.t("sidebar.proxy.accounts")}
-                    <span class="ms-auto tabular-nums text-v2-text-text-muted">{accounts().length}</span>
-                  </summary>
-                  <For each={accounts()}>
-                    {(account) => {
-                      const capacity = () => subscriptionCapacity(account, state.now)
-                      return (
-                        <div
-                          role="group"
-                          aria-label={account.name}
-                          class="flex min-w-0 flex-col gap-2 border-t border-border-weak-base py-3"
-                        >
-                          <bdi class="break-all text-13-medium text-text-strong">{account.name}</bdi>
-                          <span class="text-12-regular text-v2-text-text-muted">
-                            {account.plan
-                              ? language.t("context.overview.plan", {
-                                  plan:
-                                    account.plan === "pro"
-                                      ? "Pro 20x"
-                                      : account.plan === "prolite"
-                                        ? "Pro 5x"
-                                        : account.plan === "plus"
-                                          ? "Plus"
-                                          : account.plan,
-                                })
-                              : language.t("context.overview.planUnknown")}
+                <For each={groups()}>
+                  {(group) => {
+                    const summary = createMemo(() => subscriptionPool(group.accounts, state.now, group.plan ?? ""))
+                    const title = () =>
+                      group.plan === "pro" || group.plan === "prolite" || group.plan === "plus"
+                        ? language.t(`sidebar.proxy.${group.plan}`)
+                        : (group.plan ?? language.t("context.overview.planUnknown"))
+                    return (
+                      <section
+                        aria-label={title()}
+                        class="flex min-w-0 flex-col gap-3 border-b border-border-weak-base pb-3 last:border-0"
+                        data-slot="subscription-plan"
+                      >
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                          <h3 class="text-13-medium text-text-strong">{title()}</h3>
+                          <span class="text-12-regular text-v2-text-text-muted tabular-nums">
+                            {language.t("sidebar.proxy.groupCapacity", {
+                              ready: summary().ready,
+                              total: group.accounts.length,
+                            })}
                           </span>
+                        </div>
+                        <Show when={group.plan !== "plus"}>
+                          <span class="text-12-regular text-v2-text-text-muted">
+                            {language.t("context.overview.weekly")}
+                          </span>
+                        </Show>
+                        <For each={group.accounts}>
+                          {(account) => <SubscriptionAccount account={account} now={state.now} />}
+                        </For>
+                        <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
                           <span>
-                            {account.remaining === null
-                              ? language.t("context.overview.unknownWeekly")
-                              : language.t("context.overview.accountUsage", {
-                                  remaining: percent(account.remaining),
-                                  used: percent(100 - account.remaining),
-                                })}
-                          </span>
-                          <QuotaMeter
-                            value={account.remaining}
-                            label={language.t("context.overview.weeklyAccount", { account: account.name })}
-                          />
-                          <Show when={account.resetAt}>
-                            {(reset) => (
-                              <span class="text-12-regular text-v2-text-text-muted">
-                                {language.t("context.overview.weeklyReset", { time: date(reset(), true) })}
-                              </span>
-                            )}
-                          </Show>
-                          <Show when={account.fiveHourRemaining !== null || account.fiveHourResetAt !== null}>
-                            <span class="text-12-regular text-v2-text-text-muted">
-                              {account.fiveHourResetAt
-                                ? language.t("context.overview.fiveHourReset", {
-                                    time: new Intl.DateTimeFormat(language.intl(), {
-                                      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-                                    }).format(new Date(account.fiveHourResetAt)),
-                                  })
-                                : language.t("context.overview.fiveHour")}
-                            </span>
-                            <QuotaMeter
-                              value={account.fiveHourRemaining}
-                              label={language.t("context.overview.fiveHourAccount", { account: account.name })}
-                            />
-                          </Show>
-                          <span class="text-12-regular text-v2-text-text-muted">
-                            {account.bankedResets === null
-                              ? language.t("context.overview.accountBankedUnknown")
-                              : language.plural("context.overview.accountBanked", account.bankedResets.available)}
-                          </span>
-                          <Show when={account.plan === "plus" || account.plan === "prolite"}>
-                            <span class="text-12-regular text-v2-text-text-muted">
-                              {language.t("context.overview.resetProOnly")}
-                            </span>
-                          </Show>
-                          <span class="text-12-regular text-v2-text-text-muted">
                             {language.t(
-                              !account.enabled
-                                ? "context.overview.disabled"
-                                : !account.authenticated
-                                  ? "context.overview.reauthenticate"
-                                  : account.cooldownSeconds > 0
-                                    ? "context.overview.cooldown"
-                                    : account.stale || capacity() === "unconfirmed"
-                                      ? "context.overview.capacityUnconfirmed"
-                                      : capacity() === "outside"
-                                        ? "context.overview.outsidePool"
-                                        : account.hasCapacity === false
-                                          ? "context.overview.noCapacity"
-                                          : "context.overview.available",
+                              group.plan === "plus"
+                                ? "sidebar.proxy.combinedWeekly"
+                                : "context.overview.totalQuotaRemaining",
+                              {
+                                percent:
+                                  summary().availableRemaining === null ? "—" : percent(summary().availableRemaining!),
+                              },
                             )}
                           </span>
+                          <Show when={group.plan === "plus"}>
+                            <span>
+                              {language.t("sidebar.proxy.combinedFiveHour", {
+                                percent:
+                                  summary().fiveHourRemaining === null ? "—" : percent(summary().fiveHourRemaining!),
+                              })}
+                            </span>
+                          </Show>
+                          <Show when={group.plan === "pro"}>
+                            <span>
+                              {summary().banked === null
+                                ? language.t("context.overview.accountBankedUnknown")
+                                : language.plural("context.overview.accountBanked", summary().banked!.available)}
+                            </span>
+                            <Show when={(summary().banked?.available ?? 0) > 0}>
+                              <span>
+                                {language.t("context.overview.expiryMin", {
+                                  date:
+                                    summary().banked?.earliest == null
+                                      ? language.t("context.overview.noExpiry")
+                                      : date(summary().banked!.earliest!),
+                                })}
+                              </span>
+                            </Show>
+                          </Show>
                         </div>
-                      )
-                    }}
-                  </For>
-                </details>
+                      </section>
+                    )
+                  }}
+                </For>
               </Show>
             </Show>
           </Show>
         </div>
       </SubscriptionSurface>
+    </div>
+  )
+}
+
+function SubscriptionAccount(props: { account: Subscriptions.Account; now: number }) {
+  const language = useLanguage()
+  const account = () => props.account
+  const capacity = () => subscriptionCapacity(account(), props.now)
+  const percent = (value: number | null) =>
+    value === null
+      ? "—"
+      : new Intl.NumberFormat(language.intl(), { style: "percent", maximumFractionDigits: 0 }).format(value / 100)
+  const remaining = (value: number | null) => (account().stale || capacity() === "unconfirmed" ? null : value)
+  const date = (value: string) => formatSubscriptionDate(value, language.intl(), true)
+  const pace = () => subscriptionPace(account(), props.now)
+  const status = () => {
+    if (!account().enabled) return "context.overview.disabled"
+    if (!account().authenticated) return "context.overview.reauthenticate"
+    if (account().cooldownSeconds > 0) return "context.overview.cooldown"
+    if (capacity() === "unconfirmed") return "context.overview.capacityUnconfirmed"
+    if (capacity() === "outside") return "context.overview.outsidePool"
+    if (capacity() === "unavailable" && account().remaining === 0) return "sidebar.proxy.weeklyExhausted"
+    if (capacity() === "unavailable" && account().fiveHourRemaining === 0) return "sidebar.proxy.fiveHourExhausted"
+    if (capacity() === "unavailable") return "context.overview.noCapacity"
+  }
+  return (
+    <div role="group" aria-label={account().name} class="flex min-w-0 flex-col gap-2 py-1">
+      <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
+        <bdi class="min-w-0 truncate" title={account().name}>
+          {account().name}
+        </bdi>
+        <Show when={account().plan !== "plus"}>
+          <span class="shrink-0 tabular-nums">{percent(remaining(account().remaining))}</span>
+        </Show>
+      </div>
+      <Show when={account().plan === "plus"}>
+        <div class="flex justify-between gap-2 text-12-regular text-v2-text-text-muted">
+          <span>{language.t("context.overview.weekly")}</span>
+          <span class="tabular-nums">{percent(remaining(account().remaining))}</span>
+        </div>
+      </Show>
+      <QuotaMeter
+        value={remaining(account().remaining)}
+        label={language.t("context.overview.weeklyAccount", { account: account().name })}
+        pace={pace()}
+        paceLabel={
+          pace() === null ? undefined : language.t("context.overview.balancePace", { percent: percent(pace()) })
+        }
+      />
+      <span class="text-12-regular text-v2-text-text-muted">
+        {language.t("sidebar.proxy.renews", { date: account().resetAt ? date(account().resetAt!) : "—" })}
+      </span>
+      <Show
+        when={account().plan === "plus" || account().fiveHourRemaining !== null || account().fiveHourResetAt !== null}
+      >
+        <div class="flex justify-between gap-2 text-12-regular text-v2-text-text-muted">
+          <span>{language.t("context.overview.fiveHour")}</span>
+          <span class="tabular-nums">{percent(remaining(account().fiveHourRemaining))}</span>
+        </div>
+        <QuotaMeter
+          value={remaining(account().fiveHourRemaining)}
+          label={language.t("context.overview.fiveHourAccount", { account: account().name })}
+        />
+        <span class="text-12-regular text-v2-text-text-muted">
+          {language.t("sidebar.proxy.renews", {
+            date: account().fiveHourResetAt ? date(account().fiveHourResetAt!) : "—",
+          })}
+        </span>
+      </Show>
+      <Show when={account().plan === "pro"}>
+        <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
+          <span>
+            {account().bankedResets === null
+              ? language.t("context.overview.accountBankedUnknown")
+              : language.plural("context.overview.accountBanked", account().bankedResets!.available)}
+          </span>
+          <Show when={(account().bankedResets?.available ?? 0) > 0}>
+            <span>
+              {language.t("context.overview.expiryMin", {
+                date: account().bankedResets?.earliestExpiresAt
+                  ? date(account().bankedResets!.earliestExpiresAt!)
+                  : language.t("context.overview.noExpiry"),
+              })}
+            </span>
+          </Show>
+        </div>
+      </Show>
+      <Show when={status()}>
+        {(key) => <span class="text-12-regular text-v2-text-text-muted">{language.t(key())}</span>}
+      </Show>
     </div>
   )
 }
@@ -375,29 +361,57 @@ function SubscriptionSurface(props: {
   children: JSX.Element
 }) {
   const language = useLanguage()
-  const triggerClass = "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-12-regular text-v2-text-text-muted hover:bg-v2-background-bg-layer-02 focus-visible:outline-2 focus-visible:outline-border-active"
-  return <Show when={props.mobile} fallback={
-    <Popover open={props.open} onOpenChange={props.onOpenChange} placement="top-start" gutter={8}
-      title={props.title}
-      class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
-      triggerAs="button" triggerProps={{ type: "button", "aria-label": props.label, class: `${triggerClass} h-8` }}
-      trigger={props.trigger}>{props.children}</Popover>
-  }>
-    <Show when={props.open} fallback={
-      <button type="button" aria-label={props.label} class={`${triggerClass} h-11`} onClick={() => props.onOpenChange(true)}>{props.trigger}</button>
-    }>
-      <div class="flex min-h-0 flex-col" data-slot="mobile-proxy-details">
-        <button type="button" class="flex h-11 shrink-0 items-center gap-2 px-2 text-13-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active" onClick={() => props.onOpenChange(false)}>
-          <Icon name="chevron-left" size="small" />
-          {language.t("sidebar.proxy.back")}
-        </button>
-        <div class="max-h-[65dvh] overflow-y-auto overscroll-contain px-2 pb-3">
-          <h2 class="mb-3 text-14-medium text-text-strong">{props.title}</h2>
+  const triggerClass =
+    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-12-regular text-v2-text-text-muted hover:bg-v2-background-bg-layer-02 focus-visible:outline-2 focus-visible:outline-border-active"
+  return (
+    <Show
+      when={props.mobile}
+      fallback={
+        <Popover
+          open={props.open}
+          onOpenChange={props.onOpenChange}
+          placement="top-start"
+          gutter={8}
+          title={props.title}
+          class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
+          triggerAs="button"
+          triggerProps={{ type: "button", "aria-label": props.label, class: `${triggerClass} h-8` }}
+          trigger={props.trigger}
+        >
           {props.children}
+        </Popover>
+      }
+    >
+      <Show
+        when={props.open}
+        fallback={
+          <button
+            type="button"
+            aria-label={props.label}
+            class={`${triggerClass} h-11`}
+            onClick={() => props.onOpenChange(true)}
+          >
+            {props.trigger}
+          </button>
+        }
+      >
+        <div class="flex min-h-0 flex-col" data-slot="mobile-proxy-details">
+          <button
+            type="button"
+            class="flex h-11 shrink-0 items-center gap-2 px-2 text-13-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active"
+            onClick={() => props.onOpenChange(false)}
+          >
+            <Icon name="chevron-left" size="small" />
+            {language.t("sidebar.proxy.back")}
+          </button>
+          <div class="max-h-[65dvh] overflow-y-auto overscroll-contain px-2 pb-3">
+            <h2 class="mb-3 text-14-medium text-text-strong">{props.title}</h2>
+            {props.children}
+          </div>
         </div>
-      </div>
+      </Show>
     </Show>
-  </Show>
+  )
 }
 
 function QuotaMeter(props: { value: number | null; label: string; pace?: number | null; paceLabel?: string }) {

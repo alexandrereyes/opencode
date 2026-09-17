@@ -87,6 +87,7 @@ test("missing or stale measurements suppress the whole pool percentage", () => {
     balance: "unknown",
   })
   expect(subscriptionPool([])).toEqual({
+    fiveHourRemaining: null,
     total: 0,
     measured: 0,
     ready: 0,
@@ -116,12 +117,9 @@ test("treats a snapshot from before a completed renewal as unconfirmed", () => {
 
 test("applies completed five-hour renewal boundaries to every supported tier", () => {
   const now = Date.parse("2026-09-10T10:00:00Z")
-  expect(
-    subscriptionCapacity(
-      { ...account, plan: "plus", fiveHourResetAt: "2026-09-10T09:00:00Z" },
-      now,
-    ),
-  ).toBe("unconfirmed")
+  expect(subscriptionCapacity({ ...account, plan: "plus", fiveHourResetAt: "2026-09-10T09:00:00Z" }, now)).toBe(
+    "unconfirmed",
+  )
   expect(subscriptionCapacity({ ...account, plan: "prolite" }, now)).toBe("available")
   expect(subscriptionCapacity({ ...account, plan: "team" }, now)).toBe("outside")
 })
@@ -179,6 +177,7 @@ test("cooldown and capacity do not remove known quota from the combined balance"
     ready: 0,
     balance: "unavailable",
     availableRemaining: 45,
+    fiveHourRemaining: null,
     expectedRemaining: null,
     observedAt: Date.parse(account.observedAt),
     banked: null,
@@ -193,15 +192,20 @@ test("pace averages weekly time remaining across all pool members", () => {
   expect(subscriptionPace(full, now)).toBe(100)
   expect(subscriptionPace({ ...halfway, cooldownSeconds: 60 }, now)).toBe(50)
   expect(subscriptionPace({ ...halfway, stale: true }, now)).toBeNull()
-  expect(subscriptionPool([
-    halfway,
-    full,
-    { ...halfway, plan: "plus" },
-    { ...halfway, enabled: false },
-    { ...halfway, authenticated: false },
-    { ...halfway, cooldownSeconds: 60 },
-    { ...halfway, hasCapacity: false },
-  ], now).expectedRemaining).toBe(62.5)
+  expect(
+    subscriptionPool(
+      [
+        halfway,
+        full,
+        { ...halfway, plan: "plus" },
+        { ...halfway, enabled: false },
+        { ...halfway, authenticated: false },
+        { ...halfway, cooldownSeconds: 60 },
+        { ...halfway, hasCapacity: false },
+      ],
+      now,
+    ).expectedRemaining,
+  ).toBe(62.5)
   expect(subscriptionPool([halfway], now).expectedRemaining).toBe(50)
 })
 
@@ -243,4 +247,30 @@ test("banked inventory totals the Pro pool and preserves unknown and non-expirin
     nonExpiring: 1,
   })
   expect(subscriptionPool([first, account]).banked).toBeNull()
+})
+
+test("summarizes each tier and keeps Plus weekly and five-hour balances independent", () => {
+  const accounts = [
+    account,
+    { ...account, plan: "prolite", remaining: 62 },
+    { ...account, plan: "plus", remaining: 72, fiveHourRemaining: 0, hasCapacity: false },
+    { ...account, plan: "plus", remaining: 0, fiveHourRemaining: 85, hasCapacity: false },
+    { ...account, plan: "plus", remaining: 48, fiveHourRemaining: 60 },
+    { ...account, plan: "plus", remaining: 100, fiveHourRemaining: 100, enabled: false },
+  ]
+  expect(subscriptionPool(accounts, Date.now(), "prolite")).toMatchObject({
+    total: 1,
+    ready: 1,
+    availableRemaining: 62,
+  })
+  expect(subscriptionPool(accounts, Date.now(), "plus")).toMatchObject({
+    total: 3,
+    ready: 1,
+    availableRemaining: 40,
+    fiveHourRemaining: 145 / 3,
+  })
+  expect(subscriptionPool([{ ...account, plan: "plus", remaining: 72 }], Date.now(), "plus")).toMatchObject({
+    availableRemaining: 72,
+    fiveHourRemaining: null,
+  })
 })
