@@ -2,7 +2,7 @@ import { expect, jest, mock, test } from "bun:test"
 import { createRequire } from "node:module"
 import { createComponent } from "solid-js"
 import { render } from "solid-js/web"
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import type { SessionInfo } from "@opencode/client/promise"
 import type { SessionLifecycleResult } from "@/session/lifecycle-actions"
@@ -29,6 +29,9 @@ mock.module("@/runtime/platform/platform", () => ({ usePlatform: () => ({ platfo
 mock.module("@/servers/ssh/authenticate", () => ({ useSshAuthenticate: () => () => false }))
 mock.module("@/settings/model", () => ({
   useSettings: () => ({ permissions: { autoApprove: () => false }, appearance: { showProjectName: () => false } }),
+}))
+mock.module("@/preferences/context", () => ({
+  usePreferences: () => ({ canonical: () => false, mutate: async () => {} }),
 }))
 mock.module("@/shell/commands/command", () => ({ useCommand: () => ({ register: () => {} }) }))
 mock.module("@/shell/layout/session-tab-avatar", () => ({ SessionTabAvatar: () => null }))
@@ -64,7 +67,7 @@ const requests: { server: number; action: string; id: string }[] = []
 const invalidated: string[] = []
 const hosts = connections.map((connection, server) => {
   const [cache, setCache] = createStore<Record<string, SessionInfo | undefined>>({})
-  const [state, setState] = createStore({ connected: true })
+  const [state, setState] = createStore({ connected: true, running: {} as Record<string, boolean> })
   const backend = server ? [row("same")] : [row("same"), ...Array.from({ length: 8 }, (_, i) => row(`row-${i}`, i + 1))]
   const failures = new Set<string>()
   const waiters = new Map<string, Promise<void>>()
@@ -77,6 +80,7 @@ const hosts = connections.map((connection, server) => {
     if (type === "session.execution.started") active.add(sessionID)
     if (["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"].includes(type))
       active.delete(sessionID)
+    setState("running", sessionID, active.has(sessionID))
     listeners.forEach((listener) => listener({ type, data: { sessionID } }))
   }
   const mutate = async (action: string, id: string) => {
@@ -89,13 +93,27 @@ const hosts = connections.map((connection, server) => {
     emit(action === "remove" ? "session.deleted" : "session.archived", id)
   }
   const ctx = {
-    sync: { data: { project: [{ id: "repo", worktree: "/repo", name: "Repo" }], path: {} } },
-    projects: { list: () => [] },
+    sync: {
+      data: { project: [{ id: "repo", worktree: "/repo", name: "Repo" }], path: {} },
+      worktrees: { cached: () => undefined, load: async () => [{ directory: "/repo" }] },
+    },
+    projects: {
+      list: () => [
+        { id: "repo", worktree: "/repo", name: "Repo", expanded: true },
+        { id: "other", worktree: "/other", name: "other", expanded: true },
+      ],
+    },
     notification: { session: { unseen: () => [] } },
     data: {
+      location: {
+        info: () => undefined,
+        syncInfo: async () => {},
+        vcs: { info: () => undefined, sync: async () => {} },
+      },
       session: {
         list: () => Object.values(cache).filter((session): session is SessionInfo => !!session),
         get: (id: string) => cache[id],
+        status: (id: string) => (state.running[id] ? "running" : "idle"),
         remember: (session: SessionInfo) => setCache(session.id, session),
         permission: { list: () => undefined },
         form: { list: () => undefined },
@@ -104,7 +122,7 @@ const hosts = connections.map((connection, server) => {
       },
     },
     sdk: {
-      connection: { status: () => (state.connected ? "connected" : "disconnected") },
+      connection: { status: () => (state.connected ? "connected" : "disconnected"), epoch: () => 0 },
       event: {
         listen: (listener: Listener) => {
           listeners.add(listener)
@@ -115,13 +133,17 @@ const hosts = connections.map((connection, server) => {
         rpc: (definition: { id: string }) =>
           definition.id === "custom.archive"
             ? { archive: ({ sessionID }: { sessionID: string }) => mutate("archive", sessionID) }
-            : {
-                list: async (input: { sessionID?: string }) => {
-                  calls.navigation++
-                  await navigation.wait
-                  return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
-                },
-              },
+            : definition.id === "custom.chats"
+              ? { info: async () => ({ root: "/chats" }) }
+              : definition.id === "custom.subscriptions"
+                ? { list: async () => ({ status: "unavailable", accounts: [] }) }
+                : {
+                    list: async (input: { sessionID?: string }) => {
+                      calls.navigation++
+                      await navigation.wait
+                      return { data: backend.filter((row) => !input.sessionID || row.session.id === input.sessionID) }
+                    },
+                  },
         session: {
           active: async () => {
             calls.active++
@@ -142,11 +164,26 @@ mock.module("@/runtime/server/registry", () => ({
   }),
 }))
 mock.module("@/runtime/server/runtime", () => ({
-  useGlobal: () => ({
-    servers: { list: () => registryState.connections },
-    ensureServerCtx: (connection: ServerConnection.Any) =>
-      hosts.find((host) => ServerConnection.key(host.connection) === ServerConnection.key(connection))!.ctx,
-  }),
+  useGlobal: () => {
+    const saved = JSON.parse(localStorage.getItem("opencode.global.dat:sidebar-navigation") ?? "{}")
+    const [sidebar, setSidebar] = createStore({
+      attention: saved.attention ?? true,
+      order: saved.order ?? [],
+      collapsed: saved.collapsed ?? {},
+      pins: saved.pins ?? [],
+    })
+    const set = (...args: Parameters<typeof setSidebar>) => {
+      setSidebar(...args)
+      localStorage.setItem("opencode.global.dat:sidebar-navigation", JSON.stringify(sidebar))
+    }
+    return {
+      sidebar: { store: sidebar, set, ready: () => true },
+      settings: { server: { selected: () => connections[0] } },
+      servers: { list: () => registryState.connections },
+      ensureServerCtx: (connection: ServerConnection.Any) =>
+        hosts.find((host) => ServerConnection.key(host.connection) === ServerConnection.key(connection))!.ctx,
+    }
+  },
   useServerCtx: (connection: () => ServerConnection.Any | undefined) => () => {
     const conn = connection()
     return conn
@@ -215,6 +252,8 @@ function mount(sidebar = true, direction = "ltr", currentTab?: Tab) {
       }),
     host,
   )
+  // This fixture exercises selection with the search field already expanded.
+  if (sidebar) host.querySelector<HTMLButtonElement>('[role="toolbar"] button[aria-expanded]')!.click()
   return {
     host,
     query,
@@ -226,7 +265,9 @@ function mount(sidebar = true, direction = "ltr", currentTab?: Tab) {
   }
 }
 const button = (root: ParentNode, text: string) =>
-  [...root.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === text)!
+  [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+    (item) => item.textContent === text || item.getAttribute("aria-label") === text,
+  )!
 const rows = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>("[data-titlebar-tab]")]
 const findRows = (root: ParentNode, id: string, server = 0) =>
   rows(root).filter(
@@ -252,6 +293,7 @@ function press(link: HTMLElement, init: MouseEventInit = {}) {
 }
 const count = (root: ParentNode) => root.querySelector('[data-slot="sidebar-selection"] [role="status"]')?.textContent
 function search(root: ParentNode, value: string) {
+  if (!root.querySelector('input[type="search"]')) button(root, "Search sessions").click()
   const input = root.querySelector<HTMLInputElement>('input[type="search"]')!
   input.value = value
   input.dispatchEvent(new Event("input", { bubbles: true }))
@@ -284,7 +326,13 @@ test("sidebar render/churn benchmark", async () => {
 
 const recentSection = (root: ParentNode) =>
   [...root.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")!
-const recentLinks = (root: ParentNode) => [...recentSection(root).querySelectorAll<HTMLAnchorElement>("a")]
+// Pinned rows now share the Recent section but do not consume its pagination allowance.
+const recentLinks = (root: ParentNode) =>
+  [...recentSection(root).querySelectorAll<HTMLAnchorElement>("a")].filter(
+    (link) =>
+      link.getAttribute("href") !==
+      tabsModule.tabHref({ type: "session", server: ServerConnection.key(connections[0]), sessionId: "same" }),
+  )
 const recentOrder = (root: ParentNode) => recentLinks(root).map((link) => link.getAttribute("href"))
 
 test("Recent expands by five, collapses in place, prunes only hidden selection and keeps search complete", async () => {
@@ -316,7 +364,7 @@ test("Recent expands by five, collapses in place, prunes only hidden selection a
         expect(control.classList.contains("text-start")).toBe(true)
         expect(ui.host.dir).toBe(direction)
         expect(recentLinks(ui.host)).toHaveLength(5)
-        expect(findRows(recent, "same")).toHaveLength(0)
+        expect(findRows(recent, "same")).toHaveLength(1)
         expect(findRows(ui.host, "recent-child")).toHaveLength(0)
         expect(findRows(ui.host, "recent-archived")).toHaveLength(0)
         const first = recentLinks(ui.host)[0]
@@ -427,7 +475,7 @@ test("Recent control counts the forced current root and never offers a no-op exp
         await wait()
         expect(findRows(ui.host, current).length).toBeGreaterThan(0)
         if (!size) {
-          expect(recentSection(ui.host)).toBeUndefined()
+          expect(recentLinks(ui.host)).toHaveLength(0)
           continue
         }
         const recent = recentSection(ui.host)
@@ -532,7 +580,9 @@ test("shared sidebar clock updates every view without reordering, remounting, lo
         pinnedRow.dataset.titleOverflow = "true"
         pinnedRow.dataset.active = "true"
         expect(Number.parseFloat(getComputedStyle(pinnedRow.querySelector("a")!).paddingInlineEnd)).toBe(0)
-        expect(getComputedStyle(pinnedRow.querySelector("a")!).gridTemplateColumns).toBe("16px minmax(0, 1fr) auto")
+        expect(pinnedRow.dataset.avatar).toBe("hidden")
+        expect(getComputedStyle(pinnedRow.querySelector('[data-slot="tab-title"]')!).gridColumn).toBe("1")
+        expect(getComputedStyle(time).gridColumn).toBe("2")
         expect(getComputedStyle(pinnedRow.querySelector('[data-slot="tab-title"]')!).textOverflow).toBe("ellipsis")
         const focused = link(recent, "row-0")
         button(ui.host, "Select sessions").click()
@@ -597,6 +647,7 @@ test("shared sidebar clock updates every view without reordering, remounting, lo
       } finally {
         ui.dispose()
         hosts[0].active.clear()
+        hosts[0].setState("running", reconcile({}))
         jest.useRealTimers()
       }
     }

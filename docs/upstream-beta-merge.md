@@ -53,8 +53,9 @@ git diff --numstat --diff-filter=M e5ecb5719de37759e06c57ff05ffc668e98f6f30 -- \
 - TUI, Schema, upstream App, Desktop, Util, UI-custom and Session-UI-custom
   package suites were exercised successfully.
 
-The overall test run is **not fully green**. These failures were reproduced in
-separate clean checkouts, rather than assumed to be pre-existing:
+The initial merge test run had the following failures, reproduced in separate
+clean checkouts rather than assumed to be pre-existing. They were subsequently
+addressed in the follow-up below.
 
 | Baseline | Package | Failing tests |
 | --- | --- | --- |
@@ -71,3 +72,28 @@ fixed and rerun successfully.
 Test logs are retained under the session's temporary directory with the
 `merge-beta-` prefix, including `merge-beta-upstream-{client,sdk,cli}.log` and
 `merge-beta-custom-base-browser.log` for baseline evidence.
+
+## Follow-up: remaining test failures
+
+- CLI subprocess fixtures now use the isolated environment helper and the
+  intended service-config directory. The inherited `OPENCODE_CONFIG_DIR` had
+  redirected tests to installed configuration; the debug-paths fixture also
+  clears inherited configuration/database overrides.
+- Client fixtures use decoded `DateTime.Utc` inputs, the current file/VCS/shell
+  API inventory and the `resume` interrupt query. The Effect service entrypoint
+  is explicitly checked to remain independent of Protocol.
+- SDK transport tests distinguish the HTTP client's `SessionNotFoundError`
+  from the embedded service's `Session.NotFoundError`, exercising both paths.
+- Browser fixtures provide the current preference, server, worktree, activity
+  and RPC contexts. Assertions cover accessible icon controls, expanded search,
+  pinned rows sharing Recent without consuming pagination slots, avatar-hidden
+  title/time columns and mobile swipe actions. Activity is reset between the
+  clock test's LTR/RTL cases.
+
+No production implementation or public API was changed by this follow-up.
+
+Full affected-suite results after the fixes: **Client 168/168, SDK 32/32,
+CLI 295/295 and App-custom browser 204/204 passing**. The latter includes the
+nested sidebar, workspace and model-selection fixtures. Root lint/typechecking
+and `git diff --check` also pass. Follow-up logs use the `fix-remaining-` prefix
+in the same temporary directory.

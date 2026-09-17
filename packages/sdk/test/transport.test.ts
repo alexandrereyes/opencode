@@ -45,8 +45,11 @@ for (const entrypoint of ["create", "layer"] as const) {
         expect(yield* client.events.subscribe().pipe(Stream.take(1), Stream.runCollect)).toMatchObject([
           { type: "server.connected" },
         ])
-        expect(yield* client.sessions.get({ sessionID: Session.ID.create() }).pipe(Effect.flip)).toMatchObject({
+        expect(yield* client.session.get({ sessionID: Session.ID.create() }).pipe(Effect.flip)).toMatchObject({
           _tag: "SessionNotFoundError",
+        })
+        expect(yield* client.sessions.get({ sessionID: Session.ID.create() }).pipe(Effect.flip)).toMatchObject({
+          _tag: "Session.NotFoundError",
         })
         // Binding the SDK's transport must not change the caller's surrounding context.
         expect(yield* FetchHttpClient.Fetch).toBe(ambient)

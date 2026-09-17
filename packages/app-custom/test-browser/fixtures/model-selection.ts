@@ -115,7 +115,13 @@ function fixture(input: { session?: Commit; agents?: Agent[]; config?: ConfigMod
     state,
     set,
     setPreferences,
-    preferences: { store: preferences, set: setPreferences, ready: () => true, recent: () => preferences.recent },
+    preferences: {
+      store: preferences,
+      set: setPreferences,
+      preferences: { mutate: async () => {} },
+      ready: () => true,
+      recent: () => preferences.recent,
+    },
     data: {
       session: { get: (id: string) => state.sessions[id] },
       location: {

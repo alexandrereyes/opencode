@@ -25,6 +25,7 @@ mock.module("@/workspaces/location", () => ({
   useWorkspaceLocation: () => () => ({ directory: "/repo", ref: { directory: "/repo" }, current: undefined }),
 }))
 mock.module("@/runtime/server/current", () => ({
+  useServer: () => ({ ctx: { sync: { data: { project: [project], path: { home: "/home/test" } } } } }),
   useData: () => ({
     location: {
       info: () => (state.locationReady ? location : undefined),
@@ -52,7 +53,7 @@ mock.module("@/runtime/server/client", () => ({
           return [{ directory: "/repo" }]
         },
       },
-      vcs: { branches: async () => ({ data: [] }) },
+      vcs: { branch: { list: async () => ({ data: [] }) } },
     },
     event: { listen: () => () => {} },
   }),

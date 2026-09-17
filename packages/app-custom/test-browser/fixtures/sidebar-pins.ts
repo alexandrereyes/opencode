@@ -46,7 +46,9 @@ const platform: Pick<Platform, "platform" | "os" | "openPath" | "openAttachmentP
 mock.module("@/runtime/platform/platform", () => ({ usePlatform: () => platform }))
 mock.module("@/servers/ssh/authenticate", () => ({ useSshAuthenticate: () => () => false }))
 const edited: unknown[] = []
-mock.module("@opencode/ui-custom/context/dialog", () => ({ useDialog: () => ({ show: (render: () => unknown) => render() }) }))
+mock.module("@opencode/ui-custom/context/dialog", () => ({
+  useDialog: () => ({ show: (render: () => unknown) => render() }),
+}))
 mock.module("@/settings/workspaces/project-dialog", () => ({
   DialogEditProject: (props: unknown) => {
     edited.push(props)
@@ -73,7 +75,9 @@ mock.module("@/shell/layout/session-tab-avatar", () => ({ SessionTabAvatar: () =
 mock.module("@/shell/titlebar/tab-popover", () => ({
   TabPreviewPopover: (props: { trigger: JSX.Element }) => props.trigger,
 }))
-mock.module("@opencode/session-ui-custom/v2/session-progress-indicator-v2", () => ({ SessionProgressIndicatorV2: () => null }))
+mock.module("@opencode/session-ui-custom/v2/session-progress-indicator-v2", () => ({
+  SessionProgressIndicatorV2: () => null,
+}))
 mock.module("@/composer/persistence", () => ({ createTabComposerState: () => {} }))
 const toasts: { title: string; description?: string }[] = []
 mock.module("@/shell/notifications/toast", () => ({
@@ -178,7 +182,11 @@ const hosts = connections.map((connection, i) => {
         form: { list: (id: string) => attention.forms[id] },
         message: { sync: async () => {} },
       },
-      location: { info: () => undefined, vcs: { info: () => undefined, sync: async () => {} }, syncInfo: async () => {} },
+      location: {
+        info: () => undefined,
+        vcs: { info: () => undefined, sync: async () => {} },
+        syncInfo: async () => {},
+      },
     },
     sdk: {
       connection: {
@@ -656,7 +664,10 @@ test("quick actions opt in only for persisted sidebar rows and guard dragging an
     const [ordinary, mobile, draft] = rows
     expect(ordinary.querySelector('[aria-label="common.moreOptions"]')).not.toBeNull()
     expect(ordinary.querySelector('[aria-label="common.closeTab"]')).not.toBeNull()
-    expect(mobile.querySelector('[aria-label="common.moreOptions"]')).not.toBeNull()
+    expect(mobile.querySelector('[aria-label="common.moreOptions"]')).toBeNull()
+    const swipe = mobile.closest('[data-slot="mobile-tab-swipe"]')!
+    expect(swipe).not.toBeNull()
+    expect(swipe.querySelector('[data-slot="mobile-tab-actions"]')).not.toBeNull()
     expect(mobile.querySelector('[data-slot="mobile-tab-time"]')).not.toBeNull()
     expect(draft.querySelector('[aria-label="common.closeTab"]')).not.toBeNull()
     expect(rows.every((row) => !row.querySelector('[data-slot="tab-quick-actions"]'))).toBe(true)
