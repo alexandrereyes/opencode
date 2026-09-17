@@ -648,7 +648,7 @@ export function Titlebar(props: {
               )
             }
             createEffect(() => {
-              path()
+              // Session actions can change the active route; only explicit navigation dismisses the list.
               mobile()
               setMobileTabs("open", false)
             })
