@@ -211,6 +211,62 @@ endpoints, parameters, request bodies, and response schemas. The
 raw [OpenAPI specification](https://opencode.ai/v2/openapi.json) is also
 available for code generation and other tooling.
 
+### Finding and reading previous sessions
+
+Use this workflow when the user asks to find an earlier conversation, recover
+context, or inspect what another session actually did. Fetch the
+[API reference](https://opencode.ai/v2/docs/api) before using session endpoints.
+Check the running server's `/openapi.json` for supported query parameters and
+response shapes when needed; do not guess filters or pagination syntax.
+
+1. **Known session ID:** prefer the `opencode.session_read` tool when available.
+   Start with a bounded page, then pass its returned `next` value as `cursor`
+   to read older messages. This tool returns newest-first compact messages;
+   its pagination is distinct from the HTTP API's pagination.
+2. **Unknown session ID:** list sessions through the API:
+
+   ```sh
+   opencode api get /api/session
+   ```
+
+   Select candidates using titles, project/location, and dates. Follow the
+   returned pagination cursor using the parameters documented by the server.
+   A first page is not the entire history. Include relevant worktree locations
+   and child sessions when the work may have happened there.
+3. **Verify candidates by content:** read their messages with `session_read`
+   or the API. Titles are clues, not proof that a conversation contains the
+   requested work. Search for related terms and inspect surrounding messages
+   to confirm the action and its outcome.
+
+   ```sh
+   opencode api get '/api/session/<sessionID>/message'
+   ```
+
+   Quote paths containing query strings and URL-encode query values. Preserve
+   the server's returned cursors rather than constructing or decoding them.
+   Process large responses locally and return relevant excerpts instead of
+   dumping entire histories into the conversation.
+4. **Inspect tool details when necessary:** compact session reads may show only
+   summaries such as `[tool shell: completed]`. These do not reveal the command,
+   output, or whether the user's goal succeeded. Fetch the individual message
+   to inspect the tool input and result:
+
+   ```sh
+   opencode api get '/api/session/<sessionID>/message/<messageID>'
+   ```
+
+   Replace placeholder IDs in these examples with actual returned IDs.
+5. **Report search coverage accurately:** distinguish an unavailable server,
+   an incomplete search, and a session that was not found. Absence from a page
+   or a title search does not establish deletion. Confirm the server context
+   and search scope before drawing conclusions. Use the API first; do not
+   edit the database or restart the service just to search history.
+
+Keep requests in the same server and authentication context as the active
+client. If the CLI or API fails, inspect the actual error before changing
+approaches. Report the matching session ID/title and the messages supporting
+the finding, or state which scope was searched and what remains unresolved.
+
 ## [Client](https://opencode.ai/v2/docs/build/client)
 
 For questions about connecting an application to OpenCode over the network,
