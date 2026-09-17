@@ -46,8 +46,6 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 
 Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`, `main` ou `v2`. Essa escolha é específica deste fluxo de customização.
 
-Faça `git fetch origin` e crie a worktree pelo mecanismo padrão do OpenCode, selecionando `origin/custom` como base e o nome da branch da feature. Omita o diretório de destino para respeitar a configuração e a estratégia de worktrees vigentes; esta skill não define uma pasta própria para worktrees.
-
 - Escolha nome curto, de até três palavras separadas por hífen, sem `/` ou prefixo `feat/`.
 - Verifique previamente se a branch ou uma worktree da feature já existe. Para retomar uma feature, use a worktree dela. Use o caminho retornado pela criação, sem deduzir ou fixar um caminho em `~/Dev`.
 - Se houver ferramenta de movimentação de sessão, mova a sessão para a nova worktree.
