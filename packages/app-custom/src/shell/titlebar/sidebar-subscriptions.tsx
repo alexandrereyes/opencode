@@ -210,27 +210,37 @@ export function SidebarSubscriptions(props: {
                         <For each={group.accounts}>
                           {(account) => <SubscriptionAccount account={account} now={state.now} />}
                         </For>
-                        <div class="flex flex-col gap-1 text-12-regular text-v2-text-text-muted">
-                          <span>
-                            {language.t(
-                              group.plan === "plus"
-                                ? "sidebar.proxy.combinedWeekly"
-                                : "context.overview.totalQuotaRemaining",
-                              {
-                                percent:
-                                  summary().availableRemaining === null ? "—" : percent(summary().availableRemaining!),
-                              },
-                            )}
-                          </span>
-                          <Show when={group.plan === "plus"}>
-                            <span>
-                              {language.t("sidebar.proxy.combinedFiveHour", {
-                                percent:
-                                  summary().fiveHourRemaining === null ? "—" : percent(summary().fiveHourRemaining!),
+                        <Show when={group.plan === "pro"}>
+                          <div
+                            role="group"
+                            aria-label={language.t("sidebar.proxy.combinedQuota")}
+                            class="flex min-w-0 flex-col gap-2 py-1 text-12-regular"
+                          >
+                            <div class="flex min-w-0 items-center justify-between gap-2">
+                              <span>{language.t("sidebar.proxy.combinedQuota")}</span>
+                              <span class="shrink-0 tabular-nums">
+                                {summary().availableRemaining === null ? "—" : percent(summary().availableRemaining!)}
+                              </span>
+                            </div>
+                            <QuotaMeter
+                              value={summary().availableRemaining}
+                              label={language.t("context.overview.weeklyAccount", {
+                                account: language.t("sidebar.proxy.combinedQuota"),
+                              })}
+                              pace={summary().expectedRemaining}
+                              paceLabel={
+                                summary().expectedRemaining === null
+                                  ? undefined
+                                  : language.t("context.overview.balancePace", {
+                                      percent: percent(summary().expectedRemaining!),
+                                    })
+                              }
+                            />
+                            <span class="text-v2-text-text-muted">
+                              {language.t("context.overview.renewalMin", {
+                                date: renewals() ? date(renewals()!.min, true) : "—",
                               })}
                             </span>
-                          </Show>
-                          <Show when={group.plan === "pro"}>
                             <span>
                               {summary().banked === null
                                 ? language.t("context.overview.accountBankedUnknown")
@@ -246,8 +256,8 @@ export function SidebarSubscriptions(props: {
                                 })}
                               </span>
                             </Show>
-                          </Show>
-                        </div>
+                          </div>
+                        </Show>
                       </section>
                     )
                   }}
@@ -284,20 +294,22 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
   }
   return (
     <div role="group" aria-label={account().name} class="flex min-w-0 flex-col gap-2 py-1">
-      <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
-        <bdi class="min-w-0 truncate" title={account().name}>
-          {account().name}
-        </bdi>
-        <Show when={account().plan !== "plus"}>
-          <span class="shrink-0 tabular-nums">{percent(remaining(account().remaining))}</span>
+      <div class="flex min-w-0 flex-col">
+        <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
+          <bdi class="min-w-0 truncate" title={account().name}>
+            {account().name}
+          </bdi>
+          <Show when={account().plan !== "plus"}>
+            <span class="shrink-0 tabular-nums">{percent(remaining(account().remaining))}</span>
+          </Show>
+        </div>
+        <Show when={account().plan === "plus"}>
+          <div class="flex justify-between gap-2 text-12-regular text-v2-text-text-muted">
+            <span>{language.t("context.overview.weekly")}</span>
+            <span class="tabular-nums">{percent(remaining(account().remaining))}</span>
+          </div>
         </Show>
       </div>
-      <Show when={account().plan === "plus"}>
-        <div class="flex justify-between gap-2 text-12-regular text-v2-text-text-muted">
-          <span>{language.t("context.overview.weekly")}</span>
-          <span class="tabular-nums">{percent(remaining(account().remaining))}</span>
-        </div>
-      </Show>
       <QuotaMeter
         value={remaining(account().remaining)}
         label={language.t("context.overview.weeklyAccount", { account: account().name })}

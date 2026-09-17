@@ -156,6 +156,7 @@ export const dict = {
   "sidebar.proxy.weeklyExhausted": "Unavailable · weekly quota exhausted",
   "sidebar.proxy.fiveHourExhausted": "Unavailable · five-hour quota exhausted",
   "sidebar.proxy.combinedWeekly": "Combined weekly quota · {{percent}}",
+  "sidebar.proxy.combinedQuota": "Combined quota",
   "sidebar.proxy.combinedFiveHour": "Combined five-hour quota · {{percent}}",
   "sidebar.proxy.back": "Back to sessions",
   "sidebar.proxy.renewal": "Next Pro 20x weekly renewal",
