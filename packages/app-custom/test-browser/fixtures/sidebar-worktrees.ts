@@ -65,7 +65,12 @@ const { ServerConnection } = registry
 const { projectKey, sessionKey } = await import("@/shell/titlebar/sidebar-model")
 const { worktreeKey } = await import("@/shell/titlebar/sidebar-worktrees")
 const tabsModule = await import("@/shell/tabs/tabs")
-const [sidebarStore, setSidebarStore] = createStore({ attention: true, order: [] as string[], collapsed: {}, pins: [] as string[] })
+const [sidebarStore, setSidebarStore] = createStore({
+  attention: true,
+  order: [] as string[],
+  collapsed: {},
+  pins: [] as string[],
+})
 const drafts: { server: string; directory: string; worktree?: string }[] = []
 const tabStore: Array<{
   type: "draft"
@@ -136,7 +141,7 @@ const backend = [
 test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, collapse persistence and empty groups", async () => {
   const apiServer = createServer(async (request, response) => {
     response.setHeader("access-control-allow-origin", "*")
-    response.setHeader("access-control-allow-headers", "x-fixture-server")
+    response.setHeader("access-control-allow-headers", "x-fixture-server, content-type")
     response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")
     if (request.method === "OPTIONS") {
       response.writeHead(204)
@@ -149,8 +154,14 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     }
     const url = new URL(request.url!, "http://localhost")
     const server = Number(request.headers["x-fixture-server"])
-    const directory = url.searchParams.get("location[directory]") ?? ""
+    const directory =
+      url.searchParams.get("location[directory]") ??
+      (url.searchParams.has("projectID") ? `/${url.searchParams.get("projectID")}` : "")
     calls.push({ server, path: url.pathname, directory })
+    if (url.pathname === "/api/worktree/refresh") {
+      response.writeHead(204)
+      return response.end()
+    }
     if (url.pathname === "/api/rpc/custom.worktrees/inspect") {
       const body = JSON.parse(
         Buffer.concat((await Array.fromAsync(request)).map((chunk) => Buffer.from(chunk))).toString("utf8"),
@@ -223,7 +234,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
           ? { id: "empty", canonical: "/empty", directory: "/empty" }
           : directory.startsWith("/second")
             ? { id: "second", canonical: "/second", directory: "/second" }
-        : { id: "repo", canonical: "/repo", directory: worktree },
+            : { id: "repo", canonical: "/repo", directory: worktree },
     }
     if (url.pathname === "/api/location") {
       if (directory === "/missing/feat" || directory === "/trees/feature") return json({ message: "Unavailable" }, 400)
@@ -582,7 +593,9 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(header(repository).textContent).toContain("repository (1)")
     expect(titles(repository)).toEqual(["repository-owned"])
     expect(titles(projectElement(repositoryProject))).not.toContain("repository-owned")
-    const recent = [...host.querySelectorAll("section")].find((section) => section.querySelector("h2")?.textContent === "Recent")
+    const recent = [...host.querySelectorAll("section")].find(
+      (section) => section.querySelector("h2")?.textContent === "Recent",
+    )
     expect(recent ? titles(recent) : []).toContain("repository-owned")
     const featureHeader = header(feature)
     const rootHeader = header(projectElement())

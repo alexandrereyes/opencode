@@ -26,24 +26,22 @@ const mcp = (options?: {
     transform: () => Effect.die("unused mcp.transform"),
     reload: () => Effect.die("unused mcp.reload"),
     servers: () =>
-      Effect.succeed(
-        [
-          ...(options?.missing
-            ? []
-            : [new Mcp.ServerInfo({ name: Mcp.ServerName.make("codex-computer-use"), status: { status: "connected" } })]),
-          ...(options?.native
-            ? [
-                new Mcp.ServerInfo({
-                  name: Mcp.ServerName.make(AppMentions.SafariDevTools.server),
-                  status:
-                    options.native === "failed"
-                      ? { status: "failed" as const, error: "fixture failure" }
-                      : { status: options.native },
-                }),
-              ]
-            : []),
-        ],
-      ),
+      Effect.succeed([
+        ...(options?.missing
+          ? []
+          : [{ name: Mcp.ServerName.make("codex-computer-use"), status: { status: "connected" as const } }]),
+        ...(options?.native
+          ? [
+              {
+                name: Mcp.ServerName.make(AppMentions.SafariDevTools.server),
+                status:
+                  options.native === "failed"
+                    ? { status: "failed" as const, error: "fixture failure" }
+                    : { status: options.native },
+              },
+            ]
+          : []),
+      ]),
     add: () => Effect.die("unused mcp.add"),
     connect: () => Effect.die("unused mcp.connect"),
     disconnect: () => Effect.die("unused mcp.disconnect"),
@@ -52,19 +50,17 @@ const mcp = (options?: {
     callTool:
       options?.callTool ??
       ((input) =>
-        Effect.succeed(
-          new Mcp.ToolResult({
-            server: Mcp.ServerName.make(input.server),
-            tool: input.name,
-            isError: options?.error ?? false,
-            content: [
-              {
-                type: "text",
-                text: "Safari — com.apple.Safari [running]\nSafari — com.apple.Safari [running]",
-              },
-            ],
-          }),
-        )),
+        Effect.succeed({
+          server: Mcp.ServerName.make(input.server),
+          tool: input.name,
+          isError: options?.error ?? false,
+          content: [
+            {
+              type: "text",
+              text: "Safari — com.apple.Safari [running]\nSafari — com.apple.Safari [running]",
+            },
+          ],
+        })),
     instructions: () => Effect.succeed([]),
     prompts: () => Effect.succeed([]),
     prompt: () => Effect.undefined,
@@ -94,7 +90,7 @@ const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<
         ],
       }),
     )
-    yield* service.tools()
+    yield* service.callTool({ server: "codex-computer-use", name: "list_apps" })
     return yield* run(service)
   }).pipe(Effect.provide(Mcp.layer()), Effect.provide(hostEnvironmentLayer))
 
@@ -220,15 +216,13 @@ describe("app mentions plugin integration", () => {
           Mcp.Service,
           mcp({
             callTool: (input) =>
-              Effect.succeed(
-                new Mcp.ToolResult({
-                  server: Mcp.ServerName.make(input.server),
-                  tool: input.name,
-                  isError: false,
-                  structured: { count: 2 },
-                  content: [],
-                }),
-              ),
+              Effect.succeed({
+                server: Mcp.ServerName.make(input.server),
+                tool: input.name,
+                isError: false,
+                structured: { count: 2 },
+                content: [],
+              }),
           }),
         ),
       )

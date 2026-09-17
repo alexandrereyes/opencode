@@ -71,6 +71,51 @@ test("preserves the schema in an existing cli.json", async () => {
   expect(await Bun.file(file).json()).toEqual(config)
 })
 
+test("merges inline CLI config content over the global config", async () => {
+  await using directory = await tmpdir()
+  const file = path.join(directory.path, "cli.json")
+  const previous = process.env.OPENCODE_CLI_CONFIG_CONTENT
+  await Bun.write(
+    file,
+    JSON.stringify({
+      tabs: { enabled: true, scope: "global" },
+      keybinds: { "app.exit": "ctrl+q" },
+      plugins: ["global"],
+      animations: true,
+    }),
+  )
+  process.env.OPENCODE_CLI_CONFIG_CONTENT = JSON.stringify({
+    tabs: { enabled: false },
+    keybinds: { "help.show": false },
+    plugins: ["inline"],
+    animations: false,
+  })
+
+  try {
+    const result = await run(
+      directory.path,
+      Effect.gen(function* () {
+        const service = yield* Config.Service
+        const loaded = yield* service.get()
+        const updated = yield* service.update((draft) => {
+          draft.animations = true
+          draft.mouse = false
+        })
+        return { loaded, updated }
+      }),
+    )
+
+    expect(result.loaded.tabs).toEqual({ enabled: false, scope: "global" })
+    expect(result.loaded.keybinds).toEqual({ "app.exit": "ctrl+q", "help.show": false })
+    expect(result.loaded.plugins).toEqual(["inline"])
+    expect(result.updated).toMatchObject({ animations: false, mouse: false })
+    expect(await Bun.file(file).json()).toMatchObject({ animations: true, mouse: false })
+  } finally {
+    if (previous === undefined) delete process.env.OPENCODE_CLI_CONFIG_CONTENT
+    else process.env.OPENCODE_CLI_CONFIG_CONTENT = previous
+  }
+})
+
 test("migrates tui and kv config into cli.json", async () => {
   await using directory = await tmpdir()
   await Bun.write(
@@ -301,6 +346,7 @@ test("uses migrated keybinds when persistence fails", async () => {
   const fs = new Proxy(node, {
     get(target, property, receiver) {
       if (property === "rename") return () => Effect.die(new Error("read-only config"))
+      // oxlint-disable-next-line no-restricted-globals -- Proxy forwarding requires receiver-aware property access.
       return Reflect.get(target, property, receiver)
     },
   })

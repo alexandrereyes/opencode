@@ -30,7 +30,7 @@ export const Info = Schema.Struct({
   description: Schema.String.pipe(optional),
   slash: Schema.Boolean.pipe(optional),
   autoinvoke: Schema.Boolean.pipe(optional),
-  location: AbsolutePath,
+  path: AbsolutePath,
   content: Schema.String,
 }).annotate({ identifier: "Skill.Info" })
 

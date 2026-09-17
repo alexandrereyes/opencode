@@ -94,7 +94,7 @@ it.live(
       const firstLocation = { directory: first }
       const secondLocation = { directory: second }
 
-      yield* Effect.promise(() => client.plugin.awaitActivation({ location: firstLocation }))
+      yield* Effect.promise(() => client.rpc(AppMentions.Definition).list({}, { location: firstLocation }))
       const inventory = yield* Effect.promise(() => client.plugin.list({ location: firstLocation }))
       expect(inventory.data.find((item) => item.id === "custom.app-mentions")).toMatchObject({
         source: { type: "local" },
@@ -150,7 +150,7 @@ it.live(
       })
       expect(JSON.stringify(subscriptions)).not.toContain("private")
 
-      yield* Effect.promise(() => client.plugin.awaitActivation({ location: secondLocation }))
+      yield* Effect.promise(() => client.plugin.list({ location: secondLocation }))
       const isolated = yield* Effect.promise(() => client.plugin.list({ location: secondLocation }))
       expect(isolated.data.some((item) => item.id === "custom.app-mentions")).toBe(false)
       const unavailable = yield* Effect.tryPromise({
@@ -218,7 +218,7 @@ it.live(
       const server = yield* startServer(config)
       const client = OpenCode.make({ baseUrl: server.base, headers: server.headers })
       const location = { directory: project }
-      yield* Effect.promise(() => client.plugin.awaitActivation({ location }))
+      yield* Effect.promise(() => client.plugin.list({ location }))
       expect(yield* Effect.promise(() => client.rpc(NativeApps.Definition).list({}, { location }))).toEqual({
         os: null,
         apps: [],

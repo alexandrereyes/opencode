@@ -12,10 +12,10 @@ import { ExternalLink } from "@/runtime/platform/external-link"
 
 type SkillItem = {
   name: string
-  location: string
+  path: string
 }
 
-const skillKey = (item: SkillItem) => `${item.name}\n${item.location}`
+const skillKey = (item: SkillItem) => `${item.name}\n${item.path}`
 
 const ExtensionCard: Component<{ children: JSX.Element }> = (props) => (
   <div class="project-settings-extension-card">{props.children}</div>

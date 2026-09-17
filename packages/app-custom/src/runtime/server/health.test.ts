@@ -38,7 +38,7 @@ describe("checkServerHealth", () => {
     const result = await checkServerHealth(server, fetch)
 
     expect(result).toEqual({ healthy: true, version: "1.2.3" })
-    expect(request?.pathname).toBe("/api/health")
+    expect(request?.pathname).toBe("/api/info")
   })
 
   test("identifies a V1 server without a version as incompatible", async () => {
@@ -58,7 +58,7 @@ describe("checkServerHealth", () => {
     const result = await checkServerHealth(server, fetch)
 
     expect(result).toEqual({ healthy: false, version: "1.18.15", incompatible: true })
-    expect(requests).toEqual(["/api/health", "/global/health"])
+    expect(requests).toEqual(["/api/info", "/global/health"])
   })
 
   test("allows slow servers thirty seconds by default", async () => {
@@ -80,7 +80,7 @@ describe("checkServerHealth", () => {
 
     await checkServerHealth(server, fetch).finally(() => {
       if (timeout) Object.defineProperty(AbortSignal, "timeout", timeout)
-      if (!timeout) Reflect.deleteProperty(AbortSignal, "timeout")
+      if (!timeout) delete (AbortSignal as Partial<typeof AbortSignal>).timeout
     })
 
     expect(timeoutMs).toBe(30_000)
@@ -121,7 +121,7 @@ describe("checkServerHealth", () => {
       timeoutMs: 10,
     }).finally(() => {
       if (timeout) Object.defineProperty(AbortSignal, "timeout", timeout)
-      if (!timeout) Reflect.deleteProperty(AbortSignal, "timeout")
+      if (!timeout) delete (AbortSignal as Partial<typeof AbortSignal>).timeout
     })
 
     expect(aborted).toBe(true)

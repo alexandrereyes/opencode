@@ -118,6 +118,7 @@ export const Archived = Event.durable({
 })
 export type Archived = typeof Archived.Type
 
+// Retained for replay of custom releases written before the upstream event rename.
 export const PermissionsUpdated = Event.durable({
   type: "session.permissions.updated",
   ...options,
@@ -127,6 +128,16 @@ export const PermissionsUpdated = Event.durable({
   },
 })
 export type PermissionsUpdated = typeof PermissionsUpdated.Type
+
+export const Permissions = Event.durable({
+  type: "session.permissions",
+  ...options,
+  schema: {
+    ...Base,
+    permissions: Permission.Ruleset,
+  },
+})
+export type Permissions = typeof Permissions.Type
 
 export const Viewed = Event.durable({
   type: "session.viewed",
@@ -335,6 +346,8 @@ export namespace Step {
       agent: Agent.ID,
       model: Model.Ref,
       snapshot: Snapshot.ID.pipe(optional),
+      /** Request dispatch time, before waiting for provider output. */
+      started: NonNegativeInt,
     },
   })
   export type Started = typeof Started.Type
@@ -655,6 +668,7 @@ export const Definitions = Event.inventory(
   Renamed,
   Archived,
   PermissionsUpdated,
+  Permissions,
   Viewed,
   UsageUpdated,
   Deleted,

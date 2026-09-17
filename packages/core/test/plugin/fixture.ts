@@ -1,6 +1,5 @@
 import { Agent } from "@opencode/core/agent"
 import { AISDK } from "@opencode/core/aisdk"
-import { Catalog } from "@opencode/core/catalog"
 import { Command } from "@opencode/core/command"
 import { Config } from "@opencode/core/config"
 import { Credential } from "@opencode/core/credential"
@@ -16,9 +15,11 @@ import { Integration } from "@opencode/core/integration"
 import { KV } from "@opencode/core/kv"
 import { Location } from "@opencode/core/location"
 import { Mcp } from "@opencode/core/mcp/index"
+import { Model } from "@opencode/core/model"
 import { Npm } from "@opencode/util/npm"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginHooks } from "@opencode/core/plugin/hooks"
+import { Provider } from "@opencode/core/provider"
 import { Session } from "@opencode/core/session"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
@@ -33,6 +34,7 @@ import { Tool } from "@opencode/core/tool"
 import { Vcs } from "@opencode/core/vcs"
 import { WebSearch } from "@opencode/core/websearch"
 import { Worktree } from "@opencode/core/worktree"
+import { WorktreeStrategies } from "@opencode/core/worktree/strategies"
 import { Effect, Layer } from "effect"
 import { tempLocationLayer } from "../fixture/location"
 import { emptyMcpLayer } from "../fixture/mcp"
@@ -54,6 +56,7 @@ const generateLayer = Layer.succeed(Generate.Service, Generate.Service.of({ text
 const permissionLayer = Layer.succeed(
   Permission.Service,
   Permission.Service.of({
+    close: Effect.void,
     ask: (input) => Effect.succeed({ id: input.id ?? Permission.ID.create(), effect: "ask" }),
     assert: () => Effect.void,
     reply: () => Effect.void,
@@ -77,7 +80,8 @@ const nodes = LayerNode.group([
   Plugin.node,
   Agent.node,
   AISDK.node,
-  Catalog.node,
+  Provider.node,
+  Model.node,
   Command.node,
   Integration.node,
   KV.node,
@@ -96,6 +100,7 @@ const nodes = LayerNode.group([
   Watcher.node,
   WebSearch.node,
   Worktree.node,
+  WorktreeStrategies.node,
 ])
 
 const replacements = [

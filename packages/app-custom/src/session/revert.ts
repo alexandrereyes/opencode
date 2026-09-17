@@ -115,7 +115,7 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
       .map((item) => item.id)
     const authoritative = await environment.api.inbox
       .list({ sessionID })
-      .then((rows) => rows.filter((row) => row.type === "user" && row.timeCreated <= cutoff).map((row) => row.id))
+      .then((rows) => rows.filter((row) => row.type === "user" && row.time.created <= cutoff).map((row) => row.id))
       .catch(() => [])
     await Promise.all(
       [...new Set([...local, ...authoritative])].map((inboxID) =>

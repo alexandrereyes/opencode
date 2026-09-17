@@ -32,6 +32,12 @@ test("a cold linked checkout discovers moved sessions and branch labels through 
   ]
   const apiServer = createServer((request, response) => {
     response.setHeader("access-control-allow-origin", "*")
+    response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS")
+    response.setHeader("access-control-allow-headers", "content-type")
+    if (request.method === "OPTIONS") {
+      response.writeHead(204)
+      return response.end()
+    }
     const url = new URL(request.url!, "http://localhost")
     if (request.method !== "OPTIONS") requests.push(url.pathname)
     response.setHeader("content-type", "application/json")
@@ -54,8 +60,12 @@ test("a cold linked checkout discovers moved sessions and branch labels through 
           data: { branch: { current: "branch" } },
         }),
       )
+    if (url.pathname === "/api/worktree/refresh") {
+      response.writeHead(204)
+      return response.end()
+    }
     expect(url.pathname).toBe("/api/worktree")
-    expect(url.searchParams.get("location[directory]")).toBe("/repo")
+    expect(url.searchParams.get("projectID")).toBe("repo")
     response.end(JSON.stringify(worktrees))
   })
   await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve))
@@ -108,10 +118,21 @@ test("a cold linked checkout discovers moved sessions and branch labels through 
         project: {
           list: async () => [
             { id: "repo", canonical: "/repo", name: "Repo", time: { created: 1, updated: 1 }, sandboxes: [] },
-            { id: "unrelated", canonical: "/repository", name: "Unrelated", time: { created: 1, updated: 1 }, sandboxes: [] },
-            { id: "historical", canonical: "/repo", name: "Historical", time: { created: 1, updated: 1 }, sandboxes: [] },
+            {
+              id: "unrelated",
+              canonical: "/repository",
+              name: "Unrelated",
+              time: { created: 1, updated: 1 },
+              sandboxes: [],
+            },
+            {
+              id: "historical",
+              canonical: "/repo",
+              name: "Historical",
+              time: { created: 1, updated: 1 },
+              sandboxes: [],
+            },
           ],
-          current: async () => ({ id: "repo", canonical: "/repo", name: "Repo", time: { created: 1, updated: 1 }, sandboxes: [] }),
         },
       },
       scope: ServerScope.fromServerKey(server),
@@ -133,7 +154,7 @@ test("a cold linked checkout discovers moved sessions and branch labels through 
       return { project: sidebarProjects(server, [metadata ? { ...metadata, ...opened } : opened], [])[0], rows: [] }
     })
     controller.dispose()
-    expect(requests.slice(0, 2)).toEqual(["/api/location", "/api/worktree"])
+    expect(requests.slice(0, 3)).toEqual(["/api/location", "/api/worktree/refresh", "/api/worktree"])
     expect(requests.filter((path) => path === "/api/vcs")).toHaveLength(3)
     const location = data.location.info({ directory: opened.worktree })!
     const discovered = inventory.cached(location.project.id, location.project.canonical)!
@@ -187,7 +208,6 @@ test("a cold linked checkout discovers moved sessions and branch labels through 
         name: "managed-chats",
         rows: [row],
       })
-
     }
     worktrees = worktrees.filter((item) => item.directory !== session.location.directory)
     await inventory.refresh(location.project.id, location.project.canonical)

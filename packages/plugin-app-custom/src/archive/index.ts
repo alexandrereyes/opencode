@@ -29,17 +29,15 @@ export const registerArchive = Effect.fn("Archive.register")(function* (ctx: Plu
     .pipe(Effect.orDie)
 })
 
-export const archive: (
-  ctx: ArchiveContext,
-  input: { readonly sessionID: Session.ID },
-) => Effect.Effect<{}, unknown> = Effect.fn("Archive.archive")(function* (ctx, input) {
-  yield* ctx.interrupt({ sessionID: input.sessionID, continue: false })
-  yield* ctx.wait({ sessionID: input.sessionID })
-  const children = yield* scanChildren(ctx, input.sessionID)
-  yield* Effect.forEach(children, (sessionID) => archive(ctx, { sessionID }), { concurrency: 1, discard: true })
-  yield* ctx.archive({ sessionID: input.sessionID })
-  return {}
-})
+export const archive: (ctx: ArchiveContext, input: { readonly sessionID: Session.ID }) => Effect.Effect<{}, unknown> =
+  Effect.fn("Archive.archive")(function* (ctx, input) {
+    yield* ctx.interrupt({ sessionID: input.sessionID, resume: false })
+    yield* ctx.wait({ sessionID: input.sessionID })
+    const children = yield* scanChildren(ctx, input.sessionID)
+    yield* Effect.forEach(children, (sessionID) => archive(ctx, { sessionID }), { concurrency: 1, discard: true })
+    yield* ctx.archive({ sessionID: input.sessionID })
+    return {}
+  })
 
 function scanChildren(ctx: ArchiveContext, parentID: Session.ID, after?: Session.ID): Effect.Effect<Session.ID[]> {
   return ctx.scan({ parentID, after, limit: 1000 }).pipe(

@@ -232,8 +232,8 @@ for (const width of [1440, 390]) {
       await expect(comment).toBeFocused()
       await page.evaluate(() => {
         window.dispatchEvent(new Event("restore-client-rects"))
-        Reflect.deleteProperty(window.visualViewport!, "offsetTop")
-        Reflect.deleteProperty(window.visualViewport!, "height")
+        delete (window.visualViewport as Partial<VisualViewport>).offsetTop
+        delete (window.visualViewport as Partial<VisualViewport>).height
         window.visualViewport?.dispatchEvent(new Event("resize"))
       })
       await expect(comment).toBeVisible()

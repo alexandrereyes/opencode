@@ -76,7 +76,7 @@ const headers = {
 try {
   for (let attempt = 0; ; attempt++) {
     if (child.exitCode !== null || attempt === 120) throw new Error(`Fixture startup failed: ${work}/server.log`)
-    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/info`, {
       headers,
       signal: AbortSignal.timeout(2000),
     }).catch(() => undefined)

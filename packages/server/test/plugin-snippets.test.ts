@@ -82,14 +82,13 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
           headers: { authorization: `Basic ${btoa("opencode:secret")}` },
         })
         const snippets = client.rpc(Snippets.Definition)
-        yield* Effect.promise(() => client.plugin.awaitActivation())
-        yield* Effect.promise(() => client.plugin.awaitActivation({ location: { directory: first } }))
-        yield* Effect.promise(() => client.plugin.awaitActivation({ location: { directory: second } }))
+        expect(yield* Effect.promise(() => snippets.list({}))).toEqual({ items: legacy })
+        yield* Effect.promise(() => snippets.list({}, { location: { directory: first } }))
+        yield* Effect.promise(() => snippets.list({}, { location: { directory: second } }))
         const plugins = yield* Effect.promise(() => client.plugin.list())
         expect(plugins.data.find((item) => item.id === "custom.app-mentions")).toMatchObject({
           state: { status: "active" },
         })
-        expect(yield* Effect.promise(() => snippets.list({}))).toEqual({ items: legacy })
 
         const feed = client.event.subscribe()[Symbol.asyncIterator]()
         expect((yield* Effect.promise(() => feed.next())).value?.type).toBe("server.connected")

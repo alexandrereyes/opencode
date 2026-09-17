@@ -158,6 +158,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
 
       const assistantID = SessionMessage.ID.create()
       yield* bus.publish(SessionEvent.Step.Started, {
+        started: 0,
         sessionID: referenced.id,
         assistantMessageID: assistantID,
         agent: Agent.ID.make("build"),

@@ -15,7 +15,7 @@ const queued = [
   {
     id: "msg_original",
     sessionID: "ses_1",
-    timeCreated: 1,
+    time: { created: 1 },
     type: "user",
     delivery: "queue",
     payload: { text: "original" },
@@ -23,7 +23,7 @@ const queued = [
   {
     id: "msg_replacement",
     sessionID: "ses_1",
-    timeCreated: 2,
+    time: { created: 2 },
     type: "user",
     delivery: "queue",
     payload: { text: "edited" },
@@ -77,7 +77,7 @@ test("queue edits replace session metadata and model context", async () => {
   const item = {
     id: "msg_original",
     sessionID: "ses_current",
-    timeCreated: 1,
+    time: { created: 1 },
     type: "user",
     delivery: "queue",
     payload: {
@@ -97,7 +97,7 @@ test("queue edits round-trip same-named cited images and preserve unrelated file
   const item = {
     id: "msg_original",
     sessionID: "ses_current",
-    timeCreated: 1,
+    time: { created: 1 },
     type: "user",
     delivery: "queue",
     payload: {

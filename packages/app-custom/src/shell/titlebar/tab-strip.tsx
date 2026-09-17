@@ -122,7 +122,7 @@ function SessionTabEntry(props: {
 
     ctx.data.session.remember({ ...value, title })
     try {
-      await ctx.sdk.api.session.rename({ sessionID: value.id, title })
+      await ctx.sdk.api.session.update({ sessionID: value.id, title })
     } catch (err) {
       const current = session()
       const currentCtx = props.serverCtx
@@ -366,7 +366,10 @@ export function TitlebarTabStrip(props: {
                 const id = tabKey(tab)
                 let ref!: HTMLDivElement
                 const visibleIndex = () => visibleTabs().findIndex((item) => tabKey(item) === id)
-                useTabShortcut(() => props.shortcutIndex?.(tab) ?? visibleIndex(), () => props.onNavigate(tab, ref))
+                useTabShortcut(
+                  () => props.shortcutIndex?.(tab) ?? visibleIndex(),
+                  () => props.onNavigate(tab, ref),
+                )
                 const serverCtx = useServerCtx(() => {
                   if (tab.type !== "session") return
                   return global.servers.list().find((item) => ServerConnection.key(item) === tab.server)

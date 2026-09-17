@@ -64,7 +64,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
     const listed = await Promise.all(
       inventory.locations.map((location) =>
         input.sdk.api.permission.request
-          .list({ location: { directory: location.directory, workspace: location.workspaceID } })
+          .list({ location: { directory: location.directory } })
           .then((pending) => {
             if (!state.disposed) pending.data.forEach((request) => approve(request))
             return true
@@ -106,9 +106,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
       ...input.data.session.list().map((session) => session.location),
     ]
     return {
-      locations: [
-        ...new Map(locations.map((item) => [`${item.directory}\u0000${item.workspaceID ?? ""}`, item])).values(),
-      ],
+      locations: [...new Map(locations.map((item) => [item.directory, item])).values()],
       complete: active !== undefined && synced.every(Boolean),
     }
   }
@@ -119,7 +117,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
     if (state.disposed || !enabled() || state.responded.has(permission.id)) return
     remember(permission.id)
     input.sdk.api.permission
-      .reply({ sessionID: permission.sessionID, requestID: permission.id, reply: "once" })
+      .reply({ sessionID: permission.sessionID, requestID: permission.id, decision: "once" })
       .catch(() => {
         // A reply failure leaves the request pending but invisible (the UI
         // hides prompts while auto-approve is on), so retry a bounded number

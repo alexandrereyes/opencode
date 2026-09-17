@@ -13,10 +13,12 @@ function setup(list: (directory: string) => Promise<WorktreeDirectory[]>) {
     scope: ServerScope.local,
     queryClient: client,
     api: () => ({
+      refresh: async (input) => {
+        expect(input.projectID).toBe("project")
+      },
       list: (input) => {
-        const directory = input!.location!.directory!
-        calls.push(directory)
-        return list(directory)
+        calls.push(input.projectID)
+        return list("/repo")
       },
     }),
     updated: (_projectID, directory, items) => updates.push([directory, items]),
@@ -33,12 +35,13 @@ describe("createWorktreeInventory", () => {
     })
     const first = setupResult.inventory.load("project", "/repo")
     const second = setupResult.inventory.load("project", "/repo/")
-    expect(setupResult.calls).toEqual(["/repo"])
+    await Promise.resolve()
+    expect(setupResult.calls).toEqual(["project"])
     gate.resolve()
     expect(await first).toHaveLength(2)
     expect(await second).toHaveLength(2)
     await setupResult.inventory.load("project", "/repo")
-    expect(setupResult.calls).toEqual(["/repo"])
+    expect(setupResult.calls).toEqual(["project"])
     expect(setupResult.updates).toEqual([
       ["/repo", [{ directory: "/repo" }, { directory: "/repo/feature", strategy: "git" }]],
     ])
@@ -52,7 +55,7 @@ describe("createWorktreeInventory", () => {
     expect(setupResult.calls).toEqual([])
     await setupResult.inventory.load("project", "/opened")
     await setupResult.inventory.refresh("project", "/opened")
-    expect(setupResult.calls).toEqual(["/opened", "/opened"])
+    expect(setupResult.calls).toEqual(["project", "project"])
     setupResult.client.clear()
   })
 
@@ -66,7 +69,7 @@ describe("createWorktreeInventory", () => {
     expect(setupResult.inventory.cached("project", "/repo")).toBeUndefined()
     fail = false
     expect(await setupResult.inventory.load("project", "/repo")).toEqual([{ directory: "/repo" }])
-    expect(setupResult.calls).toEqual(["/repo", "/repo"])
+    expect(setupResult.calls).toEqual(["project", "project"])
     setupResult.client.clear()
   })
 
@@ -83,7 +86,7 @@ describe("createWorktreeInventory", () => {
 
     expect(setupResult.inventory.cached("project", "/repo")).toEqual([{ directory: "/repo" }])
     expect(setupResult.updates.at(-1)).toEqual(["/repo", [{ directory: "/repo" }]])
-    expect(setupResult.calls).toEqual(["/repo", "/repo"])
+    expect(setupResult.calls).toEqual(["project", "project"])
     setupResult.client.clear()
   })
 

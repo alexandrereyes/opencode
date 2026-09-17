@@ -63,7 +63,7 @@ export async function manifest(home: string, commit: string) {
   if (!("hashes" in input) || typeof input.hashes !== "object" || input.hashes === null)
     throw new Error("Missing artifact hashes")
   for (const file of artifacts) {
-    if (!(file in input.hashes) || Reflect.get(input.hashes, file) !== (await digest(path.join(directory, file))))
+    if (Object.entries(input.hashes).find(([key]) => key === file)?.[1] !== (await digest(path.join(directory, file))))
       throw new Error(`Release integrity check failed: ${file}`)
   }
   return { commit, version: input.version, directory }
@@ -239,23 +239,28 @@ export async function health(home: string, port: number) {
       ? legacy.password
       : ""
   if (!password) throw new Error("Runtime password is empty")
-  return fetch(`http://127.0.0.1:${port}/api/health`, {
+  const options = {
     headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
     signal: AbortSignal.timeout(2000),
-    redirect: "error",
-  })
-    .then(async (response) => {
-      const body: unknown = await response.json().catch(() => null)
-      return {
-        ready: response.ok,
-        status: response.status,
-        version:
-          typeof body === "object" && body !== null && "version" in body && typeof body.version === "string"
-            ? body.version
-            : undefined,
-      }
-    })
-    .catch(() => ({ ready: false, status: 0, version: undefined }))
+    redirect: "error" as const,
+  }
+  return (
+    fetch(`http://127.0.0.1:${port}/api/info`, options)
+      // Releases before 2.0.6 expose only /api/health; rollback and activation inspect both versions.
+      .then((response) => (response.status === 404 ? fetch(`http://127.0.0.1:${port}/api/health`, options) : response))
+      .then(async (response) => {
+        const body: unknown = await response.json().catch(() => null)
+        return {
+          ready: response.ok,
+          status: response.status,
+          version:
+            typeof body === "object" && body !== null && "version" in body && typeof body.version === "string"
+              ? body.version
+              : undefined,
+        }
+      })
+      .catch(() => ({ ready: false, status: 0, version: undefined }))
+  )
 }
 
 export function scripts(home: string, config: Awaited<ReturnType<typeof settings>>) {

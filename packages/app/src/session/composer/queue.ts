@@ -8,7 +8,8 @@ import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import { clonePrompt, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
-import { blobDataUrl } from "@/runtime/persistence/drafts"
+import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
+import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
@@ -29,6 +30,7 @@ export function createSessionQueue(input: {
   draft: ComposerStateTarget
   working: Accessor<boolean>
   behavior: Accessor<ComposerDelivery>
+  destination: () => AttachmentDestination
   restoreFocus: (cursor: number) => void
 }) {
   const data = useData()
@@ -59,6 +61,7 @@ export function createSessionQueue(input: {
         change.item,
         change.prompt,
         change.text,
+        input.destination(),
       )
       // Admit before cancelling so a failed replacement never discards the original.
       const admitted = await data.session.prompt({
@@ -130,7 +133,9 @@ export function createSessionQueue(input: {
   }
   const steer = (id: string) => {
     if (state.editing?.id === id) cancelEdit()
-    return server.api.session.inbox.steer({ sessionID: input.sessionID, inboxID: id }).catch(() => notify())
+    return server.api.session.inbox
+      .update({ sessionID: input.sessionID, inboxID: id, delivery: "steer" })
+      .catch(() => notify())
   }
   const remove = (id: string) => {
     if (state.editing?.id === id) cancelEdit()
@@ -159,7 +164,10 @@ export function createSessionQueue(input: {
     })
     const text = queuedPromptText(item)
     input.draft.mode.set("normal")
-    input.draft.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
+    input.draft.set(
+      [{ type: "text", content: text, start: 0, end: text.length }, ...queuedPromptAttachments(item)],
+      text.length,
+    )
     input.restoreFocus(text.length)
     return true
   }
@@ -179,9 +187,15 @@ export function createSessionQueue(input: {
     if (!editing || mutation.isPending) return
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
-    if (!text.trim() && !prompt.some((part) => part.type === "image")) return cancelEdit()
+    const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+    if (!text.trim() && !images.length) return cancelEdit()
     const item = queued().find((entry) => entry.id === editing.id)
-    const pristine = item && text.trim() === queuedPromptText(item) && !prompt.some((part) => part.type === "image")
+    const original = item ? queuedPromptAttachments(item) : []
+    const pristine =
+      item &&
+      text.trim() === queuedPromptText(item) &&
+      images.length === original.length &&
+      images.every((image, index) => image.id === original[index].id)
     if (pristine && delivery === "queue") return cancelEdit()
     mutation.mutate({
       type: "edit",
@@ -246,25 +260,45 @@ export function queuedPromptText(item: QueuedPrompt) {
   return typeof display === "string" && display.length > 0 ? display : item.payload.text
 }
 
+// Inline attachments are the files the composer added itself, so they return
+// to it as image parts that an edit can remove or extend. Mentions and
+// `file://` context stay in the payload; see editedPromptInput.
+export function queuedPromptAttachments(item: QueuedPrompt): ImageAttachmentPart[] {
+  return (item.payload.files ?? [])
+    .filter((file) => isComposerAttachment(file))
+    .map((file, index) => ({
+      type: "image",
+      id: `${item.id}:file:${index}`,
+      filename: file.name ?? "attachment",
+      mime: file.mime,
+      blob: createLegacyBlobReference(`data:${file.mime};base64,${file.data}`),
+    }))
+}
+
+function isComposerAttachment(file: NonNullable<QueuedPrompt["payload"]["files"]>[number]) {
+  return !file.mention && file.source.type === "inline"
+}
+
 // Confirming an edit submits the current composer content as the replacement:
-// mentions and images added during the edit are parsed like a normal
-// submission, the original's stored attachments are preserved, and the
-// review-comment notes appended to the original's model-visible text survive.
-// Ambient composer context (open review comments) stays out: it belongs to
-// the next fresh prompt, not to a queued edit.
+// mentions and attachments are parsed like a normal submission, so removed
+// attachments drop and added ones join. Stored file mentions and context files
+// the composer cannot show are preserved, and the review-comment notes appended
+// to the original's model-visible text survive. Ambient composer context (open
+// review comments) stays out: it belongs to the next fresh prompt, not to a
+// queued edit.
 async function editedPromptInput(
   sessionID: string,
   directory: string,
   item: QueuedPrompt | undefined,
   prompt: Prompt,
   text: string,
+  destination: AttachmentDestination,
 ) {
-  const images = await Promise.all(
-    prompt
-      .filter((part): part is ImageAttachmentPart => part.type === "image")
-      .map(async (part) => ({ ...part, dataUrl: await blobDataUrl(part.blob, part.mime) })),
+  const attachments = await deliverAttachments(
+    prompt.filter((part): part is ImageAttachmentPart => part.type === "image"),
+    destination,
   )
-  const request = buildPromptRequest({ prompt, context: [], images, text, sessionDirectory: directory })
+  const request = buildPromptRequest({ prompt, context: [], attachments, text, sessionDirectory: directory })
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
   const notes = payload && display && payload.text.startsWith(display) ? payload.text.slice(display.length) : ""
@@ -297,16 +331,18 @@ async function editedPromptInput(
     sessionID,
     text: request.text + notes,
     files: [
-      ...(payload?.files?.map((file) => ({
-        uri: `data:${file.mime};base64,${file.data}`,
-        name: file.name,
-        description: file.description,
-        mention: mention(file.mention),
-      })) ?? []),
+      ...(payload?.files
+        ?.filter((file) => !isComposerAttachment(file))
+        .map((file) => ({
+          uri: `data:${file.mime};base64,${file.data}`,
+          name: file.name,
+          description: file.description,
+          mention: mention(file.mention),
+        })) ?? []),
       ...request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),
     skills: skills.map((skill) => ({ id: skill.id, mention: mention(skill.mention) })),
-    metadata: { ...payload?.metadata, displayText: request.displayText },
+    metadata: { ...payload?.metadata, displayText: request.displayText, attachments: request.attachments },
   }
 }

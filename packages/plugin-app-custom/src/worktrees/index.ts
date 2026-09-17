@@ -19,21 +19,25 @@ interface CommandResult {
 }
 
 export interface WorktreeContext {
-  readonly list: Plugin.Context["worktree"]["list"]
-  readonly remove: Plugin.Context["worktree"]["remove"]
+  readonly list: () => ReturnType<Plugin.Context["worktree"]["list"]>
+  readonly remove: (
+    input: Omit<Parameters<Plugin.Context["worktree"]["remove"]>[0], "projectID">,
+  ) => ReturnType<Plugin.Context["worktree"]["remove"]>
 }
 
 export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx: Plugin.Context) {
+  const worktrees: WorktreeContext = {
+    list: () => ctx.worktree.list({ projectID: ctx.location.project.id }),
+    remove: (input) => ctx.worktree.remove({ ...input, projectID: ctx.location.project.id }),
+  }
   yield* ctx.rpc
     .register(Worktrees.Definition, {
       inspect: (input, context) =>
-        inspectWorktree({ list: ctx.worktree.list, remove: ctx.worktree.remove }, input.directory).pipe(
+        inspectWorktree(worktrees, input.directory).pipe(
           Effect.mapError((error) => operationFailed(error, context.error)),
         ),
       delete: (input, context) =>
-        removeWorktree({ list: ctx.worktree.list, remove: ctx.worktree.remove }, input).pipe(
-          Effect.mapError((error) => operationFailed(error, context.error)),
-        ),
+        removeWorktree(worktrees, input).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
     })
     .pipe(Effect.orDie)
 })

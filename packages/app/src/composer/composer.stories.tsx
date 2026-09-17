@@ -167,7 +167,7 @@ function ComposerStory(props: {
             ? buildPromptRequest({
                 prompt: draft.prompt,
                 context: draft.context.items,
-                images: [],
+                attachments: [],
                 text: value,
                 sessionDirectory: "C:/repo",
               })
@@ -187,7 +187,7 @@ function ComposerStory(props: {
           )
         },
         onStop: () =>
-          setStory("activity", props.continueOnStop ? "POST /interrupt · continue: true" : "Stop requested"),
+          setStory("activity", props.continueOnStop ? "POST /interrupt · resume: true" : "Stop requested"),
       },
     },
   })

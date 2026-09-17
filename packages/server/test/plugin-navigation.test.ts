@@ -61,7 +61,7 @@ it.live("serves navigation through plugin RPC without reviving historical locati
     )
     yield* Effect.promise(() => client.session.remove({ sessionID: template.id }))
     const form = yield* Effect.promise(() =>
-      client.form.create({
+      client.session.form.create({
         sessionID: session.id,
         title: "Question",
         metadata: { kind: "question" },
@@ -86,7 +86,7 @@ it.live("serves navigation through plugin RPC without reviving historical locati
     ).toBe(false)
 
     yield* Effect.promise(() =>
-      client.form.reply({ sessionID: session.id, formID: form.id, answer: { answer: "done" } }),
+      client.session.form.reply({ sessionID: session.id, formID: form.id, answer: { answer: "done" } }),
     )
     const cleared = yield* Effect.promise(() =>
       client.rpc(Navigation.Definition).list({ sessionID: session.id }, { location }),

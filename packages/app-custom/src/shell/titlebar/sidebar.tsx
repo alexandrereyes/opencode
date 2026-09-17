@@ -120,7 +120,8 @@ export function SessionSidebar(props: {
   const preparing = createMemo(() =>
     tabs.store
       .map((tab): SidebarPreparingTab | undefined => {
-        if (tab.type === "draft") return { tab, directory: sidebarPreparingDirectory(tab), chat: !!tab.chat || undefined }
+        if (tab.type === "draft")
+          return { tab, directory: sidebarPreparingDirectory(tab), chat: !!tab.chat || undefined }
         const pending = tabs.pendingSession(tab.server, tab.sessionId)
         if (pending)
           return {
@@ -337,7 +338,7 @@ export function SessionSidebar(props: {
           const context = ctx()
           if (!context) return
           await context.sdk.api.session
-            .rename({ sessionID: props.item.session.id, title })
+            .update({ sessionID: props.item.session.id, title })
             .then(() => {
               context.data.session.remember({ ...props.item.session, title })
             })

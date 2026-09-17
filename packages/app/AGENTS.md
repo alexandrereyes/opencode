@@ -1,6 +1,7 @@
 ## Priorities
 
 - Prioritise, in this order: stability, simplicity, performance.
+- Before changing session or timeline code, record a production benchmark baseline and compare it after the change.
 
 ## Debugging
 

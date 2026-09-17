@@ -289,6 +289,8 @@ test("authenticated fixture activation and rollback retain data and password", a
         state.authorization = request.headers.get("authorization") ?? ""
         if (state.authorization !== `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`)
           return new Response(null, { status: 401 })
+        const endpoint = state.version === `0.0.0-custom.${first}` ? "/api/health" : "/api/info"
+        if (new URL(request.url).pathname !== endpoint) return new Response(null, { status: 404 })
         return Response.json({ healthy: true, version: state.version })
       },
     })

@@ -24,11 +24,7 @@ import { sessionLabel } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import type { HomeController } from "../model"
 import { buildHomeSessionRecords, homeProjectForSession, type HomeSessionRecord } from "./records"
-import {
-  chatRoot,
-  knownChatRoot,
-  shouldRegisterSessionProject,
-} from "@/runtime/chats"
+import { chatRoot, knownChatRoot, shouldRegisterSessionProject } from "@/runtime/chats"
 
 export type { HomeSessionRecord } from "./records"
 
@@ -156,7 +152,7 @@ export function createHomeSessionsController(home: HomeController) {
     const next = title.trim()
     if (!next || next === sessionLabel(session)) return true
     return ctx.sdk.api.session
-      .rename({ sessionID: session.id, title: next })
+      .update({ sessionID: session.id, title: next })
       .then(() => {
         ctx.data.session.remember({ ...(ctx.data.session.get(session.id) ?? session), title: next })
         // Rename advances time.updated server-side; re-sync the canonical

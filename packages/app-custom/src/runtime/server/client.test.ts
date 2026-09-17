@@ -119,23 +119,23 @@ test("rotates HTTP and PTY clients together", async () => {
   })
   const initialPty = transport.pty
 
-  await transport.api.health.get()
+  await transport.api.server.info()
   const replacement = transport.update({
     url: "http://127.0.0.1:4200",
     password: "second",
   })
-  await transport.api.health.get()
+  await transport.api.server.info()
 
   expect(replacement).toBe(transport.api)
   expect(transport.pty).not.toBe(initialPty)
   expect(transport.url).toBe("http://127.0.0.1:4200")
   expect(requests).toEqual([
     {
-      url: "http://127.0.0.1:4100/api/health",
+      url: "http://127.0.0.1:4100/api/info",
       authorization: `Basic ${btoa("opencode:first")}`,
     },
     {
-      url: "http://127.0.0.1:4200/api/health",
+      url: "http://127.0.0.1:4200/api/info",
       authorization: `Basic ${btoa("opencode:second")}`,
     },
   ])

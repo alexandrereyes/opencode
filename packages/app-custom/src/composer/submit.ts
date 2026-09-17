@@ -380,7 +380,7 @@ async function sendCommand(
   if (value.delivery === "steer") await applySelection(session, value.selection, track)
   await session.api.command({
     sessionID: session.id,
-    command: command.command,
+    name: command.command,
     text: [
       value.prompt.some((part) => part.type === "snippet")
         ? request.displayText.split(" ").slice(1).join(" ")

@@ -47,7 +47,7 @@ const slashSkill = Skill.Info.make({
   description: "Explain visually",
   slash: true,
   autoinvoke: false,
-  location: AbsolutePath.make("/skills/show-me/SKILL.md"),
+  path: AbsolutePath.make("/skills/show-me/SKILL.md"),
   content: "Explain visually",
 })
 
@@ -175,7 +175,7 @@ describe("Composer submission", () => {
         },
         command: async (value) => {
           expect(command).toBe(true)
-          expect(value.command).toBe("review")
+          expect(value.name).toBe("review")
           expect(value.text).toBe("/review is literal\nSecond line")
           completed.resolve()
         },
@@ -312,7 +312,7 @@ describe("Composer submission", () => {
     ready.resolve(true)
     await submitting
 
-    expect(await sent.promise).toMatchObject({ command: "review", text: "changes", delivery: "queue" })
+    expect(await sent.promise).toMatchObject({ name: "review", text: "changes", delivery: "queue" })
     expect(calls).toEqual(["command"])
     expect(state.current()).toEqual(nextDraft)
   })
@@ -342,7 +342,7 @@ describe("Composer submission", () => {
         await committed.promise
       },
       command: async (request) => {
-        expect(request).toMatchObject({ command: "review", text: "changes", delivery: "steer" })
+        expect(request).toMatchObject({ name: "review", text: "changes", delivery: "steer" })
         expect(request).not.toHaveProperty("model")
         expect(request).not.toHaveProperty("agent")
         calls.push("command")
@@ -975,7 +975,7 @@ describe("Composer submission", () => {
     expect(requests).toEqual([
       {
         sessionID: target.id,
-        command: "review",
+        name: "review",
         text: "https://github.com/example/repo/pull/1",
         files: [],
         agents: [],
@@ -1375,7 +1375,7 @@ describe("Composer submission", () => {
       {
         id: string
         sessionID: string
-        timeCreated: number
+        time: { created: number }
         type: "user"
         payload: { text: string }
         delivery: "queue"
@@ -1444,7 +1444,7 @@ describe("Composer submission", () => {
       {
         id: "inbox-old",
         sessionID: "session-1",
-        timeCreated: 0,
+        time: { created: 0 },
         type: "user",
         payload: { text: "old" },
         delivery: "queue",

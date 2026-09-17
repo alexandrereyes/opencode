@@ -51,16 +51,16 @@ it.live("serves custom worktree deletion while preserving native routes", () =>
         const headers = { authorization: `Basic ${btoa("opencode:secret")}` }
         const client = OpenCode.make({ baseUrl, headers })
         const worktrees = client.rpc(Worktrees.Definition)
-        yield* Effect.promise(() => client.plugin.awaitActivation({ location: { directory: project } }))
+        const location = yield* Effect.promise(() => client.location.get({ location: { directory: project } }))
+        yield* Effect.promise(() => client.worktree.refresh({ projectID: location.project.id }))
+        const inspection = yield* Effect.promise(() =>
+          worktrees.inspect({ directory: linked }, { location: { directory: project } }),
+        )
         expect(
           (yield* Effect.promise(() => client.plugin.list({ location: { directory: project } }))).data.find(
             (item) => item.id === "custom.app-mentions",
           ),
         ).toMatchObject({ state: { status: "active" } })
-        yield* Effect.promise(() => client.worktree.list({ location: { directory: project } }))
-        const inspection = yield* Effect.promise(() =>
-          worktrees.inspect({ directory: linked }, { location: { directory: project } }),
-        )
         yield* Effect.promise(() => fs.writeFile(path.join(linked, "dirty.txt"), "dirty"))
         const failure = yield* Effect.tryPromise({
           try: () =>
@@ -81,10 +81,10 @@ it.live("serves custom worktree deletion while preserving native routes", () =>
         ).toEqual({ directory: AbsolutePath.make(linked) })
 
         const created = yield* Effect.promise(() =>
-          client.worktree.create({ location: { directory: project }, directory: destination, name: "native" }),
+          client.worktree.create({ projectID: location.project.id, directory: destination, name: "native" }),
         )
         yield* Effect.promise(() =>
-          client.worktree.remove({ location: { directory: project }, directory: created.directory, force: false }),
+          client.worktree.remove({ projectID: location.project.id, directory: created.directory, force: false }),
         )
         const inspectUrl = new URL("/api/worktree/inspect", baseUrl)
         inspectUrl.searchParams.set("location[directory]", project)

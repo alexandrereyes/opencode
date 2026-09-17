@@ -35,23 +35,24 @@ export function updateWorktreeInventory(
   )
 }
 
-// Listing a project's worktrees boots its Location on the server and runs discovery, so only
-// projects the user is looking at are loaded. Historical projects stay metadata-only.
+// Discover on first demand; subsequent worktree events reload the saved inventory.
 export function createWorktreeInventory(input: {
   scope: ServerScope
   queryClient: QueryClient
-  api: () => Pick<ServerApi["worktree"], "list">
+  api: () => Pick<ServerApi["worktree"], "list" | "refresh">
   updated: (projectID: string, directory: string, worktrees: WorktreeDirectory[]) => void
 }) {
   const revisions = new Map<string, number>()
   const options = (projectID: string, directory: string) => ({
     queryKey: worktreeInventoryKey(input.scope, projectID, directory),
-    queryFn: () => {
+    queryFn: async () => {
       const key = `${projectID}:${pathKey(directory)}`
       const revision = revisions.get(key) ?? 0
+      if (!input.queryClient.getQueryData(worktreeInventoryKey(input.scope, projectID, directory)))
+        await input.api().refresh({ projectID })
       return input
         .api()
-        .list({ location: { directory } })
+        .list({ projectID })
         .then((items) => {
           if ((revisions.get(key) ?? 0) !== revision)
             return (
