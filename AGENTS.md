@@ -6,6 +6,14 @@
 - For upstream-compatible work, default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and target pull requests to `v2`. For custom backend, plugin, or web product work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` ref may not exist; use `v2` or `origin/v2` for diffs.
 
+## Custom Branch Protection
+
+- Treat `custom` as a protected, long-lived branch containing critical custom implementations.
+- Never delete `custom` locally or on any remote, or rewrite its history through reset, rebase, branch replacement, or force push (including `--force-with-lease`), without explicit user authorization for that specific operation. Routine cleanup and worktree finalization do not authorize these operations.
+- Before an explicitly authorized history rewrite or an integration that rewrites `custom`, create and verify a recovery ref pointing to its current tip. Preserve uncommitted work separately before any operation that could discard it.
+- Keep GitHub protections against deletion and force pushes active for `custom`, with no bypass actors. Never weaken or remove those protections without explicit user authorization.
+- Preserve the existing custom implementations when integrating upstream changes; do not replace `custom` with an upstream branch or discard custom changes to resolve conflicts.
+
 ## Backend Customizations
 
 Follow this order while preserving existing behavior, data, and runtime guarantees:
