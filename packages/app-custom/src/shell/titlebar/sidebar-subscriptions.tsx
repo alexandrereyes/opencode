@@ -217,7 +217,7 @@ export function SidebarSubscriptions(props: {
                             class="flex min-w-0 flex-col gap-2 py-1 text-12-regular"
                           >
                             <div class="flex min-w-0 items-center justify-between gap-2">
-                              <span>{language.t("sidebar.proxy.combinedQuota")}</span>
+                              <span class="font-semibold text-text-strong">{language.t("sidebar.proxy.combinedQuota")}</span>
                               <span class="shrink-0 tabular-nums">
                                 {summary().availableRemaining === null ? "—" : percent(summary().availableRemaining!)}
                               </span>
@@ -296,7 +296,7 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
     <div role="group" aria-label={account().name} class="flex min-w-0 flex-col gap-2 py-1">
       <div class="flex min-w-0 flex-col">
         <div class="flex min-w-0 items-center justify-between gap-2 text-12-regular">
-          <bdi class="min-w-0 truncate" title={account().name}>
+          <bdi class="min-w-0 truncate font-semibold text-text-strong" title={account().name}>
             {account().name}
           </bdi>
           <Show when={account().plan !== "plus"}>
