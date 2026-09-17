@@ -39,8 +39,20 @@ export const registerSessionRead = Effect.fn("SessionRead.register")(function* (
         name: "session_read",
         description:
           "Read a bounded page of an existing OpenCode session. Results are newest-first, contain compact textual message content, and cap returned message text at 20,000 characters. Pass next as cursor to read older messages.",
-        input: ReadInput,
-        output: ReadOutput,
+        // Keep validation and JSON Schema conversion in the bundled plugin's runtime.
+        // Expose only Standard Schema so the host never interprets a foreign Effect AST.
+        input: {
+          "~standard": {
+            ...Schema.toStandardSchemaV1(ReadInput)["~standard"],
+            ...Schema.toStandardJSONSchemaV1(ReadInput)["~standard"],
+          },
+        },
+        output: {
+          "~standard": {
+            ...Schema.toStandardSchemaV1(ReadOutput)["~standard"],
+            ...Schema.toStandardJSONSchemaV1(ReadOutput)["~standard"],
+          },
+        },
         options: { namespace: "opencode", codemode: true },
         execute: (input) =>
           Effect.gen(function* () {
