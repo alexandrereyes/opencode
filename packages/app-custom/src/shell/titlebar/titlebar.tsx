@@ -35,6 +35,7 @@ import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
 import { projectForSession } from "@/shell/layout/helpers"
+import { workspaceDraftTarget } from "@/workspaces/paths"
 import { useSettingsDialog } from "@/settings/command"
 import { usePreferences } from "@/preferences/context"
 import {
@@ -334,7 +335,16 @@ export function Titlebar(props: {
                       ))
                     )
                       return openChat(connection, model)
-                    void tabs.newDraft({ server: route.server, directory: pending.draft.directory }, "", model)
+                    void tabs.newDraft(
+                      {
+                        server: route.server,
+                        directory: pending.draft.directory,
+                        worktree: pending.draft.worktree,
+                        branch: pending.draft.branch,
+                      },
+                      "",
+                      model,
+                    )
                     return
                   }
                   const activeSession = session()
@@ -358,8 +368,19 @@ export function Titlebar(props: {
                     ))
                   )
                     return openChat(connection, model)
+                  const ctx = connection ? global.ensureServerCtx(connection) : undefined
+                  const project = ctx
+                    ? projectForSession(activeSession, ctx.projects.list()) ??
+                      projectForSession(activeSession, ctx.sync.data.project)
+                    : undefined
                   void tabs.newDraft(
-                    { server: sessionTab.server, directory: activeSession.location.directory },
+                    {
+                      server: sessionTab.server,
+                      ...workspaceDraftTarget(
+                        activeSession.location.directory,
+                        project?.worktree ?? activeSession.location.directory,
+                      ),
+                    },
                     "",
                     model,
                   )
@@ -382,7 +403,16 @@ export function Titlebar(props: {
                     ))
                   )
                     return openChat(connection, model)
-                  void tabs.newDraft({ server: activeTab.server, directory: activeTab.directory }, "", model)
+                  void tabs.newDraft(
+                    {
+                      server: activeTab.server,
+                      directory: activeTab.directory,
+                      worktree: activeTab.worktree,
+                      branch: activeTab.branch,
+                    },
+                    "",
+                    model,
+                  )
                   return
                 }
                 case "agent-dashboard":
