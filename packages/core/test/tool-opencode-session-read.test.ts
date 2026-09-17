@@ -31,14 +31,30 @@ const decodeReadOutput = (value: unknown) =>
 
 const it = testEffect(OfflinePluginTestLayer)
 
-describe("custom session read tool", () => {
+describe.each(["source", "bundle"])("custom session read tool (%s)", (distribution) => {
   it.live("loads, reads durable cross-project pages, and unloads through the plugin registry", () =>
     Effect.gen(function* () {
       const plugins = yield* Plugin.Service
+      const build = yield* tmpdirScoped()
+      const target =
+        distribution === "source"
+          ? path.join(import.meta.dir, "../../plugin-app-custom/src/index.ts")
+          : path.join(build.path, "custom-plugin.js")
+      if (distribution === "bundle") {
+        const result = yield* Effect.promise(() =>
+          Bun.build({
+            entrypoints: [path.join(import.meta.dir, "../../cli/script/custom-plugin.ts")],
+            outdir: build.path,
+            target: "bun",
+            minify: true,
+          }),
+        )
+        expect(result.success).toBe(true)
+      }
       const modules = yield* PluginModule.make().pipe(Effect.provide(Watcher.testLayer))
       const custom = yield* modules.load({
         type: "add",
-        target: path.join(import.meta.dir, "../../plugin-app-custom/src/index.ts"),
+        target,
         options: {},
       })
       if ("pending" in custom) throw new Error("Custom plugin was not loaded")
@@ -66,18 +82,18 @@ describe("custom session read tool", () => {
         (message) => message.id,
       )
       const host = yield* PluginHost.make(plugins)
-      expect((yield* host.message.list({ sessionID: referenced.id, limit: 2 })).data.map((message) => message.id)).toEqual(
-        expectedIDs,
-      )
+      expect(
+        (yield* host.message.list({ sessionID: referenced.id, limit: 2 })).data.map((message) => message.id),
+      ).toEqual(expectedIDs)
       expect(yield* host.message.list({ sessionID: referenced.id, cursor: "invalid" }).pipe(Effect.flip)).toBe(
         "Invalid cursor",
       )
       const boundary = expectedIDs[0]
       if (!boundary) yield* Effect.die("Expected a message boundary")
       const cursor = MessagePage.Cursor.make({ id: boundary, order: "desc", direction: "next" })
-      expect(yield* host.message.list({ sessionID: referenced.id, cursor, order: "desc" }).pipe(Effect.flip)).toMatchObject(
-        { message: "Cursor cannot be combined with order" },
-      )
+      expect(
+        yield* host.message.list({ sessionID: referenced.id, cursor, order: "desc" }).pipe(Effect.flip),
+      ).toMatchObject({ message: "Cursor cannot be combined with order" })
       const missingCursor = MessagePage.Cursor.make({
         id: SessionMessage.ID.make("msg_missing"),
         order: "desc",

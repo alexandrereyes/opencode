@@ -32,6 +32,22 @@ session, run the complete routine in a detached `tmux` session. The update resta
 the service hosting the conversation, so a foreground shell tool is not a reliable
 owner for the operation.
 
+Before launching tmux, check the **update checkout** at `~/Dev/opencode2`, even
+when the current session is working in a different worktree:
+
+```sh
+git -C ~/Dev/opencode2 branch --show-current
+git -C ~/Dev/opencode2 status --porcelain --untracked-files=all
+```
+
+The branch must be `custom` and the status output must be empty. If either check
+fails, **do not launch tmux or start the update**. Notify the user immediately,
+listing the blocking branch or changed/untracked paths and stating that the update
+was not started. Do not automatically stash, commit, discard changes, or switch
+branches. Ask how to handle the pending work, then repeat these checks after it is
+resolved. If the user authorizes a temporary stash, record its exact identity and
+restore it after the update finishes, including when the update fails.
+
 - Use a recognizable session name such as `opencode-custom-update` and refuse to
   replace an existing session with that name.
 - Run both `git pull --ff-only origin custom` and `bun run custom:update` inside the
