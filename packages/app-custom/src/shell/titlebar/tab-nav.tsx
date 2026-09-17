@@ -23,6 +23,7 @@ import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import { MobileTabActions, useMobileTabs } from "./mobile-tab-actions"
 import { tabKey } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
+import { getFilename } from "@opencode/util/path"
 import "./tab-nav.css"
 import { chatRoot, resolvedChatIdentity } from "@/runtime/chats"
 
@@ -110,6 +111,24 @@ export function TabNavItem(props: {
     const session = props.session
     if (!session) return
     return chat() ? language.t("session.new.chats") : displayName(project() ?? { worktree: session.location.directory })
+  })
+  createEffect(() => {
+    const ctx = serverCtx()
+    const session = props.session
+    if (!mobileTabs?.open() || !ctx || !session || chat() || ctx.sdk.connection.status() !== "connected") return
+    void ctx.data.location.vcs.sync(session.location).catch(() => undefined)
+  })
+  const mobileProjectLabel = createMemo(() => {
+    const session = props.session
+    if (!mobileTabs || !session || chat()) return projectName()
+    const ctx = serverCtx()
+    const branch = ctx?.data.location.vcs.info(session.location)?.branch.current
+    const directory = ctx?.data.location.info(session.location)?.project.directory ?? session.location.directory
+    const worktree = getFilename(directory)
+    const workspace = branch && branch !== "HEAD" ? branch : worktree !== projectName() ? worktree : undefined
+    return [projectName(), workspace]
+      .filter(Boolean)
+      .join(" · ")
   })
   const previewPath = createMemo(() => {
     const session = props.session
@@ -525,7 +544,7 @@ export function TabNavItem(props: {
           when={
             !props.compact &&
             props.orientation === "vertical" &&
-            (props.projectLabel ?? (settings.appearance.showProjectName() && projectName()))
+            (mobileTabs ? mobileProjectLabel() : (props.projectLabel ?? (settings.appearance.showProjectName() && projectName())))
           }
         >
           {(name) => (

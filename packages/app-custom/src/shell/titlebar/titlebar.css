@@ -54,6 +54,10 @@
 }
 
 /* Keep the strip mounted for tab shortcuts and session metadata while collapsed. */
+[data-slot="mobile-drawer-content"]:has([data-slot="mobile-tabs-drawer"]) {
+  max-height: min(85dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 16px));
+}
+
 [data-slot="mobile-tabs-drawer"] {
   display: flex;
   min-height: 0;
@@ -112,7 +116,7 @@
 }
 
 [data-slot="mobile-tabs-drawer"] [data-titlebar-tab] [data-slot="tab-project"] {
-  color: var(--v2-text-text-faint);
+  color: var(--v2-text-text-muted);
   font-weight: 440;
   font-size: var(--font-size-small);
   line-height: var(--line-height-compact);
