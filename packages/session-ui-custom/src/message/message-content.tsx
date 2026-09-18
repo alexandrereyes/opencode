@@ -58,7 +58,7 @@ export async function writeClipboard(text: string): Promise<boolean> {
 
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
-    icon: "check" | "copy" | "reset"
+    icon: "check" | "copy" | "reset" | "fork"
     label: JSX.Element
   },
 ) {
@@ -220,7 +220,7 @@ export function CurrentUserMessageDisplay(props: {
   const data = useData()
   const dialog = useDialog()
   const i18n = useI18n()
-  const [state, setState] = createStore({ copied: false, reverting: false })
+  const [state, setState] = createStore({ copied: false, reverting: false, forking: false })
   const attachments = createMemo(() =>
     (props.message.files ?? []).filter((file) => !file.mention || file.mime.startsWith("image/")),
   )
@@ -251,6 +251,15 @@ export function CurrentUserMessageDisplay(props: {
       await props.actions.revert({ sessionID: props.sessionID, messageID: props.message.id })
     } finally {
       setState("reverting", false)
+    }
+  }
+  const fork = async () => {
+    if (!props.actions?.fork || state.forking) return
+    setState("forking", true)
+    try {
+      await props.actions.fork({ sessionID: props.sessionID, messageID: props.message.id })
+    } finally {
+      setState("forking", false)
     }
   }
   const renderAttachments = () => (
@@ -367,6 +376,19 @@ export function CurrentUserMessageDisplay(props: {
                 void revert()
               }}
               aria-label={i18n.t("ui.message.revertMessage")}
+            />
+          </Show>
+          <Show when={props.actions?.fork}>
+            <MessageActionButton
+              icon="fork"
+              label={i18n.t("ui.message.forkMessage")}
+              disabled={state.forking}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation()
+                void fork()
+              }}
+              aria-label={i18n.t("ui.message.forkMessage")}
             />
           </Show>
           <Show when={copyText()}>

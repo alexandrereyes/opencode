@@ -18,4 +18,5 @@ export type SessionUserQuote = {
 export type SessionUserActions = {
   openAttachment?: (file: PromptFileAttachment) => void
   revert?: (input: { sessionID: string; messageID: string }) => Promise<void> | void
+  fork?: (input: { sessionID: string; messageID: string }) => Promise<void> | void
 }

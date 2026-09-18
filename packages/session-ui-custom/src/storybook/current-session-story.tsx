@@ -86,6 +86,9 @@ export function CurrentSessionTimelineStory(props: {
     revert: (input) => {
       setActivity(`Selected revert boundary ${input.messageID}`)
     },
+    fork: (input) => {
+      setActivity(`Selected fork boundary ${input.messageID}`)
+    },
   } satisfies SessionUserActions
   const reset = () => {
     setActivity("No local action")
