@@ -210,6 +210,32 @@ describe("reuseTimelineRows", () => {
 })
 
 describe("createTimelineProjection", () => {
+  test.each([...timelinePresets])("omits idle markers while preserving notices in $id", (preset) => {
+    const messages: SessionMessageInfo[] = [
+      { id: "user-1", type: "user", text: "question", time: { created: 1 } },
+      {
+        id: "assistant-1",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [{ type: "text", text: "answer" }],
+        time: { created: 2, completed: 3 },
+      },
+      { id: "notice-1", type: "system", text: "Updated", description: "Updated", time: { created: 4 } },
+    ]
+    const project = (sessionMessages: SessionMessageInfo[]) =>
+      createTimelineProjection({
+        sessionMessages,
+        status: { type: "idle" },
+        reasoningMode: "full",
+        timelineDetail: preset.value,
+      }).rows
+    const expected = project(messages)
+    ;(["succeeded", "failed", "interrupted"] as const).forEach((outcome) => {
+      expect(project([...messages, { id: "idle-1", type: "idle", outcome, time: { created: 5 } }])).toEqual(expected)
+    })
+  })
+
   test("builds current message, parent, context, and row indexes", () => {
     const selectedModel = { id: "selected", providerID: "provider" } satisfies ModelRef
     const assistantModel = { id: "assistant", providerID: "provider", variant: "fast" } satisfies ModelRef

@@ -823,7 +823,8 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 function isNotice(message: SessionMessageInfo): message is Notice {
-  if (message.type === "user" || message.type === "assistant" || message.type === "shell") return false
+  if (message.type === "user" || message.type === "assistant" || message.type === "shell" || message.type === "idle")
+    return false
   if (message.type !== "synthetic") return true
   return !!message.description?.trim() || timelineNoticeRequired(message)
 }
