@@ -48,6 +48,9 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
   const uncertain = members.some(
     (account) => account.remaining === null || subscriptionCapacity(account, now) === "unconfirmed",
   )
+  // A fixed one-account weekly unit keeps exhausted accounts from changing the balance's scale.
+  const remaining =
+    !uncertain && members.length > 0 ? members.reduce((sum, account) => sum + (account.remaining ?? 0), 0) : null
   const pace = members.flatMap((account) => {
     const value = subscriptionPace(account, now)
     return value === null ? [] : [value]
@@ -76,10 +79,8 @@ export function subscriptionPool(accounts: readonly Subscriptions.Account[], now
     measured: measured.length,
     ready: ready.length,
     balance: members.length === 0 ? "empty" : uncertain ? "unknown" : ready.length === 0 ? "unavailable" : "known",
-    availableRemaining:
-      !uncertain && members.length > 0
-        ? members.reduce((sum, account) => sum + (account.remaining ?? 0), 0) / members.length
-        : null,
+    equivalents: remaining === null ? null : remaining / 100,
+    availableRemaining: remaining === null ? null : remaining / members.length,
     fiveHourRemaining:
       members.length > 0 &&
       members.every((account) => !account.stale && account.fiveHourRemaining !== null && !renewalPassed(account, now))

@@ -95,6 +95,16 @@ export function SidebarSubscriptions(props: {
       style: "percent",
       maximumFractionDigits: 0,
     }).format(value / 100)
+  const equivalentBalance = () =>
+    language.t("sidebar.proxy.equivalentBalance", {
+      value:
+        pool().equivalents === null
+          ? "—"
+          : new Intl.NumberFormat(language.intl(), {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            }).format(pool().equivalents!),
+    })
   const date = (value: number | string, weekdayFirst = false) =>
     formatSubscriptionDate(value, language.intl(), weekdayFirst)
   const updated = () => {
@@ -129,38 +139,53 @@ export function SidebarSubscriptions(props: {
         title={language.t("sidebar.proxy.title")}
         label={language.t("sidebar.proxy.details")}
         trigger={
-          <>
-            <Show when={subscription()} fallback={<Spinner class="size-3 shrink-0" />}>
-              <span
-                class="size-1.5 shrink-0 rounded-full"
-                classList={{
-                  "bg-icon-success-base": ready() && pool().ready > 0,
-                  "bg-icon-warning-base": !ready() || pool().ready === 0,
-                }}
-              />
-            </Show>
-            <span class="shrink-0 text-text-base">{language.t("sidebar.proxy.title")}</span>
-            <span class="ms-auto min-w-0 truncate tabular-nums">
-              {ready()
-                ? language.t("sidebar.proxy.quota", {
-                    percent: pool().availableRemaining !== null ? percent(pool().availableRemaining!) : "—",
-                  })
-                : language.t(subscription() ? "sidebar.proxy.unavailable" : "common.loading")}
-            </span>
-            <Show when={ready()}>
-              <Show when={nextRenewal() !== undefined}>
-                <span class="flex shrink-0 items-center gap-1 tabular-nums" title={language.t("sidebar.proxy.renewal")}>
-                  <Icon name="clock" size="small" />
-                  {language.plural("sidebar.proxy.renewalDays", nextRenewal() ?? 0)}
-                </span>
+          <div class="flex w-full min-w-0 flex-col gap-1">
+            <div class="flex min-w-0 items-center gap-2">
+              <Show when={subscription()} fallback={<Spinner class="size-3 shrink-0" />}>
+                <span
+                  class="size-1.5 shrink-0 rounded-full"
+                  classList={{
+                    "bg-icon-success-base": ready() && pool().ready > 0,
+                    "bg-icon-warning-base": !ready() || pool().ready === 0,
+                  }}
+                />
               </Show>
-              <span class="flex shrink-0 items-center gap-1 tabular-nums" title={language.t("context.overview.banked")}>
-                <Icon name="refresh" size="small" />
-                {pool().banked?.available ?? "—"}
+              <span class="shrink-0 text-text-base">{language.t("sidebar.proxy.title")}</span>
+              <span
+                class="ms-auto shrink-0 tabular-nums"
+                title={language.t(
+                  pool().equivalents === null
+                    ? "sidebar.proxy.equivalentUnknown"
+                    : "sidebar.proxy.equivalentExplanation",
+                )}
+              >
+                {ready()
+                  ? equivalentBalance()
+                  : language.t(subscription() ? "sidebar.proxy.unavailable" : "common.loading")}
               </span>
+              <Icon name="chevron-down" size="small" class={state.open ? "shrink-0" : "shrink-0 rotate-180"} />
+            </div>
+            <Show when={ready()}>
+              <div class="flex items-center justify-end gap-3">
+                <Show when={nextRenewal() !== undefined}>
+                  <span
+                    class="flex shrink-0 items-center gap-1 tabular-nums"
+                    title={language.t("sidebar.proxy.renewal")}
+                  >
+                    <Icon name="clock" size="small" />
+                    {language.plural("sidebar.proxy.renewalDays", nextRenewal() ?? 0)}
+                  </span>
+                </Show>
+                <span
+                  class="flex shrink-0 items-center gap-1 tabular-nums"
+                  title={language.t("context.overview.banked")}
+                >
+                  <Icon name="refresh" size="small" />
+                  {pool().banked?.available ?? "—"}
+                </span>
+              </div>
             </Show>
-            <Icon name="chevron-down" size="small" class={state.open ? "shrink-0" : "shrink-0 rotate-180"} />
-          </>
+          </div>
         }
       >
         <div class="flex min-w-0 flex-col gap-3 text-13-regular text-text-base">
@@ -213,11 +238,13 @@ export function SidebarSubscriptions(props: {
                         <Show when={group.plan === "pro"}>
                           <div
                             role="group"
-                            aria-label={language.t("sidebar.proxy.combinedQuota")}
+                            aria-label={language.t("sidebar.proxy.totalQuotaRemaining")}
                             class="flex min-w-0 flex-col gap-2 py-1 text-12-regular"
                           >
                             <div class="flex min-w-0 items-center justify-between gap-2">
-                              <span class="font-semibold text-text-strong">{language.t("sidebar.proxy.combinedQuota")}</span>
+                              <span class="font-semibold text-text-strong">
+                                {language.t("sidebar.proxy.totalQuotaRemaining")}
+                              </span>
                               <span class="shrink-0 tabular-nums">
                                 {summary().availableRemaining === null ? "—" : percent(summary().availableRemaining!)}
                               </span>
@@ -225,7 +252,7 @@ export function SidebarSubscriptions(props: {
                             <QuotaMeter
                               value={summary().availableRemaining}
                               label={language.t("context.overview.weeklyAccount", {
-                                account: language.t("sidebar.proxy.combinedQuota"),
+                                account: language.t("sidebar.proxy.totalQuotaRemaining"),
                               })}
                               pace={summary().expectedRemaining}
                               paceLabel={
@@ -236,6 +263,10 @@ export function SidebarSubscriptions(props: {
                                     })
                               }
                             />
+                            <span class="font-semibold text-text-strong">{equivalentBalance()}</span>
+                            <span class="text-v2-text-text-muted">
+                              {language.t("sidebar.proxy.equivalentExplanation")}
+                            </span>
                             <span class="text-v2-text-text-muted">
                               {language.t("context.overview.renewalMin", {
                                 date: renewals() ? date(renewals()!.min, true) : "—",
@@ -387,7 +418,7 @@ function SubscriptionSurface(props: {
           title={props.title}
           class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
           triggerAs="button"
-          triggerProps={{ type: "button", "aria-label": props.label, class: `${triggerClass} h-8` }}
+          triggerProps={{ type: "button", "aria-label": props.label, class: `${triggerClass} h-12` }}
           trigger={props.trigger}
         >
           {props.children}
@@ -400,7 +431,7 @@ function SubscriptionSurface(props: {
           <button
             type="button"
             aria-label={props.label}
-            class={`${triggerClass} h-11`}
+            class={`${triggerClass} h-14`}
             onClick={() => props.onOpenChange(true)}
           >
             {props.trigger}
