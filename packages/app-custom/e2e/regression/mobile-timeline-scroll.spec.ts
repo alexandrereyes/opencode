@@ -228,6 +228,104 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
       })
     }
 
+    for (const navigation of ["Home", "End", "latest", "scrollbar"] as const) {
+      test(`${navigation} takes over a pending touch adjustment`, async ({ page }) => {
+        const fixture = await setupTimeline(page, {
+          messages: [
+            userMessage(),
+            assistantMessage(
+              [
+                textPart("prt_handoff_prefix", Array.from({ length: 40 }, (_, i) => `Prefix ${i}.`).join("\n\n")),
+                shell("prt_handoff_shell", "running", "A short."),
+                textPart("prt_handoff_reading", Array.from({ length: 60 }, (_, i) => `Reading ${i}.`).join("\n\n")),
+              ],
+              { completed: false },
+            ),
+          ],
+          settings: { shellToolPartsExpanded: true },
+          viewport: { width: 390, height: 844 },
+        })
+        const timeline = page.locator('[data-slot="session-timeline-scroll"]')
+        const scroller = timeline.getByRole("region", { name: "scrollable content", exact: true })
+        await expect(timeline.locator("[data-timeline-virtual-content]")).toBeVisible()
+        await expect(page.getByText("Reading 59.", { exact: true })).toBeInViewport()
+        await page.evaluate(() => document.fonts.ready)
+        await scroller.evaluate((element) => {
+          element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }))
+          element.scrollTop = 0
+        })
+        const first = scroller.locator('[data-timeline-row="UserMessage"]')
+        await expect(first).toBeInViewport()
+        const start = await first.evaluate((element) => element.getBoundingClientRect().top)
+        await expect(page.getByText("Prefix 39.", { exact: true })).toBeAttached()
+        await expect(timeline.locator('[data-component="markdown"]:not([data-markdown-ready])')).toHaveCount(0)
+        await scroller.evaluate(
+          (element, distance) => (element.scrollTop = element.scrollHeight - element.clientHeight - distance),
+          navigation === "latest" ? 800 : 80,
+        )
+        await expect(timeline.locator('[data-orientation="vertical"][data-visible="false"]')).toHaveCount(1)
+        const latest = page.getByRole("button", { name: "Jump to latest", exact: true })
+        if (navigation === "latest") await expect(latest.locator("..")).toHaveCSS("opacity", "1")
+        const row = scroller.locator("[data-timeline-key]", {
+          has: page.locator(`[data-timeline-part-id="${renderedPartID("prt_handoff_shell")}"]`),
+        })
+        const height = await row.evaluate((element) => element.getBoundingClientRect().height)
+        const extent = await scroller.evaluate((element) => element.scrollHeight)
+        const bounds = (await scroller.boundingBox())!
+        const devtools = await page.context().newCDPSession(page)
+        await devtools.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [{ x: bounds.x + 100, y: bounds.y + 200 }],
+        })
+        await devtools.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: bounds.x + 100, y: bounds.y + 230 }],
+        })
+        await fixture.send(
+          partUpdated(
+            shell(
+              "prt_handoff_shell",
+              "running",
+              Array.from({ length: 10 }, (_, i) => `Shell line ${i}.`).join("\n\n"),
+            ),
+          ),
+        )
+        await expect
+          .poll(() => row.evaluate((element) => element.getBoundingClientRect().height))
+          .toBeGreaterThan(height)
+        // The row has grown while the native extent remains compensated. Navigate
+        // with the finger still held so an idle callback cannot reconcile first.
+        await expect.poll(() => scroller.evaluate((element) => element.scrollHeight)).toBe(extent)
+        if (navigation === "Home" || navigation === "End") await scroller.press(navigation)
+        if (navigation === "latest") await latest.click()
+        if (navigation === "scrollbar") {
+          const thumb = timeline.locator('.scroll-view__thumb[data-orientation="vertical"]')
+          await thumb.hover()
+          const grip = (await thumb.boundingBox())!
+          const anchor = page.getByText("Reading 50.", { exact: true })
+          const before = await anchor.evaluate((element) => element.getBoundingClientRect().top)
+          await page.mouse.down()
+          expect(await anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(before, 0)
+          await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2 - 4)
+          await expect
+            .poll(() => anchor.evaluate((element) => element.getBoundingClientRect().top))
+            .toBeGreaterThan(before)
+          expect((await anchor.evaluate((element) => element.getBoundingClientRect().top)) - before).toBeLessThan(60)
+          await page.mouse.move(grip.x + grip.width / 2, bounds.y + 5)
+          await page.mouse.up()
+          await page.mouse.move(0, 0)
+        }
+        const destination =
+          navigation === "Home" || navigation === "scrollbar" ? first : page.getByText("Reading 59.", { exact: true })
+        await expect(destination).toBeInViewport()
+        await devtools.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+        await expect(timeline.locator('[data-orientation="vertical"][data-visible="false"]')).toHaveCount(1)
+        await expect(destination).toBeInViewport()
+        if (navigation === "Home" || navigation === "scrollbar")
+          expect(await first.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(start, 0)
+      })
+    }
+
     for (const nestedStart of [500, 0]) {
       test(`nested output owns the gesture or chains at its boundary (${nestedStart})`, async ({ page }) => {
         const timeline = await setupTimeline(page, {

@@ -57,6 +57,25 @@ The fixture uses a temporary preview server and does not require the live backen
 - Production source parity was checked against the upstream-owned files. No
   upstream-owned UI files or shared dependency patches were changed.
 
+## Independent review
+
+- Rechecked production parity against the upstream-owned files: only the two
+  custom imports differ in the virtualizer; ScrollView and the offset observer
+  are identical. No further production changes were needed.
+- Re-ran the original 16 regression cases without retries, and the 1,156 unit
+  tests (one additional app test remains skipped): all passed.
+- Added eight persistent regression cases (four navigation methods on each
+  device profile) for Home, End, jump-to-latest and scrollbar takeover while a
+  touch adjustment is pending. They assert pending compensation before navigation,
+  the destination after release, and no jump when grabbing the scrollbar. All
+  eight passed without retries. The documented regression command now selects
+  24 cases instead of 16.
+- The new fixtures use the upstream wheel/unpin and explicit start-position
+  setup. An initial Home-key setup did not reliably establish the initial
+  position during cold measurement; it was replaced before testing the handoff.
+- Root `bun run check` passed. The separate E2E typecheck still reports the 15
+  errors listed below, with none in the new regression file.
+
 ## Existing E2E typecheck limitation
 
 `bun run typecheck:e2e` reports the same 15 errors on the clean baseline and the
