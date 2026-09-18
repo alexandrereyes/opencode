@@ -47,6 +47,13 @@ The fixture uses a temporary preview server and does not require the live backen
 - App unit tests: 1,047 passed, one skipped (the three removed override tests
   explain the difference from baseline). UI unit tests: 109 passed.
 - The regression command above passes all 16 tests, without retries.
+- An additional unmodified upstream subset for navigation handoff and reflow
+  passes 16 scenarios (Home/End, jump to latest, scrollbar drag, held/released
+  touch, large adjustments and cancellation). Its six Ctrl+Home/Ctrl+End cases
+  fail because those native shortcuts do not scroll on this macOS browser.
+  A plain overflow element, using the same Playwright Chromium 147 and both
+  device profiles, also stays at `scrollTop=1000` after either shortcut. The
+  production component deliberately leaves modified shortcuts native.
 - Production source parity was checked against the upstream-owned files. No
   upstream-owned UI files or shared dependency patches were changed.
 
