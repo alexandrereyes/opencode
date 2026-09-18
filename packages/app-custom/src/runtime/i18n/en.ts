@@ -157,6 +157,11 @@ export const dict = {
   "sidebar.proxy.fiveHourExhausted": "Unavailable · five-hour quota exhausted",
   "sidebar.proxy.combinedWeekly": "Combined weekly quota · {{percent}}",
   "sidebar.proxy.combinedQuota": "Combined quota",
+  "sidebar.proxy.equivalentBalance": "{{value}} Pro 20x",
+  "sidebar.proxy.equivalentExplanation":
+    "Weekly balance in Pro 20x equivalents: 1.00 equals one full weekly quota. Includes enabled, authenticated Pro 20x accounts; availability is shown separately.",
+  "sidebar.proxy.equivalentUnknown": "Pro 20x balance unknown",
+  "sidebar.proxy.totalQuotaRemaining": "Remaining of total quota",
   "sidebar.proxy.combinedFiveHour": "Combined five-hour quota · {{percent}}",
   "sidebar.proxy.back": "Back to sessions",
   "sidebar.proxy.renewal": "Next Pro 20x weekly renewal",

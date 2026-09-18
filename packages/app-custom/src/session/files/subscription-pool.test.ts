@@ -53,6 +53,43 @@ test("keeps exhausted accounts in the combined quota denominator", () => {
   })
 })
 
+test("weekly equivalents keep a fixed scale as accounts exhaust and can exceed one full quota", () => {
+  const exhausted = { ...account, id: "b", remaining: 0, hasCapacity: false }
+  const available = { ...account, remaining: 36 }
+  expect(subscriptionPool([available, exhausted])).toMatchObject({
+    equivalents: 0.36,
+    availableRemaining: 18,
+    ready: 1,
+  })
+  expect(subscriptionPool([available]).equivalents).toBe(0.36)
+  expect(subscriptionPool([available, { ...exhausted, remaining: 1, hasCapacity: true }]).equivalents).toBe(0.37)
+  expect(
+    subscriptionPool([
+      { ...account, remaining: 80 },
+      { ...account, remaining: 70 },
+    ]).equivalents,
+  ).toBe(1.5)
+  expect(
+    subscriptionPool([
+      { ...account, remaining: 100 },
+      { ...account, remaining: 100 },
+    ]).equivalents,
+  ).toBe(2)
+  expect(subscriptionPool([exhausted]).equivalents).toBe(0)
+  expect(subscriptionPool([available, { ...account, plan: "plus", remaining: 100 }]).equivalents).toBe(0.36)
+  expect(subscriptionPool([{ ...available, cooldownSeconds: 120 }])).toMatchObject({ equivalents: 0.36, ready: 0 })
+})
+
+test("weekly equivalents remain unknown until every included account has a confirmed measurement", () => {
+  for (const unknown of [{ stale: true }, { remaining: null }, { hasCapacity: null }]) {
+    expect(subscriptionPool([account, { ...account, ...unknown }]).equivalents).toBeNull()
+  }
+  expect(
+    subscriptionPool([{ ...account, resetAt: "2026-09-10T09:00:00Z" }], Date.parse("2026-09-10T10:00:00Z")).equivalents,
+  ).toBeNull()
+  expect(subscriptionPool([]).equivalents).toBeNull()
+})
+
 test("missing or stale measurements suppress the whole pool percentage", () => {
   expect(subscriptionCapacity({ ...account, remaining: null })).toBe("available")
   expect(subscriptionCapacity({ ...account, remaining: null, hasCapacity: false })).toBe("unavailable")
@@ -92,6 +129,7 @@ test("missing or stale measurements suppress the whole pool percentage", () => {
     measured: 0,
     ready: 0,
     balance: "empty",
+    equivalents: null,
     availableRemaining: null,
     expectedRemaining: null,
     observedAt: null,
@@ -176,6 +214,7 @@ test("cooldown and capacity do not remove known quota from the combined balance"
     measured: 2,
     ready: 0,
     balance: "unavailable",
+    equivalents: 0.9,
     availableRemaining: 45,
     fiveHourRemaining: null,
     expectedRemaining: null,
