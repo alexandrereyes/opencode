@@ -94,6 +94,12 @@ export interface SessionRetry {
   readonly agent: Agent.ID
   readonly model: Model.Ref
   readonly error: SessionError.Error
+  /** Original HTTP failure after response hooks; runtime-only, not persisted in Session errors. */
+  readonly http?: {
+    readonly url: string
+    readonly status: number
+    readonly headers: Readonly<Record<string, string>>
+  }
   readonly attempt: number
   decision: SessionRetryDecision
 }

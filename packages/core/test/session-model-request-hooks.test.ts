@@ -1,5 +1,8 @@
 import { describe, expect } from "bun:test"
 import { OpenAIChat } from "@opencode/ai/protocols"
+import { RequestExecutor } from "@opencode/ai/route/executor"
+import { SessionRunnerRetry } from "@opencode/core/session/runner/retry"
+import { toSessionError } from "@opencode/core/session/to-session-error"
 import { Agent } from "@opencode/schema/agent"
 import { Money } from "@opencode/schema/money"
 import { Session } from "@opencode/schema/session"
@@ -11,8 +14,8 @@ import { AbsolutePath } from "@opencode/core/schema"
 import { SessionModelRequest } from "@opencode/core/session/model-request"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
-import { DateTime, Effect } from "effect"
-import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { DateTime, Effect, Layer } from "effect"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
@@ -40,6 +43,62 @@ const transport = SessionModelTransport.Service.of({
 })
 
 describe("SessionModelRequest HTTP hooks", () => {
+  it.effect("passes response-hook headers through the executor failure to the retry hook", () =>
+    Effect.gen(function* () {
+      const hooks = yield* PluginHooks.Service
+      yield* hooks.register("session", "http.response", (event) =>
+        Effect.sync(() => {
+          expect(new URL(event.request.url).searchParams.get("beta")).toBe("true")
+          const headers = new Headers(event.response.headers)
+          headers.set("x-private-reset", "18000000")
+          event.response = new Response(event.response.body, { status: event.response.status, headers })
+        }),
+      )
+      const requests = yield* SessionModelRequest.Service.pipe(Effect.provide(SessionModelRequest.layer))
+      const prepared = yield* requests.primary({
+        session,
+        agent: Agent.ID.make("build"),
+        model,
+        system: [],
+        messages: [],
+      })
+      const executor = yield* RequestExecutor.Service.pipe(
+        Effect.provide(Layer.fresh(RequestExecutor.layer)),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response('{"error":{"message":"rate limited"}}', { status: 429 }),
+              ),
+            ),
+          ),
+        ),
+      )
+      const failure = yield* executor
+        .execute(HttpClientRequest.post("https://example.test/messages?beta=true"), prepared.options.http)
+        .pipe(Effect.flip)
+      expect(failure.reason.http?.headers["x-private-reset"]).toBe("18000000")
+      expect(failure.reason.http?.url).toBe("https://example.test/messages")
+      const decide = yield* SessionRunnerRetry.policy(session.id)
+      const decision = yield* decide({
+        cause: failure,
+        error: toSessionError(failure),
+        agent: Agent.ID.make("build"),
+        model: model.ref,
+        retry: true,
+        hook: (event) =>
+          Effect.sync(() => {
+            expect(event.http?.headers["x-private-reset"]).toBe("18000000")
+            expect(event.error).not.toHaveProperty("headers")
+            event.decision = { retry: true, delay: Number(event.http?.headers["x-private-reset"]) }
+          }),
+      })
+      expect(decision).toEqual({ retry: true, attempt: 2, delay: 18_000_000 })
+    }).pipe(Effect.provideService(SessionModelTransport.Service, transport)),
+  )
+
   it.effect("tags every Session request kind on http.request and http.response", () =>
     Effect.gen(function* () {
       const hooks = yield* PluginHooks.Service

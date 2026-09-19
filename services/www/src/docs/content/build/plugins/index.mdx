@@ -1432,6 +1432,25 @@ Retry decisions follow these rules:
 - Invalid delays such as `NaN`, infinity, or negative values fall back to the computed delay.
 - Context-overflow recovery is separate because it compacts the conversation instead of retrying the same request.
 
+##### HTTP failure metadata
+
+Use optional `event.http` to inspect the failed physical attempt's HTTP response after `http.response` hooks.
+For example, preserve a provider's explicit retry veto:
+
+```ts
+await ctx.session.hook("retry", (event) => {
+  if (event.http?.headers["x-should-retry"] === "false") {
+    event.decision = { retry: false }
+  }
+})
+```
+
+- `http` contains the original cause's URL, status and response headers. The object and its copied headers are readonly and frozen.
+- It is runtime-only: these fields are not added to the public or persisted `event.error` or retry-scheduled error.
+- Failures without an observed HTTP response, including connection timeouts, omit `http`. Older hosts may also omit it; retain native policy when the metadata needed by your hook is absent.
+- The URL can omit separately stored query parameters. Do not correlate it by comparing the complete serialized Web Request URL.
+- Carry response-specific metadata through response hooks rather than a shared last-error cache; auxiliary calls and separate sessions can fail concurrently. Scope provider-specific policy to the matching provider and account.
+
 #### Session reference
 
 ```ts
@@ -1457,6 +1476,11 @@ interface SessionRetryHook {
   readonly agent: string
   readonly model: { providerID: string; id: string; variant?: string }
   readonly error: { type: string; message: string; status?: number }
+  readonly http?: {
+    readonly url: string
+    readonly status: number
+    readonly headers: Readonly<Record<string, string>>
+  }
   readonly attempt: number
   decision: RetryDecision
 }
