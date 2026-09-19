@@ -107,6 +107,15 @@ export const policy = (sessionID: SessionSchema.ID) =>
           agent: input.agent,
           model: input.model,
           error: input.error,
+          ...(input.cause.reason.http === undefined
+            ? {}
+            : {
+                http: Object.freeze({
+                  url: input.cause.reason.http.url,
+                  status: input.cause.reason.http.status,
+                  headers: Object.freeze({ ...input.cause.reason.http.headers }),
+                }),
+              }),
           attempt,
           decision: input.retry ? { retry: true, delay } : { retry: false },
         }
