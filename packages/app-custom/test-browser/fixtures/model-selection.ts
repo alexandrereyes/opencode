@@ -189,6 +189,31 @@ function selection(local: ReturnType<typeof useLocal>) {
   }
 }
 
+test("catalog additions stay hidden until explicitly enabled", () => {
+  const f = fixture({ session: durable("a") })
+  f.setPreferences("user", [{ ...key("a"), visibility: "show" }, { ...key("b"), visibility: "hide" }])
+  const { local } = f.mount()
+  expect(local.model.visible(key("a"))).toBe(true)
+  expect(local.model.visible(key("b"))).toBe(false)
+  expect(local.model.visible(key("c"))).toBe(false)
+
+  f.set("models", (models) => [
+    ...models,
+    { ...models[0], id: "new", modelID: "new", time: { released: Date.now() } },
+    { ...models[0], id: "undated", modelID: "undated", time: { released: 0 } },
+  ])
+  expect(local.model.list().some((model) => model.id === "new")).toBe(true)
+  expect(local.model.visible(key("new"))).toBe(false)
+  expect(local.model.visible(key("undated"))).toBe(false)
+  expect(local.model.visible(key("a"))).toBe(true)
+  expect(local.model.current()?.id).toBe("a")
+
+  local.model.setVisibility(key("new"), true)
+  expect(local.model.visible(key("new"))).toBe(true)
+  local.model.setVisibility(key("new"), false)
+  expect(local.model.visible(key("new"))).toBe(false)
+})
+
 test("restores durable agents even when the agent selector is hidden", () => {
   const f = fixture({ session: durable("b", "high", "plan") })
   f.set("visible", false)

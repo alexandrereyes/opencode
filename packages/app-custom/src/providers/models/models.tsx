@@ -1,6 +1,5 @@
 import { type Accessor, createMemo } from "solid-js"
-import { DateTime } from "luxon"
-import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
+import { uniqueBy } from "remeda"
 import { createSimpleContext } from "@opencode/ui-custom/context"
 import { useProviders } from "@/providers/catalog/providers"
 import { useGlobal } from "@/runtime/server/runtime"
@@ -30,47 +29,6 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     ),
   )
 
-  const release = createMemo(
-    () =>
-      new Map(
-        available().map((model) => {
-          const parsed = DateTime.fromISO(model.release_date)
-          return [modelKey({ providerID: model.provider.id, modelID: model.id }), parsed] as const
-        }),
-      ),
-  )
-
-  const latest = createMemo(() =>
-    pipe(
-      available(),
-      filter(
-        (x) =>
-          Math.abs(
-            (release().get(modelKey({ providerID: x.provider.id, modelID: x.id })) ?? DateTime.invalid("invalid"))
-              .diffNow()
-              .as("months"),
-          ) < 6,
-      ),
-      groupBy((x) => x.provider.id),
-      mapValues((models) =>
-        pipe(
-          models,
-          groupBy((x) => x.family),
-          values(),
-          (groups) =>
-            groups.flatMap((g) => {
-              const first = firstBy(g, [(x) => x.release_date, "desc"])
-              return first ? [{ modelID: first.id, providerID: first.provider.id }] : []
-            }),
-        ),
-      ),
-      values(),
-      flat(),
-    ),
-  )
-
-  const latestSet = createMemo(() => new Set(latest().map((x) => modelKey(x))))
-
   const visibility = createMemo(() => {
     const map = new Map<string, Visibility>()
     for (const item of store.user) map.set(`${item.providerID}:${item.modelID}`, item.visibility)
@@ -98,16 +56,7 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     void preferences.mutate({ type: "model.visibility", ...model, visibility: state })
   }
 
-  const visible = (model: ModelKey) => {
-    const key = modelKey(model)
-    const state = visibility().get(key)
-    if (state === "hide") return false
-    if (state === "show") return true
-    if (latestSet().has(key)) return true
-    const date = release().get(key)
-    if (!date?.isValid) return true
-    return false
-  }
+  const visible = (model: ModelKey) => visibility().get(modelKey(model)) === "show"
 
   const setVisibility = (model: ModelKey, state: boolean) => {
     update(model, state ? "show" : "hide")
