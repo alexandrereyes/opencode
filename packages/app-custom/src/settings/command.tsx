@@ -1,8 +1,8 @@
 import { useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useSettingsSurface } from "./surface"
+import { useSettingsSurface, type SettingsRootTab } from "./surface"
 
-export function useSettingsDialog(defaultValue?: string) {
+export function useSettingsDialog(defaultValue?: SettingsRootTab) {
   const settings = useSettingsSurface()
   return () => settings.open(defaultValue)
 }

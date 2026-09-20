@@ -58,16 +58,22 @@ export function AddServerMenu(props: { onAddServer: () => void }) {
   )
 }
 
-export function useFilteredWslServers(filter: Accessor<string>) {
+export function filterWslServers<T extends { config: { distro: string; id: string } }>(
+  servers: readonly T[],
+  query: string,
+  id?: string,
+) {
+  const scoped = id ? servers.filter((item) => item.config.id === id) : servers
+  const value = query.trim()
+  if (!value) return scoped
+  return fuzzysort
+    .go(value, scoped, { keys: [(item) => item.config.distro, (item) => item.config.id] })
+    .map((x) => x.obj)
+}
+
+export function useFilteredWslServers(filter: Accessor<string>, id?: Accessor<string | undefined>) {
   const wsl = useWslServers()
-  return createMemo(() => {
-    const servers = wsl.data?.servers ?? []
-    const query = filter().trim()
-    if (!query) return servers
-    return fuzzysort
-      .go(query, servers, { keys: [(item) => item.config.distro, (item) => item.config.id] })
-      .map((x) => x.obj)
-  })
+  return createMemo(() => filterWslServers(wsl.data?.servers ?? [], filter(), id?.()))
 }
 
 export function WslServerSettings(props: {

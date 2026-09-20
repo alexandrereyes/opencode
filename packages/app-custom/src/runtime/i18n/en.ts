@@ -1292,6 +1292,8 @@ export const dict = {
   "settings.section.desktop": "Desktop",
   "settings.section.server": "Server",
   "settings.backToApp": "Back to app",
+  "settings.backToSettings": "Back to settings",
+  "settings.backToProjects": "Back to projects",
   "settings.tab.general": "General",
   "settings.tab.preferences": "Preferences",
   "settings.tab.shortcuts": "Shortcuts",

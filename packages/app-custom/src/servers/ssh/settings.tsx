@@ -11,16 +11,24 @@ import { Spinner } from "@opencode/ui-custom/spinner"
 import { sshName } from "./name"
 import { isSshConnecting } from "./status"
 
-export function SshServerSettings(props: { filter: string; domain: ServerCollectionController }) {
+export function filterSshServers<T extends { saved: boolean; config: { id: string; name: string; target: string } }>(
+  servers: readonly T[],
+  filter: string,
+  id?: string,
+) {
+  return servers.filter(
+    (item) =>
+      item.saved &&
+      (!id || item.config.id === id) &&
+      `${item.config.name} ${item.config.target}`.toLowerCase().includes(filter.toLowerCase()),
+  )
+}
+
+export function SshServerSettings(props: { filter: string; id?: string; domain: ServerCollectionController }) {
   const ssh = useSsh()
   const language = useLanguage()
   return (
-    <For
-      each={ssh.servers.filter(
-        (item) =>
-          item.saved && `${item.config.name} ${item.config.target}`.toLowerCase().includes(props.filter.toLowerCase()),
-      )}
-    >
+    <For each={filterSshServers(ssh.servers, props.filter, props.id)}>
       {(item) => {
         const key = ServerConnection.Key.make(`ssh:${item.config.id}`)
         const health = () => props.domain.collection.health()[key]
