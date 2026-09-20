@@ -36,7 +36,6 @@ function fixture(phase?: string) {
   })
   const boundary = () => {
     const rows = projection.rows()
-    expect(rows.filter((row) => row._tag === "FinalAnswerDivider").length).toBeLessThanOrEqual(1)
     const index = rows.findIndex((row) => row._tag === "FinalAnswerDivider")
     const next = rows[index + 1]
     return index >= 0 && next?._tag === "AssistantPart" && next.group.type === "part"
@@ -55,22 +54,33 @@ test("explicit phase waits for completion and remains anchored through late acti
       expect(view.boundary()).toBeUndefined()
       view.setState("answer", "time", "completed", 3)
       expect(view.boundary()).toBe("answer")
-      view.setState("answer", "content", 0, produce((content) => {
-        expect(content.type).toBe("text")
-        if (content.type === "text") content.text = "   "
-      }))
+      view.setState(
+        "answer",
+        "content",
+        0,
+        produce((content) => {
+          expect(content.type).toBe("text")
+          if (content.type === "text") content.text = "   "
+        }),
+      )
       expect(view.boundary()).toBeUndefined()
-      view.setState("answer", "content", 0, produce((content) => {
-        expect(content.type).toBe("text")
-        if (content.type === "text") content.text = "Final answer"
-      }))
+      view.setState(
+        "answer",
+        "content",
+        0,
+        produce((content) => {
+          expect(content.type).toBe("text")
+          if (content.type === "text") content.text = "Final answer"
+        }),
+      )
       expect(view.boundary()).toBe("answer")
-      const divider = view.projection.rowByKey().get("final-answer-divider:user")
+      const divider = view.projection.rowByKey().get("final-answer-divider:answer:answer:text:0")
       view.setState("notices", [
         {
           id: "notice",
           type: "synthetic",
           text: "Subagent completed",
+          description: "Subagent completed",
           metadata: { source: "subagent", state: "completed" },
           time: { created: 4 },
         },
@@ -80,9 +90,43 @@ test("explicit phase waits for completion and remains anchored through late acti
       expect(view.boundary()).toBe("answer")
       view.setState("late", "finish", "stop")
       expect(view.boundary()).toBe("answer")
+      expect(view.projection.rows().filter((row) => row._tag === "FinalAnswerDivider")).toHaveLength(1)
       view.setState("late", "time", "completed", 5)
       expect(view.boundary()).toBe("answer")
-      expect(view.projection.rowByKey().get("final-answer-divider:user")).toBe(divider)
+      expect(view.projection.rows().filter((row) => row._tag === "FinalAnswerDivider")).toHaveLength(2)
+      expect(view.projection.rowByKey().get("final-answer-divider:answer:answer:text:0")).toBe(divider)
+      const late = view.projection.rowByKey().get("final-answer-divider:late:late:text:0")
+      expect(late).toBeDefined()
+      view.setState(
+        "late",
+        "content",
+        0,
+        produce((content) => {
+          if (content.type === "text") content.text = "Updated final answer"
+        }),
+      )
+      expect(view.projection.rowByKey().get("final-answer-divider:late:late:text:0")).toBe(late)
+    } finally {
+      dispose()
+    }
+  })
+})
+
+test("consecutive explicit answers preserve the first divider while streaming and after completion", () => {
+  createRoot((dispose) => {
+    try {
+      const view = fixture("final_answer")
+      view.setState("answer", "finish", "stop")
+      view.setState("answer", "time", "completed", 3)
+      const divider = view.projection.rows().find((row) => row._tag === "FinalAnswerDivider")
+      expect(divider).toBeDefined()
+      view.setState("showLate", true)
+      expect(view.projection.rows().filter((row) => row._tag === "FinalAnswerDivider")).toEqual([divider!])
+      view.setState("late", "finish", "stop")
+      expect(view.projection.rows().filter((row) => row._tag === "FinalAnswerDivider")).toEqual([divider!])
+      view.setState("late", "time", "completed", 4)
+      expect(view.projection.rows().filter((row) => row._tag === "FinalAnswerDivider")).toEqual([divider!])
+      expect(view.projection.rowByKey().get("final-answer-divider:answer:answer:text:0")).toBe(divider)
     } finally {
       dispose()
     }

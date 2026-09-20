@@ -22,15 +22,16 @@ for (const earlier of ["tool", "text", "reasoning"]) {
   })
 }
 
-story("keeps the divider before the first final answer when a subagent finishes late", async ({ mount }) => {
+story("preserves both final answer dividers when a subagent finishes late", async ({ mount }) => {
   const root = await mount("current-session-final-answer--late-subagent")
   const divider = root.locator('[data-slot="session-final-answer-divider"]')
   const first = root.getByText("The project configuration is consistent.", { exact: true })
   const second = root.getByText("The last agent added another detail.", { exact: true })
-  await expect(divider).toHaveCount(1)
+  await expect(divider).toHaveCount(2)
   await expect(first).toBeVisible()
   await expect(second).toBeVisible()
-  const dividerBounds = await root.locator('[data-timeline-row="FinalAnswerDivider"]').boundingBox()
+  const dividerBounds = await root.locator('[data-timeline-row="FinalAnswerDivider"]').first().boundingBox()
+  const lateDividerBounds = await root.locator('[data-timeline-row="FinalAnswerDivider"]').last().boundingBox()
   const firstBounds = await root
     .locator('[data-timeline-row="AssistantPart"]')
     .filter({ hasText: "The project configuration is consistent." })
@@ -41,6 +42,8 @@ story("keeps the divider before the first final answer when a subagent finishes 
     .boundingBox()
   expect(dividerBounds!.y).toBeLessThan(firstBounds!.y)
   expect(firstBounds!.y).toBeLessThan(secondBounds!.y)
+  expect(firstBounds!.y).toBeLessThan(lateDividerBounds!.y)
+  expect(lateDividerBounds!.y).toBeLessThan(secondBounds!.y)
 })
 
 const unseparated: Record<string, string | boolean>[] = [

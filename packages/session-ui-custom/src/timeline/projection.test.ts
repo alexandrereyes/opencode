@@ -307,7 +307,7 @@ describe("createTimelineProjection", () => {
         timelineDetail: detail,
       }).rows
 
-    test("keeps the divider before the first explicit final answer when late activity and another answer follow", () => {
+    test("preserves the first divider and separates the answer after late activity", () => {
       const rows = project([
         assistant("assistant-commentary", "Checking the repository.", { finish: "tool-calls" }),
         assistant("assistant-final-1", "My understanding: the issue is confirmed.", {
@@ -331,9 +331,10 @@ describe("createTimelineProjection", () => {
       expect(keys(rows)).toEqual([
         "user-message:user-1",
         "assistant-part:part:part:assistant-commentary:assistant-commentary:text:0",
-        "final-answer-divider:user-1",
+        "final-answer-divider:assistant-final-1:assistant-final-1:text:0",
         "assistant-part:part:part:assistant-final-1:assistant-final-1:text:0",
         "notice:notice-late",
+        "final-answer-divider:assistant-final-2:assistant-final-2:text:0",
         "assistant-part:part:part:assistant-final-2:assistant-final-2:text:0",
       ])
       expect(rows[2]).toMatchObject({ _tag: "FinalAnswerDivider", spacing: "content" })
@@ -346,8 +347,55 @@ describe("createTimelineProjection", () => {
         assistant("assistant-final", "The explicit final answer.", { finish: "stop", phase: "final_answer" }),
       ])
 
-      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(2)
+      expect(rows.findIndex((row) => row._tag === "FinalAnswerDivider")).toBe(2)
       expect(keys(rows)[3]).toContain("assistant-final")
+    })
+
+    for (const phase of [undefined, "final_answer"]) {
+      for (const activity of ["tool", "reasoning", "commentary"] as const) {
+        test(`separates repeated ${phase ?? "legacy"} conclusions after ${activity}`, () => {
+          const work = assistant("resumed", "More work", { finish: "tool-calls" })
+          if (activity === "commentary") {
+            work.finish = phase ? "stop" : "tool-calls"
+            work.content = [{ type: "text", text: "Checking again", state: { phase: "commentary" } }]
+          }
+          if (activity === "reasoning") work.content = [{ type: "reasoning", text: "Thinking again" }]
+          if (activity === "tool")
+            work.content = [
+              {
+                type: "tool",
+                id: "tool-resumed",
+                name: "shell",
+                time: { created: 3, completed: 4 },
+                state: { status: "completed", input: { command: "true" }, content: [{ type: "text", text: "Done" }] },
+              },
+            ]
+          const rows = project([
+            assistant("work", "Working", { finish: "tool-calls" }),
+            assistant("first", "First answer", { finish: "stop", phase }),
+            work,
+            assistant("second", "Second answer", { finish: "stop", phase }),
+          ])
+          expect(rows.filter((row) => row._tag === "FinalAnswerDivider").map((row) => row.ref.messageID)).toEqual([
+            "first",
+            "second",
+          ])
+          expect(new Set(keys(rows)).size).toBe(rows.length)
+        })
+      }
+    }
+
+    test("does not duplicate a boundary for consecutive explicit final messages or parts", () => {
+      const first = assistant("first", "First answer", { finish: "stop", phase: "final_answer" })
+      first.content.push({ type: "text", text: "More answer", state: { phase: "final_answer" } })
+      const rows = project([
+        assistant("work", "Working", { finish: "tool-calls" }),
+        first,
+        assistant("second", "Another answer", { finish: "stop", phase: "final_answer" }),
+      ])
+      expect(rows.filter((row) => row._tag === "FinalAnswerDivider").map((row) => row.ref.partID)).toEqual([
+        "first:text:0",
+      ])
     })
 
     test("uses the last completed stop with visible text when the turn has no phases", () => {
@@ -357,7 +405,7 @@ describe("createTimelineProjection", () => {
         assistant("assistant-stop-2", "Later completed answer.", { finish: "stop" }),
       ])
 
-      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(3)
+      expect(rows.findIndex((row) => row._tag === "FinalAnswerDivider")).toBe(3)
       expect(keys(rows)[4]).toContain("assistant-stop-2")
     })
 
@@ -368,7 +416,7 @@ describe("createTimelineProjection", () => {
         assistant("assistant-phase", "Still commentary.", { finish: "stop", phase: "commentary" }),
       ])
 
-      expect(keys(rows).indexOf("final-answer-divider:user-1")).toBe(3)
+      expect(rows.findIndex((row) => row._tag === "FinalAnswerDivider")).toBe(3)
       expect(keys(rows)[4]).toContain("assistant-phase")
     })
 
@@ -378,9 +426,7 @@ describe("createTimelineProjection", () => {
       expect(dividers.length).toBeLessThanOrEqual(1)
       const index = rows.findIndex((row) => row._tag === "FinalAnswerDivider")
       const next = rows[index + 1]
-      return index >= 0 && next?._tag === "AssistantPart" && next.group.type === "part"
-        ? next.group.ref
-        : undefined
+      return index >= 0 && next?._tag === "AssistantPart" && next.group.type === "part" ? next.group.ref : undefined
     }
 
     test("skips an explicit answer without preceding activity when a later answer completes", () => {
@@ -435,29 +481,61 @@ describe("createTimelineProjection", () => {
       expect(boundary([answer])).toEqual({ messageID: "answer", partID: "answer:text:2" })
     })
 
-    test("does not count hidden activity before a final answer", () => {
-      const reasoning: SessionMessageAssistant = {
-        ...assistant("assistant-reasoning", "", { finish: "tool-calls" }),
-        content: [{ type: "reasoning", text: "Hidden thought", time: { created: 2, completed: 3 } }],
-      }
-      const notice: SessionMessageInfo = {
-        id: "notice-hidden",
-        type: "synthetic",
-        text: "Hidden notice",
-        description: "Hidden notice",
-        time: { created: 3 },
-      }
-      const rows = project(
-        [
-          reasoning,
-          notice,
-          assistant("assistant-final", "Only visible content.", { finish: "stop", phase: "final_answer" }),
-        ],
-        timelinePresets[4].value,
-      )
+    for (const resumed of [false, true]) {
+      test(`does not count hidden activity before ${resumed ? "a repeated" : "the first"} final answer`, () => {
+        const reasoning: SessionMessageAssistant = {
+          ...assistant("assistant-reasoning", "", { finish: "tool-calls" }),
+          content: [{ type: "reasoning", text: "Hidden thought", time: { created: 2, completed: 3 } }],
+        }
+        const notice: SessionMessageInfo = {
+          id: "notice-hidden",
+          type: "synthetic",
+          text: "Hidden notice",
+          description: "Hidden notice",
+          time: { created: 3 },
+        }
+        const rows = project(
+          [
+            ...(resumed
+              ? [
+                  assistant("work", "Working", { finish: "tool-calls" }),
+                  assistant("first", "First answer", { finish: "stop", phase: "final_answer" }),
+                ]
+              : []),
+            reasoning,
+            notice,
+            assistant("assistant-final", "Only visible content.", { finish: "stop", phase: "final_answer" }),
+          ],
+          timelinePresets[4].value,
+        )
 
-      expect(keys(rows)).not.toContain("final-answer-divider:user-1")
-    })
+        expect(rows.filter((row) => row._tag === "FinalAnswerDivider").map((row) => row.ref.messageID)).toEqual(
+          resumed ? ["first"] : [],
+        )
+      })
+    }
+
+    for (const failure of [
+      { error: { type: "Error", message: "Failed" } },
+      { retry: { attempt: 1, at: 10, error: { type: "ProviderError", message: "Retry" } } },
+    ]) {
+      test(`keeps only the first divider when a resumed answer has ${"error" in failure ? "an error" : "a retry"}`, () => {
+        const second = assistant("second", "Second answer", { finish: "stop", phase: "final_answer" })
+        const entries = [
+          assistant("work", "Working", { finish: "tool-calls" }),
+          assistant("first", "First answer", { finish: "stop", phase: "final_answer" }),
+          assistant("resumed", "Checking again", { finish: "tool-calls" }),
+          { ...second, ...failure },
+        ]
+        expect(boundary(entries)).toEqual({ messageID: "first", partID: "first:text:0" })
+        entries[3] = second
+        expect(
+          project(entries)
+            .filter((row) => row._tag === "FinalAnswerDivider")
+            .map((row) => row.ref.messageID),
+        ).toEqual(["first", "second"])
+      })
+    }
 
     test("keeps a grouped visible notice on the activity side of the boundary", () => {
       const rows = project(
@@ -477,7 +555,7 @@ describe("createTimelineProjection", () => {
       expect(keys(rows)).toEqual([
         "user-message:user-1",
         "assistant-part:context:message:notice-grouped",
-        "final-answer-divider:user-1",
+        "final-answer-divider:assistant-final:assistant-final:text:0",
         "assistant-part:part:part:assistant-final:assistant-final:text:0",
       ])
     })

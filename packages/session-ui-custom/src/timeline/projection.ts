@@ -398,16 +398,22 @@ export namespace Timeline {
     })
     appendAssistantSegment(assistantSegment)
 
-    const finalAnswerIndex = finalAnswerRowIndex(assistantMessages, rows)
-    const finalAnswerRow = rows[finalAnswerIndex]
-    if (finalAnswerRow?._tag === "AssistantPart") {
-      rows[finalAnswerIndex] = new TimelineRow.AssistantPart({ ...finalAnswerRow, spacing: undefined })
-      rows.splice(
-        finalAnswerIndex,
-        0,
-        new TimelineRow.FinalAnswerDivider({ userMessageID: turnID, spacing: finalAnswerRow.spacing }),
-      )
-    }
+    finalAnswerRowIndexes(assistantMessages, rows)
+      .reverse()
+      .forEach((finalAnswerIndex) => {
+        const finalAnswerRow = rows[finalAnswerIndex]
+        if (finalAnswerRow?._tag !== "AssistantPart" || finalAnswerRow.group.type !== "part") return
+        rows[finalAnswerIndex] = new TimelineRow.AssistantPart({ ...finalAnswerRow, spacing: undefined })
+        rows.splice(
+          finalAnswerIndex,
+          0,
+          new TimelineRow.FinalAnswerDivider({
+            userMessageID: turnID,
+            ref: finalAnswerRow.group.ref,
+            spacing: finalAnswerRow.spacing,
+          }),
+        )
+      })
 
     if (thinking && lastAssistant) {
       rows.push(
@@ -439,10 +445,7 @@ export namespace Timeline {
   }
 }
 
-function finalAnswerRowIndex(
-  messages: SessionMessageAssistant[],
-  rows: TimelineRow.TimelineRow[],
-) {
+function finalAnswerRowIndexes(messages: SessionMessageAssistant[], rows: TimelineRow.TimelineRow[]) {
   const eligible = new Map(
     messages
       .filter(
@@ -457,12 +460,34 @@ function finalAnswerRowIndex(
     const content = Timeline.resolveContent(eligible.get(row.group.ref.messageID), row.group.ref.partID)
     return content?.type === "text" ? [{ index, messageID: row.group.ref.messageID, content }] : []
   })
-  const activity = rows.findIndex((row) => row._tag !== "TurnGap" && row._tag !== "UserMessage")
-  const explicit = texts.find((entry) => entry.content.state?.phase === "final_answer" && entry.index > activity)
-  if (explicit) return explicit.index
-  // Phase is optional provider metadata, so it must not veto the legacy fallback.
-  const fallback = texts.find((entry) => entry.messageID === texts.at(-1)?.messageID)
-  return fallback && fallback.index > activity ? fallback.index : -1
+  const indexes: number[] = []
+  let activity = rows.findIndex((row) => row._tag !== "TurnGap" && row._tag !== "UserMessage")
+  let pending: typeof texts = []
+  const flush = () => {
+    const explicit = pending.find((entry) => entry.content.state?.phase === "final_answer")
+    // Phase is optional provider metadata, so it must not veto the legacy fallback.
+    const answer = explicit ?? pending.find((entry) => entry.messageID === pending.at(-1)?.messageID)
+    if (answer && answer.index > activity) indexes.push(answer.index)
+    pending = []
+  }
+  const byIndex = new Map(texts.map((entry) => [entry.index, entry]))
+  rows.forEach((row, index) => {
+    if (row._tag === "TurnGap" || row._tag === "UserMessage") return
+    const text = byIndex.get(index)
+    // Consecutive answer parts share a boundary. Visible activity starts a new
+    // conclusion, including commentary after an explicit final answer.
+    if (
+      !text ||
+      (text.content.state?.phase === "commentary" &&
+        pending.some((entry) => entry.content.state?.phase === "final_answer"))
+    ) {
+      flush()
+      activity = index
+    }
+    if (text) pending.push(text)
+  })
+  flush()
+  return indexes
 }
 
 function isInterrupted(error: SessionMessageAssistant["error"]) {

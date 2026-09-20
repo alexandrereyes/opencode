@@ -47,6 +47,7 @@ export namespace TimelineRow {
 
   export class FinalAnswerDivider extends Data.TaggedClass("FinalAnswerDivider")<{
     userMessageID: string
+    ref: PartRef
     spacing?: "tool" | "content"
   }> {}
 
@@ -96,7 +97,7 @@ export namespace TimelineRow {
       case "TurnDivider":
         return `turn-divider:${row.userMessageID}`
       case "FinalAnswerDivider":
-        return `final-answer-divider:${row.userMessageID}`
+        return `final-answer-divider:${row.ref.messageID}:${row.ref.partID}`
       // Keyed by part identity alone: a page boundary can truncate the leading turn,
       // and its rows regroup under the real user message once older history loads.
       // The group key already carries the owning message and part IDs.
@@ -123,7 +124,7 @@ export type TimelineRowMap = {
   Shell: { userMessageID: string; messageID: string }
   Notice: { userMessageID: string; messageID: string }
   TurnDivider: { userMessageID: string }
-  FinalAnswerDivider: { userMessageID: string; spacing?: "tool" | "content" }
+  FinalAnswerDivider: { userMessageID: string; ref: PartRef; spacing?: "tool" | "content" }
   AssistantPart: {
     userMessageID: string
     group: PartGroup
