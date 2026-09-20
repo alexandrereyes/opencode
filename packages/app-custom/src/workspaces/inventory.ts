@@ -10,6 +10,10 @@ export function worktreeInventoryKey(scope: ServerScope, projectID: string, dire
   return [scope, "worktree", projectID, pathKey(directory)] as const
 }
 
+export function worktreeInventoryViewKey(scope: ServerScope, projectID?: string) {
+  return [scope, "settings-workspace-inventory", projectID ?? null] as const
+}
+
 // Project metadata arrives without worktrees; a loaded inventory supplies the workspace list.
 export function withWorktreeInventory(project: Project, worktrees: readonly WorktreeDirectory[] | undefined): Project {
   if (!worktrees) return project

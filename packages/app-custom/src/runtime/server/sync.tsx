@@ -20,7 +20,12 @@ import { toggleMcp } from "./global-sync/mcp"
 import { createConnectionSync, reconnectOrder } from "./server-sync/connection"
 import { usePlatform } from "@/runtime/platform/platform"
 import type { Data } from "@opencode/client/solid"
-import { createWorktreeInventory, updateWorktreeInventory, withWorktreeInventory } from "@/workspaces/inventory"
+import {
+  createWorktreeInventory,
+  updateWorktreeInventory,
+  withWorktreeInventory,
+  worktreeInventoryViewKey,
+} from "@/workspaces/inventory"
 import { sameDirectory } from "@/workspaces/paths"
 
 type GlobalStore = {
@@ -85,8 +90,17 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     scope: serverSDK.scope,
     queryClient,
     api: () => serverSDK.api.worktree,
-    updated: (projectID, directory, items) =>
-      setGlobalStore("project", (projects) => updateWorktreeInventory(projects, projectID, directory, items)),
+    updated: (projectID, directory, items) => {
+      setGlobalStore("project", (projects) => updateWorktreeInventory(projects, projectID, directory, items))
+      for (const key of [
+        worktreeInventoryViewKey(serverSDK.scope, projectID),
+        worktreeInventoryViewKey(serverSDK.scope),
+      ]) {
+        queryClient.setQueryData<Project[]>(key, (projects) =>
+          projects ? updateWorktreeInventory(projects, projectID, directory, items) : projects,
+        )
+      }
+    },
   })
   const bootstrap = useQuery(() => ({
     queryKey: [serverSDK.scope, "bootstrap"],
@@ -160,8 +174,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
       if (bootstrap.data !== undefined && !bootstrap.isFetching) void bootstrap.refetch()
       // The refresh queue re-syncs two directories at a time, held ones first. Syncing every active
       // directory here as well sent the whole catalog fan-out for all of them at once.
-      reconnectOrder(Object.keys(children.children).filter(children.active), children.pinned).forEach(
-        (directory) => queue.push(directory),
+      reconnectOrder(Object.keys(children.children).filter(children.active), children.pinned).forEach((directory) =>
+        queue.push(directory),
       )
     },
   })

@@ -4,6 +4,7 @@ import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 const directory = "C:/Projects/workspace-live-counts"
 const workspace = `${directory}/live`
 const empty = `${directory}/empty`
+const eventWorkspace = `${directory}/event`
 const project = {
   id: "proj_workspace_live_counts",
   canonical: directory,
@@ -15,8 +16,11 @@ const project = {
 
 test.use({ viewport: { width: 1440, height: 1000 }, colorScheme: "dark" })
 
-test("updates counts from live sessions and hides empty deletion while inventory sessions refetch", async ({ page }) => {
+test("updates counts from live sessions and hides empty deletion while inventory sessions refetch", async ({
+  page,
+}) => {
   const sessions: ({ id: string } & Record<string, unknown>)[] = []
+  const worktreeRequests: string[] = []
   await mockOpenCodeServer(page, {
     directory,
     project,
@@ -24,6 +28,24 @@ test("updates counts from live sessions and hides empty deletion while inventory
     sessions,
     pageMessages: () => ({ items: [] }),
   })
+  await page.route(
+    (url) => url.pathname === "/api/worktree" || url.pathname === "/api/worktree/refresh",
+    (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname === "/api/worktree" && route.request().method() === "GET") {
+        worktreeRequests.push("list")
+        return route.fulfill({
+          json: [{ directory }, ...project.sandboxes.map((directory) => ({ directory, strategy: "git" }))],
+          headers: { "access-control-allow-origin": "*" },
+        })
+      }
+      if (url.pathname === "/api/worktree/refresh" && route.request().method() === "POST") {
+        worktreeRequests.push("refresh")
+        return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+      }
+      return route.fallback()
+    },
+  )
   await page.addInitScript((directory) => {
     localStorage.setItem(
       "opencode.global.dat:server",
@@ -88,6 +110,27 @@ test("updates counts from live sessions and hides empty deletion while inventory
   await settings.getByRole("tab", { name: "Worktrees", exact: true }).click()
   await requested
   await expect(settings.getByText(empty, { exact: true })).toBeVisible()
+
+  worktreeRequests.length = 0
+  project.sandboxes.push(eventWorkspace)
+  const refreshedInventory = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/worktree" && response.request().method() === "GET",
+  )
+  await page.evaluate((projectID) => {
+    const host = window as Window & { __mockServerStream?: { push: (events: unknown[]) => void } }
+    if (!host.__mockServerStream) throw new Error("Missing fixture event stream")
+    host.__mockServerStream.push([
+      {
+        id: "evt_workspace_inventory_updated",
+        created: 3,
+        type: "worktree.updated",
+        data: { projectID },
+      },
+    ])
+  }, project.id)
+  expect((await refreshedInventory).ok()).toBe(true)
+  expect(worktreeRequests).toEqual(["list"])
+  await expect(settings.getByText(eventWorkspace, { exact: true })).toBeVisible()
   await expect(settings.getByText("1 session in Live counts", { exact: true })).toBeVisible()
   await settings.getByRole("button", { name: "More options", exact: true }).click()
   await expect(page.getByRole("menuitem", { name: "Delete worktrees without sessions", exact: true })).toHaveCount(0)

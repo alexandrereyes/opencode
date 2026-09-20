@@ -4,7 +4,7 @@ import { createStore } from "solid-js/store"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { Key } from "@solid-primitives/keyed"
 import type { SessionInfo } from "@opencode/client/promise"
-import { useQuery } from "@tanstack/solid-query"
+import { useQuery, useQueryClient } from "@tanstack/solid-query"
 import { Button } from "@opencode/ui-custom/button"
 import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -14,8 +14,7 @@ import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { getFilename } from "@opencode/util/path"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useServerSDK } from "@/runtime/server/client"
-import { useData } from "@/runtime/server/current"
+import { useServer } from "@/runtime/server/current"
 import { showToast } from "@/shell/notifications/toast"
 import { getRelativeTime } from "@/shell/time"
 import { sessionLabel } from "@/session/title"
@@ -40,7 +39,7 @@ import {
 } from "@/workspaces/paths"
 import { listAllSessions } from "@/session/list"
 import type { ServerScope } from "@/runtime/server/scope"
-import { normalizeProjectInfo } from "@/runtime/server/global-sync/utils"
+import { workspaceInventoryQuery } from "./queries"
 import "@/settings/settings.css"
 
 type Workspace = {
@@ -48,13 +47,17 @@ type Workspace = {
   project: Project
 }
 
-export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProjectFilter: () => number }> = (
-  props,
-) => {
+export const SettingsWorkspaces: Component<{
+  activeDirectory?: string
+  resetProjectFilter?: () => number
+  projectID?: string
+}> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
-  const serverSDK = useServerSDK()
-  const data = useData()
+  const server = useServer()
+  const serverSDK = server.ctx.sdk
+  const queryClient = useQueryClient()
+  const data = server.ctx.data
   const tabs = useTabs()
   const platform = usePlatform()
   const [store, setStore] = createStore({
@@ -64,22 +67,17 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
     removing: [] as string[],
   })
   createEffect(() => {
-    props.resetProjectFilter()
+    if (props.projectID) {
+      setStore("project", props.projectID)
+      return
+    }
+    props.resetProjectFilter?.()
     setStore("project", "all")
   })
 
   const projectQuery = useQuery(() => ({
-    queryKey: [serverSDK.scope, "settings-workspace-projects"] as const,
+    ...workspaceInventoryQuery(server.ctx, queryClient, props.projectID, true),
     enabled: serverSDK.connection.status() === "connected",
-    queryFn: async () =>
-      Promise.all(
-        (await serverSDK.api.project.list()).map(async (project) => {
-          const worktrees = await serverSDK.api.worktree
-            .list({ projectID: project.id })
-            .catch(() => [{ directory: project.canonical }, ...project.sandboxes.map((directory) => ({ directory }))])
-          return normalizeProjectInfo({ ...project, worktrees })
-        }),
-      ),
     refetchOnMount: "always",
   }))
   const inventory = createMemo(() => (projectQuery.isPending ? [] : (projectQuery.data ?? [])))
@@ -91,13 +89,18 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
     ...projects().map((project) => ({ id: project.id, label: projectName(project) })),
   ])
   const selectedProject = createMemo(() =>
-    store.project === "all" || projects().some((project) => project.id === store.project) ? store.project : "all",
+    props.projectID
+      ? props.projectID
+      : store.project === "all" || projects().some((project) => project.id === store.project)
+        ? store.project
+        : "all",
   )
   const filtered = createMemo(() => filterWorkspaceInventory(workspaces(), selectedProject()))
   const captureDeleteContext = () => {
     const sdk = serverSDK
     return {
       sdk,
+      sync: server.ctx.sync,
       data,
       server: ServerConnection.key(sdk.server),
       activeDirectory: props.activeDirectory,
@@ -240,7 +243,11 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
         })
       })
       clearWorkspaceTerminals(workspace.directory, platform, context.sdk.scope)
-      await projectQuery.refetch()
+      context.sync.worktrees.remove(workspace.project.id, workspace.project.worktree, workspace.directory)
+      await context.sync.worktrees.refresh(workspace.project.id, workspace.project.worktree)
+      await queryClient.invalidateQueries({
+        queryKey: [context.sdk.scope, "settings-workspace-inventory"],
+      })
     } finally {
       setStore("deleting", (items) => items.filter((item) => item !== key))
       setStore("removing", (items) => items.filter((item) => item !== key))
@@ -342,7 +349,7 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
               {language.plural("settings.workspaces.count", filtered().length)}
             </span>
             <div class="settings-workspaces-toolbar-actions">
-              <Show when={projects().length > 1}>
+              <Show when={!props.projectID && projects().length > 1}>
                 <Menu placement="bottom-end" gutter={6}>
                   <Menu.Trigger as={Button} size="small" variant="ghost-muted" class="max-w-48">
                     <span class="min-w-0 truncate">
