@@ -49,6 +49,27 @@ function useDefaultServer() {
   }
 }
 
+export function sortServerConnections(input: {
+  servers: ServerConnection.Any[]
+  health: Record<string, ServerHealth | undefined>
+  defaultKey: ServerConnection.Key | null
+}) {
+  const order = new Map(input.servers.map((item, index) => [item, index] as const))
+  const rank = (value?: ServerHealth) => {
+    if (value?.healthy === true) return 0
+    if (value?.healthy === false) return 2
+    return 1
+  }
+  return input.servers.slice().sort((a, b) => {
+    const preferred =
+      Number(ServerConnection.key(b) === input.defaultKey) - Number(ServerConnection.key(a) === input.defaultKey)
+    if (preferred !== 0) return preferred
+    const health = rank(input.health[ServerConnection.key(a)]) - rank(input.health[ServerConnection.key(b)])
+    if (health !== 0) return health
+    return (order.get(a) ?? 0) - (order.get(b) ?? 0)
+  })
+}
+
 export function useServerActionsController() {
   const server = useServers()
   const ssh = useSsh()
@@ -93,23 +114,13 @@ export function useServerCollectionController() {
   const actions = useServerActionsController()
 
   const items = createMemo(() => server.list)
-  const sorted = createMemo(() => {
-    const raw = items()
-    const list = raw
-    if (!list.length) return list
-    const order = new Map(list.map((item, index) => [item, index] as const))
-    const rank = (value?: ServerHealth) => {
-      if (value?.healthy === true) return 0
-      if (value?.healthy === false) return 2
-      return 1
-    }
-    return list.slice().sort((a, b) => {
-      const diff =
-        rank(global.servers.health[ServerConnection.key(a)]) - rank(global.servers.health[ServerConnection.key(b)])
-      if (diff !== 0) return diff
-      return (order.get(a) ?? 0) - (order.get(b) ?? 0)
-    })
-  })
+  const sorted = createMemo(() =>
+    sortServerConnections({
+      servers: items(),
+      health: global.servers.health,
+      defaultKey: actions.defaults.key(),
+    }),
+  )
 
   return {
     collection: {
