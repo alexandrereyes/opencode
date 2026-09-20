@@ -169,17 +169,13 @@
     }
   }
 
-  [data-slot="user-message-context-preview"] {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-    flex: 1;
-    color: var(--v2-text-text-muted);
-  }
+  [data-slot="user-message-text"][role="button"] {
+    cursor: pointer;
 
-  [data-slot="user-message-expand"] > span {
-    flex-shrink: 0;
+    &:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: -2px;
+    }
   }
 
   [data-slot="user-message-scroll"] {

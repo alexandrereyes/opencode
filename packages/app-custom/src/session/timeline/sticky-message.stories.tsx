@@ -17,6 +17,7 @@ export const Reading = { render: () => <Fixture /> }
 export const WithoutHeader = { render: () => <Fixture header={false} /> }
 export const Context = { render: () => <Fixture context /> }
 export const AttachmentsOnly = { render: () => <Fixture context empty /> }
+export const CommentsOnly = { render: () => <Fixture commentsOnly /> }
 export const TextLifecycle = { render: () => <TextFixture /> }
 
 function TextFixture() {
@@ -57,7 +58,7 @@ function TextFixture() {
   )
 }
 
-function Fixture(props: { header?: boolean; context?: boolean; empty?: boolean }) {
+function Fixture(props: { header?: boolean; context?: boolean; empty?: boolean; commentsOnly?: boolean }) {
   const [state, setState] = createStore({
     pinned: true,
     action: "No action",
@@ -65,13 +66,14 @@ function Fixture(props: { header?: boolean; context?: boolean; empty?: boolean }
       {
         type: "user",
         id: `sticky-user-${index}`,
-        text: props.empty
-          ? ""
-          : props.context
-            ? "Review the attached context."
-            : index === 1
-              ? "A short request."
-              : `Request ${index + 1}.\n${"Please keep this context available while I read the response. مرحبا — src/example.ts\n".repeat(35)}`,
+        text:
+          props.empty || props.commentsOnly
+            ? ""
+            : props.context
+              ? "Review the attached context."
+              : index === 1
+                ? "A short request."
+                : `Request ${index + 1}.\n${"Please keep this context available while I read the response. مرحبا — src/example.ts\n".repeat(35)}`,
         time: { created: 1_750_000_000_000 + index * 60_000 },
         files: props.context
           ? Array.from({ length: 6 }, (_, image) => ({
@@ -138,27 +140,48 @@ function Fixture(props: { header?: boolean; context?: boolean; empty?: boolean }
       status: () => ({ type: "idle" }),
       projection,
       presentation: () =>
-        props.context
+        props.commentsOnly
           ? {
-              references: Array.from({ length: 8 }, (_, index) => ({
-                name: `context-${index}.ts`,
-                path: `/fixture/context-${index}.ts`,
-                mime: "text/plain",
-              })),
-              quotes: props.empty
-                ? undefined
-                : [
-                    {
-                      id: "fixture-quote",
-                      text: "Quoted context.\n".repeat(20),
-                      comment: "Quote comment remains available.",
-                    },
-                  ],
-              comments: props.empty
-                ? undefined
-                : [{ path: "src/context.ts", comment: "Review this context. ".repeat(40) }],
+              comments: [
+                {
+                  path: "src/tables.ts",
+                  comment:
+                    "Essas tabelas seguem o padrão de @review. Confira os relacionamentos e mantenha as menções visíveis ao ler a resposta.",
+                },
+              ],
+              quotes: [
+                {
+                  id: "quote-only",
+                  text: "As tabelas atuais usam @database e precisam manter compatibilidade.",
+                  comment: "Preserve o contexto de @database.",
+                },
+              ],
+              references: [
+                { name: "tables.ts", path: "/fixture/tables.ts", mime: "text/plain" },
+                { name: "schema.ts", path: "/fixture/schema.ts", mime: "text/plain" },
+              ],
             }
-          : undefined,
+          : props.context
+            ? {
+                references: Array.from({ length: 8 }, (_, index) => ({
+                  name: `context-${index}.ts`,
+                  path: `/fixture/context-${index}.ts`,
+                  mime: "text/plain",
+                })),
+                quotes: props.empty
+                  ? undefined
+                  : [
+                      {
+                        id: "fixture-quote",
+                        text: "Quoted context.\n".repeat(20),
+                        comment: "Quote comment remains available.",
+                      },
+                    ],
+                comments: props.empty
+                  ? undefined
+                  : [{ path: "src/context.ts", comment: "Review this context. ".repeat(40) }],
+              }
+            : undefined,
       actions: {
         revert: ({ messageID }) => {
           setState("action", `Revert ${messageID}`)
@@ -196,7 +219,7 @@ function Fixture(props: { header?: boolean; context?: boolean; empty?: boolean }
       style={{ height: "100dvh", display: "flex", "flex-direction": "column" }}
     >
       <div style={{ "flex-shrink": 0 }}>
-        <strong>sticky-message / a8e45c585 / working build 4</strong>
+        <strong>message-bubble / c8ef3c099 / review build 1</strong>
         <button
           onClick={() => {
             setState("pinned", false)

@@ -1,4 +1,14 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type ComponentProps, type JSX } from "solid-js"
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  For,
+  onCleanup,
+  Show,
+  type ComponentProps,
+  type JSX,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useData } from "../context"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
@@ -269,7 +279,14 @@ export function CurrentUserMessageDisplay(props: {
   const contextCount = () =>
     attachments().length + references().length + comments().length + (props.quotes?.length ?? 0)
   const contextPreview = () =>
-    references()[0]?.name ?? attachments()[0]?.name ?? props.quotes?.[0]?.text ?? comments()[0]?.comment
+    [
+      ...comments().map((comment) => comment.comment),
+      ...(props.quotes ?? []).map((quote) => quote.comment || quote.text),
+      ...references().map((file) => file.name),
+      ...attachments().map((file) => file.name ?? i18n.t("ui.message.attachment.alt")),
+    ].join("\n")
+  const canExpand = () => !expanded() && (contextCount() > 0 || (!!props.text && state.truncated))
+  const previewID = createUniqueId()
   const hasBody = () => !!props.text || !!props.quotes?.length
   const copyText = () => props.copyText ?? (props.quotes?.length ? props.message.text : props.text)
   const model = createMemo(() => {
@@ -356,36 +373,44 @@ export function CurrentUserMessageDisplay(props: {
     <div data-component="user-message" data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}>
       <div data-slot="user-message-scroll" data-scrollable>
         <Show
-          when={!!props.text || (expanded() && !!props.quotes?.length)}
-          fallback={
-            <Show when={expanded() && comments().length > 0}>
-              <UserMessageComments comments={comments()} bounded={false} />
-            </Show>
-          }
+          when={!!props.text || comments().length > 0 || !!props.quotes?.length || (!expanded() && contextCount() > 0)}
         >
           <div data-slot="user-message-body">
             <div
               data-slot="user-message-text"
               dir={props.quotes?.length ? undefined : "auto"}
               data-comments={comments().length > 0 ? "true" : undefined}
+              role={canExpand() ? "button" : undefined}
+              tabIndex={canExpand() ? 0 : undefined}
+              aria-expanded={canExpand() ? false : undefined}
+              aria-label={canExpand() ? i18n.t("ui.message.expand") : undefined}
+              aria-describedby={canExpand() ? previewID : undefined}
+              onClick={(event) => {
+                if (!canExpand() || window.getSelection()?.toString()) return
+                if (event.target instanceof Element && event.target.closest("a, button, input, textarea, select"))
+                  return
+                setExpanded(true)
+              }}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget || !canExpand()) return
+                if (event.key !== "Enter" && event.key !== " ") return
+                event.preventDefault()
+                if (!window.getSelection()?.toString()) setExpanded(true)
+              }}
             >
-              <Show when={props.text}>
+              <Show when={props.text || !expanded()}>
                 <div
                   ref={observeDraft}
+                  id={previewID}
                   data-slot="user-message-draft"
                   data-expanded={expanded() ? "true" : "false"}
                   dir="auto"
-                  onClick={(event) => {
-                    if (expanded() || !state.truncated || window.getSelection()?.toString()) return
-                    if (event.target instanceof Element && event.target.closest("a, button")) return
-                    setExpanded(true)
-                  }}
                 >
                   <CurrentHighlightedText
-                    text={props.text}
-                    files={inlineFiles()}
-                    agents={agents()}
-                    sessions={props.sessions ?? []}
+                    text={props.text || contextPreview()}
+                    files={props.text ? inlineFiles() : []}
+                    agents={props.text ? agents() : []}
+                    sessions={props.text ? (props.sessions ?? []) : []}
                   />
                 </div>
               </Show>
@@ -410,23 +435,15 @@ export function CurrentUserMessageDisplay(props: {
         </Show>
         <Show when={expanded()}>{renderAttachments()}</Show>
       </div>
-      <Show when={contextCount() > 0 || (!!props.text && state.truncated) || expanded()}>
+      <Show when={expanded()}>
         <button
           type="button"
           data-slot="user-message-expand"
-          aria-expanded={expanded()}
-          aria-label={i18n.t(expanded() ? "ui.message.collapse" : "ui.message.expand")}
-          onClick={() => setExpanded(!expanded())}
+          aria-expanded={true}
+          aria-label={i18n.t("ui.message.collapse")}
+          onClick={() => setExpanded(false)}
         >
-          <Show when={contextCount() > 0}>
-            <span>{i18n.plural("ui.message.context", contextCount())}</span>
-            <Show when={!expanded()}>
-              <bdi data-slot="user-message-context-preview" dir="auto">
-                {contextPreview()}
-              </bdi>
-            </Show>
-          </Show>
-          <Icon name="chevron-down" size="small" style={{ transform: expanded() ? "rotate(180deg)" : undefined }} />
+          <Icon name="chevron-down" size="small" style={{ transform: "rotate(180deg)" }} />
         </button>
       </Show>
       <Show when={hasBody() || contextCount() > 0}>

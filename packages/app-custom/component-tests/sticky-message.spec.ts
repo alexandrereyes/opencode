@@ -132,6 +132,10 @@ for (const scenario of ["context", "attachments-only"]) {
       const first = root.locator('[data-timeline-key="user-message:sticky-user-0"]')
       const message = first.locator('[data-component="user-message"]')
       await expect(first.getByRole("button", { name: "Expand message", exact: true })).toBeVisible()
+      await expect(first.locator('[data-slot="user-message-expand"]')).toHaveCount(0)
+      await expect(
+        first.getByRole("button", { name: "Expand message", exact: true }).locator("button, a, input"),
+      ).toHaveCount(0)
       await expect(first.locator('[data-slot="user-message-attachments"]')).toHaveCount(0)
       await expect(first.locator('[data-slot="user-message-quotes"]')).toHaveCount(0)
       expect((await message.boundingBox())!.height).toBeLessThan(150)
@@ -159,6 +163,7 @@ for (const scenario of ["context", "attachments-only"]) {
         )
       }
       await first.getByRole("button", { name: "Collapse message", exact: true }).click()
+      await first.locator('[data-component="user-message"]').hover()
       await first.getByRole("button", { name: "Fork to new session", exact: true }).click()
       await expect(root.getByRole("status")).toHaveText("Fork sticky-user-0")
       await expect(first.locator('[data-slot="user-message-attachments"]')).toHaveCount(0)
@@ -192,6 +197,29 @@ story("text selection and links do not expand the message", async ({ page, mount
   await draft.getByRole("link", { name: "Fixture link" }).click()
   await expect(draft).toHaveAttribute("data-expanded", "false")
 })
+
+for (const theme of ["light", "dark"]) {
+  story(`context-only blue bubble has no collapsed arrow, ${theme}`, async ({ page, mount }) => {
+    await page.setViewportSize({ width: theme === "dark" ? 390 : 1280, height: 844 })
+    await mount("sticky-message--comments-only", { globals: { theme } })
+    await page.getByRole("button", { name: "First request", exact: true }).click()
+    const first = page.locator('[data-timeline-key="user-message:sticky-user-0"]')
+    const bubble = first.locator('[data-slot="user-message-text"]')
+    await expect(bubble).toContainText("Essas tabelas seguem o padrão de @review")
+    expect(await bubble.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)")
+    await expect(first.locator('[data-slot="user-message-expand"]')).toHaveCount(0)
+    await bubble.focus()
+    await page.keyboard.press("Space")
+    await expect(first.getByRole("button", { name: "Collapse message", exact: true })).toBeVisible()
+    await expect(first.locator('[data-slot="user-message-quotes"]')).toHaveCount(1)
+    await expect(first.locator('[data-slot="user-message-comments"]')).toHaveCount(1)
+    await expect(bubble).not.toHaveAttribute("role", "button")
+    await first.getByRole("button", { name: "Collapse message", exact: true }).click()
+    await expect(first.locator('[data-slot="user-message-expand"]')).toHaveCount(0)
+    await bubble.click()
+    await expect(first.getByRole("button", { name: "Collapse message", exact: true })).toBeVisible()
+  })
+}
 
 story("draft observer follows empty/text mounts, remounts and width changes", async ({ page, mount }) => {
   await page.setViewportSize({ width: 1280, height: 844 })
