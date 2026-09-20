@@ -1141,6 +1141,18 @@ export const dict = {
   "status.popover.tab.lsp": "LSP",
   "status.popover.tab.plugins": "Plugins",
   "status.popover.action.manageServers": "Manage servers",
+  "session.summary.retry": "Retry",
+
+  "session.summary.mcp.onCreation": "Applies when the worktree is created",
+  "session.summary.mcp.prepareFailed": "Could not prepare MCP servers",
+  "session.summary.mcp.unavailable": "MCP server {{name}} is not available in this worktree.",
+  "session.summary.mcp.signInBeforeSend": "Sign in to {{name}} before sending the prompt.",
+  "session.summary.mcp.notReady": "MCP server {{name}} is not ready. Resolve its connection before sending the prompt.",
+  "session.summary.mcp.title": "Configured MCP servers",
+  "session.summary.mcp.empty": "No MCP servers configured",
+  "session.summary.mcp.failed": "Failed",
+  "session.summary.mcp.connecting": "Connecting…",
+  "session.summary.mcp.needsAuth": "Sign in required",
 
   "common.copied": "Copied",
 

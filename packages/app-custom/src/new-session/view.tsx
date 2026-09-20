@@ -19,6 +19,8 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import type { NewSessionWorkspaceController } from "./workspace/controller"
 import { NewSessionWordmark } from "./wordmark"
+import type { DraftMcpControls } from "./mcp"
+import { DraftMcpPicker } from "./summary"
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 
@@ -108,10 +110,11 @@ export function NewSessionView(props: {
   )
 }
 
-export function NewSessionStatus(props: { visible: boolean }) {
+export function NewSessionStatus(props: { visible: boolean; mcp: DraftMcpControls }) {
   const language = useLanguage()
   return (
     <TitlebarRight>
+      <DraftMcpPicker mcp={props.mcp} />
       <Show when={props.visible}>
         <Tooltip appearance="standard" placement="bottom" value={language.t("status.popover.trigger")}>
           <StatusPopover />

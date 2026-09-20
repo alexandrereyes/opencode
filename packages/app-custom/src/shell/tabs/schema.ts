@@ -25,6 +25,7 @@ export const Draft = Persistence.struct({
   worktree: Persistence.optional(Schema.String),
   branch: Persistence.optional(Schema.String),
   chat: Persistence.optional(Chat),
+  mcp: Persistence.optional(Persistence.struct({ target: Schema.String, states: Persistence.record(Schema.Boolean) })),
 })
 
 const SessionCodec = Session.pipe(
