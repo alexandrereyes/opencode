@@ -125,7 +125,10 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
     refetchOnMount: "always",
   }))
   const sessionsByWorkspace = createMemo(() => {
-    const sessions = sessionQuery.isPending ? [] : (sessionQuery.data ?? [])
+    const sessions = mergeWorkspaceSessionInventory(
+      sessionQuery.isPending ? [] : (sessionQuery.data ?? []),
+      data.session.list(),
+    )
     return new Map(
       workspaces().map((workspace) => [
         pathKey(workspace.directory),
@@ -135,13 +138,13 @@ export const SettingsWorkspaces: Component<{ activeDirectory?: string; resetProj
   })
   const workspaceSessions = (workspace: Workspace) => sessionsByWorkspace().get(pathKey(workspace.directory)) ?? []
   const workspacesWithoutSessions = createMemo(() => {
-    if (sessionQuery.isPending || sessionQuery.isError) return []
+    if (sessionQuery.isPending || sessionQuery.isError || sessionQuery.isPlaceholderData) return []
     return filtered().filter((workspace) => workspaceSessions(workspace).length === 0)
   })
   const sessionCount = (workspace: Workspace) => {
-    if (sessionQuery.isPending) return language.t("session.messages.loading")
-    if (sessionQuery.isError) return language.t("common.requestFailed")
     const count = workspaceSessions(workspace).length
+    if (!count && sessionQuery.isPending) return language.t("session.messages.loading")
+    if (!count && sessionQuery.isError) return language.t("common.requestFailed")
     if (selectedProject() !== "all") return language.plural("settings.workspaces.sessions.filtered", count, { count })
     const project = projectName(workspace.project)
     const label = language.plural("settings.workspaces.sessions", count, {
