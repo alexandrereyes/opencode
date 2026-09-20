@@ -518,6 +518,7 @@ function MessageTimelineView(
         return (
           (presentation?.displayText ?? message.text).length <= 1024 &&
           !presentation?.comments?.length &&
+          !presentation?.attachments.length &&
           !presentation?.quotes.length &&
           !parseCommentNote(message.text)
         )

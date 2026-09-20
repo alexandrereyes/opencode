@@ -162,7 +162,7 @@ describe("Composer attachment ownership", () => {
     })
   })
 
-  test("keeps pasted text and warns when every file is unsupported", async () => {
+  test("keeps pasted text and accepts a generic binary without a citation", async () => {
     await new Promise<void>((resolveTest, rejectTest) => {
       createRoot((dispose) => {
         const draft = target("before after")
@@ -183,13 +183,19 @@ describe("Composer attachment ownership", () => {
         })
 
         void attachments.handlePaste(pasteEvent(new File([new Uint8Array([0, 1, 2])], "bad.bin"), "kept")).then(() => {
-          expect(warnings).toBe(1)
+          expect(warnings).toBe(0)
           expect(draft.replacements).toEqual([
             {
               prompt: [{ type: "text", content: "kept", start: 0, end: 4 }],
               range: { start: 7, end: 7 },
             },
           ])
+          expect(draft.prompt.prompt[0]).toMatchObject({ type: "text", content: "before after" })
+          expect(draft.prompt.prompt[1]).toMatchObject({
+            type: "image",
+            filename: "bad.bin",
+            mime: "application/octet-stream",
+          })
           dispose()
           resolveTest()
         }, rejectTest)

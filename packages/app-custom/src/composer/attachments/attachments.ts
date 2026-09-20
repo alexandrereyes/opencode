@@ -5,64 +5,6 @@ import { uuid } from "@/runtime/persistence/uuid"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
 import { getCursorPosition } from "../editor/dom"
 
-const accepted = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-  "text/*",
-  "application/json",
-  "application/ld+json",
-  "application/toml",
-  "application/x-toml",
-  "application/x-yaml",
-  "application/xml",
-  "application/yaml",
-  ".c",
-  ".cc",
-  ".cjs",
-  ".conf",
-  ".cpp",
-  ".css",
-  ".csv",
-  ".cts",
-  ".env",
-  ".go",
-  ".gql",
-  ".graphql",
-  ".h",
-  ".hh",
-  ".hpp",
-  ".htm",
-  ".html",
-  ".ini",
-  ".java",
-  ".js",
-  ".json",
-  ".jsx",
-  ".log",
-  ".md",
-  ".mdx",
-  ".mjs",
-  ".mts",
-  ".py",
-  ".rb",
-  ".rs",
-  ".sass",
-  ".scss",
-  ".sh",
-  ".sql",
-  ".toml",
-  ".ts",
-  ".tsx",
-  ".txt",
-  ".xml",
-  ".yaml",
-  ".yml",
-  ".zsh",
-]
-
 type PromptTarget = {
   current: () => ComposerPrompt
   cursor: () => number | undefined
@@ -239,6 +181,9 @@ export function createComposerAttachments(
     )
     if (result.attachments.length > 0) {
       target.prompt.set([...target.prompt.current(), ...result.attachments], target.selection().end)
+      if (pastedText) {
+        target.replace([{ type: "text", content: pastedText, start: 0, end: pastedText.length }], target.selection())
+      }
       return true
     }
     if (pastedText) {
@@ -329,7 +274,7 @@ export function createComposerAttachments(
         return
       }
       void input
-        .picker({ defaultPath: input.directory(), multiple: true, accept: accepted }, (file) => add(file))
+        .picker({ defaultPath: input.directory(), multiple: true }, (file) => add(file))
         .catch(input.onError)
     },
   }
@@ -405,7 +350,7 @@ const textMimes = new Set([
   "application/yaml",
 ])
 
-async function attachmentMime(file: File) {
+export async function attachmentMime(file: File) {
   const type = file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
   if (imageMimes.has(type) || type === "application/pdf") return type
   const index = file.name.lastIndexOf(".")
@@ -415,9 +360,10 @@ async function attachmentMime(file: File) {
   if (type.startsWith("text/") || textMimes.has(type) || type.endsWith("+json") || type.endsWith("+xml")) {
     return "text/plain"
   }
+  const binary = type || "application/octet-stream"
   const bytes = new Uint8Array(await file.slice(0, 4096).arrayBuffer())
-  if (bytes.some((byte) => byte === 0)) return
+  if (bytes.some((byte) => byte === 0)) return binary
   const control = bytes.filter((byte) => byte < 9 || (byte > 13 && byte < 32)).length
-  if (bytes.length > 0 && control / bytes.length > 0.3) return
+  if (bytes.length > 0 && control / bytes.length > 0.3) return binary
   return "text/plain"
 }

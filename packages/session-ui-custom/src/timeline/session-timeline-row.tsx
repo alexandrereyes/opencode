@@ -8,7 +8,12 @@ import { useI18n } from "@opencode/ui-custom/context/i18n"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
+import type {
+  SessionUserActions,
+  SessionUserAttachmentReference,
+  SessionUserComment,
+  SessionUserQuote,
+} from "../actions"
 import { useData } from "../context"
 import { TimelineSeparator } from "../components/timeline-separator"
 import {
@@ -42,6 +47,7 @@ export type SessionUserPresentation = {
   displayText?: string
   copyText?: string
   comments?: SessionUserComment[]
+  references?: SessionUserAttachmentReference[]
   quotes?: SessionUserQuote[]
   sessions?: Array<{ start: number; end: number }>
 }
@@ -596,6 +602,7 @@ export function createSessionTimelineRowRenderer(input: {
                       displayText={presentation()?.displayText}
                       copyText={presentation()?.copyText}
                       comments={presentation()?.comments}
+                      references={presentation()?.references}
                       quotes={presentation()?.quotes}
                       quoteOpen={(id) => input.disclosure.value(`${message().id}:quote:${id}`)}
                       onQuoteOpenChange={(id, open) => {

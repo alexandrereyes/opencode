@@ -230,10 +230,16 @@ function ComposerStory(props: {
           : undefined,
         onSubmit: async () => {
           const value = draft.prompt.map((part) => ("content" in part ? part.content : "")).join("")
-          const images = await Promise.all(
+          const attachments = await Promise.all(
             draft.prompt.flatMap((part) =>
               part.type === "image"
-                ? [blobDataUrl(part.blob, part.mime).then((dataUrl) => ({ ...part, dataUrl }))]
+                ? [
+                    blobDataUrl(part.blob, part.mime).then((dataUrl) => ({
+                      type: "inline" as const,
+                      attachment: part,
+                      dataUrl,
+                    })),
+                  ]
                 : [],
             ),
           )
@@ -241,7 +247,7 @@ function ComposerStory(props: {
             ? buildPromptRequest({
                 prompt: draft.prompt,
                 context: draft.context.items,
-                images,
+                attachments,
                 text: value,
                 sessionDirectory: "C:/repo",
               })

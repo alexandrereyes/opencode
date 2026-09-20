@@ -35,7 +35,7 @@ test("codex-computer-use app identity survives insertion, persistence, submissio
   const request = buildPromptRequest({
     prompt: persisted.prompt,
     context: [],
-    images: [],
+    attachments: [],
     text,
     sessionDirectory: "/remote/repo",
   })
