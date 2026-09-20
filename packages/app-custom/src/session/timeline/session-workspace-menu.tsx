@@ -2,7 +2,7 @@ import { Menu } from "@opencode/ui-custom/menu"
 import { Icon } from "@opencode/ui-custom/icon"
 import { getFilename } from "@opencode/util/path"
 import { createStore } from "solid-js/store"
-import { createSignal, For, Show, type ComponentProps, type JSX } from "solid-js"
+import { createSignal, For, onCleanup, Show, type ComponentProps, type JSX } from "solid-js"
 import type { Project } from "@/runtime/server/types"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
@@ -37,17 +37,27 @@ export function SessionWorkspaceMenu(props: {
       directories().filter((workspace) => pathKey(workspace) !== pathKey(currentWorkspace() ?? props.directory)),
       server.ctx.sync.data.path.home,
     )
+  const update = (items: Awaited<ReturnType<typeof serverSDK.api.worktree.list>>) =>
+    setDirectories(
+      items.map((item) => item.directory).filter((directory) => !sameDirectory(props.project.worktree, directory)),
+    )
+  onCleanup(
+    serverSDK.event.listen((event) => {
+      if (event.type !== "worktree.updated" || event.data.projectID !== props.project.id) return
+      void serverSDK.api.worktree
+        .list({ projectID: props.project.id })
+        .then(update)
+        .catch(() => undefined)
+    }),
+  )
   const onOpenChange = (open: boolean) => {
     props.onOpenChange?.(open)
     if (!open) return
     const sdk = serverSDK
     void sdk.api.worktree
       .list({ projectID: props.project.id })
-      .then((items) =>
-        setDirectories(
-          items.map((item) => item.directory).filter((directory) => !sameDirectory(props.project.worktree, directory)),
-        ),
-      )
+      .then(update)
+      .then(() => sdk.api.worktree.refresh({ projectID: props.project.id }))
       .catch(() => undefined)
   }
   const move = async (selection: "create" | string) => {
