@@ -9,6 +9,7 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
 import { normalizeProjectInfo } from "@/runtime/server/global-sync/utils"
 import {
+  isWorkspaceSelection,
   prioritizeDevWorkspaces,
   sameDirectory,
   workspaceDefaultSelection,
@@ -34,6 +35,20 @@ export function resolveNewSessionBranch(input: {
 
 export function resolveNewSessionGit(input: { projectVcs?: string; branch?: string }) {
   return input.projectVcs === "git" || input.branch !== undefined
+}
+
+export function validateNewSessionWorktree(input: {
+  selected?: string
+  project?: { worktree: string; sandboxes?: readonly string[] }
+  inventoryLoaded: boolean
+  worktrees: readonly string[]
+}) {
+  const selected = input.selected
+  if (!selected) return
+  if (!input.project) return selected
+  if (isWorkspaceSelection(input.project, selected)) return selected
+  if (!input.inventoryLoaded) return selected
+  return input.worktrees.some((item) => sameDirectory(item, selected)) ? selected : undefined
 }
 
 export function createNewSessionWorkspaceController(input: {
@@ -114,6 +129,14 @@ export function createNewSessionWorkspaceController(input: {
       branch: data.location.vcs.info({ directory: sdk().directory })?.branch.current,
     }),
   )
+  const selected = createMemo(() =>
+    validateNewSessionWorktree({
+      selected: input.selectedWorktree(),
+      project: currentProject(),
+      inventoryLoaded: worktreesLoaded(),
+      worktrees: worktreeDirectories(),
+    }),
+  )
   const fallback = createMemo(() => {
     const project = currentProject()
     if (!project) return "main"
@@ -125,7 +148,7 @@ export function createNewSessionWorkspaceController(input: {
   const value = createMemo(() =>
     resolveNewSessionWorktree({
       enabled: visible(),
-      selected: input.selectedWorktree(),
+      selected: selected(),
       fallback: fallback(),
     }),
   )

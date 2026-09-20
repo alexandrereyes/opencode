@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { resolveNewSessionBranch, resolveNewSessionGit, resolveNewSessionWorktree } from "./controller"
+import {
+  resolveNewSessionBranch,
+  resolveNewSessionGit,
+  resolveNewSessionWorktree,
+  validateNewSessionWorktree,
+} from "./controller"
 
 describe("new session workspace selection", () => {
   test("keeps explicit destinations authoritative over availability and defaults", () => {
@@ -16,6 +21,47 @@ describe("new session workspace selection", () => {
   test("uses availability and defaults only when the draft has no destination", () => {
     expect(resolveNewSessionWorktree({ enabled: false, fallback: "create" })).toBe("main")
     expect(resolveNewSessionWorktree({ enabled: true, fallback: "create" })).toBe("create")
+  })
+
+  test("keeps a saved worktree until inventory can validate it", () => {
+    const input = {
+      selected: "/project/feature",
+      project: { worktree: "/project" },
+      worktrees: [],
+    }
+    expect(validateNewSessionWorktree({ ...input, project: undefined, inventoryLoaded: false })).toBe(
+      "/project/feature",
+    )
+    expect(validateNewSessionWorktree({ ...input, inventoryLoaded: false })).toBe("/project/feature")
+    expect(validateNewSessionWorktree({ ...input, inventoryLoaded: true })).toBeUndefined()
+  })
+
+  test("keeps project and custom workspace choices after inventory loads", () => {
+    const project = { worktree: "/project", sandboxes: ["/custom/workspace"] }
+    expect(
+      validateNewSessionWorktree({
+        selected: "/project",
+        project,
+        inventoryLoaded: true,
+        worktrees: [],
+      }),
+    ).toBe("/project")
+    expect(
+      validateNewSessionWorktree({
+        selected: "/custom/workspace/package",
+        project,
+        inventoryLoaded: true,
+        worktrees: [],
+      }),
+    ).toBe("/custom/workspace/package")
+    expect(
+      validateNewSessionWorktree({
+        selected: "/managed/worktree",
+        project,
+        inventoryLoaded: true,
+        worktrees: ["/managed/worktree"],
+      }),
+    ).toBe("/managed/worktree")
   })
 
   test("resolves the branch from the active location", () => {
