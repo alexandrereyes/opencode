@@ -213,6 +213,8 @@ export function CurrentUserMessageDisplay(props: {
   message: SessionMessageUser
   text: string
   copyText?: string
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   agent: string
   model: SessionMessageAssistant["model"]
   actions?: SessionUserActions
@@ -226,7 +228,37 @@ export function CurrentUserMessageDisplay(props: {
   const data = useData()
   const dialog = useDialog()
   const i18n = useI18n()
-  const [state, setState] = createStore({ copied: false, reverting: false, forking: false })
+  const [state, setState] = createStore({
+    copied: false,
+    reverting: false,
+    forking: false,
+    expanded: false,
+    truncated: false,
+  })
+  const expanded = () => props.expanded ?? state.expanded
+  const setExpanded = (value: boolean) => {
+    setState("expanded", value)
+    props.onExpandedChange?.(value)
+  }
+  const observeDraft = (element: HTMLDivElement) => {
+    // The Show owns this observer, including cleanup when the text disappears.
+    createEffect(() => {
+      props.text
+      const measure = () =>
+        setState("truncated", element.scrollHeight > Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)
+      let frame = 0
+      const observer = new ResizeObserver(() => {
+        cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(measure)
+      })
+      observer.observe(element)
+      measure()
+      onCleanup(() => {
+        observer.disconnect()
+        cancelAnimationFrame(frame)
+      })
+    })
+  }
   const attachments = createMemo(() =>
     (props.message.files ?? []).filter((file) => !file.mention || file.mime.startsWith("image/")),
   )
@@ -234,6 +266,10 @@ export function CurrentUserMessageDisplay(props: {
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
   const comments = createMemo(() => props.comments ?? [])
+  const contextCount = () =>
+    attachments().length + references().length + comments().length + (props.quotes?.length ?? 0)
+  const contextPreview = () =>
+    references()[0]?.name ?? attachments()[0]?.name ?? props.quotes?.[0]?.text ?? comments()[0]?.comment
   const hasBody = () => !!props.text || !!props.quotes?.length
   const copyText = () => props.copyText ?? (props.quotes?.length ? props.message.text : props.text)
   const model = createMemo(() => {
@@ -318,51 +354,82 @@ export function CurrentUserMessageDisplay(props: {
 
   return (
     <div data-component="user-message" data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}>
-      <Show
-        when={hasBody()}
-        fallback={
-          <Show when={comments().length > 0}>
-            <UserMessageComments comments={comments()} bounded={false} />
-          </Show>
-        }
-      >
-        <div data-slot="user-message-body">
-          <div
-            data-slot="user-message-text"
-            dir={props.quotes?.length ? undefined : "auto"}
-            data-comments={comments().length > 0 ? "true" : undefined}
-          >
-            <Show when={props.text}>
-              <div data-slot="user-message-draft" dir="auto">
-                <CurrentHighlightedText
-                  text={props.text}
-                  files={inlineFiles()}
-                  agents={agents()}
-                  sessions={props.sessions ?? []}
-                />
-              </div>
+      <div data-slot="user-message-scroll" data-scrollable>
+        <Show
+          when={!!props.text || (expanded() && !!props.quotes?.length)}
+          fallback={
+            <Show when={expanded() && comments().length > 0}>
+              <UserMessageComments comments={comments()} bounded={false} />
             </Show>
-            <Show when={props.quotes?.length}>
-              <div data-slot="user-message-quotes">
-                <For each={props.quotes}>
-                  {(quote) => (
-                    <UserMessageQuote
-                      quote={quote}
-                      open={props.quoteOpen?.(quote.id)}
-                      onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
-                    />
-                  )}
-                </For>
-              </div>
-            </Show>
-            <Show when={comments().length > 0}>
-              <UserMessageComments comments={comments()} bounded />
-            </Show>
+          }
+        >
+          <div data-slot="user-message-body">
+            <div
+              data-slot="user-message-text"
+              dir={props.quotes?.length ? undefined : "auto"}
+              data-comments={comments().length > 0 ? "true" : undefined}
+            >
+              <Show when={props.text}>
+                <div
+                  ref={observeDraft}
+                  data-slot="user-message-draft"
+                  data-expanded={expanded() ? "true" : "false"}
+                  dir="auto"
+                  onClick={(event) => {
+                    if (expanded() || !state.truncated || window.getSelection()?.toString()) return
+                    if (event.target instanceof Element && event.target.closest("a, button")) return
+                    setExpanded(true)
+                  }}
+                >
+                  <CurrentHighlightedText
+                    text={props.text}
+                    files={inlineFiles()}
+                    agents={agents()}
+                    sessions={props.sessions ?? []}
+                  />
+                </div>
+              </Show>
+              <Show when={expanded() && props.quotes?.length}>
+                <div data-slot="user-message-quotes">
+                  <For each={props.quotes}>
+                    {(quote) => (
+                      <UserMessageQuote
+                        quote={quote}
+                        open={props.quoteOpen?.(quote.id)}
+                        onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
+                      />
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <Show when={expanded() && comments().length > 0}>
+                <UserMessageComments comments={comments()} bounded />
+              </Show>
+            </div>
           </div>
-        </div>
+        </Show>
+        <Show when={expanded()}>{renderAttachments()}</Show>
+      </div>
+      <Show when={contextCount() > 0 || (!!props.text && state.truncated) || expanded()}>
+        <button
+          type="button"
+          data-slot="user-message-expand"
+          aria-expanded={expanded()}
+          aria-label={i18n.t(expanded() ? "ui.message.collapse" : "ui.message.expand")}
+          onClick={() => setExpanded(!expanded())}
+        >
+          <Show when={contextCount() > 0}>
+            <span>{i18n.plural("ui.message.context", contextCount())}</span>
+            <Show when={!expanded()}>
+              <bdi data-slot="user-message-context-preview" dir="auto">
+                {contextPreview()}
+              </bdi>
+            </Show>
+          </Show>
+          <Icon name="chevron-down" size="small" style={{ transform: expanded() ? "rotate(180deg)" : undefined }} />
+        </button>
       </Show>
-      {renderAttachments()}
-      <Show when={hasBody() || comments().length > 0}>
+      <Show when={hasBody() || contextCount() > 0}>
         <div data-slot="user-message-copy-wrapper">
           <span data-slot="user-message-meta-wrap">
             <Show when={metaHead()}>

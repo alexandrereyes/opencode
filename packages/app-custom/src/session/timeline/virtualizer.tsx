@@ -106,6 +106,10 @@ export function createTimelineVirtualizer(input: Input) {
   const [rendering, setRendering] = createStore({ initialTail: coldBottomMount, scrollAdjustment: 0 })
   const rows = input.projection.rows
   const rowByKey = input.projection.rowByKey
+  const userIndexes = createMemo(() => rows().flatMap((row, index) => (row._tag === "UserMessage" ? [index] : [])))
+  const userRows = createMemo(
+    () => new Map(userIndexes().map((index, position) => [index, userIndexes()[position + 1]])),
+  )
   const rowKeys = createMemo(() => rows().map(TimelineRow.key), undefined, {
     equals: (previous, next) => previous.length === next.length && previous.every((key, index) => key === next[index]),
   })
@@ -146,8 +150,30 @@ export function createTimelineVirtualizer(input: Input) {
       const indexes = initialTail
         ? Array.from({ length: range.count - first }, (_, index) => first + index)
         : defaultRangeExtractor({ ...range, overscan: 2 })
+      // Keep just the user header owning the visible response. Its single DOM
+      // instance sticks inside a containing block ending at the next message.
+      // TurnGap belongs to the upcoming user in the projection; the previous
+      // header still owns that gap until the next user actually reaches it.
+      const users = userIndexes()
+      let low = 0
+      let high = users.length
+      while (low < high) {
+        const middle = (low + high) >>> 1
+        if (users[middle] <= range.startIndex) {
+          low = middle + 1
+          continue
+        }
+        high = middle
+      }
+      const header = users[low - 1]
       return filterVirtualIndexes(
-        [...new Set([...indexes, ...(active < 0 ? [] : [active])])].sort((a, b) => a - b),
+        [
+          ...new Set([
+            ...indexes,
+            ...(active < 0 ? [] : [active]),
+            ...(header === undefined || initialTail ? [] : [header]),
+          ]),
+        ].sort((a, b) => a - b),
         range.count,
       )
     }
@@ -174,6 +200,7 @@ export function createTimelineVirtualizer(input: Input) {
     observeElementRect: (instance, callback) => {
       reportRect = callback
       return observeElementRect(instance, (rect) => {
+        if (rect.height > 0) listRoot()?.style.setProperty("--timeline-user-max-height", `${rect.height * 0.4}px`)
         if (active()) callback(rect)
       })
     },
@@ -476,6 +503,9 @@ export function createTimelineVirtualizer(input: Input) {
   // the end must stop following, even though the resulting position still looks like the end.
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
     input.onUserScroll(event.target)
+    const header =
+      event.target instanceof Element ? event.target.closest<HTMLElement>("[data-sticky-user] [data-scrollable]") : null
+    if (header && header.scrollHeight > header.clientHeight) return
     if (event.deltaY < 0) input.onUnpin()
   }
 
@@ -580,6 +610,17 @@ export function createTimelineVirtualizer(input: Input) {
       const initialRow = rowByKey().get(rowProps.rowKey)!
       const item = createMemo(() => virtualItemByKey().get(rowProps.rowKey) ?? initialItem)
       const row = createMemo(() => rowByKey().get(rowProps.rowKey) ?? rows()[item().index] ?? initialRow)
+      const user = () => row()._tag === "UserMessage"
+      const containingHeight = () => {
+        if (!user()) return item().size
+        // Reading total size subscribes to the virtualizer's measurement updates.
+        const end = virtualizer.getTotalSize() - 64 + topOffset()
+        const next = userRows().get(item().index)
+        return Math.max(
+          item().size,
+          (next === undefined ? end : (virtualizer.measurementsCache[next]?.start ?? end)) - item().start,
+        )
+      }
       const [ready, setReady] = createSignal(initialItem.size <= fallbackItemSize || !props.deferred(initialRow))
       let contentMeasureFrame: number | undefined
 
@@ -599,8 +640,10 @@ export function createTimelineVirtualizer(input: Input) {
             top: `${item().start - topOffset() - rendering.scrollAdjustment}px`,
             left: "0",
             width: "100%",
-            height: `${item().size}px`,
-            overflow: "clip",
+            height: `${containingHeight()}px`,
+            overflow: user() ? "visible" : "clip",
+            "pointer-events": user() ? "none" : undefined,
+            "z-index": user() ? 20 : undefined,
             "overflow-clip-margin": row()._tag === "TurnGap" ? undefined : "0.5px",
           }}
         >
@@ -622,7 +665,14 @@ export function createTimelineVirtualizer(input: Input) {
               })
             }}
             data-index={item().index}
-            style={{ "min-height": ready() ? undefined : `${initialItem.size}px` }}
+            data-sticky-user={user() ? "" : undefined}
+            style={{
+              "min-height": ready() ? undefined : `${initialItem.size}px`,
+              position: user() ? "sticky" : undefined,
+              top: user() ? (input.showHeader() ? "48px" : "0px") : undefined,
+              "pointer-events": user() ? "auto" : undefined,
+              background: user() ? "var(--v2-background-bg-base)" : undefined,
+            }}
           >
             {props.renderRow(row, () => {
               setReady(true)

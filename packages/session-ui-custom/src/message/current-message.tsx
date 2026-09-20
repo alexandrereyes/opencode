@@ -24,6 +24,8 @@ export function SessionUserMessage(props: {
   message: SessionMessageUser
   displayText?: string
   copyText?: string
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   comments?: SessionUserComment[]
   references?: SessionUserAttachmentReference[]
   quotes?: SessionUserQuote[]
@@ -40,6 +42,8 @@ export function SessionUserMessage(props: {
       message={props.message}
       text={props.displayText ?? props.message.text}
       copyText={props.copyText}
+      expanded={props.expanded}
+      onExpandedChange={props.onExpandedChange}
       comments={props.comments}
       references={props.references}
       quotes={props.quotes}

@@ -601,6 +601,11 @@ export function createSessionTimelineRowRenderer(input: {
                       message={message()}
                       displayText={presentation()?.displayText}
                       copyText={presentation()?.copyText}
+                      expanded={input.disclosure.value(`${message().id}:expanded`) ?? false}
+                      onExpandedChange={(expanded) => {
+                        input.disclosure.set(`${message().id}:expanded`, expanded)
+                        onSizeChange?.()
+                      }}
                       comments={presentation()?.comments}
                       references={presentation()?.references}
                       quotes={presentation()?.quotes}

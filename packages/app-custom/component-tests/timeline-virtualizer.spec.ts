@@ -4,8 +4,9 @@ import { expect, story } from "../../storybook/playwright/story"
 const fixture = `/@fs/${fileURLToPath(new URL("./timeline-virtualizer.fixture.tsx", import.meta.url)).replaceAll("\\", "/")}`
 
 story.beforeEach(async ({ mount }) => {
-  const component = await mount("opencode-composer-flow--mixed-attachments")
-  await expect(component.getByRole("textbox", { name: "Prompt", exact: true })).toBeVisible()
+  // The virtualizer fixture only needs the shared story providers, not a composer.
+  const component = await mount("inference-footer--completed")
+  await expect(component.getByText("The inference details remain visible below the response.")).toBeVisible()
 })
 
 story("spaces the first mobile message without changing desktop spacing", async ({ page }) => {

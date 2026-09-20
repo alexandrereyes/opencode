@@ -141,6 +141,54 @@
     align-items: flex-end;
   }
 
+  [data-slot="user-message-draft"][data-expanded="false"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  [data-slot="user-message-expand"] {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    max-width: min(82%, 64ch);
+    margin-inline-start: auto;
+    min-width: 32px;
+    height: 28px;
+    cursor: pointer;
+    color: inherit;
+    background: var(--v2-background-bg-base);
+    border-radius: 4px;
+
+    &:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: 2px;
+    }
+  }
+
+  [data-slot="user-message-context-preview"] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
+    color: var(--v2-text-text-muted);
+  }
+
+  [data-slot="user-message-expand"] > span {
+    flex-shrink: 0;
+  }
+
+  [data-slot="user-message-scroll"] {
+    width: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
   [data-slot="user-message-text"] {
     display: inline-block;
     white-space: pre-wrap;
@@ -174,6 +222,7 @@
   }
 
   [data-slot="user-message-copy-wrapper"] {
+    flex-shrink: 0;
     min-height: 24px;
     margin-top: 4px;
     display: flex;
@@ -1423,6 +1472,10 @@
     font-weight: 440;
     color: var(--v2-text-text-muted);
   }
+}
+
+[data-sticky-user] [data-component="user-message"] {
+  max-height: var(--timeline-user-max-height, 40dvh);
 }
 
 :root body [data-component="user-message"] {
