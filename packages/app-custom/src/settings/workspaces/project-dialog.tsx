@@ -204,6 +204,10 @@ function ProjectSettingsDialog(props: { project: LocalProject; server: ServerCon
                   spellcheck={false}
                   onInput={(event) => model.setStore("startup", event.currentTarget.value)}
                 />
+                <div class="flex flex-col text-[12px] leading-text-compact text-v2-text-text-muted">
+                  <span>{inlineVariables(language.t("project.settings.worktree.startup.hint.base"))}</span>
+                  <span>{inlineVariables(language.t("project.settings.worktree.startup.hint.new"))}</span>
+                </div>
               </Field>
             </div>
             <Footer />
@@ -216,4 +220,10 @@ function ProjectSettingsDialog(props: { project: LocalProject; server: ServerCon
       </Tabs>
     </Dialog>
   )
+}
+
+function inlineVariables(text: string) {
+  return text
+    .split(/(\$[A-Z][A-Z0-9_]*)/g)
+    .map((part, index) => (index % 2 === 0 ? part : <code dir="ltr">{part}</code>))
 }

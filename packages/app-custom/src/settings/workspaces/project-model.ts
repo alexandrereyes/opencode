@@ -6,9 +6,12 @@ import { createStore } from "solid-js/store"
 import { useGlobal } from "@/runtime/server/runtime"
 import { type LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
+import { useLanguage } from "@/runtime/i18n/language"
+import { showToast } from "@/shell/notifications/toast"
 
 export function createEditProjectModel(props: { project: LocalProject; server: ServerConnection.Any }) {
   const dialog = useDialog()
+  const language = useLanguage()
   const global = useGlobal()
   const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
   const folderName = createMemo(() => getFilename(props.project.worktree))
@@ -87,6 +90,13 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
         commands: { start: start || undefined },
       })
       dialog.close()
+    },
+    onError: (error: unknown) => {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : language.t("common.requestFailed"),
+      })
     },
   }))
 
