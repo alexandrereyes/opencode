@@ -347,6 +347,7 @@ export const dict = {
   "command.session.previous.unseen": "Previous unread session",
   "command.session.next.unseen": "Next unread session",
   "command.session.archive": "Archive session",
+  "command.session.summary.toggle": "Toggle summary",
 
   "command.palette": "Command palette",
 
@@ -1696,6 +1697,7 @@ export const dict = {
   "workspace.lifecycle.moving": "Moving to worktree",
   "workspace.lifecycle.set": "Worktree set",
   "session.summary.title": "Session details",
+  "session.summary.tooltip": "Summary",
   "session.summary.noBranch": "No branch",
   "session.summary.basedOn": "Based on {{branch}}",
   "workspace.type.local": "local",
