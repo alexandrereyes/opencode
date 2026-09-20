@@ -1,12 +1,8 @@
 import { Show } from "solid-js"
-import { Button } from "@opencode/ui-custom/button"
-import { useDialog } from "@opencode/ui-custom/context/dialog"
-import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useGlobal } from "@/runtime/server/runtime"
 import type { ServerConnection } from "@/runtime/server/registry"
 import type { LocalProject } from "@/shell/state/layout"
 import { useProjectActions } from "@/workspaces/project-actions"
@@ -18,39 +14,8 @@ export function SidebarProjectActions(props: {
   metadata?: LocalProject
 }) {
   const language = useLanguage()
-  const global = useGlobal()
-  const dialog = useDialog()
   const actions = useProjectActions()
   const newSession = () => actions.openNewSession(props.connection, props.directory)
-  const remove = () => {
-    const projects = global.ensureServerCtx(props.connection).projects
-    const directory = props.directory
-    const name = props.name
-    void dialog.show(() => (
-      <Dialog fit>
-        <DialogHeader hideClose>
-          <DialogTitleGroup
-            title={language.t("sidebar.project.remove.title", { project: name })}
-            description={language.t("sidebar.project.remove.description")}
-          />
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => dialog.close()}>
-            {language.t("common.cancel")}
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => {
-              dialog.close()
-              projects.close(directory)
-            }}
-          >
-            {language.t("sidebar.project.remove")}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-    ))
-  }
   return (
     <div
       data-slot="sidebar-project-actions"
@@ -88,7 +53,7 @@ export function SidebarProjectActions(props: {
           icon={<Icon name="trash" />}
           style={{ color: "var(--v2-state-fg-danger)" }}
           aria-label={language.t("sidebar.project.remove")}
-          onClick={remove}
+          onClick={() => actions.close(props.connection, { worktree: props.directory }, props.name)}
         />
       </Tooltip>
     </div>
