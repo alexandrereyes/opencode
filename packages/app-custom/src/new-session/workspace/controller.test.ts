@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
+  cycleNewSessionWorktree,
   resolveNewSessionBranch,
   resolveNewSessionGit,
   resolveNewSessionWorktree,
+  validateRememberedNewSessionWorktree,
   validateNewSessionWorktree,
 } from "./controller"
 
@@ -95,5 +97,32 @@ describe("new session workspace selection", () => {
     expect(resolveNewSessionGit({ branch: "dev" })).toBe(true)
     expect(resolveNewSessionGit({ projectVcs: "git" })).toBe(true)
     expect(resolveNewSessionGit({})).toBe(false)
+  })
+
+  test("cycles local, new, and the last existing worktree", () => {
+    const existing = "/project/feature"
+    expect(cycleNewSessionWorktree({ current: "main", existing })).toBe("create")
+    expect(cycleNewSessionWorktree({ current: "create", existing })).toBe(existing)
+    expect(cycleNewSessionWorktree({ current: existing, existing })).toBe("main")
+    expect(cycleNewSessionWorktree({ current: "create" })).toBe("main")
+  })
+
+  test("skips a remembered worktree removed from the current project", () => {
+    const remembered = { projectID: "project", directory: "/project/feature" }
+    expect(
+      validateRememberedNewSessionWorktree({
+        projectID: "project",
+        remembered,
+        worktrees: ["/project/feature"],
+      }),
+    ).toBe("/project/feature")
+    expect(validateRememberedNewSessionWorktree({ projectID: "project", remembered, worktrees: [] })).toBeUndefined()
+    expect(
+      validateRememberedNewSessionWorktree({
+        projectID: "other",
+        remembered,
+        worktrees: ["/project/feature"],
+      }),
+    ).toBeUndefined()
   })
 })

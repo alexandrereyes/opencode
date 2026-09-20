@@ -51,6 +51,23 @@ export function validateNewSessionWorktree(input: {
   return input.worktrees.some((item) => sameDirectory(item, selected)) ? selected : undefined
 }
 
+export function cycleNewSessionWorktree(input: { current: string; existing?: string }) {
+  if (input.current === "main") return "create"
+  if (input.current === "create") return input.existing ?? "main"
+  return "main"
+}
+
+export function validateRememberedNewSessionWorktree(input: {
+  projectID?: string
+  remembered?: { projectID: string; directory: string }
+  worktrees: readonly string[]
+}) {
+  const remembered = input.remembered
+  if (!input.projectID || remembered?.projectID !== input.projectID) return
+  if (!input.worktrees.some((item) => sameDirectory(item, remembered.directory))) return
+  return remembered.directory
+}
+
 export function createNewSessionWorkspaceController(input: {
   selectedWorktree: () => string | undefined
   selectedBranch: () => string | undefined
@@ -64,7 +81,10 @@ export function createNewSessionWorkspaceController(input: {
   const server = useServer()
   const settings = useSettings()
   const tabs = useTabs()
-  const [state, setState] = createStore({ search: "" })
+  const [state, setState] = createStore({
+    search: "",
+    existing: undefined as { projectID: string; directory: string } | undefined,
+  })
   const searchBranches = debounce((search: string) => setState("search", search.trim()), 100)
   const currentProject = createMemo(() => {
     const projectID = data.location.info({ directory: sdk().directory })?.project.id
@@ -174,6 +194,8 @@ export function createNewSessionWorkspaceController(input: {
   createEffect(() => {
     const selection = value()
     if (selection === "main" || selection === "create") return
+    const project = currentProject()
+    if (project) setState("existing", { projectID: project.id, directory: selection })
     void data.location.vcs.sync({ directory: selection }).catch(() => undefined)
   })
   const branch = createMemo(() =>
@@ -191,6 +213,17 @@ export function createNewSessionWorkspaceController(input: {
     const local = workspaceSelectionDestination(worktree, project.worktree) === "main"
     settings.workspaces.setLastUsed(serverSDK.scope, project.id, local ? "local" : "workspace")
   }
+  const select = (worktree: string) => {
+    input.setSelectedBranch(undefined)
+    input.setSelectedWorktree(worktree)
+    remember(worktree)
+  }
+  const existing = () =>
+    validateRememberedNewSessionWorktree({
+      projectID: currentProject()?.id,
+      remembered: state.existing,
+      worktrees: worktreeDirectories(),
+    })
 
   return {
     selection: {
@@ -201,11 +234,8 @@ export function createNewSessionWorkspaceController(input: {
         input.setSelectedBranch(undefined)
       },
       remember,
-      set: (worktree: string) => {
-        input.setSelectedBranch(undefined)
-        input.setSelectedWorktree(worktree)
-        remember(worktree)
-      },
+      set: select,
+      cycle: () => select(cycleNewSessionWorktree({ current: value(), existing: existing() })),
       create: (branch: string) => {
         input.setSelectedBranch(branch)
         input.setSelectedWorktree("create")

@@ -359,6 +359,7 @@ export const dict = {
   "command.language.set": "Use language: {{language}}",
 
   "command.session.new": "New session",
+  "command.session.location.cycle": "Cycle session location",
   "command.file.open": "Open file",
   "command.browser.open": "Open browser",
   "command.browser.reload": "Reload browser page",
