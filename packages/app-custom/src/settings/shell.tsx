@@ -1,7 +1,7 @@
 import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Tabs } from "@opencode/ui-custom/tabs"
-import { createEffect, createMemo, Match, onMount, Show, Switch } from "solid-js"
+import { createEffect, createMemo, Match, on, onCleanup, onMount, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useGlobal, useServerCtx } from "@/runtime/server/runtime"
@@ -31,6 +31,7 @@ import { SettingsNavigation, type SettingsNavGroup } from "./navigation"
 import { SettingsScopedProjects } from "./scoped-projects"
 import { pageIcons, pageLabels } from "./pages"
 import { useSettingsSurface } from "./surface"
+import { revealSettingsSearch } from "./search-reveal"
 import "@/settings/settings.css"
 
 const rootSections = [
@@ -51,14 +52,38 @@ export function SettingsScreen() {
   const global = useGlobal()
   let root: HTMLDivElement | undefined
   let viewType = surface.view().type
+  let activation = 0
 
   onMount(() => root?.focus({ preventScroll: true }))
   createEffect(() => {
     const next = surface.view().type
     if (next === viewType) return
     viewType = next
-    queueMicrotask(() => root?.focus({ preventScroll: true }))
+    queueMicrotask(() => {
+      const target =
+        surface.search.state.query.trim() && surface.search.state.expanded
+          ? root?.querySelector<HTMLInputElement>(".settings-search input")
+          : root
+      target?.focus({ preventScroll: true })
+    })
   })
+  createEffect(
+    on(
+      () => [surface.view(), surface.search.state.selected] as const,
+      ([view, selected]) => {
+        if (
+          !root ||
+          !selected ||
+          !view.searchActivation ||
+          view.searchActivation !== surface.search.state.activation ||
+          view.searchActivation === activation
+        )
+          return
+        activation = view.searchActivation
+        onCleanup(revealSettingsSearch(root, view))
+      },
+    ),
+  )
 
   const targetServer = createMemo(() => {
     const view = surface.view()
@@ -96,6 +121,11 @@ export function SettingsScreen() {
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented || dialog.active) return
         event.preventDefault()
+        if (surface.view().type !== "root" && surface.search.back()) return
+        if (surface.search.state.query.trim()) {
+          surface.search.clear()
+          return
+        }
         surface.back()
       }}
     >
@@ -206,7 +236,10 @@ function RootSettings() {
         <SettingsNotifications />
       </Tabs.Content>
       <Tabs.Content value="shortcuts" class="settings-panel">
-        <SettingsKeybinds active={surface.view().tab === "shortcuts"} />
+        <SettingsKeybinds
+          active={surface.view().tab === "shortcuts"}
+          autofocus={!surface.search.state.selected}
+        />
       </Tabs.Content>
       <Tabs.Content value="snippets" class="settings-panel">
         <SettingsSnippets />
@@ -225,10 +258,10 @@ function RootSettings() {
           <SettingsProviders directory={directory()} onBack={() => surface.select("providers")} />
         </Tabs.Content>
         <Tabs.Content value="models" class="settings-panel">
-          <SettingsModels active={surface.view().tab === "models"} />
+          <SettingsModels active={surface.view().tab === "models"} autofocus={!surface.search.state.selected} />
         </Tabs.Content>
         <Tabs.Content value="extensions" class="settings-panel">
-          <SettingsExtensions />
+          <SettingsExtensions subtab={surface.view().subtab} onSubtab={(value) => surface.subtab(value)} />
         </Tabs.Content>
       </SettingsServerScope>
       <Tabs.Content value="experimental" class="settings-panel">
@@ -297,10 +330,10 @@ function ServerSettings(props: { server: ServerConnection.Any }) {
           <SettingsProviders directory={directory()} onBack={() => surface.select("providers")} />
         </Tabs.Content>
         <Tabs.Content value="models" class="settings-panel">
-          <SettingsModels active={surface.view().tab === "models"} />
+          <SettingsModels active={surface.view().tab === "models"} autofocus={!surface.search.state.selected} />
         </Tabs.Content>
         <Tabs.Content value="extensions" class="settings-panel">
-          <SettingsExtensions />
+          <SettingsExtensions subtab={surface.view().subtab} onSubtab={(value) => surface.subtab(value)} />
         </Tabs.Content>
       </SettingsNavigation>
     </SettingsServerDataScope>
@@ -366,7 +399,7 @@ function ProjectSettings(props: { server: ServerConnection.Any; project: LocalPr
             />
           </Tabs.Content>
           <Tabs.Content value="extensions" class="settings-panel">
-            <ProjectSettingsExtensions />
+            <ProjectSettingsExtensions subtab={surface.view().subtab} onSubtab={(value) => surface.subtab(value)} />
           </Tabs.Content>
         </SettingsNavigation>
       </LocationProvider>

@@ -20,6 +20,8 @@ async function openLanguageServers(page: Page) {
   await settings.getByText("LSP demo", { exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("tab", { name: "Extensions", exact: true }).click()
+  await dialog.getByRole("tab", { name: "Skills", exact: true }).click()
+  await expect(dialog.getByRole("tab", { name: "Skills", exact: true })).toHaveAttribute("aria-selected", "true")
   await dialog.getByRole("tab", { name: "LSPs", exact: true }).click()
   return dialog
 }

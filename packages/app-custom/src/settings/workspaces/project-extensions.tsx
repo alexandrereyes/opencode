@@ -171,7 +171,10 @@ const ProjectLanguageServers: Component = () => {
   )
 }
 
-export const ProjectSettingsExtensions: Component = () => {
+export const ProjectSettingsExtensions: Component<{
+  subtab?: "mcps" | "plugins" | "skills" | "lsps"
+  onSubtab?: (value: "mcps" | "plugins" | "skills" | "lsps") => void
+}> = (props) => {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const directorySDK = useWorkspaceLocation()
@@ -260,7 +263,16 @@ export const ProjectSettingsExtensions: Component = () => {
         <span>{language.t("project.settings.extensions.description")}</span>
       </div>
 
-      <Tabs variant="pill" defaultValue="mcps" class="project-settings-extension-tabs">
+      <Tabs
+        variant="pill"
+        value={props.subtab}
+        defaultValue="mcps"
+        onChange={(value) => {
+          if (value !== "mcps" && value !== "plugins" && value !== "skills" && value !== "lsps") return
+          props.onSubtab?.(value)
+        }}
+        class="project-settings-extension-tabs settings-subtabs"
+      >
         <Tabs.List>
           <Tabs.Trigger value="mcps">{language.t("settings.extensions.tab.mcps")}</Tabs.Trigger>
           <Tabs.Trigger value="plugins">{language.t("status.popover.tab.plugins")}</Tabs.Trigger>
