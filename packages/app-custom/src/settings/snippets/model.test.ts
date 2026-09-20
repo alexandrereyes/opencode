@@ -80,7 +80,7 @@ describe("snippets", () => {
     const request = buildPromptRequest({
       prompt: restored.prompt,
       context: [],
-      images: [],
+      attachments: [],
       text: "Use #review  then @file.ts",
       sessionDirectory: "/repo",
     })

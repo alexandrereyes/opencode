@@ -18,20 +18,28 @@ import { useSsh } from "@/servers/ssh/context"
 import { AddServerMenu, isWslServer, useFilteredWslServers, WslServerSettings } from "@/servers/wsl/settings"
 import "@/settings/settings.css"
 
-export const SettingsServers: Component = () => {
+export const SettingsServers: Component<{ server?: ServerConnection.Any }> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
   const controller = useServerCollectionController()
   const [store, setStore] = createStore({ filter: "" })
-  const wslServers = useFilteredWslServers(() => store.filter)
+  const scopedWsl = () =>
+    props.server?.type === "sidecar" && props.server.variant === "wsl" ? ServerConnection.key(props.server) : undefined
+  const wslServers = useFilteredWslServers(() => store.filter, scopedWsl)
   const ssh = useSsh()
+  const scopedSsh = () => (props.server?.type === "ssh" ? props.server : undefined)
 
   const showSearch = createMemo(
-    () => controller.collection.items().filter((item) => !isWslServer(item)).length + wslServers().length > 1,
+    () =>
+      !props.server &&
+      controller.collection.items().filter((item) => !isWslServer(item)).length + wslServers().length > 1,
   )
 
   const filtered = createMemo(() => {
-    const items = controller.collection.items().filter((item) => !isWslServer(item) && item.type !== "ssh")
+    const items = controller.collection
+      .items()
+      .filter((item) => !isWslServer(item) && item.type !== "ssh")
+      .filter((item) => !props.server || ServerConnection.key(item) === ServerConnection.key(props.server))
     const query = store.filter.trim()
     if (!query) return items
     return fuzzysort
@@ -57,10 +65,16 @@ export const SettingsServers: Component = () => {
       >
         <div class="settings-tab-header-row">
           <div class="flex flex-col gap-1">
-            <h2 class="settings-tab-title">{language.t("status.popover.tab.servers")}</h2>
+            <h2 class="settings-tab-title">
+              {props.server
+                ? serverName(props.server) || ServerConnection.key(props.server)
+                : language.t("status.popover.tab.servers")}
+            </h2>
             <span class="text-11-regular text-v2-text-text-muted">{language.t("settings.servers.description")}</span>
           </div>
-          <AddServerMenu onAddServer={openAdd} />
+          <Show when={!props.server}>
+            <AddServerMenu onAddServer={openAdd} />
+          </Show>
         </div>
         <Show when={showSearch()}>
           <div class="settings-tab-search">
@@ -92,7 +106,12 @@ export const SettingsServers: Component = () => {
 
       <div class="settings-tab-body settings-servers">
         <Show
-          when={filtered().length > 0 || wslServers().length > 0 || ssh.servers.some((item) => item.saved)}
+          when={
+            filtered().length > 0 ||
+            (props.server?.type === "sidecar" && props.server.variant === "wsl" && wslServers().length > 0) ||
+            (scopedSsh() && ssh.servers.some((item) => item.saved && item.config.id === scopedSsh()?.id)) ||
+            (!props.server && (wslServers().length > 0 || ssh.servers.some((item) => item.saved)))
+          }
           fallback={
             <div class="settings-servers-status">
               <span>{store.filter ? language.t("palette.empty") : language.t("dialog.server.empty")}</span>
@@ -103,8 +122,16 @@ export const SettingsServers: Component = () => {
           }
         >
           <SettingsList>
-            <SshServerSettings filter={store.filter} domain={controller} />
-            <WslServerSettings domain={controller} servers={wslServers} />
+            <Show when={!props.server || props.server.type === "ssh"}>
+              <SshServerSettings
+                filter={props.server?.type === "ssh" ? "" : store.filter}
+                id={props.server?.type === "ssh" ? props.server.id : undefined}
+                domain={controller}
+              />
+            </Show>
+            <Show when={!props.server || (props.server.type === "sidecar" && props.server.variant === "wsl")}>
+              <WslServerSettings domain={controller} servers={wslServers} />
+            </Show>
             <For each={filtered()}>
               {(item) => {
                 const key = ServerConnection.key(item)

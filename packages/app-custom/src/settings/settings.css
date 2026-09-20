@@ -661,6 +661,184 @@
   padding-inline-end: 28px;
 }
 
+.settings-screen
+  > .settings[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  > .settings-sidebar {
+  width: 328px;
+  min-width: 328px;
+  min-height: 0;
+  flex-shrink: 0;
+  padding-block: 48px;
+  padding-inline-start: 24px;
+  padding-inline-end: 104px;
+  border-inline-end: none;
+  background: transparent;
+}
+
+.settings-screen > .settings > .settings-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  max-width: 720px;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-content > .settings-panel {
+  min-height: 0;
+  flex: 1;
+  padding-inline: 4px;
+}
+
+.settings-sidebar .settings-nav {
+  width: 200px;
+  max-width: 100%;
+  height: 100%;
+}
+
+.settings-nav-groups {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.settings-nav-group {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav-group-header {
+  padding-inline: 8px;
+  color: var(--v2-text-text-muted);
+  font-size: 11px;
+  line-height: var(--line-height-compact);
+}
+
+.settings-nav-groups [data-slot="tabs-v2-trigger-wrapper"] {
+  width: 100%;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: var(--v2-text-text-muted);
+}
+
+.settings-nav-groups [data-slot="tabs-v2-trigger"] {
+  width: 100%;
+  height: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.settings-nav-groups [data-slot="tabs-v2-trigger-wrapper"]:has([data-selected]) {
+  background: var(--v2-background-bg-layer-03);
+  color: var(--v2-text-text-base);
+}
+
+@media (hover: hover) {
+  .settings-nav-groups [data-slot="tabs-v2-trigger-wrapper"]:hover {
+    background: var(--v2-background-bg-layer-03);
+  }
+}
+
+@container settings-screen (min-width: 800px) and (max-width: 1047px) {
+  .settings-screen
+    > .settings[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+    > .settings-sidebar {
+    width: 240px;
+    min-width: 240px;
+    padding-inline-start: 16px;
+    padding-inline-end: 24px;
+  }
+}
+
+@container settings-screen (max-width: 799px) {
+  .settings-screen > .settings > .settings-content {
+    min-height: 0;
+    max-width: none;
+  }
+
+  .settings-screen
+    > .settings[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+    > .settings-sidebar {
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 0;
+    padding: 8px var(--settings-mobile-inner-inset, 16px);
+  }
+
+  .settings-sidebar .settings-nav {
+    width: 100%;
+    height: auto;
+  }
+
+  .settings-sidebar .settings-nav > .settings-back,
+  .settings-sidebar .settings-nav-groups[data-slot="tabs-v2-list"] {
+    display: none;
+  }
+
+  .settings-search[data-expanded="false"] .settings-search-matches {
+    display: none;
+  }
+
+  .settings-search-matches {
+    position: absolute;
+    z-index: 12;
+    max-height: 45vh;
+    padding-block: 8px;
+    border-radius: 8px;
+    background: var(--v2-background-bg-base);
+    box-shadow: var(--v2-elevation-raised);
+    inset-block-start: calc(100% + 8px);
+    inset-inline: 0;
+  }
+
+  .settings-screen > .settings > .settings-sidebar[data-searchable="false"] {
+    display: none;
+  }
+
+  .settings-search [data-slot="text-input-v2-input"] {
+    font-size: 16px;
+  }
+}
+
+.settings-project-row {
+  position: relative;
+  margin-inline: 1px;
+  border-radius: 8px;
+  background: var(--v2-background-bg-layer-01);
+  box-shadow: inset 0 0 0 0.5px var(--v2-border-border-muted);
+  transition: background-color 120ms;
+}
+
+.settings-project-row:hover {
+  background: var(--v2-background-bg-layer-02);
+}
+
+.settings-project-row-content {
+  display: flex;
+  width: 100%;
+  min-height: 73px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  border-radius: inherit;
+  text-align: start;
+}
+
+.settings-project-row-name {
+  font-size: 13px;
+  font-weight: 530;
+  line-height: var(--line-height-compact);
+  color: var(--v2-text-text-base);
+}
+
 .settings-tab-search-clear {
   position: absolute;
   top: 50%;

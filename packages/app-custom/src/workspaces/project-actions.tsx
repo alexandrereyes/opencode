@@ -1,7 +1,9 @@
 import { startTransition } from "solid-js"
 import { Schema } from "effect"
 import type { SessionInfo } from "@opencode/client/promise"
+import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
+import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { usePlatform } from "@/runtime/platform/platform"
@@ -88,6 +90,49 @@ export function useProjectActions() {
           void dialog.show(() => <DialogEditProject server={conn} project={project} />)
         })
         .catch(failed)
+    },
+    close(
+      conn: ServerConnection.Any,
+      project: { worktree: string },
+      name: string,
+      onClosed?: (outcome: "cancel" | "confirm") => void,
+    ) {
+      let outcome: "cancel" | "confirm" = "cancel"
+      void dialog.show(() => (
+        <Dialog
+          fit
+          onCloseAutoFocus={
+            onClosed
+              ? (event) => {
+                  event.preventDefault()
+                  onClosed(outcome)
+                }
+              : undefined
+          }
+        >
+          <DialogHeader hideClose>
+            <DialogTitleGroup
+              title={language.t("sidebar.project.remove.title", { project: name })}
+              description={language.t("sidebar.project.remove.description")}
+            />
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => dialog.close()}>
+              {language.t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                outcome = "confirm"
+                dialog.close()
+                global.ensureServerCtx(conn).projects.close(project.worktree)
+              }}
+            >
+              {language.t("sidebar.project.remove")}
+            </Button>
+          </DialogFooter>
+        </Dialog>
+      ))
     },
     canReveal,
     reveal(conn: ServerConnection.Any, project: { worktree: string }) {

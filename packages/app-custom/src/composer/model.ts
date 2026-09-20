@@ -29,13 +29,17 @@ import { snippetSuggestions } from "@/settings/snippets/model"
 import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { createSessionSearch } from "./session-search"
+import { useAttachmentDestination } from "./attachments/deliver"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
   readonly quotes?: ComposerState["quotes"]
 }
 
-export function createComposerModel(adapter: ComposerAdapter, options?: { queue?: ComposerQueue }): ComposerModel {
+export function createComposerModel(
+  adapter: ComposerAdapter,
+  options?: { queue?: ComposerQueue; destination?: ReturnType<typeof useAttachmentDestination> },
+): ComposerModel {
   const sdk = useWorkspaceLocation()
   const data = useData()
   const server = useServer()
@@ -331,6 +335,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const slashSkills = createMemo(() =>
     skills().filter((skill) => skill.slash === true && !slashCommands().some((item) => item.trigger === skill.id)),
   )
+  const destination = options?.destination ?? useAttachmentDestination(() => adapter.controls())
   const commands = createMemo<ComposerSuggestion[]>(() => [
     ...slashCommands().map((item) => ({
       id: item.id,
@@ -370,6 +375,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
     resetHistory: () => controller.resetHistory(),
     setMode: (next) => controller.dispatch({ type: next === "shell" ? "mode.shell" : "mode.normal" }),
     closePopover: () => controller.dispatch({ type: "popover.close" }),
+    destination,
     delivery: (alternate) => {
       const queue = options?.queue
       if (!queue) return "steer"

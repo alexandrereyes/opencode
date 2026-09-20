@@ -2,8 +2,14 @@ import { getFilename } from "@opencode/util/path"
 import { AppMentions } from "@opencode/plugin-app-custom/rpc"
 import type { FileSelection } from "@/workspaces/files/model"
 import { encodeFilePath } from "@/workspaces/files/path"
-import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillPart } from "@/composer/state"
-import { formatCommentNote, type PromptComment } from "@/composer/comment-note"
+import type { AgentPart, FileAttachmentPart, Prompt, SkillPart } from "@/composer/state"
+import {
+  formatAttachmentReference,
+  formatCommentNote,
+  type PromptAttachmentReference,
+  type PromptComment,
+} from "@/composer/comment-note"
+import type { DeliveredAttachment } from "@/composer/attachments/deliver"
 import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { formatChatQuotes } from "./chat-quote"
@@ -20,6 +26,7 @@ type PromptRequest = {
   apps: Extract<Prompt[number], { type: "app" }>[]
   sessions: Extract<Prompt[number], { type: "session" }>[]
   quotes: ChatQuote[]
+  attachments: PromptAttachmentReference[]
 }
 
 type ContextFile = {
@@ -36,7 +43,7 @@ type ContextFile = {
 type BuildPromptRequestInput = {
   prompt: Prompt
   context: ContextFile[]
-  images: (Omit<ImageAttachmentPart, "blob"> & { dataUrl: string })[]
+  attachments: DeliveredAttachment[]
   text: string
   sessionDirectory: string
   quotes?: ChatQuote[]
@@ -141,29 +148,40 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   const imageMentions = new Map(
     prompt.flatMap((part) => (part.type === "image" ? [[part.id, part.mention] as const] : [])),
   )
-  const images = input.images.map((attachment) => ({
-    uri: attachment.dataUrl,
-    mime: attachment.mime,
-    name: attachment.sourcePath ?? attachment.filename,
-    mention: imageMentions.get(attachment.id),
-  }))
+  const inline = input.attachments.flatMap((item) =>
+    item.type === "inline"
+      ? [
+          {
+            uri: item.dataUrl,
+            mime: item.attachment.mime,
+            name: item.attachment.sourcePath ?? item.attachment.filename,
+            mention: imageMentions.get(item.attachment.id),
+          },
+        ]
+      : [],
+  )
+  const attachments = input.attachments.flatMap((item) =>
+    item.type === "path" ? [{ name: item.attachment.filename, mime: item.attachment.mime, path: item.path }] : [],
+  )
 
   return {
     text: [
       ...(text.trim() ? [text] : []),
+      ...attachments.map(formatAttachmentReference),
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
       ...formatSessionContexts(sessions),
       ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
     ].join("\n"),
     displayText: text,
-    files: [...files, ...quoteFiles, ...context, ...images],
+    files: [...files, ...quoteFiles, ...context, ...inline],
     agents: [...agents, ...quoteAgents],
     skills: [...skills, ...quoteSkills],
     comments,
     apps,
     sessions,
     quotes: input.quotes ?? [],
+    attachments,
   }
 }
 

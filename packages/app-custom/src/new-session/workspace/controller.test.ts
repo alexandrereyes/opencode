@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { resolveNewSessionBranch, resolveNewSessionGit, resolveNewSessionWorktree } from "./controller"
+import {
+  cycleNewSessionWorktree,
+  resolveNewSessionBranch,
+  resolveNewSessionGit,
+  resolveNewSessionWorktree,
+  validateRememberedNewSessionWorktree,
+  validateNewSessionWorktree,
+} from "./controller"
 
 describe("new session workspace selection", () => {
   test("keeps explicit destinations authoritative over availability and defaults", () => {
@@ -16,6 +23,47 @@ describe("new session workspace selection", () => {
   test("uses availability and defaults only when the draft has no destination", () => {
     expect(resolveNewSessionWorktree({ enabled: false, fallback: "create" })).toBe("main")
     expect(resolveNewSessionWorktree({ enabled: true, fallback: "create" })).toBe("create")
+  })
+
+  test("keeps a saved worktree until inventory can validate it", () => {
+    const input = {
+      selected: "/project/feature",
+      project: { worktree: "/project" },
+      worktrees: [],
+    }
+    expect(validateNewSessionWorktree({ ...input, project: undefined, inventoryLoaded: false })).toBe(
+      "/project/feature",
+    )
+    expect(validateNewSessionWorktree({ ...input, inventoryLoaded: false })).toBe("/project/feature")
+    expect(validateNewSessionWorktree({ ...input, inventoryLoaded: true })).toBeUndefined()
+  })
+
+  test("keeps project and custom workspace choices after inventory loads", () => {
+    const project = { worktree: "/project", sandboxes: ["/custom/workspace"] }
+    expect(
+      validateNewSessionWorktree({
+        selected: "/project",
+        project,
+        inventoryLoaded: true,
+        worktrees: [],
+      }),
+    ).toBe("/project")
+    expect(
+      validateNewSessionWorktree({
+        selected: "/custom/workspace/package",
+        project,
+        inventoryLoaded: true,
+        worktrees: [],
+      }),
+    ).toBe("/custom/workspace/package")
+    expect(
+      validateNewSessionWorktree({
+        selected: "/managed/worktree",
+        project,
+        inventoryLoaded: true,
+        worktrees: ["/managed/worktree"],
+      }),
+    ).toBe("/managed/worktree")
   })
 
   test("resolves the branch from the active location", () => {
@@ -49,5 +97,32 @@ describe("new session workspace selection", () => {
     expect(resolveNewSessionGit({ branch: "dev" })).toBe(true)
     expect(resolveNewSessionGit({ projectVcs: "git" })).toBe(true)
     expect(resolveNewSessionGit({})).toBe(false)
+  })
+
+  test("cycles local, new, and the last existing worktree", () => {
+    const existing = "/project/feature"
+    expect(cycleNewSessionWorktree({ current: "main", existing })).toBe("create")
+    expect(cycleNewSessionWorktree({ current: "create", existing })).toBe(existing)
+    expect(cycleNewSessionWorktree({ current: existing, existing })).toBe("main")
+    expect(cycleNewSessionWorktree({ current: "create" })).toBe("main")
+  })
+
+  test("skips a remembered worktree removed from the current project", () => {
+    const remembered = { projectID: "project", directory: "/project/feature" }
+    expect(
+      validateRememberedNewSessionWorktree({
+        projectID: "project",
+        remembered,
+        worktrees: ["/project/feature"],
+      }),
+    ).toBe("/project/feature")
+    expect(validateRememberedNewSessionWorktree({ projectID: "project", remembered, worktrees: [] })).toBeUndefined()
+    expect(
+      validateRememberedNewSessionWorktree({
+        projectID: "other",
+        remembered,
+        worktrees: ["/project/feature"],
+      }),
+    ).toBeUndefined()
   })
 })

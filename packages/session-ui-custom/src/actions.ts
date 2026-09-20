@@ -15,6 +15,13 @@ export type SessionUserQuote = {
   comment: string
 }
 
+/** An attachment delivered to the model as a server path instead of inline bytes. */
+export type SessionUserAttachmentReference = {
+  name: string
+  mime: string
+  path: string
+}
+
 export type SessionUserActions = {
   openAttachment?: (file: PromptFileAttachment) => void
   revert?: (input: { sessionID: string; messageID: string }) => Promise<void> | void

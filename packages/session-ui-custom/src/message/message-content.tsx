@@ -29,7 +29,12 @@ import type {
   SessionMessageInfo,
   SessionMessageUser,
 } from "@opencode/client/promise"
-import type { SessionUserActions, SessionUserComment, SessionUserQuote } from "../actions"
+import type {
+  SessionUserActions,
+  SessionUserAttachmentReference,
+  SessionUserComment,
+  SessionUserQuote,
+} from "../actions"
 import { typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
@@ -212,6 +217,7 @@ export function CurrentUserMessageDisplay(props: {
   model: SessionMessageAssistant["model"]
   actions?: SessionUserActions
   comments?: SessionUserComment[]
+  references?: SessionUserAttachmentReference[]
   quotes?: SessionUserQuote[]
   quoteOpen?: (id: string) => boolean | undefined
   onQuoteOpenChange?: (id: string, open: boolean) => void
@@ -224,6 +230,7 @@ export function CurrentUserMessageDisplay(props: {
   const attachments = createMemo(() =>
     (props.message.files ?? []).filter((file) => !file.mention || file.mime.startsWith("image/")),
   )
+  const references = createMemo(() => props.references ?? [])
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
   const comments = createMemo(() => props.comments ?? [])
@@ -263,8 +270,15 @@ export function CurrentUserMessageDisplay(props: {
     }
   }
   const renderAttachments = () => (
-    <Show when={attachments().length > 0}>
+    <Show when={attachments().length > 0 || references().length > 0}>
       <div data-slot="user-message-attachments">
+        <For each={references()}>
+          {(file) => (
+            <AttachmentCard title={file.name} hover={file.path}>
+              {typeLabel(file.name, file.mime, i18n.t("ui.common.file"))}
+            </AttachmentCard>
+          )}
+        </For>
         <For each={attachments()}>
           {(file) => {
             const url = () => (file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`)

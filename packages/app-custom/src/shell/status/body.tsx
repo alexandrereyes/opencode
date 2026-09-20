@@ -1,45 +1,88 @@
 import { Switch } from "@opencode/ui-custom/switch"
 import { Tabs } from "@opencode/ui-custom/tabs"
-import { createMemo, createResource, For, Index, type JSXElement, Show } from "solid-js"
+import { getDirectory } from "@opencode/util/path"
+import { createEffect, createMemo, createResource, For, Index, onCleanup, Show, type JSXElement } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { useWorkspaceLocation } from "@/workspaces/location"
-import { useData } from "@/runtime/server/current"
+import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
-import { pluginLabels } from "@/providers/catalog/plugin"
+import { usePlatform } from "@/runtime/platform/platform"
+import { pluginLabel } from "@/providers/catalog/plugin"
+import { showToast } from "@/shell/notifications/toast"
+import { configuredLanguageServers } from "@/settings/workspaces/project-lsp"
 
-const pluginEmptyMessage = (value: string, file: string): JSXElement => {
-  const parts = value.split(file)
-  if (parts.length === 1) return value
-  return (
-    <>
-      {parts[0]}
-      <code class="bg-surface-raised-base px-1.5 py-0.5 rounded-sm text-text-base">{file}</code>
-      {parts.slice(1).join(file)}
-    </>
-  )
-}
+type Service = "mcp" | "plugins" | "skills" | "lsp"
 
 export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean }) {
   const data = useData()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const directory = () => sdk().directory
 
-  const toggleMcp = useMcpToggle(() => sdk().directory)
+  const toggleMcp = useMcpToggle(directory)
+  const [mcpLoad, mcpActions] = createResource(
+    () => (props.shown ? directory() : undefined),
+    async (location) => {
+      data.location.mcp.server.invalidate({ directory: location })
+      await data.location.mcp.server.sync({ directory: location })
+    },
+  )
   const mcpServers = createMemo(() =>
-    (data.location.mcp.server.list({ directory: sdk().directory }) ?? []).toSorted((a, b) =>
-      a.name.localeCompare(b.name),
-    ),
+    (data.location.mcp.server.list({ directory: directory() }) ?? []).toSorted((a, b) => a.name.localeCompare(b.name)),
   )
-  const mcpConnected = createMemo(() => mcpServers().filter((server) => server.status.status === "connected").length)
-  const [pluginList] = createResource(
-    () => (props.shown ? sdk().directory : undefined),
-    (directory) => serverSDK.api.plugin.list({ location: { directory } }).then((result) => result.data),
+  const mcpConnected = createMemo(() => mcpServers().filter((item) => item.status.status === "connected").length)
+  const [pluginList, pluginActions] = createResource(
+    () => (props.shown ? directory() : undefined),
+    (location) => serverSDK.api.plugin.list({ location: { directory: location } }).then((result) => result.data),
   )
-  const plugins = createMemo(() => pluginLabels(pluginList.latest ?? []))
-  const pluginCount = createMemo(() => plugins().length)
-  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
+  const plugins = createMemo(() =>
+    (pluginList.state === "errored" ? [] : (pluginList.latest ?? []))
+      .filter((plugin) => plugin.source.type !== "builtin")
+      .map((plugin) => ({
+        name: pluginLabel(plugin),
+        status: plugin.state.status,
+        error: plugin.state.status === "failed" ? plugin.state.error : undefined,
+      }))
+      .toSorted((a, b) => a.name.localeCompare(b.name)),
+  )
+  const [skillList, skillActions] = createResource(
+    () => (props.shown ? directory() : undefined),
+    async (location) => {
+      data.location.skill.invalidate({ directory: location })
+      await data.location.skill.sync({ directory: location })
+      return data.location.skill.list({ directory: location }) ?? []
+    },
+  )
+  const skills = createMemo(() =>
+    (skillList.state === "errored" ? [] : (skillList.latest ?? [])).toSorted((a, b) => a.name.localeCompare(b.name)),
+  )
+  const [configList, configActions] = createResource(
+    () => (props.shown ? directory() : undefined),
+    async (location) => {
+      data.location.config.invalidate({ directory: location })
+      await data.location.config.sync({ directory: location })
+      return data.location.config.list({ directory: location }) ?? []
+    },
+  )
+  const lsps = createMemo(() =>
+    configuredLanguageServers(configList.state === "errored" ? [] : (configList.latest ?? [])),
+  )
+
+  createEffect(() => {
+    const events = serverSDK.event.location(directory())
+    const cleanups = [
+      events.on("plugin.updated", () => void pluginActions.refetch()),
+      events.on("skill.updated", () => void skillActions.refetch()),
+      events.on("config.updated", () => void configActions.refetch()),
+    ]
+    onCleanup(() => cleanups.forEach((cleanup) => cleanup()))
+  })
+
+  const tabLabel = (count: number, key: "mcp" | "plugins" | "skills" | "lsp") =>
+    `${count > 0 ? `${count} ` : ""}${language.t(`session.summary.${key}`)}`
 
   return (
     <div
@@ -56,55 +99,59 @@ export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean })
         defaultValue="mcp"
         variant="underline"
       >
-        <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4 h-10">
-          <Tabs.Trigger value="mcp" data-slot="tab" class="text-12-regular">
-            {mcpConnected() > 0 ? `${mcpConnected()} ` : ""}
-            {language.t("status.popover.tab.mcp")}
+        <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-3 h-10 overflow-x-auto">
+          <Tabs.Trigger value="mcp" data-slot="tab" class="text-12-regular shrink-0">
+            {tabLabel(mcpConnected(), "mcp")}
           </Tabs.Trigger>
-          {/* TODO: Restore LSP status when V2 exposes it. */}
-          <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
-            {pluginCount() > 0 ? `${pluginCount()} ` : ""}
-            {language.t("status.popover.tab.plugins")}
+          <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular shrink-0">
+            {tabLabel(plugins().length, "plugins")}
+          </Tabs.Trigger>
+          <Tabs.Trigger value="skills" data-slot="tab" class="text-12-regular shrink-0">
+            {tabLabel(skills().length, "skills")}
+          </Tabs.Trigger>
+          <Tabs.Trigger value="lsp" data-slot="tab" class="text-12-regular shrink-0">
+            {tabLabel(lsps().servers.length, "lsp")}
           </Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="mcp">
-          <div class="flex flex-col px-2 pb-2">
-            <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
+          <Panel>
+            <ResourceState
+              loading={mcpLoad.loading}
+              ready={mcpLoad.state === "ready" || mcpLoad.state === "refreshing"}
+              error={mcpLoad.error}
+              retry={mcpActions.refetch}
+            >
               <Show
                 when={mcpServers().length > 0}
                 fallback={
-                  <div class="text-14-regular text-text-base text-center my-auto">{language.t("dialog.mcp.empty")}</div>
+                  <Empty title={language.t("session.summary.mcp.empty")} directory={directory()} service="mcp" />
                 }
               >
                 <Index each={mcpServers()}>
-                  {(server) => {
-                    const name = () => server().name
-                    const status = () => server().status.status
+                  {(item) => {
+                    const name = () => item().name
+                    const status = () => item().status.status
+                    const error = () => {
+                      const current = item().status
+                      return current.status === "failed" ? current.error : undefined
+                    }
                     const enabled = () => status() === "connected"
+                    const pending = () => toggleMcp.isPending && toggleMcp.variables === name()
                     return (
                       <button
                         type="button"
                         class="flex items-center gap-2 w-full min-h-8 pl-3 pr-2 py-1 rounded-md hover:bg-surface-raised-base-hover transition-colors text-left"
+                        title={error() ?? name()}
                         onClick={() => {
                           if (toggleMcp.isPending) return
                           toggleMcp.mutate(name())
                         }}
-                        disabled={toggleMcp.isPending && toggleMcp.variables === name()}
+                        disabled={pending()}
                       >
-                        <div
-                          classList={{
-                            "size-1.5 rounded-full shrink-0": true,
-                            "bg-icon-success-base": status() === "connected",
-                            "bg-icon-critical-base": status() === "failed",
-                            "bg-border-weak-base": status() === "disabled",
-                            "bg-icon-warning-base": status() === "needs_auth",
-                          }}
-                        />
+                        <StatusDot status={status()} />
                         <span class="flex flex-col min-w-0 flex-1">
-                          <span class="flex items-center gap-2 min-w-0">
-                            <span class="text-14-regular text-text-base truncate">{name()}</span>
-                          </span>
+                          <span class="text-14-regular text-text-base truncate">{name()}</span>
                           <Show when={status() === "needs_auth"}>
                             <span class="text-11-regular text-text-weaker truncate">
                               {language.t("mcp.auth.clickToAuthenticate")}
@@ -115,7 +162,7 @@ export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean })
                           <Switch
                             appearance="standard"
                             checked={enabled()}
-                            disabled={toggleMcp.isPending && toggleMcp.variables === name()}
+                            disabled={pending()}
                             onChange={() => {
                               if (toggleMcp.isPending) return
                               toggleMcp.mutate(name())
@@ -126,31 +173,255 @@ export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean })
                     )
                   }}
                 </Index>
+                <ConfigAction directory={directory()} service="mcp" />
               </Show>
-            </div>
-          </div>
+            </ResourceState>
+          </Panel>
         </Tabs.Content>
 
         <Tabs.Content value="plugins">
-          <div class="flex flex-col px-2 pb-2">
-            <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
+          <Panel>
+            <ResourceState
+              loading={pluginList.loading}
+              ready={pluginList.state === "ready" || pluginList.state === "refreshing"}
+              error={pluginList.error}
+              retry={pluginActions.refetch}
+            >
               <Show
                 when={plugins().length > 0}
-                fallback={<div class="text-14-regular text-text-base text-center my-auto">{pluginEmpty()}</div>}
+                fallback={
+                  <Empty
+                    title={language.t("session.summary.plugins.empty")}
+                    directory={directory()}
+                    service="plugins"
+                  />
+                }
               >
                 <For each={plugins()}>
                   {(plugin) => (
-                    <div class="flex items-center gap-2 w-full px-2 py-1">
-                      <div class="size-1.5 rounded-full shrink-0 bg-icon-success-base" />
-                      <span class="text-14-regular text-text-base truncate">{plugin}</span>
+                    <div class="flex items-center gap-2 w-full px-2 py-1" title={plugin.error ?? plugin.name}>
+                      <StatusDot status={plugin.status} />
+                      <span class="text-14-regular text-text-base truncate flex-1">{plugin.name}</span>
+                      <Show when={plugin.status === "failed"}>
+                        <span class="text-11-regular text-text-weaker">{language.t("session.summary.failed")}</span>
+                      </Show>
                     </div>
                   )}
                 </For>
+                <ConfigAction directory={directory()} service="plugins" />
               </Show>
-            </div>
-          </div>
+            </ResourceState>
+          </Panel>
+        </Tabs.Content>
+
+        <Tabs.Content value="skills">
+          <Panel>
+            <ResourceState
+              loading={skillList.loading}
+              ready={skillList.state === "ready" || skillList.state === "refreshing"}
+              error={skillList.error}
+              retry={skillActions.refetch}
+            >
+              <Show
+                when={skills().length > 0}
+                fallback={
+                  <Empty title={language.t("session.summary.skills.empty")} directory={directory()} service="skills" />
+                }
+              >
+                <For each={skills()}>
+                  {(skill) => (
+                    <div class="flex items-center gap-2 w-full px-2 py-1">
+                      <StatusDot status="active" />
+                      <span class="text-14-regular text-text-base truncate">{skill.name}</span>
+                    </div>
+                  )}
+                </For>
+                <ConfigAction directory={directory()} service="skills" />
+              </Show>
+            </ResourceState>
+          </Panel>
+        </Tabs.Content>
+
+        <Tabs.Content value="lsp">
+          <Panel>
+            <ResourceState
+              loading={configList.loading}
+              ready={configList.state === "ready" || configList.state === "refreshing"}
+              error={configList.error}
+              retry={configActions.refetch}
+            >
+              <Show
+                when={!lsps().disabled}
+                fallback={
+                  <Empty
+                    title={language.t("project.settings.extensions.lsp.disabled.title")}
+                    description={language.t("project.settings.extensions.lsp.disabled.description")}
+                    directory={directory()}
+                    service="lsp"
+                  />
+                }
+              >
+                <Show
+                  when={lsps().servers.length > 0}
+                  fallback={
+                    <Empty title={language.t("session.summary.lsp.empty")} directory={directory()} service="lsp" />
+                  }
+                >
+                  <h3 class="px-2 pb-1 text-12-regular text-text-weaker">
+                    {language.t("project.settings.extensions.lsp.configured")}
+                  </h3>
+                  <For each={lsps().servers}>
+                    {(lsp) => (
+                      <div class="flex items-center gap-2 w-full px-2 py-1">
+                        <span class="text-14-regular text-text-base truncate flex-1">{lsp.name}</span>
+                        <span class="text-11-regular text-text-weaker">
+                          {language.t(
+                            lsp.disabled
+                              ? "project.settings.extensions.lsp.status.disabled"
+                              : "project.settings.extensions.lsp.status.enabled",
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </For>
+                  <ConfigAction directory={directory()} service="lsp" />
+                </Show>
+              </Show>
+            </ResourceState>
+          </Panel>
         </Tabs.Content>
       </Tabs>
     </div>
+  )
+}
+
+function Panel(props: { children: JSXElement }) {
+  return (
+    <div class="flex flex-col px-2 pb-2">
+      <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">{props.children}</div>
+    </div>
+  )
+}
+
+function ResourceState(props: {
+  loading: boolean
+  ready: boolean
+  error: unknown
+  retry: () => unknown
+  children: JSXElement
+}) {
+  const language = useLanguage()
+  return (
+    <Show
+      when={props.ready || !props.loading}
+      fallback={
+        <div class="text-14-regular text-text-base text-center my-auto" role="status">
+          {language.t("common.loading")}
+        </div>
+      }
+    >
+      <Show
+        when={!props.error}
+        fallback={
+          <div class="flex flex-col items-center gap-2 text-14-regular text-text-base text-center my-auto" role="alert">
+            <span>{language.t("common.requestFailed")}</span>
+            <button
+              type="button"
+              class="px-2 py-1 rounded-md hover:bg-surface-raised-base-hover"
+              onClick={() => props.retry()}
+            >
+              {language.t("session.summary.retry")}
+            </button>
+          </div>
+        }
+      >
+        {props.children}
+      </Show>
+    </Show>
+  )
+}
+
+function StatusDot(props: { status: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      classList={{
+        "size-1.5 rounded-full shrink-0": true,
+        "bg-icon-success-base": props.status === "connected" || props.status === "active",
+        "bg-icon-critical-base": props.status === "failed",
+        "bg-icon-warning-base": props.status === "needs_auth" || props.status === "pending",
+        "bg-border-weak-base": props.status === "disabled",
+      }}
+    />
+  )
+}
+
+function Empty(props: { title: string; description?: string; directory: string; service: Service }) {
+  return (
+    <div class="flex flex-col gap-2 text-14-regular text-text-base text-center my-auto">
+      <span>{props.title}</span>
+      <Show when={props.description}>
+        <span class="text-12-regular text-text-weaker">{props.description}</span>
+      </Show>
+      <ConfigAction directory={props.directory} service={props.service} />
+    </div>
+  )
+}
+
+function ConfigAction(props: { directory: string; service: Service }) {
+  const language = useLanguage()
+  const platform = usePlatform()
+  const server = useServer()
+  const sdk = useServerSDK()
+  const [state, setState] = createStore({ pending: false, copied: false })
+  const reveal = () => server.isLocal && !!platform.revealPath
+  const label = () => language.t(reveal() ? "session.summary.configure" : "session.summary.copyConfigPath")
+
+  createEffect(() => {
+    if (!state.copied) return
+    const timeout = setTimeout(() => setState("copied", false), 2000)
+    onCleanup(() => clearTimeout(timeout))
+  })
+
+  const activate = async () => {
+    if (state.pending) return
+    setState({ pending: true, copied: false })
+    await sdk.api.config
+      .get({ location: { directory: props.directory } })
+      .then(async (entries) => {
+        const documents = entries
+          .filter((entry) => entry.type === "document")
+          .filter((entry) => entry.path !== undefined && /\.jsonc?$/.test(entry.path))
+        const path =
+          documents.findLast((entry) => entry.info[props.service] !== undefined)?.path ?? documents.at(-1)?.path
+        if (reveal()) {
+          if (path && (await platform.revealPath!(path))) return
+          await platform.openPath?.(path ? getDirectory(path) : props.directory)
+          return
+        }
+        if (!path) throw new Error(language.t("session.summary.configFileMissing"))
+        await (platform.writeClipboardText?.(path) ?? navigator.clipboard.writeText(path))
+        setState("copied", true)
+      })
+      .catch((error: unknown) =>
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : String(error),
+        }),
+      )
+      .finally(() => setState("pending", false))
+  }
+
+  return (
+    <button
+      type="button"
+      class="w-full mt-2 px-2 py-1 rounded-md text-12-regular text-text-weaker hover:bg-surface-raised-base-hover disabled:opacity-50"
+      disabled={state.pending}
+      title={state.copied ? language.t("common.copied") : label()}
+      onClick={() => void activate()}
+    >
+      {state.copied ? language.t("common.copied") : label()}
+    </button>
   )
 }

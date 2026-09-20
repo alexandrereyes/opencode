@@ -1,7 +1,19 @@
 import { Icon } from "@opencode/ui-custom/icon"
 import { Switch } from "@opencode/ui-custom/switch"
 import { Tabs } from "@opencode/ui-custom/tabs"
-import { type Component, For, Show, createEffect, createMemo, createResource, createSignal, type JSX } from "solid-js"
+import { Button } from "@opencode/ui-custom/button"
+import { useQuery } from "@tanstack/solid-query"
+import {
+  type Component,
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  type JSX,
+} from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { useWorkspaceLocation } from "@/workspaces/location"
@@ -9,6 +21,7 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
 import { pluginLabels } from "@/providers/catalog/plugin"
 import { ExternalLink } from "@/runtime/platform/external-link"
+import { configuredLanguageServers } from "./project-lsp"
 
 type SkillItem = {
   name: string
@@ -22,14 +35,20 @@ const ExtensionCard: Component<{ children: JSX.Element }> = (props) => (
 )
 
 const ExtensionRow: Component<{
-  icon: "mcp" | "cube" | "post-skill"
+  icon: "mcp" | "cube" | "post-skill" | "code"
   name: string
+  description?: JSX.Element
   children?: JSX.Element
 }> = (props) => (
   <div class="project-settings-extension-row">
     <div class="project-settings-extension-row-main">
       <Icon name={props.icon} class="project-settings-extension-row-icon" />
-      <span class="project-settings-extension-row-name">{props.name}</span>
+      <div class="flex min-w-0 flex-col gap-1">
+        <span class="project-settings-extension-row-name">{props.name}</span>
+        <Show when={props.description}>
+          <span class="text-11-regular text-v2-text-text-muted">{props.description}</span>
+        </Show>
+      </div>
     </div>
     {props.children}
   </div>
@@ -62,7 +81,100 @@ const SharedSection: Component<{
   )
 }
 
-export const ProjectSettingsExtensions: Component = () => {
+const ProjectLanguageServers: Component = () => {
+  const language = useLanguage()
+  const server = useServerSDK()
+  const location = useWorkspaceLocation()
+  const config = useQuery(() => ({
+    queryKey: [server.scope, "settings-project-language-servers", location().directory],
+    enabled: server.connection.status() === "connected",
+    retry: false,
+    queryFn: () => server.api.config.get({ location: { directory: location().directory } }),
+  }))
+  const configured = createMemo(() =>
+    configuredLanguageServers(config.isPending || config.isError ? [] : (config.data ?? [])),
+  )
+  const empty = () => !config.isPending && !config.isError && configured().servers.length === 0
+  onCleanup(
+    server.event.on("config.updated", (event) => {
+      if (event.location && event.location.directory !== location().directory) return
+      void config.refetch()
+    }),
+  )
+
+  return (
+    <div class="project-settings-extension-section">
+      <div class="project-settings-extension-section-header">
+        <div class="flex flex-col gap-1">
+          <span>
+            {language.t(
+              empty()
+                ? configured().disabled
+                  ? "project.settings.extensions.lsp.disabled.title"
+                  : "project.settings.extensions.lsp.empty.title"
+                : "project.settings.extensions.lsp.configured",
+            )}
+          </span>
+          <Show when={empty()}>
+            <span class="text-11-regular text-v2-text-text-muted">
+              {language.t(
+                configured().disabled
+                  ? "project.settings.extensions.lsp.disabled.description"
+                  : "project.settings.extensions.lsp.empty.description",
+              )}
+            </span>
+          </Show>
+        </div>
+        <span>{language.t("project.settings.extensions.lsp.description")}</span>
+      </div>
+      <Show
+        when={!config.isPending}
+        fallback={<p class="text-11-regular text-v2-text-text-muted">{language.t("common.loading")}</p>}
+      >
+        <Show
+          when={!config.isError}
+          fallback={
+            <div class="flex flex-col items-start gap-1" role="status">
+              <span class="text-11-regular text-v2-text-text-muted">
+                {language.t("project.settings.extensions.lsp.loadFailed")}
+              </span>
+              <Button variant="ghost-muted" onClick={() => void config.refetch()}>
+                {language.t("project.settings.extensions.lsp.retry")}
+              </Button>
+            </div>
+          }
+        >
+          <Show when={configured().servers.length > 0}>
+            <ExtensionCard>
+              <For each={configured().servers}>
+                {(item) => (
+                  <ExtensionRow
+                    icon="code"
+                    name={item.name}
+                    description={item.extensions.length ? <bdi dir="ltr">{item.extensions.join(", ")}</bdi> : undefined}
+                  >
+                    <span class="project-settings-extension-row-status">
+                      {language.t(
+                        item.disabled
+                          ? "project.settings.extensions.lsp.status.disabled"
+                          : "project.settings.extensions.lsp.status.enabled",
+                      )}
+                    </span>
+                  </ExtensionRow>
+                )}
+              </For>
+            </ExtensionCard>
+          </Show>
+        </Show>
+      </Show>
+    </div>
+  )
+}
+
+export const ProjectSettingsExtensions: Component<{
+  subtab?: "mcps" | "plugins" | "skills" | "lsps"
+  onSubtab?: (value: "mcps" | "plugins" | "skills" | "lsps") => void
+}> = (props) => {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const directorySDK = useWorkspaceLocation()
@@ -151,12 +263,21 @@ export const ProjectSettingsExtensions: Component = () => {
         <span>{language.t("project.settings.extensions.description")}</span>
       </div>
 
-      <Tabs variant="pill" defaultValue="mcps" class="project-settings-extension-tabs">
+      <Tabs
+        variant="pill"
+        value={props.subtab}
+        defaultValue="mcps"
+        onChange={(value) => {
+          if (value !== "mcps" && value !== "plugins" && value !== "skills" && value !== "lsps") return
+          props.onSubtab?.(value)
+        }}
+        class="project-settings-extension-tabs settings-subtabs"
+      >
         <Tabs.List>
           <Tabs.Trigger value="mcps">{language.t("settings.extensions.tab.mcps")}</Tabs.Trigger>
           <Tabs.Trigger value="plugins">{language.t("status.popover.tab.plugins")}</Tabs.Trigger>
           <Tabs.Trigger value="skills">{language.t("settings.extensions.tab.skills")}</Tabs.Trigger>
-          {/* TODO: Restore LSP status when V2 exposes it. */}
+          <Tabs.Trigger value="lsps">{language.t("project.settings.extensions.tab.lsps")}</Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="mcps">
@@ -198,6 +319,9 @@ export const ProjectSettingsExtensions: Component = () => {
             </Show>
             <SharedSection count={serverSkills().length}>{skillRows(serverSkills())}</SharedSection>
           </div>
+        </Tabs.Content>
+        <Tabs.Content value="lsps">
+          <ProjectLanguageServers />
         </Tabs.Content>
       </Tabs>
     </div>

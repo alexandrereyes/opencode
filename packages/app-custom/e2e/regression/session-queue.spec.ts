@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
-import type { OpenCodeEvent, SessionMessageInfo } from "@opencode/client/promise"
+import type { JsonValue, OpenCodeEvent, SessionInboxInfo, SessionMessageInfo } from "@opencode/client/promise"
 import { base64Encode } from "@opencode/util/encode"
+import { Schema } from "effect"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible } from "../utils/waits"
 
@@ -9,22 +10,16 @@ const projectID = "proj_session_queue_regression"
 const sessionID = "ses_session_queue_regression"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
-type InboxRow = {
-  id: string
-  sessionID: string
-  timeCreated: number
-  type: "user"
-  payload: { text: string; metadata?: Record<string, unknown> }
-  delivery: "steer" | "queue"
-}
+type InboxRow = Extract<SessionInboxInfo, { type: "user" }>
+const InboxMetadata = Schema.Record(Schema.String, Schema.Json)
 
-function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
-  const rows: InboxRow[] = seed.map((text, index) => ({
+function createQueueMock(seed: (string | InboxRow["payload"])[], messages: SessionMessageInfo[] = []) {
+  const rows: InboxRow[] = seed.map((value, index) => ({
     id: `inb_seed_${index + 1}`,
     sessionID,
-    timeCreated: 1700000000000 + index,
+    time: { created: 1700000000000 + index },
     type: "user",
-    payload: { text },
+    payload: typeof value === "string" ? { text: value } : value,
     delivery: "queue",
   }))
   const events: OpenCodeEvent[] = []
@@ -56,14 +51,15 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
     onPrompt: (input: { sessionID: string; body: Record<string, unknown> }) => {
       prompts.push(input.body)
       log.push(`prompt:${String(input.body.delivery ?? "steer")}`)
+      const metadata = Schema.decodeUnknownOption(InboxMetadata)(input.body.metadata)
       const row: InboxRow = {
         id: typeof input.body.id === "string" ? input.body.id : `inb_mock_${sequence}`,
         sessionID: input.sessionID,
-        timeCreated: Date.now(),
+        time: { created: Date.now() },
         type: "user",
         payload: {
           text: typeof input.body.text === "string" ? input.body.text : "",
-          ...(input.body.metadata === undefined ? {} : { metadata: input.body.metadata as Record<string, unknown> }),
+          ...(metadata._tag === "Some" ? { metadata: metadata.value as Record<string, JsonValue> } : {}),
         },
         delivery: input.body.delivery === "queue" ? "queue" : "steer",
       }
@@ -85,7 +81,7 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
         emit("session.inbox.cancelled", { sessionID: input.sessionID, inboxID: input.inboxID })
         return
       }
-      row.delivery = "steer"
+      rows[index] = { ...row, delivery: "steer" }
       emit("session.inbox.delivery.changed", {
         sessionID: input.sessionID,
         inboxID: input.inboxID,
@@ -96,12 +92,6 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
 }
 
 async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>, followUpBehavior?: "queue" | "steer") {
-  if (followUpBehavior) {
-    await page.addInitScript(
-      (behavior) => localStorage.setItem("settings.v3", JSON.stringify({ general: { followUpBehavior: behavior } })),
-      followUpBehavior,
-    )
-  }
   await mockOpenCodeServer(page, {
     directory,
     project: {
@@ -142,6 +132,44 @@ async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>,
     onInboxChange: mock.onInboxChange,
     events: mock.events,
   })
+  await page.route("**/api/session/*/inbox/*", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback()
+    const payload = route.request().postDataJSON()
+    if (payload?.delivery !== "steer") return route.fallback()
+    mock.onInboxChange({
+      sessionID,
+      inboxID: new URL(route.request().url()).pathname.split("/").at(-1) ?? "",
+      action: "steer",
+    })
+    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+  })
+  if (followUpBehavior)
+    await page.route("**/api/rpc/custom.preferences/get*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          output: {
+            version: 1,
+            revision: 0,
+            imported: true,
+            data: {
+              projects: {},
+              sidebarOrder: [],
+              pinnedSessions: [],
+              models: { user: [], variant: {} },
+              settings: {
+                followUpBehavior,
+                autoApprove: false,
+                autoSave: true,
+                tabLayout: "vertical",
+                notifications: { agent: true, permissions: true, errors: false },
+              },
+            },
+          },
+        }),
+      }),
+    )
   await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
   const composer = page.locator('[data-component="composer"]')
   await expectAppVisible(composer)
@@ -199,7 +227,21 @@ test("dragging reorders queued prompts", async ({ page }) => {
 })
 
 test("editing restores the existing draft and replaces only the original queue position", async ({ page }) => {
-  const mock = createQueueMock(["first queued prompt", "tighten the error copy", "third queued prompt"])
+  const mock = createQueueMock([
+    "first queued prompt",
+    {
+      text: "tighten the error copy",
+      files: [
+        {
+          data: "cGRm",
+          mime: "application/pdf",
+          name: "document.pdf",
+          source: { type: "inline" },
+        },
+      ],
+    },
+    "third queued prompt",
+  ])
   const view = await openSession(page, mock)
   const original = view.rows.getByText("tighten the error copy", { exact: true })
   await expect(original).toBeVisible()
@@ -214,6 +256,11 @@ test("editing restores the existing draft and replaces only the original queue p
   await original.click()
   await expect(view.input).toHaveText("tighten the error copy")
   await expect(view.input).toBeFocused()
+  const attachment = view.composer.locator('div[data-attachment-id="inb_seed_2:file:0"]')
+  await expect(attachment).toContainText("document.pdf")
+  await attachment.hover()
+  await attachment.getByRole("button", { name: "Remove attachment" }).click()
+  await expect(attachment).toHaveCount(0)
   await view.input.fill("tighten the error copy and add a retry hint")
   await expect(view.input).toHaveText("tighten the error copy and add a retry hint")
   await view.input.press("Enter")
@@ -229,6 +276,7 @@ test("editing restores the existing draft and replaces only the original queue p
     "tighten the error copy and add a retry hint",
     "third queued prompt",
   ])
+  expect(mock.prompts[0]?.files).toEqual([])
   expect(mock.prompts.every((prompt) => prompt.delivery === "queue" && prompt.resume === false)).toBe(true)
   expect(mock.changes.map((change) => change.action)).toEqual(["cancel", "cancel", "cancel"])
   expect(mock.log[0]).toBe("prompt:queue")
@@ -284,7 +332,13 @@ for (const delivery of ["steer", "queue"] as const) {
     await expect(thinking).toHaveCount(0)
 
     // The next assistant step still belongs to U1: U2 has been admitted, not delivered.
-    mock.emit("session.step.started", { sessionID, assistantMessageID: assistantID, agent: "build", model })
+    mock.emit("session.step.started", {
+      sessionID,
+      assistantMessageID: assistantID,
+      agent: "build",
+      model,
+      started: Date.now(),
+    })
     for (const tool of [
       { id: "tool_queue_read", name: "read", input: { path: "src/queue.ts" } },
       { id: "tool_queue_grep", name: "grep", input: { pattern: "retry", path: "src" } },
@@ -341,7 +395,7 @@ for (const delivery of ["steer", "queue"] as const) {
     )
 
     const later = { sessionID, assistantMessageID: "msg_queue_follow_up_assistant" }
-    mock.emit("session.step.started", { ...later, agent: "build", model })
+    mock.emit("session.step.started", { ...later, agent: "build", model, started: Date.now() })
     mock.emit("session.text.started", { ...later, ordinal: 0 })
     mock.emit("session.text.ended", { ...later, ordinal: 0, text: "A3: Now checking the retry path for U2." })
     const response = transcript

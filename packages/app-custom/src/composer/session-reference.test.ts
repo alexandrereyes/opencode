@@ -56,7 +56,7 @@ describe("session references", () => {
     const request = buildPromptRequest({
       prompt: [first, { type: "text", content: " and ", start: 5, end: 10 }, second],
       context: [],
-      images: [],
+      attachments: [],
       text: "@Same and @Same",
       sessionDirectory: "/work/current",
     })

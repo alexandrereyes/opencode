@@ -10,6 +10,7 @@ export interface DialogProps extends ParentProps {
   containerClass?: ComponentProps<"div">["class"]
   classList?: ComponentProps<"div">["classList"]
   fit?: boolean
+  onCloseAutoFocus?: ComponentProps<typeof Content>["onCloseAutoFocus"]
 }
 
 export interface DialogHeaderProps extends ParentProps {
@@ -82,7 +83,16 @@ export function DialogHeader(props: DialogHeaderProps) {
 }
 
 export function Dialog(props: DialogProps) {
-  const [local] = splitProps(props, ["size", "variant", "class", "containerClass", "classList", "fit", "children"])
+  const [local] = splitProps(props, [
+    "size",
+    "variant",
+    "class",
+    "containerClass",
+    "classList",
+    "fit",
+    "onCloseAutoFocus",
+    "children",
+  ])
 
   return (
     <div
@@ -106,6 +116,7 @@ export function Dialog(props: DialogProps) {
               autofocusEl.focus({ preventScroll: true })
             }
           }}
+          onCloseAutoFocus={local.onCloseAutoFocus}
         >
           {local.children}
         </Content>

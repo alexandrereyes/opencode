@@ -16,30 +16,77 @@ import {
 import { playSoundById, SOUND_OPTIONS } from "@/shell/notifications/sound"
 import { createSoundPreviewController, type ShellOption } from "./behavior"
 import { ServerConnection } from "@/runtime/server/registry"
-import { useServerCtx } from "@/runtime/server/runtime"
+import { useGlobal, useServerCtx } from "@/runtime/server/runtime"
+import { useLanguage } from "@/runtime/i18n/language"
+import { showToast } from "@/shell/notifications/toast"
 
 export { createShellOptions, createSoundPreviewController } from "./behavior"
 export type { ShellOption, ShellSelectOption } from "./behavior"
 
 export function createShellSettingsController(server: Accessor<ServerConnection.Any | undefined>) {
-  const serverCtx = useServerCtx(server)
-  const [shells] = createResource(
-    async () => {
-      // TODO: Dax is considering the V2 shell discovery and config update APIs.
-      // return (await sdk.api.pty.shells()).data
-      return [] as ShellOption[]
+  const language = useLanguage()
+  const global = useGlobal()
+  const selected = () => server() ?? global.settings.server.selected()
+  const serverCtx = useServerCtx(selected)
+  const source = () => {
+    const connection = selected()
+    if (connection) return ServerConnection.key(connection)
+  }
+  const [state, actions] = createResource(
+    source,
+    async (key) => {
+      const context = serverCtx()
+      const connection = selected()
+      if (!context || !connection || ServerConnection.key(connection) !== key)
+        return { key, shells: [] as ShellOption[], shell: undefined }
+      const [entries, shells] = await Promise.all([
+        context.sdk.api.config.get().catch(() => []),
+        context.sdk.api.config.shells().catch(() => []),
+      ])
+      const boundary = entries.findIndex((entry) => entry.type === "directory")
+      const global = boundary === -1 ? entries : entries.slice(0, boundary)
+      return {
+        key,
+        shells,
+        shell: global
+          .flatMap((entry) => (entry.type === "document" && entry.info.shell !== undefined ? [entry.info.shell] : []))
+          .at(-1),
+      }
     },
-    { initialValue: [] as ShellOption[] },
+    {
+      initialValue: {
+        key: undefined as ServerConnection.Key | undefined,
+        shells: [] as ShellOption[],
+        shell: undefined as string | undefined,
+      },
+    },
   )
-  const current = createMemo(() => serverCtx()?.sync.data.config.shell ?? "")
+  const active = createMemo(() => {
+    const key = source()
+    if (!key || state.latest.key !== key) return { key, shells: [] as ShellOption[], shell: undefined }
+    return state.latest
+  })
+  const current = createMemo(() => active().shell ?? "")
 
   return {
-    shells: () => shells.latest,
+    shells: () => active().shells,
     current,
     select: (value: string) => {
       if (value === current()) return
-      // TODO: Dax is considering the V2 shell discovery and config update APIs.
-      // void serverSync.updateConfig({ shell: value })
+      const context = serverCtx()
+      const key = source()
+      if (!context || !key) return
+      const previous = active()
+      actions.mutate({ ...previous, shell: value || undefined })
+      void context.sdk.api.config.update({ shell: value || null }).catch((error: unknown) => {
+        if (source() !== key) return
+        actions.mutate(previous)
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : language.t("common.requestFailed"),
+        })
+      })
     },
   }
 }

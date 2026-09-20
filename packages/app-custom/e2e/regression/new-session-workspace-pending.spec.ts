@@ -24,6 +24,77 @@ test.use({
   permissions: ["clipboard-read", "clipboard-write"],
 })
 
+test("prepares draft MCPs only in the created worktree and reuses it after session creation fails", async ({
+  page,
+}) => {
+  const mock = await openDraft(page, { failSessionCreate: true, mcp: true })
+  await chooseDraftMcp(page, mock.mcpRequests)
+
+  const pending = await submitPending(page, mock)
+  mock.worktree.resolve({ status: 200, json: { directory: workspace } })
+  await expect.poll(() => mock.mcpRequests).toEqual([{ action: "connect", directory: workspace }])
+  expect(mock.creates).toEqual([])
+  expect(mock.prompts).toEqual([])
+  expect(mock.mcpRequests.some((request) => request.directory === directory)).toBe(false)
+
+  mock.mcpConnect.resolve()
+  await expect(page).toHaveURL(draftPath)
+  await expect(page.locator('[data-component="composer-editor"]')).toHaveText(text)
+  expect(mock.creates).toHaveLength(1)
+  expect(mock.prompts).toEqual([])
+  expect(mock.worktreeRequests).toHaveLength(1)
+
+  await page.locator('[data-action="composer-submit"]').click()
+  await expect.poll(() => mock.creates).toHaveLength(2)
+  await expect.poll(() => mock.prompts).toHaveLength(1)
+  expect(mock.creates[1]).toEqual(expect.objectContaining({ location: { directory: workspace } }))
+  expect(mock.prompts[0]).toEqual({
+    sessionID: expect.any(String),
+    body: expect.objectContaining({ text }),
+  })
+  expect(mock.worktreeRequests).toHaveLength(1)
+  expect(mock.mcpRequests).toEqual([{ action: "connect", directory: workspace }])
+  await expect(page).toHaveURL(
+    (url) => url.pathname.startsWith(sessionPath) && url.pathname !== new URL(pending.url).pathname,
+  )
+})
+
+test("preserves draft MCP choices and the created worktree when MCP preparation fails", async ({ page }) => {
+  const mock = await openDraft(page, { mcp: true, failMcpConnect: true })
+  await chooseDraftMcp(page, mock.mcpRequests)
+
+  await submitPending(page, mock)
+  mock.worktree.resolve({ status: 200, json: { directory: workspace } })
+  await expect.poll(() => mock.mcpRequests).toEqual([{ action: "connect", directory: workspace }])
+  expect(mock.creates).toEqual([])
+  expect(mock.prompts).toEqual([])
+  mock.mcpConnect.resolve()
+
+  await expect(page).toHaveURL(draftPath)
+  await expect(page.locator('[data-component="composer-editor"]')).toHaveText(text)
+  await expect(page.getByRole("button", { name: "pending-workspace", exact: true })).toBeVisible()
+  expect(mock.creates).toEqual([])
+  expect(mock.prompts).toEqual([])
+  expect(mock.worktreeRequests).toEqual([{ projectID, from: directory, branch: "main" }])
+
+  await page.getByRole("button", { name: "Configured MCP servers", exact: true }).click()
+  const picker = page.getByRole("dialog", { name: "Configured MCP servers", exact: true })
+  await expect(picker.getByText("Failed", { exact: true })).toBeVisible()
+  await expect(picker.getByRole("switch")).toBeChecked()
+  await page.keyboard.press("Escape")
+
+  mock.retryMcp()
+  await page.locator('[data-action="composer-submit"]').click()
+  await expect.poll(() => mock.creates).toHaveLength(1)
+  await expect.poll(() => mock.prompts).toHaveLength(1)
+  expect(mock.creates[0]).toEqual(expect.objectContaining({ location: { directory: workspace } }))
+  expect(mock.worktreeRequests).toEqual([{ projectID, from: directory, branch: "main" }])
+  expect(mock.mcpRequests).toEqual([
+    { action: "connect", directory: workspace },
+    { action: "connect", directory: workspace },
+  ])
+})
+
 for (const viewport of [
   { name: "desktop", width: 1280, height: 900 },
   { name: "mobile", width: 390, height: 844 },
@@ -88,7 +159,7 @@ for (const viewport of [
     await expectComposerText(editor, followUp)
     await expect(editor).toBeInViewport()
 
-    expect(mock.worktreeRequests).toEqual([expect.objectContaining({ from: directory })])
+    expect(mock.worktreeRequests).toEqual([{ projectID, from: directory, branch: "main" }])
     await expect(pending.message).toBeInViewport()
     await expect(pending.shimmer).toBeInViewport()
     await expect(pending.title).toBeInViewport()
@@ -463,6 +534,8 @@ async function openDraft(
     command?: boolean
     events?: () => OpenCodeEvent[]
     reviewClosed?: boolean
+    mcp?: boolean
+    failMcpConnect?: boolean
   },
 ) {
   const worktree = Promise.withResolvers<{ status: number; json: { directory?: string; message?: string } }>()
@@ -471,6 +544,15 @@ async function openDraft(
   const creates: Record<string, unknown>[] = []
   const prompts: { sessionID: string; body: Record<string, unknown> }[] = []
   const events: OpenCodeEvent[] = []
+  const mcpConnect = Promise.withResolvers<void>()
+  const mcpRequests: { action: "connect" | "disconnect"; directory: string }[] = []
+  const mcp = {
+    fail: options?.failMcpConnect ?? false,
+    status: new Map<string, "connected" | "disabled" | "failed">([
+      [directory, "connected"],
+      [workspace, "disabled"],
+    ]),
+  }
   const project = {
     id: projectID,
     worktree: directory,
@@ -503,9 +585,10 @@ async function openDraft(
     if (request.method() !== "POST") return
     const path = new URL(request.url()).pathname
     if (path === "/api/worktree") {
-      expect(new URL(request.url()).searchParams.get("location[directory]")).toBe(directory)
+      const body = request.postDataJSON()
+      expect(body).toEqual({ projectID, from: directory, branch: "main" })
       calls.push("worktree")
-      worktreeRequests.push(request.postDataJSON())
+      worktreeRequests.push(body)
     }
     if (path === "/api/session") calls.push("session")
     if (/^\/api\/session\/[^/]+\/prompt$/.test(path)) calls.push("prompt")
@@ -535,6 +618,62 @@ async function openDraft(
     sessions.push(session)
     return route.fulfill({ json: { data: session }, headers })
   })
+  if (options?.mcp) {
+    await page.route("**/api/config?*", (route) =>
+      route.fulfill({
+        json: [
+          {
+            type: "document",
+            path: `${directory}/opencode.json`,
+            info: {
+              mcp: { servers: { "draft-server": { type: "local", command: ["draft-server"], disabled: true } } },
+            },
+          },
+        ],
+        headers,
+      }),
+    )
+    await page.route(
+      (url) =>
+        url.pathname === "/api/mcp" ||
+        url.pathname.startsWith("/api/mcp/") ||
+        url.pathname.startsWith("/api/experimental/mcp/"),
+      async (route) => {
+        if (route.request().method() === "OPTIONS") return route.fallback()
+        const url = new URL(route.request().url())
+        const target = url.searchParams.get("location[directory]") ?? directory
+        if (url.pathname === "/api/experimental/mcp/draft-server/connect") {
+          mcpRequests.push({ action: "connect", directory: target })
+          await mcpConnect.promise
+          mcp.status.set(target, mcp.fail ? "failed" : "connected")
+          return route.fulfill({ status: 204, headers })
+        }
+        if (url.pathname === "/api/experimental/mcp/draft-server/disconnect") {
+          mcpRequests.push({ action: "disconnect", directory: target })
+          mcp.status.set(target, "disabled")
+          return route.fulfill({ status: 204, headers })
+        }
+        return route.fulfill({
+          json: {
+            location: { directory: target },
+            data:
+              url.pathname === "/api/mcp/resource"
+                ? { resources: [], templates: [] }
+                : [
+                    {
+                      name: "draft-server",
+                      status:
+                        mcp.status.get(target) === "failed"
+                          ? { status: "failed", error: "MCP connection failed in the fixture" }
+                          : { status: mcp.status.get(target) ?? "disabled" },
+                    },
+                  ],
+          },
+          headers,
+        })
+      },
+    )
+  }
   await page.route("**/api/location?**", (route) => {
     if (route.request().method() !== "GET") return route.fallback()
     return route.fulfill({
@@ -606,7 +745,43 @@ async function openDraft(
   await page.getByRole("menuitem", { name: "New worktree", exact: true }).click()
   await expect(page.getByRole("button", { name: "New worktree", exact: true })).toBeVisible()
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
-  return { worktree, worktreeRequests, calls, creates, prompts, events }
+  return {
+    worktree,
+    worktreeRequests,
+    calls,
+    creates,
+    prompts,
+    events,
+    mcpConnect,
+    mcpRequests,
+    retryMcp() {
+      mcp.fail = false
+      mcp.status.set(workspace, "disabled")
+    },
+  }
+}
+
+async function chooseDraftMcp(page: Page, requests: { action: "connect" | "disconnect"; directory: string }[]) {
+  await page.getByRole("button", { name: "Configured MCP servers", exact: true }).click()
+  const picker = page.getByRole("dialog", { name: "Configured MCP servers", exact: true })
+  const toggle = picker.getByRole("switch")
+  await expect(picker.getByText("draft-server", { exact: true })).toBeVisible()
+  // The source server is connected, but preview follows its fetched config default (disabled).
+  await expect(toggle).not.toBeChecked()
+  await picker.locator('[data-slot="switch-control"]').click()
+  await expect(toggle).toBeChecked()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const value = localStorage.getItem("opencode.window.browser.dat:tabs")
+        if (!value) return
+        const tabs: { draftID?: string; mcp?: { states?: Record<string, boolean> } }[] = JSON.parse(value)
+        return tabs.find((tab) => tab.draftID === "draft_workspace_pending")?.mcp?.states?.["draft-server"]
+      }),
+    )
+    .toBe(true)
+  expect(requests).toEqual([])
+  await page.keyboard.press("Escape")
 }
 
 async function submitPending(page: Page, mock: Awaited<ReturnType<typeof openDraft>>, prompt = text) {

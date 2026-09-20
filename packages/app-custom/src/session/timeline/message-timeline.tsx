@@ -12,6 +12,7 @@ import { InlineInput } from "@opencode/ui-custom/inline-input"
 import { Keybind } from "@opencode/ui-custom/keybind"
 import { Menu } from "@opencode/ui-custom/menu"
 import { TextShimmer } from "@opencode/ui-custom/text-shimmer"
+import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import type { Project } from "@/runtime/server/types"
 import { getFilename } from "@opencode/util/path"
@@ -413,6 +414,7 @@ function MessageTimelineView(
   const data = server.ctx.data
   const settings = useSettings()
   const sdk = useWorkspaceLocation()
+  const command = useCommand()
   const sessionID = props.data.sessionID
   const sessionStatus = props.data.status
   const titleLabel = props.data.titleLabel
@@ -453,6 +455,20 @@ function MessageTimelineView(
     setSummaryOpen(open)
     props.onSummaryOpenChange(open)
   }
+  command.register(() =>
+    props.active === false || props.hideHeader || !sessionID() || !!parentID() || !project()
+      ? []
+      : [
+          {
+            id: "session.summary.toggle",
+            title: language.t("command.session.summary.toggle"),
+            category: language.t("command.category.view"),
+            keybind: "mod+shift+y",
+            onSelect: () => setSummary(!summaryOpen()),
+          },
+        ],
+  )
+  const summaryKeybind = () => command.keybindParts("session.summary.toggle")
   const sessionDiffs = createMemo(props.diffs)
   createEffect(
     on(sessionID, () => {
@@ -502,6 +518,7 @@ function MessageTimelineView(
         return (
           (presentation?.displayText ?? message.text).length <= 1024 &&
           !presentation?.comments?.length &&
+          !presentation?.attachments.length &&
           !presentation?.quotes.length &&
           !parseCommentNote(message.text)
         )
@@ -845,15 +862,27 @@ function MessageTimelineView(
                       <Show when={!parentID() && project()}>
                         {(project) => (
                           <Popover open={summaryOpen()} placement="bottom-end" gutter={6} onOpenChange={setSummary}>
-                            <Popover.Trigger
-                              as={IconButton}
-                              icon={<Icon name="window-analytics" />}
-                              variant="ghost-muted"
-                              size="large"
-                              state={summaryOpen() ? "pressed" : undefined}
-                              aria-label={language.t("session.summary.title")}
-                              aria-expanded={summaryOpen()}
-                            />
+                            <Tooltip
+                              placement="bottom"
+                              value={
+                                <>
+                                  {language.t("session.summary.tooltip")}
+                                  <Show when={summaryKeybind().length > 0}>
+                                    <Keybind keys={summaryKeybind()} variant="neutral" />
+                                  </Show>
+                                </>
+                              }
+                            >
+                              <Popover.Trigger
+                                as={IconButton}
+                                icon={<Icon name="window-analytics" />}
+                                variant="ghost-muted"
+                                size="large"
+                                state={summaryOpen() ? "pressed" : undefined}
+                                aria-label={language.t("session.summary.title")}
+                                aria-expanded={summaryOpen()}
+                              />
+                            </Tooltip>
                             <Popover.Portal>
                               <Popover.Content class="z-50 border-0 bg-transparent p-0 outline-none">
                                 <SessionSummaryPanel

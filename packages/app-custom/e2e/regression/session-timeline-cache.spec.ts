@@ -3,11 +3,68 @@ import type { OpenCodeEvent, SessionMessageInfo } from "@opencode/client/promise
 import { timelinePresets } from "@opencode/session-ui-custom/timeline/detail"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { fixture } from "../performance/timeline/session-timeline-stress.fixture"
-import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
+import {
+  installStressSessionTabs,
+  mockStressTimeline,
+  stressSessionHref,
+} from "../performance/timeline/timeline-test-helpers"
 import { waitForStableTimeline } from "../performance/timeline/session-tab-switch-probe"
 import { pressPlatformShortcut } from "../utils/command-palette"
 
 test.use({ viewport: { width: 1440, height: 900 }, serviceWorkers: "block" })
+
+test("toggles the selected cached timeline summary from the shortcut", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("settings.v3", JSON.stringify({ appearance: { tabLayout: "vertical" } }))
+  })
+  await mockStressTimeline(page)
+  await installStressSessionTabs(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await expect(page.getByRole("heading", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
+  await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
+
+  const sidebar = page.locator('[data-slot="vertical-tabs-sidebar"]')
+  await sidebar.getByRole("button", { name: "Attention view", exact: true }).click()
+  await expect(sidebar.getByRole("navigation", { name: "Sessions", exact: true })).toHaveAttribute(
+    "data-mode",
+    "projects",
+  )
+  const source = sidebar
+    .locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.sourceID)}"]`)
+    .filter({ has: page.locator('[data-slot="tab-project"]') })
+  const target = sidebar
+    .locator(`[data-titlebar-tab-link][href="${stressSessionHref(fixture.targetID)}"]`)
+    .filter({ has: page.locator('[data-slot="tab-project"]') })
+
+  await target.click()
+  await expect(page.getByRole("heading", { name: fixture.expected.targetTitle, exact: true })).toBeVisible()
+  await waitForStableTimeline(page, fixture.expected.targetMessageIDs.at(-1)!)
+  await source.click()
+  await expect(page.getByRole("heading", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
+  await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
+
+  const trigger = page.getByRole("button", { name: "Session details", expanded: false })
+  await trigger.hover()
+  const tooltip = page.locator('[data-component="tooltip-v2"]')
+  await expect(tooltip).toContainText("Summary")
+  await expect(tooltip.locator('[data-component="keybind-v2"]')).toBeVisible()
+
+  await pressPlatformShortcut(page, "Shift+Y")
+  await expect(page.getByRole("button", { name: "Session details", expanded: true })).toBeVisible()
+  await expect(page.locator('[data-component="session-summary-panel"]')).toHaveCount(1)
+  await expect(page.locator('[data-component="session-summary-panel"]')).toBeVisible()
+
+  await pressPlatformShortcut(page, "Shift+Y")
+  await expect(page.getByRole("button", { name: "Session details", expanded: false })).toBeVisible()
+  await expect(page.locator('[data-component="session-summary-panel"]')).toHaveCount(0)
+
+  await target.click()
+  await expect(page.getByRole("heading", { name: fixture.expected.targetTitle, exact: true })).toBeVisible()
+  await waitForStableTimeline(page, fixture.expected.targetMessageIDs.at(-1)!)
+  await pressPlatformShortcut(page, "Shift+Y")
+  await expect(page.getByRole("button", { name: "Session details", expanded: true })).toBeVisible()
+  await expect(page.locator('[data-component="session-summary-panel"]')).toBeVisible()
+})
 
 test("recovers from a failed cold history load when another session is selected", async ({ page }) => {
   await mockOpenCodeServer(page, {

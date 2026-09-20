@@ -5,6 +5,49 @@ import { mockOpenCodeServer } from "../utils/mock-server"
 
 test.use({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true })
 
+test("mobile history: enriches at most three pages through the user boundary and leaves older history paginated", async ({
+  page,
+}) => {
+  const messages = fixture.messages[fixture.sourceID]
+  const latest = messages.at(-1)!
+  if (latest.type !== "assistant") throw new Error("Expected the fixture to end with an assistant message")
+  const assistant = (index: number) => ({
+    ...latest,
+    id: `msg_mobile_leading_assistant_${index}`,
+    content: [{ type: "text" as const, text: `Leading assistant page ${index}. ${"Content. ".repeat(10)}` }],
+  })
+  const initial = assistant(3)
+  const pages = new Map([
+    [initial.id, { items: [assistant(2)], cursor: assistant(2).id }],
+    [assistant(2).id, { items: [assistant(1)], cursor: assistant(1).id }],
+    [assistant(1).id, { items: [messages.at(-2)!], cursor: messages.at(-3)!.id }],
+  ])
+  const parent = messages.at(-2)!
+  const requests: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.endsWith("/message") || url.searchParams.has("type") || !url.searchParams.has("cursor")) return
+    requests.push(url.searchParams.get("cursor")!)
+  })
+  await mockOpenCodeServer(page, {
+    directory: fixture.directory,
+    project: fixture.project,
+    provider: fixture.provider,
+    sessions: fixture.sessions.filter((session) => session.id === fixture.sourceID),
+    pageMessages: (_sessionID, _limit, before) =>
+      before ? (pages.get(before) ?? { items: [] }) : { items: [initial], cursor: initial.id },
+  })
+  await page.route(
+    (url) => url.pathname.endsWith("/message") && url.searchParams.has("type"),
+    (route) => route.fulfill({ json: { data: [], cursor: {} } }),
+  )
+
+  await page.goto(`/server/${base64Encode(fixture.serverKey)}/session/${fixture.sourceID}`)
+  await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toBeEditable()
+  await expect(page.locator(`[data-timeline-part-id="${parent.id}:text:0"]`)).toBeAttached()
+  expect(requests).toHaveLength(3)
+})
+
 for (const underfilled of [false, true]) {
   test(`mobile history: loads the final page ${underfilled ? "from an underfilled viewport" : "without moving the visible message"}`, async ({
     page,

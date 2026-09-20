@@ -8,12 +8,13 @@ import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import { clonePrompt, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
+import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
+import { formatAttachmentReference, readPromptPresentation } from "@/composer/comment-note"
 import { extractPromptSessions, extractSessionPrompt } from "@/composer/prompt"
 import { formatSessionContext } from "@/composer/session-reference"
 import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
 import type { ChatQuote } from "@/composer/schema"
-import { blobDataUrl } from "@/runtime/persistence/drafts"
-import { uuid } from "@/runtime/persistence/uuid"
+import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
@@ -35,6 +36,7 @@ export function createSessionQueue(input: {
   draft: ComposerStateTarget
   working: Accessor<boolean>
   behavior: Accessor<ComposerDelivery>
+  destination: () => AttachmentDestination
   restoreFocus: (cursor: number) => void
 }) {
   const data = useData()
@@ -66,6 +68,7 @@ export function createSessionQueue(input: {
         change.item,
         change.prompt,
         change.text,
+        input.destination(),
         change.quotes,
       )
       // Admit before cancelling so a failed replacement never discards the original.
@@ -120,7 +123,7 @@ export function createSessionQueue(input: {
         sessionID: input.sessionID,
         text: item.payload.text,
         files: item.payload.files?.map((file) => ({
-          uri: `data:${file.mime};base64,${file.data}`,
+          uri: file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`,
           name: file.name,
           description: file.description,
           mention: file.mention,
@@ -193,12 +196,15 @@ export function createSessionQueue(input: {
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
     const quotes = input.draft.quotes.all().map((quote) => ({ ...quote }))
-    if (!text.trim() && !prompt.some((part) => part.type === "image") && !quotes.length) return cancelEdit()
+    const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+    if (!text.trim() && !images.length && !quotes.length) return cancelEdit()
     const item = queued().find((entry) => entry.id === editing.id)
+    const original = item ? queuedPrompt(item).filter((part): part is ImageAttachmentPart => part.type === "image") : []
     const pristine =
       item &&
       text.trim() === queuedPromptText(item) &&
-      !prompt.some((part) => part.type === "image") &&
+      images.length === original.length &&
+      images.every((image, index) => image.id === original[index]?.id) &&
       JSON.stringify(quotes) === JSON.stringify(readChatQuotes(item.payload.metadata?.quotes))
     if (pristine && delivery === "queue") return cancelEdit()
     mutation.mutate({
@@ -257,7 +263,8 @@ export function queuedPromptRows(items: QueuedPrompt[], replacement?: { original
     .map((item) => ({
       id: item.id,
       text: queuedPromptText(item) || formatChatQuotes(readChatQuotes(item.payload.metadata?.quotes)),
-      attachments: item.payload.files?.length ?? 0,
+      attachments:
+        (item.payload.files?.length ?? 0) + (readPromptPresentation(item.payload.metadata)?.attachments.length ?? 0),
     }))
 }
 
@@ -270,31 +277,52 @@ export function queuedPrompt(item: QueuedPrompt): Prompt {
   const text = queuedPromptText(item)
   return [
     ...extractSessionPrompt(text, item.payload.metadata),
-    ...(item.payload.files?.flatMap((file) => {
+    ...(item.payload.files?.flatMap((file, index) => {
       const mention = queuedImageMention(file, text)
       if (!mention) return []
       const filename = mention.text.slice(1, -1)
       return [
         {
           type: "image" as const,
-          id: uuid(),
+          id: queuedAttachmentID(item, index),
           filename,
           sourcePath: file.name && file.name !== filename ? file.name : undefined,
           mime: file.mime,
-          blob: {
-            id: `data:${file.mime};base64,${file.data}`,
-            url: `data:${file.mime};base64,${file.data}`,
-          },
+          blob: createLegacyBlobReference(`data:${file.mime};base64,${file.data}`),
           mention,
         },
       ]
     }) ?? []),
+    ...queuedPromptAttachments(item),
   ]
+}
+
+export function queuedPromptAttachments(item: QueuedPrompt): ImageAttachmentPart[] {
+  return (item.payload.files ?? []).flatMap((file, index) => {
+    if (!isComposerAttachment(file)) return []
+    return [
+      {
+        type: "image",
+        id: queuedAttachmentID(item, index),
+        filename: file.name ?? "attachment",
+        mime: file.mime,
+        blob: createLegacyBlobReference(`data:${file.mime};base64,${file.data}`),
+      },
+    ]
+  })
+}
+
+function queuedAttachmentID(item: QueuedPrompt, index: number) {
+  return `${item.id}:file:${index}`
+}
+
+function isComposerAttachment(file: NonNullable<QueuedPrompt["payload"]["files"]>[number]) {
+  return !file.mention && file.source.type === "inline"
 }
 
 function queuedImageMention(file: NonNullable<QueuedPrompt["payload"]["files"]>[number], text: string) {
   const mention = file.mention
-  if (!file.mime.startsWith("image/") || !file.data || !mention) return undefined
+  if (file.source.type !== "inline" || !file.mime.startsWith("image/") || !file.data || !mention) return undefined
   if (!/^\[[^[\]\r\n]+\]$/.test(mention.text)) return undefined
   if (mention.text.slice(1, -1).trim() !== mention.text.slice(1, -1)) return undefined
   if (!Number.isInteger(mention.start) || !Number.isInteger(mention.end)) return undefined
@@ -304,9 +332,9 @@ function queuedImageMention(file: NonNullable<QueuedPrompt["payload"]["files"]>[
 }
 
 // Confirming an edit submits the current composer content as the replacement:
-// mentions and images added during the edit are parsed like a normal
-// submission. Original cited images are reconstructed in the editor and replaced
-// from that state; uncited stored attachments and review-comment notes survive.
+// mentions and attachments are parsed like a normal submission, so editable
+// inline files can be removed or replaced. Original cited images are reconstructed
+// with their ranges; external references and other hidden context survive.
 // Ambient composer context (open review comments) stays out: it belongs to
 // the next fresh prompt, not to a queued edit.
 export async function editedPromptInput(
@@ -315,26 +343,35 @@ export async function editedPromptInput(
   item: QueuedPrompt | undefined,
   prompt: Prompt,
   text: string,
+  destination: AttachmentDestination,
   quotes: ChatQuote[],
 ) {
-  const images = await Promise.all(
-    prompt
-      .filter((part): part is ImageAttachmentPart => part.type === "image")
-      .map(async (part) => ({ ...part, dataUrl: await blobDataUrl(part.blob, part.mime) })),
+  const attachments = await deliverAttachments(
+    prompt.filter((part): part is ImageAttachmentPart => part.type === "image"),
+    destination,
   )
-  const request = buildPromptRequest({ prompt, context: [], images, text, sessionDirectory: directory })
+  const request = buildPromptRequest({ prompt, context: [], attachments, text, sessionDirectory: directory })
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
+  const previousPresentation = readPromptPresentation(payload?.metadata)
+  const previousAttachments = previousPresentation?.attachments ?? []
   const previousQuotes = formatChatQuotes(readChatQuotes(payload?.metadata?.quotes))
   const original =
     previousQuotes && payload?.text.endsWith(previousQuotes)
       ? payload.text.slice(0, -previousQuotes.length).trimEnd()
       : payload?.text
   const notes = original?.startsWith(display) ? original.slice(display.length) : ""
-  const retainedNotes = extractPromptSessions(payload?.metadata).reduce(
+  const retainedSessions = extractPromptSessions(payload?.metadata).reduce(
     (value, session) =>
       value.replace(`\n${formatSessionContext(session)}`, "").replace(formatSessionContext(session), ""),
     notes,
+  )
+  const retainedNotes = previousAttachments.reduce(
+    (value, attachment) =>
+      value
+        .replace(`\n${formatAttachmentReference(attachment)}`, "")
+        .replace(formatAttachmentReference(attachment), ""),
+    retainedSessions,
   )
   const mention = (value: { start: number; end: number; text: string } | undefined) => {
     if (!value) return undefined
@@ -361,15 +398,25 @@ export async function editedPromptInput(
     ) ?? []),
     ...request.skills,
   ]
+  const retainedAttachments = previousAttachments.filter(
+    (attachment) => !request.attachments.some((item) => item.path === attachment.path),
+  )
   return {
     sessionID,
-    text: [request.text + retainedNotes, formatChatQuotes(quotes)].filter(Boolean).join("\n"),
+    text: [
+      request.text,
+      ...retainedAttachments.map(formatAttachmentReference),
+      retainedNotes.trim(),
+      formatChatQuotes(quotes),
+    ]
+      .filter(Boolean)
+      .join("\n"),
     files: [
       ...(payload?.files?.flatMap((file) => {
-        if (queuedImageMention(file, display)) return []
+        if (queuedImageMention(file, display) || isComposerAttachment(file)) return []
         return [
           {
-            uri: `data:${file.mime};base64,${file.data}`,
+            uri: file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`,
             name: file.name,
             description: file.description,
             mention: mention(file.mention),
@@ -380,6 +427,13 @@ export async function editedPromptInput(
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),
     skills: skills.map((skill) => ({ id: skill.id, mention: mention(skill.mention) })),
-    metadata: { ...payload?.metadata, displayText: request.displayText, sessions: request.sessions, quotes },
+    metadata: {
+      ...payload?.metadata,
+      displayText: request.displayText,
+      sessions: request.sessions,
+      quotes,
+      comments: previousPresentation?.comments ?? request.comments,
+      attachments: [...retainedAttachments, ...request.attachments],
+    },
   }
 }

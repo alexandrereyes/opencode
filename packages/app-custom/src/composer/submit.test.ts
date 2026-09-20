@@ -14,6 +14,7 @@ import type {
 import { createMemoryComposerState, type Prompt } from "./state"
 import type { PromptHistoryComment } from "./history/entry"
 import { createComposerSubmit } from "./submit"
+import type { AttachmentDestination } from "./attachments/deliver"
 import { createSessionRevertActions } from "@/session/revert"
 
 const selectedModel = {
@@ -21,6 +22,14 @@ const selectedModel = {
   name: "Model 1",
   provider: { id: "provider-1" },
 } as NonNullable<ReturnType<ModelSelection["current"]>>
+
+const destination: AttachmentDestination = {
+  input: { image: true, pdf: true },
+  local: false,
+  upload: async () => {
+    throw new Error("native attachments must not upload")
+  },
+}
 
 const selection = {
   ready: Object.assign(() => true, { promise: undefined }),
@@ -77,6 +86,7 @@ function submitInput(
   lifecycle?: {
     history?: (prompt: Prompt, mode: "normal" | "shell") => void
     delivery?: (alternate: boolean) => ComposerDelivery
+    destination?: AttachmentDestination
     comments?: {
       capture: () => PromptHistoryComment[]
       clear: () => void
@@ -97,6 +107,7 @@ function submitInput(
     resetHistory() {},
     setMode() {},
     closePopover() {},
+    destination: () => lifecycle?.destination ?? destination,
     notify,
     comments: lifecycle?.comments ?? { capture: () => [], clear() {}, restore() {} },
   })
@@ -148,6 +159,48 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  test("submits an unsupported local binary as a path reference", async () => {
+    const state = createMemoryComposerState().capture()
+    state.set([
+      {
+        type: "image",
+        id: "archive",
+        filename: "archive.zip",
+        sourcePath: "/local/archive.zip",
+        mime: "application/zip",
+        blob: { id: "archive", url: "data:application/zip;base64,AQID" },
+      },
+    ])
+    const completed = Promise.withResolvers<void>()
+    const target = session({
+      calls: [],
+      prompt: async (value) => {
+        expect(value.text).toBe("Attached file: `/local/archive.zip`")
+        expect(value.files).toEqual([])
+        expect(value.metadata?.attachments).toEqual([
+          { name: "archive.zip", mime: "application/zip", path: "/local/archive.zip" },
+        ])
+        completed.resolve()
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submitted() {},
+      setEditor() {},
+    }
+
+    await submitInput(adapter, undefined, "normal", undefined, undefined, {
+      destination: { ...destination, local: true },
+    }).submit(new Event("submit"))
+    await completed.promise
+  })
+
   for (const command of [false, true]) {
     test(`expands snippets for ${command ? "command arguments" : "prompt admission"}`, async () => {
       const state = createMemoryComposerState().capture()

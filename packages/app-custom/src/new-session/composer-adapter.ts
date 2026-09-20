@@ -19,12 +19,14 @@ import { showToast } from "@/shell/notifications/toast"
 import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
 import { clearSessionMessageHandoff, setSessionMessageHandoff } from "@/session/handoff"
 import { claimChat, confirmChat } from "@/runtime/chats"
+import type { DraftMcpControls } from "./mcp"
 
 export function createNewSessionComposerAdapter(props: {
   draftID: string
   worktree: () => string
   branch: () => string | undefined
   submitted: () => void
+  mcp: DraftMcpControls
 }) {
   const route = useSessionKey()
   const prompt = useComposerState()
@@ -54,6 +56,7 @@ export function createNewSessionComposerAdapter(props: {
       const projectDirectory = location().directory
       const worktree = props.worktree()
       const branch = props.branch()
+      const mcp = props.mcp.capture()
       const chat = draft.chat
       const id = chat ? Session.ID.make(chat.sessionID) : Session.ID.create()
       const pending = tabs.prepareSession(
@@ -70,6 +73,14 @@ export function createNewSessionComposerAdapter(props: {
       if (!sessionDirectory) {
         await pending.rollback()
         return
+      }
+      const rollback = async () => {
+        if (worktree === "create") {
+          data.project.invalidate()
+          await data.project.sync().catch(() => undefined)
+        }
+        await pending.rollback(worktree === "create" ? sessionDirectory : undefined)
+        if (worktree === "create") props.mcp.remember(sessionDirectory, mcp)
       }
       if (chat) {
         const claimed = await claimChat(serverSDK, {
@@ -88,9 +99,13 @@ export function createNewSessionComposerAdapter(props: {
           },
         )
         if (!claimed) {
-          await pending.rollback()
+          await rollback()
           return
         }
+      }
+      if (!(await props.mcp.prepare(sessionDirectory, mcp))) {
+        await rollback()
+        return
       }
 
       const created = data.session.create({
@@ -114,12 +129,7 @@ export function createNewSessionComposerAdapter(props: {
         },
       )
       if (!(await creation).ok) {
-        if (worktree === "create") {
-          // Keep retries on the worktree that was already created, not another new checkout.
-          data.project.invalidate()
-          await data.project.sync().catch(() => undefined)
-        }
-        await pending.rollback(worktree === "create" ? sessionDirectory : undefined)
+        await rollback()
         return
       }
       if (chat) {

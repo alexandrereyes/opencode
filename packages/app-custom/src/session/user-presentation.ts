@@ -14,6 +14,7 @@ export function userPresentation(message: SessionMessageUser): SessionUserPresen
     displayText: value?.displayText,
     copyText: copyText ? formatSessionReferences(copyText, sessions) : undefined,
     comments: value?.comments ?? (parsed ? [parsed] : []),
+    references: value?.attachments,
     quotes: value?.quotes,
     sessions: sessions.map((session) => ({ start: session.start, end: session.end })),
   }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { formatKeybind, matchKeybind, parseKeybind } from "./command"
+import { formatKeybind, keyFromKeyboardEvent, matchKeybind, parseKeybind } from "./command"
 
 describe("command keybind helpers", () => {
   test("parseKeybind handles aliases and multiple combos", () => {
@@ -49,6 +49,20 @@ describe("command keybind helpers", () => {
         new KeyboardEvent("keydown", { key: "]", ctrlKey: next?.ctrl, metaKey: next?.meta, altKey: true }),
       ),
     ).toBe(true)
+  })
+
+  test("uses the physical letter for option-generated glyphs", () => {
+    const event = new KeyboardEvent("keydown", { key: "¬", code: "KeyL", metaKey: true, altKey: true })
+
+    expect(keyFromKeyboardEvent(event)).toBe("l")
+    expect(matchKeybind(parseKeybind("meta+alt+l"), event)).toBe(true)
+  })
+
+  test("preserves option-modified non-letter keys", () => {
+    const event = new KeyboardEvent("keydown", { key: "{", code: "BracketLeft", altKey: true })
+
+    expect(keyFromKeyboardEvent(event)).toBe("{")
+    expect(matchKeybind(parseKeybind("alt+{"), event)).toBe(true)
   })
 
   test("formatKeybind returns human readable output", () => {

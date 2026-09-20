@@ -1,4 +1,4 @@
-import { For, Show, createMemo, lazy, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, lazy, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Button } from "@opencode/ui-custom/button"
@@ -6,7 +6,13 @@ import { IconButton } from "@opencode/ui-custom/icon-button"
 import { TextInput } from "@opencode/ui-custom/text-input"
 import { showToast } from "@/shell/notifications/toast"
 import fuzzysort from "fuzzysort"
-import { DEFAULT_PALETTE_KEYBIND, formatKeybind, parseKeybind, useCommand } from "@/shell/commands/command"
+import {
+  DEFAULT_PALETTE_KEYBIND,
+  formatKeybind,
+  keyFromKeyboardEvent,
+  parseKeybind,
+  useCommand,
+} from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useSettings } from "@/settings/model"
 import { SettingsList } from "@/settings/list"
@@ -69,13 +75,6 @@ function isModifier(key: string) {
   return key === "Shift" || key === "Control" || key === "Alt" || key === "Meta"
 }
 
-function normalizeKey(key: string) {
-  if (key === ",") return "comma"
-  if (key === "+") return "plus"
-  if (key === " ") return "space"
-  return key.toLowerCase()
-}
-
 function recordKeybind(event: KeyboardEvent) {
   if (isModifier(event.key)) return
 
@@ -89,7 +88,7 @@ function recordKeybind(event: KeyboardEvent) {
   if (event.altKey) parts.push("alt")
   if (event.shiftKey) parts.push("shift")
 
-  const key = normalizeKey(event.key)
+  const key = keyFromKeyboardEvent(event)
   if (!key) return
   parts.push(key)
 
@@ -342,7 +341,7 @@ export function createKeybindSettingsController(
   }
 }
 
-export function SettingsKeybinds() {
+export function SettingsKeybinds(props: { active?: boolean; autofocus?: boolean }) {
   const command = useCommand()
   const settings = useSettings()
   const controller = createKeybindSettingsController({
@@ -352,6 +351,8 @@ export function SettingsKeybinds() {
 
   return (
     <SettingsKeybindsView
+      visible={props.active}
+      autofocus={props.autofocus}
       groups={controller.catalog.groups}
       filtered={controller.catalog.filtered}
       title={controller.catalog.title}
@@ -365,6 +366,8 @@ export function SettingsKeybinds() {
 }
 
 function SettingsKeybindsView(props: {
+  visible?: boolean
+  autofocus?: boolean
   groups: KeybindGroup[]
   filtered: (query: string) => Map<KeybindGroup, string[]>
   title: (id: string) => string
@@ -375,6 +378,20 @@ function SettingsKeybindsView(props: {
   onReset: () => void
 }) {
   const language = useLanguage()
+  let search: HTMLInputElement | undefined
+  createEffect(
+    on(
+      () => props.visible ?? true,
+      (visible) => {
+        if (!visible) return
+        const frame = requestAnimationFrame(() => {
+          if (props.visible !== false && props.autofocus !== false && search?.isConnected)
+            search.focus({ preventScroll: true })
+        })
+        onCleanup(() => cancelAnimationFrame(frame))
+      },
+    ),
+  )
   const [store, setStore] = createStore({ filter: "" })
   const filtered = createMemo(() => props.filtered(store.filter))
   const hasResults = createMemo(() => props.groups.some((group) => (filtered().get(group)?.length ?? 0) > 0))
@@ -393,6 +410,7 @@ function SettingsKeybindsView(props: {
         </div>
         <div class="settings-tab-search">
           <TextInput
+            ref={search}
             type="search"
             appearance="base"
             value={store.filter}

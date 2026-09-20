@@ -1,21 +1,25 @@
-import { Component, For, Show, createMemo, createSignal } from "solid-js"
-import { IconButton } from "@opencode/ui-custom/icon-button"
+import { Key } from "@solid-primitives/keyed"
 import { Icon } from "@opencode/ui-custom/icon"
+import { TextInput } from "@opencode/ui-custom/text-input"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
+import { For, Show, createEffect, createMemo, type Component } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { displayName } from "@/shell/layout/helpers"
-import { ProjectIcon } from "@/shell/layout/project-icon"
+import type { LocalProject } from "@/shell/state/layout"
 import { InlineServerSelect } from "@/settings/server-select"
 import { DialogEditProject } from "./project-dialog"
+import { SettingsProjectRow } from "./project-row"
 import "@/settings/settings.css"
 
 export const SettingsProjects: Component = () => {
   const dialog = useDialog()
   const language = useLanguage()
   const global = useGlobal()
-  const [allServers, setAllServers] = createSignal(true)
+  const [store, setStore] = createStore({ allServers: true, filter: "" })
+  let search: HTMLInputElement | undefined
   const selected = global.settings.server.selected
   const multiple = createMemo(() => global.servers.list().length > 1)
   const projects = createMemo(() => {
@@ -24,50 +28,46 @@ export const SettingsProjects: Component = () => {
     return global.ensureServerCtx(server).projects.list()
   })
 
-  type ProjectItem = ReturnType<typeof projects>[number]
-
   const groups = createMemo(() =>
     global.servers
       .list()
       .map((server) => ({ server, projects: global.ensureServerCtx(server).projects.list() }))
       .filter((group) => group.projects.length > 0),
   )
+  const searchable = createMemo(() =>
+    store.allServers ? groups().reduce((total, group) => total + group.projects.length, 0) > 7 : projects().length > 7,
+  )
+  const query = createMemo(() => (searchable() ? store.filter.trim().toLowerCase() : ""))
+  const filteredProjects = createMemo(() => {
+    const value = query()
+    if (!value) return projects()
+    return projects().filter((project) => displayName(project).toLowerCase().includes(value))
+  })
+  const filteredGroups = createMemo(() => {
+    const value = query()
+    if (!value) return groups()
+    return groups()
+      .map((group) => ({
+        ...group,
+        projects: group.projects.filter((project) => displayName(project).toLowerCase().includes(value)),
+      }))
+      .filter((group) => group.projects.length > 0)
+  })
+  const emptyMessage = createMemo(() =>
+    store.filter.trim() ? language.t("palette.empty") : language.t("settings.projects.empty"),
+  )
+  createEffect(() => {
+    if (!searchable()) setStore("filter", "")
+  })
 
-  const openProjectSettings = (project: ProjectItem, server = selected()) => {
+  const openProjectSettings = (project: LocalProject, server = selected()) => {
     if (!server) return
     dialog.push(() => <DialogEditProject project={project} server={server} />)
   }
 
-  const ProjectRow: Component<{ project: ProjectItem; server: ServerConnection.Any }> = (props) => {
-    const name = () => displayName(props.project)
-    return (
-      <div
-        class="group mx-px flex items-center justify-between gap-5 px-4 py-2.5 rounded-lg bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)] transition-all hover:bg-v2-background-bg-layer-01"
-        onClick={() => openProjectSettings(props.project, props.server)}
-      >
-        <div class="flex items-center gap-2.5 min-w-0 flex-1">
-          <ProjectIcon project={props.project} class="shrink-0" />
-          <span class="text-13-medium text-v2-text-text-base truncate">{name()}</span>
-        </div>
-        <div class="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <IconButton
-            type="button"
-            variant="ghost-muted"
-            size="small"
-            icon={<Icon name="settings-gear" size="small" class="text-v2-icon-icon-muted" />}
-            onClick={(event: MouseEvent) => {
-              event.stopPropagation()
-              openProjectSettings(props.project, props.server)
-            }}
-          />
-        </div>
-      </div>
-    )
-  }
-
   return (
     <>
-      <div class="settings-tab-header">
+      <div class="settings-tab-header" classList={{ "settings-tab-header--stacked": searchable() }}>
         <div class="settings-tab-header-row">
           <div class="flex flex-col gap-1">
             <h2 class="settings-tab-title">{language.t("settings.projects.title")}</h2>
@@ -77,27 +77,46 @@ export const SettingsProjects: Component = () => {
             <InlineServerSelect
               all={{
                 label: language.t("settings.projects.server.all"),
-                selected: allServers,
-                onSelect: () => setAllServers(true),
+                selected: () => store.allServers,
+                onSelect: () => setStore("allServers", true),
               }}
-              onServerSelect={() => setAllServers(false)}
+              onServerSelect={() => setStore("allServers", false)}
             />
           </Show>
         </div>
+        <Show when={searchable()}>
+          <div class="settings-tab-search">
+            <TextInput
+              ref={search}
+              type="search"
+              appearance="base"
+              leadingIcon={<Icon name="magnifying-glass" size="small" />}
+              value={store.filter}
+              onInput={(event) => setStore("filter", event.currentTarget.value)}
+              placeholder={language.t("settings.projects.search.placeholder")}
+              aria-label={language.t("settings.projects.search.placeholder")}
+              showClearButton={!!store.filter}
+              onClearClick={() => {
+                setStore("filter", "")
+                search?.focus({ preventScroll: true })
+              }}
+              spellcheck={false}
+              autocorrect="off"
+              autocomplete="off"
+              autocapitalize="off"
+            />
+          </div>
+        </Show>
       </div>
 
       <div class="settings-tab-body">
         <Show
-          when={allServers()}
+          when={store.allServers}
           fallback={
             <div class="flex flex-col gap-2 w-full">
               <Show
-                when={projects().length > 0}
-                fallback={
-                  <div class="py-12 text-center text-v2-text-text-muted text-13-regular">
-                    {language.t("settings.projects.empty")}
-                  </div>
-                }
+                when={filteredProjects().length > 0}
+                fallback={<div class="py-12 text-center text-v2-text-text-muted text-13-regular">{emptyMessage()}</div>}
               >
                 <Show when={selected()} keyed>
                   {(server) => (
@@ -106,7 +125,15 @@ export const SettingsProjects: Component = () => {
                         <h3 class="settings-section-title">{serverName(server) || ServerConnection.key(server)}</h3>
                       </Show>
                       <div class="flex flex-col gap-2 w-full">
-                        <For each={projects()}>{(project) => <ProjectRow project={project} server={server} />}</For>
+                        <Key each={filteredProjects()} by="worktree">
+                          {(project) => (
+                            <SettingsProjectRow
+                              project={project()}
+                              server={server}
+                              onOpen={(item) => openProjectSettings(item, server)}
+                            />
+                          )}
+                        </Key>
                       </div>
                     </div>
                   )}
@@ -117,14 +144,10 @@ export const SettingsProjects: Component = () => {
         >
           <div class="flex flex-col gap-8 w-full">
             <Show
-              when={groups().length > 0}
-              fallback={
-                <div class="py-12 text-center text-v2-text-text-muted text-13-regular">
-                  {language.t("settings.projects.empty")}
-                </div>
-              }
+              when={filteredGroups().length > 0}
+              fallback={<div class="py-12 text-center text-v2-text-text-muted text-13-regular">{emptyMessage()}</div>}
             >
-              <For each={groups()}>
+              <For each={filteredGroups()}>
                 {(group) => (
                   <div class="settings-section">
                     <Show when={multiple()}>
@@ -133,9 +156,15 @@ export const SettingsProjects: Component = () => {
                       </h3>
                     </Show>
                     <div class="flex flex-col gap-2 w-full">
-                      <For each={group.projects}>
-                        {(project) => <ProjectRow project={project} server={group.server} />}
-                      </For>
+                      <Key each={group.projects} by="worktree">
+                        {(project) => (
+                          <SettingsProjectRow
+                            project={project()}
+                            server={group.server}
+                            onOpen={(item) => openProjectSettings(item, group.server)}
+                          />
+                        )}
+                      </Key>
                     </div>
                   </div>
                 )}
