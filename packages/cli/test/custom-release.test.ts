@@ -278,81 +278,89 @@ test("activation dry-run and rollback refusal never invoke lifecycle or change c
   expect(await Bun.file(`${home}/bin/serve`).exists()).toBe(false)
 })
 
-test("authenticated fixture activation and rollback retain data and password", async () => {
-  const home = await fixture()
-  const state = { version: `0.0.0-custom.${first}`, authorization: "", starts: 0, stops: 0 }
-  const serve = (port: number) =>
-    Bun.serve({
-      hostname: "127.0.0.1",
-      port,
-      fetch(request) {
-        state.authorization = request.headers.get("authorization") ?? ""
-        if (state.authorization !== `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`)
-          return new Response(null, { status: 401 })
-        const endpoint = state.version === `0.0.0-custom.${first}` ? "/api/health" : "/api/info"
-        if (new URL(request.url).pathname !== endpoint) return new Response(null, { status: 404 })
-        return Response.json({ healthy: true, version: state.version })
+test.each([false, true])(
+  "authenticated activation (skipBackup=%s) and rollback retain data and password",
+  async (skipBackup) => {
+    const home = await fixture()
+    const state = { version: `0.0.0-custom.${first}`, authorization: "", starts: 0, stops: 0 }
+    const serve = (port: number) =>
+      Bun.serve({
+        hostname: "127.0.0.1",
+        port,
+        fetch(request) {
+          state.authorization = request.headers.get("authorization") ?? ""
+          if (state.authorization !== `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`)
+            return new Response(null, { status: 401 })
+          const endpoint = state.version === `0.0.0-custom.${first}` ? "/api/health" : "/api/info"
+          if (new URL(request.url).pathname !== endpoint) return new Response(null, { status: 404 })
+          return Response.json({ healthy: true, version: state.version })
+        },
+      })
+    const stateServer = { value: serve(0) }
+    const port = stateServer.value.port!
+    await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
+    const service = {
+      async stop() {
+        state.stops++
+        await stateServer.value.stop(true)
       },
-    })
-  const stateServer = { value: serve(0) }
-  const port = stateServer.value.port!
-  await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
-  const service = {
-    async stop() {
-      state.stops++
+      async start() {
+        state.starts++
+        state.version = `0.0.0-custom.${await pointer(home, "current")}`
+        stateServer.value = serve(port)
+      },
+    }
+    try {
+      await activate(home, second, { skipBackup }, service)
+      expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 0 : 1)
+      expect(await pointer(home, "current")).toBe(second)
+      expect(await pointer(home, "previous")).toBe(first)
+      await activate(home, first, { rollback: true, compatible: true }, service)
+      expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 1 : 2)
+      expect(await pointer(home, "current")).toBe(first)
+      expect(state.starts).toBe(2)
+      expect(state.stops).toBe(2)
+      expect((await health(home, port)).ready).toBe(true)
+      expect(await Bun.file(`${home}/password`).text()).toBe("fixture-secret\n")
+      const db = new Database((await settings(home)).database, { readonly: true })
+      expect(db.query("SELECT value FROM facts").all()).toEqual([{ value: "preserved" }])
+      db.close()
+    } finally {
       await stateServer.value.stop(true)
-    },
-    async start() {
-      state.starts++
-      state.version = `0.0.0-custom.${await pointer(home, "current")}`
-      stateServer.value = serve(port)
-    },
-  }
-  try {
-    await activate(home, second, {}, service)
+    }
+  },
+)
+
+test.each([false, true])(
+  "failed startup (skipBackup=%s) stops attempted release without silently downgrading the database",
+  async (skipBackup) => {
+    const home = await fixture()
+    const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+    await Bun.write(`${home}/manual.json`, JSON.stringify({ port: listener.port }))
+    listener.stop(true)
+    const calls: string[] = []
+    await expect(
+      activate(
+        home,
+        second,
+        { skipBackup },
+        {
+          async stop() {
+            calls.push("stop")
+          },
+          async start() {
+            calls.push("start")
+            throw new Error("fixture boot failure")
+          },
+        },
+      ),
+    ).rejects.toThrow(skipBackup ? "No database backup was created." : "Backup:")
+    expect(calls).toEqual(["stop", "start", "stop"])
     expect(await pointer(home, "current")).toBe(second)
     expect(await pointer(home, "previous")).toBe(first)
-    await activate(home, first, { rollback: true, compatible: true }, service)
-    expect(await pointer(home, "current")).toBe(first)
-    expect(state.starts).toBe(2)
-    expect(state.stops).toBe(2)
-    expect((await health(home, port)).ready).toBe(true)
-    expect(await Bun.file(`${home}/password`).text()).toBe("fixture-secret\n")
-    const db = new Database((await settings(home)).database, { readonly: true })
-    expect(db.query("SELECT value FROM facts").all()).toEqual([{ value: "preserved" }])
-    db.close()
-  } finally {
-    await stateServer.value.stop(true)
-  }
-})
-
-test("failed startup stops attempted release without silently downgrading the database", async () => {
-  const home = await fixture()
-  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
-  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: listener.port }))
-  listener.stop(true)
-  const calls: string[] = []
-  await expect(
-    activate(
-      home,
-      second,
-      {},
-      {
-        async stop() {
-          calls.push("stop")
-        },
-        async start() {
-          calls.push("start")
-          throw new Error("fixture boot failure")
-        },
-      },
-    ),
-  ).rejects.toThrow("Database may have migrated")
-  expect(calls).toEqual(["stop", "start", "stop"])
-  expect(await pointer(home, "current")).toBe(second)
-  expect(await pointer(home, "previous")).toBe(first)
-  expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(1)
-})
+    expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 0 : 1)
+  },
+)
 
 test("another service on the configured port is never stopped, including a non-JSON 401", async () => {
   const home = await fixture()

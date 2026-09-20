@@ -11,7 +11,7 @@ bun run custom:activate --dry-run
 bun run custom:activate         # explicit interruption + backup + replacement
 
 # Subsequent updates (does NOT fetch, pull, merge, commit or push Git):
-bun run custom:update           # prepare, then activate
+bun run custom:update           # prepare, then activate without database backup
 
 # Select an already-prepared release explicitly:
 bun run custom:activate <full-40-character-sha>
@@ -100,6 +100,11 @@ override `environment`. Protect this file if it contains credentials. Never conf
 a second global or project-local copy of the custom plugin; every Location loads the
 release-owned plugin build through normal plugin configuration.
 
+Routine `custom:update` skips the database backup and does not require `sqlite3`.
+It still requires the existing database and password and verifies the authenticated
+health response and exact running version after activation.
+
+Explicit `custom:activate`, rollback and one-time migration retain the backup step.
 Activation controls only `local.opencode.custom-manual`. It unloads that job, waits
 for the port to close, takes a consistent SQLite `.backup` using the system `sqlite3`
 and checks it with `PRAGMA quick_check`. Missing database, password or sqlite3 aborts
@@ -114,7 +119,7 @@ service interruption; schedule it between active work where possible. Existing T
 processes keep their already-loaded version: reopen them with `opencode2` afterward.
 
 If startup fails, the attempted service is unloaded, `current` remains on the failed
-release, and `previous` plus the backup are retained. There is deliberately **no
+release, and `previous` plus any backup created are retained. There is deliberately **no
 automatic downgrade**: startup may already have migrated the database. Inspect
 `<runtime>/logs/server.log`, fix forward, or review the migrations before rollback:
 

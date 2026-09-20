@@ -338,7 +338,7 @@ export async function backup(database: string, destination: string) {
 export async function activate(
   home: string,
   commit: string,
-  options: { dryRun?: boolean; rollback?: boolean; compatible?: boolean },
+  options: { dryRun?: boolean; rollback?: boolean; compatible?: boolean; skipBackup?: boolean },
   service = launchd(home),
 ) {
   const release = await manifest(home, commit)
@@ -351,12 +351,14 @@ export async function activate(
     )
   if (options.dryRun) {
     console.log(
-      `Stop ${label}; back up ${config.database}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start; authenticated healthcheck. Failed boot stays stopped: no automatic database downgrade.`,
+      `Stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start; authenticated healthcheck. Failed boot stays stopped: no automatic database downgrade.`,
     )
     return
   }
   if (!(await Bun.file(`${home}/password`).text()).trim()) throw new Error("Runtime password is empty")
-  if (!Bun.which("sqlite3")) throw new Error("sqlite3 is required for a consistent backup")
+  if (!(await Bun.file(config.database).exists()))
+    throw new Error(`Database does not exist: ${config.database}; initialize a new runtime separately`)
+  if (!options.skipBackup && !Bun.which("sqlite3")) throw new Error("sqlite3 is required for a consistent backup")
   const before = await health(home, config.port)
   if (previous === commit && before.ready && before.version === release.version) {
     console.log(`Already active ${commit}`)
@@ -364,9 +366,13 @@ export async function activate(
   }
   if (!portFree(config.port) && (!previous || before.version !== `0.0.0-custom.${previous}`))
     throw new Error("Port is occupied by another release/service. Complete the documented one-time migration first.")
-  const save = path.join(home, "backups", `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`)
-  await mkdir(save, { recursive: true, mode: 0o700 })
-  await Bun.write(`${save}/activation.json`, JSON.stringify({ previous, target: commit, database: config.database }))
+  const save = options.skipBackup
+    ? undefined
+    : path.join(home, "backups", `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`)
+  if (save) {
+    await mkdir(save, { recursive: true, mode: 0o700 })
+    await Bun.write(`${save}/activation.json`, JSON.stringify({ previous, target: commit, database: config.database }))
+  }
   await service.stop()
   // bootout may return before process exit. Never snapshot or start another writer until the port closes.
   for (let attempt = 0; attempt < 65; attempt++) {
@@ -374,8 +380,10 @@ export async function activate(
     if (attempt === 64) throw new Error("Server did not stop; current is unchanged")
     await Bun.sleep(1000)
   }
-  await backup(config.database, `${save}/database.sqlite`)
-  console.log(`Consistent database backup: ${save}/database.sqlite`)
+  if (save) {
+    await backup(config.database, `${save}/database.sqlite`)
+    console.log(`Consistent database backup: ${save}/database.sqlite`)
+  }
   await mkdir(`${home}/bin`, { recursive: true })
   await mkdir(`${home}/logs`, { recursive: true })
   const wrappers = scripts(home, config)
@@ -400,7 +408,7 @@ export async function activate(
   } catch (error) {
     await service.stop()
     throw new Error(
-      `Release failed to start and was stopped. current remains ${commit}; previous=${previous ?? "none"}. Database may have migrated. Backup: ${save}/database.sqlite. Review logs and migrations before custom:rollback --database-compatible.`,
+      `Release failed to start and was stopped. current remains ${commit}; previous=${previous ?? "none"}. Database may have migrated. ${save ? `Backup: ${save}/database.sqlite.` : "No database backup was created."} Review logs and migrations before custom:rollback --database-compatible.`,
       { cause: error },
     )
   }
@@ -476,10 +484,15 @@ async function main() {
     if (action === "prepare") return
     if (!commit) throw new Error("No prepared/previous release; provide its full SHA")
     if (dryRun && action === "update") {
-      console.log(`Then explicitly activate ${commit} with backup and authenticated healthcheck`)
+      console.log(`Then activate ${commit} without database backup and with authenticated healthcheck`)
       return
     }
-    await activate(home, commit, { dryRun, rollback: action === "rollback", compatible })
+    await activate(home, commit, {
+      dryRun,
+      rollback: action === "rollback",
+      compatible,
+      skipBackup: action === "update",
+    })
   } finally {
     if (!dryRun)
       await rm(`${home}/.manual-lock`, { recursive: true }).catch((error) =>

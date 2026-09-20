@@ -17,8 +17,9 @@ For every update after the one-time migration, give the user this single command
 cd ~/Dev/opencode2 && git pull --ff-only origin custom && bun run custom:update
 ```
 
-`custom:update` prepares and activates the release, backs up the SQLite database,
-and verifies the authenticated health response and exact running version. Do not
+`custom:update` prepares and activates the release without backing up the SQLite
+database, and verifies the authenticated health response and exact running version.
+Do not add a database backup step to routine updates. Do not
 independently replace frontend, backend, plugin, TUI, or files inside a release.
 
 Activating a release briefly interrupts the installed instance. Do not execute the
