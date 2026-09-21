@@ -1238,6 +1238,11 @@
     overflow: hidden;
     overflow-wrap: anywhere;
 
+    @media (pointer: coarse) {
+      /* Smaller input text triggers automatic zoom when focused on iOS. */
+      font-size: max(16px, var(--font-size-base));
+    }
+
     &::placeholder {
       color: var(--v2-text-text-muted);
     }

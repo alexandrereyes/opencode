@@ -38,3 +38,53 @@ for (const width of [390, 1280]) {
     })
   }
 }
+
+story("keeps the text answer above a keyboard that only resizes the visual viewport", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const component = await mount("app-current-session-surface--long-question-request")
+  const dock = component.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await dock.getByRole("radio", { name: /Type your own answer/ }).click()
+  const input = dock.locator("textarea")
+  await input.fill("Keep this answer while the keyboard opens")
+
+  // Desktop automation has no native iOS keyboard. Preserve the layout viewport
+  // while reproducing its visual viewport resize and subsequent focus pan.
+  for (const offset of [0, 120]) {
+    await page.evaluate((offset) => {
+      const viewport = window.visualViewport!
+      Object.defineProperties(viewport, {
+        height: { configurable: true, value: 390 },
+        offsetTop: { configurable: true, value: offset },
+      })
+      viewport.dispatchEvent(new Event("resize"))
+      viewport.dispatchEvent(new Event("scroll"))
+    }, offset)
+    await expect
+      .poll(() =>
+        dock.evaluate((element) => {
+          const viewport = window.visualViewport!
+          const field = element.querySelector("textarea")!.getBoundingClientRect()
+          const content = element.querySelector('[data-slot="question-content"]')!.getBoundingClientRect()
+          const footer = element.querySelector('[data-slot="question-footer"]')!.getBoundingClientRect()
+          return (
+            field.top >= Math.max(content.top, viewport.offsetTop) &&
+            field.bottom <= content.bottom &&
+            footer.bottom <= viewport.offsetTop + viewport.height
+          )
+        }),
+      )
+      .toBe(true)
+    await expect(input).toBeFocused()
+    await expect(input).toHaveValue("Keep this answer while the keyboard opens")
+  }
+  await page.evaluate(() => {
+    const viewport = window.visualViewport!
+    Object.defineProperties(viewport, {
+      height: { configurable: true, value: 844 },
+      offsetTop: { configurable: true, value: 0 },
+    })
+    viewport.dispatchEvent(new Event("resize"))
+  })
+  await expect(component.locator('[data-component="session-question-dock"]')).toHaveCSS("padding-bottom", "0px")
+  await expect(dock.getByRole("button", { name: "Next", exact: true })).toBeInViewport({ ratio: 1 })
+})

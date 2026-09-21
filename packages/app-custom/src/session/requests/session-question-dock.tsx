@@ -142,7 +142,7 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
   }
 
   const measure = () => {
-    if (!root) return
+    if (!root?.parentElement) return
 
     const dock = root.closest('[data-component="session-composer-dock"]')
     if (!(dock instanceof HTMLElement) || !dock.parentElement) return
@@ -153,14 +153,27 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     const viewport = window.visualViewport
     const top = Math.max(
       panel.top,
-      timeline?.getBoundingClientRect().top ?? panel.top,
-      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().bottom : 0,
+      (timeline?.getBoundingClientRect().top ?? panel.top) +
+        (head instanceof HTMLElement && head.classList.contains("sticky") ? head.offsetHeight : 0),
       viewport?.offsetTop ?? 0,
     )
     const bottom = Math.min(panel.bottom, (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight))
-    const below = Math.max(0, dock.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom)
+    // The iOS keyboard shrinks the visual viewport without resizing the layout.
+    // Reserve the covered area in flow so the footer moves above the keyboard.
+    const inset = Number.parseFloat(root.parentElement.style.paddingBottom) || 0
+    const below = Math.max(0, dock.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom - inset)
+    root.parentElement.style.paddingBottom = `${Math.max(0, panel.bottom - bottom)}px`
     const max = Math.max(0, Math.floor(bottom - top - below - 8))
     root.style.setProperty("--question-prompt-max-height", `${max}px`)
+
+    const input = root.querySelector('[data-slot="question-custom-input"]')
+    const content = root.querySelector('[data-slot="question-content"]')
+    if (!input || input !== document.activeElement || !(content instanceof HTMLElement)) return
+    const field = input.getBoundingClientRect()
+    const bounds = content.getBoundingClientRect()
+    // Scroll only the question content; scrolling the page pans the iOS viewport.
+    if (field.bottom > bounds.bottom) content.scrollTop += field.bottom - bounds.bottom + 8
+    if (field.top < bounds.top) content.scrollTop += field.top - bounds.top - 8
   }
 
   const clamp = (i: number) => Math.max(0, Math.min(count() - 1, i))
@@ -423,8 +436,9 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
 
   const focusCustom = (el: HTMLTextAreaElement) => {
     setTimeout(() => {
-      el.focus()
       resizeInput(el)
+      el.focus({ preventScroll: true })
+      measure()
     }, 0)
   }
 
