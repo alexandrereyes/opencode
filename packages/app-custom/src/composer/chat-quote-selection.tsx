@@ -5,6 +5,8 @@ import { Button } from "@opencode/ui-custom/button"
 import { Icon } from "@opencode/ui-custom/icon"
 import { useLanguage } from "@/runtime/i18n/language"
 import "./chat-quotes.css"
+import type { ChatQuote } from "./schema"
+import { captureChatQuoteAnchor } from "./chat-quote-anchor"
 
 export function selectedChatText(root: HTMLElement, selection: Selection | null) {
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return
@@ -21,13 +23,13 @@ export function selectedChatText(root: HTMLElement, selection: Selection | null)
   const partID = body.closest('[data-component="text-part"]')?.getAttribute("data-timeline-part-id")
   const text = selection.toString().trim()
   if (!partID || !text) return
-  return { partID, text, range }
+  return { partID, text, range, anchor: captureChatQuoteAnchor(body, range) }
 }
 
 export function ChatQuoteSelection(props: {
   root?: HTMLDivElement
   active: boolean
-  onQuote?: (partID: string, text: string) => void
+  onQuote?: (partID: string, text: string, anchor: ChatQuote["anchor"]) => void
   onAddToInput?: (text: string) => void
 }) {
   const language = useLanguage()
@@ -35,6 +37,7 @@ export function ChatQuoteSelection(props: {
     selection?: {
       partID: string
       text: string
+      anchor: ChatQuote["anchor"]
       anchorX: number
       top: number
       bottom: number
@@ -61,6 +64,7 @@ export function ChatQuoteSelection(props: {
       setState("selection", {
         partID: selected.partID,
         text: selected.text,
+        anchor: selected.anchor,
         anchorX: rect.left + rect.width / 2,
         top: rect.top,
         bottom: rect.bottom,
@@ -121,7 +125,7 @@ export function ChatQuoteSelection(props: {
                   onClick={() => {
                     const selected = selection()
                     dismiss()
-                    onQuote()(selected.partID, selected.text)
+                    onQuote()(selected.partID, selected.text, selected.anchor)
                   }}
                 >
                   <Icon name="comment" />

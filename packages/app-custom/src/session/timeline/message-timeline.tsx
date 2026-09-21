@@ -36,6 +36,8 @@ import { useSettings } from "@/settings/model"
 import { SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeader } from "@/session/header/session-header"
 import { ChatQuoteSelection } from "@/composer/chat-quote-selection"
+import { ChatQuoteAnchors } from "@/composer/chat-quote-anchors"
+import type { ComposerState } from "@/composer/state"
 import type { ChatQuote } from "@/composer/schema"
 import { userPresentation } from "../user-presentation"
 
@@ -352,6 +354,7 @@ export function SessionSummaryPanel(props: {
 }
 
 type MessageTimelineProps = {
+  quotes?: ComposerState["quotes"]
   onQuote?: (quote: Omit<ChatQuote, "id" | "comment">) => void
   onAddToInput?: (text: string) => void
   hideHeader?: boolean
@@ -663,12 +666,13 @@ function MessageTimelineView(
   })
   return (
     <>
+      <ChatQuoteAnchors root={quoteRoot.element} active={props.active !== false} quotes={props.quotes} />
       <ChatQuoteSelection
         root={quoteRoot.element}
         active={props.active !== false}
         onQuote={
           props.onQuote
-            ? (partID, text) => {
+            ? (partID, text, anchor) => {
                 const row = projection
                   .rows()
                   .find(
@@ -676,7 +680,7 @@ function MessageTimelineView(
                       row._tag === "AssistantPart" && row.group.type === "part" && row.group.ref.partID === partID,
                   )
                 if (row?._tag !== "AssistantPart" || row.group.type !== "part") return
-                props.onQuote?.({ messageID: row.group.ref.messageID, partID, text })
+                props.onQuote?.({ messageID: row.group.ref.messageID, partID, text, anchor })
               }
             : undefined
         }

@@ -180,6 +180,7 @@ export const ChatQuote = Persistence.struct({
   text: Schema.String,
   comment: Schema.String,
   commentPrompt: Persistence.optional(Prompt),
+  anchor: Persistence.optional(Persistence.struct({ start: Schema.Number, end: Schema.Number, exact: Schema.String })),
 })
 export type ChatQuote = typeof ChatQuote.Type
 

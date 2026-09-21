@@ -83,7 +83,8 @@ for (const width of [1440, 390]) {
     const action = page.getByRole("button", { name: "Comment", exact: true })
     await expect(action).toBeVisible()
     await action.click()
-    const quotes = page.locator('[data-component="chat-quotes"]')
+    const quotes = page.locator('[data-slot="chat-quote-popover"]')
+    const summary = page.locator('[data-slot="chat-quotes-summary"]')
     const comment = page.getByRole("textbox", { name: "Your comment", exact: true })
     await expect(comment).toBeFocused()
     const main = page.locator(".composer-main")
@@ -93,18 +94,17 @@ for (const width of [1440, 390]) {
       await expect(editor).toHaveCount(0)
       await expect(main).toBeHidden()
       expect(await main.evaluate((element) => element.getBoundingClientRect().height)).toBe(0)
-      await expect(page.getByRole("button", { name: "Chat quotes · 1", exact: true })).toHaveCount(0)
-      await expect(quotes.getByRole("blockquote")).toHaveCSS("-webkit-line-clamp", "3")
-      await expect(quotes.getByRole("blockquote")).toHaveCSS("overflow-y", "hidden")
+      await expect(page.getByRole("button", { name: "Chat quotes · 1", exact: true })).toBeVisible()
+      await expect(quotes.getByRole("blockquote")).toHaveCount(0)
     } else {
       await expect(editor).toBeVisible()
       const disclosure = page.getByRole("button", { name: "Chat quotes · 1", exact: true })
-      await disclosure.click()
+      await comment.press("Escape")
       await expect(comment).toHaveCount(0)
       await page.setViewportSize({ width: 390, height: 900 })
       await expect(disclosure).toBeVisible()
       await expect(editor).toBeVisible()
-      await disclosure.click()
+      await page.getByRole("button", { name: "Comment 1", exact: true }).click()
       await expect(comment).toBeFocused()
       await expect(main).toBeHidden()
       await page.setViewportSize({ width, height: 900 })
@@ -158,9 +158,7 @@ for (const width of [1440, 390]) {
         return blockers
       }),
     ).toEqual([])
-    const quoteList = quotes.locator('[data-slot="chat-quotes-list"]')
-    await expect(quoteList).toHaveCSS("max-height", width < 768 ? "none" : "360px")
-    await expect(quoteList).toHaveCSS("overflow-y", width < 768 ? "visible" : "auto")
+    await expect(quotes).toHaveCSS("position", "fixed")
     await expect
       .poll(() =>
         snippet.evaluate((element) => {
@@ -169,15 +167,6 @@ for (const width of [1440, 390]) {
         }),
       )
       .toBe(true)
-    await expect
-      .poll(() =>
-        comment.evaluate((element) => {
-          const anchor = element.closest('[data-component="composer"]')!.getBoundingClientRect()
-          const popup = document.querySelector('[data-component="composer-suggestions"]')!.getBoundingClientRect()
-          return anchor.top - popup.bottom
-        }),
-      )
-      .toBeCloseTo(8, 0)
     await page.screenshot({ path: info.outputPath(`chat-quote-snippets-${width}.png`) })
     if (width < 768) {
       // WebKit reports client rects relative to the panned visual viewport, while
@@ -270,7 +259,7 @@ for (const width of [1440, 390]) {
     await expect(toggle).toHaveAttribute("aria-expanded", "false")
     await expect(comment).toHaveCount(0)
     await toggle.click()
-    await expect(quotes.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
+    await expect(summary.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
 
     const secondText = part.getByText("Check the deployment configuration.", { exact: true })
     await secondText.evaluate((element) => {
@@ -282,13 +271,11 @@ for (const width of [1440, 390]) {
     await page.keyboard.press("Shift")
     await action.click()
     await expect(comment).toBeFocused()
-    await expect(quotes.getByRole("article")).toHaveCount(width < 768 ? 1 : 2)
-    await expect(quotes.locator('[data-slot="chat-quote"]')).toHaveCount(2)
-    await expect(quotes.getByRole("article").filter({ hasText: "Check the deployment configuration." })).toBeVisible()
+    await expect(quotes.getByRole("article")).toHaveCount(1)
+    await expect(summary.locator('[data-slot="chat-quote"]')).toHaveCount(2)
+    await expect(quotes.getByRole("article")).toBeVisible()
     await comment.fill("#")
     await expect(snippet).toBeVisible()
-    await expect(quoteList).toHaveCSS("max-height", width < 768 ? "none" : "360px")
-    await expect(quoteList).toHaveCSS("overflow-y", width < 768 ? "visible" : "auto")
     await expect
       .poll(() => snippet.evaluate((element) => element.getBoundingClientRect().bottom <= innerHeight))
       .toBe(true)
@@ -300,12 +287,12 @@ for (const width of [1440, 390]) {
     if (width >= 768) await expect(editor).toBeFocused()
     const twoQuotesToggle = page.getByRole("button", { name: "Chat quotes · 2", exact: true })
     await twoQuotesToggle.click()
-    await expect(quotes.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
-    const secondQuote = quotes.getByRole("article").filter({ hasText: "Check the deployment configuration." })
+    await expect(summary.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
+    const secondQuote = summary.getByRole("article").filter({ hasText: "Check the deployment configuration." })
     await expect(secondQuote.getByText("Second quote comment", { exact: true })).toBeVisible()
     await secondQuote.getByRole("button", { name: "Edit comment", exact: true }).click()
     await expect(comment).toHaveText("Second quote comment")
-    await secondQuote.getByRole("button", { name: "Remove quote", exact: true }).click()
+    await quotes.getByRole("button", { name: "Remove quote", exact: true }).click()
     await expect(comment).toHaveCount(0)
     await expect(editor).toBeVisible()
     await expect(toggle).toBeVisible()
@@ -354,7 +341,7 @@ for (const width of [1440, 390]) {
     await page.reload()
     await expect(toggle).toBeVisible()
     if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click()
-    await expect(quotes.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
+    await expect(summary.getByText("#review $audit @src/config.ts", { exact: true })).toBeVisible()
     await editor.click()
     await editor.press(width < 768 ? "Shift+Enter" : "Enter")
     await expect.poll(() => admissions.length).toBe(1)
@@ -382,7 +369,7 @@ for (const width of [1440, 390]) {
     await expect(toggle).toHaveCount(0)
     await editor.press("ArrowUp")
     await expect(comment).toHaveText("#review $audit @src/config.ts")
-    await page.getByRole("button", { name: "Remove quote", exact: true }).click()
+    await quotes.getByRole("button", { name: "Remove quote", exact: true }).click()
     await expect(toggle).toHaveCount(0)
     await expect(editor).toBeVisible()
   })

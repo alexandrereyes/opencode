@@ -91,7 +91,83 @@
   }
 }
 
+[data-component="chat-quote-anchors"] {
+  pointer-events: none;
+  [data-slot="quote-highlight"] {
+    position: fixed;
+    z-index: 20;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--v2-border-border-focus) 12%, transparent);
+    border-block-end: 1px solid color-mix(in srgb, var(--v2-border-border-focus) 40%, transparent);
+  }
+  [data-active="true"] [data-slot="quote-highlight"] {
+    background: color-mix(in srgb, var(--v2-border-border-focus) 28%, transparent);
+  }
+  [data-slot="quote-anchor"] {
+    pointer-events: auto;
+    position: absolute;
+    z-index: 21;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--v2-border-border-focus);
+    background: var(--v2-background-bg-layer-01);
+    color: var(--v2-text-text-base);
+    font-size: 12px;
+    line-height: var(--line-height-compact);
+    cursor: pointer;
+  }
+  [data-slot="quote-anchor-rail"] {
+    position: fixed;
+    z-index: 21;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    pointer-events: none;
+    overscroll-behavior: contain;
+  }
+  [data-slot="quote-anchor"]:focus-visible {
+    outline: 2px solid var(--v2-border-border-focus);
+    outline-offset: -2px;
+  }
+}
+
+[data-component="chat-quotes"][data-slot="chat-quote-popover"] {
+  position: fixed;
+  z-index: 40;
+  width: min(368px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  border-radius: 12px;
+  box-shadow: var(--v2-elevation-floating);
+  [data-slot="chat-quote"] {
+    width: 100%;
+  }
+  blockquote {
+    max-height: 60px;
+  }
+}
+
+[data-slot="chat-quotes-summary"] [data-slot="chat-quote"] {
+  padding-block: 6px;
+  blockquote,
+  p {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-block: 4px;
+  }
+}
+
 @media (max-width: 767px) {
+  [data-component="chat-quotes"][data-slot="chat-quote-popover"] {
+    inset-inline: 8px;
+    top: auto !important;
+    bottom: calc(
+      8px + var(--quote-viewport-bottom, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    );
+    width: auto;
+  }
   [data-component="composer-region"][data-editing-quote="true"] > .composer-main {
     display: none;
   }
