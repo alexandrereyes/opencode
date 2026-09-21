@@ -111,7 +111,7 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
 
   const summary = createMemo(() => {
     const n = Math.min(store.tab + 1, total())
-    return language.t("session.question.progress", { current: n, total: total() })
+    return language.plural("session.question.roundProgress", total(), { current: n, total: total() })
   })
   const customLabel = () => language.t("ui.messagePart.option.typeOwnAnswer")
   const customPlaceholder = () => language.t("ui.question.custom.placeholder")
@@ -485,7 +485,12 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
         onKeyDown={nav}
         header={
           <>
-            <div data-slot="question-header-title">{summary()}</div>
+            <div data-slot="question-header-title">
+              <Show when={question()?.header}>
+                <div data-slot="question-header-topic">{question()?.header}</div>
+              </Show>
+              <div data-slot="question-header-summary">{summary()}</div>
+            </div>
             <div data-slot="question-header-actions">
               <Show when={total() > 1}>
                 <div data-slot="question-progress">

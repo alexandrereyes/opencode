@@ -1072,6 +1072,8 @@ export const dict = {
   "session.todo.expand": "Expand",
   "session.todo.progress": "{{done}} of {{total}} todos completed",
   "session.question.progress": "{{current}} of {{total}} questions",
+  "session.question.roundProgress.one": "Question {{current}} of {{total}} in this round",
+  "session.question.roundProgress.other": "Question {{current}} of {{total}} in this round",
   "session.websearch.title": "Third-party web search",
   "session.websearch.description": "Select the search provider agents use to search the web",
   "session.websearch.provider": "Search provider",
