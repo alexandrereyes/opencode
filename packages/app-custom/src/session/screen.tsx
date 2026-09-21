@@ -63,7 +63,7 @@ export function SessionScreen(props: { session: SessionModel }) {
     sessionID: session.identity.sessionID,
     scrollRef: timeline.scroller,
     revealMessage: timeline.actions.revealMessage,
-    pauseAutoScroll: timeline.view.unpin,
+    pauseAutoScroll: timeline.view.pause,
   })
   const messagesReady = timeline.ready
   const [store, setStore] = createStore({
@@ -248,6 +248,8 @@ export function SessionScreen(props: { session: SessionModel }) {
         onHistoryScroll={timeline.view.onHistoryScroll}
         onSelectionInteraction={timeline.view.selectionInteraction}
         pinned={timeline.view.pinned()}
+        restoreReading={timeline.view.restoreReading()}
+        history={timeline.view.history}
         centered={screen.centered()}
         reserveReviewToggle={!sideVisible()}
         setContentRef={timeline.view.setContentRef}

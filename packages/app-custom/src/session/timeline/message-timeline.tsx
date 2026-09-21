@@ -369,6 +369,13 @@ type MessageTimelineProps = {
   onHistoryScroll: () => void
   onSelectionInteraction: (event: MouseEvent) => void
   pinned: boolean
+  restoreReading: boolean
+  history: {
+    more: Accessor<boolean>
+    loading: Accessor<boolean>
+    settled: Accessor<boolean>
+    loadOlder: () => Promise<void>
+  }
   centered: boolean
   reserveReviewToggle: boolean
   setContentRef: (el: HTMLDivElement) => void
@@ -483,7 +490,9 @@ function MessageTimelineView(
   const [quoteRoot, setQuoteRoot] = createStore<{ element?: HTMLDivElement }>({})
   const virtualized = createTimelineVirtualizer({
     active: () => props.active !== false,
-    sessionKey: () => `${server.key}/${props.data.sessionID()}`,
+    sessionKey: props.session.identity.sessionKey,
+    restoreReading: () => props.restoreReading,
+    history: props.history,
     presentationKey: () => JSON.stringify(props.data.timelineDetail()),
     projection,
     showHeader,

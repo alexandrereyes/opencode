@@ -7,6 +7,7 @@ import { useLayout } from "@/shell/state/layout"
 import type { SessionModel } from "../model"
 import { useSessionHashScroll } from "../use-session-hash-scroll"
 import { createTimelineModel } from "./model"
+import { readingPosition } from "./reading-position"
 
 export function createSessionTimelineInteraction(session: SessionModel) {
   const layout = useLayout()
@@ -21,7 +22,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     },
     follow: {
       sessionKey: session.identity.sessionKey(),
-      pinned: true,
+      pinned: !location.hash && (readingPosition.get(session.identity.sessionKey())?.pinned ?? true),
     },
     refs: {
       scroller: undefined as HTMLDivElement | undefined,
@@ -31,11 +32,27 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   })
   // The single source of truth for "follow the newest content". The virtualizer pins and unpins
   // it from scroll geometry; everything else only expresses explicit intent.
-  const pinned = () => state.follow.sessionKey !== session.identity.sessionKey() || state.follow.pinned
-  const pin = () => setState("follow", { sessionKey: session.identity.sessionKey(), pinned: true })
+  const explicitNavigation = () =>
+    !!location.hash || !!state.pendingMessage || !!layout.pendingMessage.peek(session.identity.sessionKey())
+  const pinned = () =>
+    !explicitNavigation() &&
+    (state.follow.sessionKey === session.identity.sessionKey()
+      ? state.follow.pinned
+      : (readingPosition.get(session.identity.sessionKey())?.pinned ?? true))
+  const pin = () => {
+    // Arriving at the end is new navigation intent, even while a message hash
+    // still masks follow. Clear it here rather than waiting for pinned to change.
+    if (location.hash) clearMessageHash()
+    readingPosition.follow(session.identity.sessionKey(), true)
+    setState("follow", { sessionKey: session.identity.sessionKey(), pinned: true })
+  }
+  const pause = () => {
+    readingPosition.follow(session.identity.sessionKey(), false)
+    setState("follow", { sessionKey: session.identity.sessionKey(), pinned: false })
+  }
   const unpin = () => {
     if (!scroller || scroller.scrollHeight - scroller.clientHeight <= 1) return
-    setState("follow", { sessionKey: session.identity.sessionKey(), pinned: false })
+    pause()
   }
   let scroller: HTMLDivElement | undefined
   let dockHeight = 0
@@ -111,10 +128,9 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     setPendingMessage: (value) => setState("pendingMessage", value),
     setActiveMessage,
     follow: {
-      unpin,
+      unpin: pause,
       toBottom: () => {
-        pin()
-        scrollToEnd()
+        if (pinned()) scrollToEnd()
       },
     },
     scroller: () => scroller,
@@ -141,7 +157,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       resume()
       return
     }
-    unpin()
+    pause()
     scrollToMessage(messages[target], "auto")
   }
   // A gesture inside a nested scrollable region scrolls that region, not the timeline.
@@ -215,7 +231,10 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     on(
       session.identity.sessionKey,
       () => {
-        pin()
+        setState("follow", {
+          sessionKey: session.identity.sessionKey(),
+          pinned: !location.hash && (readingPosition.get(session.identity.sessionKey())?.pinned ?? true),
+        })
         setState("messageID", undefined)
         setState("pendingMessage", undefined)
         setState("scroll", { overflow: false, jump: false })
@@ -228,18 +247,17 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       () => session.identity.params.id,
       (id, previous) => {
         if (!id || !previous || id === previous || state.messageID || state.pendingMessage || location.hash) return
-        pin()
-        scrollToEnd()
+        if (pinned()) scrollToEnd()
       },
     ),
   )
   createEffect(
     on(
-      pinned,
-      (value) => {
+      () => [pinned(), session.identity.sessionKey()] as const,
+      ([value, key], previous) => {
         if (!value) return
         setState("messageID", undefined)
-        clearMessageHash()
+        if (previous?.[1] === key) clearMessageHash()
       },
       { defer: true },
     ),
@@ -302,6 +320,9 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     scroll: state.scroll,
     scroller: () => state.refs.scroller,
     view: {
+      restoreReading: () => !explicitNavigation(),
+      pause,
+      history: { ...timeline.history, settled: () => !timeline.resource.loading },
       anchor,
       markUserScroll,
       onHistoryScroll,
