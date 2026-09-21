@@ -151,13 +151,17 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     const timeline = dock.previousElementSibling
     const head = timeline?.querySelector(".scroll-view__viewport")?.firstElementChild
     const viewport = window.visualViewport
+    // WebKit can pan DOMRects with the visual viewport on input focus. Translate
+    // its page coordinate through the document rect instead of mixing offsetTop
+    // (layout coordinates) with the panel's client coordinates.
+    const viewportTop = viewport ? viewport.pageTop + document.documentElement.getBoundingClientRect().top : 0
     const top = Math.max(
       panel.top,
       (timeline?.getBoundingClientRect().top ?? panel.top) +
         (head instanceof HTMLElement && head.classList.contains("sticky") ? head.offsetHeight : 0),
-      viewport?.offsetTop ?? 0,
+      viewportTop,
     )
-    const bottom = Math.min(panel.bottom, (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight))
+    const bottom = Math.min(panel.bottom, viewportTop + (viewport?.height ?? window.innerHeight))
     // The iOS keyboard shrinks the visual viewport without resizing the layout.
     // Reserve the covered area in flow so the footer moves above the keyboard.
     const inset = Number.parseFloat(root.parentElement.style.paddingBottom) || 0

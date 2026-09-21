@@ -55,6 +55,7 @@ story("keeps the text answer above a keyboard that only resizes the visual viewp
       Object.defineProperties(viewport, {
         height: { configurable: true, value: 390 },
         offsetTop: { configurable: true, value: offset },
+        pageTop: { configurable: true, value: offset },
       })
       viewport.dispatchEvent(new Event("resize"))
       viewport.dispatchEvent(new Event("scroll"))
@@ -82,9 +83,46 @@ story("keeps the text answer above a keyboard that only resizes the visual viewp
     Object.defineProperties(viewport, {
       height: { configurable: true, value: 844 },
       offsetTop: { configurable: true, value: 0 },
+      pageTop: { configurable: true, value: 0 },
     })
     viewport.dispatchEvent(new Event("resize"))
   })
   await expect(component.locator('[data-component="session-question-dock"]')).toHaveCSS("padding-bottom", "0px")
   await expect(dock.getByRole("button", { name: "Next", exact: true })).toBeInViewport({ ratio: 1 })
+})
+
+story("keeps the question expanded when WebKit pans client rectangles with the keyboard", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const component = await mount("app-current-session-surface--long-question-request")
+  const dock = component.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await dock.getByRole("radio", { name: /Type your own answer/ }).click()
+  await dock.locator("textarea").fill("Answer during viewport panning")
+  // Model WebKit's visual-relative DOMRects, not just a smaller viewport.
+  await page.evaluate(() => {
+    document.documentElement.style.transform = "translateY(-450px)"
+    Object.defineProperties(window.visualViewport!, {
+      height: { configurable: true, value: 390 },
+      offsetTop: { configurable: true, value: 450 },
+      pageTop: { configurable: true, value: 450 },
+    })
+    window.visualViewport!.dispatchEvent(new Event("resize"))
+    window.visualViewport!.dispatchEvent(new Event("scroll"))
+  })
+  await expect
+    .poll(() =>
+      dock.evaluate((element) => {
+        const input = element.querySelector("textarea")!.getBoundingClientRect()
+        const content = element.querySelector('[data-slot="question-content"]')!.getBoundingClientRect()
+        const footer = element.querySelector('[data-slot="question-footer"]')!.getBoundingClientRect()
+        return (
+          content.height >= 100 &&
+          input.top >= Math.max(0, content.top) &&
+          input.bottom <= content.bottom &&
+          footer.bottom <= 390
+        )
+      }),
+    )
+    .toBe(true)
+  await expect(dock.locator("textarea")).toBeFocused()
+  await expect(dock.locator("textarea")).toHaveValue("Answer during viewport panning")
 })
