@@ -308,19 +308,94 @@ export function portFree(port: number) {
   }
 }
 
-function launchd(home: string): Service {
+export async function launchctl(args: string[]) {
+  const child = Bun.spawn(["/bin/launchctl", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, LC_ALL: "C" },
+    timeout: 10_000,
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { stdout, stderr, code }
+}
+
+export function launchd(
+  home: string,
+  host = {
+    run: launchctl,
+    async alive(pid: number) {
+      const child = Bun.spawn(["/bin/ps", "-p", String(pid), "-o", "pid="], {
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 10_000,
+      })
+      const [output, error, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ])
+      if (code === 0) return output.trim() === String(pid)
+      if (code === 1 && !output.trim() && !error.trim()) return false
+      throw new Error(`Cannot inspect previous process ${pid}: ${error}`)
+    },
+    now: Date.now,
+    sleep: (ms: number) => Bun.sleep(ms),
+  },
+): Service {
   const domain = `gui/${process.getuid!()}`
+  const target = `${domain}/${label}`
+  const query = async () => {
+    const result = await host.run(["print", target])
+    if (result.code !== 0) {
+      // Missing domains and permission errors do not prove that the job is gone.
+      if (result.code === 113 && result.stderr.includes(`Could not find service "${label}" in domain`)) return
+      throw new Error(`launchctl print failed (${result.code}): ${result.stderr.trim()}`)
+    }
+    if (result.stdout.match(/^\s*program = (.+)$/m)?.[1] !== `${home}/bin/serve`)
+      throw new Error(`${label} belongs to another runtime; refusing lifecycle operation`)
+    return { pid: Number(result.stdout.match(/^\s*pid = (\d+)$/m)?.[1]) || undefined }
+  }
   return {
     async stop() {
-      const loaded = Bun.spawn(["launchctl", "print", `${domain}/${label}`], { stdout: "pipe", stderr: "ignore" })
-      const output = await new Response(loaded.stdout).text()
-      if ((await loaded.exited) !== 0) return
-      if (output.match(/^\s*program = (.+)$/m)?.[1] !== `${home}/bin/serve`)
-        throw new Error(`${label} belongs to another runtime; refusing to stop it`)
-      await command(["launchctl", "bootout", `${domain}/${label}`])
+      const loaded = await query()
+      if (!loaded) return
+      const pids = new Set(loaded.pid ? [loaded.pid] : [])
+      const result = await host.run(["bootout", target])
+      if (result.code !== 0) throw new Error(`launchctl bootout failed (${result.code}): ${result.stderr.trim()}`)
+      const deadline = host.now() + 65_000
+      while (true) {
+        const registered = await query()
+        if (registered?.pid) pids.add(registered.pid)
+        const alive = (await Promise.all([...pids].map((pid) => host.alive(pid)))).some(Boolean)
+        if (!registered && !alive) return
+        if (host.now() >= deadline)
+          throw new Error(`launchd stop timed out: registered=${!!registered}, previousProcessAlive=${alive}`)
+        await host.sleep(250)
+      }
     },
     async start() {
-      await command(["launchctl", "bootstrap", domain, `${home}/${label}.plist`])
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (await query()) return // Activation still requires exact authenticated health.
+        const result = await host.run(["bootstrap", domain, `${home}/${label}.plist`])
+        if (result.code === 0) return
+        const error = new Error(
+          `launchctl bootstrap failed (${result.code}), attempt ${attempt}: ${result.stderr.trim()}`,
+        )
+        console.error(`${new Date().toISOString()} ${error.message}`)
+        if (
+          await query().catch((failure: unknown) => {
+            throw new Error(`${error.message}; reconciliation failed: ${String(failure)}`, { cause: error })
+          })
+        )
+          return
+        // Generic EIO (5) alone is permanent; require an explicit in-progress response.
+        if (attempt === 3 || !/Operation (?:already |now )?in progress/i.test(result.stderr)) throw error
+        await host.sleep(250 * attempt)
+      }
     },
   }
 }
@@ -338,7 +413,13 @@ export async function backup(database: string, destination: string) {
 export async function activate(
   home: string,
   commit: string,
-  options: { dryRun?: boolean; rollback?: boolean; compatible?: boolean; skipBackup?: boolean },
+  options: {
+    dryRun?: boolean
+    rollback?: boolean
+    compatible?: boolean
+    skipBackup?: boolean
+    report?: (phase: string) => Promise<void>
+  },
   service = launchd(home),
 ) {
   const release = await manifest(home, commit)
@@ -373,17 +454,21 @@ export async function activate(
     await mkdir(save, { recursive: true, mode: 0o700 })
     await Bun.write(`${save}/activation.json`, JSON.stringify({ previous, target: commit, database: config.database }))
   }
+  await reportProgress(options.report, "stopping")
   await service.stop()
-  // bootout may return before process exit. Never snapshot or start another writer until the port closes.
+  await reportProgress(options.report, "waiting-port")
+  // launchd removal and previous process exit are confirmed by stop; the port is a separate condition.
   for (let attempt = 0; attempt < 65; attempt++) {
     if (portFree(config.port)) break
     if (attempt === 64) throw new Error("Server did not stop; current is unchanged")
     await Bun.sleep(1000)
   }
   if (save) {
+    await reportProgress(options.report, "backup")
     await backup(config.database, `${save}/database.sqlite`)
     console.log(`Consistent database backup: ${save}/database.sqlite`)
   }
+  await reportProgress(options.report, "switching")
   await mkdir(`${home}/bin`, { recursive: true })
   await mkdir(`${home}/logs`, { recursive: true })
   const wrappers = scripts(home, config)
@@ -395,7 +480,9 @@ export async function activate(
   if (previous && previous !== commit) await point(home, "previous", previous)
   await point(home, "current", commit)
   try {
+    await reportProgress(options.report, "starting")
     await service.start()
+    await reportProgress(options.report, "healthcheck")
     for (let attempt = 0; attempt < 90; attempt++) {
       const result = await health(home, config.port)
       if (result.ready && result.version === release.version) {
@@ -406,11 +493,23 @@ export async function activate(
     }
     throw new Error("Healthcheck timed out")
   } catch (error) {
-    await service.stop()
+    const cleanup = await service.stop().then(
+      () => "stopped",
+      (failure: unknown) => `cleanup failed: ${String(failure)}`,
+    )
     throw new Error(
-      `Release failed to start and was stopped. current remains ${commit}; previous=${previous ?? "none"}. Database may have migrated. ${save ? `Backup: ${save}/database.sqlite.` : "No database backup was created."} Review logs and migrations before custom:rollback --database-compatible.`,
+      `Release failed to start (${cleanup}). Original error: ${String(error)}. current remains ${commit}; previous=${previous ?? "none"}. Database may have migrated. ${save ? `Backup: ${save}/database.sqlite.` : "No database backup was created."} Review logs and migrations before custom:rollback --database-compatible.`,
       { cause: error },
     )
+  }
+}
+
+async function reportProgress(report: ((phase: string) => Promise<void>) | undefined, phase: string) {
+  // Observability failures must never interrupt activation or trigger service cleanup.
+  try {
+    await report?.(phase)
+  } catch (error) {
+    console.error(`${new Date().toISOString()} Could not report operation phase ${phase}:`, error)
   }
 }
 
@@ -466,7 +565,30 @@ async function main() {
       )
     })
   }
+  const journal = dryRun
+    ? undefined
+    : `${home}/logs/operations/${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}.json`
+  const record = {
+    action,
+    target: "",
+    started: new Date().toISOString(),
+    phase: "preflight",
+    outcome: "running",
+    error: "",
+    events: [] as { phase: string; at: string }[],
+  }
+  const report = async (phase: string) => {
+    record.phase = phase
+    record.events.push({ phase, at: new Date().toISOString() })
+    console.log(`${new Date().toISOString()} custom:${action} ${phase}`)
+    if (!journal) return
+    await mkdir(path.dirname(journal), { recursive: true, mode: 0o700 })
+    await Bun.write(`${journal}.tmp`, JSON.stringify(record, null, 2), { mode: 0o600 })
+    await chmod(`${journal}.tmp`, 0o600)
+    await rename(`${journal}.tmp`, journal)
+  }
   try {
+    await reportProgress(report, action === "prepare" || action === "update" ? "preparing" : "preflight")
     if (action === "migrate") {
       const { migrate } = await import("./custom-migrate")
       return await migrate(home, os.homedir(), {
@@ -481,8 +603,9 @@ async function main() {
       action === "prepare" || action === "update"
         ? await prepare(home, dryRun)
         : (args.find((arg) => sha.test(arg)) ?? (await pointer(home, action === "rollback" ? "previous" : "prepared")))
-    if (action === "prepare") return
     if (!commit) throw new Error("No prepared/previous release; provide its full SHA")
+    record.target = commit
+    if (action === "prepare") return
     if (dryRun && action === "update") {
       console.log(`Then activate ${commit} without database backup and with authenticated healthcheck`)
       return
@@ -492,8 +615,16 @@ async function main() {
       rollback: action === "rollback",
       compatible,
       skipBackup: action === "update",
+      report,
     })
+  } catch (error) {
+    record.outcome = "failed"
+    record.error = String(error)
+    throw error
   } finally {
+    if (record.outcome === "running") record.outcome = "succeeded"
+    await reportProgress(report, record.phase)
+    if (journal) console.log(`Operation result: ${journal}`)
     if (!dryRun)
       await rm(`${home}/.manual-lock`, { recursive: true }).catch((error) =>
         console.error("Could not remove manual lock:", error),

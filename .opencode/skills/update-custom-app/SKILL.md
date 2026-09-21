@@ -61,6 +61,10 @@ restore it after the update finishes, including when the update fails.
   repository.
 - Preserve output in the tmux pane or a private temporary log so a failed update can
   be diagnosed after the original service stops.
+  Each run prints its private `$TMPDIR/opencode/opencode-custom-update.*/` directory;
+  inspect `result.txt` and `output.log` there after tmux closes. Runs never overwrite
+  earlier diagnostics. `outcome=succeeded` means exact release verification passed;
+  `notification=failed` is a separate delivery failure, not an activation failure.
 - The initiating agent may report that the update was started, but must not claim it
   completed before the detached job verifies it.
 - Run the runner as the tmux session's command, without `remain-on-exit` or an

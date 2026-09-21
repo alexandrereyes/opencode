@@ -106,7 +106,8 @@ health response and exact running version after activation.
 
 Explicit `custom:activate`, rollback and one-time migration retain the backup step.
 Activation controls only `local.opencode.custom-manual`. It unloads that job, waits
-for the port to close, takes a consistent SQLite `.backup` using the system `sqlite3`
+up to 65 seconds for launchd registration removal and the previous PID to exit, then
+up to 65 port checks for the port to close, takes a consistent SQLite `.backup` using the system `sqlite3`
 and checks it with `PRAGMA quick_check`. Missing database, password or sqlite3 aborts
 the operation. Backups live under `backups/<timestamp>-<uuid>/database.sqlite` with an
 `activation.json` identifying the previous/target release and database path. These
@@ -117,6 +118,23 @@ job and waits up to 90 checks for **authenticated HTTP 200 with the exact target
 version**. It preserves the password, database and config paths. This is an explicit
 service interruption; schedule it between active work where possible. Existing TUI
 processes keep their already-loaded version: reopen them with `opencode2` afterward.
+
+Bootstrap reconciles an already registered, runtime-owned job through the same health
+check. An explicit `Operation already in progress` response may be retried at most
+three times for the same release, with registration queried before every attempt.
+Generic input/output error 5 alone is not treated as transient. Query permission/domain
+errors abort rather than masquerading as a missing job. Ownership is checked on every
+successful query; an unexpected owner is never unloaded.
+
+Manual operations retain private timestamped JSON results under
+`<runtime>/logs/operations/`, including phases, times, outcome and original failure.
+These remain after subsequent recovery. The detached skill runner additionally prints
+a unique `$TMPDIR/opencode/opencode-custom-update.*/` directory containing `output.log`
+and `result.txt`, including pull/build failures. Inspect those files after tmux closes;
+successful activation and completion-notification delivery have separate outcomes.
+Progress and result writes are best-effort: a write failure emits a diagnostic on
+stderr but never interrupts activation or triggers service cleanup. If storage is
+unavailable, the JSON result may be absent or stale; consult the command output.
 
 If startup fails, the attempted service is unloaded, `current` remains on the failed
 release, and `previous` plus any backup created are retained. There is deliberately **no

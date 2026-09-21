@@ -12,6 +12,8 @@ import {
   backup,
   command,
   health,
+  launchd,
+  label,
   manifest,
   plist,
   point,
@@ -26,6 +28,149 @@ import {
 const first = "a".repeat(40)
 const second = "b".repeat(40)
 const homes: string[] = []
+
+function launchHost(home: string) {
+  const state = {
+    time: 0,
+    registered: true,
+    alive: true,
+    bootouts: 0,
+    bootstraps: 0,
+    owner: home,
+    queryError: false,
+    transient: 0,
+    permanent: false,
+    stuck: false,
+  }
+  const host = {
+    async run(args: string[]) {
+      if (args[0] === "print") {
+        if (state.queryError) return { code: 1, stdout: "", stderr: "Permission denied" }
+        return state.registered
+          ? { code: 0, stdout: `program = ${state.owner}/bin/serve\npid = 12345\n`, stderr: "" }
+          : { code: 113, stdout: "", stderr: `Could not find service "${label}" in domain for user gui` }
+      }
+      if (args[0] === "bootout") {
+        state.bootouts++
+        return { code: 0, stdout: "", stderr: "" }
+      }
+      state.bootstraps++
+      if (state.permanent) return { code: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error" }
+      if (state.bootstraps <= state.transient) return { code: 37, stdout: "", stderr: "Operation already in progress" }
+      state.registered = true
+      return { code: 0, stdout: "", stderr: "" }
+    },
+    async alive() {
+      return state.alive
+    },
+    now: () => state.time,
+    async sleep(ms: number) {
+      state.time += ms
+      if (state.stuck || !state.bootouts) return
+      if (state.time >= 500) state.registered = false
+      if (state.time >= 1000) state.alive = false
+    },
+  }
+  return { state, host }
+}
+
+test("launchd waits for both removal and process exit even with a free port", async () => {
+  const home = await fixture()
+  const fixtureHost = launchHost(home)
+  const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  const port = socket.port
+  socket.stop(true)
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
+  const service = launchd(home, fixtureHost.host)
+  const server = { value: undefined as ReturnType<typeof Bun.serve> | undefined }
+  const run = fixtureHost.host.run
+  fixtureHost.host.run = async (args) => {
+    if (args[0] === "bootstrap") {
+      expect(fixtureHost.state.time).toBe(1000)
+      expect(fixtureHost.state.alive).toBe(false)
+      expect(await pointer(home, "current")).toBe(second)
+      server.value = Bun.serve({
+        hostname: "127.0.0.1",
+        port,
+        fetch: () => Response.json({ version: `0.0.0-custom.${second}` }),
+      })
+    }
+    return run(args)
+  }
+  try {
+    await activate(home, second, { skipBackup: true }, service)
+  } finally {
+    await server.value?.stop(true)
+  }
+  expect(fixtureHost.state.bootstraps).toBe(1)
+})
+
+test("launchd retries explicit in-progress responses but reconciles a registered job", async () => {
+  const fixtureHost = launchHost("/fixture")
+  fixtureHost.state.registered = false
+  fixtureHost.state.transient = 1
+  const service = launchd("/fixture", fixtureHost.host)
+  await service.start()
+  expect(fixtureHost.state.bootstraps).toBe(2)
+  await service.start()
+  expect(fixtureHost.state.bootstraps).toBe(2)
+})
+
+test.each(["permanent", "transient"])("launchd bounds %s bootstrap failure", async (kind) => {
+  const fixtureHost = launchHost("/fixture")
+  fixtureHost.state.registered = false
+  fixtureHost.state.permanent = kind === "permanent"
+  fixtureHost.state.transient = 10
+  await expect(launchd("/fixture", fixtureHost.host).start()).rejects.toThrow("bootstrap failed")
+  expect(fixtureHost.state.bootstraps).toBe(kind === "permanent" ? 1 : 3)
+})
+
+test("bootstrap error with an owned registration reconciles without another bootstrap", async () => {
+  const fixtureHost = launchHost("/fixture")
+  fixtureHost.state.registered = false
+  const run = fixtureHost.host.run
+  fixtureHost.host.run = async (args) => {
+    const result = await run(args)
+    if (args[0] === "bootstrap") return { code: 5, stdout: "", stderr: "Input/output error" }
+    return result
+  }
+  await launchd("/fixture", fixtureHost.host).start()
+  expect(fixtureHost.state.bootstraps).toBe(1)
+})
+
+test("ownership change during teardown aborts without unloading the new owner", async () => {
+  const fixtureHost = launchHost("/fixture")
+  const run = fixtureHost.host.run
+  fixtureHost.host.run = async (args) => {
+    const result = await run(args)
+    if (args[0] === "bootout") fixtureHost.state.owner = "/other"
+    return result
+  }
+  await expect(launchd("/fixture", fixtureHost.host).stop()).rejects.toThrow("another runtime")
+  expect(fixtureHost.state.bootouts).toBe(1)
+  expect(fixtureHost.state.bootstraps).toBe(0)
+})
+
+test("launchd teardown timeout and unknown ownership prevent pointer switch", async () => {
+  const home = await fixture()
+  const fixtureHost = launchHost(home)
+  fixtureHost.state.stuck = true
+  const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: socket.port }))
+  socket.stop(true)
+  await expect(activate(home, second, { skipBackup: true }, launchd(home, fixtureHost.host))).rejects.toThrow(
+    "timed out",
+  )
+  expect(fixtureHost.state.time).toBe(65_000)
+  expect(await pointer(home, "current")).toBe(first)
+  fixtureHost.state.owner = "/other"
+  await expect(launchd(home, fixtureHost.host).stop()).rejects.toThrow("another runtime")
+  await expect(launchd(home, fixtureHost.host).start()).rejects.toThrow("another runtime")
+  expect(fixtureHost.state.bootouts).toBe(1)
+  expect(fixtureHost.state.bootstraps).toBe(0)
+  fixtureHost.state.queryError = true
+  await expect(launchd(home, fixtureHost.host).stop()).rejects.toThrow("Permission denied")
+})
 
 test("shared server config includes the native Safari DevTools MCP server", () => {
   expect(serverConfig("/release/plugin")).toEqual({
@@ -361,6 +506,97 @@ test.each([false, true])(
     expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 0 : 1)
   },
 )
+
+test.each(["waiting-port", "healthcheck"])("reporter failure at %s does not interrupt activation", async (phase) => {
+  const home = await fixture()
+  const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  const port = socket.port
+  socket.stop(true)
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
+  const state = {
+    stops: 0,
+    starts: 0,
+    reports: [] as string[],
+    server: undefined as ReturnType<typeof Bun.serve> | undefined,
+  }
+  try {
+    await activate(
+      home,
+      second,
+      {
+        skipBackup: true,
+        async report(value) {
+          state.reports.push(value)
+          if (value === phase) {
+            expect(state.stops).toBe(1)
+            expect(state.starts).toBe(phase === "healthcheck" ? 1 : 0)
+            throw new Error("fixture journal IO failure")
+          }
+        },
+      },
+      {
+        async stop() {
+          state.stops++
+        },
+        async start() {
+          state.starts++
+          state.server = Bun.serve({
+            hostname: "127.0.0.1",
+            port,
+            fetch(request) {
+              if (
+                request.headers.get("authorization") !==
+                `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`
+              )
+                return new Response(null, { status: 401 })
+              return Response.json({ version: `0.0.0-custom.${second}` })
+            },
+          })
+        },
+      },
+    )
+    expect(state.reports).toContain(phase)
+    expect(state.stops).toBe(1)
+    expect(state.starts).toBe(1)
+    expect(await health(home, port)).toMatchObject({ ready: true, version: `0.0.0-custom.${second}` })
+    expect(await pointer(home, "current")).toBe(second)
+  } finally {
+    await state.server?.stop(true)
+  }
+})
+
+test("cleanup failure retains the original startup cause", async () => {
+  const home = await fixture()
+  const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: socket.port }))
+  socket.stop(true)
+  const original = new Error("fixture original bootstrap failure")
+  const state = { stops: 0 }
+  const error = await activate(
+    home,
+    second,
+    { skipBackup: true },
+    {
+      async stop() {
+        state.stops++
+        if (state.stops === 2) throw new Error("fixture cleanup failure")
+      },
+      async start() {
+        throw original
+      },
+    },
+  ).then(
+    () => undefined,
+    (failure: unknown) => failure,
+  )
+  expect(error).toBeInstanceOf(Error)
+  if (!(error instanceof Error)) throw new Error("Expected activation failure")
+  expect(error.cause).toBe(original)
+  expect(error.message).toContain("fixture original bootstrap failure")
+  expect(error.message).toContain("cleanup failed: Error: fixture cleanup failure")
+  expect(state.stops).toBe(2)
+  expect(await pointer(home, "current")).toBe(second)
+})
 
 test("another service on the configured port is never stopped, including a non-JSON 401", async () => {
   const home = await fixture()
