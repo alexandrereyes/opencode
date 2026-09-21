@@ -965,6 +965,7 @@
 
   [data-slot="question-header"] {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -1036,6 +1037,8 @@
     gap: 4px;
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   [data-slot="question-text"] {
@@ -1066,9 +1069,9 @@
     gap: 6px;
     margin-top: 12px;
     padding: 1px 1px 16px;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
 

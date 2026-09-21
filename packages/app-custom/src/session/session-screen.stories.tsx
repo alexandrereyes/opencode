@@ -138,6 +138,40 @@ export const QuestionRequest = {
   ),
 }
 
+export const LongQuestionRequest = {
+  render: () => {
+    const content = {
+      description:
+        "Should voice and video calls be included in the first release? They require call controls, audio and video transport, and recording in addition to messaging. ".repeat(
+          4,
+        ),
+      options: Array.from({ length: 8 }, (_, index) => ({
+        value: `scope-${index}`,
+        label: `Release scope ${index + 1}`,
+        description:
+          "Include messaging, account operations, groups, statuses and channels. Calls require additional streaming and recording decisions before implementation.",
+      })),
+    }
+    return (
+      <SessionPreview
+        title="Choose the first release scope"
+        description={description}
+        document={questionPendingDocument}
+        request={{
+          type: "question",
+          value: {
+            ...activeQuestionRequest,
+            fields: [
+              { ...activeQuestionRequest.fields[0], ...content },
+              { ...activeQuestionRequest.fields[1], ...content },
+            ],
+          },
+        }}
+      />
+    )
+  },
+}
+
 export const WebSearchRequest = {
   render: () => (
     <SessionPreview

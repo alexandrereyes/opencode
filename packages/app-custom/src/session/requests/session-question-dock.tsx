@@ -144,22 +144,22 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
   const measure = () => {
     if (!root) return
 
-    const scroller = document.querySelector(".scroll-view__viewport")
-    const head = scroller instanceof HTMLElement ? scroller.firstElementChild : undefined
-    const top =
-      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().bottom : 0
-    if (!top) {
-      root.style.removeProperty("--question-prompt-max-height")
-      return
-    }
-
     const dock = root.closest('[data-component="session-composer-dock"]')
-    if (!(dock instanceof HTMLElement)) return
+    if (!(dock instanceof HTMLElement) || !dock.parentElement) return
 
-    const dockBottom = dock.getBoundingClientRect().bottom
-    const below = Math.max(0, dockBottom - root.getBoundingClientRect().bottom)
-    const gap = 8
-    const max = Math.max(240, Math.floor(dockBottom - top - gap - below))
+    const panel = dock.parentElement.getBoundingClientRect()
+    const timeline = dock.previousElementSibling
+    const head = timeline?.querySelector(".scroll-view__viewport")?.firstElementChild
+    const viewport = window.visualViewport
+    const top = Math.max(
+      panel.top,
+      timeline?.getBoundingClientRect().top ?? panel.top,
+      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().bottom : 0,
+      viewport?.offsetTop ?? 0,
+    )
+    const bottom = Math.min(panel.bottom, (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight))
+    const below = Math.max(0, dock.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom)
+    const max = Math.max(0, Math.floor(bottom - top - below - 8))
     root.style.setProperty("--question-prompt-max-height", `${max}px`)
   }
 
@@ -199,10 +199,13 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     update()
 
     makeEventListener(window, "resize", update)
+    if (window.visualViewport) {
+      makeEventListener(window.visualViewport, "resize", update)
+      makeEventListener(window.visualViewport, "scroll", update)
+    }
 
     const dock = root?.closest('[data-component="session-composer-dock"]')
-    const scroller = document.querySelector(".scroll-view__viewport")
-    createResizeObserver([dock, scroller], update)
+    createResizeObserver([dock, dock?.parentElement, dock?.previousElementSibling], update)
 
     onCleanup(() => {
       if (raf !== undefined) cancelAnimationFrame(raf)
