@@ -15,12 +15,15 @@ import {
   sidebarProjects,
   sidebarExplicitWorkspace,
   sidebarSessionProject,
+  sidebarProjectInventory,
+  sidebarProjectWorkspaces,
   visibleSessions,
   isChatDirectory,
   chatActionServer,
   type SidebarSession,
 } from "./sidebar-model"
 import { latestAttention, navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
+import { sameDirectory } from "@/workspaces/paths"
 
 const server = ServerConnection.Key.make("http://localhost:1234")
 function row(id: string, messageAt?: number, attention?: number, parentID?: string): SidebarSession {
@@ -44,6 +47,101 @@ function row(id: string, messageAt?: number, attention?: number, parentID?: stri
 }
 
 describe("sidebar navigation", () => {
+  test("prepared workspace ties are deterministic, sandbox ownership is explicit and servers stay isolated", () => {
+    const alpha = { id: "alpha", worktree: "/alpha", sandboxes: ["C:/SHARED"] }
+    const beta = { id: "beta", worktree: "/beta", worktrees: [{ directory: "c:/shared/" }] }
+    const session = { ...row("tie").session, projectID: "beta", location: { directory: "c:/shared/src" } }
+    expect(sidebarProjectInventory(server, [beta, alpha])(session)).toBe(projectKey(server, alpha))
+    expect(sidebarProjectInventory(server, [alpha, beta])(session)).toBe(projectKey(server, alpha))
+    const remote = ServerConnection.Key.make("https://remote.test")
+    expect(sidebarProjectInventory(remote, [beta, alpha])(session)).toBe(projectKey(remote, alpha))
+    expect(sidebarProjectInventory(remote, [beta])(session)).toBe(projectKey(remote, beta))
+
+    // Lowercasing expands İ, so specificity must use the original pathKey length.
+    const short = { id: "alpha", worktree: "/short", sandboxes: ["C:/İ"] }
+    const long = { id: "beta", worktree: "/long", sandboxes: ["c:/i\u0307"] }
+    expect(sidebarProjectInventory(server, [short, long])({ ...session, location: { directory: "C:/İ/src" } })).toBe(
+      projectKey(server, long),
+    )
+    expect(
+      sidebarExplicitWorkspace("c:/shared/src", [
+        { key: "same", directory: "/main", workspaces: [{ directory: "C:/SHARED" }, { directory: "c:/shared" }] },
+      ])?.directory,
+    ).toBe("c:/shared")
+  })
+
+  test("workspace deduplication matches directory equality and retains the first worktree metadata", () => {
+    const paths = [
+      "/",
+      "///",
+      "",
+      "/Repo",
+      "/repo",
+      "/repo/",
+      "/repo/child",
+      "/repo-other",
+      "C:\\Repo",
+      "c:/repo/",
+      "C:/",
+      "c:",
+      "\\\\HOST\\Share\\Repo",
+      "//host/share/repo/",
+      "/repo/../other",
+      "/other",
+    ]
+    for (const root of paths) {
+      const worktrees = paths.map((directory, index) => ({ directory, strategy: `strategy-${index}` }))
+      const result = sidebarProjectWorkspaces({ worktree: root, worktrees, sandboxes: paths })
+      const expected = worktrees.filter(
+        (workspace, index) =>
+          !sameDirectory(root, workspace.directory) &&
+          worktrees.findIndex((other) => sameDirectory(other.directory, workspace.directory)) === index,
+      )
+      expect(result).toEqual(expected)
+      result.forEach((workspace) => expect(worktrees.some((item) => item === workspace)).toBe(true))
+    }
+  })
+
+  test("prepared inventory preserves matcher precedence, path boundaries and unresolved input order", () => {
+    const projects = [
+      { id: "direct", worktree: "/direct" },
+      { id: "beta", worktree: "/beta", worktrees: [{ directory: "C:/Trees" }, { directory: "/shared" }] },
+      { id: "alpha", worktree: "/alpha", worktrees: [{ directory: "c:/trees/Feature/" }, { directory: "/shared" }] },
+      { worktree: "/notes" },
+      { id: "global", worktree: "/notes/nested" },
+    ]
+    const resolve = sidebarProjectInventory(server, projects)
+    const session = { ...row("inventory").session, projectID: "direct" }
+    for (const directory of [
+      "C:\\TREES\\FEATURE\\src",
+      "c:/trees/feature-sibling",
+      "/shared/src",
+      "/shared-sibling",
+      "/notes/nested/draft",
+    ]) {
+      const match = sidebarExplicitWorkspace(
+        directory,
+        projects.map((project) => ({
+          key: projectKey(server, project),
+          directory: project.worktree,
+          workspaces: sidebarProjectWorkspaces(project),
+        })),
+      )
+      expect(resolve({ ...session, location: { directory } })).toBe(
+        match?.project.key ?? projectKey(server, projects[0]),
+      )
+    }
+    expect(resolve({ ...session, projectID: "global", location: { directory: "/notes/nested/draft" } })).toBe(
+      projectKey(server, projects[3]),
+    )
+    expect(resolve({ ...session, projectID: "foreign", location: { directory: "/alpha/src" } })).toBe(
+      projectKey(server, { id: "foreign", worktree: "/alpha/src" }),
+    )
+    expect(
+      sidebarProjectInventory(server, [...projects].reverse())({ ...session, location: { directory: "/shared/src" } }),
+    ).toBe(projectKey(server, projects[2]))
+  })
+
   test("new Chat targets the preferred capable server or the first capable fallback", () => {
     const roots = new Map([
       ["old", undefined],

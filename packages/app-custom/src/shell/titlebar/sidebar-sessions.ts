@@ -12,7 +12,7 @@ import {
   isChatDirectory,
   sessionKey,
   sidebarProjects,
-  sidebarSessionProject,
+  sidebarProjectInventory,
   type SidebarSession,
 } from "./sidebar-model"
 import { createSidebarWorktrees } from "./sidebar-worktrees"
@@ -34,6 +34,7 @@ export function createSidebarSessions(options: {
     (connection) => {
       const ctx = global.ensureServerCtx(connection)
       const projects = createMemo(() => ctx.projects.list())
+      const inventory = createMemo(() => sidebarProjectInventory(ServerConnection.key(connection), projects()))
       const [chat] = createResource(
         () => (ctx.sdk.connection.status() === "connected" ? ctx.sdk.connection.epoch() + 1 : undefined),
         () => chatRoot(ctx.sdk),
@@ -42,6 +43,7 @@ export function createSidebarSessions(options: {
         connection,
         ctx,
         projects,
+        inventory,
         index: createSidebarIndex(ctx, clock),
         worktrees: createSidebarWorktrees(ctx),
         chat,
@@ -57,7 +59,7 @@ export function createSidebarSessions(options: {
     return rootSessions(
       indexes().flatMap((entry) => {
         const server = ServerConnection.key(entry.connection)
-        const selected = entry.projects()
+        const project = entry.inventory()
         const known = new Map(
           Object.values(entry.index.state.rows)
             .filter(Boolean)
@@ -79,7 +81,7 @@ export function createSidebarSessions(options: {
             session,
             server,
             key: sessionKey(server, session.id),
-            project: sidebarSessionProject(server, session, selected),
+            project: project(session),
             running: entry.ctx.data.session.status(session.id) === "running",
             recentRank: entry.index.ranks[session.id],
             chat:

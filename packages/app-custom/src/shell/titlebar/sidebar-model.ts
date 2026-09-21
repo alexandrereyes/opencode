@@ -6,7 +6,7 @@ import { pathKey } from "@/workspaces/path-key"
 import type { LocalProject } from "@/shell/state/layout"
 import { displayName } from "@/shell/layout/helpers"
 import { latestAttention } from "@/shell/notifications/session-attention"
-import { containsDirectory, sameDirectory } from "@/workspaces/paths"
+import { containsDirectory, directoryKey, sameDirectory } from "@/workspaces/paths"
 import { isChatDirectory } from "@/runtime/chats"
 
 export { isChatDirectory }
@@ -52,15 +52,16 @@ export function sidebarProjectWorkspaces(project: {
   worktrees?: readonly WorktreeDirectory[]
   sandboxes?: readonly string[]
 }): WorktreeDirectory[] {
+  const seen = new Set([directoryKey(project.worktree)])
   return [
     ...(project.worktrees ?? []),
     ...(project.sandboxes ?? []).map((directory): WorktreeDirectory => ({ directory })),
-  ]
-    .filter((workspace) => !sameDirectory(workspace.directory, project.worktree))
-    .filter(
-      (workspace, index, workspaces) =>
-        workspaces.findIndex((item) => sameDirectory(item.directory, workspace.directory)) === index,
-    )
+  ].filter((workspace) => {
+    const key = directoryKey(workspace.directory)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function sidebarExplicitWorkspace<
@@ -86,25 +87,50 @@ export function sidebarSessionProject(
   session: SessionInfo,
   projects: Omit<LocalProject, "expanded">[],
 ) {
-  const explicit = sidebarExplicitWorkspace(
-    session.location.directory,
-    projects.map((project) => ({
-      key: projectKey(server, project),
-      directory: project.worktree,
-      workspaces: sidebarProjectWorkspaces(project),
-    })),
+  return sidebarProjectInventory(server, projects)(session)
+}
+
+// Prepare once per server inventory, independently of session status, attention and navigation.
+export function sidebarProjectInventory(
+  server: ServerConnection.Key,
+  projects: readonly Omit<LocalProject, "expanded">[],
+) {
+  const entries = projects.map((project) => ({
+    id: project.id,
+    key: projectKey(server, project),
+    directory: project.worktree,
+    workspaces: sidebarProjectWorkspaces(project).map((workspace) => workspace.directory),
+  }))
+  const explicit = entries
+    .flatMap((project) =>
+      project.workspaces.map((directory) => ({
+        key: project.key,
+        directory: pathKey(directory),
+      })),
+    )
+    .toSorted(
+      (a, b) =>
+        b.directory.length - a.directory.length || a.key.localeCompare(b.key) || a.directory.localeCompare(b.directory),
+    )
+  const direct = new Map(
+    entries
+      .filter((project) => project.id && project.id !== "global")
+      .reverse()
+      .map((project) => [project.id, project.key]),
   )
-  if (explicit) return explicit.project.key
-  const direct = projects.find((project) => project.id && project.id !== "global" && project.id === session.projectID)
-  if (direct) return projectKey(server, direct)
-  const unresolved = projects.find(
-    (project) =>
-      (!project.id || project.id === "global") &&
-      [project.worktree, ...(project.sandboxes ?? []), ...(project.worktrees ?? []).map((item) => item.directory)].some(
-        (directory) => containsDirectory(directory, session.location.directory),
-      ),
-  )
-  return projectKey(server, unresolved ?? { id: session.projectID, worktree: session.location.directory })
+  const unresolved = entries.filter((project) => !project.id || project.id === "global")
+  return (session: SessionInfo) => {
+    const directory = session.location.directory
+    const workspace = explicit.find((workspace) => containsDirectory(workspace.directory, directory))
+    if (workspace) return workspace.key
+    const project = direct.get(session.projectID)
+    if (project) return project
+    return (
+      unresolved.find((project) =>
+        [project.directory, ...project.workspaces].some((root) => containsDirectory(root, directory)),
+      )?.key ?? projectKey(server, { id: session.projectID, worktree: directory })
+    )
+  }
 }
 
 export function sidebarProjects(

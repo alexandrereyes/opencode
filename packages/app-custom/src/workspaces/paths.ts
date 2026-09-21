@@ -95,13 +95,14 @@ export function isProjectDirectory(project: WorkspaceProject | undefined, direct
   return [project.worktree, ...(project.sandboxes ?? [])].some((root) => containsDirectory(root, directory))
 }
 
+export function directoryKey(value: string) {
+  const key = pathKey(value)
+  return /^[a-z]:\//i.test(key) || key.startsWith("//") ? key.toLowerCase() : key
+}
+
 export function containsDirectory(parent: string, child: string) {
-  const normalize = (value: string) => {
-    const key = pathKey(value)
-    return /^[a-z]:\//i.test(key) || key.startsWith("//") ? key.toLowerCase() : key
-  }
-  const root = normalize(parent)
-  const target = normalize(child)
+  const root = directoryKey(parent)
+  const target = directoryKey(child)
   return target === root || target.startsWith(root.endsWith("/") ? root : `${root}/`)
 }
 
