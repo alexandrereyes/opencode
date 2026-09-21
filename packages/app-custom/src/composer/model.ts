@@ -541,6 +541,13 @@ export function createComposerModel(
   Object.defineProperty(controller, "quotes", {
     value: {
       ...prompt.quotes,
+      editor: {
+        ...prompt.quotes.editor,
+        open: (id: string) => {
+          controller.dispatch({ type: "mode.normal" })
+          prompt.quotes.editor.open(id)
+        },
+      },
       add: (quote: Parameters<typeof prompt.quotes.add>[0]) => {
         controller.dispatch({ type: "mode.normal" })
         return prompt.quotes.add(quote)

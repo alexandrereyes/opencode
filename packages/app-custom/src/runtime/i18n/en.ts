@@ -133,6 +133,7 @@ export const dict = {
   "chatQuotes.userComment": "Your comment",
   "chatQuotes.placeholder": "Add a comment about this passage…",
   "chatQuotes.edit": "Edit comment",
+  "chatQuotes.editNumber": "Comment {{number}}",
   "chatQuotes.remove": "Remove quote",
   "chatQuotes.done": "Done",
   "context.overview.session": "Session",

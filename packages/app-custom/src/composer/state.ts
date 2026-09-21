@@ -87,6 +87,11 @@ function initialComposerStore(initial?: InitialPrompt): ComposerStore {
 }
 
 function createComposerStateValue(store: ComposerStore, setStore: SetStoreFunction<ComposerStore>) {
+  // Selection/editor geometry is transient; only the text anchor belongs in the draft.
+  const [quoteEditor, setQuoteEditor] = createStore<{
+    id: string
+    position?: { left: number; top: number; bottom: number }
+  }>({ id: "" })
   const actions = createComposerActions(setStore)
   const settled = Promise.resolve(true)
   let pendingRevert: Promise<boolean> | undefined
@@ -174,6 +179,13 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
     },
     quotes: {
       all: () => store.quotes ?? [],
+      editor: {
+        current: () => quoteEditor.id,
+        position: () => quoteEditor.position,
+        open: (id: string) => setQuoteEditor({ id, position: undefined }),
+        close: () => setQuoteEditor({ id: "", position: undefined }),
+        place: (position: typeof quoteEditor.position) => setQuoteEditor("position", position),
+      },
       add(input: Omit<ChatQuote, "id" | "comment">) {
         const quote = { ...input, id: uuid(), comment: "" }
         setStore("quotes", (items) => [...(items ?? []), quote])

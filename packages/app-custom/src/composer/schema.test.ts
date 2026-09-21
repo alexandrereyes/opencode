@@ -108,6 +108,8 @@ describe("composer persistence schemas", () => {
     const quote = { id: "quote", messageID: "message", partID: "part", text: "Quoted", comment: "Explain" }
 
     expect(decode({ quotes: [quote] }).quotes).toEqual([quote])
+    const anchored = { ...quote, anchor: { start: 12, end: 18, exact: "Quoted" } }
+    expect(decode(Schema.encodeSync(ComposerStore)(decode({ quotes: [anchored] }))).quotes).toEqual([anchored])
     expect(
       decode({
         quotes: [
