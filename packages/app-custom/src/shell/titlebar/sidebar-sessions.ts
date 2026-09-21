@@ -4,20 +4,12 @@ import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useSettings } from "@/settings/model"
 import { useLayout } from "@/shell/state/layout"
 import type { Tab } from "@/shell/tabs/tabs"
-import { navigationSession, sessionAttention } from "@/shell/notifications/session-attention"
 import { createSidebarIndex } from "./sidebar-index"
 import { createRecentClock } from "./sidebar-order"
-import {
-  rootSessions,
-  isChatDirectory,
-  sessionKey,
-  sidebarProjects,
-  sidebarProjectInventory,
-  type SidebarSession,
-} from "./sidebar-model"
+import { rootSessions, isChatDirectory, sessionKey, sidebarProjects, sidebarProjectInventory } from "./sidebar-model"
 import { createSidebarWorktrees } from "./sidebar-worktrees"
 import { chatRoot } from "@/runtime/chats"
-import { resolvedChatIdentity } from "@/runtime/chats"
+import { createSidebarChatTabs, createSidebarRows } from "./sidebar-rows"
 
 export function createSidebarSessions(options: {
   currentTab: () => Tab | undefined
@@ -29,22 +21,46 @@ export function createSidebarSessions(options: {
   const layout = useLayout()
   const settings = useSettings()
   const clock = options.clock ?? createRecentClock()
+  const chatTab = createSidebarChatTabs(() => options.tabs?.() ?? [])
   const indexes = mapArray(
     () => (options.enabled?.() === false ? [] : global.servers.list()),
     (connection) => {
+      const server = ServerConnection.key(connection)
       const ctx = global.ensureServerCtx(connection)
       const projects = createMemo(() => ctx.projects.list())
-      const inventory = createMemo(() => sidebarProjectInventory(ServerConnection.key(connection), projects()))
+      const inventory = createMemo(() => sidebarProjectInventory(server, projects()))
       const [chat] = createResource(
         () => (ctx.sdk.connection.status() === "connected" ? ctx.sdk.connection.epoch() + 1 : undefined),
         () => chatRoot(ctx.sdk),
       )
+      const index = createSidebarIndex(ctx, clock)
+      const rows = createSidebarRows({
+        server,
+        rows: () => index.state.rows,
+        fallback: () => {
+          const route = layout.route()
+          const tab = options.currentTab()
+          return [
+            ...(route.type === "session" && route.server === server ? [route.sessionId] : []),
+            ...(tab?.type === "session" && tab.server === server ? [tab.sessionId] : []),
+          ]
+        },
+        cached: (id) => ctx.data.session.get(id),
+        running: (id) => ctx.data.session.status(id) === "running",
+        rank: (id) => index.ranks[id],
+        project: inventory,
+        chatRoot: chat,
+        chatTab,
+        notifications: (id) => ctx.notification.session.unseen(id),
+        autoApprove: () => settings.permissions.autoApprove(),
+      })
       return {
         connection,
         ctx,
         projects,
         inventory,
-        index: createSidebarIndex(ctx, clock),
+        index,
+        rows,
         worktrees: createSidebarWorktrees(ctx),
         chat,
       }
@@ -57,53 +73,7 @@ export function createSidebarSessions(options: {
   const sessions = createMemo(() => {
     const currentTab = options.currentTab()
     return rootSessions(
-      indexes().flatMap((entry) => {
-        const server = ServerConnection.key(entry.connection)
-        const project = entry.inventory()
-        const known = new Map(
-          Object.values(entry.index.state.rows)
-            .filter(Boolean)
-            .map((row) => [row.session.id, row]),
-        )
-        const route = layout.route()
-        if (route.type === "session" && route.server === server && !known.has(route.sessionId)) {
-          const session = entry.ctx.data.session.get(route.sessionId)
-          if (session) known.set(session.id, { session })
-        }
-        if (currentTab?.type === "session" && currentTab.server === server && !known.has(currentTab.sessionId)) {
-          const session = entry.ctx.data.session.get(currentTab.sessionId)
-          if (session) known.set(session.id, { session })
-        }
-        return [...known.values()].map((row): SidebarSession => {
-          const session = navigationSession(row, entry.ctx.data.session.get(row.session.id))
-          return {
-            ...row,
-            session,
-            server,
-            key: sessionKey(server, session.id),
-            project: project(session),
-            running: entry.ctx.data.session.status(session.id) === "running",
-            recentRank: entry.index.ranks[session.id],
-            chat:
-              resolvedChatIdentity(
-                session.location.directory,
-                entry.chat(),
-                options
-                  .tabs?.()
-                  .some(
-                    (tab) =>
-                      tab.type === "session" && tab.server === server && tab.sessionId === session.id && !!tab.chat,
-                  ),
-              ) || undefined,
-            ...sessionAttention({
-              ...row,
-              session,
-              notifications: entry.ctx.notification.session.unseen(session.id),
-              autoApprove: settings.permissions.autoApprove(),
-            }),
-          }
-        })
-      }),
+      indexes().flatMap((entry) => entry.rows()),
       current(),
       currentTab?.type === "session" ? sessionKey(currentTab.server, currentTab.sessionId) : undefined,
     )
