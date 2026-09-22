@@ -26,6 +26,32 @@ Activating a release briefly interrupts the installed instance. Do not execute t
 update or restart the app/server unless the user explicitly asks the agent to perform
 that operational action. When the user only asks how to update, return the command.
 
+### Installation notes
+
+`custom:update` installs code already committed on `custom`. It does not incorporate,
+reconcile, or remove upstream PRs; that belongs to the upstream integration workflow
+described in `docs/upstream-overrides.md` and the `opencode-custom` skill.
+
+When the user only asks how to update, return the command without fetching or
+reading remote state. Mention the register's installation notes only when they are
+relevant, for example when the local copy of `docs/upstream-overrides.md` already
+lists an installation action.
+
+Before launching an agent-executed update, read the register at the revision that
+will be installed:
+
+```sh
+git -C ~/Dev/opencode2 fetch origin custom
+git -C ~/Dev/opencode2 show origin/custom:docs/upstream-overrides.md
+```
+
+Only the **Installation** field of each entry matters here. If an entry states an
+explicit operator action that applies to this release and is not known to be done,
+tell the user and do not launch the update until the user decides how to handle it.
+Do not perform that action unless asked. An entry's `active` or `reconcile` status
+alone is not a blocker, nor are entries marked `none`, open upstream PRs, or a
+register missing from that revision; these need no mention.
+
 ### Agent-executed updates
 
 When the user explicitly asks the agent to perform the update from a live OpenCode
@@ -48,6 +74,10 @@ was not started. Do not automatically stash, commit, discard changes, or switch
 branches. Ask how to handle the pending work, then repeat these checks after it is
 resolved. If the user authorizes a temporary stash, record its exact identity and
 restore it after the update finishes, including when the update fails.
+
+Also complete the [installation notes](#installation-notes) check. This additional
+check blocks the launch only when it reports a pending installation action; it does
+not relax the branch and status checks above or any other failure condition.
 
 - Use a recognizable session name such as `opencode-custom-update` and refuse to
   replace an existing session with that name.

@@ -14,6 +14,14 @@
 - Keep GitHub protections against deletion and force pushes active for `custom`, with no bypass actors. Never weaken or remove those protections without explicit user authorization.
 - Preserve the existing custom implementations when integrating upstream changes; do not replace `custom` with an upstream branch or discard custom changes to resolve conflicts.
 
+## Upstream Overrides
+
+- `docs/upstream-overrides.md` records upstream PRs or commits applied to `custom` ahead of its integrated upstream baseline, and adaptations or custom-package ports of upstream changes.
+- Before integrating an upstream revision into `custom`, read it and reconcile every open (`active` or `reconcile`) entry against the revision being integrated; update the register in the same integration. Resolve an entry only when its outcome is applied and no upstream follow-up remains.
+- When applying an upstream PR or commit early, or adapting or porting an upstream change, add its entry in the same change, following the template in that file. The register was started without a retroactive audit; add older cases when they are identified.
+- A conflict-free merge or commit ancestry is not evidence that the local code matches the final upstream change. Compare behavior, APIs, schema, migrations, and tests, then decide explicitly. Remove only an override made redundant in the same path or service.
+- Upstream UI changes are ported deliberately into `packages/app-custom`, `packages/ui-custom`, or `packages/session-ui-custom`; integrating upstream does not update those ports, and an equivalent in `packages/app` does not make a needed custom port redundant.
+
 ## Backend Customizations
 
 Follow this order while preserving existing behavior, data, and runtime guarantees:
