@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Fiber, Layer, Queue, Schedule, Schema, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Schedule, Schema, Stream } from "effect"
 import { Event } from "@opencode/schema/event"
 import { Config } from "@opencode/core/config"
 import { Directory, Document, type Entry, Info } from "@opencode/schema/config"
@@ -546,34 +546,74 @@ describe("ConfigSkillPlugin.Plugin", () => {
     ),
   )
 
-  it.live("keeps Locations sharing a source idle for unrelated files", () =>
+  it.live("keeps isolated Location catalogs idle for unrelated files in a shared source", () =>
     Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
       Effect.flatMap((tmp) =>
         Effect.gen(function* () {
           const root = path.join(tmp.path, "agents")
           const skills = path.join(root, "skills")
+          const names = ["one", "two", "three"]
           yield* Effect.promise(async () => {
             await fs.mkdir(path.join(skills, "deploy"), { recursive: true })
             await write(skills, "deploy", "Deploy")
             await fs.writeFile(path.join(skills, "manifest.json"), "{}")
+            for (const name of names) {
+              await fs.mkdir(path.join(tmp.path, name, "local", name), { recursive: true })
+              await write(path.join(tmp.path, name, "local"), name, `Local ${name}`)
+            }
           })
           const watcher = yield* Watcher.Test
+          const bus = yield* Bus.Service
           const compatibility = { claude: [], agents: [AbsolutePath.make(root)] }
-          const locations = yield* Effect.forEach(["one", "two", "three"], (name) =>
-            startCounted({ directory: path.join(tmp.path, name), compatibility }),
+          // Skill catalogs are Location-scoped while Bus and Watcher are process-global, as in production.
+          const locations = yield* Effect.forEach(names, (name) =>
+            Effect.gen(function* () {
+              const context = yield* Layer.build(
+                Layer.fresh(
+                  AppNodeBuilder.build(LayerNode.group([Skill.node]), [
+                    Bus.node.replace(Layer.succeed(Bus.Service, bus)),
+                  ]),
+                ),
+              )
+              const counts = yield* startCounted({
+                directory: path.join(tmp.path, name),
+                skills: ["./local"],
+                compatibility,
+              }).pipe(Effect.provideContext(context))
+              return { name, counts, skill: Context.get(context, Skill.Service) }
+            }),
           )
-          expect(locations).toEqual(Array.from({ length: 3 }, () => ({ scans: 1, reloads: 0 })))
+          const catalogs = () =>
+            Effect.forEach(locations, (location) =>
+              location.skill
+                .list()
+                .pipe(
+                  Effect.map((items) =>
+                    items.toSorted((a, b) => a.id.localeCompare(b.id)).map((item) => [item.id, item.description]),
+                  ),
+                ),
+            )
+          const expected = (deploy: string) =>
+            names.map((name) => [
+              ["deploy", deploy],
+              [name, `Local ${name}`],
+            ])
+          expect(yield* catalogs()).toEqual(expected("Deploy"))
+          expect(locations.map((location) => location.counts)).toEqual(names.map(() => ({ scans: 2, reloads: 0 })))
           const subscribed = (yield* watcher.subscriptions()).length
 
+          yield* Effect.promise(() => fs.writeFile(path.join(skills, "manifest.json"), '{"synced":1}'))
           yield* watcher.emit({ type: "update", path: path.join(skills, "manifest.json") })
           yield* settle
-          expect(locations).toEqual(Array.from({ length: 3 }, () => ({ scans: 1, reloads: 0 })))
+          expect(yield* catalogs()).toEqual(expected("Deploy"))
+          expect(locations.map((location) => location.counts)).toEqual(names.map(() => ({ scans: 2, reloads: 0 })))
           expect((yield* watcher.subscriptions()).length).toBe(subscribed)
 
           yield* Effect.promise(() => write(skills, "deploy", "Edited"))
           yield* watcher.emit({ type: "update", path: path.join(skills, "deploy", "SKILL.md") })
-          yield* waitFor(() => locations.every((counts) => counts.reloads === 1))
-          expect(locations).toEqual(Array.from({ length: 3 }, () => ({ scans: 2, reloads: 1 })))
+          yield* waitFor(() => locations.every((location) => location.counts.reloads === 1))
+          expect(yield* catalogs()).toEqual(expected("Edited"))
+          expect(locations.map((location) => location.counts)).toEqual(names.map(() => ({ scans: 4, reloads: 1 })))
         }),
       ),
     ),
