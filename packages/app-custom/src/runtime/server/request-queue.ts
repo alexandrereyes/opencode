@@ -1,3 +1,7 @@
+import { performanceHistory, requestLabel } from "@/runtime/diagnostics/performance"
+
+let requestSequence = 0
+
 type Entry = { method: string; url: string; at: number; slow: boolean }
 
 // Chromium allows six connections per origin. The event stream holds one for the life of the
@@ -109,9 +113,23 @@ export function createRequestQueue(input: {
       // The event stream is long-lived; never count it against the request budget.
       if (pathname === "/api/event") return base(request)
       const entry = { method: request.method, url: request.url, at: now(), slow: isSlowRequest(pathname) }
+      const id = ++requestSequence
+      const at = now()
+      const label = requestLabel(request.url)
+      performanceHistory.record("request.queued", {
+        id,
+        method: request.method,
+        endpoint: label,
+        inflight: inflight.size,
+        waiting: waiting.length,
+      })
       const queued = acquire(entry)
       if (queued) await queued
+      const started = now()
+      const queueMs = started - at
+      performanceHistory.record("request.dispatched", { id, queueMs })
       if (request.signal.aborted) {
+        performanceHistory.record("request.aborted", { id, queueMs })
         release(entry)
         throw request.signal.reason ?? new DOMException("The operation was aborted.", "AbortError")
       }
@@ -121,10 +139,31 @@ export function createRequestQueue(input: {
         () => controller.abort(new DOMException("Timed out waiting for the server to respond", "TimeoutError")),
         isSetupRequest(request.method, pathname) ? setupHeadersTimeoutMs : headersTimeoutMs,
       )
-      return base(new Request(request, { signal: controller.signal })).finally(() => {
-        clearTimeout(timer)
-        release(entry)
-      })
+      return base(new Request(request, { signal: controller.signal }))
+        .then(
+          (response) => {
+            performanceHistory.record("request.headers", {
+              id,
+              status: response.status,
+              queueMs,
+              headersMs: now() - started,
+            })
+            return response
+          },
+          (error: unknown) => {
+            performanceHistory.record("request.failed", {
+              id,
+              queueMs,
+              headersMs: now() - started,
+              aborted: controller.signal.aborted,
+            })
+            throw error
+          },
+        )
+        .finally(() => {
+          clearTimeout(timer)
+          release(entry)
+        })
     },
     // Bun's fetch type carries preconnect; the browser never calls it.
     { preconnect: () => {} },

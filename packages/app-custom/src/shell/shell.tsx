@@ -1,3 +1,4 @@
+import { usePerformanceMonitor } from "@/runtime/diagnostics/monitor"
 import { lazy, Show, Suspense, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -14,6 +15,7 @@ import { useLayout } from "@/shell/state/layout"
 const DebugBar = lazy(() => import("@/shell/debug/debug-bar").then((module) => ({ default: module.DebugBar })))
 
 export default function Layout(props: ParentProps) {
+  usePerformanceMonitor()
   const platform = usePlatform()
   const settings = useSettingsSurface()
   const preferences = useSettings()

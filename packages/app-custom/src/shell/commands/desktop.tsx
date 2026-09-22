@@ -1,3 +1,4 @@
+import { exportPerformanceHistory } from "@/runtime/diagnostics/performance"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCommand, type CommandOption } from "./command"
@@ -11,7 +12,14 @@ export function DesktopCommands() {
   const dialog = useDialog()
 
   command.register("desktop", () => {
-    const commands: CommandOption[] = []
+    const commands: CommandOption[] = [
+      {
+        id: "performance.export",
+        title: language.t("command.performance.export"),
+        category: language.t("command.category.settings"),
+        onSelect: () => exportPerformanceHistory(platform.version),
+      },
+    ]
     if (platform.sshServers)
       commands.push({
         id: "server.ssh.add",

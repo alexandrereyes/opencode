@@ -1,3 +1,4 @@
+import { countPerformanceEvent, performanceHistory } from "@/runtime/diagnostics/performance"
 import type { OpenCodeEvent } from "@opencode/client/promise"
 import { createClientConnection, createPtyClient, type ClientConnectionStatus } from "@opencode/client/solid"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
@@ -97,11 +98,13 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     flushInterval: 16,
     pageLifecycle: true,
     onEvent(event) {
+      countPerformanceEvent(event.type)
       events.publish(event)
     },
     log: {
       info(message, data) {
         if (message !== "event stream disconnected") return
+        performanceHistory.record("events.disconnected")
         console.info("[global-sdk] event stream disconnected", { url: transport.url, managed: !!reconnect, ...data })
       },
     },

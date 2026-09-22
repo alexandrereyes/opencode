@@ -334,6 +334,7 @@ export const dict = {
   "command.category.permissions": "Permissions",
   "command.category.workspace": "Worktree",
   "command.category.settings": "Settings",
+  "command.performance.export": "Export performance diagnostics (last 15 minutes)",
   "command.logs.export": "Export logs",
 
   "theme.scheme.system": "System",

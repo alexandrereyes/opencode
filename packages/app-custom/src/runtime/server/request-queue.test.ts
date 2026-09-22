@@ -1,3 +1,4 @@
+import { performanceHistory } from "@/runtime/diagnostics/performance"
 import { describe, expect, test } from "bun:test"
 import { createRequestQueue, isSetupRequest, isSlowRequest } from "./request-queue"
 
@@ -34,6 +35,26 @@ function setup(input?: {
 }
 
 describe("createRequestQueue", () => {
+  test("diagnostics separate queue delay from headers latency without retaining the URL", async () => {
+    const input = setup({ limit: 1 })
+    const first = input.queue.fetch("http://server/api/session?token=private")
+    const second = input.queue.fetch("http://server/api/session/ses_private?directory=/private")
+    const records = performanceHistory.snapshot().entries.filter((entry) => entry.type === "request.queued")
+    const id = records.at(-1)!.data.id
+    input.tick(120)
+    input.pending[0]!.resolve()
+    await first
+    await input.settle()
+    input.tick(30)
+    input.pending[1]!.resolve()
+    await second
+    const entries = performanceHistory.snapshot().entries.filter((entry) => entry.data.id === id)
+    expect(entries.map((entry) => entry.type)).toEqual(["request.queued", "request.dispatched", "request.headers"])
+    expect(entries.at(-1)!.data).toMatchObject({ queueMs: 120, headersMs: 30, status: 200 })
+    expect(JSON.stringify(entries)).not.toContain("private")
+    expect(JSON.stringify(entries)).not.toContain("http://server")
+  })
+
   test("starts a free slot before the caller continues its synchronous work", async () => {
     const input = setup()
     const response = input.queue.fetch("http://server/api/session")

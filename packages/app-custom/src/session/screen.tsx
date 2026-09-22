@@ -1,4 +1,6 @@
+import { recordSessionReady } from "@/runtime/diagnostics/monitor"
 import {
+  onCleanup,
   ErrorBoundary,
   Show,
   Match,
@@ -66,6 +68,11 @@ export function SessionScreen(props: { session: SessionModel }) {
     pauseAutoScroll: timeline.view.unpin,
   })
   const messagesReady = timeline.ready
+  createEffect(() => {
+    const id = session.identity.sessionID()
+    if (!id || !messagesReady()) return
+    onCleanup(recordSessionReady(id))
+  })
   const [store, setStore] = createStore({
     deferRender: false,
     bottomTerminalCached: false,
