@@ -184,6 +184,16 @@ plugins implementing tree policy must scan and archive those descendants explici
 await ctx.session.archive({ sessionID })
 ```
 
+## Reading A Session Family
+
+`ctx.session.family({ sessionID })` returns descendant `count`, total descendant `cost`, and metadata for currently `active` descendants. The root must exist; archived descendants are included. No messages or historical Locations are loaded. Supply `limit` (1–100) to also read a stable Session-ID ordered `data` page; pass `next` back as `after` for the following page. Omit `limit` for summary-only reads. Counts and costs exclude the root.
+
+```ts
+const summary = await ctx.session.family({ sessionID })
+const first = await ctx.session.family({ sessionID, limit: 10 })
+const next = first.next ? await ctx.session.family({ sessionID, limit: 10, after: first.next }) : undefined
+```
+
 ## Reading Live Pending Requests
 
 `ctx.request.pending()` returns raw permission and form snapshots grouped by Location. It samples only Locations that are

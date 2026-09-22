@@ -191,6 +191,8 @@ function SessionSurfaceState(props: SessionPreviewProps & { onReset: () => void 
   })
   const region = {
     state: {
+      pendingFailed: () => false,
+      retryPending: () => {},
       questionRequest: () => (state.request?.type === "question" ? state.request.value : undefined),
       websearch: {
         request: () => (state.request?.type === "websearch" ? state.request.value : undefined),

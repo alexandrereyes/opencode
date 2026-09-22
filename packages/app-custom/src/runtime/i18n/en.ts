@@ -220,6 +220,8 @@ export const dict = {
   "context.overview.disabled": "Subscription disabled",
   "context.overview.stale": "Usage snapshot is out of date",
   "context.overview.noCapacity": "No capacity available",
+  "session.requests.failed": "Unable to check pending requests.",
+  "context.overview.subagents.details": "Show context for {{title}}",
   "context.overview.subagents": "Subagents",
   "context.overview.subagents.more": "Show more agents",
   "context.overview.subagents.fewer": "Show fewer agents",

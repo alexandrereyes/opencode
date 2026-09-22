@@ -21,6 +21,7 @@ import { Plugin } from "@opencode/core/plugin"
 import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { Provider } from "@opencode/core/provider"
 import { Session } from "@opencode/core/session"
+import { SessionFamily } from "@opencode/core/session/family"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
@@ -87,6 +88,7 @@ const nodes = LayerNode.group([
   KV.node,
   Mcp.node,
   Session.node,
+  SessionFamily.node,
   PersistentPty.node,
   LocationServiceMap.node,
   Permission.node,

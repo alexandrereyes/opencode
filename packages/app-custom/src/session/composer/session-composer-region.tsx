@@ -7,7 +7,14 @@ import type { SessionComposerRegionController } from "./session-composer-region-
 
 type SessionComposerRegionState = Pick<
   SessionComposerRegionController["state"],
-  "questionRequest" | "websearch" | "permissionRequest" | "permissionResponding" | "decide" | "blocked"
+  | "questionRequest"
+  | "websearch"
+  | "permissionRequest"
+  | "permissionResponding"
+  | "decide"
+  | "blocked"
+  | "pendingFailed"
+  | "retryPending"
 >
 
 export type SessionComposerRegionViewController = Pick<
@@ -33,6 +40,14 @@ export function SessionComposerRegion(props: {
           "md:max-w-[1000px] md:mx-auto": controller.centered(),
         }}
       >
+        <Show when={controller.state.pendingFailed()}>
+          <div role="status" class="flex items-center gap-2 py-2 text-12-regular text-v2-text-text-muted">
+            <span>{language.t("session.requests.failed")}</span>
+            <button type="button" class="underline" onClick={controller.state.retryPending}>
+              {language.t("common.retry")}
+            </button>
+          </div>
+        </Show>
         <Show when={controller.state.websearch.request()}>
           <SessionWebSearchDock model={controller.state.websearch} onSubmit={controller.onResponseSubmit} />
         </Show>

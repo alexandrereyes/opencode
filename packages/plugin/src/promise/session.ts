@@ -4,6 +4,7 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { PromptInput } from "@opencode/schema/prompt-input"
 import type { Session } from "@opencode/schema/session"
+import type { SessionFamily } from "@opencode/schema/session-family"
 import type { SessionScan } from "@opencode/schema/session-scan"
 import type { SessionInbox } from "@opencode/schema/session-inbox"
 import type { SessionError } from "@opencode/schema/session-error"
@@ -174,6 +175,7 @@ export type SessionDomain = Pick<
   | "context"
 > & {
   readonly hook: ModelHooks<SessionHooks>
+  readonly family: (input: typeof SessionFamily.Input.Encoded) => Promise<typeof SessionFamily.Info.Encoded>
   readonly scan: (input?: typeof SessionScan.Input.Encoded) => Promise<typeof SessionScan.Page.Encoded>
   readonly archive: (input: { readonly sessionID: Session.ID }) => Promise<void>
 }

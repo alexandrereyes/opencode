@@ -24,6 +24,7 @@ import { timelinePreset } from "@opencode/session-ui-custom/timeline/detail"
 import { notifySessionTabsRemoved } from "@/shell/titlebar/session-events"
 import { usePreferences } from "@/preferences/context"
 import { Schema } from "effect"
+import { createSessionFamilies } from "@/session/family"
 import { Persistence } from "@/runtime/persistence/schema"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
@@ -225,6 +226,11 @@ function createServerController(
     data: source,
     remove: (sessionID) => sdk.api.session.remove({ sessionID }),
   })
+  const families = createSessionFamilies({
+    sdk,
+    remember: data.session.remember,
+    status: data.session.setStatus,
+  })
   // Each descendant has its own event, including sessions whose ancestry is not cached locally.
   const hideSession = (sessionID: string) =>
     notifySessionTabsRemoved({
@@ -235,7 +241,7 @@ function createServerController(
   onCleanup(data.on("session.archived", (event) => hideSession(event.data.sessionID)))
   onCleanup(data.on("session.deleted", (event) => hideSession(event.data.sessionID)))
   const sync = createServerSyncContext(sdk, data)
-  createPermissionAutoApprover({ sdk, data })
+  createPermissionAutoApprover({ sdk, data, pending: families.permissions })
   const notification = createServerNotificationState({ sdk, data, key: connKey, coordinator: notificationCoordinator })
 
   function enrich(project: { worktree: string; expanded: boolean }) {
@@ -274,6 +280,7 @@ function createServerController(
     data,
     sdk,
     snippets,
+    families,
     sync,
     isLocal,
     projects: {

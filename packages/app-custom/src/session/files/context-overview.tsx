@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, For, Show, on, onCleanup, type JSX } from "solid-js"
+import { createMemo, For, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -10,20 +10,29 @@ import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@opencode/ui-custom/dialog"
 import { createSessionBackground } from "@/session/requests/background"
 import { useData, useServer } from "@/runtime/server/current"
-import { useServerSDK } from "@/runtime/server/client"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
 import { getFilename } from "@opencode/util/path"
+import { createSubagentList } from "./subagent-list"
+import { SUBAGENT_PAGE_SIZE } from "@/session/family"
 import { SubagentContext } from "./subagent-context"
 
-const SUBAGENT_PAGE_SIZE = 10
-
-function Section(props: { title: string; count?: JSX.Element; children: JSX.Element }) {
+function Section(props: {
+  title: string
+  count?: JSX.Element
+  children: JSX.Element
+  open?: boolean
+  onToggle?: (open: boolean) => void
+}) {
   return (
-    <details open class="group border-b border-border-weak-base pb-3">
+    <details
+      open={props.open ?? true}
+      onToggle={(event) => props.onToggle?.(event.currentTarget.open)}
+      class="group border-b border-border-weak-base pb-3"
+    >
       <summary class="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-sm text-14-medium text-text-strong focus-visible:outline-2 focus-visible:outline-border-active [&::-webkit-details-marker]:hidden">
         <Icon
           name="chevron-down"
@@ -78,7 +87,6 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   const dialog = useDialog()
   const data = useData()
   const server = useServer()
-  const sdk = useServerSDK()
   const location = useWorkspaceLocation()
   const layout = useSessionLayout()
   const info = createMemo(() => (layout.params.id ? data.session.get(layout.params.id) : undefined))
@@ -91,60 +99,27 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
     status: data.session.status,
     shells: () => (layout.params.id ? data.shell.listBySession(layout.params.id) : []),
   })
-  const [state, setState] = createStore({ subagentLimit: SUBAGENT_PAGE_SIZE })
-  const familyRequest = createMemo(() => {
-    const id = layout.params.id
-    if (!props.active || !id) return
-    const controller = new AbortController()
-    onCleanup(() => controller.abort())
-    return { id, signal: controller.signal }
+  const families = server.ctx.families
+  families.watch(() => (props.active ? layout.params.id : undefined))
+  const subagents = createSubagentList({
+    sessionID: () => layout.params.id,
+    active: () => props.active,
+    version: (id) => families.get(id)?.version,
+    page: families.page,
   })
-  const [family] = createResource(
-    familyRequest,
-    async (request) => {
-      // Follow pagination and descendants instead of relying on the currently cached session page.
-      const visit = async (parentID: string): Promise<void> => {
-        const page = async (cursor?: string): Promise<void> => {
-          if (request.signal.aborted) return
-          const result = await sdk.api.session.list(cursor ? { cursor } : { parentID, limit: 100 })
-          // Resource cancellation alone cannot protect writes to the shared session cache.
-          if (request.signal.aborted) return
-          result.data.forEach((session) => data.session.remember(session))
-          await Promise.all(result.data.map((session) => visit(session.id)))
-          if (result.cursor.next) await page(result.cursor.next)
-        }
-        await page()
-      }
-      return visit(request.id)
-        .then(() => ({ id: request.id, ok: true }))
-        .catch(() => ({ id: request.id, ok: false }))
-    },
-  )
-  // `latest` falls back to the suspending resource read before its first result.
-  // These optional sections must never enlist the enclosing route's Suspense.
-  const familyResult = () =>
-    family.state === "ready" || family.state === "refreshing" ? family.latest : undefined
-  const familyPending = () => family.loading || !familyResult() || familyResult()?.id !== layout.params.id
-  const familyFailed = () => !familyPending() && familyResult()?.ok === false
-  const children = createMemo(() => {
-    const id = layout.params.id
-    const sessions = data.session.list()
-    const descendants = (parentID: string): typeof sessions =>
-      sessions
-        .filter((session) => session.parentID === parentID)
-        .flatMap((session) => [session, ...descendants(session.id)])
-    return id ? descendants(id) : []
-  })
-  const visibleChildren = createMemo(() => children().slice(0, state.subagentLimit))
-  const hasMoreChildren = () => children().length > visibleChildren().length
-  createEffect(on(() => layout.params.id, () => setState("subagentLimit", SUBAGENT_PAGE_SIZE), { defer: true }))
+  const snapshot = () => families.get(layout.params.id)?.snapshot
+  const familyPending = () => !snapshot()
+  const familyFailed = () => families.get(layout.params.id)?.failed
+  const children = () => subagents.state.children
+  const visibleChildren = createMemo(() => children().slice(0, subagents.state.subagentLimit))
+  const hasMoreChildren = () => !!subagents.state.next || children().length > visibleChildren().length
   const money = (value: number) =>
     new Intl.NumberFormat(language.intl(), {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 4,
     }).format(value)
-  const childCost = createMemo(() => children().reduce((total, session) => total + session.cost, 0))
+  const childCost = () => snapshot()?.cost ?? 0
   const project = createMemo(() => {
     const id = info()?.projectID
     return id ? data.project.get(id) : undefined
@@ -214,60 +189,96 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
       </section>
       <Section
         title={language.t("context.overview.subagents")}
-        count={familyPending() || familyFailed() ? "—" : children().length}
+        count={snapshot()?.count ?? "—"}
+        open={subagents.state.open}
+        onToggle={(open) => subagents.setState("open", open)}
       >
-        <Show when={familyPending()}>
+        <Show when={subagents.state.loading}>
           <Loading />
         </Show>
-        <Show when={familyFailed()}>
-          <p role="status">{language.t("context.overview.childrenFailed")}</p>
+        <Show when={subagents.state.failed}>
+          <p role="status">
+            {language.t("context.overview.childrenFailed")}{" "}
+            <button type="button" class="underline" onClick={() => void subagents.load()}>
+              {language.t("common.retry")}
+            </button>
+          </p>
         </Show>
         <Show
           when={children().length}
           fallback={
-            <Show when={!familyPending() && !familyFailed()}>
+            <Show when={subagents.state.loaded && !subagents.state.loading && !subagents.state.failed}>
               <p class="text-v2-text-text-muted">{language.t("context.overview.noSubagents")}</p>
             </Show>
           }
         >
           <For each={visibleChildren()}>
-            {(child) => (
-              <A
-                href={sessionHref(server.key, child.id)}
-                class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
-              >
-                <span class="min-w-0 flex-1">
-                  <bdi class="block truncate" title={child.title}>
-                    <TextShimmer text={child.title ?? child.id} active={data.session.status(child.id) === "running"} />
-                  </bdi>
-                  <SubagentContext child={child} active={props.active} />
-                </span>
-                <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
-                  <span class="block">
-                    {language.t(
-                      data.session.status(child.id) === "running"
-                        ? "context.overview.running"
-                        : child.outcome
-                          ? `context.overview.${child.outcome}`
-                          : "context.overview.idle",
-                    )}
-                  </span>
-                  <Show when={child.cost > 0}>
-                    <span class="block tabular-nums">{money(child.cost)}</span>
-                  </Show>
-                </span>
-              </A>
-            )}
+            {(child) => {
+              const [row, setRow] = createStore({ open: false })
+              return (
+                <div class="min-w-0 rounded-md px-2 py-1">
+                  <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
+                    <A
+                      href={sessionHref(server.key, child.id)}
+                      class="min-w-0 flex-1 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-border-active"
+                    >
+                      <bdi class="block truncate" title={data.session.get(child.id)?.title ?? child.title}>
+                        <TextShimmer
+                          text={data.session.get(child.id)?.title ?? child.title ?? child.id}
+                          active={data.session.status(child.id) === "running"}
+                        />
+                      </bdi>
+                    </A>
+                    <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
+                      <span class="block">
+                        {language.t(
+                          data.session.status(child.id) === "running"
+                            ? "context.overview.running"
+                            : (data.session.get(child.id) ?? child).outcome
+                              ? `context.overview.${(data.session.get(child.id) ?? child).outcome!}`
+                              : "context.overview.idle",
+                        )}
+                      </span>
+                      <Show when={(data.session.get(child.id) ?? child).cost > 0}>
+                        <span class="block tabular-nums">{money((data.session.get(child.id) ?? child).cost)}</span>
+                      </Show>
+                    </span>
+                    <button
+                      type="button"
+                      aria-expanded={row.open}
+                      aria-label={language.t("context.overview.subagents.details", { title: child.title ?? child.id })}
+                      class="flex size-7 shrink-0 items-center justify-center rounded-sm hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                      onClick={() => setRow("open", !row.open)}
+                    >
+                      <Icon name="chevron-down" size="small" classList={{ "-rotate-90": !row.open }} />
+                    </button>
+                  </div>
+                  <div classList={{ hidden: !row.open }}>
+                    <SubagentContext
+                      child={data.session.get(child.id) ?? child}
+                      active={props.active && subagents.state.open && row.open}
+                    />
+                  </div>
+                </div>
+              )
+            }}
           </For>
           <Show when={hasMoreChildren() || visibleChildren().length > SUBAGENT_PAGE_SIZE}>
             <button
               type="button"
               class="ms-2 block h-7 w-fit max-w-full rounded-[6px] px-1.5 text-start text-13-regular text-v2-text-text-muted hover:text-v2-text-text-base focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
-              onClick={() =>
-                setState("subagentLimit", (limit) =>
-                  hasMoreChildren() ? limit + SUBAGENT_PAGE_SIZE : SUBAGENT_PAGE_SIZE,
-                )
-              }
+              disabled={subagents.state.loading}
+              onClick={() => {
+                if (children().length > subagents.state.subagentLimit) {
+                  subagents.setState("subagentLimit", subagents.state.subagentLimit + SUBAGENT_PAGE_SIZE)
+                  return
+                }
+                if (subagents.state.next) {
+                  void subagents.load(true)
+                  return
+                }
+                subagents.setState("subagentLimit", SUBAGENT_PAGE_SIZE)
+              }}
             >
               {language.t(hasMoreChildren() ? "context.overview.subagents.more" : "context.overview.subagents.fewer")}
             </button>

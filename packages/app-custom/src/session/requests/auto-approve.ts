@@ -11,7 +11,11 @@ const retryDelayMs = 1000
 // Auto-approves permission requests on one server connection whenever the
 // app-level auto-approve setting is on. The setting lives in the client-local
 // settings store, so it applies to every session, tab, and server at once.
-export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data }) {
+export function createPermissionAutoApprover(input: {
+  sdk: ServerSDK
+  data: Data
+  pending?: () => PermissionRequest[]
+}) {
   const enabled = useSettings().permissions.autoApprove
   const state = { disposed: false, generation: 0, responded: new Set<string>() }
 
@@ -39,6 +43,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   // deliberately reads them after an await, outside Solid tracking.
   createEffect(() => {
     if (!enabled()) return
+    input.pending?.().forEach((request) => approve(request))
     for (const session of input.data.session.list()) {
       for (const request of input.data.session.permission.list(session.id) ?? []) approve(request)
     }

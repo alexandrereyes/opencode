@@ -11,6 +11,8 @@ import { registerArchive } from "./archive/index.js"
 import { registerPreferences } from "./preferences/index.js"
 import { registerChats } from "./chats/index.js"
 
+import { registerFamily } from "./session-family/index.js"
+
 export default Plugin.define({
   id: "custom.app-mentions",
   effect: (ctx) =>
@@ -25,5 +27,6 @@ export default Plugin.define({
       yield* registerArchive(ctx)
       yield* registerPreferences(ctx)
       yield* registerChats(ctx)
+      yield* registerFamily(ctx)
     }),
 })

@@ -26,7 +26,8 @@
     "./navigation/rpc": "./src/navigation/rpc.ts",
     "./archive/rpc": "./src/archive/rpc.ts",
     "./preferences/rpc": "./src/preferences/rpc.ts",
-    "./chats/rpc": "./src/chats/rpc.ts"
+    "./chats/rpc": "./src/chats/rpc.ts",
+    "./session-family/rpc": "./src/session-family/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

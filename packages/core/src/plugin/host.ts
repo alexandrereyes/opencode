@@ -21,6 +21,7 @@ import { LocationServiceMap } from "../location-service-map.js"
 import { Model } from "../model.js"
 import { Mcp } from "../mcp/index.js"
 import { Session } from "../session.js"
+import { SessionFamily } from "../session/family.js"
 import { PersistentPty } from "../persistent-pty.js"
 import { Provider } from "../provider.js"
 import { Reference } from "../reference.js"
@@ -72,6 +73,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const permission = yield* Permission.Service
   const hooks = yield* PluginHooks.Service
   const sessions = yield* Session.Service
+  const family = yield* SessionFamily.Service
   const persistentPty = yield* PersistentPty.Service
   const locations = yield* LocationServiceMap.Service
   const worktrees = yield* Worktree.Service
@@ -616,6 +618,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
           .pipe(Effect.map((interrupted) => ({ interrupted }))),
       wait: (input) => sessions.wait(input.sessionID),
       context: (input) => sessions.context(input.sessionID),
+      family: Effect.fn(function* (input) {
+        yield* sessions.get(input.sessionID)
+        return yield* family.read(input, yield* sessions.active)
+      }),
       scan: sessions.scan,
       archive: (input) => sessions.archive(input.sessionID),
     },
@@ -648,6 +654,7 @@ export const requirements = LayerNode.group([
   Form.node,
   PluginHooks.node,
   Session.node,
+  SessionFamily.node,
   PersistentPty.node,
   LocationServiceMap.node,
 ])

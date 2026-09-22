@@ -7,10 +7,9 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useSettings } from "@/settings/model"
 import { useWorkspaceLocation } from "@/workspaces/location"
-import { sessionPermissionRequest, sessionFormRequest, sessionTreeIDs } from "@/session/requests/session-request-tree"
 import { createWebSearchRequest } from "./websearch"
 import { createSessionBackground } from "@/session/requests/background"
-import { useData } from "@/runtime/server/current"
+import { useServer, useData } from "@/runtime/server/current"
 import { syncSessionBackgroundShells } from "./background-shells"
 
 export function createSessionRequestModel() {
@@ -20,31 +19,20 @@ export function createSessionRequestModel() {
   const data = useData()
   const language = useLanguage()
   const settings = useSettings()
+  const families = useServer().ctx.families
+  families.watch(() => params.id)
   createEffect(() => {
     const id = params.id
     if (!id || serverSDK.connection.status() !== "connected") return
-    void Promise.all([
-      syncSessionBackgroundShells({
-        sessionID: id,
-        current: sdk().ref,
-        known: untrack(() => data.shell.listBySession(id).map((shell) => shell.location)),
-        message: serverSDK.api.message,
-        sync: (location) => data.shell.sync(location),
-      }),
-      data.session.permission.sync(id),
-    ]).catch(() => undefined)
+    void syncSessionBackgroundShells({
+      sessionID: id,
+      current: sdk().ref,
+      known: untrack(() => data.shell.listBySession(id).map((shell) => shell.location)),
+      message: serverSDK.api.message,
+      sync: (location) => data.shell.sync(location),
+    }).catch(() => undefined)
   })
-  createEffect(() => {
-    const id = params.id
-    if (!id || serverSDK.connection.status() !== "connected") return
-    void Promise.all(
-      sessionTreeIDs(data.session.list(), id).map((sessionID) => data.session.form.sync(sessionID)),
-    ).catch(() => undefined)
-  })
-
-  const formRequest = createMemo((): FormInfo | undefined => {
-    return sessionFormRequest(data.session.list(), data.session.form.list, params.id)
-  })
+  const formRequest = createMemo((): FormInfo | undefined => families.get(params.id)?.snapshot?.forms[0])
   const websearch = createWebSearchRequest({
     owner: () => params.id,
     connected: () => serverSDK.connection.status() === "connected",
@@ -70,7 +58,7 @@ export function createSessionRequestModel() {
 
   const permissionRequest = createMemo((): PermissionRequest | undefined => {
     if (settings.permissions.autoApprove()) return undefined
-    return sessionPermissionRequest(data.session.list(), data.session.permission.list, params.id)
+    return families.get(params.id)?.snapshot?.permissions[0]
   })
 
   const blocked = createMemo(() => {
@@ -135,6 +123,10 @@ export function createSessionRequestModel() {
 
   return {
     blocked,
+    pendingFailed: () => !!families.get(params.id)?.failed,
+    retryPending: () => {
+      if (params.id) families.retry(params.id)
+    },
     questionRequest,
     websearch,
     permissionRequest,

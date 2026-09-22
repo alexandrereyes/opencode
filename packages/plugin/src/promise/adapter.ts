@@ -1,4 +1,5 @@
 import { Tool } from "@opencode/schema/tool"
+import { SessionFamily } from "@opencode/schema/session-family"
 import { SessionScan } from "@opencode/schema/session-scan"
 import type { Rpc } from "@opencode/schema/rpc"
 import type { RpcCallOptions, RpcEventPayload } from "@opencode/client/promise/api"
@@ -602,6 +603,13 @@ export function fromPromise(plugin: Plugin) {
             move: adaptApiMethod(SessionEndpoints["session.move"], host.session.move),
             wait: adaptApiMethod(SessionEndpoints["session.wait"], host.session.wait),
             context: adaptApiMethod(SessionEndpoints["session.context"], host.session.context),
+            family: (input) =>
+              run(
+                Schema.decodeUnknownEffect(SessionFamily.Input)(input).pipe(
+                  Effect.flatMap(host.session.family),
+                  Effect.flatMap(Schema.encodeEffect(SessionFamily.Info)),
+                ),
+              ),
             scan: (input) =>
               run(
                 Schema.decodeUnknownEffect(SessionScan.Input)(input ?? {}).pipe(
