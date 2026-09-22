@@ -29,6 +29,7 @@ import { Global } from "@opencode/util/global"
 import { LocationServiceMap, type LocationServices } from "@opencode/core/location-services"
 import { LocationActivity } from "@opencode/core/location-activity"
 import { Location } from "@opencode/core/location"
+import { LocationLifecycle } from "@opencode/core/location-lifecycle"
 import { LocationWatcher } from "@opencode/core/filesystem/location-watcher"
 import { Plugin } from "@opencode/core/plugin"
 import { Model } from "@opencode/core/model"
@@ -173,6 +174,37 @@ describe("LocationServiceMap", () => {
         expect(Option.getOrThrow(yield* locations.contextEffectOption(ref))).toBe(repaired)
       }))
   }
+
+  testEffect(Layer.empty).live("fails a missing local directory before building its graph", () =>
+    Effect.gen(function* () {
+      const builds = { started: 0 }
+      const layer = AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, LocationServiceMap.node]), [
+        Global.node.replace(tempGlobalLayer),
+        offlineModels,
+        LocationLifecycle.node.replace(
+          LocationLifecycle.node.mapLayer((layer) => layer.pipe(Layer.tap(() => Effect.sync(() => builds.started++)))),
+        ),
+      ])
+      yield* Effect.gen(function* () {
+        const dir = yield* tmpdirScoped()
+        const directory = path.join(dir.path, "missing")
+        const ref = Location.Ref.make({ directory: AbsolutePath.make(directory) })
+        const locations = yield* LocationServiceMap.Service
+        const failures = yield* Effect.forEach(
+          Array.from({ length: 3 }),
+          () => locations.contextEffect(ref).pipe(Effect.scoped, Effect.exit),
+          { concurrency: "unbounded" },
+        )
+        expect(failures.every(Exit.isFailure)).toBe(true)
+        expect(builds.started).toBe(0)
+        expect(yield* RcMap.has(locations.rcMap, ref)).toBe(false)
+
+        yield* Effect.promise(() => fs.mkdir(directory))
+        yield* locations.contextEffect(ref).pipe(Effect.scoped)
+        expect(builds.started).toBe(1)
+      }).pipe(Effect.provide(layer))
+    }),
+  )
 
   for (const disposition of ["retry", "invalidate", "interrupt"] as const) {
     testEffect(Layer.empty).live(

@@ -1,4 +1,5 @@
 import { Context, Duration, Effect, Exit, Layer, LayerMap, MutableHashMap, Option } from "effect"
+import { stat } from "node:fs/promises"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Instance } from "./instance.js"
 import { Location } from "./location.js"
@@ -23,9 +24,10 @@ export function buildLocationServiceMap(
           const build: { close?: Effect.Effect<void> } = {}
           MutableHashMap.set(builds, ref, build)
           return Layer.fromBuild((memoMap, scope) =>
-            Effect.suspend(() =>
-              Layer.buildWithMemoMap(Instance.layer(ref, { replacements: bindings }), memoMap, scope),
-            ).pipe(
+            requireLocalDirectory(ref).pipe(
+              Effect.andThen(() =>
+                Layer.buildWithMemoMap(Instance.layer(ref, { replacements: bindings }), memoMap, scope),
+              ),
               Effect.onExit((exit) => {
                 const finish = Effect.suspend(() => {
                   if (Exit.isSuccess(exit)) {
@@ -84,5 +86,21 @@ export function buildLocationServiceMap(
       ]
       return map
     }),
+  )
+}
+
+// A local Location whose directory is gone always fails to boot. Fail before the
+// graph starts watchers and plugins so repeated requests for it stay cheap.
+function requireLocalDirectory(ref: Location.Ref) {
+  if (ref.workspaceID) return Effect.void
+  return Effect.promise(() =>
+    stat(ref.directory).then(
+      () => true,
+      () => false,
+    ),
+  ).pipe(
+    Effect.flatMap((exists) =>
+      exists ? Effect.void : Effect.die(new Error(`Location directory not found: ${ref.directory}`)),
+    ),
   )
 }

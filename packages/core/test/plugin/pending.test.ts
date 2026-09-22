@@ -21,7 +21,7 @@ import { offlineModels } from "../fixture/models"
 import { testEffect } from "../lib/effect"
 
 for (const failure of ["defect", "interrupt"] as const) {
-  testEffect(Layer.empty).live(`pending requests isolate boot ${failure}s without losing healthy snapshots`, () =>
+  testEffect(Layer.empty).live(`pending requests skip booting ${failure}s without losing healthy snapshots`, () =>
     Effect.gen(function* () {
       const entered = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
@@ -45,7 +45,7 @@ for (const failure of ["defect", "interrupt"] as const) {
                 Layer.tap(() =>
                   Effect.gen(function* () {
                     if (++builds.count !== 2) return
-                    // Hold the second real graph build until pending() joins its cached entry.
+                    // Hold the second real graph build while pending() runs.
                     yield* Deferred.succeed(entered, undefined)
                     yield* Deferred.await(release)
                     return yield* failure === "interrupt" ? Effect.interrupt : Effect.die("location boot failed")
@@ -78,11 +78,11 @@ for (const failure of ["defect", "interrupt"] as const) {
           .pipe(Effect.scoped, Effect.exit, Effect.forkScoped)
         yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
         yield* Deferred.await(entered)
-        const pending = yield* host.request.pending().pipe(Effect.exit, Effect.forkScoped({ startImmediately: true }))
+        // An in-flight boot is skipped rather than awaited.
+        expect(yield* host.request.pending().pipe(Effect.timeout("2 seconds"))).toEqual(expected)
         yield* Deferred.succeed(release, undefined)
         expect(Exit.isFailure(yield* Fiber.join(boot))).toBe(true)
-        const result = yield* Fiber.join(pending)
-        expect(yield* result).toEqual(expected)
+        expect(yield* host.request.pending()).toEqual(expected)
       }).pipe(Effect.provide(layer))
     }),
   )

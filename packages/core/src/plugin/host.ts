@@ -8,7 +8,7 @@ import type { Event } from "@opencode/schema/event"
 import { ServerConfig } from "@opencode/schema/mcp"
 import { MessagePage } from "@opencode/schema/session-message-page"
 import { App } from "../app.js"
-import { Context, Effect, Option, RcMap, Schema, Stream } from "effect"
+import { Context, Deferred, Effect, Option, Schema, Stream } from "effect"
 import { Agent } from "../agent.js"
 import { AISDK } from "../aisdk.js"
 import { Command } from "../command.js"
@@ -485,7 +485,13 @@ export const make = Effect.fn("PluginHost.make")(function* (
     },
     request: {
       pending: Effect.fn("PluginHost.pendingRequests")(function* () {
-        const refs = yield* RcMap.keys(locations.rcMap)
+        const state = locations.rcMap.state
+        // Skip in-flight boots: awaiting one would stall every caller behind an
+        // unrelated, possibly failing, Location build.
+        const refs =
+          state._tag === "Open"
+            ? Array.from(state.map).flatMap(([ref, entry]) => (Deferred.isDoneUnsafe(entry.deferred) ? [ref] : []))
+            : []
         return yield* Effect.forEach(refs, (ref) =>
           Effect.scoped(
             Effect.gen(function* () {

@@ -27,9 +27,10 @@ Add equivalent Effect/Promise surfaces:
    Use bounded metadata SQL without decoding transcripts or replaying logs.
 2. `ctx.request.pending()` returns live Location snapshots with Location ref,
    raw permission requests, and raw form records. Inspect only already-live
-   Location contexts, never initialize historical Locations. This is a live
-   observation, not a cross-Location atomic transaction. Failed or interrupted
-   Location builds or request listings are logged and skipped.
+   Location contexts, never initialize historical Locations or await in-flight
+   builds. This is a live observation, not a cross-Location atomic transaction.
+   Failed or interrupted Location builds or request listings are logged and
+   skipped.
    `custom.requests.permissions` exposes the permission requests from these
    snapshots for the web auto-approve sweep, without booting historical Locations
    or resyncing an active-session inventory. A failed RPC receives bounded retries.
