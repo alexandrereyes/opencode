@@ -11,6 +11,8 @@ import { SessionStore } from "@opencode/core/session/store"
 import { SessionMessageTable, SessionTable } from "@opencode/core/session/sql"
 import { Session } from "@opencode/schema/session"
 import { Project } from "@opencode/schema/project"
+import { Provider } from "@opencode/schema/provider"
+import { Model } from "@opencode/schema/model"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { testEffect } from "./lib/effect"
 
@@ -69,6 +71,87 @@ it.effect(
       expect(nested.count).toBe(54)
       expect(nested.cost).toBe(27)
     }),
+)
+
+it.effect("reads each page row's latest measured assistant context without decoding transcripts", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const family = yield* SessionFamily.Service
+    const root = Session.ID.make("ses_context_root")
+    const measured = Session.ID.make("ses_context_measured")
+    const unmeasured = Session.ID.make("ses_context_unmeasured")
+    yield* database.db
+      .insert(ProjectTable)
+      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/repo"), sandboxes: [] })
+      .onConflictDoNothing()
+      .run()
+    yield* database.db
+      .insert(SessionTable)
+      .values(
+        [root, measured, unmeasured].map((id, i) => ({
+          id,
+          project_id: Project.ID.global,
+          slug: id,
+          directory: AbsolutePath.make("/repo"),
+          version: "test",
+          parent_id: i === 0 ? undefined : root,
+          time_created: i,
+          time_updated: i,
+        })),
+      )
+      .run()
+    const tokens = (input: number) => ({ input, output: 1, reasoning: 0, cache: { read: 2, write: 3 } })
+    yield* database.db
+      .insert(SessionMessageTable)
+      .values([
+        {
+          id: SessionMessage.ID.make("msg_context_old"),
+          session_id: measured,
+          seq: 1,
+          type: "assistant",
+          time_created: 1,
+          time_updated: 1,
+          data: { time: { created: 1 }, model: { providerID: "old", id: "old-model" }, tokens: tokens(10) },
+        },
+        {
+          id: SessionMessage.ID.make("msg_context_new"),
+          session_id: measured,
+          seq: 2,
+          type: "assistant",
+          time_created: 2,
+          time_updated: 2,
+          data: { time: { created: 2 }, model: { providerID: "anthropic", id: "claude" }, tokens: tokens(500) },
+        },
+        {
+          id: SessionMessage.ID.make("msg_context_streaming"),
+          session_id: measured,
+          seq: 3,
+          type: "assistant",
+          time_created: 3,
+          time_updated: 3,
+          data: { time: { created: 3 }, model: { providerID: "anthropic", id: "streaming" } },
+        },
+        {
+          id: SessionMessage.ID.make("msg_context_user"),
+          session_id: unmeasured,
+          seq: 1,
+          type: "user",
+          time_created: 1,
+          time_updated: 1,
+          data: { time: { created: 1 }, text: "hello" },
+        },
+      ])
+      .run()
+    const page = yield* family.read({ sessionID: root, limit: 10 }, new Set())
+    expect(page.data.map((session) => session.id)).toEqual([measured, unmeasured])
+    expect(page.data[0]?.context).toEqual({
+      id: SessionMessage.ID.make("msg_context_new"),
+      tokens: tokens(500),
+      model: { providerID: Provider.ID.make("anthropic"), id: Model.ID.make("claude") },
+    })
+    expect(page.data[1]?.context).toBeUndefined()
+    expect(page.active).toEqual([])
+  }),
 )
 
 it.effect("selects boundaries across 154 descendants with native list/message ordering and an exact cutoff", () =>

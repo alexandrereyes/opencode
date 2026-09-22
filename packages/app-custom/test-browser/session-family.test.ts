@@ -5,11 +5,15 @@ import { OpenCode, type SessionInfo, type FormInfo, type PermissionRequest } fro
 import { createOpenCodeEventSource } from "@/runtime/server/client"
 import { createSessionFamilies } from "@/session/family"
 import { createSubagentList } from "@/session/files/subagent-list"
-import { createSubagentContextSnapshot } from "@/session/files/subagent-context-model"
 
 const cleanups: VoidFunction[] = []
 afterEach(() => cleanups.splice(0).forEach((dispose) => dispose()))
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10))
+const context = (i: number) => ({
+  id: `msg_measured_${String(i).padStart(3, "0")}`,
+  tokens: { input: 1000 * i, output: 10, reasoning: 0, cache: { read: 5, write: 0 } },
+  model: { providerID: "test", id: "large" },
+})
 const child = (i: number): SessionInfo => ({
   id: `ses_child_${String(i).padStart(3, "0")}`,
   parentID: "ses_root",
@@ -85,7 +89,10 @@ function fixture() {
             return response.promise
           }
           const start = body.input.after ? Number(body.input.after.split("_").at(-1)) + 1 : 0
-          const data = Array.from({ length: Math.min(10, 154 - start) }, (_, i) => child(start + i))
+          const data = Array.from({ length: Math.min(10, 154 - start) }, (_, i) => ({
+            ...child(start + i),
+            ...((start + i) % 2 === 0 ? { context: context(start + i) } : {}),
+          }))
           return Response.json({ output: { data, ...(start + 10 < 154 ? { next: data.at(-1)!.id } : {}) } })
         }
         throw new Error(`Unexpected request ${request.url}: ${JSON.stringify(body)}`)
@@ -116,18 +123,19 @@ function fixture() {
   })
 }
 
-test("154 descendants cost one shared opening snapshot, one page per expansion and real pagination, with cached reopen", async () => {
+test("154 descendants cost one shared opening snapshot plus one page of rows with context, real pagination and cached reopen", async () => {
   const value = fixture()
+  expect(value.list.state.open).toBeTrue()
   await tick()
-  expect(value.requests.map((request) => request.method)).toEqual(["snapshot"])
+  expect(value.requests.map((request) => request.method).toSorted()).toEqual(["page", "snapshot"])
   expect(value.families.get("ses_root")?.snapshot?.count).toBe(154)
-  expect(value.list.state.children).toHaveLength(0)
-  expect(value.remembered.map((session) => session.id)).toEqual([child(153).id])
+  expect(value.remembered.map((session) => session.id)).toContain(child(153).id)
   expect(value.families.get("ses_root")?.snapshot?.forms[0]).toEqual(question)
-  value.list.setState("open", true)
-  await tick()
-  expect(value.requests.map((request) => request.method)).toEqual(["snapshot", "page"])
   expect(value.list.state.children).toHaveLength(10)
+  // Context arrives with the page: no per-child message or model requests.
+  expect(value.list.state.children[0]?.context).toEqual(context(0))
+  expect(value.list.state.children[1]?.context).toBeUndefined()
+  expect(value.requests.every((request) => request.method === "snapshot" || request.method === "page")).toBeTrue()
   await value.list.load(true)
   expect(value.list.state.children).toHaveLength(20)
   expect(value.requests.at(-1)?.input).toMatchObject({ after: child(9).id, limit: 10 })
@@ -135,13 +143,12 @@ test("154 descendants cost one shared opening snapshot, one page per expansion a
   value.list.setState("open", true)
   await tick()
   expect(value.requests).toHaveLength(3)
-  expect(value.list.state.children).toHaveLength(10)
+  expect(value.list.state.children).toHaveLength(20)
 })
 
 test("closing demand aborts the real page signal and switching session clears rows and pending", async () => {
   const value = fixture()
-  await tick()
-  value.list.setState("open", true)
+  value.pending.deferPage = true
   await tick()
   const signal = value.requests.find((request) => request.method === "page")!.signal
   expect(signal.aborted).toBeFalse()
@@ -151,6 +158,9 @@ test("closing demand aborts the real page signal and switching session clears ro
   expect(value.list.state.children).toHaveLength(0)
   expect(value.families.get("ses_other")?.snapshot).toBeUndefined()
   expect(value.list.state.open).toBeFalse()
+  value.list.setState("open", true)
+  value.setState("id", "ses_root")
+  expect(value.list.state.open).toBeTrue()
 })
 
 test("resolved prompts cannot be restored by an old snapshot; reconnect discovers pending and reconciles active status", async () => {
@@ -181,62 +191,48 @@ test("resolved prompts cannot be restored by an old snapshot; reconnect discover
   expect(value.statuses.get(child(153).id)).toBe("idle")
 })
 
-test("hidden subagent details make no message or model requests, selected item is bounded and reuses its snapshot", async () => {
+test("a listed member's step refreshes page context in place and keeps the shown depth; unlisted steps do not", async () => {
   const value = fixture()
-  const messages: { id: string; limit?: number; signal?: AbortSignal }[] = []
-  const models: string[] = []
-  createRoot((dispose) => {
-    cleanups.push(dispose)
-    Array.from({ length: 10 }, (_, i) =>
-      createSubagentContextSnapshot({
-        child: () => child(i),
-        active: () => value.state.active && value.state.selected === i,
-        sdk: {
-          ...value.sdk,
-          api: {
-            message: {
-              list: async (input, options) => {
-                messages.push({ id: input.sessionID, limit: input.limit, signal: options?.signal })
-                return { data: [], cursor: {} }
-              },
-            },
-          },
-        },
-        data: {
-          session: { message: { get: () => undefined } },
-          location: {
-            model: {
-              sync: async (location) => {
-                models.push(location!.directory!)
-              },
-            },
-          },
-        },
-      }),
-    )
+  await tick()
+  await value.list.load(true)
+  expect(value.list.state.children).toHaveLength(20)
+  const count = value.requests.length
+  value.events.publish({
+    id: "evt_step_unlisted",
+    type: "session.step.ended",
+    created: 2,
+    data: { sessionID: child(140).id, assistantMessageID: "msg_x", tokens: context(1).tokens },
   })
-  await tick()
-  expect(messages).toEqual([])
-  expect(models).toEqual([])
-  value.setState("selected", 3)
-  await tick()
-  expect(messages.map((request) => [request.id, request.limit])).toEqual([[child(3).id, 20]])
-  value.setState("selected", -1)
-  expect(messages[0].signal?.aborted).toBeTrue()
-  value.setState("selected", 3)
-  await tick()
-  expect(messages).toHaveLength(1)
+  await new Promise((resolve) => setTimeout(resolve, 175))
+  expect(value.requests.slice(count).map((request) => request.method)).toEqual(["snapshot"])
+  value.events.publish({
+    id: "evt_step_listed",
+    type: "session.step.ended",
+    created: 3,
+    data: { sessionID: child(12).id, assistantMessageID: "msg_y", tokens: context(1).tokens },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 175))
+  expect(value.requests.slice(count + 1).map((request) => request.method).toSorted()).toEqual([
+    "page",
+    "page",
+    "snapshot",
+  ])
+  expect(value.list.state.children).toHaveLength(20)
+  expect(value.list.state.loading).toBeFalse()
+  expect(value.list.state.subagentLimit).toBe(20)
+  expect(value.list.state.next).toBe(child(19).id)
+  await value.list.load(true)
+  expect(value.requests.at(-1)?.input).toMatchObject({ after: child(19).id, limit: 10 })
+  expect(value.list.state.children).toHaveLength(30)
 })
 
 test("in-flight optional pages are cancelled on collapse and cannot hydrate the shared cache after navigation", async () => {
   const value = fixture()
-  await tick()
   value.pending.deferPage = true
-  value.list.setState("open", true)
   await tick()
   expect(value.list.state.loading).toBeTrue()
   expect(value.pending.pages).toHaveLength(1)
-  const signal = value.requests.at(-1)!.signal
+  const signal = value.requests.find((request) => request.method === "page")!.signal
   value.list.setState("open", false)
   expect(signal.aborted).toBeTrue()
   value.setState("id", "ses_other")
@@ -260,7 +256,7 @@ test("new descendant permissions are automatic, text deltas do not refresh, and 
   await new Promise((resolve) => setTimeout(resolve, 175))
   expect(value.families.get("ses_root")?.snapshot?.permissions).toEqual([permission])
   expect(value.families.permissions()).toEqual([permission])
-  expect(value.list.state.children).toHaveLength(0)
+  expect(value.list.state.children).toHaveLength(10)
   const count = value.requests.length
   Array.from({ length: 100 }, (_, i) =>
     value.events.publish({
@@ -282,7 +278,7 @@ test("new descendant permissions are automatic, text deltas do not refresh, and 
   )
   await new Promise((resolve) => setTimeout(resolve, 175))
   expect(value.requests).toHaveLength(count + 1)
-  expect(value.requests.every((request) => request.method === "snapshot")).toBeTrue()
+  expect(value.requests.at(-1)?.method).toBe("snapshot")
   value.events.publish({
     type: "permission.replied",
     id: "evt_reply_permission",
@@ -302,5 +298,5 @@ test("snapshot failure is visible and explicit retry restores unloaded pending r
   await tick()
   expect(value.families.get("ses_root")?.failed).toBeFalse()
   expect(value.families.get("ses_root")?.snapshot?.forms[0]).toEqual(question)
-  expect(value.requests).toHaveLength(2)
+  expect(value.requests.filter((request) => request.method === "snapshot")).toHaveLength(2)
 })

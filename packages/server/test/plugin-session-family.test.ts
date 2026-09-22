@@ -57,7 +57,27 @@ it.live("serves bounded family pages and pending descendants through the actual 
                     { id: `msg_family_${i}_before`, type: "user", text: "Before", time: { created: 99 } },
                     { id: `msg_family_${i}_exact`, type: "user", text: "At cutoff", time: { created: 100 } },
                   ]
-                : [],
+                : i === 1
+                  ? [
+                      {
+                        id: "msg_family_1_measured",
+                        type: "assistant",
+                        agent: "build",
+                        model: { providerID: "anthropic", id: "claude" },
+                        content: [],
+                        time: { created: 100, completed: 100 },
+                        tokens: { input: 1200, output: 10, reasoning: 0, cache: { read: 3, write: 4 } },
+                      },
+                      {
+                        id: "msg_family_1_streaming",
+                        type: "assistant",
+                        agent: "build",
+                        model: { providerID: "anthropic", id: "claude" },
+                        content: [],
+                        time: { created: 101, completed: 101 },
+                      },
+                    ]
+                  : [],
             location,
           }),
         ),
@@ -113,6 +133,21 @@ it.live("serves bounded family pages and pending descendants through the actual 
       client.rpc(Family.Definition).page({ sessionID: root.id, limit: 10, after: page.next }, { location }),
     )
     expect(new Set([...page.data, ...second.data].map((item) => item.id)).size).toBe(20)
+    const walk = (after: string | undefined): Effect.Effect<(typeof page.data)[number][]> =>
+      Effect.gen(function* () {
+        if (!after) return []
+        const next = yield* Effect.promise(() =>
+          client.rpc(Family.Definition).page({ sessionID: root.id, limit: 100, after }, { location }),
+        )
+        return [...next.data, ...(yield* walk(next.next))]
+      })
+    const measured = [...page.data, ...second.data, ...(yield* walk(second.next))].filter((item) => item.context)
+    expect(measured.map((item) => item.id)).toEqual([ids[1]])
+    expect(measured[0]?.context).toEqual({
+      id: "msg_family_1_measured",
+      tokens: { input: 1200, output: 10, reasoning: 0, cache: { read: 3, write: 4 } },
+      model: { providerID: "anthropic", id: "claude" },
+    })
     yield* Effect.promise(() =>
       client.session.form.reply({ sessionID: ids[153], formID: form.id, answer: { answer: "done" } }),
     )

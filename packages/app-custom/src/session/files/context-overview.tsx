@@ -1,5 +1,4 @@
-import { createMemo, For, Show, type JSX } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createEffect, createMemo, For, on, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
 import { Icon } from "@opencode/ui-custom/icon"
 import { ProgressCircle } from "@opencode/ui-custom/progress-circle"
@@ -10,6 +9,7 @@ import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@opencode/ui-custom/dialog"
 import { createSessionBackground } from "@/session/requests/background"
 import { useData, useServer } from "@/runtime/server/current"
+import { useServerSDK } from "@/runtime/server/client"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useSessionLayout } from "@/session/session-layout"
@@ -87,6 +87,7 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   const dialog = useDialog()
   const data = useData()
   const server = useServer()
+  const sdk = useServerSDK()
   const location = useWorkspaceLocation()
   const layout = useSessionLayout()
   const info = createMemo(() => (layout.params.id ? data.session.get(layout.params.id) : undefined))
@@ -113,6 +114,19 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
   const children = () => subagents.state.children
   const visibleChildren = createMemo(() => children().slice(0, subagents.state.subagentLimit))
   const hasMoreChildren = () => !!subagents.state.next || children().length > visibleChildren().length
+  // Context limits need each child's model list; sync once per distinct location, not per row.
+  const directories = createMemo(() =>
+    props.active && subagents.state.open && sdk.connection.status() === "connected"
+      ? [...new Set(visibleChildren().map((child) => child.location.directory))]
+      : [],
+  )
+  createEffect(
+    on(directories, (current, previous = []) =>
+      current
+        .filter((directory) => !previous.includes(directory))
+        .forEach((directory) => void data.location.model.sync({ directory }).catch(() => undefined)),
+    ),
+  )
   const money = (value: number) =>
     new Intl.NumberFormat(language.intl(), {
       style: "currency",
@@ -214,52 +228,36 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         >
           <For each={visibleChildren()}>
             {(child) => {
-              const [row, setRow] = createStore({ open: false })
+              const live = createMemo(() => ({ ...child, ...data.session.get(child.id) }))
               return (
-                <div class="min-w-0 rounded-md px-2 py-1">
-                  <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
-                    <A
-                      href={sessionHref(server.key, child.id)}
-                      class="min-w-0 flex-1 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-border-active"
-                    >
-                      <bdi class="block truncate" title={data.session.get(child.id)?.title ?? child.title}>
-                        <TextShimmer
-                          text={data.session.get(child.id)?.title ?? child.title ?? child.id}
-                          active={data.session.status(child.id) === "running"}
-                        />
-                      </bdi>
-                    </A>
-                    <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
-                      <span class="block">
-                        {language.t(
-                          data.session.status(child.id) === "running"
-                            ? "context.overview.running"
-                            : (data.session.get(child.id) ?? child).outcome
-                              ? `context.overview.${(data.session.get(child.id) ?? child).outcome!}`
-                              : "context.overview.idle",
-                        )}
-                      </span>
-                      <Show when={(data.session.get(child.id) ?? child).cost > 0}>
-                        <span class="block tabular-nums">{money((data.session.get(child.id) ?? child).cost)}</span>
-                      </Show>
+                <A
+                  href={sessionHref(server.key, child.id)}
+                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                >
+                  <span class="min-w-0 flex-1">
+                    <bdi class="block truncate" title={live().title}>
+                      <TextShimmer
+                        text={live().title ?? child.id}
+                        active={data.session.status(child.id) === "running"}
+                      />
+                    </bdi>
+                    <SubagentContext child={live()} />
+                  </span>
+                  <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
+                    <span class="block">
+                      {language.t(
+                        data.session.status(child.id) === "running"
+                          ? "context.overview.running"
+                          : live().outcome
+                            ? `context.overview.${live().outcome!}`
+                            : "context.overview.idle",
+                      )}
                     </span>
-                    <button
-                      type="button"
-                      aria-expanded={row.open}
-                      aria-label={language.t("context.overview.subagents.details", { title: child.title ?? child.id })}
-                      class="flex size-7 shrink-0 items-center justify-center rounded-sm hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
-                      onClick={() => setRow("open", !row.open)}
-                    >
-                      <Icon name="chevron-down" size="small" classList={{ "-rotate-90": !row.open }} />
-                    </button>
-                  </div>
-                  <div classList={{ hidden: !row.open }}>
-                    <SubagentContext
-                      child={data.session.get(child.id) ?? child}
-                      active={props.active && subagents.state.open && row.open}
-                    />
-                  </div>
-                </div>
+                    <Show when={live().cost > 0}>
+                      <span class="block tabular-nums">{money(live().cost)}</span>
+                    </Show>
+                  </span>
+                </A>
               )
             }}
           </For>

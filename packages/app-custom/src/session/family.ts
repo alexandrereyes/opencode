@@ -13,7 +13,10 @@ type Snapshot = {
   forms: FormInfo[]
   permissions: PermissionRequest[]
 }
-type Page = { data: SessionInfo[]; next?: string }
+/** Latest measured assistant context, read with the page instead of each child's transcript. */
+export type MeasuredContext = { id: string; tokens: SessionInfo["tokens"]; model: NonNullable<SessionInfo["model"]> }
+export type SubagentInfo = SessionInfo & { context?: MeasuredContext }
+type Page = { data: SubagentInfo[]; next?: string }
 type Entry = { snapshot?: Snapshot; failed: boolean; version: number }
 
 export function createSessionFamilies(input: {
@@ -111,19 +114,24 @@ export function createSessionFamilies(input: {
       const settledForm = event.type === "form.replied" || event.type === "form.cancelled" ? event.data.id : undefined
       const settledPermission = event.type === "permission.replied" ? event.data.requestID : undefined
       const topology = event.type === "session.created" || event.type === "session.deleted"
+      // Page rows carry measured context, so a listed member's step or revert changes page data.
+      const measured =
+        event.type === "session.step.ended" ||
+        (event.type === "session.step.failed" && event.data.tokens) ||
+        event.type === "session.revert.committed"
+          ? event.data.sessionID
+          : undefined
       const relevant =
         topology ||
+        measured ||
         settledForm ||
         settledPermission ||
         event.type === "form.created" ||
         event.type === "permission.asked" ||
-        event.type === "session.step.ended" ||
-        event.type === "session.step.failed" ||
         event.type === "session.execution.started" ||
         event.type === "session.execution.succeeded" ||
         event.type === "session.execution.failed" ||
-        event.type === "session.execution.interrupted" ||
-        event.type === "session.revert.committed"
+        event.type === "session.execution.interrupted"
       if (!relevant) return
       cache.forEach((work, id) => {
         work.dirty = true
@@ -135,7 +143,10 @@ export function createSessionFamilies(input: {
           setState(id, "snapshot", "permissions", (permissions) =>
             permissions.filter((request) => request.id !== settledPermission),
           )
-        if (topology) {
+        const listed =
+          measured !== undefined &&
+          [...work.pages.values()].some((page) => page.data.some((session) => session.id === measured))
+        if (topology || listed) {
           work.pages.clear()
           work.pageRevision++
           work.pagesDirty = true
@@ -204,6 +215,7 @@ export function createSessionFamilies(input: {
       // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
       const page = result as Page
       work.pages.set(after ?? "", page)
+      // The optional context field is inert in the session cache; consumers read SessionInfo fields only.
       page.data.forEach(input.remember)
       return page
     },

@@ -1,7 +1,6 @@
 import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { SessionInfo } from "@opencode/client/promise"
-import { SUBAGENT_PAGE_SIZE } from "@/session/family"
+import { SUBAGENT_PAGE_SIZE, type SubagentInfo } from "@/session/family"
 
 export function createSubagentList(input: {
   sessionID: () => string | undefined
@@ -11,13 +10,13 @@ export function createSubagentList(input: {
     id: string,
     after: string | undefined,
     signal: AbortSignal,
-  ) => Promise<{ data: SessionInfo[]; next?: string } | undefined>
+  ) => Promise<{ data: SubagentInfo[]; next?: string } | undefined>
 }) {
   const [state, setState] = createStore({
     owner: input.sessionID(),
-    open: false,
+    open: true,
     subagentLimit: SUBAGENT_PAGE_SIZE,
-    children: [] as SessionInfo[],
+    children: [] as SubagentInfo[],
     next: undefined as string | undefined,
     loaded: false,
     loading: false,
@@ -34,17 +33,25 @@ export function createSubagentList(input: {
   const load = async (more = false) => {
     const request = demand()
     if (!request || state.loading) return
-    setState({ loading: true, failed: false })
-    const after = more ? state.next : undefined
-    await input
-      .page(request.id, after, request.signal)
-      .then((page) => {
-        if (!page || request.signal.aborted) return
+    // Invalidated rows refresh in place to the depth already shown, without a visible reload.
+    const depth = more ? state.children.length + 1 : Math.max(state.children.length, 1)
+    setState({ loading: !state.loaded || more, failed: false })
+    const children = more ? [...state.children] : []
+    const walk = async (after: string | undefined): Promise<string | undefined> => {
+      const page = await input.page(request.id, after, request.signal)
+      if (!page || request.signal.aborted) return
+      children.push(...page.data)
+      if (!page.next || children.length >= depth) return page.next
+      return walk(page.next)
+    }
+    await walk(more ? state.next : undefined)
+      .then((next) => {
+        if (request.signal.aborted) return
         setState({
-          children: more ? [...state.children, ...page.data] : page.data,
-          next: page.next,
+          children,
+          next,
           loaded: true,
-          subagentLimit: more ? state.subagentLimit + SUBAGENT_PAGE_SIZE : SUBAGENT_PAGE_SIZE,
+          subagentLimit: more ? state.subagentLimit + SUBAGENT_PAGE_SIZE : state.subagentLimit,
         })
       })
       .catch(() => {
@@ -66,7 +73,6 @@ export function createSubagentList(input: {
       () =>
         setState({
           owner: input.sessionID(),
-          open: false,
           children: [],
           next: undefined,
           loaded: false,

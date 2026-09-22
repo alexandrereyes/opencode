@@ -1,8 +1,10 @@
 export * as SessionFamily from "./session-family.js"
 
 import { Schema } from "effect"
+import { Model } from "./model.js"
 import { SessionMessage } from "./session-message.js"
 import { Session } from "./session.js"
+import { TokenUsage } from "./token-usage.js"
 import { NonNegativeInt, PositiveInt, optional } from "./schema.js"
 
 export interface Input extends Schema.Schema.Type<typeof Input> {}
@@ -13,11 +15,25 @@ export const Input = Schema.Struct({
   limit: PositiveInt.check(Schema.isLessThanOrEqualTo(100)).pipe(optional),
 }).annotate({ identifier: "SessionFamily.Input" })
 
+/** Latest measured assistant context of a descendant; absent until a step reports tokens. */
+export interface Context extends Schema.Schema.Type<typeof Context> {}
+export const Context = Schema.Struct({
+  id: SessionMessage.ID,
+  tokens: TokenUsage.Info,
+  model: Model.Ref,
+}).annotate({ identifier: "SessionFamily.Context" })
+
+export interface Member extends Schema.Schema.Type<typeof Member> {}
+export const Member = Schema.Struct({
+  ...Session.Info.fields,
+  context: Context.pipe(optional),
+}).annotate({ identifier: "SessionFamily.Member" })
+
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   count: NonNegativeInt,
   cost: Schema.Finite,
-  data: Schema.Array(Session.Info),
+  data: Schema.Array(Member),
   next: Session.ID.pipe(optional),
   active: Schema.Array(Session.Info),
 }).annotate({ identifier: "SessionFamily.Info" })

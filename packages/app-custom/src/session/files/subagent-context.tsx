@@ -1,29 +1,20 @@
 import { createMemo, Show } from "solid-js"
-import type { SessionInfo } from "@opencode/client/promise"
 import { Icon } from "@opencode/ui-custom/icon"
 import { ProgressCircle } from "@opencode/ui-custom/progress-circle"
-import { Spinner } from "@opencode/ui-custom/spinner"
 import { useData } from "@/runtime/server/current"
-import { useServerSDK } from "@/runtime/server/client"
 import { useLanguage } from "@/runtime/i18n/language"
-import { createSubagentContextSnapshot } from "./subagent-context-model"
-import { latestContextMessage, subagentContext } from "./subagent-context-usage"
+import type { SubagentInfo } from "@/session/family"
+import { latestContextMessage, measuredContext, subagentContext } from "./subagent-context-usage"
 
-export function SubagentContext(props: { child: SessionInfo; active: boolean }) {
+export function SubagentContext(props: { child: SubagentInfo }) {
   const data = useData()
-  const sdk = useServerSDK()
   const language = useLanguage()
-  const cached = createMemo(() => latestContextMessage(data.session.message.list(props.child.id)))
-  const snapshot = createSubagentContextSnapshot({ child: () => props.child, active: () => props.active, sdk, data })
-  const context = createMemo(() => {
-    // Never read a pending resource: optional metadata must not suspend the page.
-    const fetched = snapshot.state === "ready" || snapshot.state === "refreshing" ? snapshot.latest?.message : undefined
-    const live = cached()
-    return subagentContext(
-      latestContextMessage([...(fetched ? [fetched] : []), ...(live ? [live] : [])]),
+  const context = createMemo(() =>
+    subagentContext(
+      measuredContext(latestContextMessage(data.session.message.list(props.child.id)), props.child.context),
       data.location.model.list(props.child.location),
-    )
-  })
+    ),
+  )
   return (
     <span
       data-slot="subagent-context"
@@ -36,14 +27,7 @@ export function SubagentContext(props: { child: SessionInfo; active: boolean }) 
         </bdi>
       </span>
       <span class="inline-flex items-center gap-1.5" aria-label={language.t("context.overview.context")}>
-        <Show
-          when={context()?.usage != null}
-          fallback={
-            <Show when={snapshot.loading && !context()}>
-              <Spinner class="size-4" />
-            </Show>
-          }
-        >
+        <Show when={context()?.usage != null}>
           <ProgressCircle
             appearance="indicator"
             size={16}

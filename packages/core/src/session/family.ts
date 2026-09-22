@@ -1,7 +1,7 @@
 export * as SessionFamily from "./family.js"
 
-import { and, asc, getTableName, gt, inArray, sql } from "drizzle-orm"
-import { Context, Effect, Layer } from "effect"
+import { and, asc, getTableColumns, getTableName, gt, inArray, sql } from "drizzle-orm"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Session } from "@opencode/schema/session"
 import { SessionFamily } from "@opencode/schema/session-family"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
@@ -16,6 +16,8 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionFamily") {}
+
+const decodeContext = Schema.decodeUnknownOption(Schema.fromJsonString(SessionFamily.Context))
 
 const layer = Layer.effect(
   Service,
@@ -93,7 +95,23 @@ const layer = Layer.effect(
           input.limit === undefined
             ? []
             : yield* database.db
-                .select()
+                .select({
+                  session: getTableColumns(SessionTable),
+                  // The newest assistant measurement per listed row, read from the
+                  // indexed (session, type, seq) order without decoding payloads.
+                  context: sql<string | null>`(
+                    select json_object(
+                      'id', id,
+                      'tokens', json_extract(data, '$.tokens'),
+                      'model', json_extract(data, '$.model')
+                    )
+                    from ${SessionMessageTable}
+                    where session_id = ${sql.identifier(getTableName(SessionTable))}.${sql.identifier(SessionTable.id.name)}
+                      and type = 'assistant'
+                      and json_extract(data, '$.tokens') is not null
+                    order by seq desc limit 1
+                  )`,
+                })
                 .from(SessionTable)
                 .where(and(descendants, input.after ? gt(SessionTable.id, input.after) : undefined))
                 .orderBy(asc(SessionTable.id))
@@ -110,7 +128,10 @@ const layer = Layer.effect(
                 .orderBy(asc(SessionTable.id))
                 .all()
                 .pipe(Effect.orDie)
-        const data = rows.slice(0, input.limit ?? 0).map(fromRow)
+        const data = rows.slice(0, input.limit ?? 0).map((row) => {
+          const context = row.context ? Option.getOrUndefined(decodeContext(row.context)) : undefined
+          return { ...fromRow(row.session), ...(context ? { context } : {}) }
+        })
         return {
           count: summary?.count ?? 0,
           cost: summary?.cost ?? 0,

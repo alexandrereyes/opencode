@@ -1,11 +1,13 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
+import { SessionFamily } from "@opencode/schema/session-family"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
 import { Effect, Schema } from "effect"
 import { Family } from "./rpc.js"
 
 const encodeSession = Schema.encodeSync(Session.Info)
+const encodeMember = Schema.encodeSync(SessionFamily.Member)
 const encodeForm = Schema.encodeSync(Form.Info)
 const encodePermission = Schema.encodeSync(Permission.Request)
 
@@ -87,7 +89,7 @@ export const registerFamily = Effect.fn("Family.register")(function* (ctx: Plugi
       page: (input, context) =>
         ctx.session.family({ ...input, limit: input.limit ?? 10 }).pipe(
           Effect.map((result) => ({
-            data: result.data.map((item) => encodeSession(item)),
+            data: result.data.map((item) => encodeMember(item)),
             ...(result.next ? { next: result.next } : {}),
           })),
           Effect.mapError(() =>
