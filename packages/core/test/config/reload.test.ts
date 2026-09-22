@@ -10,7 +10,6 @@ import { ConfigAgentPlugin } from "@opencode/core/config/plugin/agent"
 import { ConfigCommandPlugin } from "@opencode/core/config/plugin/command"
 import { ConfigProviderPlugin } from "@opencode/core/config/plugin/provider"
 import { ConfigReferencePlugin } from "@opencode/core/config/plugin/reference"
-import { ConfigCompatibilityPlugin } from "@opencode/core/config/plugin/compatibility"
 import { ConfigSkillPlugin } from "@opencode/core/config/plugin/skill"
 import { Bus } from "@opencode/core/bus"
 import { Integration } from "@opencode/core/integration"
@@ -28,7 +27,7 @@ import { Credential } from "@opencode/core/credential"
 import { WellKnown } from "@opencode/core/wellknown"
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { AppProcess } from "@opencode/util/process"
-import { Deferred, Effect, Layer, Schema } from "effect"
+import { Deferred, Effect, Layer, Schema, Stream } from "effect"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { AbsolutePath } from "@opencode/core/schema"
 import { testEffect } from "../lib/effect"
@@ -67,7 +66,7 @@ describe("config plugin reloads", () => {
               const plugins = yield* Plugin.Service
               const skills = yield* Skill.Service
               const host = yield* PluginHost.make(plugins)
-              yield* ConfigCompatibilityPlugin.Plugin.effect(host)
+              yield* ConfigSkillPlugin.Plugin.effect(host)
               expect(yield* skills.list()).toEqual([])
 
               // Finish startup by observing an ordinary config reload before creating the root.
@@ -91,6 +90,71 @@ describe("config plugin reloads", () => {
       ),
     )
   }
+
+  it.live("ignores unrelated files under compatibility skills while hot reloading skill changes", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const project = path.join(tmp.path, "project")
+          const root = path.join(project, ".agents", "skills")
+          const manifest = path.join(root, "synced", "manifest.json")
+          const outside = path.join(tmp.path, "outside")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(project, "global"), { recursive: true })
+            await fs.mkdir(path.join(root, "synced"), { recursive: true })
+            await fs.mkdir(path.join(outside, "moved"), { recursive: true })
+            await Bun.write(path.join(root, "deploy", "SKILL.md"), "---\ndescription: Initial\n---\nDeploy")
+            await Bun.write(path.join(outside, "moved", "SKILL.md"), "---\ndescription: Moved\n---\nMoved")
+            await Bun.write(manifest, "{}")
+          })
+          return yield* Effect.gen(function* () {
+            const bus = yield* Bus.Service
+            const plugins = yield* Plugin.Service
+            const skills = yield* Skill.Service
+            const host = yield* PluginHost.make(plugins)
+            yield* ConfigSkillPlugin.Plugin.effect(host)
+            const description = (id: string) =>
+              skills.list().pipe(Effect.map((items) => items.find((item) => item.id === id)?.description))
+            expect(yield* description("deploy")).toBe("Initial")
+            const updates = { count: 0 }
+            yield* bus.subscribe(Skill.Event.Updated).pipe(
+              Stream.runForEach(() => Effect.sync(() => updates.count++)),
+              Effect.forkScoped({ startImmediately: true }),
+            )
+
+            // A skill edit proves the native watch is live before checking for ignored events.
+            yield* Effect.promise(() =>
+              Bun.write(path.join(root, "deploy", "SKILL.md"), "---\ndescription: Edited\n---\n"),
+            )
+            yield* waitUntil(description("deploy").pipe(Effect.map((value) => value === "Edited")))
+            const settled = updates.count
+            for (const version of [1, 2, 3]) {
+              yield* Effect.promise(() => Bun.write(manifest, JSON.stringify({ version })))
+              yield* Effect.sleep("50 millis")
+            }
+            yield* Effect.promise(async () => {
+              await Bun.write(`${manifest}.tmp`, JSON.stringify({ version: 4 }))
+              await fs.rename(`${manifest}.tmp`, manifest)
+            })
+            yield* Effect.sleep("1 second")
+            expect(updates.count).toBe(settled)
+
+            yield* Effect.promise(() => fs.rename(path.join(outside, "moved"), path.join(root, "moved")))
+            yield* waitUntil(description("moved").pipe(Effect.map((value) => value === "Moved")))
+            yield* Effect.promise(() => fs.rename(path.join(root, "moved"), path.join(root, "renamed")))
+            yield* waitUntil(description("renamed").pipe(Effect.map((value) => value === "Moved")))
+            expect(yield* description("moved")).toBeUndefined()
+            yield* Effect.promise(() => fs.rename(path.join(root, "renamed"), path.join(outside, "renamed")))
+            yield* waitUntil(description("renamed").pipe(Effect.map((value) => value === undefined)))
+            yield* Effect.promise(() => fs.symlink(path.join(outside, "renamed"), path.join(root, "linked")))
+            yield* waitUntil(description("linked").pipe(Effect.map((value) => value === "Moved")))
+            yield* Effect.promise(() => fs.rm(path.join(root, "deploy"), { recursive: true }))
+            yield* waitUntil(description("deploy").pipe(Effect.map((value) => value === undefined)))
+          }).pipe(Effect.provide(liveConfig(project)))
+        }),
+      ),
+    ),
+  )
 
   it.live("retains readiness signalled synchronously during initial config startup", () =>
     Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(

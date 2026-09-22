@@ -25,13 +25,35 @@ export const Plugin = define({
     const global = yield* Global.Service
     const location = yield* Location.Service
     const watcher = yield* Watcher.Service
-    const loaded: { entries: Entry[]; skills: Skill.Info[] } = {
+    const compatibilityRoots = config.compatibility ?? (() => Effect.succeed({ claude: [], agents: [] }))
+    const loaded: {
+      entries: Entry[]
+      compatibility: { readonly claude: readonly AbsolutePath[]; readonly agents: readonly AbsolutePath[] }
+      skills: Skill.Info[]
+      roots: string[]
+      files: string[]
+    } = {
       entries: yield* config.entries(),
+      compatibility: yield* compatibilityRoots(),
       skills: [],
+      roots: [],
+      files: [],
     }
     const watches = yield* FiberMap.make<string>()
     const changes = yield* PubSub.sliding<string>(1)
     const lock = Semaphore.makeUnsafe(1)
+
+    // Recursive source watches also report unrelated files, such as sync manifests. Directory
+    // moves and replacements report only the directory, so paths containing a loaded root or
+    // skill file stay relevant, and new directories may bring skills without file events.
+    const relevant = (update: Watcher.Update) => {
+      const target = path.resolve(update.path)
+      if (path.basename(target) === "SKILL.md") return Effect.succeed(true)
+      if (target.endsWith(".md") && loaded.roots.includes(path.dirname(target))) return Effect.succeed(true)
+      if ([...loaded.roots, ...loaded.files].some((item) => FSUtil.contains(target, item))) return Effect.succeed(true)
+      if (update.type === "delete") return Effect.succeed(false)
+      return fs.isDir(target)
+    }
 
     const watch = Effect.fn("ConfigSkillPlugin.watch")(function* (directory: string, type: "file" | "directory") {
       const target = path.resolve(directory)
@@ -39,7 +61,10 @@ export const Plugin = define({
       yield* FiberMap.run(
         watches,
         `${type}:${target}`,
-        updates.pipe(Stream.runForEach((update) => PubSub.publish(changes, update.path).pipe(Effect.asVoid))),
+        updates.pipe(
+          Stream.filterEffect(relevant),
+          Stream.runForEach((update) => PubSub.publish(changes, update.path).pipe(Effect.asVoid)),
+        ),
         { onlyIfMissing: true, startImmediately: true },
       )
     })
@@ -82,6 +107,9 @@ export const Plugin = define({
       }
       const directories = loaded.entries.flatMap((entry) => (entry.type === "directory" ? [entry.path] : []))
       const items = loaded.entries.flatMap((entry) => (entry.type === "document" ? (entry.info.skills ?? []) : []))
+      for (const directory of [...loaded.compatibility.claude, ...loaded.compatibility.agents]) {
+        add(Skill.DirectorySource.make({ type: "directory", path: AbsolutePath.make(path.join(directory, "skills")) }))
+      }
       for (const directory of directories) {
         add(Skill.DirectorySource.make({ type: "directory", path: AbsolutePath.make(path.join(directory, "skill")) }))
         add(Skill.DirectorySource.make({ type: "directory", path: AbsolutePath.make(path.join(directory, "skills")) }))
@@ -116,12 +144,14 @@ export const Plugin = define({
             )
       const roots = (yield* Effect.forEach(directories, watchDirectory)).flat()
       const skills: Skill.Info[] = []
+      const tracked: string[] = []
       for (const directory of directories) {
         const files = yield* fs
           .scan("{*.md,**/SKILL.md}", { cwd: directory, absolute: true, include: "file", symlink: true, dot: true })
           .pipe(Effect.orElseSucceed(() => [] as string[]))
         for (const filepath of files.toSorted()) {
           const resolved = yield* fs.realPath(filepath).pipe(Effect.orElseSucceed(() => filepath))
+          tracked.push(filepath, resolved)
           if (!roots.some((root) => FSUtil.contains(root, resolved))) yield* watch(path.dirname(resolved), "directory")
           const content = yield* fs.readFileStringSafe(filepath).pipe(Effect.orElseSucceed(() => undefined))
           if (!content) continue
@@ -143,7 +173,7 @@ export const Plugin = define({
         directories,
         skills: skills.map((skill) => skill.id),
       })
-      return skills
+      return { skills, roots, files: tracked }
     })
 
     const refresh = Effect.fn("ConfigSkillPlugin.refresh")(
@@ -151,10 +181,13 @@ export const Plugin = define({
         yield* FiberMap.clear(watches)
         const skills = new Map<Skill.ID, Skill.Info>()
         const current = sources()
-        for (const source of current) {
-          for (const skill of yield* load(source)) skills.set(skill.id, skill)
+        const results = yield* Effect.forEach(current, load)
+        for (const result of results) {
+          for (const skill of result.skills) skills.set(skill.id, skill)
         }
         loaded.skills = Array.from(skills.values())
+        loaded.roots = results.flatMap((result) => result.roots)
+        loaded.files = results.flatMap((result) => result.files)
         if (file) {
           yield* Effect.logInfo("skills rescanned", {
             file,
@@ -181,11 +214,20 @@ export const Plugin = define({
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),
       Stream.runForEach(() =>
-        config.entries().pipe(
-          Effect.tap((entries) => Effect.sync(() => (loaded.entries = entries))),
-          Effect.andThen(refresh()),
-          Effect.andThen(ctx.skill.reload()),
-        ),
+        Effect.gen(function* () {
+          const previous = sources()
+          loaded.entries = yield* config.entries()
+          loaded.compatibility = yield* compatibilityRoots()
+          const current = sources()
+          // Source order controls precedence. File events still refresh unchanged sources.
+          if (
+            previous.length === current.length &&
+            previous.every((source, index) => Skill.Source.equals(source, current[index]))
+          )
+            return
+          yield* refresh()
+          yield* ctx.skill.reload()
+        }),
       ),
       Effect.forkScoped({ startImmediately: true }),
     )
