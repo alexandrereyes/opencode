@@ -134,6 +134,6 @@ Informe de forma curta:
 
 Configuração V2 oficial: `https://opencode.ai/v2/docs/skills/`.
 
-Esta skill é versionada em `.opencode/skills/opencode-custom/SKILL.md` na branch `custom` do fork. Deve acompanhar as worktrees baseadas nessa branch, sem uma cópia em diretórios globais de skills.
+Esta skill é versionada em `.agents/skills/opencode-custom/SKILL.md` na branch `custom` do fork. Deve acompanhar as worktrees baseadas nessa branch, sem uma cópia em diretórios globais de skills.
 
 `metadata.opencode/autoinvoke: true` permite descoberta automática no contexto do projeto. `slash: true` mantém sua disponibilidade no catálogo interativo e ela também pode ser solicitada explicitamente pelo ID `opencode-custom`.

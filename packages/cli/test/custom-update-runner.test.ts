@@ -48,7 +48,7 @@ test.each(["update-failure", "wrong-version", "notification-failure", "success",
       await mkdir(`${home}/Dev/opencode2`, { recursive: true })
       await mkdir(`${home}/bin`)
       await copyFile(
-        path.resolve(import.meta.dirname, "../../../.opencode/skills/update-custom-app/scripts/run-update.zsh"),
+        path.resolve(import.meta.dirname, "../../../.agents/skills/update-custom-app/scripts/run-update.zsh"),
         `${home}/runner.zsh`,
       )
       await Bun.write(
