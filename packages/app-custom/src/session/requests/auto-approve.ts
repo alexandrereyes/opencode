@@ -1,6 +1,7 @@
 import { createEffect, on, onCleanup } from "solid-js"
 import type { PermissionRequest } from "@opencode/client/promise"
 import type { Data } from "@opencode/client/solid"
+import { Requests } from "@opencode/plugin-app-custom/rpc"
 import type { ServerSDK } from "@/runtime/server/client"
 import { useSettings } from "@/settings/model"
 
@@ -39,8 +40,7 @@ export function createPermissionAutoApprover(input: {
 
   // Approves pending requests that reach the local store, which is how a
   // previously unknown idle session's requests surface when its view opens
-  // and syncs them. Store changes cannot re-trigger the network sweep: it
-  // deliberately reads them after an await, outside Solid tracking.
+  // and syncs them. Store changes do not re-trigger the network sweep.
   createEffect(() => {
     if (!enabled()) return
     input.pending?.().forEach((request) => approve(request))
@@ -65,58 +65,17 @@ export function createPermissionAutoApprover(input: {
   }
 
   async function sweep() {
-    const inventory = await sweepLocations()
-    const listed = await Promise.all(
-      inventory.locations.map((location) =>
-        input.sdk.api.permission.request
-          .list({ location: { directory: location.directory } })
-          .then((pending) => {
-            if (!state.disposed) pending.data.forEach((request) => approve(request))
-            return true
-          })
-          .catch(() => false),
-      ),
-    )
-    return inventory.complete && listed.every(Boolean)
+    return input.sdk.api
+      .rpc(Requests.Definition)
+      .permissions({})
+      .then((pending) => {
+        if (!state.disposed) pending.forEach((request) => approve(request))
+        return true
+      })
+      .catch(() => false)
   }
 
-  // Active sessions are the primary inventory: session.active is server-wide,
-  // so it covers sessions no tab has loaded, and a request blocking a tool
-  // call always belongs to one (Permission.assert clears its entry when the
-  // awaiting fiber dies). Locally known sessions are swept too because the
-  // external session.permission.create API can park a request on an idle
-  // session. A detached request on a session this client never loaded is the
-  // one case that stays uncovered.
-  async function sweepLocations() {
-    const active = await input.sdk.api.session.active().catch(() => undefined)
-    const ids = Object.keys(active ?? {})
-    // Resync every active session rather than trusting cached info: another
-    // client may have moved one while this client was disconnected, and the
-    // cached location would list permissions from the old location. A failed
-    // resync falls back to the cached location and marks the sweep incomplete.
-    const synced = await Promise.all(
-      ids.map((id) => {
-        input.data.session.invalidate(id)
-        return input.data.session.sync(id).then(
-          () => true,
-          () => false,
-        )
-      }),
-    )
-    const locations = [
-      ...ids.flatMap((id) => {
-        const location = input.data.session.get(id)?.location
-        return location ? [location] : []
-      }),
-      ...input.data.session.list().map((session) => session.location),
-    ]
-    return {
-      locations: [...new Map(locations.map((item) => [item.directory, item])).values()],
-      complete: active !== undefined && synced.every(Boolean),
-    }
-  }
-
-  function approve(permission: PermissionRequest, attempt = 0) {
+  function approve(permission: Pick<PermissionRequest, "id" | "sessionID">, attempt = 0) {
     // enabled() guards the retry timer path: the user may disable the setting
     // between a failed reply and its scheduled retry.
     if (state.disposed || !enabled() || state.responded.has(permission.id)) return

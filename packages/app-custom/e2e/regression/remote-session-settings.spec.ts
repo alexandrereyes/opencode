@@ -48,7 +48,7 @@ test("session settings use the remote server context", async ({ page }) => {
     .poll(() =>
       permissionRequests.some((request) => {
         const url = new URL(request)
-        return url.origin === serverB && url.searchParams.get("location[directory]") === directoryB
+        return url.origin === serverB && !url.searchParams.has("location[directory]")
       }),
     )
     .toBe(true)
@@ -73,7 +73,7 @@ test("session settings use the remote server context", async ({ page }) => {
     .poll(() =>
       permissionRequests.some((request) => {
         const url = new URL(request)
-        return url.origin === serverB && url.searchParams.get("location[directory]") === directoryB
+        return url.origin === serverB && !url.searchParams.has("location[directory]")
       }),
     )
     .toBe(true)
@@ -120,7 +120,7 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
     .poll(() =>
       permissionRequests.some((request) => {
         const url = new URL(request)
-        return url.origin === serverA && url.searchParams.get("location[directory]") === directoryA
+        return url.origin === serverA && !url.searchParams.has("location[directory]")
       }),
     )
     .toBe(true)
@@ -198,13 +198,11 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   const permissionResponses: PermissionResponse[] = []
   const pendingA: MockPermission[] = []
   const listFailures: Record<string, number> = {}
-  const sessionGets: string[] = []
   await installSseTransport(page, { server: serverB })
   const transport = await installSseTransport(page, { server: serverA, retry: 20 })
   await mockServers(page, permissionRequests, permissionResponses, {
     pending: { [serverA]: pendingA },
     listFailures,
-    sessionGets,
   })
   await configureServers(page, [{ type: "session", server: serverA, sessionId: sessionA.id }])
 
@@ -220,7 +218,7 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
     .poll(() =>
       permissionRequests.some((request) => {
         const url = new URL(request)
-        return url.origin === serverA && url.searchParams.get("location[directory]") === directoryA
+        return url.origin === serverA && !url.searchParams.has("location[directory]")
       }),
     )
     .toBe(true)
@@ -233,17 +231,15 @@ test("auto-accept sweeps again after a reconnect", async ({ page }) => {
   permissionRequests.length = 0
   pendingA.push(pendingPermission("permission-offline-a", sessionA.id))
   listFailures[serverA] = 1
-  const syncsBeforeReconnect = sessionGets.length
   await transport.disconnect()
   await transport.waitForConnection({ after: first.id })
-  await expect.poll(() => sessionGets.slice(syncsBeforeReconnect)).toContain(sessionA.id)
 
   await expect
     .poll(
       () =>
         permissionRequests.filter((request) => {
           const url = new URL(request)
-          return url.origin === serverA && url.searchParams.get("location[directory]") === directoryA
+          return url.origin === serverA && !url.searchParams.has("location[directory]")
         }).length,
     )
     .toBeGreaterThanOrEqual(2)
@@ -268,7 +264,7 @@ test("auto-accept approves a request discovered by opening a session", async ({ 
   await installSseTransport(page, { server: serverB })
   // The request is only served from the per-session permission list, so it
   // reaches the client through the store sync when the session view opens,
-  // never through a location sweep or an event.
+  // never through a server-wide sweep or an event.
   await mockServers(page, permissionRequests, permissionResponses, {
     sessionPending: { [sessionA.id]: [pendingPermission("permission-synced-a", sessionA.id)] },
   })
@@ -327,14 +323,12 @@ async function configureServers(page: Page, tabs: { type: "session"; server: str
 }
 
 type MockServerOptions = {
-  // Pending requests served from /api/permission/request, keyed by origin.
+  // Pending requests served from custom.requests.permissions, keyed by origin.
   pending?: Record<string, MockPermission[]>
   // Pending requests served from /api/session/:id/permission, keyed by session ID.
   sessionPending?: Record<string, MockPermission[]>
-  // Counts of /api/permission/request calls to fail with a 500, keyed by origin.
+  // Counts of custom.requests.permissions calls to fail with a 500, keyed by origin.
   listFailures?: Record<string, number>
-  // Records /api/session/:id GETs so tests can assert session resyncs.
-  sessionGets?: string[]
 }
 
 async function mockServers(
@@ -382,14 +376,14 @@ async function mockServers(
     if (url.pathname === "/api/model") return json(route, { location: { directory }, data: [model(remote)] })
     if (url.pathname === "/api/model/default") return json(route, { location: { directory }, data: model(remote) })
     if (url.pathname === "/api/agent") return json(route, { location: { directory }, data: [] })
-    if (url.pathname === "/api/permission/request") {
+    if (url.pathname === "/api/rpc/custom.requests/permissions") {
       permissionRequests.push(url.toString())
       const failures = options.listFailures?.[url.origin] ?? 0
       if (failures > 0) {
         options.listFailures![url.origin] = failures - 1
         return json(route, { name: "Internal" }, 500)
       }
-      return json(route, { location: { directory }, data: options.pending?.[url.origin] ?? [] })
+      return json(route, { output: options.pending?.[url.origin] ?? [] })
     }
     if (["/api/command", "/api/reference", "/api/question/request"].includes(url.pathname))
       return json(route, { location: { directory }, data: [] })
@@ -422,7 +416,6 @@ async function mockServers(
       return json(route, { data: Object.fromEntries(sessions.map((session) => [session.id, { type: "running" }])) })
     const currentSessionInfo = sessions.find((session) => url.pathname === `/api/session/${session.id}`)
     if (currentSessionInfo) {
-      options.sessionGets?.push(currentSessionInfo.id)
       return json(route, { data: currentSession(currentSessionInfo) })
     }
     if (sessions.some((session) => url.pathname === `/api/session/${session.id}/message`))

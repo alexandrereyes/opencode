@@ -10,6 +10,7 @@ import { registerNavigation } from "./navigation/index.js"
 import { registerArchive } from "./archive/index.js"
 import { registerPreferences } from "./preferences/index.js"
 import { registerChats } from "./chats/index.js"
+import { registerRequests } from "./requests/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -27,6 +28,7 @@ export default Plugin.define({
       yield* registerArchive(ctx)
       yield* registerPreferences(ctx)
       yield* registerChats(ctx)
+      yield* registerRequests(ctx)
       yield* registerFamily(ctx)
     }),
 })

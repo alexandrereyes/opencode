@@ -499,7 +499,14 @@ export const make = Effect.fn("PluginHost.make")(function* (
                 forms: yield* forms.list(),
               }
             }),
-          ).pipe(Effect.orDie),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Skipping pending requests for unavailable location", {
+                directory: ref.directory,
+                cause,
+              }).pipe(Effect.as(undefined)),
+            ),
+          ),
         ).pipe(Effect.map((snapshots) => snapshots.filter((snapshot) => snapshot !== undefined)))
       }),
     },
