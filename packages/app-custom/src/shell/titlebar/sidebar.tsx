@@ -48,6 +48,8 @@ import {
   type SidebarSession,
 } from "./sidebar-model"
 import { createSidebarSessions } from "./sidebar-sessions"
+import { getFilename } from "@opencode/util/path"
+import { sameDirectory } from "@/workspaces/paths"
 
 const RECENT_PAGE_SIZE = 5
 
@@ -133,6 +135,12 @@ export function SessionSidebar(props: {
       .filter((item): item is SidebarPreparingTab => !!item),
   )
   const hierarchyRows = createMemo(() => withoutPreparingSessions(sessions().rows, preparing()))
+  const chatPreparing = createMemo(() =>
+    preparing().filter(
+      (item) => item.chat || isChatDirectory(item.directory, inventory.chatRoots().get(item.tab.server)),
+    ),
+  )
+  const recentPreparing = createMemo(() => preparing().filter((item) => !chatPreparing().includes(item)))
   let projectList: HTMLDivElement | undefined
   const projectOrder = createMemo(() => ({
     keys: projects().map((project) => project.key),
@@ -172,7 +180,7 @@ export function SessionSidebar(props: {
   )
   const preparingGroups = createMemo(() =>
     sidebarPreparingGroups(
-      preparing().filter((item) => !item.chat),
+      recentPreparing(),
       projects().map((project) => ({
         key: project.key,
         server: project.server,
@@ -254,13 +262,14 @@ export function SessionSidebar(props: {
         focused.focus({ preventScroll: true })
     })
   }
-  const PreparingStrip = (strip: { tabs: Tab[] }) => (
+  const PreparingStrip = (strip: { tabs: Tab[]; projectLabel?: (tab: Tab) => string | undefined }) => (
     <Show when={strip.tabs.length}>
       <TitlebarTabStrip
         orientation="vertical"
         distributed
         shortcuts={false}
         tabs={strip.tabs}
+        projectLabel={strip.projectLabel}
         currentTab={props.currentTab}
         shortcutIndex={(tab) => tabs.store.findIndex((item) => tabKey(item) === tabKey(tab))}
         onNavigate={(tab) => tabs.select(tab)}
@@ -359,10 +368,38 @@ export function SessionSidebar(props: {
       ? language.t("sidebar.project.server", { project: project.name, server: project.serverName })
       : project.name
   }
+  const preparingLabel = (tab: Tab) => {
+    const key = tabKey(tab)
+    const placement = [...preparingGroups()].find(([, value]) =>
+      [...value.root, ...[...value.groups.values()].flat()].some((item) => tabKey(item) === key),
+    )
+    if (placement) {
+      const group = [...placement[1].groups].find(([, items]) => items.some((item) => tabKey(item) === key))
+      const workspace =
+        group &&
+        worktrees()
+          .get(placement[0])
+          ?.groups.find((item) => item.key === group[0])
+      return [projectLabel(placement[0]), workspace?.name].filter(Boolean).join(" · ")
+    }
+    const draft = tab.type === "draft" ? tab : tabs.pendingSession(tab.server, tab.sessionId)?.draft
+    if (!draft) return
+    const project = projects().find(
+      (project) => project.server === draft.server && sameDirectory(project.directory, draft.directory),
+    )
+    const directory = sidebarPreparingDirectory(draft)
+    return [
+      project ? projectLabel(project.key) : getFilename(draft.directory) || draft.directory,
+      !sameDirectory(directory, draft.directory) ? getFilename(directory) || directory : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+  }
   const Section = (props: {
     title: JSX.Element
     rows: SidebarSession[]
     projectMetadataIcon?: boolean
+    preparing?: Tab[]
     children?: JSX.Element
   }) => {
     let element: HTMLElement | undefined
@@ -377,12 +414,15 @@ export function SessionSidebar(props: {
         focused.focus({ preventScroll: true })
     })
     return (
-      <Show when={rows().items.length}>
+      <Show when={rows().items.length || props.preparing?.length}>
         <section ref={element} class="mt-4 first:mt-0">
           <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
             {props.title}
           </h2>
           <div class="flex flex-col gap-0">
+            <Show when={props.preparing?.length}>
+              <PreparingStrip tabs={props.preparing!} projectLabel={preparingLabel} />
+            </Show>
             <Key each={rows().items} by="key">
               {(item) => <Row item={item()} projectMetadataIcon={props.projectMetadataIcon} />}
             </Key>
@@ -649,14 +689,7 @@ export function SessionSidebar(props: {
                     </Tooltip>
                   </h2>
                   <div class="flex flex-col gap-0">
-                    <PreparingStrip
-                      tabs={preparing()
-                        .filter(
-                          (item) =>
-                            item.chat || isChatDirectory(item.directory, inventory.chatRoots().get(item.tab.server)),
-                        )
-                        .map((item) => item.tab)}
-                    />
+                    <PreparingStrip tabs={chatPreparing().map((item) => item.tab)} />
                     <Key each={chats()} by="key">
                       {(item) => <Row item={item()} />}
                     </Key>
@@ -670,6 +703,9 @@ export function SessionSidebar(props: {
                     </>
                   }
                   rows={[...pinned(), ...recent()]}
+                  preparing={recentPreparing()
+                    .map((item) => item.tab)
+                    .reverse()}
                   projectMetadataIcon
                 >
                   <Show

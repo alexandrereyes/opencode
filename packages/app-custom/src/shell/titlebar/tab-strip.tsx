@@ -29,6 +29,7 @@ function SessionTabSlot(props: {
   session: SessionInfo | undefined
   preparing: boolean
   fallbackTitle?: string
+  projectLabel?: string
   onRename: (title: string) => Promise<void>
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
@@ -66,6 +67,8 @@ function SessionTabSlot(props: {
         session={props.session}
         preparing={props.preparing}
         fallbackTitle={props.fallbackTitle}
+        projectLabel={props.projectLabel}
+        projectMetadataIcon={!!props.projectLabel}
         onRename={props.onRename}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
@@ -86,6 +89,7 @@ function SessionTabEntry(props: {
   active: boolean
   orientation: "horizontal" | "vertical"
   serverCtx: ServerCtx | undefined
+  projectLabel?: string
   session?: SessionInfo
   onVisibleChange: (visible: boolean) => void
   onNavigate: (element: HTMLDivElement) => void
@@ -176,6 +180,7 @@ function SessionTabEntry(props: {
         active={props.active}
         orientation={props.orientation}
         session={session()}
+        projectLabel={props.projectLabel}
         preparing={!!pending()}
         fallbackTitle={
           pending()
@@ -198,6 +203,7 @@ function DraftTabSlot(props: {
   active: boolean
   orientation: "horizontal" | "vertical"
   title: string
+  projectLabel?: string
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
 }) {
@@ -230,6 +236,7 @@ function DraftTabSlot(props: {
         }}
         href={tabHref(props.tab)}
         title={props.title}
+        projectLabel={props.projectLabel}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
         active={props.active}
@@ -253,6 +260,7 @@ export function TitlebarTabStrip(props: {
   onReorder?: (keys: string[]) => void
   shortcutIndex?: (tab: Tab) => number
   distributed?: boolean
+  projectLabel?: (tab: Tab) => string | undefined
 }) {
   const global = useGlobal()
   const language = useLanguage()
@@ -381,9 +389,10 @@ export function TitlebarTabStrip(props: {
                       tab={tab}
                       id={id}
                       index={visibleIndex()}
-                      active={props.currentTab === tab}
+                      active={!!props.currentTab && tabKey(props.currentTab) === id}
                       orientation={vertical() ? "vertical" : "horizontal"}
                       serverCtx={serverCtx()}
+                      projectLabel={props.projectLabel?.(tab)}
                       session={props.session?.(tab)}
                       onVisibleChange={(visible) => setVisibility(id, visible)}
                       onNavigate={(element) => {
@@ -402,9 +411,10 @@ export function TitlebarTabStrip(props: {
                     tab={tab}
                     id={id}
                     index={visibleIndex()}
-                    active={props.currentTab === tab}
+                    active={!!props.currentTab && tabKey(props.currentTab) === id}
                     orientation={vertical() ? "vertical" : "horizontal"}
                     title={language.t("session.tab.session")}
+                    projectLabel={props.projectLabel?.(tab)}
                     onNavigate={(element) => {
                       ref = element
                       props.onNavigate(tab, element)
