@@ -86,6 +86,10 @@ function initialComposerStore(initial?: InitialPrompt): ComposerStore {
   }
 }
 
+export type RevertProgress =
+  | { phase: "planning" | "session" | "inbox" }
+  | { phase: "descendants"; completed: number; total: number }
+
 function createComposerStateValue(store: ComposerStore, setStore: SetStoreFunction<ComposerStore>) {
   // Selection/editor geometry is transient; only the text anchor belongs in the draft.
   const [quoteEditor, setQuoteEditor] = createStore<{
@@ -99,10 +103,15 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
     boundary: undefined as string | undefined,
     local: false,
     pending: false,
+    progress: undefined as RevertProgress | undefined,
   })
   const revertProject = new Set<() => void>()
   const revert = {
     pending: () => revertState.pending,
+    progress: () => revertState.progress,
+    report: (progress: RevertProgress) => setRevertState({ progress }),
+    scheduled: (boundary: string | undefined) =>
+      pendingRevert && revertState.boundary === boundary ? pendingRevert : undefined,
     boundary: (current: string | undefined, available: (messageID: string) => boolean = () => true) => {
       const server = current && available(current) ? current : undefined
       if (!revertState.local) return server
@@ -114,20 +123,22 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
       return revertState.boundary
     },
     schedule(boundary: string | undefined, action: () => Promise<boolean>) {
+      if (pendingRevert && revertState.boundary === boundary) return pendingRevert
+      if (!pendingRevert) setRevertState("progress", { phase: "planning" })
       setRevertState({ boundary, local: true, pending: true })
       const operation = (pendingRevert ?? settled).then((ready) => (ready ? action() : false))
       const tracked = operation.then(
         (result) => {
           if (pendingRevert === tracked) {
             pendingRevert = undefined
-            setRevertState({ pending: false, ...(!result ? { local: false } : {}) })
+            setRevertState({ pending: false, progress: undefined, ...(!result ? { local: false } : {}) })
           }
           return result
         },
         (error) => {
           if (pendingRevert === tracked) {
             pendingRevert = undefined
-            setRevertState({ pending: false, local: false })
+            setRevertState({ pending: false, progress: undefined, local: false })
           }
           throw error
         },

@@ -25,6 +25,7 @@ export type SessionComposerRegionViewController = Pick<
 export function SessionComposerRegion(props: {
   controller: SessionComposerRegionViewController
   composer: JSX.Element
+  status?: JSX.Element
 }) {
   const language = useLanguage()
   const controller = props.controller
@@ -40,6 +41,7 @@ export function SessionComposerRegion(props: {
           "md:max-w-[1000px] md:mx-auto": controller.centered(),
         }}
       >
+        {props.status}
         <Show when={controller.state.pendingFailed()}>
           <div role="status" class="flex items-center gap-2 py-2 text-12-regular text-v2-text-text-muted">
             <span>{language.t("session.requests.failed")}</span>

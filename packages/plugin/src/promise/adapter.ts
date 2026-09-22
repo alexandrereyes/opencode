@@ -603,6 +603,13 @@ export function fromPromise(plugin: Plugin) {
             move: adaptApiMethod(SessionEndpoints["session.move"], host.session.move),
             wait: adaptApiMethod(SessionEndpoints["session.wait"], host.session.wait),
             context: adaptApiMethod(SessionEndpoints["session.context"], host.session.context),
+            familyBoundaries: (input) =>
+              run(
+                Schema.decodeUnknownEffect(SessionFamily.BoundariesInput)(input).pipe(
+                  Effect.flatMap(host.session.familyBoundaries),
+                  Effect.flatMap(Schema.encodeEffect(SessionFamily.Boundaries)),
+                ),
+              ),
             family: (input) =>
               run(
                 Schema.decodeUnknownEffect(SessionFamily.Input)(input).pipe(

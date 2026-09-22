@@ -59,6 +59,22 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
 export const registerFamily = Effect.fn("Family.register")(function* (ctx: Plugin.Context) {
   yield* ctx.rpc
     .register(Family.Definition, {
+      revert: (input, context) =>
+        ctx.session
+          .familyBoundaries({ sessionID: input.sessionID, message: { type: "user", createdAtOrAfter: input.cutoff } })
+          .pipe(
+            Effect.mapError(() =>
+              context.error("read_failed", "Unable to read revert boundaries", { sessionID: input.sessionID }),
+            ),
+          ),
+      clear: (input, context) =>
+        ctx.session
+          .familyBoundaries({ sessionID: input.sessionID })
+          .pipe(
+            Effect.mapError(() =>
+              context.error("read_failed", "Unable to read staged reverts", { sessionID: input.sessionID }),
+            ),
+          ),
       snapshot: (input, context) =>
         snapshot(
           { family: ctx.session.family, get: ctx.session.get, pending: ctx.request.pending },

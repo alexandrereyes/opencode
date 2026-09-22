@@ -618,6 +618,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
           .pipe(Effect.map((interrupted) => ({ interrupted }))),
       wait: (input) => sessions.wait(input.sessionID),
       context: (input) => sessions.context(input.sessionID),
+      familyBoundaries: Effect.fn(function* (input) {
+        yield* sessions.get(input.sessionID)
+        return yield* family.boundaries(input)
+      }),
       family: Effect.fn(function* (input) {
         yield* sessions.get(input.sessionID)
         return yield* family.read(input, yield* sessions.active)

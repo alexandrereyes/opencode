@@ -26,6 +26,7 @@ import { createSessionRevert } from "../revert"
 import { createSessionFork } from "../fork"
 import { SessionComposerRegion } from "./session-composer-region"
 import { createSessionComposerController, type SessionComposerController } from "./controller"
+import { SessionRevertStatus } from "./revert-status"
 import { SessionQueuePanel } from "./queue-panel"
 import { resolveSessionComposerSelection } from "./selection"
 import { createSessionRequestModel } from "../requests/model"
@@ -227,9 +228,11 @@ export function createActiveSessionRegion(input: {
 export type ActiveSessionRegionModel = ReturnType<typeof createActiveSessionRegion>
 
 export function ActiveSessionComposerRegion(props: { model: SessionComposerController }) {
+  const prompt = useComposerState()
   return (
     <SessionComposerRegion
       controller={props.model.region}
+      status={<SessionRevertStatus progress={() => prompt.capture().revert.progress()} />}
       composer={
         <div class="relative">
           <SessionQueuePanel queue={props.model.queue} />

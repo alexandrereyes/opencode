@@ -270,6 +270,9 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
         plugin: () => Effect.succeed({ location: location(config), data: [] }),
         mcp: () => Effect.succeed({ location: location(config), data: config.mcpServers ?? [] }),
         rpcCall: (ctx) => {
+          if (ctx.params.rpcID === "custom.session-family" && ["revert", "clear"].includes(ctx.params.method)) {
+            return Effect.succeed({ output: [] })
+          }
           if (ctx.params.rpcID === "custom.snippets" && ctx.params.method === "list") {
             return Effect.succeed({ output: { items: config.snippets ?? [] } })
           }

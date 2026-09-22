@@ -95,3 +95,37 @@ test("hides revert actions in a child session", async ({ page }) => {
   await message.hover()
   await expect(message.getByRole("button", { name: "Revert message" })).toHaveCount(0)
 })
+
+test("shows pending feedback and ignores duplicate clicks while the aggregate plan is pending", async ({ page }) => {
+  const staged: { sessionID: string; messageID: string }[] = []
+  const plan = Promise.withResolvers<void>()
+  const requested = Promise.withResolvers<void>()
+  let reads = 0
+  await mockOpenCodeServer(page, { ...fixture, sessions: [session], onRevertStage: (input) => staged.push(input) })
+  await page.route("**/api/rpc/custom.session-family/revert**", async (route) => {
+    reads++
+    requested.resolve()
+    await plan.promise
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ output: [] }) })
+  })
+  await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
+  await expectSessionTitle(page, "Session message revert")
+  const message = page.locator('[data-message-id="msg_second"]')
+  await message.hover()
+  const button = message.getByRole("button", { name: "Revert message" })
+  await button.click()
+  await requested.promise
+  await expect(page.getByRole("status").filter({ hasText: "Checking subagents" })).toBeVisible()
+  await expect(button).toBeDisabled()
+  // Even a dispatched event cannot bypass the production handler's pending guard.
+  await button.dispatchEvent("click")
+  const stagedResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === `/api/session/${sessionID}/revert/stage`,
+  )
+  plan.resolve()
+  expect((await stagedResponse).ok()).toBe(true)
+  await expect(page.locator('[data-component="session-revert-status"]')).toHaveCount(0)
+  await expect(button).toBeEnabled()
+  expect(reads).toBe(1)
+  expect(staged).toEqual([{ sessionID, messageID: "msg_second" }])
+})

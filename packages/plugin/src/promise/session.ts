@@ -175,6 +175,9 @@ export type SessionDomain = Pick<
   | "context"
 > & {
   readonly hook: ModelHooks<SessionHooks>
+  readonly familyBoundaries: (
+    input: typeof SessionFamily.BoundariesInput.Encoded,
+  ) => Promise<typeof SessionFamily.Boundaries.Encoded>
   readonly family: (input: typeof SessionFamily.Input.Encoded) => Promise<typeof SessionFamily.Info.Encoded>
   readonly scan: (input?: typeof SessionScan.Input.Encoded) => Promise<typeof SessionScan.Page.Encoded>
   readonly archive: (input: { readonly sessionID: Session.ID }) => Promise<void>

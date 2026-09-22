@@ -25,6 +25,21 @@ export type Page = typeof Page.Type
 export const Definition = Rpc.define({
   id: "custom.session-family",
   methods: {
+    revert: {
+      input: Schema.toStandardSchemaV1(
+        Schema.Struct({
+          sessionID: Session.ID,
+          cutoff: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+        }),
+      ),
+      output: Schema.toStandardSchemaV1(SessionFamily.Boundaries),
+      errors: { read_failed: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })) },
+    },
+    clear: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })),
+      output: Schema.toStandardSchemaV1(SessionFamily.Boundaries),
+      errors: { read_failed: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })) },
+    },
     snapshot: {
       input: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })),
       output: Schema.toStandardSchemaV1(Snapshot),

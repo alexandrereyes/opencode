@@ -1,6 +1,11 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "session.revert.planning": "Checking subagents before updating the conversation…",
+  "session.revert.subagents.one": "Updating subagent: {{completed}} of {{count}}…",
+  "session.revert.subagents.other": "Updating subagents: {{completed}} of {{count}}…",
+  "session.revert.session": "Updating the conversation…",
+  "session.revert.inbox": "Finishing the conversation update…",
   "dashboard.title": "Agent dashboard",
   "dashboard.server": "Server",
   "dashboard.search": "Search title, project or directory",
