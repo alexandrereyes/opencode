@@ -19,7 +19,6 @@ import {
   onCleanup,
   onMount,
   Show,
-  untrack,
   type Accessor,
   type JSX,
 } from "solid-js"
@@ -28,7 +27,6 @@ import { createMediaQuery } from "@solid-primitives/media"
 import type { createTimelineProjection } from "./projection"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { filterVirtualIndexes } from "./virtual-items"
-import { readingPosition } from "./reading-position"
 
 const fallbackItemSize = 60
 const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
@@ -59,13 +57,6 @@ type Input = {
   showHeader: Accessor<boolean>
   /** True while the timeline follows the newest content. Drives every anchoring decision. */
   pinned: Accessor<boolean>
-  restoreReading?: Accessor<boolean>
-  history?: {
-    more: Accessor<boolean>
-    loading: Accessor<boolean>
-    settled: Accessor<boolean>
-    loadOlder: () => Promise<void>
-  }
   scroll: Accessor<{ overflow: boolean; jump: boolean }>
   onResumeScroll: () => void
   setScrollRef: (element: HTMLDivElement | undefined) => void
@@ -98,11 +89,6 @@ export function createTimelineVirtualizer(input: Input) {
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const topOffset = () => (input.showHeader() ? 64 : isDesktop() ? 0 : 16)
   const ownerSessionKey = input.sessionKey()
-  let restoring = readingPosition.get(ownerSessionKey)?.anchor
-  let restoreQueued = false
-  let restoreFrame: number | undefined
-  let recoveryRequested = false
-  let readingObserver: MutationObserver | undefined
   const entry = cache.get(ownerSessionKey)
   const cached = entry?.presentationKey === input.presentationKey?.() ? entry : undefined
   const initialMeasurements = cached?.measurements
@@ -245,11 +231,10 @@ export function createTimelineVirtualizer(input: Input) {
         if (!active()) return
         virtualContent?.querySelectorAll<HTMLDivElement>("[data-index]").forEach(virtualizer.measureElement)
         if (input.pinned()) virtualizer.scrollToEnd()
-        else restoreReading()
         settleColdBottom()
       })
     },
-    initialOffset: () => (input.pinned() ? Number.MAX_SAFE_INTEGER : (restoring?.scrollTop ?? 0)),
+    initialOffset: () => (input.pinned() ? Number.MAX_SAFE_INTEGER : 0),
     initialMeasurementsCache: initialMeasurements,
     estimateSize: () => fallbackItemSize,
     // A newly observed element gets a real ResizeObserver box before paint. Reuse
@@ -338,7 +323,6 @@ export function createTimelineVirtualizer(input: Input) {
         })
       })
       batchingColdSizes = false
-      restoreReading()
       if (coldPending) pinColdBottom()
       settleColdBottom()
       if (coldPending) return
@@ -370,7 +354,6 @@ export function createTimelineVirtualizer(input: Input) {
   }
 
   function prepareNavigation() {
-    restoring = undefined
     if (touchStart === undefined) touchScrolling = false
     flushTouchAdjustment()
   }
@@ -391,142 +374,6 @@ export function createTimelineVirtualizer(input: Input) {
   )
   const virtualRowKeys = createMemo(() => virtualizer.getVirtualItems().map((item) => String(item.key)))
 
-  function saveReading() {
-    const root = listRoot()
-    if (!active() || !root?.isConnected || restoring || input.pinned()) return
-    const offset = root.scrollTop + rendering.scrollAdjustment
-    // Use the logical row, not the sticky user header's much larger containing block.
-    const item =
-      virtualizer.getVirtualItems().find((item) => item.start <= offset && item.end > offset) ??
-      virtualizer.getVirtualItems().find((item) => item.start >= offset)
-    const row = item && rows()[item.index]
-    if (!item || !row) return
-    readingPosition.save(ownerSessionKey, {
-      key: String(item.key),
-      messageID: row.userMessageID,
-      offset: offset - item.start,
-      scrollTop: offset,
-    })
-  }
-
-  function restoreReading() {
-    if (!active() || !restoring || restoreQueued) return
-    if (input.pinned() || input.restoreReading?.() === false) {
-      restoring = undefined
-      return
-    }
-    restoreQueued = true
-    queueMicrotask(() => {
-      restoreQueued = false
-      const root = listRoot()
-      const anchor = restoring
-      if (!active() || !anchor || !root?.isConnected || !root.clientHeight) return
-      if (input.pinned() || input.restoreReading?.() === false) {
-        restoring = undefined
-        return
-      }
-      if (input.history && (!input.history.settled() || input.history.loading())) return
-      const index = rows().findIndex((row) => TimelineRow.key(row) === anchor.key)
-      const fallback = input.projection.messageRowIndex().get(anchor.messageID)
-      // A presentation change can hide/re-group a row while its owning message
-      // remains loaded. Older pages cannot restore that presentation key.
-      if (index < 0 && fallback === undefined && input.history?.more()) {
-        if (input.history.loading() || recoveryRequested) return
-        recoveryRequested = true
-        void input.history.loadOlder().then(
-          () => {
-            recoveryRequested = false
-            restoreReading()
-          },
-          () => {
-            recoveryRequested = false
-            restoring = undefined
-          },
-        )
-        return
-      }
-      const target = index < 0 ? fallback : index
-      if (target === undefined) {
-        virtualizer.scrollToOffset(anchor.scrollTop)
-        restoring = undefined
-        return
-      }
-      const item = virtualizer.measurementsCache[target]
-      if (!item) return
-      const element = virtualizer.elementsCache.get(item.key)
-      if (element?.isConnected && element.offsetHeight !== item.size) {
-        virtualizer.resizeItem(target, element.offsetHeight)
-        // resizeItem is batched above. Its flush schedules another restore with
-        // fresh measurements; never clamp a deep offset using this stale item.
-        return
-      }
-      const offset = index < 0 ? 0 : anchor.offset
-      // Estimates can be shorter than an intrarow offset. Mount the anchor first,
-      // then apply that offset once its real content has been measured.
-      const ready = element?.isConnected && !element.querySelector(pendingMarkdown) && !pendingSizes.size
-      const top = item.start + (ready ? Math.min(offset, Math.max(0, item.size - 1)) : 0)
-      virtualizer.scrollToOffset(Math.max(0, top))
-      reportOffset?.(root.scrollTop, false)
-      if (
-        !ready ||
-        Math.abs(root.scrollTop - Math.min(Math.max(0, top), Math.max(0, root.scrollHeight - root.clientHeight))) > 1
-      )
-        return
-      if (restoreFrame !== undefined) return
-      // Reattachment/viewport changes can deliver ResizeObserver boxes after this
-      // microtask. Verify real layout before handing anchoring back to normal scroll.
-      restoreFrame = requestAnimationFrame(() => {
-        restoreFrame = undefined
-        if (!active() || restoring !== anchor || !root.isConnected) return
-        virtualizer.getVirtualItems().forEach((item) => {
-          const element = virtualizer.elementsCache.get(item.key)
-          if (element?.isConnected) virtualizer.resizeItem(item.index, element.offsetHeight)
-        })
-        if (pendingSizes.size || virtualContent?.querySelector(pendingMarkdown)) return
-        const current = virtualizer.measurementsCache[target]
-        if (!current) return
-        const expected = Math.min(
-          Math.max(0, current.start + Math.min(offset, Math.max(0, current.size - 1))),
-          Math.max(0, root.scrollHeight - root.clientHeight),
-        )
-        if (Math.abs(root.scrollTop - expected) > 1) {
-          restoreReading()
-          return
-        }
-        restoring = undefined
-        scrollTop = root.scrollTop
-        maxScroll = root.scrollHeight - root.clientHeight
-        input.onScheduleScrollState(root)
-      })
-    })
-  }
-
-  createEffect(
-    on(active, (value) => {
-      if (!value) return
-      restoring = readingPosition.get(ownerSessionKey)?.anchor
-      restoreReading()
-    }),
-  )
-  createEffect(() => {
-    if (!active()) return
-    rows()
-    input.history?.loading()
-    input.history?.settled()
-    input.restoreReading?.()
-    untrack(restoreReading)
-  })
-  onMount(() => {
-    if (!virtualContent) return
-    readingObserver = new MutationObserver(restoreReading)
-    readingObserver.observe(virtualContent, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-markdown-ready"],
-    })
-  })
-
   createEffect(() => {
     if (!active()) return
     const root = listRoot()
@@ -538,7 +385,6 @@ export function createTimelineVirtualizer(input: Input) {
       // its real viewport before restoring the offset and admitting rows.
       reportRect?.({ width: root.offsetWidth, height: root.offsetHeight })
       if (input.pinned()) virtualizer.scrollToEnd()
-      else restoreReading()
       reportOffset?.(root.scrollTop, false)
       settleColdBottom()
     })
@@ -656,7 +502,6 @@ export function createTimelineVirtualizer(input: Input) {
   // Upward input is the one intent geometry cannot recover: nudging up while still a pixel from
   // the end must stop following, even though the resulting position still looks like the end.
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
-    restoring = undefined
     input.onUserScroll(event.target)
     const header =
       event.target instanceof Element ? event.target.closest<HTMLElement>("[data-sticky-user] [data-scrollable]") : null
@@ -665,7 +510,6 @@ export function createTimelineVirtualizer(input: Input) {
   }
 
   const handleListTouchStart = (event: TouchEvent) => {
-    restoring = undefined
     clearTouchTarget()
     input.onUserScroll(event.target)
     touchScrolling = true
@@ -716,7 +560,6 @@ export function createTimelineVirtualizer(input: Input) {
   // Drag-selecting past the edge and dragging the scrollbar both scroll without a wheel or key,
   // so a held pointer is what separates those from the virtualizer's own measurement adjustments.
   const handleListPointerDown = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
-    restoring = undefined
     input.onUserScroll(event.target)
     pointerHeld = true
   }
@@ -738,7 +581,6 @@ export function createTimelineVirtualizer(input: Input) {
     if (!isScrollKeyTarget(event.target, key)) return
     if (scrollKeyOwner(event.currentTarget, event.target, key) !== event.currentTarget) return
     input.onUserScroll(event.currentTarget)
-    restoring = undefined
     if (upwardKeys.has(key)) input.onUnpin()
   }
 
@@ -748,10 +590,6 @@ export function createTimelineVirtualizer(input: Input) {
   const handleListScroll = (event: Event & { currentTarget: HTMLDivElement }) => {
     if (!active()) return
     const root = event.currentTarget
-    if (restoring) {
-      restoreReading()
-      return
-    }
     const previousTop = scrollTop
     const previousMaxScroll = maxScroll
     scrollTop = root.scrollTop
@@ -763,7 +601,6 @@ export function createTimelineVirtualizer(input: Input) {
     settleColdBottom()
     input.onScheduleScrollState(root)
     input.onHistoryScroll()
-    saveReading()
   }
 
   function View(props: ViewProps) {
@@ -929,9 +766,6 @@ export function createTimelineVirtualizer(input: Input) {
   }
 
   onCleanup(() => {
-    saveReading()
-    if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame)
-    readingObserver?.disconnect()
     cache.delete(ownerSessionKey)
     cache.set(ownerSessionKey, {
       measurements: virtualizer.takeSnapshot(),

@@ -470,11 +470,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       pendingMessage: {
-        peek(sessionKey: string) {
-          const current = store.sessionView[sessionKey]
-          if (!current?.pendingMessageAt || Date.now() - current.pendingMessageAt > PENDING_MESSAGE_TTL_MS) return
-          return current.pendingMessage
-        },
         set(sessionKey: string, messageID: string) {
           const at = Date.now()
           touch(sessionKey)
