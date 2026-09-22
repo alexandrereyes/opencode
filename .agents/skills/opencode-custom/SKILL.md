@@ -41,6 +41,7 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 3. Inspecione `git status`, `git remote -v` e `git worktree list` no checkout existente. Preserve alterações e arquivos não rastreados de outras tarefas.
 4. Leia a versão atual de `docs/custom-macos.md` no fork e a documentação operacional em `my-env`. O updater pode evoluir: confirme seus comandos por código/documentação antes de executá-los.
 5. Diferencie **app web**, desktop e TUI. Para menções de apps Mac, consulte o MCP realmente configurado, seus métodos e retornos atuais; não presuma o antigo `codex-computer-use` ou formato de `list_apps`.
+6. Se o trabalho integrar uma revisão upstream em `custom`, aplicar um PR/commit upstream antes da baseline integrada ou adaptar/portar uma mudança upstream, leia `docs/upstream-overrides.md` na base usada antes de alterar código. Ele diz o que `custom` já carrega de upstream e quando reconciliar.
 
 ## 2. Criar a feature
 
@@ -55,11 +56,12 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 ## 3. Implementar
 
 - Prefira pontos de extensão existentes quando reduzirem o trabalho de manutenção. Alterações diretas no backend e app web são permitidas quando necessárias.
-- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; frontend: `packages/app`, `ui`, `session-ui`; cliente: `packages/client`.
+- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; frontend web custom: `packages/app-custom`, `ui-custom`, `session-ui-custom` (`packages/app`, `ui` e `session-ui` permanecem idênticos à baseline upstream); cliente: `packages/client`.
 - Mudou Protocol ou Server HttpApi público? Execute `bun run generate` em `packages/client`; nunca edite arquivos gerados manualmente.
 - Faça mudanças focadas, sem refatorações extensas não necessárias à feature.
 - Para mudanças no updater, versionar código runtime no fork e os arquivos operacionais declarativos em `my-env`, conforme a organização vigente. Não duplique fontes que deveriam ser únicas.
 - Credenciais, tokens, banco, logs, backups e releases ficam fora do Git. Não exiba segredos ao consultar configuração. Use arquivos locais privados ou referências a variáveis.
+- Ao aplicar um PR/commit upstream antecipadamente ou adaptá-lo, registre a entrada em `docs/upstream-overrides.md` na mesma mudança, seguindo o template do arquivo: link, SHA da revisão upstream revisada, mudança local e diferenças, testes, status, condição para reconciliar/remover e instalação (`none` salvo ação operacional explícita). Mudança de UI upstream não entra antecipada em `packages/app`, `ui` ou `session-ui`: porte-a deliberadamente para `packages/app-custom`, `ui-custom` ou `session-ui-custom`. Apenas acompanhar um PR aberto, sem incorporá-lo, não gera entrada. O registro começou sem auditoria retroativa: ao identificar um caso antigo, registre-o também.
 
 ## 4. Validar
 
@@ -104,6 +106,15 @@ git push -u origin <feature-curta>
 - Imediatamente antes de publicar a integração, confirme que `origin/custom` não avançou. Se avançou, refaça a integração sobre a base nova e valide novamente.
 - Publique por push normal fast-forward, sem `--force`. Não tente atualizar uma branch local `custom` que esteja em uso em outra worktree.
 - Não misture sync do upstream com a feature. Esse é um processo independente do updater.
+
+### Integrar upstream em `custom`
+
+Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active` ou `reconcile`) de `docs/upstream-overrides.md` com essa revisão e atualize o registro na própria integração:
+
+- Merge sem conflito ou ancestralidade não provam equivalência. O Git pode manter a cópia local e a versão upstream lado a lado; cherry-pick, patch e squash geram SHAs diferentes; o PR pode ter mudado depois da revisão registrada. Compare a mudança upstream final com o código local em comportamento, API, schema/migrations e testes.
+- Decida explicitamente: remover o override que ficou redundante no mesmo caminho/serviço em que upstream agora fornece a mudança, manter só a adaptação mínima documentada, reescrever ou descartar quando upstream fechou ou divergiu.
+- Na UI web, integrar upstream atualiza apenas `packages/app`, `ui` e `session-ui`. Um equivalente ali não torna redundante o porte em `app-custom`, `ui-custom` ou `session-ui-custom`, que é o que a web custom usa: preserve o porte necessário e compare-o manualmente com a versão upstream final, atualizando-o quando útil.
+- Marque a entrada como `resolved` e mova-a para as resolvidas, com o resultado, somente quando a decisão estiver aplicada e não restar acompanhamento upstream. Adaptação que ainda depende de upstream continua `active` ou `reconcile`, com os campos atualizados; isso não bloqueia a integração nem updates.
 
 ## 6. Entrega e instalação
 
