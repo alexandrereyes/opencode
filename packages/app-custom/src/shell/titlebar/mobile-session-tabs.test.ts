@@ -40,3 +40,31 @@ test("only open tabs are closable", () => {
   expect(mobileTabIsOpen(tabs, open)).toBe(true)
   expect(mobileTabIsOpen(tabs, { type: "session", server, sessionId: "closed" })).toBe(false)
 })
+
+test("carries current chat classification across canonical row updates without requiring an open tab", () => {
+  const chat = { ...row("closed"), chat: true }
+  const initial = mobileSessionTabs([], [chat], () => false)
+  const updated = mobileSessionTabs([], [{ ...chat, session: { ...chat.session, title: "Updated" } }], () => false)
+
+  expect(initial).toEqual([{ type: "session", server, sessionId: "closed", chat: true }])
+  expect(updated).toEqual(initial)
+})
+
+test("current sidebar classification replaces stale open-tab flags in both directions", () => {
+  const routed = { ...open, routeSessionId: "child", routeParentId: "open" }
+  const chat = { ...row("open"), chat: true }
+  const classified = mobileSessionTabs([routed], [chat], () => false)
+  expect(classified).toEqual([{ ...routed, chat: true }])
+  expect(routed).not.toHaveProperty("chat")
+
+  const moved = mobileSessionTabs(classified, [row("open")], () => false)
+  expect(moved).toEqual([routed])
+  expect(classified).toEqual([{ ...routed, chat: true }])
+  expect(mobileTabIsOpen(classified, moved[0])).toBe(true)
+})
+
+test("reuses open tabs when their chat classification matches the sidebar", () => {
+  const chat = { ...open, chat: true }
+  expect(mobileSessionTabs([chat], [{ ...row("open"), chat: true }], () => false)[0]).toBe(chat)
+  expect(mobileSessionTabs([open], [row("open")], () => false)[0]).toBe(open)
+})
