@@ -753,6 +753,7 @@ export function DraftTabItem(props: {
   ref?: Ref<HTMLDivElement>
   href: string
   title: string
+  projectLabel?: string
   active?: boolean
   onNavigate: () => void
   onClose: () => void
@@ -812,6 +813,7 @@ export function DraftTabItem(props: {
           props.onNavigate()
         }}
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base [-webkit-user-drag:none]"
+        classList={{ "pe-6": props.orientation === "vertical" && !!props.projectLabel }}
       >
         <span class="flex size-4 shrink-0 items-center justify-center">
           <svg
@@ -830,11 +832,22 @@ export function DraftTabItem(props: {
           </svg>
         </span>
         <span
+          data-slot="tab-title"
           data-titlebar-tab-title
           class="min-w-0 flex-1 overflow-hidden text-clip whitespace-nowrap outline-none leading-4"
         >
           {props.title}
         </span>
+        <Show when={props.orientation === "vertical" && props.projectLabel}>
+          {(name) => (
+            <span data-slot="tab-project">
+              <Icon name="folder" size="small" class="shrink-0" />
+              <span dir="auto" class="min-w-0 truncate">
+                {name()}
+              </span>
+            </span>
+          )}
+        </Show>
       </a>
       <div data-slot="tab-close">
         <IconButton

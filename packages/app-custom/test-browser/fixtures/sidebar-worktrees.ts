@@ -11,6 +11,7 @@ import { createWorktreeInventory, withWorktreeInventory } from "@/workspaces/inv
 import { ServerScope } from "@/runtime/server/scope"
 import type { Project } from "@/runtime/server/types"
 import type { SessionNavigationInfo } from "@/shell/titlebar/sidebar-model"
+import type { Tab, DraftTab } from "@/shell/tabs/tabs"
 
 const require = createRequire(import.meta.url)
 const solid = createRequire(require.resolve("vite-plugin-solid"))
@@ -80,16 +81,27 @@ const tabStore: Array<{
   worktree?: string
   branch?: string
 }> = []
+const [draftState, setDraftState] = createStore({
+  empty: false,
+  tabs: undefined as Tab[] | undefined,
+  current: undefined as Tab | undefined,
+  pending: undefined as { draft: DraftTab } | undefined,
+})
 mock.module("@/shell/tabs/tabs", () => ({
   ...tabsModule,
   useTabs: () => ({
-    store: tabStore,
-    pendingSession: () => false,
+    get store() {
+      return draftState.tabs ?? tabStore
+    },
+    info: {},
+    pendingSession: () => draftState.pending,
+    rememberSessionInfo: () => {},
+    closeTab: (index: number) => setDraftState("tabs", (tabs) => tabs?.filter((_, i) => i !== index)),
     newDraft: async (input: { server: string; directory: string; worktree?: string }) => {
       drafts.push(input)
     },
     addSessionTab: () => {},
-    select: () => {},
+    select: (tab: Tab) => setDraftState("current", { ...tab }),
     updateDraft: (draftID: string, update: Partial<(typeof tabStore)[number]>) => {
       const draft = tabStore.find((item) => item.draftID === draftID)
       if (draft) Object.assign(draft, update)
@@ -375,7 +387,7 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
   )
   mock.module("@/runtime/server/runtime", () => ({
     useGlobal: () => ({
-      servers: { list: () => connections },
+      servers: { list: () => (draftState.empty ? [] : connections) },
       sidebar: { store: sidebarStore, set: setSidebarStore, ready: () => true },
       ensureServerCtx: (connection: ServerConnection.Any) =>
         roots[connections.indexOf(connection as (typeof connections)[number])].ctx,
@@ -405,7 +417,13 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
               get children() {
                 return createComponent(DialogProvider, {
                   get children() {
-                    return createComponent(SessionSidebar, { header: null, children: null })
+                    return createComponent(SessionSidebar, {
+                      header: null,
+                      children: null,
+                      get currentTab() {
+                        return draftState.current
+                      },
+                    })
                   },
                 })
               },
@@ -593,10 +611,10 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
     expect(header(repository).textContent).toContain("repository (1)")
     expect(titles(repository)).toEqual(["repository-owned"])
     expect(titles(projectElement(repositoryProject))).not.toContain("repository-owned")
-    const recent = [...host.querySelectorAll("section")].find(
+    const recentSection = [...host.querySelectorAll("section")].find(
       (section) => section.querySelector("h2")?.textContent === "Recent",
     )
-    expect(recent ? titles(recent) : []).toContain("repository-owned")
+    expect(recentSection ? titles(recentSection) : []).toContain("repository-owned")
     const featureHeader = header(feature)
     const rootHeader = header(projectElement())
     expect(featureHeader.textContent).toContain("feat")
@@ -788,6 +806,79 @@ test("grouping, lazy metadata, identity, drafts, keyboard selection/reorder, col
       const next = strip.nextElementSibling
       expect(next?.hasAttribute("data-titlebar-tab") || !!next?.querySelector("[data-titlebar-tab]")).toBe(true)
     }
+    const recent = () =>
+      [...host.querySelectorAll("section")].find((section) =>
+        section.querySelector("h2")?.textContent?.includes("Recent"),
+      )!
+    const draftLinks = () => [...recent().querySelectorAll<HTMLAnchorElement>('a[href*="draftId="]')]
+    expect(draftLinks()).toHaveLength(2)
+    expect(draftLinks().map((link) => new URL(link.href, "http://sidebar.test").searchParams.get("draftId"))).toEqual([
+      "worktree-layout",
+      "root-layout",
+    ])
+    expect(titles(recent()).slice(0, 2)).toEqual(["Session", "Session"])
+    expect(
+      [...recent().querySelectorAll('[data-slot="tab-project"]')].slice(0, 2).map((item) => item.textContent),
+    ).toEqual([expect.stringContaining("fix/live-branch"), "Renamed · sidebar-local.test"])
+    setDraftState("tabs", [
+      ...tabStore,
+      {
+        type: "draft",
+        draftID: "chat-only",
+        server: ServerConnection.key(connections[0]),
+        directory: "/chats",
+        chat: true,
+      },
+    ])
+    await wait()
+    expect(draftLinks()).toHaveLength(2)
+    expect(recent().querySelector('a[href*="chat-only"]')).toBeNull()
+    expect(
+      [...host.querySelectorAll("section")]
+        .find((section) => section.querySelector("h2")?.textContent?.includes("Chats"))
+        ?.querySelector('a[href*="chat-only"]'),
+    ).not.toBeNull()
+    draftLinks()[1].click()
+    expect(draftState.current).toMatchObject({ draftID: "root-layout" })
+    expect(draftLinks()[1].closest("[data-titlebar-tab]")?.getAttribute("data-active")).toBe("true")
+    const draft = { ...draftState.tabs![0] } as DraftTab
+    const pendingTab: Tab = { type: "session", server: draft.server, sessionId: "submitted-draft" }
+    setDraftState("pending", { draft })
+    setDraftState("tabs", (tabs) => [pendingTab, ...tabs!.slice(1)])
+    setDraftState("current", { ...pendingTab })
+    await wait()
+    expect(recent().querySelectorAll('a[href*="submitted-draft"]')).toHaveLength(1)
+    expect(draftLinks()).toHaveLength(1)
+    const submitted = row("submitted-draft", "/repo")
+    submitted.session.time.created = Date.now()
+    submitted.session.time.updated = Date.now()
+    roots[0].ctx.data.session.remember(submitted.session)
+    expect(recent().querySelectorAll('a[href*="submitted-draft"]')).toHaveLength(1)
+    // Navigate away before admission completes: cached open sessions must bridge index latency.
+    setDraftState("current", draftState.tabs![1])
+    setDraftState("pending", undefined)
+    await wait()
+    expect(roots[0].ctx.data.session.get("submitted-draft")).toBeDefined()
+    expect(draftState.tabs![0].type).toBe("session")
+    expect(recent().querySelectorAll('a[href*="submitted-draft"]'), JSON.stringify(titles(host))).toHaveLength(1)
+    expect(titles(recent())).toContain("submitted-draft")
+    draftLinks()[0]
+      .closest("[data-titlebar-tab]")!
+      .querySelector<HTMLButtonElement>('button[aria-label="Close tab"]')!
+      .click()
+    await wait()
+    expect(draftLinks()).toHaveLength(0)
+    expect(draftState.tabs?.some((tab) => tab.type === "draft" && tab.draftID === "worktree-layout")).toBe(false)
+    // No connected inventory or real sessions: Recent must still render its draft-only section.
+    setDraftState("tabs", [{ ...draft }])
+    setDraftState("empty", true)
+    await wait()
+    expect(recent()).toBeDefined()
+    expect(titles(recent())).toEqual(["Session"])
+    expect(recent().querySelectorAll("[data-titlebar-tab]")).toHaveLength(1)
+    expect(draftLinks().map((link) => new URL(link.href, "http://sidebar.test").searchParams.get("draftId"))).toEqual([
+      "root-layout",
+    ])
   } finally {
     gates.inventory.resolve()
     gates.remoteInventory.resolve()

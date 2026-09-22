@@ -43,6 +43,10 @@ export function createSidebarSessions(options: {
           return [
             ...(route.type === "session" && route.server === server ? [route.sessionId] : []),
             ...(tab?.type === "session" && tab.server === server ? [tab.sessionId] : []),
+            // A submitted draft can finish while another tab is selected, before the navigation index catches up.
+            ...(options.tabs?.() ?? []).flatMap((tab) =>
+              tab.type === "session" && tab.server === server ? [tab.sessionId] : [],
+            ),
           ]
         },
         cached: (id) => ctx.data.session.get(id),
