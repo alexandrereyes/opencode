@@ -133,7 +133,13 @@ export function createServerTransport(input: { http: ServerConnection.HttpBase; 
   readonly api: ServerApi
   readonly pty: ReturnType<typeof createPtyClient>
 } {
-  const queue = createRequestQueue({ fetch: input.fetch ?? globalThis.fetch })
+  // Temporarily bypass both concurrency limits to compare session navigation without queueing.
+  // Keep the transport wrapper for request deadlines and performance diagnostics.
+  const queue = createRequestQueue({
+    fetch: input.fetch ?? globalThis.fetch,
+    limit: Infinity,
+    slowLimit: Infinity,
+  })
   const build = (http: ServerConnection.HttpBase) => {
     const api = createApiForServer({ server: http, fetch: queue.fetch })
     return { http, api, pty: createPtyClient(api, { url: http.url }) }
