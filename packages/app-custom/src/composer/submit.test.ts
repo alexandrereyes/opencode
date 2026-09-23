@@ -16,6 +16,7 @@ import type { PromptHistoryComment } from "./history/entry"
 import { createComposerSubmit } from "./submit"
 import type { AttachmentDestination } from "./attachments/deliver"
 import { createSessionRevertActions } from "@/session/revert"
+import { btwQuestion } from "@/session/btw/state"
 
 const selectedModel = {
   id: "model-1",
@@ -84,6 +85,7 @@ function submitInput(
   commands: () => readonly { name: string }[] | undefined = () => [],
   skills: () => readonly Skill.Info[] | undefined = () => [],
   lifecycle?: {
+    clientCommand?: (text: string) => boolean
     history?: (prompt: Prompt, mode: "normal" | "shell") => void
     delivery?: (alternate: boolean) => ComposerDelivery
     destination?: AttachmentDestination
@@ -96,6 +98,7 @@ function submitInput(
   },
 ) {
   return createComposerSubmit({
+    clientCommand: lifecycle?.clientCommand,
     adapter,
     mode: () => mode,
     commands,
@@ -159,6 +162,47 @@ function session(input: {
 }
 
 describe("Composer submission", () => {
+  test("handles /btw before selection, busy interruption, history, and prompt admission", async () => {
+    const state = createMemoryComposerState().capture()
+    state.set([{ type: "text", content: "/btw explain this", start: 0, end: 17 }])
+    const calls: string[] = []
+    const target = session({
+      calls,
+      prompt: async () => {
+        calls.push("prompt")
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls: () => {
+        throw new Error("must not require a composer model")
+      },
+      working: () => true,
+      session: () => target,
+      interrupt: async () => {
+        calls.push("interrupt")
+      },
+      submitted() {
+        calls.push("submitted")
+      },
+      setEditor() {},
+    }
+    await submitInput(adapter, undefined, "normal", undefined, undefined, {
+      history: () => {
+        calls.push("history")
+      },
+      clientCommand: (text) => {
+        expect(btwQuestion(text)).toBe("explain this")
+        calls.push("btw")
+        return true
+      },
+    }).submit(new Event("submit"))
+    expect(calls).toEqual(["btw"])
+    expect(state.current()).toEqual([])
+  })
+
   test("submits an unsupported local binary as a path reference", async () => {
     const state = createMemoryComposerState().capture()
     state.set([

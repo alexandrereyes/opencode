@@ -30,8 +30,10 @@ import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { createSessionSearch } from "./session-search"
 import { useAttachmentDestination } from "./attachments/deliver"
+import { createComposerBtw } from "@/session/btw/model"
 
 export type ComposerModel = ComposerEditorModel & {
+  readonly btw?: ReturnType<typeof createComposerBtw>
   readonly model: ComposerControls["model"]
   readonly quotes?: ComposerState["quotes"]
 }
@@ -53,6 +55,7 @@ export function createComposerModel(
   const language = useLanguage()
   const platform = usePlatform()
   const prompt = adapter.state
+  const btw = createComposerBtw(adapter)
   let editor: HTMLDivElement | undefined
 
   const interaction = createComposerEditorState(prompt.mode.current())
@@ -365,6 +368,7 @@ export function createComposerModel(
   ])
   const variants = createMemo(() => ["default", ...adapter.controls().model.selection.variant.list()])
   const submission = createComposerSubmit({
+    clientCommand: btw?.submitSlash,
     adapter,
     mode,
     commands: () => data.location.command.list({ directory: sdk().directory }),
@@ -582,7 +586,7 @@ export function createComposerModel(
     },
   ])
 
-  return controller as ComposerModel
+  return Object.assign(controller, { btw }) as ComposerModel
 }
 
 function composerErrorMessage(language: ReturnType<typeof useLanguage>, error: unknown) {

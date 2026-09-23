@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Mobile-friendly /btw peek panel — https://github.com/anomalyco/opencode/pull/49750
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `dcfe1ec7bd4922d4f44c141ba33047402bffc57e`, 2026-09-23
+- **Local change:** `feat(app): add mobile-friendly side question panel`; `packages/app-custom/src/session/btw/`, custom composer command/selection integration, command shortcuts, and English source strings. Reimplements the feature in Solid with a responsive floating panel above the composer, inspired by OpenChamber's MIT-licensed `useBtwStore`, `BtwPanel`, and `ComposerFloatingPanel`. Unlike upstream's desktop-only review tab, it works on iPhone, has collapse/reopen and touch dismissal, and opens from `/btw`, the command palette, Mod+Shift+B, or selected assistant text. Unlike OpenChamber's fork-based conversation, it uses the existing transient `session.generate` API and a separate question field that preserves the main draft. The server chooses the current session model and context; responses arrive whole, without token streaming, tools, history writes, or interruption. Panel state is local to the mounted session composer and is not durable.
+- **Tests:** app-custom `bun run typecheck`, `bun run test:unit` (1122 pass, 1 skip), `bun run test:browser` (219 pass), `bun run build`, and root `bun run check` pass. State tests use the real generated client with fake HTTP responses for success, errors, empty answers, replacement, cancellation, and isolation. Composer tests verify bypassing model selection, history, prompt admission, and interruption. Playwright CLI verified the built app at 1440×900 and iPhone 390×844: slash suggestion and arguments, palette, shortcut, pending/error/retry/success, long-answer scrolling, collapse/reopen, keyboard and touch dismissal; reduced 390×460 viewport also fits. Browser state checks used HTTP response fixtures. The temporary server inherited explicit configuration despite isolated XDG/database paths: one initial request reached the configured provider and was cancelled (HTTP 499); no real answer completed. The verification session's history remained empty. `git diff --check` passes.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 _None recorded yet. The register began with this document, without a retroactive
 audit (see above)._
 

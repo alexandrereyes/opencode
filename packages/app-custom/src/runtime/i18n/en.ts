@@ -1,6 +1,16 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "command.session.btw": "Ask a side question",
+  "command.session.btw.description": "Ask about this session without interrupting it or adding to its history",
+  "session.btw.title": "/btw · Side question",
+  "session.btw.hint": "Uses this session’s context and model. Side questions are not saved to the conversation.",
+  "session.btw.question": "Ask a side question…",
+  "session.btw.ask": "Ask",
+  "session.btw.loading": "Thinking…",
+  "session.btw.dismiss": "Dismiss side question",
+  "session.btw.error": "Could not answer this side question. Check the session’s model and try again.",
+  "session.btw.retry": "Try again",
   "session.revert.planning": "Checking subagents before updating the conversation…",
   "session.revert.subagents.one": "Updating subagent: {{completed}} of {{count}}…",
   "session.revert.subagents.other": "Updating subagents: {{completed}} of {{count}}…",

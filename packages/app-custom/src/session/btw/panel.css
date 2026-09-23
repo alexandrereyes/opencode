@@ -1,0 +1,68 @@
+.btw-panel {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 8px);
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 12px;
+  background: var(--v2-background-bg-base);
+  color: var(--v2-text-text-base);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 15%);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: var(--line-height-base);
+}
+.btw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+.btw-header button {
+  min-height: 36px;
+}
+.btw-body {
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 8px 16px;
+  overflow-wrap: anywhere;
+}
+.btw-question {
+  white-space: pre-wrap;
+  margin-block: 12px;
+  font-weight: 530;
+}
+.btw-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px 12px 12px;
+  flex-shrink: 0;
+}
+.btw-form textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--v2-background-bg-base);
+  color: var(--v2-text-text-base);
+  font: inherit;
+}
+@media (max-width: 767px) {
+  .btw-form textarea {
+    font-size: 16px;
+  }
+  .btw-header button,
+  .btw-form button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
