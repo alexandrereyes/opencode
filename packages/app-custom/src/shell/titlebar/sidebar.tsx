@@ -17,7 +17,7 @@ import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
-import { useCommand } from "@/shell/commands/command"
+import { parseKeybind, useCommand } from "@/shell/commands/command"
 import { getCompactRelativeTime } from "@/shell/time"
 import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
@@ -33,6 +33,7 @@ import {
   type SidebarPreparingTab,
 } from "./sidebar-worktrees"
 import { createSidebarSelection } from "./sidebar-selection"
+import { createModifierHold, sidebarShortcuts } from "./sidebar-shortcuts"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
 import { usePreferences } from "@/preferences/context"
 import {
@@ -229,6 +230,24 @@ export function SessionSidebar(props: {
     view: () => JSON.stringify([query(), saved.attention]),
     pending: lifecycle.pending,
   })
+  const open = (item: SidebarSession) =>
+    tabs.select(tabs.addSessionTab({ server: item.server, sessionId: item.session.id, chat: item.chat }))
+  const shortcuts = createMemo(() => sidebarShortcuts(selectable().map((item) => item.key)))
+  // Project groups repeat sessions already listed above; only their first row is numbered.
+  const listedAbove = createMemo(() => new Set([...chats(), ...pinned(), ...recent()].map((item) => item.key)))
+  const holding = createModifierHold(!!parseKeybind("mod+1")[0]?.meta)
+  command.register("sidebar-session-shortcuts", () =>
+    selectable()
+      .slice(0, 9)
+      .map((item, index) => ({
+        id: `sidebar.session.${index + 1}`,
+        category: "tab",
+        title: "",
+        keybind: `mod+${index + 1}`,
+        hidden: true,
+        onSelect: () => open(item),
+      })),
+  )
   const loading = () => indexes().some((entry) => entry.index.state.loading)
   const searchID = createUniqueId()
   let searchButton: HTMLButtonElement | undefined
@@ -268,17 +287,22 @@ export function SessionSidebar(props: {
         orientation="vertical"
         distributed
         shortcuts={false}
+        numbered={false}
         tabs={strip.tabs}
         projectLabel={strip.projectLabel}
         currentTab={props.currentTab}
-        shortcutIndex={(tab) => tabs.store.findIndex((item) => tabKey(item) === tabKey(tab))}
         onNavigate={(tab) => tabs.select(tab)}
         onClose={(tab) => tabs.closeTab(tabs.store.findIndex((item) => tabKey(item) === tabKey(tab)))}
         onReorder={(keys) => tabs.reorder(mergeVisibleTabOrder(tabs.store.map(tabKey), strip.tabs.map(tabKey), keys))}
       />
     </Show>
   )
-  const Row = (props: { item: SidebarSession; compact?: boolean; projectMetadataIcon?: boolean }) => {
+  const Row = (props: {
+    item: SidebarSession
+    compact?: boolean
+    projectMetadataIcon?: boolean
+    numbered?: boolean
+  }) => {
     // Recent's monotonic rank and metadata updates are not interaction timestamps.
     const at = createMemo(() => props.item.messageAt ?? props.item.session.time.created)
     const time = createMemo(() => {
@@ -302,6 +326,11 @@ export function SessionSidebar(props: {
         showAvatar={false}
         timestamp={
           time() ? { ...time()!, label: getCompactRelativeTime(time()!.at, language.plural, state.now) } : undefined
+        }
+        shortcut={
+          holding() && props.numbered !== false && shortcuts().has(props.item.key)
+            ? command.keybind(`sidebar.session.${shortcuts().get(props.item.key)}`)
+            : undefined
         }
         compact={props.compact}
         projectMetadataIcon={props.projectMetadataIcon}
@@ -331,15 +360,7 @@ export function SessionSidebar(props: {
                 })()
             : undefined
         }
-        onNavigate={() =>
-          tabs.select(
-            tabs.addSessionTab({
-              server: props.item.server,
-              sessionId: props.item.session.id,
-              chat: props.item.chat,
-            }),
-          )
-        }
+        onNavigate={() => open(props.item)}
         onClose={() => {
           const index = tabs.store.findIndex((value) => tabKey(value) === tabKey(tab()))
           if (index !== -1) tabs.closeTab(index)
@@ -623,12 +644,6 @@ export function SessionSidebar(props: {
         data-slot="session-sidebar"
         data-mode={query() ? "search" : saved.attention ? "attention" : "projects"}
       >
-        {/* Search renders real rows while this hidden strip retains draft/pending shortcuts. */}
-        <Show when={query()}>
-          <div hidden>
-            <PreparingStrip tabs={preparing().map((item) => item.tab)} />
-          </div>
-        </Show>
         <Show when={!query() && saved.attention}>
           <PreparingStrip tabs={preparing().map((item) => item.tab)} />
         </Show>
@@ -841,7 +856,7 @@ export function SessionSidebar(props: {
                                     <PreparingStrip tabs={preparingGroups().get(key)?.root ?? []} />
                                   </Show>
                                   <Key each={visible()} by="key">
-                                    {(item) => <Row item={item()} compact />}
+                                    {(item) => <Row item={item()} compact numbered={!listedAbove().has(item().key)} />}
                                   </Key>
                                 </div>
                                 <Show when={!collapsed() && tree().root.length > visible().length}>
@@ -946,7 +961,9 @@ export function SessionSidebar(props: {
                                               />
                                             </Show>
                                             <Key each={visible()} by="key">
-                                              {(item) => <Row item={item()} compact />}
+                                              {(item) => (
+                                                <Row item={item()} compact numbered={!listedAbove().has(item().key)} />
+                                              )}
                                             </Key>
                                           </div>
                                           <Show when={!collapsed() && group().rows.length > visible().length}>

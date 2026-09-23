@@ -55,6 +55,7 @@ export function TabNavItem(props: {
   chat?: boolean
   compact?: boolean
   timestamp?: { dateTime: string; title: string; label: string }
+  shortcut?: string
   sidebarActions?: boolean
   showAvatar?: boolean
   closable?: boolean
@@ -332,7 +333,8 @@ export function TabNavItem(props: {
       data-titlebar-tab
       data-slot="titlebar-tab-item"
       data-orientation={props.orientation ?? "horizontal"}
-      data-sidebar-time={props.orientation === "vertical" && props.timestamp ? "" : undefined}
+      data-sidebar-time={props.orientation === "vertical" && (props.timestamp || props.shortcut) ? "" : undefined}
+      data-shortcut={props.orientation === "vertical" && props.shortcut ? "" : undefined}
       data-sidebar-actions={sidebarActions() ? "" : undefined}
       data-avatar={props.showAvatar === false ? "hidden" : undefined}
       data-title-overflow={titleOverflowing()}
@@ -583,6 +585,11 @@ export function TabNavItem(props: {
               {timestamp().label}
             </time>
           )}
+        </Show>
+        <Show when={props.orientation === "vertical" && props.shortcut}>
+          <kbd data-slot="tab-shortcut" aria-hidden="true">
+            {props.shortcut}
+          </kbd>
         </Show>
         <Show when={mobileTabs && props.session}>
           {(session) => (

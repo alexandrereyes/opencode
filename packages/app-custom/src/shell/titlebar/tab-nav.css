@@ -169,6 +169,25 @@
   grid-column: 2;
 }
 
+[data-titlebar-tab] [data-slot="tab-shortcut"] {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  color: var(--v2-text-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: var(--line-height-compact);
+  white-space: nowrap;
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"] [data-slot="tab-shortcut"] {
+  grid-column: 2;
+}
+
+[data-titlebar-tab][data-shortcut] [data-slot="tab-time"] {
+  visibility: hidden;
+}
+
 [data-titlebar-tab]:not(:where([data-slot="mobile-tabs-drawer"] *)):is(
     :hover,
     :has(> [data-slot="tab-link"]:focus-visible)
