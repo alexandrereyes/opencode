@@ -353,9 +353,6 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Installation:** none
 - **Result after upstream:** pending
 
-_None recorded yet. The register began with this document, without a retroactive
-audit (see above)._
-
 ### Mobile-friendly /btw peek panel — https://github.com/anomalyco/opencode/pull/49750
 
 - **Kind:** adaptation
@@ -367,9 +364,6 @@ audit (see above)._
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
 - **Result after upstream:** pending
-
-_None recorded yet. The register began with this document, without a retroactive
-audit (see above)._
 
 ## Resolved entries
 
