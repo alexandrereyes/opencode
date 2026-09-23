@@ -50,6 +50,7 @@ export function TabNavItem(props: {
   orientation?: "horizontal" | "vertical"
   projectLabel?: string
   projectMetadataIcon?: boolean
+  showProjectBranch?: boolean
   chatMetadataIcon?: boolean
   chat?: boolean
   compact?: boolean
@@ -115,8 +116,22 @@ export function TabNavItem(props: {
   createEffect(() => {
     const ctx = serverCtx()
     const session = props.session
-    if (!mobileTabs?.open() || !ctx || !session || chat() || ctx.sdk.connection.status() !== "connected") return
+    if (
+      !(mobileTabs?.open() || props.showProjectBranch) ||
+      !ctx ||
+      !session ||
+      chat() ||
+      ctx.sdk.connection.status() !== "connected"
+    )
+      return
     void ctx.data.location.vcs.sync(session.location).catch(() => undefined)
+  })
+  const projectLabel = createMemo(() => {
+    const name = props.projectLabel ?? (settings.appearance.showProjectName() && projectName())
+    const session = props.session
+    if (!name || !props.showProjectBranch || !session || chat()) return name
+    const branch = serverCtx()?.data.location.vcs.info(session.location)?.branch.current
+    return `${name} · ${branch && branch !== "HEAD" ? branch : "-"}`
   })
   const mobileProjectLabel = createMemo(() => {
     const session = props.session
@@ -542,9 +557,7 @@ export function TabNavItem(props: {
         </span>
         <Show
           when={
-            !props.compact &&
-            props.orientation === "vertical" &&
-            (mobileTabs ? mobileProjectLabel() : (props.projectLabel ?? (settings.appearance.showProjectName() && projectName())))
+            !props.compact && props.orientation === "vertical" && (mobileTabs ? mobileProjectLabel() : projectLabel())
           }
         >
           {(name) => (
