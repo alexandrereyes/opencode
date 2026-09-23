@@ -71,7 +71,9 @@ test("uploads a generic binary and renders its sent path reference", async ({ pa
     mimeType: "application/zip",
     buffer: bytes,
   })
-  await expect(page.getByText("archive.zip", { exact: true })).toBeVisible()
+  await expect(
+    page.locator('[data-slot="composer-attachments"]').getByText("archive.zip", { exact: true }),
+  ).toBeVisible()
 
   await editor.press("Enter")
 
