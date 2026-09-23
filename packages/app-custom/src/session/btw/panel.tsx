@@ -1,11 +1,11 @@
-import { createEffect, onCleanup, Show } from "solid-js"
+import { createEffect, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Markdown } from "@opencode/session-ui-custom/markdown"
 import { useLanguage } from "@/runtime/i18n/language"
-import type { BtwModel } from "./state"
+import { btwSubmitKey, type BtwModel } from "./state"
 import "./panel.css"
 
 export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
@@ -56,6 +56,7 @@ export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
         class="btw-panel"
         data-slot="session-btw-panel"
         data-prevent-autofocus
+        data-collapsed={props.btw.state.collapsed}
         role="region"
         aria-label={language.t("command.session.btw")}
         style={{ "max-height": `${layout.height}px` }}
@@ -71,6 +72,9 @@ export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
           </Button>
           <Show when={props.btw.state.pending}>
             <span role="status">{language.t("session.btw.loading")}</span>
+            <Button variant="ghost" onClick={props.btw.cancel}>
+              {language.t("session.btw.cancel")}
+            </Button>
           </Show>
           <IconButton
             icon={<Icon name="close" />}
@@ -82,11 +86,19 @@ export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
         <Show when={!props.btw.state.collapsed}>
           <div class="btw-body">
             <p class="text-text-weak">{language.t("session.btw.hint")}</p>
-            <Show when={props.btw.state.question}>
+            <For each={props.btw.state.history}>
+              {(entry) => (
+                <article>
+                  <p class="btw-question">{entry.question}</p>
+                  <Markdown text={entry.answer} />
+                </article>
+              )}
+            </For>
+            <Show when={props.btw.state.question && !props.btw.state.answer}>
               <p class="btw-question">{props.btw.state.question}</p>
             </Show>
-            <Show when={props.btw.state.answer}>
-              <Markdown text={props.btw.state.answer} />
+            <Show when={props.btw.state.cancelled}>
+              <p role="status">{language.t("session.btw.cancelled")}</p>
             </Show>
             <Show when={props.btw.state.error}>
               <div role="alert">
@@ -112,7 +124,7 @@ export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
               placeholder={language.t("session.btw.question")}
               onInput={(event) => props.btw.draft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.shiftKey || event.isComposing) return
+                if (!btwSubmitKey(event, window.matchMedia("(max-width: 767px)").matches)) return
                 event.preventDefault()
                 if (!props.btw.state.pending) void props.btw.ask()
               }}

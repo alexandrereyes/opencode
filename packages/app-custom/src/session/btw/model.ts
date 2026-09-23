@@ -1,16 +1,24 @@
-import { onCleanup } from "solid-js"
+import { createEffect, onCleanup } from "solid-js"
 import type { ComposerAdapter } from "@/composer/adapter"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useServerSDK } from "@/runtime/server/client"
+import { useServerSDK, type ServerSDK } from "@/runtime/server/client"
 import { useCommand } from "@/shell/commands/command"
-import { createBtwState } from "./state"
+import { createBtwSessions } from "./state"
+
+const states = new WeakMap<ServerSDK, ReturnType<typeof createBtwSessions>>()
 
 export function createComposerBtw(adapter: ComposerAdapter) {
   if (adapter.kind !== "active-session") return
   const server = useServerSDK()
   const language = useLanguage()
   const command = useCommand()
-  const btw = createBtwState(adapter.session().id, (input, options) => server.api.session.generate(input, options))
+  const sessions =
+    states.get(server) ?? createBtwSessions((input, options) => server.api.session.generate(input, options))
+  states.set(server, sessions)
+  const btw = sessions(adapter.session().id)
+  createEffect(() => {
+    if (adapter.active?.() === false) btw.cancel()
+  })
   onCleanup(btw.cancel)
   command.register("session.btw", () => [
     {

@@ -23,6 +23,21 @@
   padding: 4px 8px;
   flex-shrink: 0;
 }
+.btw-panel[data-collapsed="true"] {
+  inset-inline-end: auto;
+  max-width: 100%;
+  border-radius: 20px;
+}
+.btw-panel[data-collapsed="true"] .btw-header {
+  padding-block: 0;
+}
+.btw-header > button:first-child {
+  min-width: 0;
+  flex-shrink: 1;
+}
+.btw-header > [role="status"] {
+  font-size: 12px;
+}
 .btw-header button {
   min-height: 36px;
 }
