@@ -447,3 +447,17 @@ bubble. Two optional pairs of theme variables drive the custom session UI; every
 its default colors: `v2-user-message-background`/`v2-user-message-text` (local-session user
 bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths,
 which otherwise follow `syntax-string`).
+
+## Model picker
+
+The composer model picker and the **Select model** dialog (`mod+'`) share one list. Search matches
+model name, ID and provider, keeps the sections and disables reordering while a query is active.
+The star adds a model to **Favorites** (new favorites go first) without selecting it; favorites
+also stay in their provider section, and hidden models stay out of both. Drag the grip handles to
+reorder favorites or provider sections; collapsed sections are remembered per browser.
+The pin makes a model and the thinking level shown in its row the **web default** for new
+sessions; pin it again to clear it. The default takes precedence over agent and `opencode.json`
+models in new-session drafts but never changes existing sessions, the TUI or the config file.
+Favorites, provider order and the default live in the server-side preferences profile
+(`plugin-app-custom` `custom.preferences`), so every browser shares them. ↑↓ navigate, Enter
+selects and ←→ cycles the highlighted model's thinking level before selecting it.

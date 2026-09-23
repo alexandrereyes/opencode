@@ -16,6 +16,12 @@ const Model = Schema.Struct({
   visibility: Schema.Literals(["show", "hide"]),
   favorite: optional(Schema.Boolean),
 })
+const ModelRef = Schema.Struct({ providerID: Schema.String, modelID: Schema.String })
+const DefaultModel = Schema.Struct({
+  providerID: Schema.String,
+  modelID: Schema.String,
+  variant: optional(Schema.String),
+})
 const Settings = Schema.Struct({
   followUpBehavior: Schema.Literals(["queue", "steer"]),
   autoApprove: Schema.Boolean,
@@ -31,6 +37,9 @@ export const Data = Schema.Struct({
   models: Schema.Struct({
     user: Schema.Array(Model),
     variant: Schema.Record(Schema.String, Schema.mutableKey(Schema.String)),
+    favorites: optional(Schema.Array(ModelRef)),
+    providerOrder: optional(Schema.Array(Schema.String)),
+    default: optional(DefaultModel),
   }),
   settings: Settings,
 })
@@ -71,6 +80,9 @@ export const Intent = Schema.Union([
     modelID: Schema.String,
     favorite: Schema.Boolean,
   }),
+  Schema.Struct({ type: Schema.Literal("model.favorite.order"), favorites: Schema.Array(ModelRef) }),
+  Schema.Struct({ type: Schema.Literal("model.provider.order"), order: Schema.Array(Schema.String) }),
+  Schema.Struct({ type: Schema.Literal("model.default"), model: Schema.NullOr(DefaultModel) }),
   Schema.Struct({
     type: Schema.Literal("model.variant"),
     providerID: Schema.String,

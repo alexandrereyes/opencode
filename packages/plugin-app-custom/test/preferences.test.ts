@@ -56,6 +56,42 @@ test("model and behavioral intents change only their owned preference", () => {
   expect(approved.data.models).not.toHaveProperty("recent")
 })
 
+test("favorites keep their own order without changing model visibility", () => {
+  const favorite = (current: Preferences.Profile, modelID: string, value: boolean) =>
+    applyIntent(current, { type: "model.favorite", providerID: "openai", modelID, favorite: value })
+  const added = favorite(favorite(profile, "a", true), "b", true)
+  expect(added.data.models.favorites).toEqual([
+    { providerID: "openai", modelID: "b" },
+    { providerID: "openai", modelID: "a" },
+  ])
+  expect(added.data.models.user).toEqual([])
+
+  const ordered = applyIntent(added, {
+    type: "model.favorite.order",
+    favorites: [
+      { providerID: "openai", modelID: "a" },
+      { providerID: "openai", modelID: "b" },
+    ],
+  })
+  expect(favorite(ordered, "a", false).data.models.favorites).toEqual([{ providerID: "openai", modelID: "b" }])
+})
+
+test("provider order and default model round-trip and clear", () => {
+  const ordered = applyIntent(profile, { type: "model.provider.order", order: ["openai", "anthropic"] })
+  const defaulted = applyIntent(ordered, {
+    type: "model.default",
+    model: { providerID: "openai", modelID: "gpt", variant: "high" },
+  })
+  expect(defaulted.data.models.providerOrder).toEqual(["openai", "anthropic"])
+  expect(defaulted.data.models.default).toEqual({ providerID: "openai", modelID: "gpt", variant: "high" })
+  expect(
+    Schema.decodeUnknownSync(Preferences.Profile)(Schema.encodeSync(Preferences.Profile)(defaulted)).data.models,
+  ).toEqual(defaulted.data.models)
+
+  const cleared = applyIntent(defaulted, { type: "model.default", model: null })
+  expect(Schema.encodeSync(Preferences.Profile)(cleared).data.models).not.toHaveProperty("default")
+})
+
 test("tab layout is global while profiles saved before it remain valid", () => {
   const legacy = Schema.encodeSync(Preferences.Profile)(profile)
   delete (legacy.data.settings as { tabLayout?: string }).tabLayout

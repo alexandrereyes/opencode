@@ -82,9 +82,14 @@ export function createComposerModelSelection(input: {
     })[0]
   const current = () => {
     if (!configuredModel.ready()) return
-    const key = [prompt.model.current(), input.agent()?.model, configuredModel(), recent(), fallback()].find(
-      (item): item is ModelKey => !!item && valid(item),
-    )
+    const key = [
+      prompt.model.current(),
+      models.default.get(),
+      input.agent()?.model,
+      configuredModel(),
+      recent(),
+      fallback(),
+    ].find((item): item is ModelKey => !!item && valid(item))
     return key ? models.find(key) : undefined
   }
   const recentModels = createMemo(() =>

@@ -13,12 +13,19 @@ function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`
 }
 
+// Callers may pass richer model objects; persist only the reference.
+function key(model: ModelKey) {
+  return { providerID: model.providerID, modelID: model.modelID }
+}
+
 const createModelsController = (directory: Accessor<string | undefined>) => {
   const providers = useProviders(() => directory())
   const models = useGlobal().models
   const store = models.store
   const setStore = models.set
   const preferences = models.preferences
+  const saved = () => preferences.profile().data.models
+  const same = (a: ModelKey, b: ModelKey) => a.providerID === b.providerID && a.modelID === b.modelID
 
   const available = createMemo(() =>
     providers.connected().flatMap((p) =>
@@ -69,7 +76,12 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
   }
 
   const variantKey = (model: ModelKey) => `${model.providerID}/${model.modelID}`
-  const getVariant = (model: ModelKey) => store.variant?.[variantKey(model)]
+  // The web default model starts new selections with the thinking level saved alongside it.
+  const getVariant = (model: ModelKey) => {
+    const fallback = saved().default
+    if (fallback && same(fallback, model)) return fallback.variant ?? "default"
+    return store.variant?.[variantKey(model)]
+  }
 
   const setVariant = (model: ModelKey, value: string | undefined) => {
     const key = variantKey(model)
@@ -88,6 +100,30 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     find,
     visible,
     setVisibility,
+    favorite: {
+      list: (): ModelKey[] => [...(saved().favorites ?? [])],
+      has: (model: ModelKey) => (saved().favorites ?? []).some((item) => same(item, model)),
+      set: (model: ModelKey, favorite: boolean) =>
+        void preferences.mutate({ type: "model.favorite", ...key(model), favorite }),
+      order: (favorites: ModelKey[]) =>
+        void preferences.mutate({ type: "model.favorite.order", favorites: favorites.map(key) }),
+    },
+    providerOrder: {
+      list: () => [...(saved().providerOrder ?? [])],
+      set: (order: string[]) => void preferences.mutate({ type: "model.provider.order", order }),
+    },
+    default: {
+      get: () => saved().default,
+      is: (model: ModelKey) => {
+        const current = saved().default
+        return !!current && same(current, model)
+      },
+      set: (model: (ModelKey & { variant?: string }) | undefined) =>
+        void preferences.mutate({
+          type: "model.default",
+          model: model ? { ...key(model), ...(model.variant ? { variant: model.variant } : {}) } : null,
+        }),
+    },
     recent: {
       list: models.recent,
       push,

@@ -107,6 +107,9 @@ function fixture(input: { session?: Commit; agents?: Agent[]; config?: ConfigMod
     recent: [] as ModelKey[],
     variant: (input.preferred ? { "provider/a": input.preferred } : {}) as Record<string, string>,
   })
+  const [profile, setProfile] = createStore({
+    models: {} as { default?: ModelKey & { variant?: string } },
+  })
   const events = new Map<string, Set<(event: Event) => void>>()
   const configLoads: string[] = []
   const result = {
@@ -115,10 +118,11 @@ function fixture(input: { session?: Commit; agents?: Agent[]; config?: ConfigMod
     state,
     set,
     setPreferences,
+    setProfile,
     preferences: {
       store: preferences,
       set: setPreferences,
-      preferences: { mutate: async () => {} },
+      preferences: { mutate: async () => {}, profile: () => ({ data: profile }) },
       ready: () => true,
       recent: () => preferences.recent,
     },
@@ -487,4 +491,30 @@ test.each([1, -1] as const)("cycles %p from outside recents to the correct end a
   expect(local.model.current()?.id).toBe(direction === 1 ? "c" : "b")
   local.model.cycle(direction)
   expect(local.model.current()?.id).toBe(direction === 1 ? "b" : "c")
+})
+
+test("the web default model and thinking win over agent and configured models in new sessions", () => {
+  const f = fixture({ agents: [agent("build", key("a"), "low"), agent("plan")], config: "provider/b", preferred: "low" })
+  f.setProfile("models", "default", { ...key("b"), variant: "high" })
+  f.set("route", "id", undefined)
+  const { local, composer } = f.mount(true)
+  if (!composer) throw new Error("missing draft composer")
+  expect(selection(local)).toEqual({ agent: "build", model: "b", variant: "high" })
+  expect(composer.current()?.id).toBe("b")
+  expect(composer.variant.current()).toBe("high")
+
+  composer.set(key("c"))
+  expect(composer.current()?.id).toBe("c")
+  composer.set(key("b"))
+  expect(composer.variant.current()).toBe("high")
+
+  f.setProfile("models", { default: key("b") })
+  expect(composer.variant.current()).toBeUndefined()
+})
+
+test("existing sessions keep their durable model when a web default exists", () => {
+  const f = fixture({ session: durable("a", "low") })
+  f.setProfile("models", "default", { ...key("b"), variant: "high" })
+  const { local } = f.mount()
+  expect(selection(local)).toEqual({ agent: "build", model: "a", variant: "low" })
 })

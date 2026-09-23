@@ -80,7 +80,8 @@
 }
 
 @media (max-width: 47.999rem) {
-  :is([data-slot="composer-model-menu"], [data-slot="composer-option-menu"]) :is([role="menuitem"], [role="menuitemradio"], input) {
+  :is([data-slot="composer-model-menu"], [data-slot="composer-option-menu"])
+    :is([role="menuitem"], [role="menuitemradio"], [role="option"], input) {
     font-size: var(--font-size-base);
     line-height: var(--line-height-base);
     min-height: 40px;

@@ -241,6 +241,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const model = session?.model
           return model && { providerID: model.providerID, modelID: model.id }
         },
+        models.default.get,
         () => agent.current()?.model,
         fallback,
       )

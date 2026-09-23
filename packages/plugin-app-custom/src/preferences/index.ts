@@ -62,20 +62,31 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
         ? data.pinnedSessions
         : [...data.pinnedSessions, intent.session]
       : data.pinnedSessions.filter((item) => item !== intent.session)
-  if (intent.type === "model.visibility" || intent.type === "model.favorite") {
+  if (intent.type === "model.visibility") {
     const index = data.models.user.findIndex(
       (item) => item.providerID === intent.providerID && item.modelID === intent.modelID,
     )
-    const current = data.models.user[index]
     const next = {
       providerID: intent.providerID,
       modelID: intent.modelID,
-      visibility: intent.type === "model.visibility" ? intent.visibility : (current?.visibility ?? "show"),
-      favorite: intent.type === "model.favorite" ? intent.favorite : current?.favorite,
+      visibility: intent.visibility,
+      favorite: data.models.user[index]?.favorite,
     }
     if (index === -1) data.models.user.push(next)
     else data.models.user[index] = next
   }
+  if (intent.type === "model.favorite") {
+    const rest = (data.models.favorites ?? []).filter(
+      (item) => item.providerID !== intent.providerID || item.modelID !== intent.modelID,
+    )
+    data.models.favorites = intent.favorite
+      ? [{ providerID: intent.providerID, modelID: intent.modelID }, ...rest]
+      : rest
+  }
+  if (intent.type === "model.favorite.order")
+    data.models.favorites = intent.favorites.map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
+  if (intent.type === "model.provider.order") data.models.providerOrder = [...intent.order]
+  if (intent.type === "model.default") data.models.default = intent.model ? { ...intent.model } : undefined
   if (intent.type === "model.variant") data.models.variant[`${intent.providerID}/${intent.modelID}`] = intent.variant
   if (intent.type === "settings.followUpBehavior") data.settings.followUpBehavior = intent.value
   if (intent.type === "settings.autoApprove") data.settings.autoApprove = intent.value
@@ -145,7 +156,13 @@ function mutableData(data: Preferences.Data) {
     ),
     sidebarOrder: [...data.sidebarOrder],
     pinnedSessions: [...data.pinnedSessions],
-    models: { user: data.models.user.map((model) => ({ ...model })), variant: { ...data.models.variant } },
+    models: {
+      user: data.models.user.map((model) => ({ ...model })),
+      variant: { ...data.models.variant },
+      favorites: data.models.favorites?.map((model) => ({ ...model })),
+      providerOrder: data.models.providerOrder && [...data.models.providerOrder],
+      default: data.models.default && { ...data.models.default },
+    },
     settings: { ...data.settings, notifications: { ...data.settings.notifications } },
   }
 }

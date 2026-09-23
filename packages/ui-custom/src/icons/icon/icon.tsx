@@ -8,6 +8,14 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<path d="M5 2H11M6 2V6L3.5 9V10H12.5V9L10 6V2M8 10V14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
   },
+  star: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M8 2L9.76 5.57L13.71 6.15L10.85 8.93L11.53 12.87L8 11.01L4.47 12.87L5.15 8.93L2.29 6.15L6.24 5.57L8 2Z" stroke="currentColor" stroke-linejoin="round"/>`,
+  },
+  "star-fill": {
+    viewBox: "0 0 16 16",
+    body: `<path d="M8 2L9.76 5.57L13.71 6.15L10.85 8.93L11.53 12.87L8 11.01L4.47 12.87L5.15 8.93L2.29 6.15L6.24 5.57L8 2Z" fill="currentColor" stroke="currentColor" stroke-linejoin="round"/>`,
+  },
   clock: {
     viewBox: "0 0 16 16",
     body: `<circle cx="8" cy="8" r="6" stroke="currentColor"/><path d="M8 4.5V8H11" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
