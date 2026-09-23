@@ -85,7 +85,12 @@ export function createSessionTimelineRowRenderer(input: {
       if (row._tag !== "AssistantPart" || row.group.type !== "context") return
       row.group.refs.forEach((ref) => {
         const content = Timeline.resolveContent(input.projection.messageByID().get(ref.messageID), ref.partID)
-        if (content?.type !== "tool" || content.name !== "patch" || content.state.status === "error") return
+        if (
+          content?.type !== "tool" ||
+          !["edit", "write", "patch"].includes(content.name) ||
+          content.state.status === "error"
+        )
+          return
         const part = `${ref.messageID}:${ref.partID}`
         const key = patchGroupKeys.get(part)
         if (key && !owners.has(key)) owners.set(key, part)

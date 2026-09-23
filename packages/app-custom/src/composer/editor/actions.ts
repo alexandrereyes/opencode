@@ -10,7 +10,13 @@ import type {
   ComposerPrompt,
   ComposerSessionPart,
 } from "../types"
-import { normalizeComposerCursor, normalizeComposerPrompt, normalizeComposerText, promptLength } from "../prompt-parts"
+import {
+  isAttachment,
+  normalizeComposerCursor,
+  normalizeComposerPrompt,
+  normalizeComposerText,
+  promptLength,
+} from "../prompt-parts"
 
 export type ComposerStateStore = [
   Store<ComposerPersistedState> | Accessor<Store<ComposerPersistedState>>,
@@ -72,7 +78,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
         setStore()((state) => ({
           prompt: [
             { type: "text", content: value, start: 0, end: value.length },
-            ...state.prompt.filter((part) => part.type === "image" && !part.mention),
+            ...state.prompt.filter((part) => isAttachment(part) && !part.mention),
           ],
           cursor: value.length,
           retry: undefined,
@@ -129,9 +135,9 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
     },
     removeAttachment(id: string) {
       setStore()("prompt", (parts) => {
-        const attachment = parts.find((part) => part.type === "image" && part.id === id)
-        const remaining = parts.filter((part) => part.type !== "image" || part.id !== id)
-        if (!attachment || attachment.type !== "image" || !attachment.mention) return remaining
+        const attachment = parts.find((part) => isAttachment(part) && part.id === id)
+        const remaining = parts.filter((part) => !isAttachment(part) || part.id !== id)
+        if (!attachment || !isAttachment(attachment) || !attachment.mention) return remaining
         return replacePromptRange(remaining, attachment.mention.start, attachment.mention.end, [])
       })
       clearRetry()
@@ -166,7 +172,7 @@ function replacePromptRange(
   const after: ComposerPrompt = []
   const insertedLength = promptLength(content)
   const images = prompt.flatMap((part) => {
-    if (part.type !== "image") return []
+    if (!isAttachment(part)) return []
     if (!part.mention) return [part]
     const overlaps =
       start === end
@@ -184,7 +190,7 @@ function replacePromptRange(
   })
   let position = 0
   prompt.forEach((part) => {
-    if (part.type === "image") return
+    if (isAttachment(part)) return
     const partStart = position
     position += part.content.length
     if (position <= start) {
@@ -203,7 +209,7 @@ function replacePromptRange(
   return withOffsets([
     ...before,
     ...content.map((part) =>
-      part.type === "image" && part.mention
+      isAttachment(part) && part.mention
         ? {
             ...part,
             mention: {
@@ -247,7 +253,7 @@ function withOffsets(prompt: ComposerPrompt): ComposerPrompt {
       return result
     }, [])
     .map((part) => {
-      if (part.type === "image") return part
+      if (isAttachment(part)) return part
       const next = { ...part, start: offset, end: offset + part.content.length }
       offset = next.end
       return next

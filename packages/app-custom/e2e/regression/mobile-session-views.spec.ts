@@ -106,8 +106,9 @@ for (const position of ["top", "bottom"] as const) {
     await expect(composer).toBeHidden()
 
     await more.click()
-    await page.getByRole("menuitem", { name: "Status", exact: true }).click()
-    const status = page.getByRole("dialog", { name: "Status", exact: true })
+    await expect(page.getByRole("menuitem", { name: "Status", exact: true })).toBeHidden()
+    await page.getByRole("menuitem", { name: "Session details", exact: true }).click()
+    const status = page.getByRole("dialog", { name: "Session details", exact: true })
     await expect(status.getByRole("tab", { name: "MCP", exact: true })).toBeVisible()
     await status.getByRole("button", { name: "Close", exact: true }).click()
     await expect(status).toBeHidden()

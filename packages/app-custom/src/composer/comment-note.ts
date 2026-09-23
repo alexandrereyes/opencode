@@ -13,6 +13,7 @@ export type PromptAttachmentReference = {
   name: string
   mime: string
   path: string
+  mention?: { text: string; start: number; end: number }
 }
 
 function selection(selection: unknown) {
@@ -74,7 +75,22 @@ export function readPromptPresentation(value: unknown) {
       const mime = (item as { mime?: unknown }).mime
       const path = (item as { path?: unknown }).path
       if (typeof name !== "string" || typeof mime !== "string" || typeof path !== "string") return []
-      return [{ name, mime, path }]
+      const value = (item as { mention?: unknown }).mention
+      const mention =
+        value && typeof value === "object" ? (value as { text?: unknown; start?: unknown; end?: unknown }) : undefined
+      return [
+        {
+          name,
+          mime,
+          path,
+          ...(mention &&
+          typeof mention.text === "string" &&
+          typeof mention.start === "number" &&
+          typeof mention.end === "number"
+            ? { mention: { text: mention.text, start: mention.start, end: mention.end } }
+            : {}),
+        },
+      ]
     }),
     quotes: readChatQuotes((value as { quotes?: unknown }).quotes),
     comments: comments.flatMap((item): PromptComment[] => {

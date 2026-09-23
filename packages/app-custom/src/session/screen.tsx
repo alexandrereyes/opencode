@@ -11,7 +11,10 @@ import {
   createEffect,
   createComputed,
   on,
+  onMount,
 } from "solid-js"
+import { makeEventListener } from "@solid-primitives/event-listener"
+import { debounce } from "@solid-primitives/scheduled"
 import { createStore } from "solid-js/store"
 import { ResizeHandle } from "@opencode/ui-custom/resize-handle"
 import { MessageTimeline, SessionSummaryPanel } from "@/session/timeline/message-timeline"
@@ -37,6 +40,8 @@ import { SessionReviewToggle } from "./header/session-header-actions"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createSessionBrowser } from "./browser/model"
 import { createTimelineCache } from "./timeline/cache"
+import { ArtifactMarkdownProvider, ArtifactOpenerProvider, useArtifactOpener } from "./files/open-artifact"
+import { useBrowserAttachments } from "./browser/attachments"
 
 const SessionMobileFiles = lazy(async () => {
   const { SessionMobileFiles } = await import("./files/session-mobile-files")
@@ -44,8 +49,24 @@ const SessionMobileFiles = lazy(async () => {
 })
 
 export function SessionScreen(props: { session: SessionModel }) {
+  return (
+    <ArtifactOpenerProvider>
+      <ArtifactMarkdownProvider>
+        <SessionScreenContent session={props.session} />
+      </ArtifactMarkdownProvider>
+    </ArtifactOpenerProvider>
+  )
+}
+
+function SessionScreenContent(props: { session: SessionModel }) {
+  const artifacts = useArtifactOpener()
+  const attachments = useBrowserAttachments()
   const session = props.session
   const server = useServer()
+  createEffect(() => {
+    const sessionID = session.identity.sessionID()
+    if (sessionID) onCleanup(attachments.onPreview(server, sessionID, (path) => void artifacts.open(path)))
+  })
   const detailsProject = createMemo(() => {
     const info = session.data.info()
     return info ? projectForSession(info, server.ctx.sync.data.project) : undefined
@@ -84,11 +105,24 @@ export function SessionScreen(props: { session: SessionModel }) {
     sideTerminalPresent: false,
     mobileTerminalCached: false,
     mobileMoveDismissed: false,
+    summaryResizeTranslate: undefined as string | undefined,
   })
   const [elements, setElements] = createStore<{
+    chat?: HTMLDivElement
     side?: HTMLDivElement
     bottomTerminal?: HTMLDivElement
   }>({})
+  const finishWindowResize = debounce(() => setStore("summaryResizeTranslate", undefined), 150)
+  onMount(() => {
+    makeEventListener(window, "resize", () => {
+      if (store.summaryResizeTranslate === undefined) {
+        const content = elements.chat?.querySelector("[data-timeline-virtual-content]")
+        // Freeze the painted offset, including an in-flight slide, until resizing settles.
+        setStore("summaryResizeTranslate", content ? getComputedStyle(content).translate : "none")
+      }
+      finishWindowResize()
+    })
+  })
   const sideVisible = createMemo(() => isDesktop() && screen.side.layout().visible)
   const sideTerminalVisible = createMemo(() => isDesktop() && screen.terminal.side() && screen.terminal.open())
   const bottomTerminalVisible = createMemo(() => isDesktop() && screen.terminal.open() && screen.terminal.bottom())
@@ -163,6 +197,17 @@ export function SessionScreen(props: { session: SessionModel }) {
     return key
   })
   const review = createSessionReview({ session, screen, deferRender: () => store.deferRender })
+  createEffect(
+    on(
+      artifacts.opened,
+      () => {
+        if (isDesktop()) return
+        session.layout.view().terminal.close()
+        review.mobile.setTab("files")
+      },
+      { defer: true },
+    ),
+  )
   const mobileView = createMemo(() => (screen.terminal.open() ? "terminal" : review.mobile.tab()))
   const conversationVisible = createMemo(() => isDesktop() || mobileView() === "session")
   createEffect(() => {
@@ -355,6 +400,9 @@ export function SessionScreen(props: { session: SessionModel }) {
               "transition-none": screen.size.active() || !sidePresence.animate(),
             }}
             data-slot="session-chat-panel"
+            ref={(element) => setElements("chat", element)}
+            data-summary-open={isDesktop() && review.details.open()}
+            data-summary-resizing={store.summaryResizeTranslate !== undefined}
             data-width-animating={store.sideWidthMotion}
             data-scrollbar-hidden={store.timelineScrollbarHidden || store.sideWidthMotion}
             onPointerMove={revealTimelineScrollbar}
@@ -366,6 +414,7 @@ export function SessionScreen(props: { session: SessionModel }) {
             onTransitionCancel={trackSideWidthMotion}
             style={{
               width: screen.panel.width(),
+              "--session-summary-resize-translate": store.summaryResizeTranslate,
             }}
           >
             <Show when={!!session.identity.params.id}>

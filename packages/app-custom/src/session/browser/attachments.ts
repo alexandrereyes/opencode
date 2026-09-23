@@ -42,6 +42,7 @@ export const { use: useBrowserAttachments, provider: BrowserAttachmentsProvider 
     const [unsupported, setUnsupported] = createStore<Record<string, true | undefined>>({})
     const live = new Map<string, Live>()
     const focus = new Map<string, Set<(tabID: Browser.TabID) => void>>()
+    const preview = new Map<string, Set<(path: string) => void>>()
     const key = (server: Server, sessionID: string) => `${server.key}\n${sessionID}`
     const enabled = createMemo(
       () => !!platform.browserPane && settings.ready() && settings.general.experimentalBrowser(),
@@ -101,6 +102,7 @@ export const { use: useBrowserAttachments, provider: BrowserAttachmentsProvider 
             endpoint: { ...server.conn.http, url: server.ctx.sdk.url },
           }),
           focus: (tabID) => focus.get(id)?.forEach((listener) => listener(tabID)),
+          preview: (path) => preview.get(id)?.forEach((listener) => listener(path)),
           change: (state) => {
             if (state.error === "browser.pane.unsupported") {
               setUnsupported(server.key, true)
@@ -149,6 +151,16 @@ export const { use: useBrowserAttachments, provider: BrowserAttachmentsProvider 
         return () => {
           listeners.delete(listener)
           if (!listeners.size) focus.delete(id)
+        }
+      },
+      onPreview(server: Server, sessionID: string, listener: (path: string) => void) {
+        const id = key(server, sessionID)
+        const listeners = preview.get(id) ?? new Set()
+        listeners.add(listener)
+        preview.set(id, listeners)
+        return () => {
+          listeners.delete(listener)
+          if (!listeners.size) preview.delete(id)
         }
       },
       command(server: Server, sessionID: string, command: BrowserPaneCommand) {

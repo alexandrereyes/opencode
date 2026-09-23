@@ -88,11 +88,10 @@ const ImageFields = {
 }
 const Image = Persistence.struct({
   ...ImageFields,
-  blob: Schema.Struct({ id: Schema.NonEmptyString, url: Schema.String.check(Schema.isPattern(/^(blob:|data:)/)) }),
+  blob: Schema.Struct({ id: Schema.NonEmptyString, url: Schema.String.check(Schema.isPattern(/^(blob:|data:|$)/)) }),
 })
 
-// Draft storage hydrates content-addressed blobs before this codec runs. Legacy
-// inline data remains usable, but unresolved references are not renderable.
+// Draft references resolve their bytes only when displayed or delivered.
 export const ImageAttachmentPart = Schema.Struct({
   ...ImageFields,
   blob: Persistence.optional(
@@ -122,6 +121,16 @@ export const ImageAttachmentPart = Schema.Struct({
 )
 export type ImageAttachmentPart = typeof ImageAttachmentPart.Type
 
+export const PathAttachmentPart = Persistence.struct({
+  type: Schema.Literal("path"),
+  id: Schema.String,
+  filename: Schema.String,
+  mime: Schema.String,
+  path: Schema.String,
+  mention: ImageFields.mention,
+})
+export type PathAttachmentPart = typeof PathAttachmentPart.Type
+
 export const ContentPart = Schema.Union([
   TextPart,
   FileAttachmentPart,
@@ -131,6 +140,7 @@ export const ContentPart = Schema.Union([
   AppPart,
   SessionPart,
   ImageAttachmentPart,
+  PathAttachmentPart,
 ])
 export type ContentPart = typeof ContentPart.Type
 export const Prompt = Persistence.array(ContentPart)

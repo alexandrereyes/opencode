@@ -17,7 +17,12 @@ import { useProviders } from "@/providers/catalog/providers"
 import { useIntegrations } from "@/providers/catalog/integrations"
 import { CustomProviderForm } from "@/providers/credentials/dialog"
 import { decode64 } from "@/runtime/persistence/base64"
-import { createProviderConnectionController, type ProviderConnectMethod } from "./controller"
+import {
+  CONSOLE_PROVIDERS,
+  consoleIntegration,
+  createProviderConnectionController,
+  type ProviderConnectMethod,
+} from "./controller"
 
 const CUSTOM_ID = "_custom"
 type IntegrationForm = NonNullable<ProviderConnectMethod["form"]>[number]
@@ -259,11 +264,19 @@ function ProviderConnection(props: {
   const params = useParams()
   const language = useLanguage()
   const providers = useProviders(() => props.directory)
+  const integrations = useIntegrations(() => props.directory)
   const directory = () => props.directory ?? decode64(params.dir)
+  const isConsole = () => CONSOLE_PROVIDERS.has(props.provider)
 
   const controller = createProviderConnectionController({
-    provider: () => props.provider,
+    provider: () => consoleIntegration(props.provider),
+    keyProvider: () => props.provider,
     directory,
+    autoSelect: (methods) => {
+      if (!isConsole()) return undefined
+      const index = methods.findIndex((method) => method.type === "oauth")
+      return index === -1 ? undefined : index
+    },
     onComplete: () => {
       dialog.close()
       showToast({
@@ -276,7 +289,11 @@ function ProviderConnection(props: {
   })
   const provider = createMemo(() => ({
     id: props.provider,
-    name: providers.all().get(props.provider)?.name ?? controller.integration()?.name ?? props.provider,
+    name:
+      integrations.list().find((item) => item.id === props.provider)?.name ??
+      providers.all().get(props.provider)?.name ??
+      controller.integration()?.name ??
+      props.provider,
   }))
   const methodLabel = (value?: { type?: string; label?: string }) => {
     if (!value) return ""
@@ -307,7 +324,7 @@ function ProviderConnection(props: {
 
     const fields = createMemo<StringForm[]>(() => {
       const value = controller.currentMethod()
-      return (value?.form ?? []).flatMap((field) => (field.type === "string" ? [field] : []))
+      return (value?.form ?? []).flatMap((field) => (field.type === "string" && !field.hidden ? [field] : []))
     })
     const matches = (field: StringForm, value: Record<string, string>) => {
       return (field.when ?? []).every((condition) => {
@@ -422,7 +439,12 @@ function ProviderConnection(props: {
   }
 
   function goBack() {
-    if (controller.methods().length > 1 && controller.methodIndex() !== undefined) {
+    const oauth = controller.methods().findIndex((method) => method.type === "oauth")
+    if (isConsole() && controller.currentMethod()?.type === "key" && oauth !== -1) {
+      void controller.auth.select(oauth)
+      return
+    }
+    if (!isConsole() && controller.methods().length > 1 && controller.methodIndex() !== undefined) {
       controller.auth.reset()
       return
     }
@@ -494,21 +516,18 @@ function ProviderConnection(props: {
     return (
       <div class="flex flex-col gap-5 px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
         <Show
-          when={provider().id === "opencode"}
+          when={isConsole()}
           fallback={language.t("provider.connect.apiKey.description", { provider: provider().name })}
         >
           <div class="flex flex-col gap-5">
-            <div>{language.t("provider.connect.opencodeZen.line1")}</div>
-            <div>{language.t("provider.connect.opencodeZen.line2")}</div>
+            <div>{language.t("provider.connect.console.apiKey.description")}</div>
             <div>
-              {language.t("provider.connect.opencodeZen.visit.prefix")}
               <ExternalLink
-                href="https://opencode.ai/zen"
+                href="https://opencode.ai/console"
                 class="text-v2-text-text-base focus-visible:rounded-xs focus-visible:outline-2 focus-visible:outline-v2-border-border-focus"
               >
-                {language.t("provider.connect.opencodeZen.visit.link")}
+                {language.t("provider.connect.console.apiKey.link")}
               </ExternalLink>
-              {language.t("provider.connect.opencodeZen.visit.suffix")}
             </div>
           </div>
         </Show>
@@ -575,11 +594,10 @@ function ProviderConnection(props: {
     return (
       <div class="flex flex-col gap-5 px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
         <div>
-          {language.t("provider.connect.oauth.code.visit.prefix")}
-          <ExternalLink href={controller.authorization()!.url} class="text-v2-text-text-base">
-            {language.t("provider.connect.oauth.code.visit.link")}
+          <p>{language.t("provider.connect.oauth.code.description", { provider: provider().name })}</p>
+          <ExternalLink href={controller.authorization()!.url} class="text-v2-text-text-base underline">
+            {language.t("provider.connect.oauth.openBrowser")}
           </ExternalLink>
-          {language.t("provider.connect.oauth.code.visit.suffix", { provider: provider().name })}
         </div>
         <form onSubmit={handleSubmit} class="flex flex-col items-start gap-5 self-stretch">
           <label class="flex w-full flex-col gap-1 font-[530] leading-4 text-v2-text-text-base">
@@ -613,6 +631,7 @@ function ProviderConnection(props: {
   }
 
   function OAuthAutoView() {
+    const ready = () => controller.authorization()?.url
     const code = createMemo(() => {
       const instructions = controller.authorization()?.instructions
       if (instructions?.includes(":")) {
@@ -624,22 +643,32 @@ function ProviderConnection(props: {
     return (
       <div class="flex flex-col gap-6">
         <div class="text-14-regular text-text-base">
-          {language.t("provider.connect.oauth.auto.visit.prefix")}
-          <ExternalLink href={controller.authorization()!.url}>
-            {language.t("provider.connect.oauth.auto.visit.link")}
-          </ExternalLink>
-          {language.t("provider.connect.oauth.auto.visit.suffix", { provider: provider().name })}
+          <p>
+            {language.t(
+              isConsole() ? "provider.connect.console.description" : "provider.connect.oauth.auto.description",
+              { provider: provider().name },
+            )}
+          </p>
+          <Show when={ready()}>
+            {(url) => (
+              <ExternalLink href={url()} class="underline">
+                {language.t("provider.connect.oauth.openBrowser")}
+              </ExternalLink>
+            )}
+          </Show>
         </div>
         <TextField
           label={language.t("provider.connect.oauth.auto.confirmationCode")}
+          description={language.t("provider.connect.oauth.auto.confirmationCode.description")}
           class="font-mono"
-          value={code()}
+          value={code() ?? ""}
+          placeholder={language.t("provider.connect.console.code.placeholder")}
           readOnly
-          copyable
+          copyable={code() !== undefined}
         />
         <div class="text-14-regular text-text-base flex items-center gap-4">
           <Spinner />
-          <span>{language.t("provider.connect.status.waiting")}</span>
+          <span>{language.t(ready() ? "provider.connect.status.waiting" : "provider.connect.console.opening")}</span>
         </div>
       </div>
     )
@@ -663,7 +692,17 @@ function ProviderConnection(props: {
       <div class="flex min-h-0 flex-1 flex-col">
         <div>
           <Switch>
-            <Match when={controller.loading()}>
+            <Match
+              when={
+                isConsole() &&
+                controller.currentMethod()?.type !== "key" &&
+                controller.auth.state() !== "error" &&
+                (controller.busy() || controller.authorization()?.mode === "auto")
+              }
+            >
+              <OAuthAutoView />
+            </Match>
+            <Match when={controller.busy()}>
               <div class="text-14-regular text-text-base">
                 <div class="flex items-center gap-x-2">
                   <Spinner />
@@ -674,14 +713,6 @@ function ProviderConnection(props: {
             <Match when={controller.methodIndex() === undefined}>
               <MethodSelection />
             </Match>
-            <Match when={controller.auth.state() === "pending"}>
-              <div class="text-14-regular text-text-base">
-                <div class="flex items-center gap-x-2">
-                  <Spinner />
-                  <span>{language.t("provider.connect.status.inProgress")}</span>
-                </div>
-              </div>
-            </Match>
             <Match when={controller.auth.state() === "form"}>
               <AuthFormView />
             </Match>
@@ -689,8 +720,13 @@ function ProviderConnection(props: {
               <div class="text-14-regular text-text-base">
                 <div class="flex items-center gap-x-2">
                   <Icon name="circle-ban-sign" class="text-icon-critical-base" />
-                  <span>{language.t("provider.connect.status.failed", { error: controller.auth.error() ?? "" })}</span>
+                  <span role="alert">
+                    {language.t("provider.connect.status.failed", { error: controller.auth.error() ?? "" })}
+                  </span>
                 </div>
+                <Button variant="neutral" onClick={() => controller.auth.retry()}>
+                  {language.t("common.retry")}
+                </Button>
               </div>
             </Match>
             <Match when={controller.currentMethod()?.type === "key"}>
@@ -707,6 +743,25 @@ function ProviderConnection(props: {
               </Switch>
             </Match>
           </Switch>
+          <Show
+            when={
+              isConsole() &&
+              !controller.loading() &&
+              controller.currentMethod()?.type !== "key" &&
+              controller.methods().some((method) => method.type === "key")
+            }
+          >
+            <button
+              type="button"
+              data-action="provider-connect-api-key"
+              class="mt-5 text-12-regular text-text-weak underline"
+              onClick={() =>
+                void controller.auth.select(controller.methods().findIndex((method) => method.type === "key"))
+              }
+            >
+              {language.t("provider.connect.console.apiKey.switch")}
+            </button>
+          </Show>
         </div>
       </div>
     </div>

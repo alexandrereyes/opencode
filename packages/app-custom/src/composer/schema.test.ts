@@ -229,7 +229,7 @@ describe("composer persistence schemas", () => {
     expect(roundTrip.prompt[1]).toHaveProperty("app.path", "/Applications/Preview.app/")
   })
 
-  test("migrates inline images but never encodes dataUrl or unresolved references", () => {
+  test("migrates inline images and retains lazy references without encoding dataUrl", () => {
     const value = Schema.decodeUnknownSync(
       Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
     )({
@@ -247,7 +247,7 @@ describe("composer persistence schemas", () => {
         { ...image, blob: { id: "missing" }, dataUrl: "data:image/png;base64,YQ==" },
       ],
     })
-    expect(value.prompt).toHaveLength(3)
+    expect(value.prompt).toHaveLength(6)
     expect(value.prompt[0]).toEqual({
       ...image,
       sourcePath: "/image.png",

@@ -113,9 +113,11 @@ export function SessionMobileViewTabs(props: {
                 {language.t("session.summary.title")}
               </Menu.Item>
             </Show>
-            <Menu.Item onSelect={() => setStore({ pending: "status", menu: false })}>
-              {language.t("status.popover.trigger")}
-            </Menu.Item>
+            <Show when={!props.details}>
+              <Menu.Item onSelect={() => setStore({ pending: "status", menu: false })}>
+                {language.t("status.popover.trigger")}
+              </Menu.Item>
+            </Show>
           </Menu.Content>
         </Menu.Portal>
       </Menu>
@@ -277,7 +279,7 @@ function ReviewTitle(props: { review: SessionReviewModel }) {
 function ReviewEmpty(props: { review: SessionReviewModel; loadingClass: string }) {
   const language = useLanguage()
   const loading = () => (props.review.mode() === "git" || props.review.mode() === "branch") && !props.review.ready()
-  const noGit = () => props.review.mode() === "turn" && props.review.noGit()
+  const noGit = () => props.review.noGit()
   const text = () => {
     if (props.review.mode() === "git") return language.t("session.review.noUncommittedChanges")
     if (props.review.mode() === "branch") return language.t("session.review.noBranchChanges")
@@ -310,7 +312,7 @@ function ReviewEmpty(props: { review: SessionReviewModel; loadingClass: string }
 function ReviewPanelEmpty(props: { review: SessionReviewModel }) {
   const language = useLanguage()
   const loading = () => (props.review.mode() === "git" || props.review.mode() === "branch") && !props.review.ready()
-  const noGit = () => props.review.mode() === "turn" && props.review.noGit()
+  const noGit = () => props.review.noGit()
   return (
     <Switch>
       <Match when={loading()}>

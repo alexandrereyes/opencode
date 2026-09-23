@@ -135,12 +135,11 @@ describe("queuedPromptAttachments", () => {
         },
       },
     ])
-    expect(queuedPrompt(item).filter((part) => part.type === "image").map((part) => part.id)).toEqual([
-      "msg_original:file:3",
-      "msg_original:file:0",
-      "msg_original:file:1",
-      "msg_original:file:2",
-    ])
+    expect(
+      queuedPrompt(item)
+        .filter((part) => part.type === "image")
+        .map((part) => part.id),
+    ).toEqual(["msg_original:file:3", "msg_original:file:0", "msg_original:file:1", "msg_original:file:2"])
   })
 })
 
@@ -195,7 +194,7 @@ test("queue edits upload image and PDF attachments when the destination cannot r
     "ses_current",
     "/current",
     next,
-    [{ type: "text", content: nextText, start: 0, end: nextText.length }],
+    [{ type: "text", content: nextText, start: 0, end: nextText.length }, ...queuedPromptAttachments(next)],
     nextText,
     nativeDestination,
     [],
@@ -385,7 +384,47 @@ test("queue edits remove and replace uncited inline files while preserving exter
   expect(result.text.match(/Attached file: `\/remote\/replace\.bin`/g)).toHaveLength(1)
 })
 
-test("queue edits preserve hidden path attachments without duplicating their rendered note", async () => {
+test("queued staged image citations preserve remapped ranges through snippet expansion", async () => {
+  const text = "#s [large.png]"
+  const result = await editedPromptInput(
+    "ses_1",
+    "/repo",
+    undefined,
+    [
+      { type: "snippet", id: "s", name: "s", content: "#s", expansion: "expanded", start: 0, end: 2 },
+      { type: "text", content: " [large.png]", start: 2, end: text.length },
+      {
+        type: "path",
+        id: "large",
+        filename: "large.png",
+        mime: "image/png",
+        path: "/tmp/large.png",
+        mention: { text: "[large.png]", start: 3, end: text.length },
+      },
+    ],
+    text,
+    nativeDestination,
+    [],
+  )
+  const item: Extract<SessionInboxInfo, { type: "user" }> = {
+    id: "queued",
+    sessionID: "ses_1",
+    time: { created: 1 },
+    type: "user",
+    delivery: "queue",
+    payload: { text: result.text, metadata: result.metadata },
+  }
+  expect(queuedPrompt(item)).toContainEqual({
+    type: "path",
+    id: "queued:path:0",
+    filename: "large.png",
+    mime: "image/png",
+    path: "/tmp/large.png",
+    mention: { text: "[large.png]", start: 9, end: 20 },
+  })
+})
+
+test("queue edits can remove restored path attachments and their rendered note", async () => {
   const attachment = { name: "archive.zip", mime: "application/zip", path: "/remote/archive.zip" }
   const comment = { path: "src/index.ts", comment: "Keep this behavior" }
   const item = {
@@ -411,8 +450,9 @@ test("queue edits preserve hidden path attachments without duplicating their ren
     [],
   )
 
-  expect(result.metadata).toMatchObject({ attachments: [attachment], comments: [comment], custom: true })
-  expect(result.text.match(/Attached file: `\/remote\/archive\.zip`/g)).toHaveLength(1)
+  expect(queuedPromptAttachments(item)).toMatchObject([{ type: "path", path: attachment.path }])
+  expect(result.metadata).toMatchObject({ attachments: [], comments: [comment], custom: true })
+  expect(result.text).not.toContain("Attached file:")
 })
 
 test("queue edits replace matching hidden path metadata without duplicating its note", async () => {
@@ -444,15 +484,7 @@ test("queue edits replace matching hidden path metadata without duplicating its 
     upload: () => Promise.reject(new Error("Local source paths must not upload")),
   }
 
-  const result = await editedPromptInput(
-    "ses_current",
-    "/current",
-    item,
-    prompt,
-    "Inspect archive",
-    destination,
-    [],
-  )
+  const result = await editedPromptInput("ses_current", "/current", item, prompt, "Inspect archive", destination, [])
 
   expect(result.metadata.attachments).toEqual([attachment])
   expect(result.text.match(/Attached file: `\/remote\/archive\.zip`/g)).toHaveLength(1)

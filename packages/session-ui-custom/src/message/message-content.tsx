@@ -45,7 +45,7 @@ import type {
   SessionUserComment,
   SessionUserQuote,
 } from "../actions"
-import { typeLabel } from "../components/message-file"
+import { attached, typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -269,9 +269,7 @@ export function CurrentUserMessageDisplay(props: {
       })
     })
   }
-  const attachments = createMemo(() =>
-    (props.message.files ?? []).filter((file) => !file.mention || file.mime.startsWith("image/")),
-  )
+  const attachments = createMemo(() => (props.message.files ?? []).filter(attached))
   const references = createMemo(() => props.references ?? [])
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])

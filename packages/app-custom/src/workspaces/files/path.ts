@@ -105,7 +105,10 @@ export function createPathHelpers(scope: () => string) {
   const normalize = (input: string) => {
     const root = scope()
 
-    let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input))))
+    let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input)))).replace(
+      /^[/\\]([A-Za-z]:)/,
+      "$1",
+    )
 
     // Separator-agnostic prefix stripping for Cygwin/native Windows compatibility
     // Only case-insensitive on Windows (drive letter or UNC paths)
@@ -117,16 +120,13 @@ export function createPathHelpers(scope: () => string) {
       (canonRoot.endsWith("/") || canonPath === canonRoot || canonPath[canonRoot.length] === "/")
     ) {
       // Slice from original path to preserve native separators
-      path = path.slice(root.length)
+      path = path.slice(root.length).replace(/^[/\\]/, "")
     }
 
     if (path.startsWith("./") || path.startsWith(".\\")) {
       path = path.slice(2)
     }
 
-    if (path.startsWith("/") || path.startsWith("\\")) {
-      path = path.slice(1)
-    }
     return path
   }
 
@@ -149,6 +149,7 @@ export function createPathHelpers(scope: () => string) {
 
   return {
     normalize,
+    absolute: (path: string) => /^[A-Za-z]:[/\\]/.test(path) || path.startsWith("/") || path.startsWith("\\\\"),
     tab,
     pathFromTab,
     normalizeDir,

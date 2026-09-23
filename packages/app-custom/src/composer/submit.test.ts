@@ -89,6 +89,7 @@ function submitInput(
     history?: (prompt: Prompt, mode: "normal" | "shell") => void
     delivery?: (alternate: boolean) => ComposerDelivery
     destination?: AttachmentDestination
+    removeHistory?: () => void
     comments?: {
       capture: () => PromptHistoryComment[]
       clear: () => void
@@ -106,6 +107,7 @@ function submitInput(
     editor: () => undefined,
     queueScroll() {},
     addToHistory: lifecycle?.history ?? (() => undefined),
+    removeFromHistory: lifecycle?.removeHistory ?? (() => undefined),
     delivery: lifecycle?.delivery,
     resetHistory() {},
     setMode() {},
@@ -940,12 +942,14 @@ describe("Composer submission", () => {
       missingSelection() {},
       failed: () => (attempts.length === 2 ? first.resolve() : second.resolve()),
     }
+    const history: string[] = []
     const submission = submitInput(
       adapter,
       notify,
       "normal",
       () => [],
       () => [slashSkill],
+      { history: () => history.push("add"), removeHistory: () => history.push("remove") },
     )
 
     await submission.submit(new Event("submit"))
@@ -957,6 +961,7 @@ describe("Composer submission", () => {
     expect(new Set(attempts).size).toBe(1)
     expect(statuses).toEqual(["running", "idle", "running", "idle"])
     expect(state.current()).toMatchObject([{ type: "text", content: text }])
+    expect(history).toEqual(["add", "remove", "add", "remove"])
   })
 
   test("forwards structured mentions to custom commands", async () => {

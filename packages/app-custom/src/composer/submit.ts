@@ -5,7 +5,8 @@ import { Event } from "@opencode/schema/event"
 import type { Accessor } from "solid-js"
 import type { PromptHistoryComment } from "./history/entry"
 import type { ImageAttachmentPart, Prompt } from "./state"
-import { clonePrompt, expandSnippets, promptLength } from "./prompt-parts"
+import { clonePrompt, expandSnippets, isAttachment, promptLength } from "./prompt-parts"
+import { resolveBlobUrl } from "@/runtime/persistence/drafts"
 import type { ComposerAdapter, ComposerDelivery, ComposerSelection, ComposerSession } from "./adapter"
 import { createComposerSubmission } from "./submission-state"
 import { buildPromptRequest, formatAppContext } from "./request"
@@ -15,6 +16,7 @@ import type { ModelSelection } from "@/providers/models/selection"
 import type { ChatQuote } from "./schema"
 import { formatChatQuotes } from "./chat-quote"
 import { formatSessionContexts } from "./session-reference"
+import { formatAttachmentReference } from "./comment-note"
 
 const submitting = new WeakSet<object>()
 
@@ -39,6 +41,12 @@ type ComposerSubmitInput = {
   editor: () => HTMLDivElement | undefined
   queueScroll: () => void
   addToHistory: (prompt: Prompt, mode: "normal" | "shell") => void
+  removeFromHistory: (
+    prompt: Prompt,
+    mode: "normal" | "shell",
+    comments: PromptHistoryComment[],
+    quotes: ChatQuote[],
+  ) => void
   resetHistory: () => void
   setMode: (mode: "normal" | "shell") => void
   closePopover: () => void
@@ -116,6 +124,13 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
       : undefined
 
     try {
+      value.images = await Promise.all(
+        value.images.map(async (image) => ({
+          ...image,
+          // Delivery reports missing bytes through the normal failed-send restoration path.
+          blob: { ...image.blob, url: (await resolveBlobUrl(image.blob).catch(() => undefined)) ?? image.blob.url },
+        })),
+      )
       if (input.adapter.submissionBarrier && !(await input.adapter.submissionBarrier.wait())) {
         if (delayed && (!input.comments.current || input.comments.current() === clearedComments))
           restoreSubmission(input, submission, value, comments, ownsView)
@@ -225,6 +240,18 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
     })),
     metadata: {
       displayText: value.text,
+      attachments: value.prompt.flatMap((part) =>
+        part.type === "path"
+          ? [
+              {
+                name: part.filename,
+                mime: part.mime,
+                path: part.path,
+                ...(part.mention ? { mention: part.mention } : {}),
+              },
+            ]
+          : [],
+      ),
       quotes: value.quotes,
       apps: value.prompt.filter((part) => part.type === "app"),
       sessions: value.prompt.filter((part) => part.type === "session"),
@@ -265,7 +292,7 @@ function readSubmission(
   const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
   const comments = context.filter((item) => !!item.comment?.trim()).length
   const quotes = mode === "normal" ? input.adapter.state.quotes.all().map((quote) => ({ ...quote })) : []
-  if (!text.trim() && images.length === 0 && comments === 0 && quotes.length === 0) return
+  if (!text.trim() && !prompt.some(isAttachment) && comments === 0 && quotes.length === 0) return
 
   const controls = input.adapter.controls()
   const model = controls.model.selection.current()
@@ -318,6 +345,7 @@ function restoreSubmission(
 ) {
   const restored = submission.restore()
   if (!restored) return false
+  input.removeFromHistory(value.prompt, value.mode, comments, value.quotes)
   restored.target.set(restored.prompt, promptLength(restored.prompt))
   restored.target.mode.set(value.mode)
   restored.target.quotes.replace([
@@ -412,6 +440,7 @@ async function sendCommand(
       value.prompt.some((part) => part.type === "snippet")
         ? request.displayText.split(" ").slice(1).join(" ")
         : command.arguments,
+      ...request.attachments.map(formatAttachmentReference),
       ...request.apps.map(formatAppContext),
       ...formatSessionContexts(request.sessions),
       formatChatQuotes(value.quotes),
@@ -499,7 +528,7 @@ async function buildSubmissionRequest(
   const request = buildPromptRequest({
     prompt: value.prompt,
     context: value.context,
-    attachments: await deliverAttachments(value.images, destination),
+    attachments: await deliverAttachments(value.prompt.filter(isAttachment), destination),
     text: value.text,
     sessionDirectory: session.directory,
     quotes: value.quotes,

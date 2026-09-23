@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { resolveObjectURL } from "node:buffer"
-import { createDraftStore } from "@/runtime/persistence/drafts"
+import { createDraftStore, resolveBlobUrl } from "@/runtime/persistence/drafts"
 
 function fixture(id: string, getBlob: () => Promise<Blob | null>) {
   const documents = new Map([
@@ -29,13 +29,16 @@ test("deduplicates concurrent history and draft reads without invalidating eithe
     started.resolve()
     return pending.promise
   })
-  const history = store.getItem("history")
-  const draft = store.getItem("draft")
+  const history = await store.getItem("history")
+  const draft = await store.getItem("draft")
+  expect(reads).toBe(0)
+  const first = resolveBlobUrl(JSON.parse(history!).entries[0].prompt[0].blob)
+  const second = resolveBlobUrl(JSON.parse(draft!).prompt[0].blob)
   await started.promise
   pending.resolve(new Blob(["shared screenshot"]))
-  const [saved, active] = await Promise.all([history, draft])
-  const reference = JSON.parse(saved!).entries[0].prompt[0].blob
-  expect(JSON.parse(active!).prompt[0].blob).toEqual(reference)
+  const [a, b] = await Promise.all([first, second])
+  expect(a).toBe(b)
+  const reference = { id: "history-cache-concurrent", url: a! }
   expect(reads).toBe(1)
   await store.removeItem("history")
   expect(await resolveObjectURL(reference.url)?.text()).toBe("shared screenshot")
@@ -59,6 +62,10 @@ test("hydrates repeated references once within one history document", async () =
   )
   const value = JSON.parse((await store.getItem("history"))!)
   expect(value.entries).toHaveLength(100)
+  expect(reads).toBe(0)
+  await Promise.all(
+    value.entries.map((entry: { prompt: { blob: { id: string } }[] }) => resolveBlobUrl(entry.prompt[0].blob)),
+  )
   expect(
     new Set(value.entries.map((entry: { prompt: { blob: { url: string } }[] }) => entry.prompt[0].blob.url)).size,
   ).toBe(1)
@@ -72,6 +79,7 @@ test("reuses a live URL on remount but reads the latest document", async () => {
     return new Blob(["saved screenshot"])
   })
   const first = JSON.parse((await store.getItem("history"))!)
+  first.entries[0].prompt[0].blob.url = await resolveBlobUrl(first.entries[0].prompt[0].blob)
   const changed = JSON.parse(documents.get("history")!)
   changed.entries[0].prompt.unshift({ type: "text", content: "new admission" })
   documents.set("history", JSON.stringify(changed))
@@ -96,8 +104,8 @@ test("reuses a just-stored attachment without a round trip", async () => {
 test("does not retain a missing blob result", async () => {
   let reads = 0
   const { store } = fixture("history-cache-missing", async () => (++reads === 1 ? null : new Blob(["arrived"])))
-  expect(JSON.parse((await store.getItem("draft"))!).prompt[0].blob.url).toBeUndefined()
-  expect(JSON.parse((await store.getItem("draft"))!).prompt[0].blob.url).toStartWith("blob:")
+  expect(await resolveBlobUrl(JSON.parse((await store.getItem("draft"))!).prompt[0].blob)).toBeUndefined()
+  expect(await resolveBlobUrl(JSON.parse((await store.getItem("draft"))!).prompt[0].blob)).toStartWith("blob:")
   expect(reads).toBe(2)
 })
 
@@ -107,8 +115,9 @@ test("retries after a failed blob read", async () => {
     if (++reads === 1) throw new Error("temporary storage failure")
     return new Blob(["recovered"])
   })
-  await expect(store.getItem("history")).rejects.toThrow("temporary storage failure")
-  expect(JSON.parse((await store.getItem("history"))!).entries[0].prompt[0].blob.url).toStartWith("blob:")
+  const ref = JSON.parse((await store.getItem("history"))!).entries[0].prompt[0].blob
+  await expect(resolveBlobUrl(ref)).rejects.toThrow("temporary storage failure")
+  expect(await resolveBlobUrl(ref)).toStartWith("blob:")
   expect(reads).toBe(2)
 })
 
@@ -125,6 +134,11 @@ test("keeps different blob IDs independent", async () => {
     },
   })
   const value = JSON.parse((await store.getItem("history"))!)
+  await Promise.all(
+    value.map(async (item: { blob: { id: string; url?: string } }) => {
+      item.blob.url = await resolveBlobUrl(item.blob)
+    }),
+  )
   expect(value[0].blob.url).not.toBe(value[1].blob.url)
   expect(
     await Promise.all(value.map((item: { blob: { url: string } }) => resolveObjectURL(item.blob.url)?.text())),

@@ -1,6 +1,15 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "prompt.toast.uploading.cancel": "Cancel upload",
+  "prompt.toast.uploading.percent": "{{percent}}%",
+  "file.view.preview": "Preview",
+  "file.view.source": "Source",
+  "file.view.download": "Download",
+  "file.view.zoom": "Toggle actual image size",
+  "file.view.binary": "This file cannot be previewed, is too large, or uses an unsupported format.",
+  "file.view.table.truncated": "Showing {{shown}} of {{total}} rows",
+  "file.view.fontSample": "The quick brown fox jumps over the lazy dog.",
   "command.session.btw": "Ask a side question",
   "command.session.btw.description": "Ask about this session without interrupting it or adding to its history",
   "session.btw.title": "/btw · Side question",
@@ -444,7 +453,7 @@ export const dict = {
   "dialog.provider.opencode.note": "Curated models including Claude, GPT, Gemini and more",
   "dialog.provider.opencode.tagline": "Reliable optimized models",
   "dialog.provider.opencodeGo.tagline": "Low cost subscription for everyone",
-  "dialog.provider.anthropic.note": "Direct access to Claude models, including Pro and Max",
+  "dialog.provider.anthropic.note": "Direct access to Claude models via API key",
   "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
@@ -465,7 +474,7 @@ export const dict = {
   "dialog.provider.viewAll": "Show more providers",
 
   "provider.connect.title": "Connect {{provider}}",
-  "provider.connect.title.anthropicProMax": "Login with Claude Pro/Max",
+  "provider.connect.title.anthropicProMax": "Login with Anthropic",
   "provider.connect.selectMethod": "Select login method for {{provider}}.",
   "provider.connect.method.apiKey": "API key",
   "provider.connect.method.browser": "Browser",
@@ -498,6 +507,22 @@ export const dict = {
   "provider.connect.oauth.auto.visit.suffix":
     " and enter the code below to connect your account and use {{provider}} models in OpenCode.",
   "provider.connect.oauth.auto.confirmationCode": "Confirmation code",
+  "provider.connect.oauth.auto.confirmationCode.description":
+    "Check that your browser shows the same code before you authorize.",
+  "provider.connect.oauth.auto.description":
+    "Your browser opens so you can sign in to {{provider}}. Come back here when you are done.",
+  "provider.connect.oauth.code.description":
+    "Your browser opens so you can sign in to {{provider}}. Paste the authorization code it gives you below.",
+  "provider.connect.oauth.openBrowser": "Open browser",
+  "provider.connect.oauth.expired": "Authorization expired",
+  "provider.connect.console.description":
+    "Sign in with your OpenCode Console account. Your browser opens to the Console, where you pick a workspace and select Authorize.",
+  "provider.connect.console.apiKey.switch": "Connect with an API key or service account instead",
+  "provider.connect.console.apiKey.description":
+    "Paste an API key for a service account. You create service accounts in the OpenCode Console under Keys.",
+  "provider.connect.console.apiKey.link": "Open the Console",
+  "provider.connect.console.opening": "Opening your browser…",
+  "provider.connect.console.code.placeholder": "Requesting a code…",
   "provider.connect.toast.connected.title": "{{provider}} connected",
   "provider.connect.toast.connected.description": "{{provider}} models are now available to use.",
 
@@ -575,6 +600,7 @@ export const dict = {
   "common.connect": "Connect",
   "common.disconnect": "Disconnect",
   "common.continue": "Continue",
+  "common.retry": "Try again",
   "common.submit": "Submit",
   "common.save": "Save",
   "common.saving": "Saving…",
@@ -855,7 +881,7 @@ export const dict = {
   "context.stats.lastActivity": "Last Activity",
 
   "context.usage.tokens": "Tokens",
-  "context.usage.usage": "Context Usage",
+  "context.usage.usage": "Context",
   "context.usage.cost": "Cost",
   "context.usage.clickToView": "Click to view context",
   "context.usage.view": "View context usage",
@@ -1052,8 +1078,8 @@ export const dict = {
   "session.queue.steerTooltip": "Send without interrupting",
   "session.queue.remove": "Remove",
   "session.queue.reorder": "Reorder queued prompt",
-  "session.queue.attachments.one": "Plus {{count}} attachment",
-  "session.queue.attachments.other": "Plus {{count}} attachments",
+  "session.queue.attachments.one": "{{count}} attachment",
+  "session.queue.attachments.other": "{{count}} attachments",
   "session.timeline.working": "Working",
   "session.timeline.notice.finished": "{{actor}} finished",
   "session.timeline.notice.failed": "{{actor}} failed",
@@ -1172,6 +1198,11 @@ export const dict = {
   "session.summary.skills.empty": "No skills configured",
   "session.summary.lsp.empty": "No LSP servers configured",
   "session.summary.failed": "Failed",
+  "session.summary.service.active": "Available",
+  "session.summary.service.disabled": "No enabled services",
+  "session.summary.service.failed": "Service error",
+  "session.summary.service.pending": "Connecting",
+  "session.summary.service.needs_auth": "Authentication required",
   "session.summary.retry": "Retry",
   "session.summary.configure": "Configuration file",
   "session.summary.copyConfigPath": "Copy configuration path",
@@ -1619,6 +1650,7 @@ export const dict = {
   "settings.providers.tag.environment": "Environment",
   "settings.providers.tag.config": "Config",
   "settings.providers.tag.custom": "Custom",
+  "settings.providers.tag.account": "Account",
   "settings.providers.tag.other": "Other",
   "settings.models.title": "Models",
   "settings.models.description": "Choose which models appear in model picker",

@@ -1,61 +1,40 @@
-import type { Accessor } from "solid-js"
-import { blobBytes, blobDataUrl } from "@/runtime/persistence/drafts"
-import { useServer } from "@/runtime/server/current"
-import { useServerSDK } from "@/runtime/server/client"
-import { useWorkspaceLocation } from "@/workspaces/location"
-import type { ComposerControls } from "../adapter"
+import { blobData, blobDataUrl } from "@/runtime/persistence/drafts"
 import type { ImageAttachmentPart } from "../state"
+import type { ComposerAttachment } from "../types"
+import type { AttachmentDestination } from "./destination"
+import { uploads } from "./uploads"
 
-export type AttachmentDestination = {
-  input: { image: boolean; pdf: boolean }
-  local: boolean
-  upload: (file: { name: string; data: Uint8Array }) => Promise<string>
+export { useAttachmentDestination, type AttachmentDestination } from "./destination"
+
+export const MAX_INLINE_BYTES = 20 * 1024 * 1024
+
+export function nativeAttachment(mime: string, size: number, input: AttachmentDestination["input"]) {
+  if (size > MAX_INLINE_BYTES) return false
+  if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime)) return input.image
+  return mime === "application/pdf" && input.pdf
 }
 
 export type DeliveredAttachment =
   | { type: "inline"; attachment: ImageAttachmentPart; dataUrl: string }
-  | { type: "path"; attachment: ImageAttachmentPart; path: string }
+  | { type: "path"; attachment: ComposerAttachment; path: string }
 
-export function deliverAttachments(attachments: ImageAttachmentPart[], destination: AttachmentDestination) {
-  return Promise.all(attachments.map((attachment) => deliver(attachment, destination)))
-}
-
-async function deliver(
-  attachment: ImageAttachmentPart,
-  destination: AttachmentDestination,
-): Promise<DeliveredAttachment> {
-  if (native(attachment.mime, destination.input)) {
-    return { type: "inline", attachment, dataUrl: await blobDataUrl(attachment.blob, attachment.mime) }
-  }
-  if (destination.local && attachment.sourcePath) return { type: "path", attachment, path: attachment.sourcePath }
-  const path = await destination.upload({ name: attachment.filename, data: await blobBytes(attachment.blob) })
-  return { type: "path", attachment, path }
-}
-
-const imageMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
-
-function native(mime: string, input: AttachmentDestination["input"]) {
-  if (mime === "text/plain") return true
-  if (imageMimes.has(mime)) return input.image
-  if (mime === "application/pdf") return input.pdf
-  return false
-}
-
-export function useAttachmentDestination(controls: Accessor<ComposerControls>) {
-  const server = useServer()
-  const sdk = useServerSDK()
-  const location = useWorkspaceLocation()
-  return (): AttachmentDestination => ({
-    input: controls().model.selection.current()?.capabilities.input ?? { image: false, pdf: false },
-    local: server.isLocal,
-    upload: async (file) => {
-      const info = await sdk.api.server.info()
-      const written = await sdk.api.file.write({
-        location: { directory: location().directory },
-        path: `${info.paths.tmp}/uploads/${crypto.randomUUID()}/${file.name}`,
-        payload: file.data,
-      })
-      return written.data.path
-    },
-  })
+export function deliverAttachments(attachments: ComposerAttachment[], destination: AttachmentDestination) {
+  return Promise.all(
+    attachments.map(async (attachment): Promise<DeliveredAttachment> => {
+      if (attachment.type === "path") return { type: "path", attachment, path: attachment.path }
+      // Legacy drafts can still contain text or oversized blobs; migrate their delivery too.
+      const blob = await blobData(attachment.blob)
+      if (nativeAttachment(attachment.mime, blob.size, destination.input)) {
+        return { type: "inline", attachment, dataUrl: await blobDataUrl(attachment.blob, attachment.mime) }
+      }
+      if (destination.local && attachment.sourcePath) return { type: "path", attachment, path: attachment.sourcePath }
+      const file = new File([blob], attachment.filename, { type: attachment.mime })
+      const path = await uploads.track(
+        { id: crypto.randomUUID(), filename: file.name, mime: attachment.mime, size: file.size },
+        (report, signal) => destination.upload(file, report, signal),
+      )
+      if (!path) throw new DOMException("Upload aborted", "AbortError")
+      return { type: "path", attachment, path }
+    }),
+  )
 }

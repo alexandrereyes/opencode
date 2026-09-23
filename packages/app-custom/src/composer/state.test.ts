@@ -90,6 +90,14 @@ describe("prompt state initialization", () => {
         },
         {
           type: "image",
+          id: "missing-blob",
+          filename: "missing.png",
+          mime: "image/png",
+          blob: { id: "content-hash-without-a-url", url: "" },
+        },
+        { type: "image", id: "invalid-url", filename: "invalid.png", mime: "image/png", blob: { id: "hash", url: "" } },
+        {
+          type: "image",
           id: "legacy",
           filename: "legacy.png",
           mime: "image/png",

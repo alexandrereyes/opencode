@@ -33,6 +33,7 @@ export type FileContent = {
   }
   encoding?: "base64"
   mimeType?: string
+  size?: number
 }
 
 export type Path = {
@@ -127,6 +128,8 @@ export type Model = {
 
 export type Provider = {
   id: string
+  /** Integration that connects this provider, including Console-managed providers. */
+  integrationID?: string
   name: string
   source: "env" | "config" | "custom" | "api"
   env: string[]
