@@ -129,6 +129,16 @@ export const PermissionsUpdated = Event.durable({
 })
 export type PermissionsUpdated = typeof PermissionsUpdated.Type
 
+export const MetadataUpdated = Event.durable({
+  type: "session.metadata.updated",
+  ...options,
+  schema: {
+    ...Base,
+    metadata: SessionMetadata,
+  },
+})
+export type MetadataUpdated = typeof MetadataUpdated.Type
+
 export const Permissions = Event.durable({
   type: "session.permissions",
   ...options,
@@ -668,6 +678,7 @@ export const Definitions = Event.inventory(
   Renamed,
   Archived,
   PermissionsUpdated,
+  MetadataUpdated,
   Permissions,
   Viewed,
   UsageUpdated,

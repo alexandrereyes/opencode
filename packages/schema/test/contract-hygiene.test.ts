@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { DateTime, Schema } from "effect"
 import { Agent } from "../src/agent.js"
 import { ConfigAgent } from "../src/config/agent.js"
+import { ConfigProvider } from "../src/config/provider.js"
 import { FileSystem } from "../src/filesystem.js"
 import { Form } from "../src/form.js"
 import { Integration } from "../src/integration.js"
@@ -169,6 +170,8 @@ describe("contract hygiene", () => {
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,
+      ConfigProvider.ModelSettings,
+      ConfigProvider.Settings,
       FileSystem.Submatch,
       Form.Field,
       Form.Fields,
@@ -182,6 +185,7 @@ describe("contract hygiene", () => {
       Model.Ref,
       Model.Capabilities,
       Model.Cost,
+      Model.Settings,
       Model.Variant,
       Project.Current,
       Worktree.Directory,
@@ -245,7 +249,7 @@ describe("contract hygiene", () => {
     ).toBe(opaque)
   })
 
-  test("current source limits Any to provider options and avoids mutable contract wrappers", async () => {
+  test("current source limits Any to reviewed boundaries and avoids mutable contract wrappers", async () => {
     const files = [...new Bun.Glob("*.ts").scanSync(new URL("../src", import.meta.url).pathname)].filter(
       (file) => !file.endsWith("-v1.ts"),
     )
@@ -256,11 +260,13 @@ describe("contract hygiene", () => {
 
     expect(
       sources
-        .filter((item) => item.file !== "provider.ts")
+        .filter((item) => item.file !== "provider.ts" && item.file !== "model.ts" && item.file !== "integration.ts")
         .map((item) => item.source)
         .join("\n"),
     ).not.toContain("Schema.Any")
-    expect(sources.find((item) => item.file === "provider.ts")?.source.match(/Schema\.Any/g)).toHaveLength(4)
+    expect(sources.find((item) => item.file === "provider.ts")?.source.match(/Schema\.Any/g)).toHaveLength(3)
+    expect(sources.find((item) => item.file === "model.ts")?.source.match(/Schema\.Any/g)).toHaveLength(2)
+    expect(sources.find((item) => item.file === "integration.ts")?.source.match(/Schema\.Any/g)).toHaveLength(2)
     expect(source).not.toContain("Schema.mutable")
   })
 

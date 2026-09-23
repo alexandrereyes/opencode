@@ -1,3 +1,52 @@
+# V2 integration — 2026-09-23
+
+## Baselines
+
+- Custom parent: `bea19bc71`.
+- Integrated upstream: `8ce629be225b551416d3009e87f02031824c5747` (`upstream/v2`,
+  source of the published 2.0.15 release; tag `v2.0.15` only adds the version bump).
+  `upstream/beta` stopped at `e5ecb5719` (2.0.6), already integrated below; the
+  official `latest` channel is now built from `refs/heads/v2`.
+- Local integration branch: `merge-upstream`.
+- Runtime: Bun 1.4.2.
+
+The upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` trees
+match the integrated upstream revision exactly.
+
+## Integration points
+
+- Keep custom `session.archived` and replay-only `session.permissions.updated`
+  alongside upstream's new `session.metadata.updated` event (schema, projector,
+  message updater, event manifest test).
+- Promise plugin adapter: adopt upstream's `runtime` context name for the custom
+  `mcp.callTool` unload signal.
+- Plugin test fixture: keep the custom shared node list and offline layer, adding
+  upstream's `ManagedPolicy.node`.
+- `packages/schema/src/integration.ts` returns to upstream: upstream's hygiene test
+  now permits `Schema.Any` there, making the custom `Schema.Unknown` substitution
+  redundant. The custom opaque-metadata test still passes.
+- `packages/codemode/test/openapi.test.ts` takes upstream's isolated fixture spec,
+  replacing the custom assertion against the live server spec.
+- App-custom fixtures add upstream's required `Project.Time.active`; the image test
+  follows upstream's declared-errors-as-`Error` client change (#50788).
+- Regenerate the Client from source.
+
+Shared implementation overlap against the fixed upstream baseline, measured with
+the command below using `8ce629be2`: **53 modified upstream files, 656 added lines,
+57 removed lines**.
+
+## Validation
+
+- Frozen dependency installation, root `bun run check` and custom web production
+  build pass.
+- Core 5,508 passed, 21 skipped; Schema 68; Client 175; CodeMode 1,318;
+  Server 67 (three skipped); SDK 32; CLI 323 (nine skipped); TUI 1,362 (two
+  skipped); custom plugin 44; App-custom unit 1,116 (one skipped) and browser 219;
+  UI-custom 109; Session-UI-custom 208.
+- Plugin 9 passed with a symlink-free `TMPDIR`; with the default macOS `TMPDIR`,
+  one `host.test.ts` expectation differs only by the `/var` → `/private/var`
+  symlink.
+
 # Beta integration — 2026-09-17
 
 ## Baselines
