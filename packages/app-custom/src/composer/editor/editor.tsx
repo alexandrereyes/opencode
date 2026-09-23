@@ -12,6 +12,7 @@ import {
 import { resolveBlobUrl } from "@/runtime/persistence/drafts"
 import type { Upload } from "../attachments/uploads"
 import { createStore } from "solid-js/store"
+import { Key } from "@solid-primitives/keyed"
 import { Portal } from "solid-js/web"
 import { createMediaQuery } from "@solid-primitives/media"
 import { history, historyKeymap, isolateHistory, standardKeymap } from "@codemirror/commands"
@@ -705,47 +706,60 @@ export function ComposerAttachments(props: {
               </div>
             )}
           </For>
-          <For each={props.attachments}>
-            {(attachment) => (
-              <div class="relative group shrink-0" data-attachment-id={attachment.id}>
-                <Tooltip value={attachment.filename} placement="top" contentClass="break-all">
-                  <Show
-                    when={attachment.type === "image" && attachment.mime.startsWith("image/") ? attachment : undefined}
-                    fallback={
-                      <AttachmentCard title={attachment.filename}>
-                        {typeLabel(attachment.filename, attachment.mime, i18n.t("ui.common.file"))}
-                      </AttachmentCard>
-                    }
+          <Key each={props.attachments} by="id">
+            {(attachment) => {
+              const image = createMemo(() => {
+                const part = attachment()
+                return part.type === "image" && part.mime.startsWith("image/") ? part : undefined
+              })
+              return (
+                <div class="relative group shrink-0" data-attachment-id={attachment().id}>
+                  <Tooltip value={attachment().filename} placement="top" contentClass="break-all">
+                    <Show
+                      when={image()}
+                      fallback={
+                        <AttachmentCard title={attachment().filename}>
+                          {typeLabel(attachment().filename, attachment().mime, i18n.t("ui.common.file"))}
+                        </AttachmentCard>
+                      }
+                    >
+                      {(image) => {
+                        // Thumbnails must not suspend the session (and detach its focused editor).
+                        // Document edits replace attachment objects, but only a new blob id needs loading.
+                        // The empty initial value lets `latest` render a cold preview without suspending.
+                        const [url] = createResource(
+                          () => (image().blob.url ? false : image().blob.id),
+                          (id) => resolveBlobUrl({ id }),
+                          { initialValue: "" },
+                        )
+                        return (
+                          <>
+                            <img
+                              src={image().blob.url || url.latest || ""}
+                              alt={attachment().filename}
+                              class="w-[58px] h-[46px] rounded-[6px] object-cover"
+                              onClick={() => props.onAttachmentClick?.(attachment())}
+                            />
+                            <div class="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--v2-border-border-base)] pointer-events-none" />
+                          </>
+                        )
+                      }}
+                    </Show>
+                  </Tooltip>
+                  <button
+                    type="button"
+                    data-action="remove-attachment"
+                    data-attachment-id={attachment().id}
+                    onClick={() => props.onAttachmentRemove(attachment())}
+                    class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label={props.removeLabel}
                   >
-                    {(image) => {
-                      const [url] = createResource(() => image().blob, resolveBlobUrl)
-                      return (
-                        <>
-                          <img
-                            src={url() ?? ""}
-                            alt={attachment.filename}
-                            class="w-[58px] h-[46px] rounded-[6px] object-cover"
-                            onClick={() => props.onAttachmentClick?.(attachment)}
-                          />
-                          <div class="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--v2-border-border-base)] pointer-events-none" />
-                        </>
-                      )
-                    }}
-                  </Show>
-                </Tooltip>
-                <button
-                  type="button"
-                  data-action="remove-attachment"
-                  data-attachment-id={attachment.id}
-                  onClick={() => props.onAttachmentRemove(attachment)}
-                  class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  aria-label={props.removeLabel}
-                >
-                  <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
-                </button>
-              </div>
-            )}
-          </For>
+                    <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
+                  </button>
+                </div>
+              )
+            }}
+          </Key>
           <For each={props.uploads ?? []}>
             {(item) => (
               <div class="relative shrink-0" data-component="attachment-upload">
