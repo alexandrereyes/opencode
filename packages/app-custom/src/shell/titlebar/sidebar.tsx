@@ -439,7 +439,7 @@ export function SessionSidebar(props: {
     return (
       <Show when={rows().items.length || props.preparing?.length}>
         <section ref={element} class="mt-4 first:mt-0">
-          <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
+          <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-[600] leading-5 text-v2-text-text-base">
             {props.title}
           </h2>
           <div class="flex flex-col gap-0">
@@ -687,8 +687,8 @@ export function SessionSidebar(props: {
             fallback={
               <>
                 <section class="first:mt-0">
-                  <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-semibold leading-5 text-v2-text-text-muted">
-                    <Icon name="speech-bubble" size="small" />
+                  <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-[600] leading-5 text-v2-text-text-base">
+                    <Icon name="speech-bubble" size="small" class="text-v2-icon-icon-muted" />
                     <span>{language.t("sidebar.sessions.chats")}</span>
                     <Tooltip value={language.t("sidebar.sessions.chats.new")}>
                       <button
@@ -715,7 +715,7 @@ export function SessionSidebar(props: {
                 <Section
                   title={
                     <>
-                      <Icon name="history" size="small" />
+                      <Icon name="history" size="small" class="text-v2-icon-icon-muted" />
                       <span>{language.t("sidebar.sessions.recent")}</span>
                     </>
                   }
@@ -733,7 +733,7 @@ export function SessionSidebar(props: {
                   >
                     <button
                       type="button"
-                      class="mt-1 block h-7 w-fit max-w-full rounded-[6px] px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                      class="mt-1 block h-7 w-fit max-w-full rounded-[6px] px-1.5 text-start text-[13px] leading-4 text-v2-text-text-faint hover:text-v2-text-text-base focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
                       onClick={() =>
                         setState("recentLimit", (limit) => (recentMore() ? limit + RECENT_PAGE_SIZE : RECENT_PAGE_SIZE))
                       }
@@ -799,7 +799,7 @@ export function SessionSidebar(props: {
                                 <div class="group/project flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
                                   <button
                                     ref={handle}
-                                    class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-muted"
+                                    class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-base"
                                     classList={{
                                       "cursor-grab": state.drag !== key,
                                       "cursor-grabbing": state.drag === key,
@@ -821,8 +821,8 @@ export function SessionSidebar(props: {
                                       setSaved("collapsed", key, !collapsed())
                                     }}
                                   >
-                                    <Icon name="folder" size="small" />
-                                    <span dir="auto" class="min-w-0 truncate font-semibold" title={projectLabel(key)}>
+                                    <Icon name="folder" size="small" class="text-v2-icon-icon-muted" />
+                                    <span dir="auto" class="min-w-0 truncate font-[600]" title={projectLabel(key)}>
                                       {projectLabel(key)}
                                     </span>
                                     <Show
@@ -862,7 +862,7 @@ export function SessionSidebar(props: {
                                 </div>
                                 <Show when={!collapsed() && tree().root.length > visible().length}>
                                   <button
-                                    class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
+                                    class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-faint hover:text-v2-text-text-base"
                                     onClick={() => setState("limits", key, (value = 5) => value + 5)}
                                   >
                                     {language.t("sidebar.sessions.more")}
@@ -893,7 +893,7 @@ export function SessionSidebar(props: {
                                               onClick={() => setSaved("collapsed", group().key, !collapsed())}
                                             >
                                               <Icon name="outline-worktree" size="small" />
-                                              <span dir="auto" class="min-w-0 truncate font-semibold">
+                                              <span dir="auto" class="min-w-0 truncate font-[600]">
                                                 {language.plural(
                                                   "sidebar.worktree.heading",
                                                   group().rows.length +
@@ -970,7 +970,7 @@ export function SessionSidebar(props: {
                                           <Show when={!collapsed() && group().rows.length > visible().length}>
                                             <button
                                               type="button"
-                                              class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-muted hover:text-v2-text-text-base"
+                                              class="h-7 px-1.5 text-[13px] leading-4 text-v2-text-text-faint hover:text-v2-text-text-base"
                                               onClick={() => setState("limits", group().key, (value = 5) => value + 5)}
                                             >
                                               {language.t("sidebar.sessions.more")}
@@ -993,7 +993,7 @@ export function SessionSidebar(props: {
             }
           >
             <section class="mt-4 first:mt-0">
-              <h2 class="mb-1 px-1.5 text-[13px] leading-4 text-v2-text-text-muted">
+              <h2 class="mb-1 px-1.5 text-[13px] font-[600] leading-4 text-v2-text-text-base">
                 {language.t("sidebar.sessions.priority")}
               </h2>
               <Show

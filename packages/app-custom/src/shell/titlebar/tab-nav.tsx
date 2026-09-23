@@ -472,7 +472,12 @@ export function TabNavItem(props: {
           if (props.suppressNavigation) return
           props.onNavigate()
         }}
-        class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
+        class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
+        classList={{
+          "font-medium text-v2-text-text-faint": props.orientation !== "vertical",
+          "text-v2-text-text-muted": props.orientation === "vertical" && !props.unread,
+          "text-v2-text-text-base": props.orientation === "vertical" && !!props.unread,
+        }}
       >
         <Show when={props.showAvatar !== false}>
           <span
@@ -833,8 +838,12 @@ export function DraftTabItem(props: {
           if (props.suppressNavigation) return
           props.onNavigate()
         }}
-        class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base [-webkit-user-drag:none]"
-        classList={{ "pe-6": props.orientation === "vertical" && !!props.projectLabel }}
+        class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] group-data-[active='true']:text-v2-text-text-base [-webkit-user-drag:none]"
+        classList={{
+          "pe-6": props.orientation === "vertical" && !!props.projectLabel,
+          "font-medium text-v2-text-text-faint": props.orientation !== "vertical",
+          "text-v2-text-text-muted": props.orientation === "vertical",
+        }}
       >
         <span class="flex size-4 shrink-0 items-center justify-center">
           <svg

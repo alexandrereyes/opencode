@@ -1,7 +1,11 @@
 [data-component="markdown"] {
-  --markdown-inline-code-path-color: var(--v2-text-text-code-path);
-  --markdown-inline-code-color: var(--v2-text-text-code-accent);
-  --markdown-inline-code-bg-mix: 8%;
+  /* Body text stays below full contrast so bold text and headings can stand out. */
+  --markdown-body-color: color-mix(in oklch, var(--v2-text-text-base) 82%, transparent);
+  --markdown-strong-color: var(--v2-text-text-base);
+  /* Inline code follows the active syntax theme, like strings in code blocks. */
+  --markdown-inline-code-path-color: var(--syntax-string, var(--v2-text-text-code-path));
+  --markdown-inline-code-color: var(--syntax-string, var(--v2-text-text-code-accent));
+  --markdown-inline-code-bg-mix: 10%;
   --markdown-shell-code-background: var(--v2-background-bg-layer-02);
   --markdown-shell-code-border: var(--v2-border-border-muted);
   --markdown-shell-code-color: var(--v2-text-text-base);
@@ -11,7 +15,7 @@
   min-width: 0;
   max-width: 100%;
   overflow-wrap: break-word;
-  color: var(--v2-text-text-base);
+  color: var(--markdown-body-color);
   font-family: var(--font-family-sans);
   font-size: var(--font-size-base);
   line-height: 160%;
@@ -77,11 +81,11 @@
     line-height: var(--line-height-large);
   }
 
-  /* Emphasis & Strong: Neutral strong color */
+  /* Strong text uses full contrast above the dimmed body. */
   strong,
   b {
-    color: var(--v2-text-text-base);
-    font-weight: var(--font-weight-medium);
+    color: var(--markdown-strong-color);
+    font-weight: 600;
   }
 
   /* Paragraphs */
@@ -92,18 +96,34 @@
   /* Links */
   a {
     color: var(--text-interactive-base);
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+    text-underline-offset: 2px;
     font-weight: inherit;
   }
 
   a:hover {
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration-color: currentColor;
   }
 
   a[data-local-link],
   &[data-local-links] :not(pre) > code[data-inline-code-kind="path"]:not(a > code) {
     cursor: pointer;
+  }
+
+  /* File links read as the same kind of reference as inline file paths. */
+  a[data-local-link] {
+    color: var(--markdown-inline-code-path-color);
+  }
+
+  &[data-local-links] :not(pre) > code[data-inline-code-kind="path"]:not(a > code) {
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklch, var(--markdown-inline-code-path-color) 40%, transparent);
+    text-underline-offset: 2px;
+  }
+
+  &[data-local-links] :not(pre) > code[data-inline-code-kind="path"]:not(a > code):hover {
+    text-decoration-color: var(--markdown-inline-code-path-color);
   }
 
   /* Lists */
@@ -286,17 +306,20 @@
     unicode-bidi: isolate;
     font-family: var(--font-family-mono);
     font-feature-settings: var(--font-family-mono--font-feature-settings);
-    color: var(--v2-text-text-base);
-    font-weight: var(--font-weight-medium);
+    color: var(--markdown-inline-code-color);
+    font-weight: 400;
     padding: 0 4px;
     border-radius: 4px;
-    background: color-mix(in oklch, var(--v2-text-text-base) var(--markdown-inline-code-bg-mix), transparent);
+    background: color-mix(in oklch, var(--markdown-inline-code-color) var(--markdown-inline-code-bg-mix), transparent);
   }
 
   :not(pre) > code[data-inline-code-kind="path"] {
     color: var(--markdown-inline-code-path-color);
-    padding: 0 2px;
-    background: none;
+    background: color-mix(
+      in oklch,
+      var(--markdown-inline-code-path-color) var(--markdown-inline-code-bg-mix),
+      transparent
+    );
   }
 
   a.external-link > code[data-inline-code-kind="url"] {

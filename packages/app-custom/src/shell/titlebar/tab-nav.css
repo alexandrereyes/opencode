@@ -104,14 +104,10 @@
   gap: 4px;
   min-width: 0;
   overflow: hidden;
-  color: var(--v2-text-text-muted);
+  color: var(--v2-text-text-faint);
   font-size: 13px;
   line-height: var(--line-height-compact);
   white-space: nowrap;
-}
-
-[data-titlebar-tab][data-project-metadata-icon] [data-slot="tab-project"] {
-  color: var(--v2-text-text-faint);
 }
 
 [data-titlebar-tab][data-orientation="vertical"] [data-slot="tab-close"] {
@@ -137,7 +133,7 @@
   grid-row: 1;
   justify-self: end;
   flex: none;
-  color: var(--v2-text-text-muted);
+  color: var(--v2-text-text-faint);
   font-size: 12px;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
