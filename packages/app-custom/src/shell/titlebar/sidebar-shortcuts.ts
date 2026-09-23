@@ -22,7 +22,7 @@ export function modifierHold(state: ModifierHold, event: ModifierHoldEvent): Mod
   return "cancelled"
 }
 
-export function createModifierHold(mac: boolean) {
+export function createModifierHold() {
   const [store, setStore] = createStore({ state: "idle" as ModifierHold })
   const timer = { id: undefined as ReturnType<typeof setTimeout> | undefined }
   const dispatch = (event: ModifierHoldEvent) => {
@@ -35,12 +35,11 @@ export function createModifierHold(mac: boolean) {
   const keydown = (event: KeyboardEvent) =>
     dispatch({
       type: "keydown",
-      mod: mac ? event.metaKey : event.ctrlKey,
-      extra: event.altKey || event.shiftKey || (mac ? event.ctrlKey : event.metaKey),
-      key: event.key === (mac ? "Meta" : "Control") ? "mod" : /^[1-9]$/.test(event.key) ? "digit" : "other",
+      mod: event.ctrlKey,
+      extra: event.altKey || event.shiftKey || event.metaKey,
+      key: event.key === "Control" ? "mod" : /^[1-9]$/.test(event.key) ? "digit" : "other",
     })
-  const keyup = (event: KeyboardEvent) =>
-    dispatch({ type: "keyup", mod: event.key !== (mac ? "Meta" : "Control") && (mac ? event.metaKey : event.ctrlKey) })
+  const keyup = (event: KeyboardEvent) => dispatch({ type: "keyup", mod: event.key !== "Control" && event.ctrlKey })
   const release = () => dispatch({ type: "release" })
   window.addEventListener("keydown", keydown, true)
   window.addEventListener("keyup", keyup, true)

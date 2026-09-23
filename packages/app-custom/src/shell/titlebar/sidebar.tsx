@@ -17,7 +17,7 @@ import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { showToast } from "@/shell/notifications/toast"
-import { parseKeybind, useCommand } from "@/shell/commands/command"
+import { useCommand } from "@/shell/commands/command"
 import { getCompactRelativeTime } from "@/shell/time"
 import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
@@ -235,7 +235,8 @@ export function SessionSidebar(props: {
   const shortcuts = createMemo(() => sidebarShortcuts(selectable().map((item) => item.key)))
   // Project groups repeat sessions already listed above; only their first row is numbered.
   const listedAbove = createMemo(() => new Set([...chats(), ...pinned(), ...recent()].map((item) => item.key)))
-  const holding = createModifierHold(!!parseKeybind("mod+1")[0]?.meta)
+  const holding = createModifierHold()
+  // Control on every platform: Safari consumes Cmd+1-9 for tab switching before the page sees the digit.
   command.register("sidebar-session-shortcuts", () =>
     selectable()
       .slice(0, 9)
@@ -243,7 +244,7 @@ export function SessionSidebar(props: {
         id: `sidebar.session.${index + 1}`,
         category: "tab",
         title: "",
-        keybind: `mod+${index + 1}`,
+        keybind: `ctrl+${index + 1}`,
         hidden: true,
         onSelect: () => open(item),
       })),
