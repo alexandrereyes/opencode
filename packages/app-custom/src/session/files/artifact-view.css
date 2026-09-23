@@ -1,0 +1,79 @@
+[data-component="artifact-view"] {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  [data-slot="artifact-toolbar"] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    flex-shrink: 0;
+    min-height: 44px;
+    a {
+      padding: 10px 4px;
+    }
+  }
+  iframe {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    background: white;
+  }
+  [data-slot="artifact-document"] {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+  }
+  [data-slot="artifact-empty"] {
+    padding: 24px;
+  }
+  [data-slot="artifact-media"] {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    button {
+      display: contents;
+      cursor: zoom-in;
+    }
+    img,
+    video {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    audio {
+      width: 100%;
+    }
+    &[data-zoom="true"] {
+      display: block;
+      button {
+        cursor: zoom-out;
+      }
+      img {
+        max-width: none;
+        max-height: none;
+      }
+    }
+  }
+  table {
+    border-collapse: collapse;
+    min-width: 100%;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--border-weak-base);
+    padding: 8px 12px;
+    text-align: start;
+    white-space: pre-wrap;
+  }
+}

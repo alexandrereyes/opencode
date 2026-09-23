@@ -28,6 +28,7 @@ import { ToolErrorCard } from "../components/tool-error-card"
 import { DiffChanges } from "@opencode/ui-custom/diff-changes"
 import { Markdown } from "../components/markdown"
 import { createMarkdownImages } from "../components/markdown-image"
+import { createImagePreview } from "../components/image-preview"
 import { useMarkdown } from "../context/markdown"
 import { getDirectory, getFilename } from "@opencode/util/path"
 import { checksum } from "@opencode/util/encode"
@@ -1345,8 +1346,10 @@ ToolRegistry.register({
 
 function ReadImage(props: { path: string; onContentRendered?: () => void }) {
   const markdown = useMarkdown()
+  const previewImages = createImagePreview()
   let root!: HTMLDivElement
   createEffect(() => {
+    previewImages(root)
     if (!markdown?.readImage) return
     const images = createMarkdownImages(markdown.readImage)
     images.update(root)

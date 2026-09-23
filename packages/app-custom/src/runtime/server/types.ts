@@ -33,6 +33,7 @@ export type FileContent = {
   }
   encoding?: "base64"
   mimeType?: string
+  size?: number
 }
 
 export type Path = {

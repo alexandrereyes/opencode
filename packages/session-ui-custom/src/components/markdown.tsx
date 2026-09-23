@@ -37,8 +37,9 @@ import {
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 import { renderMermaidSvg } from "./markdown-mermaid"
 import { createMarkdownRenderer } from "./markdown-solid"
-import { useMarkdown, type ReadMarkdownImage } from "../context/markdown"
+import { useMarkdown, type OpenMarkdownLocalFile, type ReadMarkdownImage } from "../context/markdown"
 import { createMarkdownImages } from "./markdown-image"
+import { createImagePreview } from "./image-preview"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -262,7 +263,9 @@ function markCodeLinks(root: HTMLDivElement) {
   for (const code of codeNodes) {
     const href = codeUrl(code.textContent ?? "")
     const parentLink =
-      code.parentElement instanceof HTMLAnchorElement && code.parentElement.classList.contains("external-link")
+      code.parentElement instanceof HTMLAnchorElement &&
+      code.parentElement.classList.contains("external-link") &&
+      !code.parentElement.hasAttribute("data-local-link")
         ? code.parentElement
         : null
 
@@ -293,6 +296,32 @@ function markInlineCode(root: HTMLDivElement) {
     delete code.dataset.inlineCodeKind
     const kind = inlineCodeKind(code.textContent ?? "")
     if (kind) code.dataset.inlineCodeKind = kind
+  }
+}
+
+function setupLocalLinks(root: HTMLDivElement, open: () => OpenMarkdownLocalFile | undefined) {
+  const handle = (event: MouseEvent | KeyboardEvent) => {
+    if (event.defaultPrevented || !open()) return
+    if (event instanceof MouseEvent && event.button !== 0) return
+    if (event instanceof KeyboardEvent && event.key !== "Enter") return
+    if (!(event.target instanceof Element)) return
+    const link = event.target.closest("a[data-local-link]")
+    const code = event.target.closest(':not(pre) > code[data-inline-code-kind="path"]')
+    const path =
+      link instanceof HTMLElement
+        ? link.dataset.localLink
+        : code && !code.closest("a")
+          ? code.textContent?.trim()
+          : undefined
+    if (!path) return
+    event.preventDefault()
+    open()?.(path)
+  }
+  root.addEventListener("click", handle)
+  root.addEventListener("keydown", handle)
+  return () => {
+    root.removeEventListener("click", handle)
+    root.removeEventListener("keydown", handle)
   }
 }
 
@@ -394,6 +423,7 @@ export function Markdown(
   const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "deferUntilReady", "class", "classList"])
   const i18n = useI18n()
   const markdown = useMarkdown()
+  const previewImages = createImagePreview()
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const owner = createUniqueId()
   const lifetime = new AbortController()
@@ -513,6 +543,7 @@ export function Markdown(
   )
 
   let copyCleanup: (() => void) | undefined
+  let linkCleanup: (() => void) | undefined
   let readImage: ReadMarkdownImage | undefined
   let images: ReturnType<typeof createMarkdownImages> | undefined
 
@@ -557,6 +588,12 @@ export function Markdown(
       child.remove()
     }
     images?.update(container)
+    container.querySelectorAll<HTMLElement>(':not(pre) > code[data-inline-code-kind="path"]').forEach((code) => {
+      if (!markdown?.openLocalFile || code.closest("a")) return
+      code.tabIndex = 0
+      code.setAttribute("role", "link")
+    })
+    previewImages(container)
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-copy-button"]')
       .forEach((button) => setCopyState(button, labels, button.dataset.copied === "true"))
@@ -565,6 +602,8 @@ export function Markdown(
         copy: i18n.t("ui.message.copy"),
         copied: i18n.t("ui.message.copied"),
       }))
+    if (!linkCleanup) linkCleanup = setupLocalLinks(container, () => markdown?.openLocalFile)
+    container.toggleAttribute("data-local-links", !!markdown?.openLocalFile)
     if (result?.ready && result.text === local.text) container.dataset.markdownReady = ""
   })
 
@@ -572,6 +611,7 @@ export function Markdown(
     lifetime.abort()
     images?.dispose()
     if (copyCleanup) copyCleanup()
+    linkCleanup?.()
     const container = root()
     if (container) disposeRenderedMarkdown(container)
     if (streamed) disposeMarkdownProjection(owner)

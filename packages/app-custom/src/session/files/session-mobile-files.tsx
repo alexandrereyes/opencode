@@ -1,7 +1,7 @@
 import { Button } from "@opencode/ui-custom/button"
 import { Tabs } from "@opencode/ui-custom/tabs"
 import { getFilename } from "@opencode/util/path"
-import { createMemo, For } from "solid-js"
+import { createEffect, createMemo, For, on } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useSessionLayout } from "@/session/session-layout"
@@ -10,6 +10,7 @@ import { useFile } from "@/workspaces/files/model"
 import { SessionFileBrowserTab } from "./session-file-browser-tab"
 import type { Kind } from "./file-tree-v2"
 import "./session-mobile-files.css"
+import { useArtifactOpener } from "./open-artifact"
 
 export function SessionMobileFiles() {
   const file = useFile()
@@ -21,6 +22,8 @@ export function SessionMobileFiles() {
     normalizeTab: file.tab,
   })
   const [store, setStore] = createStore({ browsing: !tabs.activeFileTab() })
+  const artifacts = useArtifactOpener()
+  createEffect(on(artifacts.opened, () => setStore("browsing", false), { defer: true }))
   const browsing = () => store.browsing || !tabs.activeFileTab()
   const active = createMemo(() => file.pathFromTab(tabs.activeFileTab() ?? ""))
   const kinds = new Map<string, Kind>()
