@@ -13,6 +13,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import type { ComposerModel } from "./model"
 import { ChatQuotes } from "./chat-quotes"
 import { BtwPanel } from "@/session/btw/panel"
+import { BtwComposer } from "@/session/btw/composer"
 
 export function Composer(props: { class?: string; model: ComposerModel; borderUnderlay?: boolean }) {
   const dialog = useDialog()
@@ -20,12 +21,24 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
   const language = useLanguage()
   const [state, setState] = createStore({ editingQuote: false })
 
+  const btw = () => (props.model.btw?.active() ? props.model.btw : undefined)
+
   return (
     <div class="relative flex flex-col gap-3" data-component="composer-region" data-editing-quote={state.editingQuote}>
       <Show when={props.model.btw}>
-        {(btw) => <BtwPanel btw={btw()} completion={props.model.completion} restoreFocus={props.model.restoreFocus} />}
+        {(btw) => <BtwPanel btw={btw()} restoreFocus={props.model.restoreFocus} />}
       </Show>
-      <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
+      <Show when={btw()} keyed>
+        {(btw) => (
+          <BtwComposer
+            btw={btw}
+            completion={props.model.completion}
+            models={props.model.model.selection}
+            borderUnderlay={props.borderUnderlay}
+          />
+        )}
+      </Show>
+      <Show when={!btw() && props.model.state.mode !== "shell" && props.model.quotes}>
         {(quotes) => (
           <ChatQuotes
             quotes={quotes()}
@@ -37,10 +50,11 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
           />
         )}
       </Show>
+      {/* Hidden rather than unmounted so the main draft keeps its editor state. */}
       <ComposerEditor
         controller={props.model}
         borderUnderlay={props.borderUnderlay}
-        class={`composer-main ${props.class ?? ""}`}
+        class={`composer-main ${btw() ? "hidden!" : ""} ${props.class ?? ""}`}
         modelControlsVisible={!props.model.model.loading}
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}

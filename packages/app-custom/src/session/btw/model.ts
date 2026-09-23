@@ -7,7 +7,7 @@ import { createBtwSessions } from "./state"
 
 const states = new WeakMap<ServerSDK, ReturnType<typeof createBtwSessions>>()
 
-export function createComposerBtw(adapter: ComposerAdapter) {
+export function createComposerBtw(adapter: ComposerAdapter, mainEditor: () => HTMLDivElement | undefined) {
   if (adapter.kind !== "active-session") return
   const server = useServerSDK()
   const language = useLanguage()
@@ -44,5 +44,16 @@ export function createComposerBtw(adapter: ComposerAdapter) {
       },
     },
   ])
-  return btw
+  return {
+    ...btw,
+    // Generation always uses the session's committed model, not the composer's pending selection.
+    sessionModel: () => adapter.session().current()?.model,
+    // While the side question composer replaces the main one, type-to-focus targets it.
+    setEditor: (element: HTMLDivElement | undefined) => {
+      const target = element ?? mainEditor()
+      if (target) adapter.setEditor(target)
+    },
+  }
 }
+
+export type ComposerBtw = NonNullable<ReturnType<typeof createComposerBtw>>

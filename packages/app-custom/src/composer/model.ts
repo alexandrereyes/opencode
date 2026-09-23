@@ -56,8 +56,8 @@ export function createComposerModel(
   const language = useLanguage()
   const platform = usePlatform()
   const prompt = adapter.state
-  const btw = createComposerBtw(adapter)
   let editor: HTMLDivElement | undefined
+  const btw = createComposerBtw(adapter, () => editor)
 
   const interaction = createComposerEditorState(prompt.mode.current())
   const [completionState, setCompletionState] = createStore({
@@ -578,7 +578,7 @@ export function createComposerModel(
       title: language.t("prompt.action.attachFile"),
       category: language.t("command.category.file"),
       keybind: "mod+u",
-      disabled: controller.state.mode !== "normal",
+      disabled: controller.state.mode !== "normal" || !!btw?.active(),
       onSelect: () => controller.attach(),
     },
     {
@@ -586,7 +586,7 @@ export function createComposerModel(
       title: language.t("command.prompt.mode.shell"),
       category: language.t("command.category.session"),
       keybind: "mod+shift+x",
-      disabled: controller.state.mode === "shell",
+      disabled: controller.state.mode === "shell" || !!btw?.active(),
       onSelect: () => controller.dispatch({ type: "mode.shell" }),
     },
     {

@@ -4,7 +4,7 @@ import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner } from "@opencode/ui-custom/scroll-view"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, on, onMount, type Accessor } from "solid-js"
+import { createEffect, createMemo, on, onMount, Show, type Accessor } from "solid-js"
 import { Composer } from "@/composer/composer"
 import { useComposerState } from "@/composer/persistence"
 import { createComposerControls } from "@/composer/selection"
@@ -235,7 +235,9 @@ export function ActiveSessionComposerRegion(props: { model: SessionComposerContr
       status={<SessionRevertStatus progress={() => prompt.capture().revert.progress()} />}
       composer={
         <div class="relative">
-          <SessionQueuePanel queue={props.model.queue} />
+          <Show when={!props.model.composer.btw?.active()}>
+            <SessionQueuePanel queue={props.model.queue} />
+          </Show>
           <div class="relative z-10">
             <Composer model={props.model.composer} borderUnderlay />
           </div>

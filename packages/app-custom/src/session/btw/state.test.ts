@@ -22,25 +22,58 @@ function setup() {
 }
 
 describe("side questions", () => {
-  test("rich draft survives cancellation/navigation while generate receives expanded text", async () => {
+  test("submitting clears the rich draft and cancellation returns it while generate receives expanded text", async () => {
     const input = setup()
     const btw = input.sessions("rich")
-    btw.draft("#why", [
-      { type: "snippet", id: "why", name: "why", content: "#why", expansion: "Explain this", start: 0, end: 4 },
-    ])
-    const pending = btw.ask("Explain this", true)
-    expect(btw.state.draft).toBe("#why")
-    expect(btw.state.draftPrompt?.[0].type).toBe("snippet")
+    const draftPrompt = [
+      { type: "snippet" as const, id: "why", name: "why", content: "#why", expansion: "Explain this", start: 0, end: 4 },
+    ]
+    btw.draft("#why", draftPrompt)
+    const pending = btw.ask("Explain this", { draft: "#why", draftPrompt })
+    expect(btw.state.draft).toBe("")
+    expect(btw.state.draftPrompt).toBeUndefined()
+    expect((await input.requests[0].request.json()).prompt).toEndWith("Explain this")
     btw.cancel()
+    expect(btw.state).toMatchObject({ cancelled: true, pending: false, draft: "#why" })
     input.requests[0].reply(Response.json({ data: { text: "discarded" } }))
     await pending
     expect(input.sessions("rich").state.draftPrompt?.[0].type).toBe("snippet")
-    const retry = btw.ask("Explain this", true)
+    const retry = btw.ask("Explain this", { draft: "#why", draftPrompt })
     input.requests[1].reply(Response.json({ data: { text: "answer" } }))
     await retry
     expect(btw.state.draft).toBe("")
     expect(btw.state.draftPrompt).toBeUndefined()
   })
+
+  test("a failed question returns its draft unless something new was typed", async () => {
+    const input = setup()
+    const failed = input.btw.ask("first", { draft: "first" })
+    input.requests[0].reply(new Response("unavailable", { status: 503 }))
+    await failed
+    expect(input.btw.state).toMatchObject({ error: true, draft: "first" })
+    const edited = input.btw.ask("second", { draft: "second" })
+    input.btw.draft("typed while waiting")
+    input.requests[1].reply(new Response("unavailable", { status: 503 }))
+    await edited
+    expect(input.btw.state.draft).toBe("typed while waiting")
+    const retry = input.btw.ask(input.btw.state.question)
+    input.requests[2].reply(new Response("unavailable", { status: 503 }))
+    await retry
+    expect(input.btw.state.draft).toBe("typed while waiting")
+  })
+
+  test("active only while open and expanded", () => {
+    const { btw } = setup()
+    expect(btw.active()).toBe(false)
+    btw.open()
+    expect(btw.active()).toBe(true)
+    btw.collapse()
+    expect(btw.active()).toBe(false)
+    btw.open()
+    btw.dismiss()
+    expect(btw.active()).toBe(false)
+  })
+
   test("recognizes only the exact slash command and retains multiline arguments", () => {
     expect(btwQuestion(" /btw ")).toBe("")
     expect(btwQuestion("/btw why?\nand how?")).toBe("why?\nand how?")
@@ -86,7 +119,7 @@ describe("side questions", () => {
     requests[1].reply(Response.json({ data: { text: " " } }))
     await empty
     expect(btw.state.error).toBe(true)
-    const success = btw.ask()
+    const success = btw.ask(btw.state.question)
     requests[2].reply(Response.json({ data: { text: "answer" } }))
     await success
     expect(btw.state).toMatchObject({ pending: false, error: false, answer: "answer" })
@@ -153,7 +186,7 @@ describe("side questions", () => {
     await pending
     expect(input.sessions("first")).toBe(first)
     expect(first.state.history).toEqual([{ question: "remember me", answer: "remembered" }])
-    expect(first.state).toMatchObject({ cancelled: true, pending: false, draft: "cancel on leave" })
+    expect(first.state).toMatchObject({ cancelled: true, pending: false, question: "cancel on leave", draft: "" })
     expect(input.sessions("second").state.history).toEqual([])
     expect(setup().sessions("first").state.history).toEqual([])
   })

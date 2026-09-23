@@ -79,6 +79,7 @@ export type ComposerEditorProps = {
   class?: string
   modelControl?: JSX.Element
   modelControlsVisible?: boolean
+  addMenu?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
   alternateKeybind?: string[]
@@ -591,27 +592,29 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
         <Show when={!props.compact}>
           <div data-slot="composer-toolbar" class="flex h-11 items-center px-2">
-            <div
-              class="flex shrink-0 items-center"
-              aria-hidden={state.mode === "shell"}
-              inert={state.mode === "shell" ? true : undefined}
-              style={buttons()}
-            >
-              <ComposerEditorAddMenu
-                disabled={view.draftOnly || state.mode === "shell"}
-                title={i18n.t("ui.promptInput.add")}
-                keybind={props.attachKeybind ?? ["Mod", "U"]}
-                attachLabel={i18n.t("ui.promptInput.attachments")}
-                attachShortcut={props.attachShortcut ?? "Mod+U"}
-                commandsLabel={i18n.t("ui.promptInput.commands")}
-                contextLabel={i18n.t("ui.promptInput.context")}
-                shellLabel={i18n.t("ui.promptInput.shell")}
-                onAttach={props.controller.attach}
-                onCommands={props.controller.openCommands}
-                onContext={props.controller.openContext}
-                onShell={props.controller.openShell}
-              />
-            </div>
+            <Show when={props.addMenu ?? true}>
+              <div
+                class="flex shrink-0 items-center"
+                aria-hidden={state.mode === "shell"}
+                inert={state.mode === "shell" ? true : undefined}
+                style={buttons()}
+              >
+                <ComposerEditorAddMenu
+                  disabled={view.draftOnly || state.mode === "shell"}
+                  title={i18n.t("ui.promptInput.add")}
+                  keybind={props.attachKeybind ?? ["Mod", "U"]}
+                  attachLabel={i18n.t("ui.promptInput.attachments")}
+                  attachShortcut={props.attachShortcut ?? "Mod+U"}
+                  commandsLabel={i18n.t("ui.promptInput.commands")}
+                  contextLabel={i18n.t("ui.promptInput.context")}
+                  shellLabel={i18n.t("ui.promptInput.shell")}
+                  onAttach={props.controller.attach}
+                  onCommands={props.controller.openCommands}
+                  onContext={props.controller.openContext}
+                  onShell={props.controller.openShell}
+                />
+              </div>
+            </Show>
             <div
               ref={controlsViewport}
               data-slot="composer-controls"

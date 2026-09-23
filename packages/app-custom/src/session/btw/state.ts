@@ -51,12 +51,23 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
     cancelled: false,
     focus: 0,
   })
-  const request = { controller: undefined as AbortController | undefined }
+  // `sent` holds the composer draft cleared on submit, returned to the composer
+  // when the question is cancelled or fails and nothing new was typed since.
+  const request = {
+    controller: undefined as AbortController | undefined,
+    sent: undefined as { draft: string; draftPrompt?: Prompt } | undefined,
+  }
+  const restoreDraft = () => {
+    const sent = request.sent
+    request.sent = undefined
+    if (sent && !state.draft.trim()) setState({ draft: sent.draft, draftPrompt: sent.draftPrompt })
+  }
   const cancel = () => {
-    if (request.controller) setState("cancelled", true)
-    request.controller?.abort()
+    if (!request.controller) return
+    request.controller.abort()
     request.controller = undefined
-    setState("pending", false)
+    setState({ cancelled: true, pending: false })
+    restoreDraft()
   }
   const open = (draft?: string) => {
     setState({
@@ -66,13 +77,13 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
       ...(draft !== undefined ? { draft, draftPrompt: undefined } : {}),
     })
   }
-  const ask = async (value = state.draft, preserveDraft = false) => {
+  const ask = async (value: string, sent?: { draft: string; draftPrompt?: Prompt }) => {
     const question = value.trim()
     if (!question) return open()
-    const draft = preserveDraft ? state.draft : question
-    cancel()
+    request.controller?.abort()
     const controller = new AbortController()
     request.controller = controller
+    request.sent = sent
     const context = state.history.length
       ? `Previous side questions and answers (reference context):\n${JSON.stringify(state.history.map((entry) => ({ question: entry.question.slice(0, 1000), answer: entry.answer.slice(0, 3000) })))}`
       : ""
@@ -80,7 +91,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
       open: true,
       collapsed: false,
       question,
-      ...(preserveDraft ? {} : { draft: question, draftPrompt: undefined }),
+      ...(sent ? { draft: "", draftPrompt: undefined } : {}),
       answer: "",
       pending: true,
       error: false,
@@ -94,13 +105,14 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
         if (request.controller !== controller) return
         const answer = result.text.trim()
         setState({ answer, error: !answer })
-        if (answer) {
-          setState("history", (history) => [...history, { question, answer }].slice(-5))
-          if (state.draft === draft) setState({ draft: "", draftPrompt: undefined })
-        }
+        if (!answer) return restoreDraft()
+        request.sent = undefined
+        setState("history", (history) => [...history, { question, answer }].slice(-5))
       })
       .catch(() => {
-        if (request.controller === controller) setState("error", true)
+        if (request.controller !== controller) return
+        setState("error", true)
+        restoreDraft()
       })
       .finally(() => {
         if (request.controller !== controller) return
@@ -113,9 +125,11 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
     open,
     ask,
     cancel,
+    active: () => state.open && !state.collapsed,
     draft: (draft: string, draftPrompt?: Prompt) => setState({ draft, draftPrompt }),
     collapse: () => setState("collapsed", true),
     dismiss: () => {
+      request.sent = undefined
       cancel()
       setState({
         open: false,

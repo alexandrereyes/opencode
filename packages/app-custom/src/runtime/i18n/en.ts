@@ -17,7 +17,7 @@ export const dict = {
   "session.btw.question": "Ask a side question…",
   "session.btw.ask": "Ask",
   "session.btw.loading": "Thinking…",
-  "session.btw.cancel": "Cancel",
+  "session.btw.model": "Uses this session’s model",
   "session.btw.cancelled": "Side question cancelled. You can edit the question and ask again.",
   "session.btw.dismiss": "Dismiss side question",
   "session.btw.error": "Could not answer this side question. Check the session’s model and try again.",
