@@ -114,6 +114,25 @@ describe("worktrees", () => {
     ).rejects.toThrow("The worktree identity changed")
   })
 
+  test("reports a stored worktree removed outside OpenCode as missing", async () => {
+    const fixture = await repository("missing")
+    await $`git worktree remove ${fixture.linked}`.cwd(fixture.root).quiet()
+    const error = await Effect.runPromise(
+      inspectWorktree(context(fixture.root, fixture.linked), fixture.linked).pipe(Effect.flip),
+    )
+    expect(error.message).toBe(`Worktree directory no longer exists: ${fixture.linked}`)
+    expect(operationFailed(error, (type, message, data) => data)).toEqual({
+      message: error.message,
+      missing: true,
+    })
+
+    const unknown = await Effect.runPromise(
+      inspectWorktree(inventory([{ directory: fixture.root }]), fixture.linked).pipe(Effect.flip),
+    )
+    expect(unknown.message).toContain("ENOENT")
+    expect(operationFailed(unknown, (type, message, data) => data).missing).toBeUndefined()
+  })
+
   test("returns partial cleanup failures after the worktree is removed", async () => {
     const fixture = await repository("partial")
     const ctx = context(fixture.root, fixture.linked)

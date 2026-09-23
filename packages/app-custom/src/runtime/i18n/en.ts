@@ -141,6 +141,11 @@ export const dict = {
   "sidebar.worktree.delete.archiveBusy":
     "Its sessions could not be archived because another session action is in progress.",
   "sidebar.worktree.delete.success": "Deleted {{worktree}} worktree",
+  "sidebar.worktree.delete.missing": "This worktree folder no longer exists. It can only be removed from the list.",
+  "sidebar.worktree.delete.missing.button": "Remove from list",
+  "sidebar.worktree.delete.missing.pending": "Removing from list…",
+  "sidebar.worktree.delete.missing.stillListed": "The worktree is still listed after refreshing the project.",
+  "sidebar.worktree.delete.missing.success": "Removed {{worktree}} from the list",
   "sidebar.sessions.empty": "No recent sessions or pending requests",
   "sidebar.project.server": "{{project}} · {{server}}",
   "sidebar.sessions.retry": "Couldn't load sessions from {{server}}. Retry",

@@ -44,10 +44,11 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
 
 export function inspectWorktree(ctx: WorktreeContext, directory: string) {
   return Effect.gen(function* () {
-    const target = yield* Effect.tryPromise(() => canonical(directory)).pipe(
-      Effect.mapError((error) => new Error(message(error))),
-    )
     const inventory = yield* ctx.list().pipe(Effect.mapError((error) => new Error(message(error))))
+    const target = yield* Effect.tryPromise({
+      try: () => canonical(directory),
+      catch: (cause) => unavailable(inventory, directory, cause),
+    })
     return yield* Effect.tryPromise({
       try: async (signal) => {
         const stored = await findStored(inventory, target)
@@ -182,6 +183,21 @@ async function findStored(inventory: readonly { directory: string; strategy?: st
   return stored
 }
 
+// A stored worktree whose directory was removed outside OpenCode can only be pruned by a refresh.
+function unavailable(
+  inventory: readonly { directory: string; strategy?: string }[],
+  directory: string,
+  cause: unknown,
+) {
+  const missing =
+    cause instanceof globalThis.Error &&
+    "code" in cause &&
+    cause.code === "ENOENT" &&
+    inventory.some((item) => item.strategy && path.normalize(item.directory) === path.normalize(directory))
+  if (!missing) return new Error(message(cause))
+  return new Error(`Worktree directory no longer exists: ${directory}`, { cause: { missing: true } })
+}
+
 async function verifyOwner(
   inventory: readonly { directory: string; strategy?: string }[],
   entries: readonly { directory: string; kind: "main" | "linked" }[],
@@ -270,11 +286,22 @@ function requireSuccess(result: CommandResult, fallback: string) {
 
 export function operationFailed<A>(
   error: globalThis.Error,
-  create: (type: "operation_failed", message: string, data: { message: string; forceRequired?: boolean }) => A,
+  create: (
+    type: "operation_failed",
+    message: string,
+    data: { message: string; forceRequired?: boolean; missing?: boolean },
+  ) => A,
 ) {
   return create("operation_failed", error.message, {
     message: error.message,
     forceRequired: forceRequired(error),
+    missing:
+      typeof error.cause === "object" &&
+      error.cause !== null &&
+      "missing" in error.cause &&
+      error.cause.missing === true
+        ? true
+        : undefined,
   })
 }
 

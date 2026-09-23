@@ -50,7 +50,11 @@ export const RemoveResult = Schema.Struct({
   remoteBranch: optional(CleanupResult),
 }).annotate({ identifier: "Worktrees.RemoveResult" })
 
-const OperationFailed = Schema.Struct({ message: Schema.String, forceRequired: optional(Schema.Boolean) })
+const OperationFailed = Schema.Struct({
+  message: Schema.String,
+  forceRequired: optional(Schema.Boolean),
+  missing: optional(Schema.Boolean),
+})
 
 export const Definition = Rpc.define({
   id: "custom.worktrees",

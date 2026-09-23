@@ -16,7 +16,7 @@ import type { ServerCtx } from "@/runtime/server/runtime"
 import { errorMessage } from "@/shell/layout/helpers"
 import { showToast } from "@/shell/notifications/toast"
 import { useTabs } from "@/shell/tabs/tabs"
-import { containsDirectory } from "@/workspaces/paths"
+import { containsDirectory, sameDirectory } from "@/workspaces/paths"
 
 type Target = {
   server: ServerConnection.Key
@@ -59,6 +59,44 @@ export function useSidebarWorktreeDelete(archive: Archive, lifecyclePending: () 
       .filter((item): item is NonNullable<typeof item> => !!item && !item.deleted)
       .map((item) => item.error ?? language.t("common.requestFailed"))
 
+  const settle = async (target: Target, linked: readonly SessionInfo[], cleanup: string[], success: string) => {
+    const canonical =
+      target.ctx.data.location.info({ directory: target.projectDirectory })?.project.canonical ??
+      target.projectDirectory
+    target.ctx.sync.worktrees.remove(target.projectID, canonical, target.directory)
+    await target.ctx.sync.worktrees.refresh(target.projectID, canonical)
+    tabs.store.forEach((tab) => {
+      if (tab.type !== "draft" || tab.server !== target.server) return
+      const directoryMatches = containsDirectory(target.directory, tab.directory)
+      const worktreeMatches = tab.worktree && containsDirectory(target.directory, tab.worktree)
+      if (!directoryMatches && !worktreeMatches) return
+      tabs.updateDraft(tab.draftID, {
+        directory: directoryMatches ? target.projectDirectory : tab.directory,
+        worktree: undefined,
+        branch: undefined,
+      })
+    })
+    const archived = linked.length
+      ? await archive(
+          linked.map((session) => ({ server: target.server, session })),
+          () => {},
+        )
+      : { succeeded: [], failed: [] }
+    const errors = [
+      ...cleanup,
+      ...(!archived ? [language.t("sidebar.worktree.delete.archiveBusy")] : archived.failed.map((item) => item.error)),
+    ]
+    if (errors.length) {
+      showToast({
+        variant: "error",
+        title: language.t("sidebar.worktree.delete.partial.title"),
+        description: [...new Set(errors)].join("\n"),
+      })
+      return
+    }
+    showToast({ title: success })
+  }
+
   const remove = async (
     target: Target,
     inspection: Worktrees.Inspection,
@@ -80,41 +118,12 @@ export function useSidebarWorktreeDelete(archive: Archive, lifecyclePending: () 
         },
         { location: { directory: target.projectDirectory } },
       )
-      const canonical = target.ctx.data.location.info({ directory: target.projectDirectory })?.project.canonical ?? target.projectDirectory
-      target.ctx.sync.worktrees.remove(target.projectID, canonical, target.directory)
-      await target.ctx.sync.worktrees.refresh(target.projectID, canonical)
-      tabs.store.forEach((tab) => {
-        if (tab.type !== "draft" || tab.server !== target.server) return
-        const directoryMatches = containsDirectory(target.directory, tab.directory)
-        const worktreeMatches = tab.worktree && containsDirectory(target.directory, tab.worktree)
-        if (!directoryMatches && !worktreeMatches) return
-        tabs.updateDraft(tab.draftID, {
-          directory: directoryMatches ? target.projectDirectory : tab.directory,
-          worktree: undefined,
-          branch: undefined,
-        })
-      })
-      const archived = linked.length
-        ? await archive(
-            linked.map((session) => ({ server: target.server, session })),
-            () => {},
-          )
-        : { succeeded: [], failed: [] }
-      const errors = [
-        ...cleanupErrors(result),
-        ...(!archived
-          ? [language.t("sidebar.worktree.delete.archiveBusy")]
-          : archived.failed.map((item) => item.error)),
-      ]
-      if (errors.length) {
-        showToast({
-          variant: "error",
-          title: language.t("sidebar.worktree.delete.partial.title"),
-          description: [...new Set(errors)].join("\n"),
-        })
-      } else {
-        showToast({ title: language.t("sidebar.worktree.delete.success", { worktree: target.name }) })
-      }
+      await settle(
+        target,
+        linked,
+        cleanupErrors(result),
+        language.t("sidebar.worktree.delete.success", { worktree: target.name }),
+      )
       return { completed: true }
     } catch (error) {
       const forceRequired =
@@ -137,11 +146,35 @@ export function useSidebarWorktreeDelete(archive: Archive, lifecyclePending: () 
     }
   }
 
+  // Refresh drops stored worktrees whose directories no longer exist.
+  const prune = async (target: Target) => {
+    if (state.pending[target.directory]) return { completed: false }
+    setState("pending", target.directory, true)
+    try {
+      const linked = await sessions(target)
+      await target.ctx.sdk.api.worktree.refresh({ projectID: target.projectID })
+      const inventory = await target.ctx.sdk.api.worktree.list({ projectID: target.projectID })
+      if (inventory.some((item) => sameDirectory(item.directory, target.directory)))
+        throw new Error(language.t("sidebar.worktree.delete.missing.stillListed"))
+      await settle(target, linked, [], language.t("sidebar.worktree.delete.missing.success", { worktree: target.name }))
+      return { completed: true }
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: language.t("sidebar.worktree.delete.failed.title"),
+        description: errorMessage(error, language.t("common.requestFailed")),
+      })
+      return { completed: false }
+    } finally {
+      setState("pending", target.directory, false)
+    }
+  }
+
   return {
     pending: (directory: string) => state.pending[directory] === true,
     show: (target: Target) => {
       if (state.pending[target.directory] || lifecyclePending()) return
-      void dialog.show(() => <WorktreeDeleteDialog target={target} remove={remove} />)
+      void dialog.show(() => <WorktreeDeleteDialog target={target} remove={remove} prune={prune} />)
     },
   }
 }
@@ -153,6 +186,7 @@ function WorktreeDeleteDialog(props: {
     inspection: Worktrees.Inspection,
     options: { local: boolean; remote: boolean; force: boolean },
   ) => Promise<{ completed: boolean; forceRequired?: boolean }>
+  prune: (target: Target) => Promise<{ completed: boolean }>
 }) {
   const dialog = useDialog()
   const language = useLanguage()
@@ -160,6 +194,7 @@ function WorktreeDeleteDialog(props: {
     pending: true,
     submitting: false,
     forceRequired: false,
+    missing: false,
     local: false,
     remote: false,
     inspection: undefined as Worktrees.Inspection | undefined,
@@ -170,16 +205,33 @@ function WorktreeDeleteDialog(props: {
       .rpc(Worktrees.Definition)
       .inspect({ directory: props.target.directory }, { location: { directory: props.target.projectDirectory } })
       .then((inspection) => setState({ inspection, pending: false }))
-      .catch((error) =>
+      .catch((error) => {
+        const missing =
+          typeof error === "object" &&
+          error !== null &&
+          "data" in error &&
+          typeof error.data === "object" &&
+          error.data !== null &&
+          "missing" in error.data &&
+          error.data.missing === true
+        if (missing) return setState({ pending: false, missing: true })
         setState({
           pending: false,
           error: errorMessage(error, language.t("sidebar.worktree.delete.inspectFailed")),
-        }),
-      )
+        })
+      })
   })
   const confirm = async () => {
-    if (state.pending || state.submitting || !state.inspection) return
+    if (state.pending || state.submitting) return
     const active = dialog.active
+    if (state.missing) {
+      setState("submitting", true)
+      const pruned = await props.prune(props.target)
+      setState("submitting", false)
+      if (pruned.completed && dialog.active === active) dialog.close()
+      return
+    }
+    if (!state.inspection) return
     setState("submitting", true)
     const result = await props.remove(props.target, state.inspection, {
       local: state.local,
@@ -233,6 +285,11 @@ function WorktreeDeleteDialog(props: {
             </p>
           )}
         </Show>
+        <Show when={state.missing}>
+          <p role="status" data-slot="worktree-delete-missing" class="text-[13px] leading-4 text-v2-text-text-muted">
+            {language.t("sidebar.worktree.delete.missing")}
+          </p>
+        </Show>
         <Show when={dirty()}>
           <p role="alert" class="text-[13px] leading-4 text-v2-state-fg-danger">
             {language.t("sidebar.worktree.delete.dirty")}
@@ -268,9 +325,13 @@ function WorktreeDeleteDialog(props: {
           {language.t("common.cancel")}
         </Button>
         <Button variant="danger" disabled={state.pending || state.submitting || !!state.error} onClick={confirm}>
-          {state.submitting
-            ? language.t("sidebar.worktree.delete.pending")
-            : language.t("sidebar.worktree.delete.button")}
+          {state.missing
+            ? state.submitting
+              ? language.t("sidebar.worktree.delete.missing.pending")
+              : language.t("sidebar.worktree.delete.missing.button")
+            : state.submitting
+              ? language.t("sidebar.worktree.delete.pending")
+              : language.t("sidebar.worktree.delete.button")}
         </Button>
       </DialogFooter>
     </Dialog>

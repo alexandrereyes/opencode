@@ -70,6 +70,9 @@ function fixture() {
     archiveGate: undefined as PromiseWithResolvers<void> | undefined,
     archiveError: undefined as Error | undefined,
     deletes: 0,
+    missing: false,
+    stale: false,
+    refreshes: 0,
     archives: [] as string[],
     removed: [] as string[],
   }
@@ -79,6 +82,22 @@ function fixture() {
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init)
       const url = new URL(request.url)
+      if (url.pathname === "/api/rpc/custom.worktrees/inspect" && state.missing) {
+        const message = "Worktree directory no longer exists: /repo/feature"
+        return Response.json(
+          { _tag: "RpcError", type: "operation_failed", message, data: { message, missing: true } },
+          { status: 400 },
+        )
+      }
+      if (url.pathname === "/api/worktree/refresh") {
+        state.refreshes++
+        return new Response(null, { status: 204 })
+      }
+      if (url.pathname === "/api/worktree")
+        return Response.json([
+          { directory: "/repo" },
+          ...(state.stale ? [{ directory: "/repo/feature", strategy: "git" }] : []),
+        ])
       if (url.pathname === "/api/rpc/custom.worktrees/inspect")
         return Response.json({
           output: {
@@ -121,11 +140,12 @@ function fixture() {
     },
     sync: {
       worktrees: {
-        remove: (_project: string, directory: string) => state.removed.push(directory),
+        remove: (_project: string, _canonical: string, directory: string) => state.removed.push(directory),
         refresh: async () => {},
       },
     },
     data: {
+      location: { info: () => undefined },
       session: {
         list: () => sessions,
         get: (id: string) => sessions.find((item) => item.id === id),
@@ -292,6 +312,47 @@ test("worktree deletion uses real lifecycle results for cancel, success, failure
   } finally {
     active.state.deleteGate?.resolve()
     active.state.archiveGate?.resolve()
+    view.dispose()
+  }
+})
+
+test("a worktree whose folder no longer exists can be removed from the list", async () => {
+  const view = await mount()
+  try {
+    active.state.missing = true
+    active.state.stale = true
+    view.button("Open delete").click()
+    await view.wait()
+    expect(document.querySelector('[data-slot="worktree-delete-missing"]')?.textContent).toBe(
+      "This worktree folder no longer exists. It can only be removed from the list.",
+    )
+    expect(document.querySelector('[data-slot="worktree-delete-options"]')).toBeNull()
+    expect(view.button("Delete worktree")).toBeUndefined()
+
+    view.button("Remove from list").click()
+    await view.wait()
+    expect(active.state.refreshes).toBe(1)
+    expect(active.state.deletes).toBe(0)
+    expect(active.state.removed).toEqual([])
+    expect(active.state.archives).toEqual([])
+    expect(
+      toasts.some((toast) => toast.description === "The worktree is still listed after refreshing the project."),
+    ).toBe(true)
+    expect(view.button("Remove from list")).toBeDefined()
+
+    active.state.stale = false
+    view.button("Remove from list").click()
+    await view.wait()
+    expect(active.state.refreshes).toBe(2)
+    expect(active.state.deletes).toBe(0)
+    expect(active.state.removed).toEqual(["/repo/feature"])
+    expect(active.state.archives).toEqual(["worktree-session"])
+    expect(toasts.some((toast) => toast.title === "Removed feature from the list")).toBe(true)
+    // The dialog stack removes a closed dialog after its 100ms exit timer.
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(controls.dialog.active).toBeUndefined()
+    expect(view.button("Remove from list")).toBeUndefined()
+  } finally {
     view.dispose()
   }
 })
