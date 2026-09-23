@@ -401,6 +401,13 @@ export function CurrentUserMessageDisplay(props: {
                   ref={observeDraft}
                   id={previewID}
                   data-slot="user-message-draft"
+                  title={
+                    !props.text && references().length
+                      ? references()
+                          .map((file) => file.path)
+                          .join("\n")
+                      : undefined
+                  }
                   data-expanded={expanded() ? "true" : "false"}
                   dir="auto"
                 >

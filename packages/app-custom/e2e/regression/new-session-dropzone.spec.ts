@@ -21,6 +21,16 @@ test("shows the dropzone and attaches a dropped file", async ({ page }) => {
     sessions: [],
     pageMessages: () => ({ items: [] }),
   })
+  const uploads: string[] = []
+  await page.route("**/api/info", (route) =>
+    route.fulfill({
+      json: { version: "test", pid: 1, urls: [server], paths: { tmp: "/tmp/opencode" } },
+    }),
+  )
+  await page.route("**/api/experimental/fs/write?*", async (route) => {
+    uploads.push(route.request().postDataBuffer()?.toString() ?? "")
+    await route.fulfill({ json: { data: { path: new URL(route.request().url()).searchParams.get("path") } } })
+  })
   await page.addInitScript(
     ({ directory, draftID, server }) => {
       localStorage.setItem(
@@ -56,5 +66,6 @@ test("shows the dropzone and attaches a dropped file", async ({ page }) => {
 
   await surface.dispatchEvent("drop", { dataTransfer: transfer })
   await expect(page.locator('[data-component="composer-attachments"]')).toContainText("dropzone.txt")
+  expect(uploads).toEqual(["Dropzone fixture"])
   await expect(dropzone).toHaveCount(0)
 })
