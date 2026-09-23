@@ -236,6 +236,29 @@ describe("createTimelineProjection", () => {
     })
   })
 
+  test("keeps model and compaction dividers separate from grouped activity", () => {
+    const result = createTimelineProjection({
+      sessionMessages: [
+        { id: "user", type: "user", text: "continue", time: { created: 1 } },
+        { id: "model", type: "model-switched", model: { id: "next", providerID: "provider" }, time: { created: 2 } },
+        {
+          id: "compact",
+          type: "compaction",
+          time: { created: 3 },
+          status: "completed",
+          reason: "auto",
+          summary: "summary",
+          recent: "recent",
+        },
+      ],
+      status: { type: "idle" },
+      reasoningMode: "full",
+      timelineDetail: { ...timelinePresets[0].value, notices: { placement: "grouped" } },
+    })
+    expect(result.rows.filter((row) => row._tag === "Notice").map((row) => row.messageID)).toEqual(["model", "compact"])
+    expect(result.rows.some((row) => row._tag === "AssistantPart")).toBe(false)
+  })
+
   test("builds current message, parent, context, and row indexes", () => {
     const selectedModel = { id: "selected", providerID: "provider" } satisfies ModelRef
     const assistantModel = { id: "assistant", providerID: "provider", variant: "fast" } satisfies ModelRef

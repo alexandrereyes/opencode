@@ -1,5 +1,14 @@
 import { expect, story } from "../../storybook/playwright/story"
 
+story("renders notice-only updates with the usage-label styling", async ({ mount }) => {
+  const root = await mount("current-tool-group--notices-only")
+  const trigger = root.getByRole("button", { name: "Updates", exact: true })
+  await expect(trigger.locator('[data-slot="context-tool-group-prefix"]')).toHaveText("Updates")
+  await expect(trigger.locator('[data-slot="basic-tool-tool-title"]')).toHaveCount(0)
+  await trigger.click()
+  await expect(root.getByText("Instructions updated: AGENTS.md")).toBeVisible()
+})
+
 for (const reasoningDefaultOpen of [false, true]) {
   story(
     `keeps ordered thoughts and tool-only counts with reasoning ${reasoningDefaultOpen ? "expanded" : "collapsed"}`,

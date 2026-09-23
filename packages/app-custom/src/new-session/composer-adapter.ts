@@ -53,7 +53,8 @@ export function createNewSessionComposerAdapter(props: {
       if (managedSessionBlocked(context.pending)) return
       const draftID = props.draftID
       const draft = tabs.draft(draftID)
-      const projectDirectory = location().directory
+      const currentDirectory = location().directory
+      const projectDirectory = data.location.info({ directory: currentDirectory })?.project.canonical ?? currentDirectory
       const worktree = props.worktree()
       const branch = props.branch()
       const mcp = props.mcp.capture()
