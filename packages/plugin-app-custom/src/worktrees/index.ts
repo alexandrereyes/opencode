@@ -38,6 +38,7 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
         ),
       delete: (input, context) =>
         removeWorktree(worktrees, input).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
+      branches: () => worktreeBranches(ctx.location.directory),
     })
     .pipe(Effect.orDie)
 })
@@ -106,6 +107,17 @@ export function inspectWorktree(ctx: WorktreeContext, directory: string) {
       catch: (cause) => new Error(message(cause)),
     })
   })
+}
+
+// Branch labels for every checkout of the repository in one Git call, without booting each worktree's Location.
+export function worktreeBranches(directory: string) {
+  return Effect.tryPromise(async (signal) => {
+    const repository = await discover(directory, signal)
+    return (await worktreeList(repository, signal)).map((entry) => ({
+      directory: entry.directory,
+      branch: entry.branch,
+    }))
+  }).pipe(Effect.orElseSucceed(() => []))
 }
 
 export function removeWorktree(ctx: WorktreeContext, input: Worktrees.DeleteInput) {
@@ -241,12 +253,19 @@ async function worktreeList(repository: Repository, signal: AbortSignal) {
       .trim()
       .split(/\r?\n\r?\n/)
       .flatMap((block, index) => {
-        const directory = block
-          .split(/\r?\n/)
+        const lines = block.split(/\r?\n/)
+        const directory = lines
           .find((line) => line.startsWith("worktree "))
           ?.slice(9)
           .trim()
-        return directory ? [{ directory, kind: index === 0 ? ("main" as const) : ("linked" as const) }] : []
+        const branch = lines
+          .find((line) => line.startsWith("branch "))
+          ?.slice(7)
+          .trim()
+          .replace(/^refs\/heads\//, "")
+        return directory
+          ? [{ directory, branch: branch || undefined, kind: index === 0 ? ("main" as const) : ("linked" as const) }]
+          : []
       })
       .map(async (entry) => ({ ...entry, directory: await canonical(entry.directory) })),
   )

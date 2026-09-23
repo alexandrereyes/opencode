@@ -741,8 +741,8 @@ async function openDraft(
   )
   await page.goto(draftPath)
   await expectAppVisible(page.locator('[data-component="composer-editor"]'))
-  await page.getByRole("button", { name: "Local", exact: true }).click()
-  await page.getByRole("menuitem", { name: "New worktree", exact: true }).click()
+  await page.locator('[data-action="prompt-workspace"]').click()
+  await page.getByRole("menuitem", { name: "New", exact: true }).click()
   await expect(page.getByRole("button", { name: "New worktree", exact: true })).toBeVisible()
   await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
   return {

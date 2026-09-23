@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
 import { AbsolutePath } from "@opencode/schema/schema"
-import { inspectWorktree, operationFailed, removeWorktree, type WorktreeContext } from "../src/worktrees"
+import { inspectWorktree, operationFailed, removeWorktree, worktreeBranches, type WorktreeContext } from "../src/worktrees"
 import { Worktrees } from "../src/worktrees/rpc"
 
 const directories: string[] = []
@@ -17,7 +17,7 @@ afterEach(async () => {
 describe("worktrees", () => {
   test("publishes the frozen browser-safe RPC contract", () => {
     expect(Worktrees.Definition.id).toBe("custom.worktrees")
-    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete"])
+    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches"])
     expect(Object.keys(Worktrees.Definition.methods.inspect.errors)).toEqual(["operation_failed"])
     expect(
       Schema.encodeSync(Worktrees.DeleteInput)(
@@ -78,6 +78,20 @@ describe("worktrees", () => {
     expect(await Bun.file(fixture.linked).exists()).toBe(false)
     expect((await $`git branch --list feature`.cwd(fixture.root).text()).trim()).toBe("")
     expect((await $`git --git-dir ${fixture.remote} branch --list feature`.text()).trim()).toBe("")
+  })
+
+  test("lists the branch of every checkout from any worktree of the repository", async () => {
+    const fixture = await repository("branches")
+    const detached = path.join(path.dirname(fixture.root), "detached")
+    await $`git worktree add --detach ${detached}`.cwd(fixture.root).quiet()
+    const expected = [
+      { directory: AbsolutePath.make(fixture.root), branch: "main" },
+      { directory: AbsolutePath.make(await fs.realpath(detached)), branch: undefined },
+      { directory: AbsolutePath.make(fixture.linked), branch: "feature" },
+    ]
+    expect(await Effect.runPromise(worktreeBranches(fixture.root))).toEqual(expected)
+    expect(await Effect.runPromise(worktreeBranches(fixture.linked))).toEqual(expected)
+    expect(await Effect.runPromise(worktreeBranches(path.dirname(fixture.root)))).toEqual([])
   })
 
   test("rejects roots, wrong owners, changed identities, and unsupported strategies", async () => {

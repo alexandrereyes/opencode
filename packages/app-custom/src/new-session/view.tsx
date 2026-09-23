@@ -59,13 +59,15 @@ export function NewSessionView(props: {
           active={props.composer.state.drag === "active"}
           input={props.composer.model.selection.current()?.capabilities.input}
         />
-        <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
+        <div class="absolute inset-x-0 top-[24%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <NewSessionWordmark />
-            <div class="mt-8 flex flex-col gap-8">
-              <Composer model={props.composer} />
-              <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
-                <PromptProjectSelector controller={props.project} placement="bottom" />
+            <div class="mt-10 flex flex-col gap-1.5">
+              <div
+                data-component="new-session-location"
+                class="flex min-h-7 min-w-0 flex-wrap items-center gap-x-1.5 px-0.5"
+              >
+                <PromptProjectSelector controller={props.project} placement="bottom-start" />
                 <Show when={props.project.selected()}>
                   <Show
                     when={props.workspace.bar.visible()}
@@ -73,7 +75,6 @@ export function NewSessionView(props: {
                       <PromptGitStatus
                         branch={props.workspace.bar.branch()}
                         noGit={!props.workspace.project.git()}
-                        class="ms-1"
                       />
                     }
                   >
@@ -83,6 +84,7 @@ export function NewSessionView(props: {
                       workspaces={props.workspace.project.workspaces()}
                       branches={props.workspace.project.branches()}
                       branch={props.workspace.bar.branch()}
+                      checkoutBranch={props.workspace.project.checkoutBranch}
                       onboarding={onboardingReady() && !onboarding.used}
                       onChange={select}
                       onCreate={props.workspace.selection.create}
@@ -93,6 +95,7 @@ export function NewSessionView(props: {
                   </Show>
                 </Show>
               </div>
+              <Composer model={props.composer} />
             </div>
           </div>
         </div>

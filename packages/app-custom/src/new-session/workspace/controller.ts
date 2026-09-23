@@ -8,6 +8,7 @@ import { useSettings } from "@/settings/model"
 import { useTabs } from "@/shell/tabs/tabs"
 import { ServerConnection } from "@/runtime/server/registry"
 import { normalizeProjectInfo } from "@/runtime/server/global-sync/utils"
+import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
 import {
   isWorkspaceSelection,
   prioritizeDevWorkspaces,
@@ -105,9 +106,19 @@ export function createNewSessionWorkspaceController(input: {
       .list({ projectID: source.projectID })
       .catch(() => (currentProject()?.id === source.projectID ? currentProject()?.worktrees : undefined) ?? []),
   }))
+  const [checkouts, checkoutActions] = createResource(
+    () => worktreeSource()?.directory,
+    (directory) =>
+      serverSDK.api
+        .rpc(Worktrees.Definition)
+        .branches({}, { location: { directory } })
+        .catch(() => []),
+  )
   onCleanup(
     serverSDK.event.listen((event) => {
-      if (event.type === "worktree.updated") void worktreeActions.refetch()
+      if (event.type !== "worktree.updated") return
+      void worktreeActions.refetch()
+      void checkoutActions.refetch()
     }),
   )
   // `latest` only skips Suspense once the resource has resolved at least once. Before that it
@@ -259,6 +270,11 @@ export function createNewSessionWorkspaceController(input: {
         ].slice(0, 50)
       },
       searchBranches,
+      // Guarded like `worktreesLoaded`: reading an unresolved resource would suspend the page.
+      checkoutBranch: (directory: string) =>
+        checkouts.state === "ready" || checkouts.state === "refreshing"
+          ? checkouts.latest?.find((item) => sameDirectory(item.directory, directory))?.branch
+          : undefined,
       openAll: input.onViewAll,
     },
     bar: {

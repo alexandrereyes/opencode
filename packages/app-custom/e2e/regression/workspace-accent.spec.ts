@@ -67,12 +67,12 @@ for (const theme of ["light", "dark"] as const) {
           await testInfo.attach("workspace-accent", { path, contentType: "image/png" })
         }
 
-        await expectBackground(view.send, "icon-button-contrast")
+        await expectNeutralSend(view.send)
         await view.send.hover()
-        await expectBackground(view.send, "icon-button-contrast")
+        await expectNeutralSend(view.send)
         await view.composer.locator('[data-action="composer-model"]').press("Tab")
         await expect(view.send).toBeFocused()
-        await expectBackground(view.send, "icon-button-contrast")
+        await expectNeutralSend(view.send)
         const message = page.locator('[data-slot="user-message-text"]')
         await expect(message).toHaveText("Check this fixture workspace.")
         await expectToken(
@@ -92,7 +92,7 @@ for (const theme of ["light", "dark"] as const) {
       const view = await openSession(page, workspace, [{ directory: root }])
       await view.input.fill("Keep this draft while the inventory changes.")
       await expect(view.send).toBeEnabled()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
       const url = page.url()
 
       const refreshed = page.waitForResponse(
@@ -109,14 +109,14 @@ for (const theme of ["light", "dark"] as const) {
         data: { projectID },
       })
       expect((await refreshed).ok()).toBe(true)
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
       await expect(page).toHaveURL(url)
       await expect(view.input).toHaveText("Keep this draft while the inventory changes.")
       await expect(view.send).toBeEnabled()
 
       await view.input.fill("")
       await expect(view.send).toBeDisabled()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
 
       view.events.push({
         id: "evt_workspace_accent_running",
@@ -131,25 +131,25 @@ for (const theme of ["light", "dark"] as const) {
 
       await view.input.fill("Send a follow-up instead of stopping.")
       await expect(view.send).toBeEnabled()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
       await expect(page).toHaveURL(url)
     })
 
     test("new workspace send button stays neutral", async ({ page }) => {
       const view = await openSession(page, root, [...inventory], true)
       await expect(view.send).toBeDisabled()
-      await expectBackground(view.send, "icon-button-contrast")
-      await page.getByRole("button", { name: "Local", exact: true }).click()
-      await page.getByRole("menuitem", { name: "New worktree", exact: true }).click()
+      await expectNeutralSend(view.send)
+      await page.locator('[data-action="prompt-workspace"]').click()
+      await page.getByRole("menuitem", { name: "New", exact: true }).click()
       await expect(page.getByRole("button", { name: "New worktree", exact: true })).toBeVisible()
       await view.input.fill("Inspect this fixture workspace.")
       await expect(view.send).toBeEnabled()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
       await view.send.hover()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
       await view.composer.locator('[data-action="composer-model"]').press("Tab")
       await expect(view.send).toBeFocused()
-      await expectBackground(view.send, "icon-button-contrast")
+      await expectNeutralSend(view.send)
     })
   })
 }
@@ -256,6 +256,12 @@ async function expectBackground(element: Locator, token: string, property = "bac
     return color
   }, token)
   await expect(element).toHaveCSS(property, new RegExp(color.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+}
+
+// The send button is a ghost icon in every Location, so a workspace never tints it with the accent.
+async function expectNeutralSend(element: Locator) {
+  await expect(element).toHaveAttribute("data-variant", "ghost")
+  await expectToken(element, "color", "--v2-text-text-base")
 }
 
 async function expectToken(element: Locator, property: string, token: string) {

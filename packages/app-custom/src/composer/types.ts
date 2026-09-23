@@ -38,6 +38,7 @@ export type ComposerOption = {
   id: string
   label: string
   providerID?: string
+  color?: string
 }
 
 export type ComposerSuggestion = {

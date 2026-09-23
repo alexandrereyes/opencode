@@ -1,12 +1,11 @@
 import { Show, createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
 import { Keybind } from "@opencode/ui-custom/keybind"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
-import { ComposerEditor } from "./editor/editor"
+import { ComposerEditor, composerControlClass } from "./editor/editor"
 import { ModelSelectorPopover } from "@/providers/models/select-dialog"
 import { DialogSelectModelUnpaid } from "@/providers/models/unpaid"
 import { formatKeybind, useCommand } from "@/shell/commands/command"
@@ -79,19 +78,10 @@ function ComposerModelControl(props: {
   const shouldAnimate = createMemo<boolean>((previous) => previous ?? props.loading)
   const content = () => (
     <>
-      <Show when={props.providerID}>
-        {(providerID) => (
-          <ProviderIcon
-            id={providerID()}
-            class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
-            style={{ "will-change": "opacity", transform: "translateZ(0)" }}
-          />
-        )}
+      <Show when={props.providerID} fallback={<Icon name="models" class="shrink-0 text-v2-icon-icon-muted" />}>
+        {(providerID) => <ProviderIcon id={providerID()} class="size-4 shrink-0" />}
       </Show>
-      <span class="truncate leading-4">{props.modelName}</span>
-      <span class="-ml-0.5 -mr-1 flex shrink-0">
-        <Icon name="chevron-down" />
-      </span>
+      <span class="truncate">{props.modelName}</span>
     </>
   )
   return (
@@ -109,35 +99,31 @@ function ComposerModelControl(props: {
         <Show
           when={props.paid}
           fallback={
-            <Button
+            <button
+              type="button"
               data-action="composer-model"
               data-control-type="dialog"
-              variant="ghost-muted"
-              size="normal"
-              class="min-w-0 max-w-[220px] justify-start ![font-weight:440] group"
+              class={composerControlClass}
               classList={{ "animate-in fade-in": shouldAnimate() }}
-              style={{ height: "28px" }}
               onClick={props.onUnpaidClick}
             >
               {content()}
-            </Button>
+            </button>
           }
         >
           <ModelSelectorPopover
             model={props.model}
             trigger={(triggerProps) => (
-              <Button
+              <button
                 {...triggerProps}
-                variant="ghost-muted"
-                size="normal"
-                style={{ height: "28px" }}
-                class="min-w-0 max-w-[220px] justify-start ![font-weight:440] group"
+                type="button"
+                class={composerControlClass}
                 classList={{ "animate-in fade-in": shouldAnimate() }}
                 data-action="composer-model"
                 data-control-type="popover"
               >
                 {content()}
-              </Button>
+              </button>
             )}
             onClose={props.onClose}
           />

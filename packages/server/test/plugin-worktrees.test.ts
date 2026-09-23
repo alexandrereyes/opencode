@@ -57,6 +57,9 @@ it.live("serves custom worktree deletion while preserving native routes", () =>
           worktrees.inspect({ directory: linked }, { location: { directory: project } }),
         )
         expect(
+          yield* Effect.promise(() => worktrees.branches({}, { location: { directory: project } })),
+        ).toContainEqual({ directory: inspection.directory, branch: "feature" })
+        expect(
           (yield* Effect.promise(() => client.plugin.list({ location: { directory: project } }))).data.find(
             (item) => item.id === "custom.app-mentions",
           ),

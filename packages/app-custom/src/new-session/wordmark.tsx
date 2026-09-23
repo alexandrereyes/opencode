@@ -6,7 +6,7 @@ export function NewSessionWordmark() {
     <div
       data-component="new-session-wordmark"
       aria-hidden="true"
-      class="pointer-events-none mx-auto w-full max-w-[720px] text-v2-background-bg-inverse"
+      class="pointer-events-none mx-auto w-full max-w-[240px] text-v2-background-bg-inverse"
     >
       <div data-slot="wordmark-reveal" class="relative">
         <Wordmark fade={false} class="block h-auto w-full opacity-60 [[data-color-scheme=dark]_&]:opacity-50" />
