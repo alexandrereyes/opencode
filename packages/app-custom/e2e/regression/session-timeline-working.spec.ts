@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { timelinePresets } from "@opencode/session-ui-custom/timeline/detail"
 import {
   assistantID,
@@ -14,8 +14,13 @@ import {
   userMessage,
 } from "../performance/timeline-stability/fixture"
 
+// The model name comes from the fixture catalog, so assertions match the activity phrase.
+const activityLabel = (page: Page) => page.locator('[data-component="session-working"] [data-component="text-shimmer"]')
+
 for (const width of [1400, 390]) {
-  test(`shows Working between busy and reasoning states at ${width}px`, async ({ page }, testInfo) => {
+  test(`shows the assistant status through busy, reasoning, and idle states at ${width}px`, async ({
+    page,
+  }, testInfo) => {
     const timeline = await setupTimeline(page, {
       messages: [userMessage()],
       sessionStatus: { [sessionID]: { type: "busy" } },
@@ -27,10 +32,11 @@ for (const width of [1400, 390]) {
     const working = page.locator('[data-component="session-working"]')
     await expect(working).toHaveCount(1)
     await expect(working).toHaveRole("status")
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", "Working")
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", /^\S.* is \S/)
+    await expect(working.locator('[data-component="provider-icon"]')).toBeVisible()
     await expect(working).toBeInViewport()
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("data-active", "true")
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveCSS("line-height", "16px")
+    await expect(activityLabel(page)).toHaveAttribute("data-active", "true")
+    await expect(activityLabel(page)).toHaveCSS("line-height", "16px")
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`working-${width}.png`) })
 
@@ -39,11 +45,13 @@ for (const width of [1400, 390]) {
     const id = `prt_working_reasoning_${width}`
     await timeline.send(partUpdated(reasoningPart(id, "")))
     await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
-    await expect(working).toHaveCount(0)
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", / is thinking$/)
+    await expect(working).toBeInViewport()
 
+    // A generic phrase does not replace the last specific status.
     await timeline.send(partUpdated(reasoningPart(id, "The inspection is complete.")))
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", "Working")
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", / is thinking$/)
     await expect(working).toBeInViewport()
 
     await timeline.send(status("idle"))
@@ -51,8 +59,10 @@ for (const width of [1400, 390]) {
   })
 }
 
+const toolPhrases = { shell: "running command", patch: "applying patch", subagent: "delegating task" } as const
+
 for (const name of ["shell", "patch", "subagent"] as const) {
-  test(`hides Working during ${name} input and execution, then restores it on completion`, async ({ page }) => {
+  test(`names ${name} in the assistant status during input and execution`, async ({ page }) => {
     const timeline = await setupTimeline(page, {
       messages: [userMessage(), assistantMessage([], { completed: false })],
       settings: {
@@ -60,6 +70,7 @@ for (const name of ["shell", "patch", "subagent"] as const) {
       },
     })
     const working = page.locator('[data-component="session-working"]')
+    const phrase = new RegExp(` is ${toolPhrases[name]}$`)
     await expect(working).toBeVisible()
 
     const id = `prt_working_${name}`
@@ -72,7 +83,7 @@ for (const name of ["shell", "patch", "subagent"] as const) {
     await timeline.send(partUpdated(toolPart(id, name, "streaming", input)))
     const tool = page.locator(`[data-timeline-part-id="${id}"]`)
     await expect(tool).toBeVisible()
-    await expect(working).toHaveCount(0)
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", phrase)
 
     const metadata =
       name === "patch"
@@ -92,16 +103,35 @@ for (const name of ["shell", "patch", "subagent"] as const) {
     await expect(tool).toContainText(
       name === "shell" ? "printf ready" : name === "patch" ? "working.ts" : "Inspect working indicator",
     )
-    await expect(working).toHaveCount(0)
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", phrase)
 
     await timeline.send(partUpdated(toolPart(id, name, "completed", input, { metadata })))
     await expect(tool).toBeVisible()
     await expect(page.locator('[data-component="collapsed-tool-group"]')).toHaveCount(0)
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", "Working")
     await expect(working).toBeVisible()
-    await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("data-active", "true")
+    await expect(activityLabel(page)).toHaveAttribute("aria-label", phrase)
+    await expect(activityLabel(page)).toHaveAttribute("data-active", "true")
   })
 }
+
+test("names the tool a running Code Mode script is calling", async ({ page }) => {
+  const timeline = await setupTimeline(page, {
+    messages: [userMessage(), assistantMessage([], { completed: false })],
+  })
+  await expect(page.locator('[data-component="session-working"]')).toBeVisible()
+  const input = { code: "await tools.browser.tabs.open({})" }
+  const toolCalls = [
+    { tool: "read", status: "completed" },
+    { tool: "browser.tabs.open", status: "running" },
+  ]
+  await timeline.send(partUpdated(toolPart("prt_working_execute", "execute", "running", input)))
+  await expect(activityLabel(page)).toHaveAttribute("aria-label", / is running a script$/)
+
+  await timeline.send(
+    partUpdated(toolPart("prt_working_execute", "execute", "running", input, { metadata: { toolCalls } })),
+  )
+  await expect(activityLabel(page)).toHaveAttribute("aria-label", / is calling browser\.tabs\.open$/)
+})
 
 for (const name of ["read", "shell", "subagent"] as const) {
   test(`keeps Working for grouped ${name} regardless of disclosure`, async ({ page }, testInfo) => {
@@ -201,7 +231,7 @@ for (const grouped of [false, true]) {
     const group = page.locator('[data-component="collapsed-tool-group"]')
     if (!grouped) {
       await expect(page.locator('[data-timeline-part-id="prt_background_active"]')).toBeVisible()
-      await expect(working).toHaveCount(0)
+      await expect(working).toBeVisible()
       return
     }
     const trigger = group.getByRole("button", { name: "Used 2 Shell", exact: true, includeHidden: true })
@@ -227,11 +257,11 @@ test("replaces Working with Retry and restores it on recovery", async ({ page })
   await timeline.send(stepStarted(assistant))
   await expect(retry).toHaveCount(0)
   await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
-  await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", "Working")
+  await expect(activityLabel(page)).toHaveAttribute("aria-label", /^\S.* is \S/)
   await expect(working).toBeVisible()
 })
 
-test("hides Working while assistant text streams", async ({ page }) => {
+test("reports composing while assistant text streams", async ({ page }) => {
   const timeline = await setupTimeline(page, {
     messages: [userMessage(), assistantMessage([], { completed: false })],
   })
@@ -256,7 +286,8 @@ test("hides Working while assistant text streams", async ({ page }) => {
   await expect(page.locator(`[data-timeline-part-id="${assistantID}:text:0"]`)).toContainText(
     "The response is streaming.",
   )
-  await expect(working).toHaveCount(0)
+  await expect(working).toBeVisible()
+  await expect(activityLabel(page)).toHaveAttribute("aria-label", / is composing$/)
 })
 
 for (const failed of [false, true]) {
@@ -293,7 +324,7 @@ for (const failed of [false, true]) {
       const request = await requested
       expect(request.postDataJSON()).toMatchObject({ text: "Check the working indicator immediately." })
       await expect(working).toHaveRole("status")
-      await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", "Working")
+      await expect(activityLabel(page)).toHaveAttribute("aria-label", /^\S.* is \S/)
       await expect(working).toBeInViewport()
       await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
     } finally {

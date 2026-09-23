@@ -42,6 +42,9 @@ import type { ChatQuote } from "@/composer/schema"
 import { userPresentation } from "../user-presentation"
 import { readingPositions } from "./reading-position"
 import { StatusPopoverBody } from "@/shell/status/body"
+import { useProviders } from "@/providers/catalog/providers"
+import { assistantActivity } from "./assistant-activity"
+import { AssistantStatus } from "./assistant-status"
 
 type BackgroundTask = {
   id: string
@@ -430,6 +433,7 @@ function MessageTimelineView(
   const data = server.ctx.data
   const settings = useSettings()
   const sdk = useWorkspaceLocation()
+  const providers = useProviders(() => sdk().directory)
   const command = useCommand()
   const sessionID = props.data.sessionID
   const sessionStatus = props.data.status
@@ -642,13 +646,31 @@ function MessageTimelineView(
     sessionID,
     1000,
   )
+  const activeAssistant = createMemo(() => {
+    const active = projection.activeMessageID()
+    return active ? projection.assistantMessagesByParent().get(active)?.at(-1) : undefined
+  })
+  const activity = createMemo(() => {
+    const id = sessionID()
+    return assistantActivity({
+      assistant: activeAssistant(),
+      permission: !!id && !!data.session.permission.list(id)?.length,
+      key: `${id}:${activeAssistant()?.id ?? projection.activeMessageID()}`,
+    })
+  })
+  const activityModel = createMemo(() => {
+    // Before a response exists, the session already names the model of the next step.
+    const ref = activeAssistant()?.model ?? props.session.data.info()?.model
+    if (!ref) return
+    return { providerID: ref.providerID, name: providers.all().get(ref.providerID)?.models[ref.id]?.name ?? ref.id }
+  })
   const showWorking = createMemo(() => {
     const id = sessionID()
     if (!id || sessionStatus().type !== "busy") return false
-    if (data.session.permission.list(id)?.length || data.session.form.list(id)?.length) return false
+    if (data.session.form.list(id)?.length) return false
     const active = projection.activeMessageID()
     if (!active) return false
-    const assistant = projection.assistantMessagesByParent().get(active)?.at(-1)
+    const assistant = activeAssistant()
     if (assistant?.retry) return false
     // Pending steers still project under the previous response until delivery.
     // Its error must not hide feedback for a newly submitted prompt.
@@ -657,31 +679,11 @@ function MessageTimelineView(
       !data.session.pending.list(id).some((item) => item.type === "user" && item.delivery === "steer")
     )
       return false
-    const content = assistant?.content.at(-1)
-    if (
-      assistant?.time.completed === undefined &&
-      assistant?.time.streamed === undefined &&
-      content?.type === "text" &&
-      content.text.trim()
-    )
-      return false
-    const background = new Set(props.background.tasks().map((task) => task.id))
+    // A running compaction shows its own status.
     return !projection.rows().some((row) => {
-      if (row.userMessageID !== active) return false
-      if (row._tag === "Thinking") return true
-      if (row._tag === "Notice") {
-        const message = messageByID().get(row.messageID)
-        return message?.type === "compaction" && message.status === "running"
-      }
-      // Used groups keep the fallback regardless of disclosure state.
-      if (row._tag !== "AssistantPart" || row.group.type === "context") return false
-      return (row.group.type === "part" ? [row.group.ref] : row.group.refs).some((ref) => {
-        const content = Timeline.resolveContent(messageByID().get(ref.messageID), ref.partID)
-        if (content?.type !== "tool") return false
-        if (content.state.status === "streaming" || content.state.status === "running") return true
-        const taskID = content.state.metadata?.[content.name === "subagent" ? "sessionID" : "shellID"]
-        return background.has(content.id) || (typeof taskID === "string" && background.has(taskID))
-      })
+      if (row.userMessageID !== active || row._tag !== "Notice") return false
+      const message = messageByID().get(row.messageID)
+      return message?.type === "compaction" && message.status === "running"
     })
   })
   return (
@@ -719,16 +721,14 @@ function MessageTimelineView(
               <div
                 class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}
               >
-                <Show when={showWorking()}>
-                  <div data-component="session-working" role="status">
-                    <TextShimmer text={language.t("session.timeline.working")} active />
-                  </div>
+                <Show when={showWorking() && sessionID()} keyed>
+                  <AssistantStatus activity={activity()} model={activityModel()} />
                 </Show>
                 <Show when={backgroundHintPresence.present()}>
                   <div
                     ref={setBackgroundHintRef}
                     data-component="session-background-hint-row"
-                    class="duration-150 motion-reduce:animate-none"
+                    class="min-w-0 duration-150 motion-reduce:animate-none"
                     classList={{
                       "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
                       "animate-out fade-out fill-mode-forwards":

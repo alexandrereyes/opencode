@@ -253,15 +253,21 @@ test("moves blocking work to the background with Ctrl+B", async ({ page }) => {
   await expect(page.getByText("Called `subagent`", { exact: false })).toHaveCount(0)
   await expect(page.locator('[data-component="background-tool-control"]')).toHaveCount(0)
   const hint = page.getByRole("button", { name: /move running work to the background/i })
+  const working = page.locator('[data-component="session-working"]')
   await expect(hint).toBeVisible()
+  await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", / is delegating task$/)
   await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
   await expect
     .poll(async () => {
-      const [cardBox, hintBox] = await Promise.all([card.boundingBox(), hint.boundingBox()])
-      if (!cardBox || !hintBox) return undefined
+      const [cardBox, workingBox, hintBox] = await Promise.all([
+        card.boundingBox(),
+        working.boundingBox(),
+        hint.boundingBox(),
+      ])
+      if (!cardBox || !workingBox || !hintBox) return undefined
       return {
-        aligned: Math.abs(cardBox.x - hintBox.x) < 2,
-        ordered: cardBox.y < hintBox.y,
+        aligned: Math.abs(cardBox.x - workingBox.x) < 2,
+        ordered: cardBox.y < workingBox.y && workingBox.x + workingBox.width <= hintBox.x,
       }
     })
     .toEqual({ aligned: true, ordered: true })
