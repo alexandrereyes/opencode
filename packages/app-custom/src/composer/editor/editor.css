@@ -161,3 +161,50 @@
     gap: 6px;
   }
 }
+[data-component="composer-editor"] {
+  .composer-md-marker,
+  .composer-md-url {
+    color: var(--v2-text-text-muted);
+  }
+  .composer-md-quote {
+    color: var(--markdown-block-quote);
+  }
+  .composer-md-heading {
+    color: var(--markdown-heading);
+  }
+  .composer-md-list {
+    color: var(--markdown-list-enumeration);
+  }
+  .composer-md-code,
+  .composer-md-fence {
+    background: var(
+      --v2-inline-code-background,
+      color-mix(
+        in oklch,
+        var(--v2-inline-code-text, var(--syntax-string, var(--v2-text-text-code-accent))) 10%,
+        transparent
+      )
+    );
+  }
+  .composer-md-code {
+    color: var(--v2-inline-code-text, var(--syntax-string, var(--v2-text-text-code-accent)));
+    border-radius: 6px;
+  }
+  .composer-md-fence {
+    color: var(--markdown-code);
+  }
+  .composer-md-link {
+    color: var(--markdown-link-text);
+    text-decoration: underline;
+  }
+  .composer-md-attention {
+    color: var(--v2-state-fg-warning);
+    font-weight: 600;
+  }
+  .composer-md-strong {
+    font-weight: 600;
+  }
+  .composer-md-emphasis {
+    font-style: italic;
+  }
+}

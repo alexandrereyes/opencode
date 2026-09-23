@@ -56,6 +56,7 @@ import {
 } from "./codemirror"
 import { isAttachment, normalizeComposerCursor, normalizeComposerPrompt } from "../prompt-parts"
 import { preserveDelayedEnterModifiers } from "./delayed-enter"
+import { composerMarkdown, markdownKeyEdit, markdownLinkEdit } from "./markdown"
 import "../attachments/attachments.css"
 import "./editor.css"
 
@@ -133,6 +134,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
   const editable = () => !props.disabled && !props.readOnly
   const editableCompartment = new Compartment()
   const attributesCompartment = new Compartment()
+  const markdownCompartment = new Compartment()
   const labels = () => ({ app: language.t("promptInput.computerUse"), session: language.t("promptInput.session") })
   const editorAttributes = () => ({
     "data-component": "composer-editor",
@@ -226,6 +228,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       effects: [
         editableCompartment.reconfigure(editorAccess()),
         attributesCompartment.reconfigure(EditorView.contentAttributes.of(editorAttributes())),
+        markdownCompartment.reconfigure(state.mode === "normal" ? composerMarkdown : []),
       ],
     })
   }
@@ -236,6 +239,22 @@ export function ComposerEditor(props: ComposerEditorProps) {
     const releaseDelayedEnter = preserveDelayedEnterModifiers(editorHost)
     const interceptKey = (event: KeyboardEvent) => {
       if (editorView?.composing || event.isComposing || event.keyCode === 229 || event.key === "Dead") return false
+      if (
+        editorView &&
+        editable() &&
+        state.mode === "normal" &&
+        state.popover.type === "closed" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        const edit = markdownKeyEdit(editorView.state, event.key)
+        if (edit) {
+          event.preventDefault()
+          editorView.dispatch(edit)
+          return true
+        }
+      }
       if (props.compact && !props.compact.submit && event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         event.stopPropagation()
@@ -277,6 +296,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
           ...(props.compact ? [Prec.highest(composerEditorCompactTheme)] : []),
           composerReferences.init(() => composerReferencesFromPrompt(prompt, labels())),
           composerReferenceHistory,
+          markdownCompartment.of(state.mode === "normal" ? composerMarkdown : []),
           Prec.highest(keymap.of([{ any: (_view, event) => interceptKey(event) }])),
           keymap.of([...standardKeymap, ...historyKeymap]),
           editableCompartment.of(editorAccess()),
@@ -327,8 +347,20 @@ export function ComposerEditor(props: ComposerEditorProps) {
               props.controller.dispatch({ type: "focus.editor" })
               return false
             },
-            paste: (event) => {
+            paste: (event, current) => {
               props.controller.onPaste(event)
+              if (
+                !event.defaultPrevented &&
+                editable() &&
+                state.mode === "normal" &&
+                !Array.from(event.clipboardData?.items ?? []).some((item) => item.kind === "file")
+              ) {
+                const edit = markdownLinkEdit(current.state, event.clipboardData?.getData("text/plain") ?? "")
+                if (edit) {
+                  event.preventDefault()
+                  current.dispatch(edit)
+                }
+              }
               return event.defaultPrevented
             },
             copy: (event, current) => {

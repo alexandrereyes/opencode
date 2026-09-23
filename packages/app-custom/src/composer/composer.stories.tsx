@@ -407,6 +407,18 @@ export const Snippets = {
 
 export const TextDraft = { render: () => <ComposerStory prompt={text("Explain this change")} /> }
 
+export const MarkdownSource = {
+  render: () => (
+    <ComposerStory
+      prompt={text(
+        "# Review **this change**\n- Keep *source* visible\n2) Read [the docs](https://opencode.ai)\n> Try `inline code` and ***both***\n!!! Check the result\n```ts\nconst plain = '**not emphasis**'\n```",
+      )}
+      label="Select text to wrap it or paste a URL; type a third backtick at line start"
+      accessControls
+    />
+  ),
+}
+
 export const MultilineDraft = {
   render: () => <ComposerStory prompt={text("Review the implementation\nThen run the focused tests")} />,
 }
