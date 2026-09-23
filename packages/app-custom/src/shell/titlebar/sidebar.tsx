@@ -305,6 +305,7 @@ export function SessionSidebar(props: {
         }
         compact={props.compact}
         projectMetadataIcon={props.projectMetadataIcon}
+        showProjectBranch={props.projectMetadataIcon}
         chatMetadataIcon={props.item.chat && props.projectMetadataIcon}
         chat={props.item.chat}
         projectLabel={props.item.chat ? language.t("session.new.chats") : projectLabel(props.item.project)}

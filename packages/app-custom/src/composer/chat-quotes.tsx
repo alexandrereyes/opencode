@@ -58,6 +58,8 @@ export function ChatQuotes(props: {
   })
   onCleanup(() => props.onEditingChange(false))
   const done = () => {
+    const quote = editing()
+    if (quote && !quote.comment.trim()) props.quotes.remove(quote.id)
     flushPersisted()
     props.quotes.editor.close()
     setState("open", false)
