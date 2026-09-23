@@ -320,6 +320,31 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Installation:** none
 - **Result after upstream:** pending
 
+### Rich artifact tabs in the custom browser UI — https://github.com/anomalyco/opencode/pull/49882
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `60ed84ecd193ce09f1343cbea074fc2aa8e4a554`, 2026-09-23
+- **Local change:** `feat(app): port rich artifact tabs and timeline image previews`; `packages/app-custom/src/session/files`, `src/session/screen.tsx`, `src/session/browser`, `src/workspaces/files`, `src/runtime`, `packages/session-ui-custom/src/components/markdown*`, `src/context/markdown.tsx`, and `packages/cli/src/services/web-ui.ts`. Local markdown links and inline path references open existing custom file tabs; mobile opens the existing Files view. Ported media/document/table/font classification and viewers with compact preview/source/download controls rather than upstream's metadata toolbar. Browser-only HTML stays in an opaque-origin sandbox instead of Electron file URL handoff; nested Markdown references resolve relative to the artifact. Preserves custom timeline, side-panel, and mobile layout. The shared web shell CSP minimally allows blob frames, media, and fonts so installed browser previews work; script policy is unchanged.
+- **Tests:** app-custom unit and browser suites pass; session-ui-custom unit suite passes; app-custom and session-ui-custom typechecks and root `bun run check` pass; app-custom production build passes; CLI `bun test test/web-ui.test.ts` passes (2 tests). Playwright real built UI fixtures at 1440×900 and 390×844 verify rich tab opening, nested links, inline-reference keyboard activation, source/preview switching, touch tab closing, sandboxed HTML, and no horizontal viewport overflow.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Timeline image attachment previews in custom UI — https://github.com/anomalyco/opencode/pull/49111
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `24dff6929dce6ed4a90f53e65dbd80df5f014e83`, 2026-09-23
+- **Local change:** `feat(app): port rich artifact tabs and timeline image previews`; `packages/session-ui-custom/src/components/image-preview.tsx`, `src/components/markdown.tsx`, `src/components/markdown.css`, `src/components/message-part.css`, `src/tools/tool-renderer.tsx`, and component fixtures/tests. Reuses the existing `@opencode/ui-custom/image-preview` attachment dialog for Markdown and Read-tool images, including keyboard activation and touch-close controls. Custom message attachment behavior is preserved.
+- **Tests:** session-ui-custom `bun run test` passes (221 tests); app-custom Playwright built UI tests at 1440×900 and 390×844 pass for Markdown and Read-tool image preview, keyboard activation, Escape, and close control; both custom package typechecks and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+_None recorded yet. The register began with this document, without a retroactive
+audit (see above)._
+
 ## Resolved entries
 
 _None._

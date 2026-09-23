@@ -5,7 +5,8 @@ import { createSimpleContext } from "@opencode/ui-custom/context"
 import { showToast } from "@/shell/notifications/toast"
 import { useParams } from "@solidjs/router"
 import { base64Encode } from "@opencode/util/encode"
-import { getFilename } from "@opencode/util/path"
+import { getDirectory, getFilename } from "@opencode/util/path"
+import { fileContentFromBytes } from "./artifact"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useLayout } from "@/shell/state/layout"
@@ -186,13 +187,16 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       setLoading(file)
 
       const promise = serverSDK.api.file
-        .read({ path: file, location: { directory } })
+        .read(
+          path.absolute(file)
+            ? { path: getFilename(file), location: { directory: getDirectory(file) } }
+            : { path: file, location: { directory } },
+        )
         .then((data) => {
           if (scope() !== directory) return
-          const content = { type: "text" as const, content: new TextDecoder().decode(data) }
+          const content = fileContentFromBytes(file, data)
           setLoaded(file, content)
 
-          if (!content) return
           touchFileContent(file, approxBytes(content))
           evictContent(new Set([file]))
         })
@@ -281,6 +285,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     return {
       ready: () => view().ready(),
       normalize: path.normalize,
+      absolute: path.absolute,
       tab: path.tab,
       pathFromTab: path.pathFromTab,
       tree: {

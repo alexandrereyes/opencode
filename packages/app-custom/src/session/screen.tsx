@@ -40,6 +40,8 @@ import { SessionReviewToggle } from "./header/session-header-actions"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createSessionBrowser } from "./browser/model"
 import { createTimelineCache } from "./timeline/cache"
+import { ArtifactMarkdownProvider, ArtifactOpenerProvider, useArtifactOpener } from "./files/open-artifact"
+import { useBrowserAttachments } from "./browser/attachments"
 
 const SessionMobileFiles = lazy(async () => {
   const { SessionMobileFiles } = await import("./files/session-mobile-files")
@@ -47,8 +49,24 @@ const SessionMobileFiles = lazy(async () => {
 })
 
 export function SessionScreen(props: { session: SessionModel }) {
+  return (
+    <ArtifactOpenerProvider>
+      <ArtifactMarkdownProvider>
+        <SessionScreenContent session={props.session} />
+      </ArtifactMarkdownProvider>
+    </ArtifactOpenerProvider>
+  )
+}
+
+function SessionScreenContent(props: { session: SessionModel }) {
+  const artifacts = useArtifactOpener()
+  const attachments = useBrowserAttachments()
   const session = props.session
   const server = useServer()
+  createEffect(() => {
+    const sessionID = session.identity.sessionID()
+    if (sessionID) onCleanup(attachments.onPreview(server, sessionID, (path) => void artifacts.open(path)))
+  })
   const detailsProject = createMemo(() => {
     const info = session.data.info()
     return info ? projectForSession(info, server.ctx.sync.data.project) : undefined
@@ -179,6 +197,17 @@ export function SessionScreen(props: { session: SessionModel }) {
     return key
   })
   const review = createSessionReview({ session, screen, deferRender: () => store.deferRender })
+  createEffect(
+    on(
+      artifacts.opened,
+      () => {
+        if (isDesktop()) return
+        session.layout.view().terminal.close()
+        review.mobile.setTab("files")
+      },
+      { defer: true },
+    ),
+  )
   const mobileView = createMemo(() => (screen.terminal.open() ? "terminal" : review.mobile.tab()))
   const conversationVisible = createMemo(() => isDesktop() || mobileView() === "session")
   createEffect(() => {

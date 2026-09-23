@@ -3,6 +3,13 @@ import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 export const dict = {
   "prompt.toast.uploading.cancel": "Cancel upload",
   "prompt.toast.uploading.percent": "{{percent}}%",
+  "file.view.preview": "Preview",
+  "file.view.source": "Source",
+  "file.view.download": "Download",
+  "file.view.zoom": "Toggle actual image size",
+  "file.view.binary": "This file cannot be previewed, is too large, or uses an unsupported format.",
+  "file.view.table.truncated": "Showing {{shown}} of {{total}} rows",
+  "file.view.fontSample": "The quick brown fox jumps over the lazy dog.",
   "session.revert.planning": "Checking subagents before updating the conversation…",
   "session.revert.subagents.one": "Updating subagent: {{completed}} of {{count}}…",
   "session.revert.subagents.other": "Updating subagents: {{completed}} of {{count}}…",

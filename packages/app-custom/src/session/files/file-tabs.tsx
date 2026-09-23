@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -11,7 +11,8 @@ import { LineCommentOverflowIcon } from "@opencode/ui-custom/line-comment"
 import { Menu } from "@opencode/ui-custom/menu"
 import { Tabs } from "@opencode/ui-custom/tabs"
 import { ScrollView } from "@opencode/ui-custom/scroll-view"
-import { showToast } from "@/shell/notifications/toast"
+import { artifactKind } from "@/workspaces/files/artifact"
+import { ArtifactView } from "./artifact-view"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/workspaces/files/model"
 import { useComments } from "@/composer/comments"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -433,39 +434,38 @@ export function SessionFileView(props: SessionFileViewProps) {
         }}
         search={search}
         class="select-text"
-        media={{
-          mode: "auto",
-          path: path(),
-          current: state()?.content,
-          onLoad: scrollSync.queueRestore,
-          onError: (args: { kind: "image" | "audio" | "svg" }) => {
-            if (args.kind !== "svg") return
-            showToast({
-              variant: "error",
-              title: language.t("toast.file.loadFailed.title"),
-            })
-          },
-        }}
+        media={{ mode: "off" }}
       />
     </div>
   )
 
+  const codeView = (source: string) => (
+    <ScrollView class="min-h-0 flex-1" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll}>
+      {renderFile(source)}
+    </ScrollView>
+  )
+
   const content = () => (
-    <div class="mt-3 relative h-full min-h-0">
-      <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll}>
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}…</div>
-          </Match>
-          <Match when={state()?.notFound ? state()?.name : undefined}>
-            {(name) => (
-              <div class="px-6 py-4 text-text-weak">{language.t("file.error.notFound", { name: name() })}</div>
-            )}
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+    <div class="relative h-full min-h-0 flex flex-col">
+      <Switch>
+        <Match when={state()?.loaded ? state()?.content : undefined}>
+          {(value) => (
+            <Show
+              when={value().type === "binary" || artifactKind(path() ?? "") !== "text"}
+              fallback={codeView(contents())}
+            >
+              <ArtifactView path={path() ?? ""} content={value()} source={codeView(contents())} />
+            </Show>
+          )}
+        </Match>
+        <Match when={state()?.loading}>
+          <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}…</div>
+        </Match>
+        <Match when={state()?.notFound ? state()?.name : undefined}>
+          {(name) => <div class="px-6 py-4 text-text-weak">{language.t("file.error.notFound", { name: name() })}</div>}
+        </Match>
+        <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+      </Switch>
     </div>
   )
 

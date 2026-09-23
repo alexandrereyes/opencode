@@ -101,6 +101,11 @@
     text-underline-offset: 2px;
   }
 
+  a[data-local-link],
+  &[data-local-links] :not(pre) > code[data-inline-code-kind="path"]:not(a > code) {
+    cursor: pointer;
+  }
+
   /* Lists */
   ul,
   ol {
@@ -329,6 +334,7 @@
 
   /* Images */
   img {
+    cursor: zoom-in;
     max-width: 100%;
     height: auto;
     border-radius: 4px;
