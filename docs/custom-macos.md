@@ -271,6 +271,23 @@ stale reads, execution completion/interruption, and viewport/unmount cancellatio
 browser Solid runtime. Browser verification
 is prepared in `e2e/regression/agent-dashboard.spec.ts` for an isolated reviewer-run server.
 
+## New session layout
+
+The new-session screen shows a compact wordmark (at most 240px wide) above the location
+selectors and the composer. The project selector, followed by the worktree selector, sits
+above the composer's left edge. The project list is searchable and marks the current choice.
+Each project uses its custom image, or a folder tinted with the project color from the sidebar;
+projects without a color use a muted folder. The worktree menu lists **Project root** with the
+root checkout's branch, then **Worktrees**, with **New** to create one on submit. Worktrees
+appear by branch name, using the folder name when the branch is unavailable. The branches
+come from one `custom.worktrees` `branches` RPC (`git worktree list`), so opening the menu
+does not boot each worktree's Location. Choosing **New** keeps the **from branch** base selector.
+
+Both the new-session and session composers put the add menu on the left. The thinking
+variant, model, and agent follow on the right, before the send button. The default variant
+stays visible but muted. Other variants use the info color. The agent uses its configured
+color, the built-in agent tone, or a stable palette color.
+
 ## Mobile composer
 
 On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submits the

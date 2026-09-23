@@ -10,6 +10,10 @@ Move the custom inspection/deletion workflow to the existing custom plugin:
 - RPC ID `custom.worktrees`.
 - `inspect({ directory }) -> Inspection`.
 - `delete(DeleteInput) -> RemoveResult`.
+- `branches({}) -> BranchEntry[]`: every checkout of the Location's repository
+  with its branch (absent when detached), from one `git worktree list` call.
+  The new-session worktree picker uses it for labels without booting each
+  worktree's Location; non-Git Locations return an empty list.
 - Preserve the existing custom `Inspection`, `DeleteInput`, `CleanupResult`,
   and `RemoveResult` fields/optionality, including identity, branch, remote,
   dirty state, force, optional branch deletion, and partial cleanup results.

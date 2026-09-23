@@ -64,11 +64,6 @@
   );
 }
 
-[data-component="composer"]:not(:hover) .composer-variant-default:not(:focus-visible, [data-expanded]) {
-  opacity: 0;
-  pointer-events: none;
-}
-
 [data-color-scheme="dark"] [data-component="composer"][data-dock-border-underlay="true"],
 [data-color-scheme="dark"] [data-component="session-composer-dock"] [data-component="composer"],
 [data-color-scheme="dark"] [data-component="new-session"] [data-component="composer"] {

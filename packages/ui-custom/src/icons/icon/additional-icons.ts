@@ -109,6 +109,9 @@ export const additionalIcons = {
   cube: `<path d="M10 2.5L16.5 6.25V13.75L10 17.5L3.5 13.75V6.25L10 2.5Z" stroke="currentColor"/><path d="M10 10L16.5 6.25M10 10V17.5M10 10L3.5 6.25" stroke="currentColor"/>`,
   "post-skill": `<rect x="2.5" y="3.5" width="15" height="13" rx="1.5" stroke="currentColor"/><path d="M5.5 7.5H10.5M5.5 10.5H14.5" stroke="currentColor"/>`,
   "arrow-undo-down": `<path d="M4.08333 11.0859L1.75 8.7526L4.08333 6.41927M2.33333 8.7526L12.5417 8.7526L12.5417 3.21094L7 3.21094" stroke="currentColor" stroke-width="1" stroke-linecap="square"/>`,
+  "circle-plus": `<circle cx="10" cy="10" r="7.5" stroke="currentColor"/><path d="M10 6.5V13.5M6.5 10H13.5" stroke="currentColor" stroke-linecap="round"/>`,
+  agent: `<circle cx="10" cy="10" r="7.5" stroke="currentColor"/><circle cx="7.5" cy="8.5" r="0.75" fill="currentColor"/><circle cx="12.5" cy="8.5" r="0.75" fill="currentColor"/><path d="M7 11.75C7.6 12.8 8.7 13.5 10 13.5C11.3 13.5 12.4 12.8 13 11.75" stroke="currentColor" stroke-linecap="round"/>`,
+  send: `<path d="M3.5 3.25L17 10L3.5 16.75L5.75 10L3.5 3.25Z" stroke="currentColor" stroke-linejoin="round"/><path d="M5.75 10H10.5" stroke="currentColor" stroke-linecap="round"/>`,
 }
 
 export function additionalIconViewBox(name: keyof typeof additionalIcons) {

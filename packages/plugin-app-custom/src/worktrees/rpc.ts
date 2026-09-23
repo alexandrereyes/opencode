@@ -50,6 +50,12 @@ export const RemoveResult = Schema.Struct({
   remoteBranch: optional(CleanupResult),
 }).annotate({ identifier: "Worktrees.RemoveResult" })
 
+export interface BranchEntry extends Schema.Schema.Type<typeof BranchEntry> {}
+export const BranchEntry = Schema.Struct({
+  directory: AbsolutePath,
+  branch: optional(Schema.String),
+}).annotate({ identifier: "Worktrees.BranchEntry" })
+
 const OperationFailed = Schema.Struct({
   message: Schema.String,
   forceRequired: optional(Schema.Boolean),
@@ -68,6 +74,10 @@ export const Definition = Rpc.define({
       input: Schema.toStandardSchemaV1(DeleteInput),
       output: Schema.toStandardSchemaV1(RemoveResult),
       errors: { operation_failed: Schema.toStandardSchemaV1(OperationFailed) },
+    },
+    branches: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({})),
+      output: Schema.toStandardSchemaV1(Schema.Array(BranchEntry)),
     },
   },
   events: {},

@@ -22,7 +22,6 @@ import { FileIcon } from "@opencode/ui-custom/file-icon"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
-import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { useI18n } from "@opencode/ui-custom/context/i18n"
 import { Button } from "@opencode/ui-custom/button"
 import { Keybind } from "@opencode/ui-custom/keybind"
@@ -586,24 +585,14 @@ export function ComposerEditor(props: ComposerEditorProps) {
               data-slot="composer-controls"
               data-overflow-start={overflow.start}
               data-overflow-end={overflow.end}
-              class="ms-1 me-3 h-full min-w-0 flex-1 overflow-x-auto overscroll-x-contain no-scrollbar"
+              class="ms-3 me-3 h-full min-w-0 flex-1 overflow-x-auto overscroll-x-contain no-scrollbar"
               onScroll={updateOverflow}
               aria-hidden={state.mode === "shell"}
               inert={state.mode === "shell" ? true : undefined}
               style={buttons()}
             >
-              <div ref={controlsContent} class="flex h-full w-max min-w-full items-center gap-1">
-                <Show when={view.agent} keyed>
-                  {(control) => (
-                    <ComposerEditorConfiguredSelect
-                      title={i18n.t("ui.promptInput.chooseAgent")}
-                      keybind={["Mod", "."]}
-                      control={control}
-                    />
-                  )}
-                </Show>
+              <div ref={controlsContent} class="flex h-full w-max min-w-full items-center justify-end gap-3">
                 <Show when={props.modelControlsVisible ?? true}>
-                  {props.modelControl}
                   <Show when={view.variant} keyed>
                     {(control) => (
                       <Show when={control.options().length > 1}>
@@ -611,11 +600,25 @@ export function ComposerEditor(props: ComposerEditorProps) {
                           title={i18n.t("ui.promptInput.chooseVariant")}
                           keybind={["Shift", "Mod", "D"]}
                           control={control}
-                          class={control.current() === "default" ? "composer-variant-default" : undefined}
+                          icon="brain"
+                          tone={control.current() === "default" ? undefined : "var(--v2-state-fg-info)"}
                         />
                       </Show>
                     )}
                   </Show>
+                  {props.modelControl}
+                </Show>
+                <Show when={view.agent} keyed>
+                  {(control) => (
+                    <ComposerEditorConfiguredSelect
+                      title={i18n.t("ui.promptInput.chooseAgent")}
+                      keybind={["Mod", "."]}
+                      control={control}
+                      icon="agent"
+                      tone={composerAgentTone(control.options().find((option) => option.id === control.current()))}
+                      optionTone={composerAgentTone}
+                    />
+                  )}
                 </Show>
               </div>
             </div>
@@ -818,7 +821,7 @@ export function ComposerEditorAddMenu(props: {
           as={IconButton}
           data-action="composer-attach"
           type="button"
-          icon={<Icon name="plus" />}
+          icon={<Icon name="circle-plus" size="large" />}
           variant="ghost-muted"
           size="large"
           disabled={props.disabled}
@@ -853,34 +856,38 @@ function ComposerEditorConfiguredSelect(props: {
   title: string
   keybind?: string[]
   control: ComposerSelectControl
-  model?: boolean
+  icon: string
+  tone?: string
+  optionTone?: (option: ComposerOption) => string | undefined
   class?: string
 }) {
-  const current = () => props.control.current()
-  const providerID = () => props.control.options().find((option) => option.id === current())?.providerID
   return (
     <ComposerEditorSelect
       title={props.title}
       class={props.class}
       keybind={props.control.keybind?.() ?? props.keybind}
       options={props.control.options()}
-      current={current()}
-      currentIcon={
-        <Show when={props.model && providerID()}>
-          <ProviderIcon id={providerID()!} class="size-4 shrink-0 opacity-60" />
-        </Show>
-      }
+      current={props.control.current()}
+      icon={props.icon}
+      tone={props.tone}
+      optionTone={props.optionTone}
       onSelect={props.control.onSelect}
     />
   )
 }
+
+/** Borderless composer control: a leading icon and label, colored by `tone` when set. */
+export const composerControlClass =
+  "flex h-8 min-w-0 max-w-[220px] shrink-0 items-center gap-1.5 rounded-md px-1 text-[13px] font-[500] leading-[var(--line-height-compact)] tracking-[-0.04px] text-v2-text-text-base outline-none transition-opacity duration-150 hover:opacity-70 focus-visible:bg-v2-overlay-simple-overlay-hover disabled:opacity-50 data-[expanded]:opacity-70"
 
 export function ComposerEditorSelect(props: {
   title: string
   keybind?: string[]
   options: ComposerOption[]
   current: string
-  currentIcon?: JSX.Element
+  icon: string
+  tone?: string
+  optionTone?: (option: ComposerOption) => string | undefined
   class?: string
   onOpenChange?: (open: boolean) => void
   onSelect: (id: string) => void
@@ -895,20 +902,16 @@ export function ComposerEditorSelect(props: {
         </>
       }
     >
-      <Menu gutter={6} modal={false} placement="top-start" onOpenChange={props.onOpenChange}>
+      <Menu gutter={6} modal={false} placement="top-end" onOpenChange={props.onOpenChange}>
         <Menu.Trigger
-          as={Button}
-          variant="ghost-muted"
-          size="normal"
-          class={`max-w-[220px] justify-start ![font-weight:440] ${props.class ?? ""}`}
+          class={`${composerControlClass} ${props.class ?? ""}`}
+          classList={{ "!text-v2-text-text-muted": !props.tone }}
+          style={props.tone ? { color: props.tone } : undefined}
           aria-label={props.title}
         >
-          {props.currentIcon}
-          <span class="truncate capitalize leading-5">
+          <Icon name={props.icon} class="shrink-0" classList={{ "text-v2-icon-icon-muted": !props.tone }} />
+          <span class="truncate capitalize">
             {props.options.find((option) => option.id === props.current)?.label ?? props.current}
-          </span>
-          <span class="-ms-0.5 -me-1 flex shrink-0">
-            <Icon name="chevron-down" />
           </span>
         </Menu.Trigger>
         <Menu.Portal>
@@ -917,6 +920,11 @@ export function ComposerEditorSelect(props: {
               <For each={props.options}>
                 {(option) => (
                   <Menu.RadioItem value={option.id} class="capitalize" closeOnSelect>
+                    <Show when={props.optionTone?.(option)}>
+                      {(tone) => (
+                        <span class="size-1.5 shrink-0 rounded-full" style={{ background: tone() }} aria-hidden="true" />
+                      )}
+                    </Show>
                     {option.label}
                   </Menu.RadioItem>
                 )}
@@ -927,6 +935,42 @@ export function ComposerEditorSelect(props: {
       </Menu>
     </Tooltip>
   )
+}
+
+const agentTones: Record<string, string> = {
+  build: "var(--v2-agent-build-solid)",
+  explore: "var(--v2-agent-explore-solid)",
+  plan: "var(--v2-agent-plan-solid)",
+  review: "var(--v2-agent-review-solid)",
+  writer: "var(--v2-agent-writer-solid)",
+}
+
+const agentThemeTones: Record<string, string> = {
+  primary: "var(--v2-text-text-accent)",
+  secondary: "var(--v2-text-text-muted)",
+  accent: "var(--v2-icon-icon-accent)",
+  success: "var(--v2-state-fg-success)",
+  warning: "var(--v2-state-fg-warning)",
+  error: "var(--v2-state-fg-danger)",
+  info: "var(--v2-state-fg-info)",
+}
+
+const agentPalette = [
+  "var(--v2-agent-build-solid)",
+  "var(--v2-agent-explore-solid)",
+  "var(--v2-agent-plan-solid)",
+  "var(--v2-agent-review-solid)",
+  "var(--v2-agent-writer-solid)",
+]
+
+/** Agent identity color: the configured color, the built-in agent tone, or a stable palette pick. */
+export function composerAgentTone(option?: ComposerOption) {
+  if (!option) return undefined
+  if (option.color) return agentThemeTones[option.color] ?? option.color
+  const key = option.id.toLowerCase()
+  if (agentTones[key]) return agentTones[key]
+  const hash = Array.from(key).reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
+  return agentPalette[hash % agentPalette.length]
 }
 
 export function ComposerEditorPopover(props: {
@@ -1171,9 +1215,14 @@ export function ComposerEditorSubmitButton(props: {
         type="button"
         disabled={!props.stopping && props.disabled}
         tabIndex={props.mode === "normal" ? undefined : -1}
-        icon={<Icon name={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"} />}
-        variant="submit"
-        class="size-7 rounded-md p-[6px]"
+        icon={
+          <Icon
+            name={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "send"}
+            size={props.stopping || props.mode === "shell" ? "normal" : "large"}
+          />
+        }
+        variant={props.stopping ? "submit" : "ghost"}
+        class="size-8 rounded-md"
         aria-label={props.stopping ? props.stopLabel : props.sendLabel}
         onClick={(event) => {
           event.preventDefault()

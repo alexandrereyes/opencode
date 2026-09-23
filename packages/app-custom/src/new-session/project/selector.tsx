@@ -11,13 +11,13 @@ import {
 import { createStore } from "solid-js/store"
 import { Menu } from "@opencode/ui-custom/menu"
 import { Icon } from "@opencode/ui-custom/icon"
-import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
 import { useLanguage } from "@/runtime/i18n/language"
 import { displayName, getProjectAvatarSource } from "@/shell/layout/helpers"
 import { pathKey } from "@/workspaces/path-key"
 import { handleDocumentSearchKeydown } from "@/shell/commands/search-keydown"
 import { createMenuDismissController } from "@/shell/commands/menu-dismiss"
+import { NEW_SESSION_TRIGGER } from "@/new-session/layout"
 
 export type PromptProject = {
   name?: string
@@ -331,15 +331,15 @@ export function PromptProjectSelector(props: {
           data-mobile-menu="session-location"
           ref={contentRef}
           id="prompt-project-menu"
-          class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none [&[data-closed]]:!animate-none"
+          class="w-[288px] max-w-[calc(100vw-32px)] overflow-hidden !rounded-lg border-0 !p-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none [&[data-closed]]:!animate-none"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onPointerDownOutside={dismiss.preventTriggerRestore}
           onFocusOutside={dismiss.preventTriggerRestore}
           onCloseAutoFocus={dismiss.onCloseAutoFocus}
         >
           <div class="flex flex-col">
-            <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
-              <Icon name="magnifying-glass" size="small" class="shrink-0" />
+            <div class="flex h-9 items-center gap-2 border-b border-v2-border-border-muted pl-3 pr-2.5 text-v2-icon-icon-muted">
+              <Icon name="magnifying-glass" class="shrink-0" />
               <input
                 ref={(el) => props.controller.setSearchRef(el)}
                 value={props.controller.search()}
@@ -395,7 +395,7 @@ export function PromptProjectSelector(props: {
                 </button>
               </Show>
             </div>
-            <div class="max-h-[224px] overflow-y-auto">
+            <div class="max-h-[min(420px,60dvh)] overflow-y-auto p-1">
               <Show
                 when={props.controller.servers().length > 1}
                 fallback={
@@ -444,7 +444,7 @@ export function PromptProjectSelector(props: {
             </div>
           </div>
           <div class="h-px bg-v2-border-border-muted" />
-          <div class="flex flex-col">
+          <div class="flex flex-col p-1">
             <Show
               when={props.controller.servers().length > 1}
               fallback={
@@ -459,7 +459,7 @@ export function PromptProjectSelector(props: {
                 <Menu.SubTrigger
                   id={props.controller.actionKey()}
                   data-option-key={props.controller.actionKey()}
-                  class={projectActionClass}
+                  class={projectRowClass}
                   classList={{
                     "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === props.controller.actionKey(),
                   }}
@@ -509,13 +509,8 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
       data-action="prompt-project"
       type="button"
       disabled={local.controller.pending()}
-      class="flex h-7 min-w-0 max-w-[203px] items-center gap-1.5 rounded-sm px-1.5 transition-colors focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-      classList={{
-        ...local.classList,
-        "hover:bg-v2-overlay-simple-overlay-hover": !local.controller.open(),
-        "bg-v2-overlay-simple-overlay-pressed": local.controller.open(),
-        "text-v2-text-text-muted": local.controller.open(),
-      }}
+      class={`${NEW_SESSION_TRIGGER} max-w-[240px]`}
+      classList={{ ...local.classList, "opacity-70": local.controller.open() }}
       onClick={local.onClick ?? (() => local.controller.setOpen(true))}
       onKeyDown={(event) => {
         if (!local.controller.open() && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
@@ -528,22 +523,13 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
     >
       <Show
         when={!local.controller.chat()}
-        fallback={<Icon name="speech-bubble" size="small" class="shrink-0 text-v2-icon-icon-muted" />}
+        fallback={<Icon name="speech-bubble" class="shrink-0 text-v2-icon-icon-muted" />}
       >
-        <Show
-          when={project()}
-          fallback={<Icon name="folder-add-left" size="small" class="shrink-0 text-v2-icon-icon-muted" />}
-        >
-          {(item) => (
-            <ProjectAvatar
-              fallback={displayName(item())}
-              src={getProjectAvatarSource(item().id, item().icon)}
-              variant={getProjectAvatarVariant(item().icon?.color)}
-            />
-          )}
+        <Show when={project()} fallback={<Icon name="folder-add-left" class="shrink-0 text-v2-icon-icon-muted" />}>
+          {(item) => <ProjectGlyph project={item()} />}
         </Show>
       </Show>
-      <span class="min-w-0 truncate leading-5">
+      <span class="min-w-0 truncate">
         {local.controller.chat()
           ? local.controller.labels.chats()
           : project()
@@ -555,20 +541,60 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
   )
 }
 
+/** A folder tinted with the project's color, or its custom image, matching the sidebar's project identity. */
+function ProjectGlyph(props: { project: PromptProject }) {
+  const src = () => getProjectAvatarSource(props.project.id, props.project.icon)
+  const variant = () => (props.project.icon?.color ? getProjectAvatarVariant(props.project.icon.color) : undefined)
+  return (
+    <Show
+      when={src()}
+      fallback={
+        <Icon
+          name="folder"
+          data-component="prompt-project-glyph"
+          class="shrink-0"
+          classList={{
+            "text-v2-icon-icon-muted": !variant(),
+            "text-[var(--glyph-light)] [[data-color-scheme=dark]_&]:text-[var(--glyph-dark)]": !!variant(),
+          }}
+          style={
+            variant()
+              ? { "--glyph-light": `var(--v2-avatar-bg-${variant()})`, "--glyph-dark": `var(--v2-avatar-border-${variant()})` }
+              : undefined
+          }
+        />
+      }
+    >
+      {(value) => (
+        <img
+          src={value()}
+          alt=""
+          draggable={false}
+          data-component="prompt-project-glyph"
+          class="size-4 shrink-0 rounded-[3px] object-contain"
+        />
+      )}
+    </Show>
+  )
+}
+
+const projectRowClass =
+  "!h-8 !gap-2 !rounded-md !px-2 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
+
 function ChatItem(props: { controller: PromptProjectController }) {
   return (
     <Menu.RadioItem
       id={chatKey}
       value={chatKey}
       data-option-key={chatKey}
-      class="h-7 gap-2 rounded-sm px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
+      class={projectRowClass}
       classList={{ "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === chatKey }}
       closeOnSelect
       disabled={props.controller.pending()}
       onMouseEnter={() => props.controller.setActive(chatKey)}
       onSelect={props.controller.selectChat}
     >
-      <Icon name="speech-bubble" size="small" />
+      <Icon name="speech-bubble" class="shrink-0 text-v2-icon-icon-muted" />
       <span class="min-w-0 truncate leading-5">{props.controller.labels.chats()}</span>
     </Menu.RadioItem>
   )
@@ -585,7 +611,8 @@ function ProjectItem(props: {
       id={key()}
       value={key()}
       data-option-key={key()}
-      class="h-7 gap-2 rounded-sm px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
+      title={props.project.worktree}
+      class={projectRowClass}
       classList={{ "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === key() }}
       closeOnSelect
       onMouseEnter={() => {
@@ -594,18 +621,11 @@ function ProjectItem(props: {
       }}
       onSelect={() => props.onSelect(props.project)}
     >
-      <ProjectAvatar
-        fallback={displayName(props.project)}
-        src={getProjectAvatarSource(props.project.id, props.project.icon)}
-        variant={getProjectAvatarVariant(props.project.icon?.color)}
-      />
+      <ProjectGlyph project={props.project} />
       <span class="min-w-0 truncate leading-5">{displayName(props.project)}</span>
     </Menu.RadioItem>
   )
 }
-
-const projectActionClass =
-  "h-7 gap-2 rounded-sm px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
 
 function ProjectAction(props: {
   server?: string
@@ -617,7 +637,7 @@ function ProjectAction(props: {
     <Menu.Item
       id={key()}
       data-option-key={key()}
-      class="h-7 gap-2 rounded-sm px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base [font-family:var(--v2-font-family-sans)] data-[highlighted]:!bg-v2-overlay-simple-overlay-hover"
+      class={projectRowClass}
       classList={{ "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === key() }}
       onMouseEnter={() => {
         props.controller.setActive(key())
@@ -625,7 +645,7 @@ function ProjectAction(props: {
       }}
       onSelect={() => props.onSelect(props.server)}
     >
-      <Icon name="plus" size="small" />
+      <Icon name="plus" class="shrink-0 text-v2-icon-icon-muted" />
       <span class="min-w-0 truncate leading-5">{props.controller.labels.add()}</span>
     </Menu.Item>
   )
@@ -633,7 +653,7 @@ function ProjectAction(props: {
 
 function ServerAction(props: { server: { key: string; name: string }; onSelect: (server: string) => void }) {
   return (
-    <Menu.Item class={projectActionClass} onSelect={() => props.onSelect(props.server.key)}>
+    <Menu.Item class={projectRowClass} onSelect={() => props.onSelect(props.server.key)}>
       <span class="min-w-0 flex-1 truncate leading-5">{props.server.name}</span>
     </Menu.Item>
   )

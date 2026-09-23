@@ -15,6 +15,7 @@ export interface MockServerConfig {
   mcpServers?: unknown[]
   appMentions?: unknown[]
   home?: string
+  worktreeBranches?: { directory: string; branch?: string }[]
   snippets?: unknown[]
   skills?: unknown[]
   subscriptions?: unknown
@@ -317,6 +318,9 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
                   }),
               },
             })
+          }
+          if (ctx.params.rpcID === "custom.worktrees" && ctx.params.method === "branches") {
+            return Effect.succeed({ output: config.worktreeBranches ?? [] })
           }
           if (ctx.params.rpcID === "custom.directories" && ctx.params.method === "home") {
             return Effect.succeed({ output: { path: config.home ?? "" } })
