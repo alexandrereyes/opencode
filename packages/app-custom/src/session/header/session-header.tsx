@@ -9,7 +9,7 @@ import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { useCommand } from "@/shell/commands/command"
 
-export function SessionHeader(props: { reserveReviewToggle: boolean }) {
+export function SessionHeader(props: { reserveReviewToggle: boolean; summaryAvailable?: boolean }) {
   const language = useLanguage()
   const settings = useSettings()
   const command = useCommand()
@@ -19,7 +19,7 @@ export function SessionHeader(props: { reserveReviewToggle: boolean }) {
   return (
     <>
       <TitlebarRight>
-        <Show when={isDesktop() && settings.visibility.status()}>
+        <Show when={isDesktop() && settings.visibility.status() && !props.summaryAvailable}>
           <Tooltip appearance="standard" placement="bottom" value={language.t("status.popover.trigger")}>
             <StatusPopover />
           </Tooltip>

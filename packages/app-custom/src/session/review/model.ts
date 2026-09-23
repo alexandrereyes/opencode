@@ -398,6 +398,7 @@ export function createSessionReview(input: {
     count,
     deferRender: input.deferRender,
     details: {
+      open: () => state.detailsOpen,
       diffs: () => (detailsQuery.isFetched ? (detailsQuery.data ?? []) : undefined),
       setOpen: (open: boolean) => setState("detailsOpen", open),
     },
