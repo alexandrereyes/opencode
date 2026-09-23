@@ -113,9 +113,11 @@ export function SessionMobileViewTabs(props: {
                 {language.t("session.summary.title")}
               </Menu.Item>
             </Show>
-            <Menu.Item onSelect={() => setStore({ pending: "status", menu: false })}>
-              {language.t("status.popover.trigger")}
-            </Menu.Item>
+            <Show when={!props.details}>
+              <Menu.Item onSelect={() => setStore({ pending: "status", menu: false })}>
+                {language.t("status.popover.trigger")}
+              </Menu.Item>
+            </Show>
           </Menu.Content>
         </Menu.Portal>
       </Menu>

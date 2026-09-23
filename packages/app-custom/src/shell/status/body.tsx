@@ -12,15 +12,22 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { pluginLabel } from "@/providers/catalog/plugin"
 import { showToast } from "@/shell/notifications/toast"
 import { configuredLanguageServers } from "@/settings/workspaces/project-lsp"
+import { serviceStatus } from "./service-status"
 
 type Service = "mcp" | "plugins" | "skills" | "lsp"
 
-export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean }) {
+export function StatusPopoverBody(props: {
+  shown: boolean
+  embedded?: boolean
+  compact?: boolean
+  directory?: string
+}) {
   const data = useData()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
   const language = useLanguage()
-  const directory = () => sdk().directory
+  const directory = () => props.directory ?? sdk().directory
+  const [state, setState] = createStore({ service: "" })
 
   const toggleMcp = useMcpToggle(directory)
   const [mcpLoad, mcpActions] = createResource(
@@ -83,6 +90,27 @@ export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean })
 
   const tabLabel = (count: number, key: "mcp" | "plugins" | "skills" | "lsp") =>
     `${count > 0 ? `${count} ` : ""}${language.t(`session.summary.${key}`)}`
+  const status = (service: Service) => {
+    if (service === "mcp")
+      return serviceStatus(
+        mcpServers().map((item) => item.status.status),
+        mcpLoad.error,
+      )
+    if (service === "plugins")
+      return serviceStatus(
+        plugins().map((item) => item.status),
+        pluginList.error,
+      )
+    if (service === "skills")
+      return serviceStatus(
+        skills().map(() => "active"),
+        skillList.error,
+      )
+    return serviceStatus(
+      lsps().servers.map((item) => (item.disabled ? "disabled" : "active")),
+      configList.error,
+    )
+  }
 
   return (
     <div
@@ -94,24 +122,67 @@ export function StatusPopoverBody(props: { shown: boolean; embedded?: boolean })
     >
       <Tabs
         aria-label={language.t("status.popover.ariaLabel")}
-        class="tabs bg-background-strong rounded-xl overflow-hidden"
+        class={
+          props.compact
+            ? "tabs overflow-hidden w-full min-w-0"
+            : "tabs bg-background-strong rounded-xl overflow-hidden w-full min-w-0"
+        }
         data-active="mcp"
         defaultValue="mcp"
+        value={props.compact ? state.service : undefined}
+        activationMode={props.compact ? "manual" : "automatic"}
         variant="underline"
       >
-        <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-3 h-10 overflow-x-auto">
-          <Tabs.Trigger value="mcp" data-slot="tab" class="text-12-regular shrink-0">
-            {tabLabel(mcpConnected(), "mcp")}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular shrink-0">
-            {tabLabel(plugins().length, "plugins")}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="skills" data-slot="tab" class="text-12-regular shrink-0">
-            {tabLabel(skills().length, "skills")}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="lsp" data-slot="tab" class="text-12-regular shrink-0">
-            {tabLabel(lsps().servers.length, "lsp")}
-          </Tabs.Trigger>
+        <Tabs.List
+          data-slot="tablist"
+          class={
+            props.compact
+              ? "bg-transparent !border-b-0 !px-2 !gap-2 !h-9 overflow-x-auto after:!hidden"
+              : "bg-transparent border-b-0 px-4 pt-2 pb-0 gap-3 h-10 overflow-x-auto"
+          }
+        >
+          <Show
+            when={props.compact}
+            fallback={
+              <>
+                <Tabs.Trigger value="mcp" data-slot="tab" class="text-12-regular shrink-0">
+                  {tabLabel(mcpConnected(), "mcp")}
+                </Tabs.Trigger>
+                <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular shrink-0">
+                  {tabLabel(plugins().length, "plugins")}
+                </Tabs.Trigger>
+                <Tabs.Trigger value="skills" data-slot="tab" class="text-12-regular shrink-0">
+                  {tabLabel(skills().length, "skills")}
+                </Tabs.Trigger>
+                <Tabs.Trigger value="lsp" data-slot="tab" class="text-12-regular shrink-0">
+                  {tabLabel(lsps().servers.length, "lsp")}
+                </Tabs.Trigger>
+              </>
+            }
+          >
+            <For each={["mcp", "plugins", "skills", "lsp"] as const}>
+              {(service) => (
+                <Tabs.Trigger
+                  value={service}
+                  data-slot="tab"
+                  class="text-12-regular flex-1 min-w-0"
+                  classes={{ button: "w-full flex items-center justify-center !gap-1 !px-1 !text-[12px]" }}
+                  aria-expanded={state.service === service}
+                  aria-description={language.t(`session.summary.service.${status(service)}`)}
+                  title={language.t(`session.summary.service.${status(service)}`)}
+                  onClick={() => setState("service", state.service === service ? "" : service)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return
+                    event.preventDefault()
+                    setState("service", state.service === service ? "" : service)
+                  }}
+                >
+                  <StatusDot status={status(service)} />
+                  {language.t(`session.summary.${service}`)}
+                </Tabs.Trigger>
+              )}
+            </For>
+          </Show>
         </Tabs.List>
 
         <Tabs.Content value="mcp">
@@ -416,7 +487,7 @@ function ConfigAction(props: { directory: string; service: Service }) {
   return (
     <button
       type="button"
-      class="w-full mt-2 px-2 py-1 rounded-md text-12-regular text-text-weaker hover:bg-surface-raised-base-hover disabled:opacity-50"
+      class="w-full mt-2 px-2 py-1 rounded-md text-12-regular text-v2-text-text-muted hover:bg-surface-raised-base-hover disabled:opacity-50"
       disabled={state.pending}
       title={state.copied ? language.t("common.copied") : label()}
       onClick={() => void activate()}

@@ -41,6 +41,7 @@ import type { ComposerState } from "@/composer/state"
 import type { ChatQuote } from "@/composer/schema"
 import { userPresentation } from "../user-presentation"
 import { readingPositions } from "./reading-position"
+import { StatusPopoverBody } from "@/shell/status/body"
 
 type BackgroundTask = {
   id: string
@@ -337,6 +338,12 @@ export function SessionSummaryPanel(props: {
             <BackgroundWorkSummary tasks={props.backgroundTasks} mobile={props.mobile} />
           </div>
         </div>
+      </div>
+      <div
+        class="mt-2 overflow-hidden rounded-[6px] bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]"
+        data-section="services"
+      >
+        <StatusPopoverBody shown embedded compact directory={props.directory} />
       </div>
       <Show when={props.local && props.diffs && props.diffs.length > 0 && props.moveEligible}>
         <WorkspaceMoveAction
@@ -879,6 +886,10 @@ function MessageTimelineView(
                       <Show when={!parentID() && project()}>
                         {(project) => (
                           <Popover open={summaryOpen()} placement="bottom-end" gutter={6} onOpenChange={setSummary}>
+                            <Popover.Anchor
+                              class="pointer-events-none absolute end-3 top-2.5 h-7 w-0"
+                              aria-hidden="true"
+                            />
                             <Tooltip
                               placement="bottom"
                               value={
@@ -901,7 +912,10 @@ function MessageTimelineView(
                               />
                             </Tooltip>
                             <Popover.Portal>
-                              <Popover.Content class="z-50 border-0 bg-transparent p-0 outline-none">
+                              <Popover.Content
+                                class="z-50 max-h-[calc(100dvh-96px)] overflow-y-auto border-0 bg-transparent p-1 outline-none"
+                                aria-label={language.t("session.summary.title")}
+                              >
                                 <SessionSummaryPanel
                                   project={project()}
                                   avatar={showProjectIcon() ? projectAvatar() : undefined}
@@ -925,7 +939,10 @@ function MessageTimelineView(
                           </Popover>
                         )}
                       </Show>
-                      <SessionHeader reserveReviewToggle={props.reserveReviewToggle} />
+                      <SessionHeader
+                        reserveReviewToggle={props.reserveReviewToggle}
+                        summaryAvailable={!parentID() && !!project()}
+                      />
                     </div>
                   )}
                 </Show>
