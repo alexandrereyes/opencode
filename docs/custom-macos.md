@@ -460,8 +460,8 @@ Settings → General → Appearance → Theme offers an **OpenChamber** theme (`
 with light and dark variants adapted from OpenChamber's signature palette: warm ink neutrals,
 orange accent, Vitesse-style syntax, teal links, green inline code and a tinted user-message
 bubble. Two optional pairs of theme variables drive the custom session UI; every other theme keeps
-its default colors: `v2-user-message-background`/`v2-user-message-text` (local-session user
-bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths,
+its default colors: `v2-user-message-background`/`v2-user-message-text` (user bubble in both
+local and worktree sessions, replacing the worktree accent bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths,
 which otherwise follow `syntax-string`).
 
 ## Model picker
