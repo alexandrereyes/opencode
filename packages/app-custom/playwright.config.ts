@@ -55,7 +55,11 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      // Local macOS runs use the installed Google Chrome instead of downloaded Playwright browsers.
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: process.platform === "darwin" && !process.env.CI ? "chrome" : undefined,
+      },
     },
   ],
 })
