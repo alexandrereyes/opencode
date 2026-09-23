@@ -22,15 +22,15 @@ Transformar o pedido em uma feature do fork pessoal, validar e publicar seguindo
 | Oficial (`upstream`) | `https://github.com/anomalyco/opencode.git` |
 | Base das features e destino de integração | `origin/custom` |
 | Linha upstream integrada | `upstream/v2` (fonte do canal `latest`; `beta` parou na 2.0.6) |
-| Checkout principal conhecido | `/Users/alexandremartins/Dev/opencode` |
-| Worktree da feature inicial de apps | `/Users/alexandremartins/Dev/opencode2` |
-| Worktree do updater | `/Users/alexandremartins/Dev/opencode-updater` |
-| Configuração operacional versionada | `/Users/alexandremartins/Dev/my-env` (não `myenv`) |
-| Instalação custom | `~/.local/share/opencode-custom` |
-| Comando operacional | `~/.local/share/opencode-custom/bin/opencode-custom` |
-| UI principal/produção | `http://127.0.0.1:4096` |
+| Checkout de atualização | `~/Dev/opencode2`, sempre limpo em `custom`; não é área de edição |
+| Worktrees de features | `~/Worktrees/opencode2-<branch>` |
+| Instalação custom | `~/.local/share/opencode-custom-v2` (`releases/`, `current`, `prepared`, `previous`) |
+| Operação da instalação | `bun run custom:{prepare,update,activate,status,rollback,prune}` no checkout de atualização |
+| Backend de produção | `http://127.0.0.1:4178`, job `local.opencode.custom-manual` |
+| UI principal | `http://127.0.0.1:4096`, proxy autenticado para 4178 (job `com.alexandrem.opencode2-ui`) |
+| TUI | `opencode2`, launcher estável que usa o release `current` com `--server http://127.0.0.1:4178` |
 | Dev efêmero, sob demanda | `http://127.0.0.1:4177` — nunca serviço permanente |
-| Jobs | `com.alexandrereyes.opencode-custom.server` e `.daily` |
+| Documentação operacional | `docs/custom-macos.md` e a skill `update-custom-app` |
 
 Esses caminhos são pontos de partida, não garantias de estado. Confira Git, manifests, documentação e serviços antes de agir. Não copie SHAs ou nomes de modelos de sessões antigas.
 
@@ -39,7 +39,7 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 1. Carregue a skill `opencode` e consulte a documentação **V2** pertinente em `https://opencode.ai/v2/docs/`.
 2. Leia `AGENTS.md` da raiz e dos pacotes envolvidos. Para UI web use as skills de interface pertinentes; para código Effect, `effect`; para execução/debug do servidor, `opencode-dev`.
 3. Inspecione `git status`, `git remote -v` e `git worktree list` no checkout existente. Preserve alterações e arquivos não rastreados de outras tarefas.
-4. Leia a versão atual de `docs/custom-macos.md` no fork e a documentação operacional em `my-env`. O updater pode evoluir: confirme seus comandos por código/documentação antes de executá-los.
+4. Leia a versão atual de `docs/custom-macos.md` no fork. Confirme os comandos `custom:*` por código (`packages/cli/script/custom-release.ts`) e documentação antes de executá-los.
 5. Diferencie **app web**, desktop e TUI. Para menções de apps Mac, consulte o MCP realmente configurado, seus métodos e retornos atuais; não presuma o antigo `codex-computer-use` ou formato de `list_apps`.
 6. Se o trabalho integrar uma revisão upstream em `custom`, aplicar um PR/commit upstream antes da baseline integrada ou adaptar/portar uma mudança upstream, leia `docs/upstream-overrides.md` na base usada antes de alterar código. Ele diz o que `custom` já carrega de upstream e quando reconciliar.
 
@@ -51,7 +51,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 - Verifique previamente se a branch ou uma worktree da feature já existe. Para retomar uma feature, use a worktree dela. Use o caminho retornado pela criação, sem deduzir ou fixar um caminho em `~/Dev`.
 - Se houver ferramenta de movimentação de sessão, mova a sessão para a nova worktree.
 - Registre o SHA de `origin/custom` usado como base.
-- Não use o checkout de release instalado nem o controlador em execução como área de edição.
+- Não edite no checkout de atualização `~/Dev/opencode2` nem dentro dos releases instalados.
 
 ## 3. Implementar
 
@@ -59,7 +59,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 - Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; frontend web custom: `packages/app-custom`, `ui-custom`, `session-ui-custom` (`packages/app`, `ui` e `session-ui` permanecem idênticos à baseline upstream); cliente: `packages/client`.
 - Mudou Protocol ou Server HttpApi público? Execute `bun run generate` em `packages/client`; nunca edite arquivos gerados manualmente.
 - Faça mudanças focadas, sem refatorações extensas não necessárias à feature.
-- Para mudanças no updater, versionar código runtime no fork e os arquivos operacionais declarativos em `my-env`, conforme a organização vigente. Não duplique fontes que deveriam ser únicas.
+- Mudanças no fluxo de release (`packages/cli/script/custom-*.ts`, launchers, config gerada) ficam no fork e são documentadas em `docs/custom-macos.md`.
 - Credenciais, tokens, banco, logs, backups e releases ficam fora do Git. Não exiba segredos ao consultar configuração. Use arquivos locais privados ou referências a variáveis.
 - Ao aplicar um PR/commit upstream antecipadamente ou adaptá-lo, registre a entrada em `docs/upstream-overrides.md` na mesma mudança, seguindo o template do arquivo: link, SHA da revisão upstream revisada, mudança local e diferenças, testes, status, condição para reconciliar/remover e instalação (`none` salvo ação operacional explícita). Mudança de UI upstream não entra antecipada em `packages/app`, `ui` ou `session-ui`: porte-a deliberadamente para `packages/app-custom`, `ui-custom` ou `session-ui-custom`. Apenas acompanhar um PR aberto, sem incorporá-lo, não gera entrada. O registro começou sem auditoria retroativa: ao identificar um caso antigo, registre-o também.
 
@@ -68,8 +68,8 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 1. Use o Bun exigido pelo `packageManager` atual. A instalação custom tem runtime privado; não substitua o Bun global para satisfazer o projeto.
 2. Rode `bun typecheck` a partir dos pacotes afetados e testes relevantes nos diretórios de pacote, nunca testes na raiz.
 3. Para UI web, use `playwright-cli` para validar a interface real. Verifique filtro, seleção por clique/teclado, payload e viewports relevantes. Distinga claramente fixture de integração real.
-4. Use `opencode-custom dev <worktree-da-feature>` para validação isolada em 4177 e encerre o processo ao terminar. Nunca teste em 4096. Não pare nem reinicie o serviço que hospeda a conversa.
-5. Para updater/manutenção, teste lock, atividade em andamento, lease, falhas, concorrência com publicação e retomada. Não use sessões reais como alvo de testes destrutivos.
+4. Para validação isolada em 4177, use o entrypoint de desenvolvimento `packages/cli/script/custom-server.ts` da worktree com um `OPENCODE_CUSTOM_HOME` exclusivo do teste (veja "Isolated source development" em `docs/custom-macos.md`) e encerre o processo ao terminar. Nunca teste em 4096 ou 4178. Não pare nem reinicie o serviço que hospeda a conversa.
+5. Para o fluxo de release, use `--dry-run`, um `OPENCODE_CUSTOM_HOME` isolado e `packages/cli/script/custom-smoke.ts`; cubra lock, falhas de preparação/ativação e retomada. Não use a instalação ou sessões reais como alvo de testes destrutivos.
 6. Execute `git diff --check` e revise o diff. Não contorne hooks de publicação. Falhas preexistentes exigem evidência na base, não mera suposição.
 
 ### Ambiente pronto para testar
@@ -79,7 +79,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 - Configuração e autenticação são distintas. Na V2, credenciais/conexões são persistidas no banco; `~/.local/share/opencode/auth.json` é uma fonte legada e não garante autenticação atual. Inspecione o mecanismo vigente antes de transportar credenciais.
 - Prepare uma cópia local privada da configuração e das credenciais necessárias em persistência exclusiva do teste, com permissões restritas (0600 para arquivos de segredos). Use exportação/importação suportada ou snapshot consistente para extrair os registros necessários; nunca copie diretamente o SQLite vivo, aponte o dev para o banco principal ou copie todo o histórico só para obter autenticação. Não exponha tokens em logs, comandos exibidos ou Git, nem permita que alterações do dev sejam gravadas na configuração principal.
 - Referências a variáveis de ambiente, arquivos e plugins precisam continuar resolvendo no dev. Confirme no ambiente de teste os providers/modelos disponíveis e a autenticação/conectividade das integrações relevantes, sem revelar segredos. Não afirme equivalência apenas porque copiou o JSON.
-- Confira a implementação atual de `opencode-custom dev`: o comando pode copiar apenas `opencode.json`, sem credenciais. Estas instruções são requisitos de preparação, não prova de que o comando já os automatiza. Se faltar suporte, implemente o ajuste mínimo no comando operacional e valide, ou reporte precisamente o bloqueio antes de entregar um ambiente incompleto.
+- `custom-server.ts` lê config de `OPENCODE_CONFIG_DIR` (padrão `<runtime>/config/opencode`) e usa o banco `OPENCODE_CUSTOM_DB` (padrão `<runtime>/data/opencode/custom.db`); ele não copia configuração nem credenciais. Estas instruções são requisitos de preparação, não prova de que algo já os automatiza. Se faltar suporte, implemente o ajuste mínimo e valide, ou reporte precisamente o bloqueio antes de entregar um ambiente incompleto.
 
 ### Correções sucessivas e cache da UI
 
@@ -105,7 +105,7 @@ git push -u origin <feature-curta>
 - Depois da aprovação da feature, prepare a integração em worktree limpa baseada no **`origin/custom` atualizado**, incorporando a feature e validando a combinação. Prefira squash para uma feature nova de vários commits; preserve histórico existente quando um merge for mais adequado.
 - Imediatamente antes de publicar a integração, confirme que `origin/custom` não avançou. Se avançou, refaça a integração sobre a base nova e valide novamente.
 - Publique por push normal fast-forward, sem `--force`. Não tente atualizar uma branch local `custom` que esteja em uso em outra worktree.
-- Não misture sync do upstream com a feature. Esse é um processo independente do updater.
+- Não misture integração upstream com a feature; ela segue a seção abaixo, em branch própria.
 
 ### Integrar upstream em `custom`
 
@@ -122,16 +122,12 @@ Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active
 
 **Publicar em `custom` não significa que a versão já esteja ativa no Mac.**
 
-- Confira `opencode-custom status` e a documentação operacional para solicitar preparação/ativação por meio do controlador existente.
-- O modelo operacional é backend source em checkout fixo e UI de produção do mesmo commit.
-- A publicação atualiza a experiência principal em **4096**, preservando o banco, sessões e providers principais. **4177 serve apenas para validar features em worktrees**, nunca é o destino permanente do updater.
-- Confira `primaryAdopted` no status. Na instalação antiga, 4096 é um proxy para o backend oficial 4097, sem manutenção atômica. A primeira adoção requer janela explícita, clientes fechados e processo antigo parado fora da sessão do agente. `adopt-primary` recusa PID vivo e faz backup a frio; não invente transição segura baseada em active/pgrep, nem agende shutdown automático do backend que hospeda a conversa.
-- Após adoção, o proxy 4096 aponta para o backend custom privado 4178, e o wrapper de `opencode2` usa endpoint explícito, sem alterar o binário oficial. O supervisor reserva 4097 para evitar respawn legado. Não altere o registro oficial enquanto seu processo estiver vivo.
-- A preparação pode ocorrer durante uso. A ativação deve passar pela barreira de manutenção e esperar idle, tentando novamente a cada 120 segundos. Não substitua isso por `pgrep`, checagem isolada de `/api/session/active` ou leitura do SQLite.
-- Não mate um processo ocupado para acelerar instalação. Um processo vivo pode estar idle; a API de manutenção é a autoridade para a troca coordenada.
-- Não há sync automático: o updater periódico foi aposentado (veja `docs/custom-macos.md`). A integração upstream é manual, seguindo [Integrar upstream em `custom`](#integrar-upstream-em-custom), e a instalação usa `bun run custom:update` (skill `update-custom-app`).
-- Se a mudança afetar o próprio controlador, siga seu procedimento documentado de atualização e retomada; não suponha que sair da sessão de agente reinicia o launchd ou instala código novo.
-- Preserve a instalação e os dados oficiais durante a preparação. A adoção principal deve manter os caminhos de persistência e fazer backup antes de migrations. Se a primeira troca está bloqueada pela sessão atual, informe **preparada/pendente**, nunca **ativada**.
+- A instalação é manual e sempre a partir de `custom`: `cd ~/Dev/opencode2 && git pull --ff-only origin custom && bun run custom:update`. Siga a skill `update-custom-app`, inclusive a checagem de `docs/upstream-overrides.md` e a execução em `tmux` quando o agente fizer a atualização.
+- Não há sync automático nem updater periódico; nada consulta o Git ou agenda instalações (`docs/custom-macos.md`).
+- `custom:update` prepara um release imutável (backend, web `app-custom`, plugin e TUI do mesmo commit) e o ativa, com interrupção breve do serviço que hospeda a conversa. Só execute quando Alexandre pedir explicitamente; caso contrário, entregue o comando.
+- A preparação (`custom:prepare`) é segura durante o uso. A ativação reinicia `local.opencode.custom-manual` preservando banco, config e senha; não mate processos nem reinicie o serviço por fora dos comandos `custom:*`.
+- Confirme com `bun run custom:status`: `current` e `prepared` iguais ao commit esperado, `running` = `0.0.0-custom.<sha>` e `health: ready`. TUIs abertas continuam na versão antiga até serem reabertas com `opencode2`.
+- Falha de ativação não faz downgrade automático; siga `docs/custom-macos.md` para correção ou `custom:rollback --database-compatible`.
 
 ## Resposta de conclusão
 
@@ -141,7 +137,7 @@ Informe de forma curta:
 - Branch, worktree, commit e link do fork.
 - Checks executados e limitações verificadas.
 - Se foi **apenas publicada**, **integrada em custom**, **preparada** ou **ativada** — não confunda esses estados.
-- Se a ativação está esperando idle, diga isso e forneça o comando de status.
+- Se a atualização foi iniciada e ainda não confirmada, diga isso e forneça o comando de status.
 
 ## Escopo e acionamento
 
