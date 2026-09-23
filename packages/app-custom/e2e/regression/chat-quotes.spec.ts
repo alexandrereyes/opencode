@@ -87,6 +87,25 @@ for (const width of [1440, 390]) {
     const summary = page.locator('[data-slot="chat-quotes-summary"]')
     const comment = page.getByRole("textbox", { name: "Your comment", exact: true })
     await expect(comment).toBeFocused()
+    for (const close of ["Done", "Escape", "ControlOrMeta+Enter"]) {
+      if (close !== "Done") await comment.fill("   ")
+      if (close === "Done") await quotes.getByRole("button", { name: "Done", exact: true }).click()
+      else await comment.press(close)
+      await expect(comment).toHaveCount(0)
+      await expect(summary).toHaveCount(0)
+      await expect(page.getByRole("button", { name: "Comment 1", exact: true })).toHaveCount(0)
+      await expect(editor).toBeVisible()
+      if (width >= 768) await expect(editor).toBeFocused()
+      await text.evaluate((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        window.getSelection()?.removeAllRanges()
+        window.getSelection()?.addRange(range)
+      })
+      await page.keyboard.press("Shift")
+      await action.click()
+      await expect(comment).toBeFocused()
+    }
     const main = page.locator(".composer-main")
     await expect(main).toBeAttached()
     if (width < 768) {
@@ -99,6 +118,7 @@ for (const width of [1440, 390]) {
     } else {
       await expect(editor).toBeVisible()
       const disclosure = page.getByRole("button", { name: "Chat quotes · 1", exact: true })
+      await comment.fill("Keep this comment")
       await comment.press("Escape")
       await expect(comment).toHaveCount(0)
       await page.setViewportSize({ width: 390, height: 900 })
@@ -292,11 +312,13 @@ for (const width of [1440, 390]) {
     await expect(secondQuote.getByText("Second quote comment", { exact: true })).toBeVisible()
     await secondQuote.getByRole("button", { name: "Edit comment", exact: true }).click()
     await expect(comment).toHaveText("Second quote comment")
-    await quotes.getByRole("button", { name: "Remove quote", exact: true }).click()
+    await comment.fill("")
+    await quotes.getByRole("button", { name: "Done", exact: true }).click()
     await expect(comment).toHaveCount(0)
     await expect(editor).toBeVisible()
     await expect(toggle).toBeVisible()
 
+    await toggle.click()
     await page.getByRole("button", { name: "Edit comment", exact: true }).click()
     await expect(comment).toContainText("#review $audit @src/config.ts")
     await comment.press("ControlOrMeta+Enter")
