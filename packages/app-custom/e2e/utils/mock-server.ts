@@ -612,7 +612,9 @@ function currentModels(value: unknown) {
             modelID: record(model.api) && typeof model.api.id === "string" ? model.api.id : model.id,
             providerID: provider.id,
             name: model.name,
-            capabilities: { tools: true, input: ["text"], output: ["text"] },
+            capabilities: record(model.capabilities)
+              ? model.capabilities
+              : { tools: true, input: ["text"], output: ["text"] },
             variants: record(model.variants)
               ? Object.entries(model.variants).map(([id, settings]) => ({
                   id,
