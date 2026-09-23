@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test"
+import { channel } from "../../../playwright.channel"
 import { fileURLToPath } from "node:url"
 
 export default defineConfig({
@@ -9,7 +10,13 @@ export default defineConfig({
   timeout: 60_000,
   reporter: "line",
   outputDir: process.env.OPENCODE_HISTORY_OUTPUT,
-  use: { baseURL: "http://127.0.0.1:4783", viewport: { width: 1440, height: 900 }, trace: "off", video: "off" },
+  use: {
+    channel,
+    baseURL: "http://127.0.0.1:4783",
+    viewport: { width: 1440, height: 900 },
+    trace: "off",
+    video: "off",
+  },
   webServer: {
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
     command:

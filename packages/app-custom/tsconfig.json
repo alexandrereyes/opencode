@@ -25,6 +25,7 @@
     "src",
     "component-tests",
     "playwright.components.config.ts",
+    "playwright.channel.ts",
     "../storybook/playwright/*.ts",
     "package.json"
   ],

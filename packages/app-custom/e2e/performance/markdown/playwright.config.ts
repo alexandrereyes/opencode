@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test"
+import { channel } from "../../../playwright.channel"
 import { fileURLToPath } from "node:url"
 
 process.env.PLAYWRIGHT_PORT = "6199"
@@ -14,7 +15,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: [["line"]],
-  use: { baseURL: "http://127.0.0.1:6199", viewport: { width: 1280, height: 900 }, serviceWorkers: "block" },
+  use: { channel, baseURL: "http://127.0.0.1:6199", viewport: { width: 1280, height: 900 }, serviceWorkers: "block" },
   webServer: {
     cwd: fileURLToPath(new URL("../../..", import.meta.url)),
     command: `bun run serve -- --host 127.0.0.1 --port 6199 --strictPort --outDir "${process.env.MARKDOWN_APP_BUILD_DIR}"`,

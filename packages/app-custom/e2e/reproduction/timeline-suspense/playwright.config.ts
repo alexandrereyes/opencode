@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test"
+import { channel } from "../../../playwright.channel"
 
 const port = Number(process.env.PLAYWRIGHT_TIMELINE_SUSPENSE_PORT ?? 4317)
 
@@ -22,6 +23,7 @@ export default defineConfig({
   },
   use: {
     baseURL: `http://127.0.0.1:${port}`,
+    channel,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

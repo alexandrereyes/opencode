@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test"
+import { channel } from "../../../playwright.channel"
 
 const baseURL = `http://127.0.0.1:${process.env.PATCH_PORT ?? 4317}`
 export default defineConfig({
@@ -9,7 +10,7 @@ export default defineConfig({
   timeout: 60_000,
   outputDir: process.env.PATCH_RESULTS_DIR,
   reporter: "line",
-  use: { baseURL, viewport: { width: 1366, height: 768 }, colorScheme: "light" },
+  use: { channel, baseURL, viewport: { width: 1366, height: 768 }, colorScheme: "light" },
   webServer: {
     command: "bun serve.ts",
     url: baseURL,
