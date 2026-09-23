@@ -315,7 +315,14 @@ export const fixture = {
       {
         id: "opencode",
         name: "OpenCode",
-        models: { "claude-opus-4-6": { id: "claude-opus-4-6", name: "Claude Opus 4.6", limit: { context: 200_000 } } },
+        models: {
+          "claude-opus-4-6": {
+            id: "claude-opus-4-6",
+            name: "Claude Opus 4.6",
+            limit: { context: 200_000 },
+            capabilities: { tools: true, input: ["text", "image", "pdf"], output: ["text"] },
+          },
+        },
       },
     ],
     connected: ["opencode"],

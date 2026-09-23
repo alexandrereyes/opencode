@@ -92,4 +92,9 @@ test("uploads a generic binary and renders its sent path reference", async ({ pa
   await expect(sent).toHaveCount(1)
   await expect(sent.getByText("archive.zip", { exact: true })).toBeVisible()
   await expect(sent.getByTitle(remotePath)).toBeVisible()
+  await sent.getByRole("button", { name: "Expand message", exact: true }).click()
+  await expect(
+    sent.locator('[data-component="attachment-card"]').getByText("archive.zip", { exact: true }),
+  ).toBeVisible()
+  await expect(sent.locator('[data-component="attachment-card"]')).toHaveAttribute("title", remotePath)
 })
