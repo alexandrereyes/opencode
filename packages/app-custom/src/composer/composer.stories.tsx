@@ -278,6 +278,11 @@ function ComposerStory(props: {
       },
     },
     attachments: {
+      destination: () => ({
+        input: { image: true, pdf: true },
+        local: false,
+        upload: async (file) => `/tmp/${file.name}`,
+      }),
       directory: () => "C:/repo",
       isDialogActive: () => false,
       warn: () => setStory("activity", "Unsupported attachment"),

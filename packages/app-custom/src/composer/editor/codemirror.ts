@@ -2,7 +2,7 @@ import { invertedEffects } from "@codemirror/commands"
 import { StateEffect, StateField, type ChangeDesc, type Extension } from "@codemirror/state"
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
-import { normalizeComposerPrompt } from "../prompt-parts"
+import { isAttachment, normalizeComposerPrompt } from "../prompt-parts"
 import { formatSessionReference } from "../session-reference"
 
 export type ComposerReference = Exclude<ComposerPrompt[number], { type: "text" }>
@@ -41,7 +41,7 @@ export function composerReferencesFromPrompt(
   let offset = 0
   const normalized = normalizeComposerPrompt(prompt)
   const references = normalized.flatMap((part) => {
-    if (part.type === "image") return []
+    if (isAttachment(part)) return []
     const from = offset
     offset += part.content.length
     if (part.type === "text") return []
@@ -57,7 +57,7 @@ export function composerReferencesFromPrompt(
   return [
     ...references,
     ...normalized.flatMap((part) => {
-      if (part.type !== "image" || !part.mention) return []
+      if (!isAttachment(part) || !part.mention) return []
       return [{ from: part.mention.start, to: part.mention.end, part }]
     }),
   ].toSorted((a, b) => a.from - b.from)
@@ -79,7 +79,7 @@ export function composerPromptFromDocument(
     .toSorted((a, b) => a.from - b.from)
   const structured = valid.filter(
     (reference): reference is ComposerReferenceRange & { part: Exclude<ComposerReference, ComposerAttachment> } =>
-      reference.part.type !== "image",
+      !isAttachment(reference.part),
   )
   const prompt: ComposerPrompt = []
   let offset = 0
@@ -95,7 +95,7 @@ export function composerPromptFromDocument(
     prompt.push({ type: "text", content: text.slice(offset), start: offset, end: text.length })
   }
   const referenced = valid.flatMap((reference) => {
-    if (reference.part.type !== "image") return []
+    if (!isAttachment(reference.part)) return []
     return [
       {
         ...reference.part,
@@ -127,21 +127,20 @@ export function mapComposerReferences(
         ...reference,
         from: changes.mapPos(reference.from, 1),
         to: changes.mapPos(reference.to, -1),
-        part:
-          reference.part.type === "image"
-            ? {
-                ...reference.part,
-                mention: {
-                  text: reference.part.mention?.text ?? "",
-                  start: changes.mapPos(reference.from, 1),
-                  end: changes.mapPos(reference.to, -1),
-                },
-              }
-            : {
-                ...reference.part,
+        part: isAttachment(reference.part)
+          ? {
+              ...reference.part,
+              mention: {
+                text: reference.part.mention?.text ?? "",
                 start: changes.mapPos(reference.from, 1),
                 end: changes.mapPos(reference.to, -1),
               },
+            }
+          : {
+              ...reference.part,
+              start: changes.mapPos(reference.from, 1),
+              end: changes.mapPos(reference.to, -1),
+            },
       },
     ]
   })
@@ -186,14 +185,13 @@ function referenceDecorations(references: readonly ComposerReferenceRange[]): De
 
 function referenceAttributes(reference: ComposerReferenceRange) {
   const part = reference.part
-  const mention =
-    part.type === "image"
-      ? "file"
-      : part.type === "file" && part.mime === "application/x-directory"
-        ? "reference"
-        : part.type
+  const mention = isAttachment(part)
+    ? "file"
+    : part.type === "file" && part.mime === "application/x-directory"
+      ? "reference"
+      : part.type
   const base = { "data-mention": mention, dir: "auto", style: "unicode-bidi: isolate" }
-  if (part.type === "image") {
+  if (isAttachment(part)) {
     return { ...base, "data-id": part.id, "data-filename": part.filename, title: part.filename }
   }
   if (part.type === "agent") return { ...base, "data-name": part.name }
@@ -229,7 +227,7 @@ function referenceAttributes(reference: ComposerReferenceRange) {
 }
 
 function referenceText(part: ComposerReference) {
-  return part.type === "image" ? (part.mention?.text ?? "") : part.content
+  return isAttachment(part) ? (part.mention?.text ?? "") : part.content
 }
 
 export const composerEditorTheme = EditorView.theme({

@@ -30,6 +30,7 @@ import { expandSnippets } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { createSessionSearch } from "./session-search"
 import { useAttachmentDestination } from "./attachments/deliver"
+import { resolveBlobUrl } from "@/runtime/persistence/drafts"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
@@ -372,6 +373,8 @@ export function createComposerModel(
     editor: () => editor,
     queueScroll: () => requestAnimationFrame(() => editor?.scrollIntoView({ block: "nearest" })),
     addToHistory: (value, mode) => controller.addHistory(value, mode),
+    removeFromHistory: (value, mode, comments, quotes) =>
+      history.remove(value, mode, mode === "shell" ? [] : comments, mode === "shell" ? [] : quotes),
     resetHistory: () => controller.resetHistory(),
     setMode: (next) => controller.dispatch({ type: next === "shell" ? "mode.shell" : "mode.normal" }),
     closePopover: () => controller.dispatch({ type: "popover.close" }),
@@ -458,8 +461,12 @@ export function createComposerModel(
     onContextRemove(item) {
       if (item?.commentID) commentScope.remove(item.path, item.commentID)
     },
-    openAttachment: (attachment) =>
-      dialog.show(() => createComponent(ImagePreview, { src: attachment.blob.url, alt: attachment.filename })),
+    openAttachment: (attachment) => {
+      if (attachment.type !== "image") return
+      void resolveBlobUrl(attachment.blob).then((src) => {
+        if (src) dialog.show(() => createComponent(ImagePreview, { src, alt: attachment.filename }))
+      })
+    },
     openContext(key) {
       const item = controller.contextItem(key)
       if (item) openComment(item, adapter.controls(), layout, files, commentScope)
@@ -475,6 +482,7 @@ export function createComposerModel(
       return () => command.trigger(selected.id, "slash")
     },
     attachments: {
+      destination,
       picker: platform.openAttachmentPickerDialog,
       directory: () => sdk().directory,
       isDialogActive: () => !!dialog.active,

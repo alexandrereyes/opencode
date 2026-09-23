@@ -1,9 +1,14 @@
 import { onCleanup, onMount } from "solid-js"
+import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createBlobReference } from "@/runtime/persistence/drafts"
 import { uuid } from "@/runtime/persistence/uuid"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
 import { getCursorPosition } from "../editor/dom"
+import { isAttachment } from "../prompt-parts"
+import { nativeAttachment } from "./deliver"
+import type { AttachmentDestination } from "./destination"
+import { uploads } from "./uploads"
 
 type PromptTarget = {
   current: () => ComposerPrompt
@@ -22,6 +27,7 @@ export type ComposerAttachmentConfig = {
     onFile: (file: File) => Promise<unknown>,
   ) => Promise<void>
   directory: () => string
+  destination: () => AttachmentDestination
   isDialogActive: () => boolean
   warn: () => void
   duplicate: () => void
@@ -42,6 +48,7 @@ export function createComposerAttachments(
   },
 ) {
   const pendingFilenames = new Set<string>()
+  const [pending, setPending] = createStore<{ ids: string[] }>({ ids: [] })
   const clearDrag = () => {
     input.setDraggingType(null)
   }
@@ -67,7 +74,31 @@ export function createComposerAttachments(
     pending: ComposerAttachment[] = [],
   ) => {
     const mime = await attachmentMime(file)
-    if (!mime) return undefined
+    const destination = input.destination()
+    if (!nativeAttachment(mime, file.size, destination.input)) {
+      const id = uuid()
+      const sourcePath = input.getPathForFile?.(file)
+      setPending("ids", (ids) => [...ids, id])
+      const path =
+        destination.local && sourcePath
+          ? sourcePath
+          : await uploads
+              .track({ id, filename, mime, size: file.size }, (report, signal) =>
+                destination.upload(file, report, signal),
+              )
+              .catch((error: unknown) => {
+                input.onError(error)
+                return undefined
+              })
+              .finally(() => setPending("ids", (ids) => ids.filter((item) => item !== id)))
+      if (destination.local && sourcePath) setPending("ids", (ids) => ids.filter((item) => item !== id))
+      if (!path) return false
+      if ([...target.prompt.current(), ...pending].some((part) => part.type === "path" && part.path === path)) {
+        input.duplicate()
+        return false
+      }
+      return { type: "path" as const, id, filename, mime, path }
+    }
     const blob = input.store ? await input.store(file) : await createBlobReference(file)
     const sourcePath = input.getPathForFile?.(file) || undefined
     const duplicate = [...target.prompt.current(), ...pending].some(
@@ -119,7 +150,7 @@ export function createComposerAttachments(
     const names = assignAttachmentFilenames(files, [
       ...target.prompt
         .current()
-        .filter((part): part is ComposerAttachment => part.type === "image")
+        .filter(isAttachment)
         .map((part) => part.filename),
       ...pendingFilenames,
     ])
@@ -265,6 +296,12 @@ export function createComposerAttachments(
   })
 
   return {
+    pending: () => uploads.items().filter((item) => pending.ids.includes(item.id)),
+    cancel: (id: string) =>
+      uploads
+        .items()
+        .find((item) => item.id === id)
+        ?.cancel(),
     addAttachments,
     handlePaste,
     handleDrop,
@@ -273,9 +310,7 @@ export function createComposerAttachments(
         fallback()
         return
       }
-      void input
-        .picker({ defaultPath: input.directory(), multiple: true }, (file) => add(file))
-        .catch(input.onError)
+      void input.picker({ defaultPath: input.directory(), multiple: true }, (file) => add(file)).catch(input.onError)
     },
   }
 }

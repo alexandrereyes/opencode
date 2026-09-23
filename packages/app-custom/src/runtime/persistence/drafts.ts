@@ -42,6 +42,14 @@ const refs = new Map<string, Set<string>>()
 // Image ids that were restored under a different id (a store without WebCrypto assigns fresh
 // ones); live references still carry the original.
 const aliases = new Map<string, string>()
+let loader: ((id: string) => Promise<string | undefined>) | undefined
+
+export function resolveBlobUrl(blob: { id: string; url?: string }) {
+  if (blob.url) return Promise.resolve(blob.url)
+  const existing = retained.get(aliases.get(blob.id) ?? blob.id)
+  if (existing) return Promise.resolve(existing.url)
+  return loader?.(blob.id) ?? Promise.resolve(undefined)
+}
 
 function blobUrl(id: string, blob: Blob, grace?: number) {
   const existing = retained.get(id)
@@ -120,7 +128,7 @@ export function createDraftStore(driver: Driver, options: { grace?: number } = {
   const loading = new Map<string, Promise<string | undefined>>()
   const loadBlobUrl = (id: string) => {
     const existing = retained.get(id)
-    if (existing) return existing.url
+    if (existing) return Promise.resolve(existing.url)
     const pending = loading.get(id)
     if (pending) return pending
     const next = driver
@@ -130,6 +138,7 @@ export function createDraftStore(driver: Driver, options: { grace?: number } = {
     loading.set(id, next)
     return next
   }
+  loader = loadBlobUrl
   const putBlob = async (blob: Blob) => {
     const id = await driver.putBlob(blob)
     return { id, url: blobUrl(id, blob, grace) }
@@ -222,8 +231,8 @@ export function createDraftStore(driver: Driver, options: { grace?: number } = {
         return (await Promise.all(ref.ids.map((id) => loadChunk(String(id))))).join("")
       }
       if (typeof ref.id === "string") {
-        const url = await loadBlobUrl(ref.id)
-        if (url) return { ...item, blob: { id: ref.id, url } }
+        const url = retained.get(aliases.get(ref.id) ?? ref.id)?.url
+        return { ...item, blob: url ? { id: ref.id, url } : { id: ref.id } }
       }
     }
     return Object.fromEntries(
@@ -421,9 +430,12 @@ function referenced(json: string) {
   return ids
 }
 
-async function blobData(blob: BlobReference) {
+export async function blobData(blob: BlobReference) {
   const kept = retained.get(aliases.get(blob.id) ?? blob.id)
-  return kept ? kept.blob : await fetch(blob.url).then((response) => response.blob())
+  if (kept) return kept.blob
+  const url = await resolveBlobUrl(blob)
+  if (!url) throw new Error(`Attachment ${blob.id} has no stored bytes`)
+  return fetch(url).then((response) => response.blob())
 }
 
 export async function blobBytes(blob: BlobReference) {

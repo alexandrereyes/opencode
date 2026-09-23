@@ -4,6 +4,12 @@ import { createStore } from "solid-js/store"
 import { assignAttachmentFilenames, createComposerAttachments } from "@/composer/attachments/attachments"
 import type { ComposerPrompt } from "@/composer/types"
 
+const destination = () => ({
+  input: { image: true, pdf: true },
+  local: false,
+  upload: async (file: File) => `/tmp/${file.name}`,
+})
+
 function target(content = "") {
   const [store, setStore] = createStore<{ prompt: ComposerPrompt; cursor: number }>({
     prompt: [{ type: "text", content, start: 0, end: content.length }],
@@ -33,6 +39,58 @@ function pasteEvent(file: File, text = "") {
 }
 
 describe("Composer attachment ownership", () => {
+  test("stages a large file directly with progress without storing draft bytes", async () => {
+    await new Promise<void>((resolveTest, rejectTest) =>
+      createRoot((dispose) => {
+        const draft = target()
+        const started = Promise.withResolvers<void>()
+        const completed = Promise.withResolvers<string>()
+        const file = new File([new Uint8Array(21 * 1024 * 1024)], "large.png", { type: "image/png" })
+        const attachments = createComposerAttachments({
+          capture: () => draft.capture,
+          editor: () => document.createElement("div"),
+          focusEditor() {},
+          addPart: () => false,
+          setDraggingType() {},
+          directory: () => "/repo",
+          isDialogActive: () => false,
+          warn() {},
+          duplicate() {},
+          onError: rejectTest,
+          store: async () => {
+            throw new Error("Large attachment entered draft storage")
+          },
+          destination: () => ({
+            input: { image: true, pdf: true },
+            local: false,
+            upload: async (source, report) => {
+              expect(source).toBe(file)
+              report(file.size / 2)
+              started.resolve()
+              return completed.promise
+            },
+          }),
+        })
+        const pending = attachments.addAttachments([file])
+        void started.promise
+          .then(async () => {
+            expect(attachments.pending()[0]?.loaded).toBe(file.size / 2)
+            expect(draft.prompt.prompt).toHaveLength(1)
+            completed.resolve("/tmp/uploads/large.png")
+            await pending
+            expect(attachments.pending()).toEqual([])
+            expect(draft.prompt.prompt[1]).toMatchObject({
+              type: "path",
+              filename: "large.png",
+              path: "/tmp/uploads/large.png",
+            })
+            dispose()
+            resolveTest()
+          })
+          .catch(rejectTest)
+      }),
+    )
+  })
   test("assigns stable unique names to same-named and generic pasted images", () => {
     expect(
       assignAttachmentFilenames(
@@ -54,6 +112,7 @@ describe("Composer attachment ownership", () => {
         const stored = Promise.withResolvers<{ id: string; url: string }>()
         let active = first.capture
         const attachments = createComposerAttachments({
+          destination,
           capture: () => active,
           editor: () => document.createElement("div"),
           focusEditor() {},
@@ -88,6 +147,7 @@ describe("Composer attachment ownership", () => {
         draft.selection.end = 7
         const stored = Promise.withResolvers<{ id: string; url: string }>()
         const attachments = createComposerAttachments({
+          destination,
           capture: () => draft.capture,
           editor: () => document.createElement("div"),
           focusEditor() {},
@@ -129,6 +189,7 @@ describe("Composer attachment ownership", () => {
         ]
         let index = 0
         const attachments = createComposerAttachments({
+          destination,
           capture: () => draft.capture,
           editor: () => document.createElement("div"),
           focusEditor() {},
@@ -170,6 +231,7 @@ describe("Composer attachment ownership", () => {
         draft.selection.end = 7
         let warnings = 0
         const attachments = createComposerAttachments({
+          destination,
           capture: () => draft.capture,
           editor: () => document.createElement("div"),
           focusEditor() {},
@@ -192,7 +254,7 @@ describe("Composer attachment ownership", () => {
           ])
           expect(draft.prompt.prompt[0]).toMatchObject({ type: "text", content: "before after" })
           expect(draft.prompt.prompt[1]).toMatchObject({
-            type: "image",
+            type: "path",
             filename: "bad.bin",
             mime: "application/octet-stream",
           })
@@ -222,6 +284,7 @@ describe("Composer attachment ownership", () => {
         let duplicates = 0
         let warnings = 0
         const attachments = createComposerAttachments({
+          destination,
           capture: () => draft.capture,
           editor: () => document.createElement("div"),
           focusEditor() {},
@@ -254,6 +317,7 @@ describe("Composer attachment ownership", () => {
         const draft = target()
         let releases = 0
         const attachments = createComposerAttachments({
+          destination,
           capture: () => ({
             ...draft.capture,
             trackSelection: () => ({ current: draft.capture.selection, release: () => releases++ }),

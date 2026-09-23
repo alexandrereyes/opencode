@@ -36,7 +36,7 @@ export function prependHistoryEntry(
     .map((part) => ("content" in part ? part.content : ""))
     .join("")
     .trim()
-  const hasImages = prompt.some((part) => part.type === "image")
+  const hasImages = prompt.some((part) => part.type === "image" || part.type === "path")
   const hasComments = comments.some((comment) => !!comment.comment.trim())
   if (!text && !hasImages && !hasComments && !quotes.length) return entries
 
@@ -48,6 +48,17 @@ export function prependHistoryEntry(
   const last = entries[0]
   if (last && isPromptEqual(last, entry)) return entries
   return [entry, ...entries].slice(0, max)
+}
+
+export function removeHistoryEntry(
+  entries: PromptHistoryStoredEntry[],
+  prompt: Prompt,
+  comments: PromptHistoryComment[] = [],
+  quotes: ChatQuote[] = [],
+) {
+  const entry = { prompt, comments, quotes }
+  const next = entries.filter((item) => !isPromptEqual(item, entry))
+  return next.length === entries.length ? entries : next
 }
 
 function isCommentEqual(commentA: PromptHistoryComment, commentB: PromptHistoryComment) {
@@ -102,6 +113,8 @@ function isPromptEqual(entryA: PromptHistoryStoredEntry, entryB: PromptHistorySt
         return false
     }
     if (partA.type === "image" && partA.id !== (partB.type === "image" ? partB.id : "")) return false
+    if (partA.type === "path" && (partB.type !== "path" || partA.path !== partB.path || partA.id !== partB.id))
+      return false
   }
   if (entryA.comments.length !== entryB.comments.length) return false
   for (let i = 0; i < entryA.comments.length; i++) {

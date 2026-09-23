@@ -1,10 +1,14 @@
 import type { Prompt } from "./state"
 
+export function isAttachment(part: Prompt[number]): part is Extract<Prompt[number], { type: "image" | "path" }> {
+  return part.type === "image" || part.type === "path"
+}
+
 export function clonePrompt(prompt: Prompt): Prompt {
   return prompt.map((part) =>
     part.type === "file"
       ? { ...part, selection: part.selection ? { ...part.selection } : undefined }
-      : part.type === "image"
+      : isAttachment(part)
         ? { ...part, mention: part.mention ? { ...part.mention } : undefined }
         : { ...part },
   )
@@ -18,7 +22,7 @@ export function normalizeComposerPrompt(prompt: Prompt): Prompt {
   let offset = 0
   const source = prompt.map((part) => ("content" in part ? part.content : "")).join("")
   return clonePrompt(prompt).map((part) => {
-    if (part.type === "image") {
+    if (isAttachment(part)) {
       if (!part.mention) return part
       const text = normalizeComposerText(part.mention.text)
       const start = normalizeComposerText(source.slice(0, part.mention.start)).length
@@ -49,7 +53,7 @@ export function expandSnippets(prompt: Prompt): Prompt {
     shifts.filter((change) => change.end <= position).reduce((total, change) => total + change.delta, 0)
   let offset = 0
   return prompt.map((part) => {
-    if (part.type === "image") {
+    if (isAttachment(part)) {
       if (!part.mention) return part
       return {
         ...part,
@@ -75,7 +79,7 @@ export function appendPrompt(prompt: Prompt, following: Prompt): Prompt {
     ...clonePrompt(prompt),
     { type: "text", content: "\n\n", start, end: offset },
     ...clonePrompt(following).map((part) => {
-      if (part.type !== "image") return { ...part, start: part.start + offset, end: part.end + offset }
+      if (!isAttachment(part)) return { ...part, start: part.start + offset, end: part.end + offset }
       if (!part.mention) return part
       return {
         ...part,

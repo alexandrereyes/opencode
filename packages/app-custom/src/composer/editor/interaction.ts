@@ -2,6 +2,7 @@ import { createEffect, onCleanup, type Accessor } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useFilteredList } from "@opencode/ui-custom/hooks"
 import { createComposerAttachments, type ComposerAttachmentConfig } from "../attachments/attachments"
+import { isAttachment } from "../prompt-parts"
 import { createComposerEditorActions, type ComposerStateStoreInput } from "./actions"
 import type {
   ComposerAttachment,
@@ -96,7 +97,7 @@ export function createComposerEditor(input: {
   const contextQueryOwner = Symbol()
   const [state, setState] = input.state ?? createComposerEditorState(draft.state.mode)
   function addPart(part: ComposerPersistedState["prompt"][number]) {
-    if (part.type === "image") return false
+    if (isAttachment(part)) return false
     if (part.type !== "text") {
       if (editorBinding) {
         editorBinding.addMention(part)
@@ -253,10 +254,7 @@ export function createComposerEditor(input: {
     if (event.type === "popover.select") {
       if (!action || state.popover.type !== "command-menu") result.commands.forEach(execute)
       if (action && event.item.kind === "command" && state.popover.type !== "command-menu") {
-        draft.setPrompt(
-          draft.state.prompt.filter((part): part is ComposerAttachment => part.type === "image"),
-          0,
-        )
+        draft.setPrompt(draft.state.prompt.filter(isAttachment), 0)
       }
     }
     setState(reconcile(result.state))
@@ -415,7 +413,7 @@ export function createComposerEditor(input: {
       return draft.state.context.items.filter((item) => !!item.comment?.trim())
     },
     attachments(): ComposerAttachment[] {
-      return draft.state.prompt.filter((part): part is ComposerAttachment => part.type === "image")
+      return draft.state.prompt.filter(isAttachment)
     },
     toggleContext(id: string) {
       dispatch({ type: "context.active", id })
@@ -435,13 +433,14 @@ export function createComposerEditor(input: {
       draft.removeAttachment(id)
     },
     canSubmit() {
+      if (attachments?.pending().length) return false
       if (input.view.submit.available?.() === false) return false
       if (input.view.draftOnly) return false
       const persisted = draft.state
       if (state.mode === "shell") {
         return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
       }
-      if (persisted.prompt.some((part) => part.type === "image")) return true
+      if (persisted.prompt.some(isAttachment)) return true
       if (persisted.quotes?.length) return true
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
       return persisted.prompt.some((part) => "content" in part && !!part.content.trim())
@@ -473,6 +472,7 @@ export function createComposerEditor(input: {
       dispatch({ type: "mode.shell" })
     },
     submit(options?: { alternate?: boolean }) {
+      if (attachments?.pending().length) return
       if (input.view.submit.available?.() === false) return
       if (input.view.draftOnly) return
       input.view.submit.onSubmit(options)
@@ -490,10 +490,7 @@ export function createComposerEditor(input: {
     },
     onPaste(event: ClipboardEvent) {
       const clipboard = event.clipboardData
-      if (
-        attachments &&
-        (Array.from(clipboard?.items ?? []).some((item) => item.kind === "file") || !clipboard?.getData("text/plain"))
-      ) {
+      if (attachments && shouldHandlePasteAsAttachment(clipboard, !!input.attachments?.readClipboardImage)) {
         void attachments.handlePaste(event)
         return
       }
@@ -530,6 +527,8 @@ export function createComposerEditor(input: {
       }
     },
     attach,
+    uploads: () => attachments?.pending() ?? [],
+    cancelUpload: (id: string) => attachments?.cancel(id),
     setFileInput(element: HTMLInputElement) {
       fileInput = element
     },
@@ -549,6 +548,12 @@ export function createComposerEditor(input: {
 }
 
 export type ComposerEditorModel = ReturnType<typeof createComposerEditor>
+
+export function shouldHandlePasteAsAttachment(clipboard: DataTransfer | null, readClipboardImage: boolean) {
+  if (Array.from(clipboard?.items ?? []).some((item) => item.kind === "file")) return true
+  if (Array.from(clipboard?.types ?? []).some((type) => type.startsWith("text/"))) return false
+  return readClipboardImage
+}
 
 function canNavigateHistory(direction: "up" | "down", text: string, cursor: number, inHistory: boolean) {
   const position = Math.max(0, Math.min(cursor, text.length))
