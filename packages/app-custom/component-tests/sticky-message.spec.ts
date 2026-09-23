@@ -172,6 +172,61 @@ for (const scenario of ["context", "attachments-only"]) {
   }
 }
 
+for (const width of [1280, 390]) {
+  story(`collapsed quotes preview as single rows above the text at ${width}px`, async ({ page, mount }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mount("sticky-message--quotes")
+    const root = page.getByTestId("sticky-fixture")
+    await root.getByRole("button", { name: "First request", exact: true }).click()
+    const first = root.locator('[data-timeline-key="user-message:sticky-user-0"]')
+    const bubble = first.locator('[data-slot="user-message-text"]')
+    const rows = first.locator('[data-slot="user-message-quote-preview"]')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.nth(0)).toHaveText(
+      "Quoted from an earlier message: Quoted 1, with a comment long enough to be truncated on a narrow collapsed bubble",
+    )
+    await expect(rows.nth(1)).toHaveText("Quoted from an earlier message: Isso é um teste de citação sem comentário.")
+    await expect(first.locator('[data-component="user-message-quote"]')).toHaveCount(0)
+    for (const index of [0, 1]) {
+      expect(
+        await rows
+          .nth(index)
+          .evaluate((element) => element.clientHeight / Number.parseFloat(getComputedStyle(element).lineHeight)),
+      ).toBeLessThan(1.5)
+    }
+    expect(
+      await rows
+        .nth(0)
+        .locator('[data-slot="user-message-quote-preview-line"]')
+        .evaluate((element) => element.scrollWidth > element.clientWidth),
+    ).toBe(true)
+    const draft = first.locator('[data-slot="user-message-draft"]')
+    expect((await rows.nth(1).boundingBox())!.y).toBeLessThan((await draft.boundingBox())!.y)
+    await expect(draft).toHaveAttribute("data-expanded", "false")
+    await expect.poll(() => bubble.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+
+    await rows.nth(0).click()
+    await expect(rows).toHaveCount(0)
+    await expect(draft).toHaveAttribute("data-expanded", "true")
+    const long = first.locator('[data-component="user-message-quote"]').filter({ hasText: "Quoted 1" })
+    const short = first.locator('[data-component="user-message-quote"]').filter({ hasText: "Isso é um teste" })
+    await expect(short.getByRole("button")).toHaveCount(0)
+    await expect(long.locator("blockquote")).toHaveCSS("-webkit-line-clamp", "4")
+    await long.getByRole("button", { name: "Expand quote", exact: true }).click()
+    await expect(long.getByRole("button", { name: "Collapse quote", exact: true })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    )
+    await expect(long.locator("blockquote")).toHaveCSS("-webkit-line-clamp", "none")
+    await long.getByRole("button", { name: "Collapse quote", exact: true }).press("Enter")
+    await expect(long.getByRole("button", { name: "Expand quote", exact: true })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+    await expect(first.getByRole("button", { name: "Collapse message", exact: true })).toBeVisible()
+  })
+}
+
 story("text selection and links do not expand the message", async ({ page, mount }) => {
   await mount("sticky-message--reading")
   await page.getByRole("button", { name: "First request", exact: true }).click()

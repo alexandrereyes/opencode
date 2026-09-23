@@ -18,7 +18,7 @@ import { ImagePreview } from "@opencode/ui-custom/image-preview"
 import { getFilename } from "@opencode/util/path"
 import { AttachmentCard } from "./attachment-card"
 import { CommentCard } from "./comment-card"
-import { UserMessageQuote } from "./user-message-quote"
+import { UserMessageQuote, UserMessageQuotePreview } from "./user-message-quote"
 import { TimelineSeparator } from "../components/timeline-separator"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { IconButton } from "@opencode/ui-custom/icon-button"
@@ -279,7 +279,6 @@ export function CurrentUserMessageDisplay(props: {
   const contextPreview = () =>
     [
       ...comments().map((comment) => comment.comment),
-      ...(props.quotes ?? []).map((quote) => quote.comment || quote.text),
       ...references().map((file) => file.name),
       ...attachments().map((file) => file.name ?? i18n.t("ui.message.attachment.alt")),
     ].join("\n")
@@ -382,7 +381,7 @@ export function CurrentUserMessageDisplay(props: {
               tabIndex={canExpand() ? 0 : undefined}
               aria-expanded={canExpand() ? false : undefined}
               aria-label={canExpand() ? i18n.t("ui.message.expand") : undefined}
-              aria-describedby={canExpand() ? previewID : undefined}
+              aria-describedby={canExpand() ? `${previewID}-quotes ${previewID}` : undefined}
               onClick={(event) => {
                 if (!canExpand() || window.getSelection()?.toString()) return
                 if (event.target instanceof Element && event.target.closest("a, button, input, textarea, select"))
@@ -396,7 +395,29 @@ export function CurrentUserMessageDisplay(props: {
                 if (!window.getSelection()?.toString()) setExpanded(true)
               }}
             >
-              <Show when={props.text || !expanded()}>
+              <Show when={props.quotes?.length}>
+                <Show
+                  when={expanded()}
+                  fallback={
+                    <div id={`${previewID}-quotes`} data-slot="user-message-quote-previews">
+                      <For each={props.quotes}>{(quote) => <UserMessageQuotePreview quote={quote} />}</For>
+                    </div>
+                  }
+                >
+                  <div data-slot="user-message-quotes">
+                    <For each={props.quotes}>
+                      {(quote) => (
+                        <UserMessageQuote
+                          quote={quote}
+                          open={props.quoteOpen?.(quote.id)}
+                          onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
+                        />
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </Show>
+              <Show when={props.text || (!expanded() && contextPreview())}>
                 <div
                   ref={observeDraft}
                   id={previewID}
@@ -417,19 +438,6 @@ export function CurrentUserMessageDisplay(props: {
                     agents={props.text ? agents() : []}
                     sessions={props.text ? (props.sessions ?? []) : []}
                   />
-                </div>
-              </Show>
-              <Show when={expanded() && props.quotes?.length}>
-                <div data-slot="user-message-quotes">
-                  <For each={props.quotes}>
-                    {(quote) => (
-                      <UserMessageQuote
-                        quote={quote}
-                        open={props.quoteOpen?.(quote.id)}
-                        onOpenChange={(open) => props.onQuoteOpenChange?.(quote.id, open)}
-                      />
-                    )}
-                  </For>
                 </div>
               </Show>
               <Show when={expanded() && comments().length > 0}>

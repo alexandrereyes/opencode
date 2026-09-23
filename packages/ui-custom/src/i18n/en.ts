@@ -236,6 +236,7 @@ const source = {
   "ui.message.context.one": "{{count}} context item",
   "ui.message.context.other": "{{count}} context items",
   "ui.message.quote.caption": "Quoted from an earlier message",
+  "ui.message.quote.previewLabel": "Quoted from an earlier message:",
   "ui.message.quote.expand": "Expand quote",
   "ui.message.quote.collapse": "Collapse quote",
   "ui.message.copy": "Copy",
