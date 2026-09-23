@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web"
 import { Button } from "@opencode/ui-custom/button"
 import { Icon } from "@opencode/ui-custom/icon"
 import { useLanguage } from "@/runtime/i18n/language"
+import { useCommand } from "@/shell/commands/command"
 import "./chat-quotes.css"
 import type { ChatQuote } from "./schema"
 import { captureChatQuoteAnchor } from "./chat-quote-anchor"
@@ -33,6 +34,7 @@ export function ChatQuoteSelection(props: {
   onAddToInput?: (text: string) => void
 }) {
   const language = useLanguage()
+  const command = useCommand()
   const [state, setState] = createStore<{
     selection?: {
       partID: string
@@ -150,6 +152,20 @@ export function ChatQuoteSelection(props: {
                   {language.t("chatQuotes.addToInput")}
                 </Button>
               )}
+            </Show>
+            <Show when={command.options.some((item) => item.id === "session.btw" && !item.disabled)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                onPointerDown={(event: PointerEvent) => event.preventDefault()}
+                onClick={() => {
+                  command.trigger("session.btw")
+                  dismiss()
+                }}
+              >
+                {language.t("command.session.btw")}
+              </Button>
             </Show>
           </div>
         </Portal>

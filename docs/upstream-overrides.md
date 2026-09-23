@@ -345,6 +345,20 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 _None recorded yet. The register began with this document, without a retroactive
 audit (see above)._
 
+### Mobile-friendly /btw peek panel — https://github.com/anomalyco/opencode/pull/49750
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `dcfe1ec7bd4922d4f44c141ba33047402bffc57e`, 2026-09-23
+- **Local change:** `feat(app): add mobile-friendly side question panel` (`223dc0836`), `fix(app): refine side question history and cancellation`; `packages/app-custom/src/session/btw/`, custom composer command/selection integration, command shortcuts, and English source strings. Uses the same abortable `session.generate` backend and verbatim side-question instructions as upstream #49750. The Solid UI is modeled on OpenChamber's MIT-licensed `useBtwStore`, `BtwPanel`, and `ComposerFloatingPanel`: a responsive panel docked above the composer, compact collapsed chip, explicit cancel, and touch dismissal. Entry points are `/btw`, `/btw <question>`, command palette, Mod+Shift+B, and selected assistant text. The separate question field preserves the main draft; mobile Enter inserts a newline and desktop Enter submits. Up to five completed side Q&A pairs are kept per session, with bounded plain-text context included in subsequent generate prompts. State survives in-app navigation for the 20 most recently used sessions per server, but not reload; session changes/unmount cancel pending requests. OpenChamber is UI/UX inspiration only: no forks, metadata links, synthetic messages, plugin hooks, backend changes, or durable side history. The server chooses the current session model/context and returns the complete answer without token streaming.
+- **Tests:** app-custom `bun run typecheck`, `bun run test:unit` (1126 pass, 1 skip), `bun run test:browser` (219 pass), `bun run build`, and root `bun run check` pass. State tests use the real generated client with fake HTTP responses for success, errors, empty answers, replacement, cancellation, bounded Q&A history, follow-up context, draft edits while waiting, session/server isolation, and mobile/desktop/IME key rules. Composer tests verify bypassing model selection, history, prompt admission, and interruption. Playwright CLI verified the built app at 1440×900 and iPhone 390×844: slash suggestion, keyboard/button submission, mobile Enter newline without a request, Q&A history and follow-up context, pending/cancel/error states, compact collapse/reopen, navigation isolation and cancellation, and touch dismissal. The new temporary server strips inherited `OPENCODE_*` variables and explicitly sets isolated config paths/content; `/api/info` confirmed its PID/version and `/api/provider` returned `data: []` before any sends. Browser generation uses HTTP-boundary fixtures; server logs show no provider generation requests. `git diff --check` passes.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+_None recorded yet. The register began with this document, without a retroactive
+audit (see above)._
+
 ## Resolved entries
 
 _None._

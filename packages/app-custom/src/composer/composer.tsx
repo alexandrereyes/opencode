@@ -13,6 +13,7 @@ import { formatKeybind, useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
 import type { ComposerModel } from "./model"
 import { ChatQuotes } from "./chat-quotes"
+import { BtwPanel } from "@/session/btw/panel"
 
 export function Composer(props: { class?: string; model: ComposerModel; borderUnderlay?: boolean }) {
   const dialog = useDialog()
@@ -21,7 +22,8 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
   const [state, setState] = createStore({ editingQuote: false })
 
   return (
-    <div class="flex flex-col gap-3" data-component="composer-region" data-editing-quote={state.editingQuote}>
+    <div class="relative flex flex-col gap-3" data-component="composer-region" data-editing-quote={state.editingQuote}>
+      <Show when={props.model.btw}>{(btw) => <BtwPanel btw={btw()} restoreFocus={props.model.restoreFocus} />}</Show>
       <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
         {(quotes) => (
           <ChatQuotes

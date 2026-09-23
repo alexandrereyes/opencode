@@ -33,6 +33,7 @@ type ComposerSubmission = {
 }
 
 type ComposerSubmitInput = {
+  clientCommand?: (text: string) => boolean
   adapter: ComposerAdapter
   mode: Accessor<"normal" | "shell">
   commands: Accessor<readonly { name: string }[] | undefined>
@@ -66,6 +67,20 @@ type ComposerSubmitInput = {
 export function createComposerSubmit(input: ComposerSubmitInput) {
   const submit = async (event: globalThis.Event, options?: { alternate?: boolean }) => {
     event.preventDefault()
+
+    const text = input.adapter.state
+      .current()
+      .filter((part) => part.type === "text")
+      .map((part) => part.content)
+      .join("")
+    if (input.mode() === "normal" && input.clientCommand?.(text)) {
+      input.adapter.state.set(
+        input.adapter.state.current().filter((part) => part.type !== "text"),
+        0,
+      )
+      input.closePopover()
+      return
+    }
 
     const submission = createComposerSubmission({
       target: input.adapter.state,
