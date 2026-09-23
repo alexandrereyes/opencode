@@ -311,15 +311,16 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
       ? "—"
       : new Intl.NumberFormat(language.intl(), { style: "percent", maximumFractionDigits: 0 }).format(value / 100)
   const remaining = (value: number | null) => (account().stale || capacity() === "unconfirmed" ? null : value)
+  const weeklyExhausted = () => remaining(account().remaining) === 0
   const date = (value: string) => formatSubscriptionDate(value, language.intl(), true)
-  const pace = () => subscriptionPace(account(), props.now)
+  const pace = () => (weeklyExhausted() ? null : subscriptionPace(account(), props.now))
   const status = () => {
     if (!account().enabled) return "context.overview.disabled"
     if (!account().authenticated) return "context.overview.reauthenticate"
     if (account().cooldownSeconds > 0) return "context.overview.cooldown"
     if (capacity() === "unconfirmed") return "context.overview.capacityUnconfirmed"
     if (capacity() === "outside") return "context.overview.outsidePool"
-    if (capacity() === "unavailable" && account().remaining === 0) return "sidebar.proxy.weeklyExhausted"
+    if (weeklyExhausted()) return
     if (capacity() === "unavailable" && account().fiveHourRemaining === 0) return "sidebar.proxy.fiveHourExhausted"
     if (capacity() === "unavailable") return "context.overview.noCapacity"
   }
@@ -353,7 +354,10 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
         {language.t("sidebar.proxy.renews", { date: account().resetAt ? date(account().resetAt!) : "—" })}
       </span>
       <Show
-        when={account().plan === "plus" || account().fiveHourRemaining !== null || account().fiveHourResetAt !== null}
+        when={
+          !weeklyExhausted() &&
+          (account().plan === "plus" || account().fiveHourRemaining !== null || account().fiveHourResetAt !== null)
+        }
       >
         <div class="flex justify-between gap-2 text-12-regular text-v2-text-text-muted">
           <span>{language.t("context.overview.fiveHour")}</span>
