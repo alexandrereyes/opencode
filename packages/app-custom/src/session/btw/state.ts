@@ -1,15 +1,12 @@
 import { createStore } from "solid-js/store"
 import type { ServerSDK } from "@/runtime/server/client"
+import type { Prompt } from "@/composer/state"
 
 const instructions = [
   "The user is asking a quick side question about the conversation so far.",
   "Answer directly and concisely in markdown from what you already know.",
   "Do not call any tools and do not take any actions.",
 ].join(" ")
-
-export function btwSubmitKey(event: Pick<KeyboardEvent, "key" | "shiftKey" | "isComposing">, mobile: boolean) {
-  return event.key === "Enter" && !event.isComposing && (mobile ? event.shiftKey : !event.shiftKey)
-}
 
 export function createBtwSessions(generate: ServerSDK["api"]["session"]["generate"]) {
   const sessions = new Map<string, BtwModel>()
@@ -45,6 +42,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
     open: false,
     collapsed: false,
     draft: "",
+    draftPrompt: undefined as Prompt | undefined,
     question: "",
     answer: "",
     history: [] as { question: string; answer: string }[],
@@ -61,11 +59,17 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
     setState("pending", false)
   }
   const open = (draft?: string) => {
-    setState({ open: true, collapsed: false, focus: state.focus + 1, ...(draft !== undefined ? { draft } : {}) })
+    setState({
+      open: true,
+      collapsed: false,
+      focus: state.focus + 1,
+      ...(draft !== undefined ? { draft, draftPrompt: undefined } : {}),
+    })
   }
-  const ask = async (value = state.draft) => {
+  const ask = async (value = state.draft, preserveDraft = false) => {
     const question = value.trim()
     if (!question) return open()
+    const draft = preserveDraft ? state.draft : question
     cancel()
     const controller = new AbortController()
     request.controller = controller
@@ -76,7 +80,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
       open: true,
       collapsed: false,
       question,
-      draft: question,
+      ...(preserveDraft ? {} : { draft: question, draftPrompt: undefined }),
       answer: "",
       pending: true,
       error: false,
@@ -92,7 +96,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
         setState({ answer, error: !answer })
         if (answer) {
           setState("history", (history) => [...history, { question, answer }].slice(-5))
-          if (state.draft === question) setState("draft", "")
+          if (state.draft === draft) setState({ draft: "", draftPrompt: undefined })
         }
       })
       .catch(() => {
@@ -109,7 +113,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
     open,
     ask,
     cancel,
-    draft: (draft: string) => setState("draft", draft),
+    draft: (draft: string, draftPrompt?: Prompt) => setState({ draft, draftPrompt }),
     collapse: () => setState("collapsed", true),
     dismiss: () => {
       cancel()
@@ -120,6 +124,7 @@ export function createBtwState(sessionID: string, generate: ServerSDK["api"]["se
         answer: "",
         history: [],
         draft: "",
+        draftPrompt: undefined,
         error: false,
         cancelled: false,
       })

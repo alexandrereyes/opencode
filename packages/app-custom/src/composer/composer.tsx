@@ -23,7 +23,9 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
 
   return (
     <div class="relative flex flex-col gap-3" data-component="composer-region" data-editing-quote={state.editingQuote}>
-      <Show when={props.model.btw}>{(btw) => <BtwPanel btw={btw()} restoreFocus={props.model.restoreFocus} />}</Show>
+      <Show when={props.model.btw}>
+        {(btw) => <BtwPanel btw={btw()} completion={props.model.completion} restoreFocus={props.model.restoreFocus} />}
+      </Show>
       <Show when={props.model.state.mode !== "shell" && props.model.quotes}>
         {(quotes) => (
           <ChatQuotes

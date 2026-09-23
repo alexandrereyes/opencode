@@ -86,6 +86,7 @@ export type ComposerEditorProps = {
     id?: string
     ariaLabel: string
     autofocus?: boolean
+    submit?: boolean
     onDone: () => void
   }
 }
@@ -234,7 +235,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
     const releaseDelayedEnter = preserveDelayedEnterModifiers(editorHost)
     const interceptKey = (event: KeyboardEvent) => {
       if (editorView?.composing || event.isComposing || event.keyCode === 229 || event.key === "Dead") return false
-      if (props.compact && event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      if (props.compact && !props.compact.submit && event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         event.stopPropagation()
         props.compact.onDone()
@@ -242,13 +243,15 @@ export function ComposerEditor(props: ComposerEditorProps) {
       }
       if (props.compact) {
         if (props.controller.onKeyDown(event)) return true
-        if (event.key !== "Escape") return false
-        event.preventDefault()
-        event.stopPropagation()
-        props.compact.onDone()
-        return true
+        if (event.key === "Escape") {
+          event.preventDefault()
+          event.stopPropagation()
+          props.compact.onDone()
+          return true
+        }
+        if (!props.compact.submit) return false
       }
-      if (!view.draftOnly && props.controller.onKeyDown(event)) return true
+      if (!props.compact && !view.draftOnly && props.controller.onKeyDown(event)) return true
       const mod = event.metaKey || event.ctrlKey
       if (mod && event.key === "ArrowUp" && !event.shiftKey && !event.altKey) {
         if (view.submit.queue?.editFirst()) event.preventDefault()

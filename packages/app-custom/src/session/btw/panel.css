@@ -60,19 +60,18 @@
   padding: 8px 12px 12px;
   flex-shrink: 0;
 }
-.btw-form textarea {
+.btw-form [data-component="composer"][data-compact="true"] {
   flex: 1;
   min-width: 0;
-  resize: none;
   border: 1px solid var(--v2-border-border-base);
   border-radius: 6px;
-  padding: 8px;
   background: var(--v2-background-bg-base);
   color: var(--v2-text-text-base);
   font: inherit;
+  box-shadow: none;
 }
 @media (max-width: 767px) {
-  .btw-form textarea {
+  .btw-form .cm-content {
     font-size: 16px;
   }
   .btw-header button,

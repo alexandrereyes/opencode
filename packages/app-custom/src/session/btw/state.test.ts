@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { OpenCode } from "@opencode/client/promise"
-import { btwQuestion, btwSubmitKey, createBtwSessions, createBtwState } from "./state"
+import { btwQuestion, createBtwSessions, createBtwState } from "./state"
 
 function setup() {
   const requests: { request: Request; reply: (response: Response) => void }[] = []
@@ -22,6 +22,25 @@ function setup() {
 }
 
 describe("side questions", () => {
+  test("rich draft survives cancellation/navigation while generate receives expanded text", async () => {
+    const input = setup()
+    const btw = input.sessions("rich")
+    btw.draft("#why", [
+      { type: "snippet", id: "why", name: "why", content: "#why", expansion: "Explain this", start: 0, end: 4 },
+    ])
+    const pending = btw.ask("Explain this", true)
+    expect(btw.state.draft).toBe("#why")
+    expect(btw.state.draftPrompt?.[0].type).toBe("snippet")
+    btw.cancel()
+    input.requests[0].reply(Response.json({ data: { text: "discarded" } }))
+    await pending
+    expect(input.sessions("rich").state.draftPrompt?.[0].type).toBe("snippet")
+    const retry = btw.ask("Explain this", true)
+    input.requests[1].reply(Response.json({ data: { text: "answer" } }))
+    await retry
+    expect(btw.state.draft).toBe("")
+    expect(btw.state.draftPrompt).toBeUndefined()
+  })
   test("recognizes only the exact slash command and retains multiline arguments", () => {
     expect(btwQuestion(" /btw ")).toBe("")
     expect(btwQuestion("/btw why?\nand how?")).toBe("why?\nand how?")
@@ -150,15 +169,5 @@ describe("side questions", () => {
     input.requests[1].reply(new Response("error", { status: 503 }))
     await failed
     expect(input.btw.state.history).toEqual([{ question: "one", answer: "one answer" }])
-  })
-
-  test("mobile Enter inserts a newline; desktop Enter and mobile Shift+Enter submit, except during IME", () => {
-    const enter = { key: "Enter", shiftKey: false, isComposing: false }
-    expect(btwSubmitKey(enter, true)).toBe(false)
-    expect(btwSubmitKey(enter, false)).toBe(true)
-    expect(btwSubmitKey({ ...enter, shiftKey: true }, true)).toBe(true)
-    expect(btwSubmitKey({ ...enter, shiftKey: true }, false)).toBe(false)
-    expect(btwSubmitKey({ ...enter, isComposing: true }, false)).toBe(false)
-    expect(btwSubmitKey({ ...enter, key: "Escape" }, false)).toBe(false)
   })
 })

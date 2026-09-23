@@ -5,23 +5,23 @@ import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Markdown } from "@opencode/session-ui-custom/markdown"
 import { useLanguage } from "@/runtime/i18n/language"
-import { btwSubmitKey, type BtwModel } from "./state"
+import type { BtwModel } from "./state"
+import type { ComposerEditorModel } from "@/composer/editor/interaction"
+import { BtwQuestionEditor } from "./question-editor"
 import "./panel.css"
 
-export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
+export function BtwPanel(props: {
+  btw: BtwModel
+  completion: ComposerEditorModel["completion"]
+  restoreFocus: () => void
+}) {
   const language = useLanguage()
   const [layout, setLayout] = createStore({ height: 520 })
   let panel: HTMLDivElement | undefined
-  let input: HTMLTextAreaElement | undefined
   const close = () => {
     props.btw.dismiss()
     props.restoreFocus()
   }
-  createEffect(() => {
-    if (!props.btw.state.open) return
-    props.btw.state.focus
-    if (!props.btw.state.collapsed) input?.focus({ preventScroll: true })
-  })
   createEffect(() => {
     if (!props.btw.state.open) return
     const update = () => {
@@ -109,30 +109,14 @@ export function BtwPanel(props: { btw: BtwModel; restoreFocus: () => void }) {
               </div>
             </Show>
           </div>
-          <form
-            class="btw-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void props.btw.ask()
+          <BtwQuestionEditor
+            btw={props.btw}
+            completion={props.completion}
+            onDone={() => {
+              props.btw.collapse()
+              props.restoreFocus()
             }}
-          >
-            <textarea
-              ref={input}
-              rows={2}
-              value={props.btw.state.draft}
-              aria-label={language.t("session.btw.question")}
-              placeholder={language.t("session.btw.question")}
-              onInput={(event) => props.btw.draft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (!btwSubmitKey(event, window.matchMedia("(max-width: 767px)").matches)) return
-                event.preventDefault()
-                if (!props.btw.state.pending) void props.btw.ask()
-              }}
-            />
-            <Button type="submit" disabled={props.btw.state.pending || !props.btw.state.draft.trim()}>
-              {language.t("session.btw.ask")}
-            </Button>
-          </form>
+          />
         </Show>
       </div>
     </Show>
