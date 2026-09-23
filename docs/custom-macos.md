@@ -437,3 +437,13 @@ cancellation, or a server restart.
 Movement messages are queried by type to discover previous Locations after a cold reload, so a
 Session still shows its live shells in the original Location until they exit. Fork-copied history
 does not transfer ownership, and a child reused in foreground is not duplicated in background.
+
+## OpenChamber theme
+
+Settings → General → Appearance → Theme offers an **OpenChamber** theme (`packages/ui-custom/src/theme/themes/openchamber.json`)
+with light and dark variants adapted from OpenChamber's signature palette: warm ink neutrals,
+orange accent, Vitesse-style syntax, teal links, green inline code and a tinted user-message
+bubble. Two optional pairs of theme variables drive the custom session UI; every other theme keeps
+its default colors: `v2-user-message-background`/`v2-user-message-text` (local-session user
+bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths,
+which otherwise follow `syntax-string`).

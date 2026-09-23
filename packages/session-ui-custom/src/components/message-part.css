@@ -1557,8 +1557,8 @@
   [data-local-session]
   [data-component="user-message"]
   [data-slot="user-message-text"] {
-  background: var(--v2-blue-100);
-  color: var(--v2-blue-700);
+  background: var(--v2-user-message-background, var(--v2-blue-100));
+  color: var(--v2-user-message-text, var(--v2-blue-700));
   border-radius: 8px;
 }
 
@@ -1567,7 +1567,7 @@
   [data-local-session]
   [data-component="user-message"]
   [data-slot="user-message-text"] {
-  background: var(--v2-blue-1200);
-  color: var(--v2-blue-300);
+  background: var(--v2-user-message-background, var(--v2-blue-1200));
+  color: var(--v2-user-message-text, var(--v2-blue-300));
   border-radius: 8px;
 }

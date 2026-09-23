@@ -3,8 +3,8 @@
   --markdown-body-color: color-mix(in oklch, var(--v2-text-text-base) 82%, transparent);
   --markdown-strong-color: var(--v2-text-text-base);
   /* Inline code follows the active syntax theme, like strings in code blocks. */
-  --markdown-inline-code-path-color: var(--syntax-string, var(--v2-text-text-code-path));
-  --markdown-inline-code-color: var(--syntax-string, var(--v2-text-text-code-accent));
+  --markdown-inline-code-path-color: var(--v2-inline-code-text, var(--syntax-string, var(--v2-text-text-code-path)));
+  --markdown-inline-code-color: var(--v2-inline-code-text, var(--syntax-string, var(--v2-text-text-code-accent)));
   --markdown-inline-code-bg-mix: 10%;
   --markdown-shell-code-background: var(--v2-background-bg-layer-02);
   --markdown-shell-code-border: var(--v2-border-border-muted);
@@ -310,15 +310,17 @@
     font-weight: 400;
     padding: 0 4px;
     border-radius: 4px;
-    background: color-mix(in oklch, var(--markdown-inline-code-color) var(--markdown-inline-code-bg-mix), transparent);
+    background: var(
+      --v2-inline-code-background,
+      color-mix(in oklch, var(--markdown-inline-code-color) var(--markdown-inline-code-bg-mix), transparent)
+    );
   }
 
   :not(pre) > code[data-inline-code-kind="path"] {
     color: var(--markdown-inline-code-path-color);
-    background: color-mix(
-      in oklch,
-      var(--markdown-inline-code-path-color) var(--markdown-inline-code-bg-mix),
-      transparent
+    background: var(
+      --v2-inline-code-background,
+      color-mix(in oklch, var(--markdown-inline-code-path-color) var(--markdown-inline-code-bg-mix), transparent)
     );
   }
 
