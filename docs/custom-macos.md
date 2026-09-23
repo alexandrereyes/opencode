@@ -329,6 +329,22 @@ captured content on submission, including when a command is prefixed from the co
 Drafts and prompt history retain the structured association while its text remains unchanged.
 Snippets do not require server config files.
 
+## Project explorer
+
+**Add project** on Home and in the new-session project menu opens a flat directory explorer
+instead of the tree picker; the desktop native picker and the SSH project dialog are unchanged.
+The path field is both location and filter: text up to the last `/` is the browsed directory
+and the rest filters its children by prefix, starting at `~/`. Arrow keys move, Enter opens the
+highlighted folder (or `..`), and Cmd/Ctrl+Enter adds the typed path. Home also allows batch
+selection with the checkboxes or Space while browsing; each row's `+` adds that folder at once.
+Existing projects are marked **Added**, and **Show hidden** reveals dot folders. The server
+home directory and filesystem roots cannot be added, so browsing `~/` never adds home by accident.
+
+When the typed final segment does not exist, the action becomes **Create and add**. The
+`custom.directories` plugin RPC creates only that final folder, so a missing parent fails
+instead of creating a tree; it also reports the server home directory, which V2 sync does not
+publish. Servers without the custom plugin start at the current location and cannot create folders.
+
 ## Chat quotes
 
 Select prose or code inside one assistant text part and choose **Comment**. The composer

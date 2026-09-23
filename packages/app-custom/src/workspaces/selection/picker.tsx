@@ -1,12 +1,15 @@
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { ServerConnection } from "@/runtime/server/registry"
 import { usePlatform } from "@/runtime/platform/platform"
-import { lazy } from "solid-js"
+import { type Component, lazy } from "solid-js"
 import type { LocationRef } from "@opencode/client/promise"
 import { directoryPickerKind } from "./policy"
 
 const DirectoryPickerDialog = lazy(() =>
   import("./dialog").then((module) => ({ default: module.DirectoryPickerDialog })),
+)
+const ProjectExplorerDialog = lazy(() =>
+  import("./explorer").then((module) => ({ default: module.ProjectExplorerDialog })),
 )
 
 type DirectoryPickerInput = {
@@ -18,6 +21,14 @@ type DirectoryPickerInput = {
 }
 
 export function useDirectoryPicker() {
+  return usePicker(DirectoryPickerDialog)
+}
+
+export function useProjectPicker() {
+  return usePicker(ProjectExplorerDialog)
+}
+
+function usePicker(View: Component<DirectoryPickerInput>) {
   const platform = usePlatform()
   const dialog = useDialog()
 
@@ -35,6 +46,6 @@ export function useDirectoryPicker() {
     const cancel = () => {
       if (!selected) input.onSelect(null)
     }
-    dialog.show(() => <DirectoryPickerDialog {...input} onSelect={onSelect} />, cancel)
+    dialog.show(() => <View {...input} onSelect={onSelect} />, cancel)
   }
 }

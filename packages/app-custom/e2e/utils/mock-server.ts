@@ -14,6 +14,7 @@ export interface MockServerConfig {
   sessions: ({ id: string } & Record<string, unknown>)[]
   mcpServers?: unknown[]
   appMentions?: unknown[]
+  home?: string
   snippets?: unknown[]
   skills?: unknown[]
   subscriptions?: unknown
@@ -316,6 +317,9 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
                   }),
               },
             })
+          }
+          if (ctx.params.rpcID === "custom.directories" && ctx.params.method === "home") {
+            return Effect.succeed({ output: { path: config.home ?? "" } })
           }
           if (ctx.params.rpcID !== "custom.app-mentions" || ctx.params.method !== "list") {
             return Effect.succeed({ output: {} })
