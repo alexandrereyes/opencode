@@ -1,5 +1,5 @@
 import { createMemo, createResource } from "solid-js"
-import { useDirectoryPicker } from "@/workspaces/selection/picker"
+import { useProjectPicker } from "@/workspaces/selection/picker"
 import { useGlobal, useServerCtx } from "@/runtime/server/runtime"
 import { useServerSDK } from "@/runtime/server/client"
 import { serverName, ServerConnection, useServers } from "@/runtime/server/registry"
@@ -22,7 +22,7 @@ export function createComposerProjectControls(props: {
   const tabs = useTabs()
   const global = useGlobal()
   const language = useLanguage()
-  const pickDirectory = useDirectoryPicker()
+  const pickDirectory = useProjectPicker()
   const projectServer = () => serverSDK.server
   const projectServerCtx = useServerCtx(projectServer)
   const capability = chatCapability(serverSDK)

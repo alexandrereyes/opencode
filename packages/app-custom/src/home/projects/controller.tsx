@@ -1,4 +1,4 @@
-import { useDirectoryPicker } from "@/workspaces/selection/picker"
+import { useProjectPicker } from "@/workspaces/selection/picker"
 import { useServerActionsController } from "@/servers/registry/controller"
 import { useSettingsCommand } from "@/settings/command"
 import { type LocalProject } from "@/shell/state/layout"
@@ -22,7 +22,7 @@ export const HomeServersSchema = Schema.Struct({
 
 export function createHomeProjectsController(home: HomeController) {
   const platform = usePlatform()
-  const pickDirectory = useDirectoryPicker()
+  const pickDirectory = useProjectPicker()
   const dialog = useDialog()
   const language = useLanguage()
   const openSettings = useSettingsCommand()
