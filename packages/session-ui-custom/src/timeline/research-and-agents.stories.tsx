@@ -146,6 +146,15 @@ const CompareSearchProviders = {
         ),
         storyTool("tool_search_exa", "websearch", "completed", { query: "exa" }, { metadata: { provider: "exa" } }),
         storyTool("tool_search_generic", "websearch", "completed", { query: "generic" }),
+        ...["tinyfish", "opencode", "customsearch"].map((provider) =>
+          storyTool(
+            `tool_search_${provider}`,
+            "websearch",
+            "completed",
+            { query: provider },
+            { metadata: { provider } },
+          ),
+        ),
       ])}
     />
   ),

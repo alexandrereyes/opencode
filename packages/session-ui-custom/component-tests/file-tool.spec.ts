@@ -9,14 +9,17 @@ for (const theme of ["light", "dark"]) {
     const group = root.locator('[data-component="collapsed-tool-group"]').filter({ hasText: "Patch" })
     const disclosure = group.getByRole("button", { name: /^Used \d+ .*Edit.*Write.*Patch$/ })
     await disclosure.click()
-    for (const name of ["edit", "write", "patch"]) {
-      const tool = group.locator(`[data-timeline-part-id="tool_family_${name}"]`)
+    const files = group.locator('[data-timeline-part-ids="tool_family_edit,tool_family_write,tool_family_patch"]')
+    await expect(files.locator('[data-slot="accordion-item"]')).toHaveCount(2)
+    for (const name of ["a.ts", "new.ts"]) {
+      const tool = files.locator('[data-slot="accordion-item"]').filter({ hasText: name })
       const file = tool.locator('[data-slot="accordion-trigger"]')
       await expect(file).toHaveAttribute("aria-expanded", "false")
       await expect(tool.locator('[data-component="file"]')).toHaveCount(0)
       await file.click()
       await expect(file).toHaveAttribute("aria-expanded", "true")
-      await expect(tool.locator('[data-component="file"]')).toBeVisible()
+      await expect(tool.locator('[data-component="file"]')).toHaveCount(name === "a.ts" ? 2 : 1)
+      for (const diff of await tool.locator('[data-component="file"]').all()) await expect(diff).toBeVisible()
       await expect(file).toBeFocused()
       await file.press("Space")
       await expect(file).toHaveAttribute("aria-expanded", "false")
@@ -25,10 +28,11 @@ for (const theme of ["light", "dark"]) {
     }
     await disclosure.click()
     await disclosure.click()
-    for (const name of ["edit", "write", "patch"]) {
-      const tool = group.locator(`[data-timeline-part-id="tool_family_${name}"]`)
+    for (const name of ["a.ts", "new.ts"]) {
+      const tool = files.locator('[data-slot="accordion-item"]').filter({ hasText: name })
       await expect(tool.locator('[data-slot="accordion-trigger"]')).toHaveAttribute("aria-expanded", "true")
-      await expect(tool.locator('[data-component="file"]')).toBeVisible()
+      await expect(tool.locator('[data-component="file"]')).toHaveCount(name === "a.ts" ? 2 : 1)
+      for (const diff of await tool.locator('[data-component="file"]').all()) await expect(diff).toBeVisible()
     }
     await root.screenshot({ path: info.outputPath(`file-tools-${theme}.png`) })
   })

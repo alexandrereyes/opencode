@@ -16,36 +16,19 @@ story("renders every admitted tool family and hides timeline-only exclusions", a
     "websearch",
     "subagent",
     "shell",
-    "edit",
-    "write",
-    "patch",
     "question",
     "skill",
     "custom",
   ]) {
     await expect(timeline.locator(`[data-timeline-part-id="tool_family_${id}"]`), id).toBeVisible()
   }
-  for (const [name, filename] of [
-    ["edit", "a.ts"],
-    ["write", "new.ts"],
-    ["patch", "a.ts"],
-  ]) {
-    const tool = timeline.locator(`[data-timeline-part-id="tool_family_${name}"]`)
-    await expect(tool.getByRole("button")).toHaveCount(1)
-    await expect(tool.locator('[data-scope="apply-patch"] button')).toHaveAttribute("aria-expanded", "false")
-    await expect(tool.locator('[data-slot="message-part-title-filename"]')).toHaveCount(0)
-    await expect(tool.locator('[data-slot="message-part-actions"]')).toHaveCount(0)
-    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveText(filename)
-    if (name === "edit") {
-      await expect(tool.getByText("1 file", { exact: true })).toBeVisible()
-      await expect(tool.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("data-locked", "")
-      await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("font-size", "13px")
-      await expect(tool.locator('[data-slot="basic-tool-tool-title"]')).toHaveCSS("line-height", "16px")
-      continue
-    }
-    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveCSS("font-size", "13px")
-    await expect(tool.locator('[data-slot="apply-patch-filename"]')).toHaveCSS("line-height", "16px")
-  }
+  const files = timeline.locator('[data-timeline-part-ids="tool_family_edit,tool_family_write,tool_family_patch"]')
+  await expect(files).toBeVisible()
+  await expect(files.locator('[data-slot="apply-patch-filename"]')).toHaveText(["a.ts", "new.ts"])
+  await expect(files.locator('[data-scope="apply-patch"]')).toHaveCount(1)
+  await expect(files.locator('[data-slot="basic-tool-tool-title"]')).toHaveCount(0)
+  await expect(files.locator('[data-scope="apply-patch"] button')).toHaveCount(2)
+  await expect(files.locator('[data-scope="apply-patch"] button[aria-expanded="false"]')).toHaveCount(2)
   await expect(timeline.locator('[data-timeline-part-id="tool_family_todo"]')).toHaveCount(0)
 })
 
@@ -82,11 +65,14 @@ story("transitions shell and question through running error outcomes", async ({ 
 // Moved from packages/app/e2e/regression/session-timeline-tool-projection.spec.ts
 story("labels all web search provider variants", async ({ mount }) => {
   const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "providers" } })
-  await timeline.getByRole("button", { name: "Used 3 Parallel Web Search, Exa Web Search, Web Search" }).click()
+  await timeline.getByRole("button", { name: /^Used 6 Parallel Web Search/ }).click()
   const tools = timeline.locator('[data-component="context-tool-group-list"]')
   await expect(tools.getByRole("button", { name: /Parallel Web Search/ })).toBeVisible()
   await expect(tools.getByRole("button", { name: /Exa Web Search/ })).toBeVisible()
   await expect(tools.getByRole("button", { name: /^Web Search/ })).toBeVisible()
+  await expect(tools.getByRole("button", { name: /^TinyFish Web Search/ })).toBeVisible()
+  await expect(tools.getByRole("button", { name: /^OpenCode Web Search/ })).toBeVisible()
+  await expect(tools.getByRole("button", { name: /^Customsearch Web Search/ })).toBeVisible()
 })
 
 // Moved from packages/app/e2e/regression/session-timeline-tool-projection.spec.ts
