@@ -92,7 +92,7 @@ type Input = {
 
 type ViewProps = {
   header: JSX.Element
-  bottomSpacer?: JSX.Element
+  overlay?: JSX.Element
   workspaceSession: Accessor<boolean>
   deferred: (row: TimelineRow.TimelineRow) => boolean
   renderRow: (row: Accessor<TimelineRow.TimelineRow>, onSizeChange?: () => void) => JSX.Element
@@ -1015,11 +1015,10 @@ export function createTimelineVirtualizer(input: Input) {
               data-timeline-row="bottom-spacer"
               class="h-16 absolute top-0 left-0 w-full"
               style={{ transform: `translateY(${virtualizer.getTotalSize() - 64 - rendering.scrollAdjustment}px)` }}
-            >
-              {props.bottomSpacer}
-            </div>
+            />
           </div>
         </ScrollView>
+        {props.overlay}
       </div>
     )
   }

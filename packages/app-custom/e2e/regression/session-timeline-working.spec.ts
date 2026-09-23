@@ -59,6 +59,33 @@ for (const width of [1400, 390]) {
   })
 }
 
+test("pins the assistant status above the composer and yields to jump to latest", async ({ page }) => {
+  await setupTimeline(page, {
+    seedHistory: true,
+    messages: [userMessage(), assistantMessage([], { completed: false })],
+  })
+  const overlay = page.locator('[data-slot="session-activity-overlay"]')
+  const working = page.locator('[data-component="session-working"]')
+  const dock = page.locator('[data-component="session-composer-dock"]')
+  await expect(working).toBeInViewport()
+  await expect
+    .poll(async () => {
+      const [workingBox, dockBox] = await Promise.all([working.boundingBox(), dock.boundingBox()])
+      if (!workingBox || !dockBox) return undefined
+      const gap = dockBox.y - (workingBox.y + workingBox.height)
+      return gap >= 0 && gap < 32
+    })
+    .toBe(true)
+
+  await page.locator("[data-timeline-virtual-content]").hover()
+  await page.mouse.wheel(0, -100_000)
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCSS("opacity", "1")
+  await expect(overlay).toHaveCSS("opacity", "0")
+
+  await page.getByRole("button", { name: "Jump to latest" }).click()
+  await expect(overlay).toHaveCSS("opacity", "1")
+})
+
 const toolPhrases = { shell: "running command", patch: "applying patch", subagent: "delegating task" } as const
 
 for (const name of ["shell", "patch", "subagent"] as const) {

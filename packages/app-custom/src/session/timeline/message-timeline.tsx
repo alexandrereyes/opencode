@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
+import { createMediaQuery } from "@solid-primitives/media"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import type { SessionUserActions } from "@opencode/session-ui-custom/actions"
 import { useData } from "@opencode/session-ui-custom/context"
@@ -65,6 +66,7 @@ export function BackgroundMoveHint(props: { keybind?: string[]; onMove?: () => v
   const command = useCommand()
   const keys = () => props.keybind ?? command.keybindParts("session.background")
   const keybind = () => props.keybind?.join("+") ?? command.keybind("session.background")
+  const isDesktop = createMediaQuery("(min-width: 768px)")
 
   return (
     <Button
@@ -77,7 +79,9 @@ export function BackgroundMoveHint(props: { keybind?: string[]; onMove?: () => v
       onClick={() => props.onMove?.()}
     >
       <span class="min-w-0 truncate">{language.t("session.background.moveRunning")}</span>
-      <Keybind keys={keys()} variant="neutral" />
+      <Show when={isDesktop()}>
+        <Keybind keys={keys()} variant="neutral" />
+      </Show>
     </Button>
   )
 }
@@ -716,16 +720,27 @@ function MessageTimelineView(
       />
       <VirtualizedTimeline
         workspaceSession={workspaceSession}
-        bottomSpacer={
+        overlay={
           <Show when={showWorking() || backgroundHintPresence.present()}>
+            {/* Pinned above the composer inside the timeline's reserved bottom space.
+                It yields to the jump-to-latest button, which shares that space. */}
             <div
-              classList={{
-                "min-w-0 w-full max-w-full": true,
-                "md:max-w-[1000px] md:mx-auto": props.centered,
-              }}
+              data-slot="session-activity-overlay"
+              class="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2 transition-opacity duration-100"
+              classList={{ "md:max-w-[1000px] md:mx-auto": props.centered, "opacity-0": props.scroll.jump }}
             >
               <div
-                class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}
+                data-slot="session-activity-chip"
+                class="flex h-8 w-fit max-w-full items-center gap-2 rounded-full ps-3 text-[13px] font-[530] leading-text-compact backdrop-blur-[2px]"
+                classList={{
+                  "pointer-events-auto": !props.scroll.jump,
+                  "pe-1": backgroundHintPresence.present(),
+                  "pe-3": !backgroundHintPresence.present(),
+                }}
+                style={{
+                  background: "color-mix(in srgb, var(--v2-background-bg-base) 92%, transparent)",
+                  "box-shadow": "var(--v2-elevation-raised)",
+                }}
               >
                 <Show when={showWorking() && sessionID()} keyed>
                   <AssistantStatus activity={activity()} model={activityModel()} />

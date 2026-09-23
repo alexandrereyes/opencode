@@ -257,20 +257,24 @@ test("moves blocking work to the background with Ctrl+B", async ({ page }) => {
   await expect(hint).toBeVisible()
   await expect(working.locator('[data-component="text-shimmer"]')).toHaveAttribute("aria-label", / is delegating task$/)
   await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
+  // The status chip is pinned just above the composer, not after the timeline content.
+  const composer = page.locator('[data-component="session-composer-dock"]')
   await expect
     .poll(async () => {
-      const [cardBox, workingBox, hintBox] = await Promise.all([
+      const [cardBox, workingBox, hintBox, composerBox] = await Promise.all([
         card.boundingBox(),
         working.boundingBox(),
         hint.boundingBox(),
+        composer.boundingBox(),
       ])
-      if (!cardBox || !workingBox || !hintBox) return undefined
+      if (!cardBox || !workingBox || !hintBox || !composerBox) return undefined
+      const gap = composerBox.y - (workingBox.y + workingBox.height)
       return {
-        aligned: Math.abs(cardBox.x - workingBox.x) < 2,
+        docked: gap >= 0 && gap < 32,
         ordered: cardBox.y < workingBox.y && workingBox.x + workingBox.width <= hintBox.x,
       }
     })
-    .toEqual({ aligned: true, ordered: true })
+    .toEqual({ docked: true, ordered: true })
 
   const request = page.waitForRequest(
     (request) =>
@@ -279,6 +283,21 @@ test("moves blocking work to the background with Ctrl+B", async ({ page }) => {
   await page.keyboard.press("Control+b")
   await request
 })
+
+for (const width of [1400, 390]) {
+  test(`${width < 768 ? "hides" : "shows"} the background shortcut at ${width}px`, async ({ page }) => {
+    await setupTimeline(page, {
+      viewport: { width, height: 900 },
+      settings: {
+        timelineDetail: { ...timelinePresets[2].value, subagents: { placement: "separate" } },
+      },
+      sessionMessages: [user, assistant(false, true)],
+    })
+    const hint = page.getByRole("button", { name: /move running work to the background/i })
+    await expect(hint).toBeInViewport()
+    await expect(hint.locator('[data-component="keybind-v2"]')).toHaveCount(width < 768 ? 0 : 1)
+  })
+}
 
 test("navigates from a running subagent card and hides background controls in the child", async ({ page }) => {
   const childID = "ses_running_child"
