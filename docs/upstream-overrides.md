@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Compatibility skill watcher storm — https://github.com/anomalyco/opencode/commit/7784b3ee0d033da3eab101e45882387f4a3e1eaa
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `affa57e40f44fbd294c18199ecab5879c0ae0d70` (`upstream/v2`, where `compatibility.ts` is still identical to the version introduced by `7784b3ee0d033da3eab101e45882387f4a3e1eaa`), 2026-09-23
+- **Local change:** `fix(core): stop compatibility skill watcher storms`; `packages/core/src/config/plugin/compatibility.ts`, `packages/core/test/config/skill.test.ts`. There is no upstream fix. Upstream reloads on every raw `config.changes()` event without a debounce, and every refresh runs `FiberMap.clear` and resubscribes all watches. Every Location runs the plugin, so a single event under `~/.agents` or `~/.claude` became N×events full rescans, native watcher restarts, and `skill.updated` notifications. That storm froze the shared server (observed on 2026-09-23: ~30k refreshes in 22 minutes). Locally: config changes are filtered to `.claude`/`.agents` roots and share the existing 100 ms debounce; watches are reconciled so only watches that left the source set are released; claude and agents roots that resolve to the same directory are scanned once; `ctx.skill.reload()` runs only when the loaded skills changed. Related open issues: https://github.com/anomalyco/opencode/issues/47505 and https://github.com/anomalyco/opencode/issues/50594.
+- **Tests:** `bun test test/config test/filesystem` in `packages/core` (281 pass); the new `ConfigCompatibilityPlugin.Plugin` test fails against the upstream file (6 reloads for a 5-event burst) and passes locally; full `packages/core` suite passes except the environment-only `preload.test.ts` home isolation check; `bun run check` passes.
+- **Status:** active
+- **Reconcile or remove when:** upstream changes `packages/core/src/config/plugin/compatibility.ts` to debounce or filter `config.changes()` and to stop restarting unchanged watches (for example, a fix for #47505 or #50594); then compare behavior and keep only what upstream still lacks.
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Custom timeline tool groups and notices — [#48594](https://github.com/anomalyco/opencode/pull/48594), [#48909](https://github.com/anomalyco/opencode/pull/48909), [#48932](https://github.com/anomalyco/opencode/pull/48932), [#49045](https://github.com/anomalyco/opencode/pull/49045), [#48895](https://github.com/anomalyco/opencode/pull/48895), [#47821](https://github.com/anomalyco/opencode/pull/47821)
 
 - **Kind:** adaptation

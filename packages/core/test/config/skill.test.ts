@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Schema, Stream } from "effect"
 import { Config } from "@opencode/core/config"
 import { Directory, Document, type Entry, Info } from "@opencode/schema/config"
 import { ConfigSkillPlugin } from "@opencode/core/config/plugin/skill"
@@ -411,6 +411,68 @@ describe("ConfigSkillPlugin.Plugin", () => {
           expect((yield* skill.list()).map((item) => item.id)).toEqual([Skill.ID.make("deploy")])
         }),
       ),
+    ),
+  )
+})
+
+describe("ConfigCompatibilityPlugin.Plugin", () => {
+  it.live("coalesces root change bursts without restarting watches or reloading unchanged skills", () =>
+    Effect.acquireDisposable(Effect.promise(() => tmpdir())).pipe(
+      Effect.flatMap((tmp) => {
+        const root = AbsolutePath.make(path.join(tmp.path, ".agents"))
+        const skills = path.join(root, "skills")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(skills, "review"), { recursive: true })
+            await write(skills, "review", "Initial")
+          })
+          const service = yield* Skill.Service
+          const bus = yield* Bus.Service
+          const watcher = yield* Watcher.Test
+          const config = yield* Config.Test
+          const reloads = yield* Ref.make(0)
+          yield* bus.subscribe(Skill.Event.Updated).pipe(
+            Stream.runForEach(() => Ref.update(reloads, (count) => count + 1)),
+            Effect.forkScoped,
+          )
+          yield* Effect.yieldNow
+          yield* ConfigCompatibilityPlugin.Plugin.effect(
+            host({
+              skill: {
+                list: () => Effect.die("unused skill.list"),
+                transform: service.transform,
+                reload: service.reload,
+              },
+            }),
+          )
+          const description = service
+            .list()
+            .pipe(Effect.map((items) => items.find((item) => item.id === "review")?.description))
+          const burst = (update: Watcher.Update) =>
+            Effect.forEach(Array.from({ length: 5 }), () => config.emitChange(update), { discard: true })
+          yield* Effect.sleep("50 millis")
+          const initial = yield* Ref.get(reloads)
+          // Claude and agents roots share one canonical directory: one watch, one scan.
+          expect(yield* watcher.subscriptions()).toEqual([{ path: skills, type: "directory" }])
+          expect(yield* description).toBe("Initial")
+
+          yield* burst({ type: "update", path: root })
+          yield* Effect.sleep("300 millis")
+          expect(yield* Ref.get(reloads)).toBe(initial)
+
+          yield* Effect.promise(() => write(skills, "review", "Updated"))
+          yield* burst({ type: "update", path: root })
+          yield* Effect.sleep("300 millis")
+          expect(yield* description).toBe("Updated")
+          expect(yield* Ref.get(reloads)).toBe(initial + 1)
+          expect(yield* watcher.subscriptions()).toEqual([{ path: skills, type: "directory" }])
+
+          yield* Effect.promise(() => write(skills, "review", "Unrelated"))
+          yield* config.emitChange({ type: "update", path: path.join(tmp.path, "opencode.json") })
+          yield* Effect.sleep("300 millis")
+          expect(yield* description).toBe("Updated")
+        }).pipe(Effect.provide(Config.testLayer([], { claude: [root], agents: [root] })))
+      }),
     ),
   )
 })

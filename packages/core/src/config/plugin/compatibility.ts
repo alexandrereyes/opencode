@@ -3,6 +3,7 @@ export * as ConfigCompatibilityPlugin from "./compatibility.js"
 import { define } from "@opencode/plugin/effect/plugin"
 import { FSUtil } from "@opencode/util/fs-util"
 import path from "path"
+import { isDeepStrictEqual } from "node:util"
 import { Effect, FiberMap, PubSub, Semaphore, Stream } from "effect"
 import { Config } from "../../config.js"
 import { Watcher } from "../../filesystem/watcher.js"
@@ -25,25 +26,29 @@ export const Plugin = define({
       target: string,
       type: "file" | "directory",
     ) {
+      const key = `${type}:${target}`
+      if (yield* FiberMap.has(watches, key)) return key
       const updates = yield* watcher.subscribe({ path: target, type })
       yield* FiberMap.run(
         watches,
-        `${type}:${target}`,
+        key,
         updates.pipe(Stream.runForEach((update) => PubSub.publish(changes, update.path).pipe(Effect.asVoid))),
         { onlyIfMissing: true, startImmediately: true },
       )
+      return key
     })
 
     const refresh = Effect.fn("ConfigCompatibilityPlugin.refresh")(
       function* () {
-        yield* FiberMap.clear(watches)
         const roots = config.compatibility ? yield* config.compatibility() : { claude: [], agents: [] }
         const directories = [...roots.claude, ...roots.agents].map((root) => path.join(root, "skills"))
         const loaded = new Map<Skill.ID, Skill.Info>()
+        const watched = new Set<string>()
         for (const directory of directories) {
           const resolved = yield* fs.realPath(directory).pipe(Effect.orElseSucceed(() => undefined))
-          if (!resolved) continue
-          yield* watch(resolved, "directory")
+          // Claude and agents roots may resolve to the same skills directory; scan it once.
+          if (!resolved || watched.has(`directory:${resolved}`)) continue
+          watched.add(yield* watch(resolved, "directory"))
           const files = yield* fs
             .scan("{*.md,**/SKILL.md}", { cwd: resolved, absolute: true, include: "file", symlink: true, dot: true })
             .pipe(Effect.orElseSucceed(() => [] as string[]))
@@ -54,20 +59,33 @@ export const Plugin = define({
             if (parsed._tag === "Parsed") loaded.set(parsed.skill.id, parsed.skill)
           }
         }
-        skills.splice(0, skills.length, ...loaded.values())
+        // Release only watches that left the source set: releasing a native watch stops it, and
+        // restarting every watch on each refresh turns a burst of events into a watcher storm.
+        yield* Effect.forEach(
+          Array.from(watches, ([key]) => key).filter((key) => !watched.has(key)),
+          (key) => FiberMap.remove(watches, key),
+          { discard: true },
+        )
+        const next = Array.from(loaded.values())
+        if (isDeepStrictEqual(skills, next)) return false
+        skills.splice(0, skills.length, ...next)
+        return true
       },
       (effect) => lock.withPermit(effect),
     )
 
-    const reload = refresh().pipe(Effect.andThen(ctx.skill.reload()))
+    const reload = refresh().pipe(Effect.flatMap((changed) => (changed ? ctx.skill.reload() : Effect.void)))
     const updates = yield* PubSub.subscribe(changes)
     yield* Stream.fromSubscription(updates).pipe(
       Stream.debounce("100 millis"),
       Stream.runForEach(() => reload),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // Config forwards every raw watcher event and each Location runs this plugin, so only root
+    // appearance or removal may rescan, and it shares the debounce above.
     yield* config.changes().pipe(
-      Stream.runForEach(() => reload),
+      Stream.filter((update) => [".claude", ".agents"].includes(path.basename(update.path))),
+      Stream.runForEach((update) => PubSub.publish(changes, update.path).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
     )
     yield* refresh()
