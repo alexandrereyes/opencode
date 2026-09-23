@@ -21,6 +21,7 @@ import { useCommand } from "@/shell/commands/command"
 import { getCompactRelativeTime } from "@/shell/time"
 import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
 import { TabNavItem } from "./tab-nav"
+import { SessionActivityMarker } from "./session-activity"
 import { TitlebarTabStrip } from "./tab-strip"
 import { createRecentClock } from "./sidebar-order"
 import { SidebarProjectActions, SidebarWorktreeNewSession } from "./sidebar-project-actions"
@@ -42,6 +43,7 @@ import {
   pinnedSessions,
   recentSessions,
   searchSessions,
+  sidebarActivity,
   sidebarSelectableSessions,
   visibleSessions,
   isChatDirectory,
@@ -342,7 +344,9 @@ export function SessionSidebar(props: {
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === props.item.key}
         unread={props.item.attention !== undefined}
-        activity={props.item.running ? "running" : props.item.attention !== undefined ? "unread" : undefined}
+        activity={sidebarActivity([props.item])}
+        permissions={props.item.permissionCount}
+        questions={props.item.questionCount}
         pinned={pins().has(props.item.key)}
         selectionMode={selection.state.mode}
         selected={selection.state.keys.includes(props.item.key)}
@@ -825,24 +829,8 @@ export function SessionSidebar(props: {
                                     <span dir="auto" class="min-w-0 truncate font-[600]" title={projectLabel(key)}>
                                       {projectLabel(key)}
                                     </span>
-                                    <Show
-                                      when={
-                                        collapsed() &&
-                                        projectSessionRows().some((row) => row.running || row.attention !== undefined)
-                                      }
-                                    >
-                                      <span
-                                        class="size-1.5 shrink-0 rounded-full"
-                                        classList={{
-                                          "bg-icon-warning-base": projectSessionRows().some((row) => row.running),
-                                          "bg-v2-icon-icon-accent": !projectSessionRows().some((row) => row.running),
-                                        }}
-                                        aria-label={language.t(
-                                          projectSessionRows().some((row) => row.running)
-                                            ? "dashboard.status.running"
-                                            : "sidebar.attention.pending",
-                                        )}
-                                      />
+                                    <Show when={collapsed() && sidebarActivity(projectSessionRows())}>
+                                      {(activity) => <SessionActivityMarker activity={activity()} />}
                                     </Show>
                                   </button>
                                   <SidebarProjectActions
@@ -901,24 +889,8 @@ export function SessionSidebar(props: {
                                                   { worktree: group().name },
                                                 )}
                                               </span>
-                                              <Show
-                                                when={
-                                                  collapsed() &&
-                                                  group().rows.some((row) => row.running || row.attention !== undefined)
-                                                }
-                                              >
-                                                <span
-                                                  class="size-1.5 shrink-0 rounded-full"
-                                                  classList={{
-                                                    "bg-icon-warning-base": group().rows.some((row) => row.running),
-                                                    "bg-v2-icon-icon-accent": !group().rows.some((row) => row.running),
-                                                  }}
-                                                  aria-label={language.t(
-                                                    group().rows.some((row) => row.running)
-                                                      ? "dashboard.status.running"
-                                                      : "sidebar.attention.pending",
-                                                  )}
-                                                />
+                                              <Show when={collapsed() && sidebarActivity(group().rows)}>
+                                                {(activity) => <SessionActivityMarker activity={activity()} />}
                                               </Show>
                                             </button>
                                             <Show when={group().removable ? project().metadata?.id : undefined}>

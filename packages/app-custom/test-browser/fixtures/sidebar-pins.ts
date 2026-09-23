@@ -472,6 +472,12 @@ test("legacy prefs, real menus, search, priorities, reload, disconnect, archive 
     expect(titles(first.host.querySelector(`[data-project-key='${project}']`)!)).toEqual(["old"])
     first.host.querySelector<HTMLButtonElement>('[aria-label="sidebar.attention.toggle"]')!.click()
     expect(titles(section(first.host, "priority")!)).toEqual(["priority"])
+    const blocked = section(first.host, "priority")!.querySelector("[data-titlebar-tab]")!
+    expect(blocked.getAttribute("data-activity")).toBe("permission")
+    expect(blocked.querySelector('[data-slot="session-activity"]')?.getAttribute("aria-label")).toBe(
+      "sidebar.session.permissionRequired",
+    )
+    expect(blocked.querySelector('[data-slot="tab-requests"]')?.textContent).toBe("1")
     expect(titles(section(first.host, "pinned")!)).toEqual(["same", "same", "old"])
     expect(titles(first.host).filter((title) => title === "priority")).toHaveLength(1)
     expect(titles(first.host).filter((title) => title === "old")).toHaveLength(1)

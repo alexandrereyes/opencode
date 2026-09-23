@@ -205,21 +205,42 @@ export function rootSessions(rows: SidebarSession[], current?: string, fallback?
     (fallbackRow && !fallbackRow.session.parentID ? fallback : current)
   const attention = new Map<string, number>()
   const running = new Set<string>()
+  const permissions = new Map<string, number>()
+  const questions = new Map<string, number>()
   byKey.forEach((row) => {
     if (row.session.time.archived) return
-    const time = row.session.parentID ? latestAttention(row.permissionAt, row.questionAt) : row.attention
     const parent = root(row)
-    if (row.running && parent && !parent.session.time.archived) running.add(parent.key)
-    if (time === undefined || !parent || parent.session.time.archived) return
+    if (!parent || parent.session.time.archived) return
+    if (row.running) running.add(parent.key)
+    if (row.permissionCount) permissions.set(parent.key, (permissions.get(parent.key) ?? 0) + row.permissionCount)
+    if (row.questionCount) questions.set(parent.key, (questions.get(parent.key) ?? 0) + row.questionCount)
+    const time = row.session.parentID ? latestAttention(row.permissionAt, row.questionAt) : row.attention
+    if (time === undefined) return
     attention.set(parent.key, Math.max(attention.get(parent.key) ?? time, time))
   })
   return {
     current: currentRoot,
     rows: [...byKey.values()]
       .filter((row) => !row.session.time.archived && !row.session.parentID)
-      .map((row) => ({ ...row, running: running.has(row.key) || undefined, attention: attention.get(row.key) }))
+      .map((row) => ({
+        ...row,
+        running: running.has(row.key) || undefined,
+        attention: attention.get(row.key),
+        permissionCount: permissions.get(row.key),
+        questionCount: questions.get(row.key),
+      }))
       .sort((a, b) => (b.messageAt ?? 0) - (a.messageAt ?? 0) || a.key.localeCompare(b.key)),
   }
+}
+
+export type SidebarActivity = "permission" | "question" | "running" | "unread"
+
+// Pending requests block the session, so they outrank its running state.
+export function sidebarActivity(rows: readonly SidebarSession[]): SidebarActivity | undefined {
+  if (rows.some((row) => row.permissionCount)) return "permission"
+  if (rows.some((row) => row.questionCount)) return "question"
+  if (rows.some((row) => row.running)) return "running"
+  if (rows.some((row) => row.attention !== undefined)) return "unread"
 }
 
 export function localDays(now: number) {

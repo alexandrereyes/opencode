@@ -184,6 +184,48 @@
   visibility: hidden;
 }
 
+[data-titlebar-tab] [data-slot="tab-requests"] {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  grid-column: -2 / -1;
+  grid-row: 2;
+  justify-self: end;
+}
+
+[data-titlebar-tab] [data-slot="tab-requests"] > span {
+  display: inline-flex;
+  height: 16px;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  padding-inline: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--line-height-compact);
+}
+
+[data-titlebar-tab] [data-slot="tab-requests"] svg {
+  width: 12px;
+  height: 12px;
+}
+
+[data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-project"]):has([data-slot="tab-requests"])
+  [data-slot="tab-link"] {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+[data-titlebar-tab][data-orientation="vertical"][data-avatar="hidden"]:has([data-slot="tab-project"]):has(
+    [data-slot="tab-requests"]
+  )
+  [data-slot="tab-link"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+[data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-requests"]) [data-slot="tab-project"] {
+  grid-column-end: -2;
+}
+
 [data-titlebar-tab]:not(:where([data-slot="mobile-tabs-drawer"] *)):is(
     :hover,
     :has(> [data-slot="tab-link"]:focus-visible)

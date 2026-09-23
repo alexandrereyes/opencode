@@ -56,10 +56,16 @@ export const list = Effect.fn("Navigation.list")(function* (
         ...(row.messageAt === undefined ? {} : { messageAt: row.messageAt }),
         ...(unreadAt === undefined ? {} : { unreadAt }),
         ...(sessionPermissions.length
-          ? { permissionAt: Math.max(...sessionPermissions.map((request) => request.created ?? 0)) }
+          ? {
+              permissionAt: Math.max(...sessionPermissions.map((request) => request.created ?? 0)),
+              permissionCount: sessionPermissions.length,
+            }
           : {}),
         ...(sessionQuestions.length
-          ? { questionAt: Math.max(...sessionQuestions.map((form) => form.created ?? 0)) }
+          ? {
+              questionAt: Math.max(...sessionQuestions.map((form) => form.created ?? 0)),
+              questionCount: sessionQuestions.length,
+            }
           : {}),
       }
     }),

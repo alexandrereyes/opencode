@@ -12,6 +12,8 @@ export function sessionAttention(input: {
   unreadAt?: number
   permissionAt?: number
   questionAt?: number
+  permissionCount?: number
+  questionCount?: number
   autoApprove?: boolean
 }) {
   const viewed = input.session.time.viewed ?? 0
@@ -31,7 +33,15 @@ export function sessionAttention(input: {
   // incremental request caches can be both incomplete and stale across reconnects.
   const permissionAt = input.autoApprove ? undefined : input.permissionAt
   const questionAt = input.questionAt
-  return { unreadAt, permissionAt, questionAt, attention: latestAttention(unreadAt, permissionAt, questionAt) }
+  return {
+    unreadAt,
+    permissionAt,
+    questionAt,
+    // Counts are newer than their timestamps; a pending request without one still counts once.
+    permissionCount: permissionAt === undefined ? undefined : (input.permissionCount ?? 1),
+    questionCount: questionAt === undefined ? undefined : (input.questionCount ?? 1),
+    attention: latestAttention(unreadAt, permissionAt, questionAt),
+  }
 }
 
 /** Navigation owns ancestry; partial cache updates may add live metadata, but cannot turn a child into a root. */

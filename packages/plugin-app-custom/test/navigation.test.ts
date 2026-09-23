@@ -91,7 +91,7 @@ test("preserves unread precedence, root policy, pending classification, and wire
   )
 
   expect(result.data.map((row) => row.unreadAt)).toEqual([20, 30, 20, undefined, undefined])
-  expect(result.data[0]).toMatchObject({ permissionAt: 7, questionAt: 9 })
+  expect(result.data[0]).toMatchObject({ permissionAt: 7, questionAt: 9, permissionCount: 1, questionCount: 2 })
   expect(typeof result.data[0].session.time.created).toBe("number")
   expect(Navigation.Definition.id).toBe("custom.navigation")
 
@@ -101,4 +101,6 @@ test("preserves unread precedence, root policy, pending classification, and wire
   )
   expect(cleared.data[0].permissionAt).toBeUndefined()
   expect(cleared.data[0].questionAt).toBeUndefined()
+  expect(cleared.data[0].permissionCount).toBeUndefined()
+  expect(cleared.data[0].questionCount).toBeUndefined()
 })

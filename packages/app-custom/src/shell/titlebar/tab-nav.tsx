@@ -26,6 +26,8 @@ import { getRelativeTime } from "@/shell/time"
 import { getFilename } from "@opencode/util/path"
 import "./tab-nav.css"
 import { chatRoot, resolvedChatIdentity } from "@/runtime/chats"
+import type { SidebarActivity } from "./sidebar-model"
+import { SessionActivityMarker, SessionRequestBadges } from "./session-activity"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
 const MIDDLE_MOUSE_BUTTON = 1
@@ -42,7 +44,9 @@ export function TabNavItem(props: {
   onNavigate: () => void
   active?: boolean
   unread?: boolean
-  activity?: "running" | "unread"
+  activity?: SidebarActivity
+  permissions?: number
+  questions?: number
   suppressNavigation?: boolean
   dragging?: boolean
   pressed?: boolean
@@ -404,22 +408,7 @@ export function TabNavItem(props: {
       </Show>
       <Show when={sidebarActions() && !props.selectionMode && (!props.pinned || !!props.activity)}>
         <span class="flex size-4 shrink-0 items-center justify-center">
-          <Show when={props.activity}>
-            {(activity) => (
-              <span
-                role="img"
-                class="size-1.5 rounded-full"
-                classList={{
-                  "bg-icon-warning-base": activity() === "running",
-                  "bg-v2-icon-icon-accent": activity() === "unread",
-                }}
-                aria-label={language.t(
-                  activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending",
-                )}
-                title={language.t(activity() === "running" ? "dashboard.status.running" : "sidebar.attention.pending")}
-              />
-            )}
-          </Show>
+          <Show when={props.activity}>{(activity) => <SessionActivityMarker activity={activity()} />}</Show>
         </span>
       </Show>
       <Menu.Context.Trigger
@@ -577,6 +566,9 @@ export function TabNavItem(props: {
               </span>
             </span>
           )}
+        </Show>
+        <Show when={sidebarActions() && props.orientation === "vertical" && !props.selectionMode}>
+          <SessionRequestBadges permissions={props.permissions} questions={props.questions} />
         </Show>
         <Show when={props.orientation === "vertical" && props.timestamp}>
           {(timestamp) => (

@@ -12,6 +12,7 @@ import {
   rootSessions,
   searchSessions,
   sessionKey,
+  sidebarActivity,
   sidebarProjects,
   sidebarExplicitWorkspace,
   sidebarSessionProject,
@@ -197,6 +198,22 @@ describe("sidebar navigation", () => {
 
     expect(rootSessions([parent, child]).rows).toMatchObject([{ session: { id: "parent" }, running: true }])
     expect(rootSessions([parent]).rows[0].running).toBeUndefined()
+  })
+
+  test("pending requests outrank running activity and sum across the session family", () => {
+    const parent = { ...row("parent", undefined, 10), running: true, questionCount: 1 }
+    const child = { ...row("child", undefined, undefined, "parent"), permissionCount: 2, questionCount: 1 }
+    const archived = { ...row("archived", undefined, undefined, "parent"), permissionCount: 5 }
+    archived.session.time.archived = 1
+
+    const root = rootSessions([parent, child, archived]).rows[0]
+    expect(root).toMatchObject({ running: true, permissionCount: 2, questionCount: 2 })
+    expect(sidebarActivity([root])).toBe("permission")
+    expect(sidebarActivity([{ ...root, permissionCount: undefined }])).toBe("question")
+    expect(sidebarActivity([{ ...root, permissionCount: undefined, questionCount: undefined }])).toBe("running")
+    expect(sidebarActivity([row("unread", undefined, 10)])).toBe("unread")
+    expect(sidebarActivity([row("idle"), { ...row("blocked"), questionCount: 1 }])).toBe("question")
+    expect(sidebarActivity([row("idle")])).toBeUndefined()
   })
 
   test("projects mode uses pinned, recent and rendered project order with first-occurrence membership", () => {
@@ -406,6 +423,15 @@ describe("sidebar navigation", () => {
     expect(
       sessionAttention({ session: read, notifications, permissionAt: 70, autoApprove: true }).attention,
     ).toBeUndefined()
+    expect(sessionAttention({ session, notifications, permissionAt: 70, questionAt: 60 })).toMatchObject({
+      permissionCount: 1,
+      questionCount: 1,
+    })
+    expect(
+      sessionAttention({ session, notifications, permissionAt: 70, permissionCount: 3, autoApprove: true })
+        .permissionCount,
+    ).toBeUndefined()
+    expect(sessionAttention({ session, notifications, questionCount: 2 }).questionCount).toBeUndefined()
     const legacy = row("legacy").session
     expect(sessionAttention({ session: legacy, notifications }).attention).toBe(50)
     expect(

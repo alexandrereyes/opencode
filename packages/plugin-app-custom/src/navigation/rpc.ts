@@ -11,6 +11,8 @@ export const Info = Schema.Struct({
   unreadAt: Schema.Finite.pipe(Schema.optional),
   permissionAt: Schema.Finite.pipe(Schema.optional),
   questionAt: Schema.Finite.pipe(Schema.optional),
+  permissionCount: Schema.Int.pipe(Schema.optional),
+  questionCount: Schema.Int.pipe(Schema.optional),
 }).annotate({ identifier: "Navigation.Info" })
 
 export interface Page extends Schema.Schema.Type<typeof Page> {}
