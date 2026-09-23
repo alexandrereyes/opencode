@@ -4,6 +4,7 @@ import type {
   ComposerStore,
   FileAttachmentPart,
   ImageAttachmentPart,
+  PathAttachmentPart,
   Prompt,
   SessionPart,
   SkillPart,
@@ -16,7 +17,7 @@ export type ComposerSkillPart = SkillPart
 export type ComposerSnippetPart = SnippetPart
 export type ComposerAppPart = AppPart
 export type ComposerSessionPart = SessionPart
-export type ComposerAttachment = ImageAttachmentPart
+export type ComposerAttachment = ImageAttachmentPart | PathAttachmentPart
 export type ComposerPrompt = Prompt
 export type ComposerComment = ComposerStore["context"]["items"][number]
 export type ComposerPersistedState = ComposerStore

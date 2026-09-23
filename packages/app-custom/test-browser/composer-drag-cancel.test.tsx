@@ -8,6 +8,7 @@ test("clears drag state on platform cancellation", async () => {
   let dragging: "image" | "@mention" | null = "image"
   const dispose = render(() => {
     createComposerAttachments({
+      destination: () => ({ input: { image: true, pdf: true }, local: false, upload: async () => "/tmp/file" }),
       capture: () => ({ current: () => [], cursor: () => 0, set: () => {} }),
       editor: () => undefined,
       focusEditor: () => {},

@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import type { Platform } from "@/runtime/platform/platform"
 import { createComposerReady, createComposerState } from "@/composer/state"
 import { ServerScope } from "@/runtime/server/scope"
-import { createDraftStore } from "@/runtime/persistence/drafts"
+import { createDraftStore, resolveBlobUrl } from "@/runtime/persistence/drafts"
 import { flushPersisted } from "@/runtime/persistence/persist"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 
@@ -109,7 +109,7 @@ describe("prompt persistence", () => {
         id: "image",
         filename: "image.png",
         mime: "image/png",
-        blob: { id: "composer-image", url: expect.stringMatching(/^blob:/) },
+        blob: { id: "composer-image", url: "" },
       },
     ])
     root.session.set([{ type: "text", content: "hello", start: 0, end: 5 }, ...root.session.current()])
@@ -259,7 +259,8 @@ test("moves image data URLs into blobs and hydrates object URLs", async () => {
   expect(documents.get("prompt")).not.toContain("dataUrl")
   const value = JSON.parse((await store.getItem("prompt"))!)
   expect(value.prompt[0].blob.id).toBe("1")
-  expect(value.prompt[0].blob.url).toStartWith("blob:")
+  expect(value.prompt[0].blob.url).toBeUndefined()
+  expect(await resolveBlobUrl(value.prompt[0].blob)).toStartWith("blob:")
 })
 
 test("does not let delayed blob migration overwrite a newer draft", async () => {

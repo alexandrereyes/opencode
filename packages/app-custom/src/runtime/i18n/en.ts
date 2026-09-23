@@ -1,6 +1,8 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "prompt.toast.uploading.cancel": "Cancel upload",
+  "prompt.toast.uploading.percent": "{{percent}}%",
   "session.revert.planning": "Checking subagents before updating the conversation…",
   "session.revert.subagents.one": "Updating subagent: {{completed}} of {{count}}…",
   "session.revert.subagents.other": "Updating subagents: {{completed}} of {{count}}…",

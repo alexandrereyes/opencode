@@ -6,7 +6,8 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import type { ComposerDelivery } from "@/composer/adapter"
 import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
-import { clonePrompt, promptLength } from "@/composer/prompt-parts"
+import type { ComposerAttachment } from "@/composer/types"
+import { clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
 import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
 import { formatAttachmentReference, readPromptPresentation } from "@/composer/comment-note"
@@ -196,10 +197,10 @@ export function createSessionQueue(input: {
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
     const quotes = input.draft.quotes.all().map((quote) => ({ ...quote }))
-    const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+    const images = prompt.filter(isAttachment)
     if (!text.trim() && !images.length && !quotes.length) return cancelEdit()
     const item = queued().find((entry) => entry.id === editing.id)
-    const original = item ? queuedPrompt(item).filter((part): part is ImageAttachmentPart => part.type === "image") : []
+    const original = item ? queuedPrompt(item).filter(isAttachment) : []
     const pristine =
       item &&
       text.trim() === queuedPromptText(item) &&
@@ -297,19 +298,34 @@ export function queuedPrompt(item: QueuedPrompt): Prompt {
   ]
 }
 
-export function queuedPromptAttachments(item: QueuedPrompt): ImageAttachmentPart[] {
-  return (item.payload.files ?? []).flatMap((file, index) => {
-    if (!isComposerAttachment(file)) return []
-    return [
-      {
-        type: "image",
-        id: queuedAttachmentID(item, index),
-        filename: file.name ?? "attachment",
+export function queuedPromptAttachments(item: QueuedPrompt): ComposerAttachment[] {
+  return [
+    ...(item.payload.files ?? []).flatMap((file, index): ImageAttachmentPart[] => {
+      if (!isComposerAttachment(file)) return []
+      return [
+        {
+          type: "image",
+          id: queuedAttachmentID(item, index),
+          filename: file.name ?? "attachment",
+          mime: file.mime,
+          blob: createLegacyBlobReference(`data:${file.mime};base64,${file.data}`),
+        },
+      ]
+    }),
+    ...(readPromptPresentation(item.payload.metadata)?.attachments ?? []).map(
+      (file, index): ComposerAttachment => ({
+        type: "path",
+        id: `${item.id}:path:${index}`,
+        filename: file.name,
         mime: file.mime,
-        blob: createLegacyBlobReference(`data:${file.mime};base64,${file.data}`),
-      },
-    ]
-  })
+        path: file.path,
+        mention:
+          file.mention && queuedPromptText(item).slice(file.mention.start, file.mention.end) === file.mention.text
+            ? file.mention
+            : undefined,
+      }),
+    ),
+  ]
 }
 
 function queuedAttachmentID(item: QueuedPrompt, index: number) {
@@ -346,10 +362,7 @@ export async function editedPromptInput(
   destination: AttachmentDestination,
   quotes: ChatQuote[],
 ) {
-  const attachments = await deliverAttachments(
-    prompt.filter((part): part is ImageAttachmentPart => part.type === "image"),
-    destination,
-  )
+  const attachments = await deliverAttachments(prompt.filter(isAttachment), destination)
   const request = buildPromptRequest({ prompt, context: [], attachments, text, sessionDirectory: directory })
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
@@ -398,19 +411,9 @@ export async function editedPromptInput(
     ) ?? []),
     ...request.skills,
   ]
-  const retainedAttachments = previousAttachments.filter(
-    (attachment) => !request.attachments.some((item) => item.path === attachment.path),
-  )
   return {
     sessionID,
-    text: [
-      request.text,
-      ...retainedAttachments.map(formatAttachmentReference),
-      retainedNotes.trim(),
-      formatChatQuotes(quotes),
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    text: [request.text, retainedNotes.trim(), formatChatQuotes(quotes)].filter(Boolean).join("\n"),
     files: [
       ...(payload?.files?.flatMap((file) => {
         if (queuedImageMention(file, display) || isComposerAttachment(file)) return []
@@ -433,7 +436,7 @@ export async function editedPromptInput(
       sessions: request.sessions,
       quotes,
       comments: previousPresentation?.comments ?? request.comments,
-      attachments: [...retainedAttachments, ...request.attachments],
+      attachments: request.attachments,
     },
   }
 }

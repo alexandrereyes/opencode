@@ -4,6 +4,7 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import {
   clonePromptHistoryComments,
   prependHistoryEntry,
+  removeHistoryEntry,
   type PromptHistoryComment,
   type PromptHistoryStoredEntry,
 } from "./entry"
@@ -13,6 +14,7 @@ import { PromptHistoryState, type ChatQuote } from "../schema"
 export type ComposerHistoryStore = {
   entries: (mode: "normal" | "shell") => PromptHistoryStoredEntry[]
   add: (prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes?: ChatQuote[]) => void
+  remove: (prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes?: ChatQuote[]) => void
 }
 
 type PromptHistoryState = typeof PromptHistoryState.Type
@@ -25,6 +27,12 @@ function createComposerHistoryStore(
 ): ComposerHistoryStore {
   return {
     entries: (mode) => (mode === "shell" ? shell.entries : normal.entries),
+    remove(prompt, mode, comments, quotes) {
+      const current = mode === "shell" ? shell : normal
+      const setCurrent = mode === "shell" ? setShell : setNormal
+      const next = removeHistoryEntry(current.entries, prompt, comments, quotes)
+      if (next !== current.entries) setCurrent("entries", next)
+    },
     add(prompt, mode, comments, quotes) {
       const current = mode === "shell" ? shell : normal
       const setCurrent = mode === "shell" ? setShell : setNormal
@@ -49,6 +57,14 @@ export function createComposerHistory() {
   const history = createComposerHistoryStore(normal, setNormal, shell, setShell)
   return {
     ...history,
+    remove(prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes: ChatQuote[] = []) {
+      const ready = mode === "shell" ? shellInit : normalInit
+      if (!(ready instanceof Promise)) return history.remove(prompt, mode, comments, quotes)
+      const saved = clonePrompt(prompt)
+      const metadata = clonePromptHistoryComments(comments)
+      const savedQuotes = quotes.map((quote) => ({ ...quote }))
+      void ready.then(() => history.remove(saved, mode, metadata, savedQuotes))
+    },
     add(prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[], quotes: ChatQuote[] = []) {
       const ready = mode === "shell" ? shellInit : normalInit
       if (!(ready instanceof Promise)) return history.add(prompt, mode, comments, quotes)

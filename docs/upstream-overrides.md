@@ -111,8 +111,60 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
-_None recorded yet. The register began with this document, without a retroactive
-audit (see above)._
+### Staged composer attachments — https://github.com/anomalyco/opencode/pull/49467
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `f04c3fd82bf98cb911f5c1c7b25f9cded0b86722` (#49467), `469e1c035ee3f1343f02b60c0aab22136fdb4f2a` (https://github.com/anomalyco/opencode/pull/49647), `90112f52db59a8f2ec412c66c6677193bf5dc7b8` (https://github.com/anomalyco/opencode/pull/49682), 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer`, `packages/app-custom/src/session/composer/queue.ts`, `packages/app-custom/src/shell/shell.tsx`, `packages/app-custom/src/runtime/i18n/en.ts`, `packages/ui-custom/src/feedback/toast`. Streams non-native, text, and over-20-MiB files directly to the server with cancellable progress. Path parts extend the custom CodeMirror attachment/reference algebra, including image citations, undo, snippets, drafts, history, and queued edits. Retains a delivery adapter for legacy blob drafts and model capability changes; keeps the custom composer rather than adopting upstream's editor.
+- **Tests:** app-custom unit and browser-condition suites, all three affected package typechecks, root `bun run check`, app-custom production build; isolated-server browser checks at 1440×900 and 390×844 include 21-MiB streaming progress, picker attachment, image paste, staged reference removal/undo, and draft reload.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `47f66de8dda535de9f2e2c3bfdbeaad774ad6e82`, 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/runtime/persistence/drafts.ts`, `packages/app-custom/src/composer/{schema.ts,model.ts,submit.ts,editor/editor.tsx}`. Restored image references keep IDs without reading bytes until thumbnail, preview, or delivery; retains custom image citation metadata and legacy path-delivery support.
+- **Tests:** lazy draft/cache/persistence tests, app-custom unit and browser-condition suites, typechecks, root check, production build, browser draft reload.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Failed-send history and bounded toasts — https://github.com/anomalyco/opencode/pull/49717
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `dd71cdbd840f8bc875fd516c39c8e29f199c5b84`, 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer/{history,model.ts,submit.ts}`, `packages/ui-custom/src/feedback/toast`. Removes restored failed submissions from history with custom quote-aware matching. Bounds toast descriptions to 2,000 characters before deduplication and retention.
+- **Tests:** actual failed admission/retry history tests, history matching tests, ui-custom toast bound test and suite, package typechecks and root check.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Preserve native clipboard paste — https://github.com/anomalyco/opencode/pull/49424
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `acfacede2d96fb6adf59b826491d3339d5d95261`, 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer/editor/interaction.ts`. Uses upstream's attachment-paste guard while leaving ordinary and non-plain text paste to CodeMirror and preserving structured Session paste and custom image citation insertion.
+- **Tests:** clipboard guard tests for missing data, HTML/RTF, native image reading, and files; existing attachment ownership/reference tests; desktop/mobile paste and remove/undo checks.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Timeline attachment classification — https://github.com/anomalyco/opencode/pull/49932
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `5848ee0d24ba273dea17daa084e4634ac8bf5b16`, 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/session-ui-custom/src/{components/message-file.ts,message/message-content.tsx}`. Ports final upstream `attached()` semantics: mentions and unmentioned file-URI context are not inline attachment cards. Staged paths continue to render through the custom attachment-reference metadata.
+- **Tests:** classification tests, session-ui-custom suite (209 passing), package typecheck and root check.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
 
 ## Resolved entries
 

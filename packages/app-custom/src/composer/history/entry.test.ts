@@ -1,11 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import type { Prompt } from "@/composer/state"
-import { prependHistoryEntry, type PromptHistoryComment } from "./entry"
+import { prependHistoryEntry, removeHistoryEntry, type PromptHistoryComment } from "./entry"
 import { Schema } from "effect"
 import { PromptHistoryState } from "../schema"
 import { Persistence } from "@/runtime/persistence/schema"
 
 const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
+
+test("failed history removal matches comments and leaves other attachment entries intact", () => {
+  const prompt: Prompt = [
+    { type: "path", id: "file", filename: "large.zip", mime: "application/zip", path: "/tmp/large.zip" },
+  ]
+  const earlier = prependHistoryEntry([], text("earlier"))
+  const entries = prependHistoryEntry(earlier, prompt, [comment("note")])
+  expect(removeHistoryEntry(entries, prompt)).toBe(entries)
+  expect(removeHistoryEntry(entries, prompt, [comment("note")])).toEqual(earlier)
+})
 
 const text = (value: string): Prompt => [{ type: "text", content: value, start: 0, end: value.length }]
 const comment = (id: string, value = "note"): PromptHistoryComment => ({

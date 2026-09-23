@@ -190,9 +190,31 @@ describe("CodeMirror composer references", () => {
     const changes = EditorState.create({ doc: "[photo.png]" }).changes({ from: 0, insert: "x " })
     expect(
       composerPromptFromDocument("x [photo.png]", mapComposerReferences(references, changes), [image, uncited]).map(
-        (part) => (part.type === "image" ? part.id : part.content),
+        (part) => ("content" in part ? part.content : part.id),
       ),
     ).toEqual(["x [photo.png]", "image-1", "image-2"])
+  })
+
+  test("staged image references remove and undo with their attachment identity", () => {
+    const path = {
+      type: "path" as const,
+      id: "staged",
+      filename: "photo.png",
+      mime: "image/png",
+      path: "/tmp/photo.png",
+      mention: image.mention,
+    }
+    const view = createView([{ type: "text", content: "A [photo.png] B", start: 0, end: 15 }, path])
+    view.dispatch({ changes: { from: 2, to: 13 } })
+    expect(composerPromptFromDocument(view.state.doc.toString(), view.state.field(composerReferences), [path])).toEqual(
+      [{ type: "text", content: "A  B", start: 0, end: 4 }],
+    )
+    expect(view.command(undo)).toBe(true)
+    expect(
+      composerPromptFromDocument(view.state.doc.toString(), view.state.field(composerReferences), []),
+    ).toContainEqual(path)
+    expect(view.command(redo)).toBe(true)
+    expect(view.state.field(composerReferences)).toEqual([])
   })
 
   test("restores a removed leading image in document order", () => {

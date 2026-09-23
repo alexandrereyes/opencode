@@ -1,4 +1,16 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import {
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js"
+import { resolveBlobUrl } from "@/runtime/persistence/drafts"
+import type { Upload } from "../attachments/uploads"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -41,7 +53,7 @@ import {
   mapComposerReferences,
   setComposerReferences,
 } from "./codemirror"
-import { normalizeComposerCursor, normalizeComposerPrompt } from "../prompt-parts"
+import { isAttachment, normalizeComposerCursor, normalizeComposerPrompt } from "../prompt-parts"
 import { preserveDelayedEnterModifiers } from "./delayed-enter"
 import "../attachments/attachments.css"
 import "./editor.css"
@@ -177,21 +189,20 @@ export function ComposerEditor(props: ComposerEditorProps) {
         ...reference,
         from: reference.from + start,
         to: reference.to + start,
-        part:
-          reference.part.type === "image"
-            ? {
-                ...reference.part,
-                mention: {
-                  text: reference.part.mention?.text ?? "",
-                  start: reference.from + start,
-                  end: reference.to + start,
-                },
-              }
-            : {
-                ...reference.part,
+        part: isAttachment(reference.part)
+          ? {
+              ...reference.part,
+              mention: {
+                text: reference.part.mention?.text ?? "",
                 start: reference.from + start,
                 end: reference.to + start,
               },
+            }
+          : {
+              ...reference.part,
+              start: reference.from + start,
+              end: reference.to + start,
+            },
       })),
     ].toSorted((a, b) => a.from - b.from)
     current.dispatch({
@@ -296,7 +307,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
             const referencesChanged =
               update.startState.field(composerReferences) !== update.state.field(composerReferences)
             if (update.docChanged || referencesChanged) {
-              const images = props.controller.parts().filter((part) => part.type === "image")
+              const images = props.controller.parts().filter(isAttachment)
               const next = composerPromptFromDocument(
                 update.state.doc.toString(),
                 update.state.field(composerReferences),
@@ -390,7 +401,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
         if (!current) return false
         const reference = current.state
           .field(composerReferences)
-          .find((item) => item.part.type === "image" && item.part.id === id)
+          .find((item) => isAttachment(item.part) && item.part.id === id)
         if (!reference) return false
         current.dispatch({
           changes: { from: reference.from, to: reference.to },
@@ -494,6 +505,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
         <Show when={!props.compact && state.mode === "normal"}>
           <ComposerAttachments
             attachments={props.controller.attachments()}
+            uploads={props.controller.uploads()}
+            onUploadCancel={props.controller.cancelUpload}
             comments={props.controller.comments()}
             activeCommentID={state.activeContextID}
             removeLabel={i18n.t("ui.promptInput.removeAttachment")}
@@ -646,6 +659,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
 export function ComposerAttachments(props: {
   attachments: ComposerAttachment[]
+  uploads?: Upload[]
+  onUploadCancel?: (id: string) => void
   comments?: ComposerComment[]
   activeCommentID?: string
   removeLabel: string
@@ -656,7 +671,7 @@ export function ComposerAttachments(props: {
 }) {
   const i18n = useI18n()
   return (
-    <Show when={props.attachments.length > 0 || (props.comments?.length ?? 0) > 0}>
+    <Show when={props.attachments.length > 0 || (props.comments?.length ?? 0) > 0 || (props.uploads?.length ?? 0) > 0}>
       <div data-component="composer-attachments" data-slot="composer-attachments" class="relative">
         <div
           data-slot="composer-attachments-scroll"
@@ -695,20 +710,27 @@ export function ComposerAttachments(props: {
               <div class="relative group shrink-0" data-attachment-id={attachment.id}>
                 <Tooltip value={attachment.filename} placement="top" contentClass="break-all">
                   <Show
-                    when={attachment.mime.startsWith("image/")}
+                    when={attachment.type === "image" && attachment.mime.startsWith("image/") ? attachment : undefined}
                     fallback={
                       <AttachmentCard title={attachment.filename}>
                         {typeLabel(attachment.filename, attachment.mime, i18n.t("ui.common.file"))}
                       </AttachmentCard>
                     }
                   >
-                    <img
-                      src={attachment.blob.url}
-                      alt={attachment.filename}
-                      class="w-[58px] h-[46px] rounded-[6px] object-cover"
-                      onClick={() => props.onAttachmentClick?.(attachment)}
-                    />
-                    <div class="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--v2-border-border-base)] pointer-events-none" />
+                    {(image) => {
+                      const [url] = createResource(() => image().blob, resolveBlobUrl)
+                      return (
+                        <>
+                          <img
+                            src={url() ?? ""}
+                            alt={attachment.filename}
+                            class="w-[58px] h-[46px] rounded-[6px] object-cover"
+                            onClick={() => props.onAttachmentClick?.(attachment)}
+                          />
+                          <div class="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--v2-border-border-base)] pointer-events-none" />
+                        </>
+                      )
+                    }}
                   </Show>
                 </Tooltip>
                 <button
@@ -720,6 +742,18 @@ export function ComposerAttachments(props: {
                   aria-label={props.removeLabel}
                 >
                   <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
+                </button>
+              </div>
+            )}
+          </For>
+          <For each={props.uploads ?? []}>
+            {(item) => (
+              <div class="relative shrink-0" data-component="attachment-upload">
+                <AttachmentCard title={item.filename}>
+                  <progress aria-label={item.filename} max={item.size || 1} value={item.loaded} />
+                </AttachmentCard>
+                <button type="button" aria-label={props.removeLabel} onClick={() => props.onUploadCancel?.(item.id)}>
+                  <Icon name="outline-xmark" />
                 </button>
               </div>
             )}

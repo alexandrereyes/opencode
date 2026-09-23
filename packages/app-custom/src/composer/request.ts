@@ -10,7 +10,7 @@ import {
   type PromptComment,
 } from "@/composer/comment-note"
 import type { DeliveredAttachment } from "@/composer/attachments/deliver"
-import { expandSnippets } from "./prompt-parts"
+import { expandSnippets, isAttachment } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
 import { formatChatQuotes } from "./chat-quote"
 import { formatSessionContexts } from "./session-reference"
@@ -146,7 +146,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   })
 
   const imageMentions = new Map(
-    prompt.flatMap((part) => (part.type === "image" ? [[part.id, part.mention] as const] : [])),
+    prompt.flatMap((part) => (isAttachment(part) ? [[part.id, part.mention] as const] : [])),
   )
   const inline = input.attachments.flatMap((item) =>
     item.type === "inline"
@@ -161,7 +161,16 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       : [],
   )
   const attachments = input.attachments.flatMap((item) =>
-    item.type === "path" ? [{ name: item.attachment.filename, mime: item.attachment.mime, path: item.path }] : [],
+    item.type === "path"
+      ? [
+          {
+            name: item.attachment.filename,
+            mime: item.attachment.mime,
+            path: item.path,
+            ...(imageMentions.get(item.attachment.id) ? { mention: imageMentions.get(item.attachment.id) } : {}),
+          },
+        ]
+      : [],
   )
 
   return {

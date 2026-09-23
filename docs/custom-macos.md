@@ -302,6 +302,21 @@ pastes; their references remain in paste order even when storage completes out o
 and prompt concatenation remap each image range before image file parts carry the matching mention in the
 multimodal request. Cited images follow document order; uncited picker attachments retain their existing order.
 
+### Attachment staging
+
+The custom composer accepts arbitrary files. Supported images and PDFs up to 20 MiB
+remain inline; text, unsupported types, and larger files stream directly to the server's
+temporary upload directory. They appear as path attachments after upload, without storing
+their bytes in the browser's draft database. Upload cards and a persistent toast show
+progress and offer cancellation; sending is disabled while this composer's uploads finish.
+Uploads remain owned by the draft where selection or paste started, including after navigation.
+
+Pasted images retain their editable `[filename]` references even when delivered by path.
+Path references survive draft reloads, history, snippet expansion, and queued-message edits.
+Removing a queued attachment also removes its model-visible path note. Restored inline images
+load their bytes only when shown or sent. Failed sends restore the draft and remove its
+duplicate history entry; toast error descriptions are bounded before retention.
+
 ## Prompt snippets
 
 Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,

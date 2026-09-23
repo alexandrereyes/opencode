@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createDraftStore, draftTextChunk, draftTextThreshold } from "./drafts"
+import { createDraftStore, draftTextChunk, draftTextThreshold, resolveBlobUrl } from "./drafts"
 
 function memoryDriver() {
   const documents = new Map<string, string>()
@@ -287,11 +287,14 @@ describe("draft store image retention", () => {
     expect(await released(store, 5, shared.url)).toBe(true)
   })
 
-  test("loading a document pins the images it references", async () => {
+  test("loading a document leaves image bytes lazy and pins them when resolved", async () => {
     const { memory, store } = fresh()
     const id = await memory.driver.putBlob(image(6))
     memory.documents.set("loaded", JSON.stringify({ prompt: [{ type: "image", blob: { id } }] }))
-    const url = JSON.parse((await store.getItem("loaded"))!).prompt[0].blob.url
+    const ref = JSON.parse((await store.getItem("loaded"))!).prompt[0].blob
+    expect(ref).toEqual({ id })
+    const url = await resolveBlobUrl(ref)
+    if (!url) throw new Error("Missing image URL")
     await tick()
     expect(await released(store, 6, url)).toBe(false)
     await store.removeItem("loaded")
