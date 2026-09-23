@@ -3,18 +3,20 @@ import { Badge } from "@opencode/ui-custom/badge"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { showToast } from "@/shell/notifications/toast"
-import { popularProviders, useProviders } from "@/providers/catalog/providers"
+import { useProviders } from "@/providers/catalog/providers"
 import { useIntegrations } from "@/providers/catalog/integrations"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
+import { CONSOLE_INTEGRATION } from "@/providers/connect/controller"
 import { DialogConnectProvider, useProviderConnectController } from "@/providers/connect/dialog"
 import { SettingsServerScope } from "@/settings/server-scope"
 import { InlineServerSelect } from "@/settings/server-select"
 import { SettingsList } from "@/settings/list"
 import "@/settings/settings.css"
+import { popularConnections } from "./popular"
 
-type ProviderSource = "env" | "api" | "config" | "custom"
+type ProviderSource = "env" | "api" | "account" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
 
 const PROVIDER_NOTES = [
@@ -40,7 +42,8 @@ export const SettingsProviders: Component<{
   const providers = useProviders(() => props.directory)
   const integrations = useIntegrations(() => props.directory)
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
-  const integration = (providerID: string) => integrations.list().find((item) => item.id === providerID)
+  const integration = (item: ProviderItem) =>
+    integrations.list().find((entry) => entry.id === (item.integrationID ?? item.id))
 
   const connect = (provider?: string) => {
     providerConnect.select(provider)
@@ -63,20 +66,17 @@ export const SettingsProviders: Component<{
 
   const popular = createMemo(() => {
     const connectedIDs = new Set(connected().map((p) => p.id))
-    const items = providers
-      .popular()
-      .filter((p) => !connectedIDs.has(p.id))
-      .slice()
-    items.sort((a, b) => popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id))
-    return items
+    const console = integrations.list().find((entry) => entry.id === CONSOLE_INTEGRATION)
+    return popularConnections(providers.popular(), connectedIDs, console)
   })
 
   // Connection state comes from the integration list like the TUI: credential
   // connections mean an API key or OAuth grant, env connections mean detected
   // environment variables, and a connectionless integration is config-provided.
   const source = (item: ProviderItem): ProviderSource | undefined => {
-    const current = integration(item.id)
-    if (current?.connections.some((connection) => connection.type === "credential")) return "api"
+    const current = integration(item)
+    const credential = current?.connections.find((connection) => connection.type === "credential")
+    if (credential) return credential.method === "oauth" ? "account" : "api"
     if (current?.connections.some((connection) => connection.type === "env")) return "env"
     if (current) return "config"
     if (!("source" in item)) return
@@ -89,13 +89,14 @@ export const SettingsProviders: Component<{
     const current = source(item)
     if (current === "env") return language.t("settings.providers.tag.environment")
     if (current === "api") return language.t("provider.connect.method.apiKey")
+    if (current === "account") return language.t("settings.providers.tag.account")
     if (current === "config") return language.t("settings.providers.tag.config")
     if (current === "custom") return language.t("settings.providers.tag.custom")
     return language.t("settings.providers.tag.other")
   }
 
   const canDisconnect = (item: ProviderItem) => {
-    const current = integration(item.id)
+    const current = integration(item)
     if (current) return current.connections.some((connection) => connection.type === "credential")
     const currentSource = source(item)
     return currentSource !== "env" && currentSource !== "config"
@@ -103,10 +104,11 @@ export const SettingsProviders: Component<{
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
 
-  const disconnect = async (providerID: string, name: string) => {
+  const disconnect = async (item: ProviderItem) => {
+    const name = item.name
     const location = props.directory ? { directory: props.directory } : undefined
     await serverSdk.api.integration
-      .get({ integrationID: providerID, location })
+      .get({ integrationID: item.integrationID ?? item.id, location })
       .then(async (integration) => {
         const credentials = integration.data?.connections.filter((item) => item.type === "credential") ?? []
         if (credentials.length === 0) throw new Error(`No removable credentials found for ${name}`)
@@ -169,7 +171,7 @@ export const SettingsProviders: Component<{
                         </span>
                       }
                     >
-                      <Button size="normal" variant="ghost-muted" onClick={() => void disconnect(item.id, item.name)}>
+                      <Button size="normal" variant="ghost-muted" onClick={() => void disconnect(item)}>
                         {language.t("common.disconnect")}
                       </Button>
                     </Show>
