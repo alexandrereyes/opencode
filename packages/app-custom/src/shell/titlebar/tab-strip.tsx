@@ -250,6 +250,7 @@ function DraftTabSlot(props: {
 export function TitlebarTabStrip(props: {
   orientation?: "horizontal" | "vertical"
   shortcuts?: boolean
+  numbered?: boolean
   tabs: Tab[]
   currentTab: Tab | undefined
   onNavigate: (tab: Tab, el?: HTMLDivElement) => void
@@ -375,7 +376,7 @@ export function TitlebarTabStrip(props: {
                 let ref!: HTMLDivElement
                 const visibleIndex = () => visibleTabs().findIndex((item) => tabKey(item) === id)
                 useTabShortcut(
-                  () => props.shortcutIndex?.(tab) ?? visibleIndex(),
+                  () => (props.numbered === false ? -1 : (props.shortcutIndex?.(tab) ?? visibleIndex())),
                   () => props.onNavigate(tab, ref),
                 )
                 const serverCtx = useServerCtx(() => {
