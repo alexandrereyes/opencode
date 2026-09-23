@@ -1,6 +1,6 @@
 ---
 name: opencode-custom
-description: Desenvolve e publica customizações pessoais do OpenCode V2 no fork de Alexandre, usando branches de feature a partir de custom e worktrees isoladas.
+description: Desenvolve e publica customizações pessoais do OpenCode V2 no fork de Alexandre, usando branches de feature a partir de custom.
 slash: true
 metadata:
   opencode/autoinvoke: true
@@ -22,8 +22,7 @@ Transformar o pedido em uma feature do fork pessoal, validar e publicar seguindo
 | Oficial (`upstream`) | `https://github.com/anomalyco/opencode.git` |
 | Base das features e destino de integração | `origin/custom` |
 | Linha upstream integrada | `upstream/v2` (fonte do canal `latest`; `beta` parou na 2.0.6) |
-| Checkout de atualização | `~/Dev/opencode2`, sempre limpo em `custom`; não é área de edição |
-| Worktrees de features | `~/Worktrees/opencode2-<branch>` |
+| Checkout de trabalho e atualização | `~/Dev/opencode2` |
 | Instalação custom | `~/.local/share/opencode-custom-v2` (`releases/`, `current`, `prepared`, `previous`) |
 | Operação da instalação | `bun run custom:{prepare,update,activate,status,rollback,prune}` no checkout de atualização |
 | Backend de produção | `http://127.0.0.1:4178`, job `local.opencode.custom-manual` |
@@ -38,7 +37,7 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 
 1. Carregue a skill `opencode` e consulte a documentação **V2** pertinente em `https://opencode.ai/v2/docs/`.
 2. Leia `AGENTS.md` da raiz e dos pacotes envolvidos. Para UI web use as skills de interface pertinentes; para código Effect, `effect`; para execução/debug do servidor, `opencode-dev`.
-3. Inspecione `git status`, `git remote -v` e `git worktree list` no checkout existente. Preserve alterações e arquivos não rastreados de outras tarefas.
+3. Inspecione `git status` e `git remote -v` no checkout existente. Preserve alterações e arquivos não rastreados de outras tarefas.
 4. Leia a versão atual de `docs/custom-macos.md` no fork. Confirme os comandos `custom:*` por código (`packages/cli/script/custom-release.ts`) e documentação antes de executá-los.
 5. Diferencie **app web**, desktop e TUI. Para menções de apps Mac, consulte o MCP realmente configurado, seus métodos e retornos atuais; não presuma o antigo `codex-computer-use` ou formato de `list_apps`.
 6. Se o trabalho integrar uma revisão upstream em `custom`, aplicar um PR/commit upstream antes da baseline integrada ou adaptar/portar uma mudança upstream, leia `docs/upstream-overrides.md` na base usada antes de alterar código. Ele diz o que `custom` já carrega de upstream e quando reconciliar.
@@ -48,10 +47,9 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`, `main` ou `v2`. Essa escolha é específica deste fluxo de customização.
 
 - Escolha nome curto, de até três palavras separadas por hífen, sem `/` ou prefixo `feat/`.
-- Verifique previamente se a branch ou uma worktree da feature já existe. Para retomar uma feature, use a worktree dela. Use o caminho retornado pela criação, sem deduzir ou fixar um caminho em `~/Dev`.
-- Se houver ferramenta de movimentação de sessão, mova a sessão para a nova worktree.
+- Verifique previamente se a branch da feature já existe para retomar o trabalho existente.
 - Registre o SHA de `origin/custom` usado como base.
-- Não edite no checkout de atualização `~/Dev/opencode2` nem dentro dos releases instalados.
+- Não edite dentro dos releases instalados.
 
 ## 3. Implementar
 
@@ -68,14 +66,14 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 1. Use o Bun exigido pelo `packageManager` atual. A instalação custom tem runtime privado; não substitua o Bun global para satisfazer o projeto.
 2. Rode `bun typecheck` a partir dos pacotes afetados e testes relevantes nos diretórios de pacote, nunca testes na raiz.
 3. Para UI web, use `playwright-cli` para validar a interface real. Verifique filtro, seleção por clique/teclado, payload e viewports relevantes. Distinga claramente fixture de integração real.
-4. Para validação isolada em 4177, use o entrypoint de desenvolvimento `packages/cli/script/custom-server.ts` da worktree com um `OPENCODE_CUSTOM_HOME` exclusivo do teste (veja "Isolated source development" em `docs/custom-macos.md`) e encerre o processo ao terminar. Nunca teste em 4096 ou 4178. Não pare nem reinicie o serviço que hospeda a conversa.
+4. Para validação isolada em 4177, use o entrypoint de desenvolvimento `packages/cli/script/custom-server.ts` com um `OPENCODE_CUSTOM_HOME` exclusivo do teste (veja "Isolated source development" em `docs/custom-macos.md`) e encerre o processo ao terminar. Nunca teste em 4096 ou 4178. Não pare nem reinicie o serviço que hospeda a conversa.
 5. Para o fluxo de release, use `--dry-run`, um `OPENCODE_CUSTOM_HOME` isolado e `packages/cli/script/custom-smoke.ts`; cubra lock, falhas de preparação/ativação e retomada. Não use a instalação ou sessões reais como alvo de testes destrutivos.
 6. Execute `git diff --check` e revise o diff. Não contorne hooks de publicação. Falhas preexistentes exigem evidência na base, não mera suposição.
 
 ### Ambiente pronto para testar
 
 - Antes de convidar Alexandre a testar, prepare a 4177 com os mesmos providers, modelos, MCPs e configurações efetivas da instalação principal. O usuário não deve precisar configurar tudo novamente a cada teste.
-- Descubra as fontes atuais, respeitando overrides de ambiente e JSON/JSONC. O caminho global usual é `~/.config/opencode/opencode.json` (ou `.jsonc`). Preserve os ajustes da worktree da feature e aplique apenas as diferenças necessárias ao isolamento do teste.
+- Descubra as fontes atuais, respeitando overrides de ambiente e JSON/JSONC. O caminho global usual é `~/.config/opencode/opencode.json` (ou `.jsonc`). Preserve os ajustes da feature e aplique apenas as diferenças necessárias ao isolamento do teste.
 - Configuração e autenticação são distintas. Na V2, credenciais/conexões são persistidas no banco; `~/.local/share/opencode/auth.json` é uma fonte legada e não garante autenticação atual. Inspecione o mecanismo vigente antes de transportar credenciais.
 - Prepare uma cópia local privada da configuração e das credenciais necessárias em persistência exclusiva do teste, com permissões restritas (0600 para arquivos de segredos). Use exportação/importação suportada ou snapshot consistente para extrair os registros necessários; nunca copie diretamente o SQLite vivo, aponte o dev para o banco principal ou copie todo o histórico só para obter autenticação. Não exponha tokens em logs, comandos exibidos ou Git, nem permita que alterações do dev sejam gravadas na configuração principal.
 - Referências a variáveis de ambiente, arquivos e plugins precisam continuar resolvendo no dev. Confirme no ambiente de teste os providers/modelos disponíveis e a autenticação/conectividade das integrações relevantes, sem revelar segredos. Não afirme equivalência apenas porque copiou o JSON.
@@ -86,7 +84,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 - O ambiente 4177 deve servir a versão recém-construída sem service worker/PWA ativo. Um build de produção pode registrar SW mesmo quando usado para teste; confirme o comportamento real e use uma opção de desenvolvimento específica para impedir esse registro. Não altere a política de cache da produção 4096 para resolver um problema do dev.
 - Para um navegador que já acessou a 4177, remova registros antigos de service worker e caches da aplicação somente na origem exata de teste. `localhost:4177` e `127.0.0.1:4177` são origens diferentes: use uma URL consistente e confira a origem antes de limpar. Preserve cookies, localStorage, IndexedDB e autenticação; não use limpeza global de dados do navegador.
 - Impedir registros novos não desativa um SW que já controla a aba. Após remover o registro, faça a navegação/reabertura necessária e confirme que `navigator.serviceWorker.controller` é nulo e que nenhum registro da aplicação voltou. Headers `no-cache` ou um simples reload não bastam como evidência.
-- Após cada correção solicitada, reconstrua/atualize o bundle servido a partir da worktree correta, atualize o processo dev quando necessário e valide novamente pelo Playwright antes de pedir novo teste. Respeite as instruções do repositório sobre ciclo de vida dos processos; nunca reinicie o servidor que hospeda a conversa.
+- Após cada correção solicitada, reconstrua/atualize o bundle servido a partir do código corrigido, atualize o processo dev quando necessário e valide novamente pelo Playwright antes de pedir novo teste. Respeite as instruções do repositório sobre ciclo de vida dos processos; nunca reinicie o servidor que hospeda a conversa.
 - Disponibilize identificação visível do build no ambiente de teste (commit e identificador de build que também diferencie alterações ainda não commitadas), usando mecanismo existente ou um indicador restrito ao dev. Confira que o navegador mostra esse build e execute o comportamento corrigido; o SHA sozinho não distingue duas correções não commitadas.
 - Ao entregar para teste, informe URL, build e resultado da checagem de configuração/cache. Não diga que esses mecanismos já estão implementados sem verificar o comando e o navegador reais.
 
@@ -102,9 +100,9 @@ git push -u origin <feature-curta>
 
 - Faça stage apenas do trabalho desta feature.
 - A integração é em **`custom` do fork**, nunca na branch oficial nem em `main` por hábito.
-- Depois da aprovação da feature, prepare a integração em worktree limpa baseada no **`origin/custom` atualizado**, incorporando a feature e validando a combinação. Prefira squash para uma feature nova de vários commits; preserve histórico existente quando um merge for mais adequado.
+- Depois da aprovação da feature, prepare a integração em checkout limpo baseado no **`origin/custom` atualizado**, incorporando a feature e validando a combinação. Prefira squash para uma feature nova de vários commits; preserve histórico existente quando um merge for mais adequado.
 - Imediatamente antes de publicar a integração, confirme que `origin/custom` não avançou. Se avançou, refaça a integração sobre a base nova e valide novamente.
-- Publique por push normal fast-forward, sem `--force`. Não tente atualizar uma branch local `custom` que esteja em uso em outra worktree.
+- Publique por push normal fast-forward, sem `--force`.
 - Não misture integração upstream com a feature; ela segue a seção abaixo, em branch própria.
 
 ### Integrar upstream em `custom`
@@ -134,7 +132,7 @@ Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active
 Informe de forma curta:
 
 - Feature implementada e comportamentos relevantes.
-- Branch, worktree, commit e link do fork.
+- Branch, commit e link do fork.
 - Checks executados e limitações verificadas.
 - Se foi **apenas publicada**, **integrada em custom**, **preparada** ou **ativada** — não confunda esses estados.
 - Se a atualização foi iniciada e ainda não confirmada, diga isso e forneça o comando de status.
@@ -143,6 +141,6 @@ Informe de forma curta:
 
 Configuração V2 oficial: `https://opencode.ai/v2/docs/skills/`.
 
-Esta skill é versionada em `.agents/skills/opencode-custom/SKILL.md` na branch `custom` do fork. Deve acompanhar as worktrees baseadas nessa branch, sem uma cópia em diretórios globais de skills.
+Esta skill é versionada em `.agents/skills/opencode-custom/SKILL.md` na branch `custom` do fork, sem uma cópia em diretórios globais de skills.
 
 `metadata.opencode/autoinvoke: true` permite descoberta automática no contexto do projeto. `slash: true` mantém sua disponibilidade no catálogo interativo e ela também pode ser solicitada explicitamente pelo ID `opencode-custom`.
