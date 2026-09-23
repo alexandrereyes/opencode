@@ -1,17 +1,24 @@
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLocation } from "@solidjs/router"
-import { createEffect, on, onCleanup } from "solid-js"
+import { createEffect, createMemo, on, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLayout } from "@/shell/state/layout"
 import type { SessionModel } from "../model"
 import { useSessionHashScroll } from "../use-session-hash-scroll"
 import { createTimelineModel } from "./model"
+import { readingPositions } from "./reading-position"
 
 export function createSessionTimelineInteraction(session: SessionModel) {
   const layout = useLayout()
   const location = useLocation()
   const timeline = createTimelineModel({ session })
+  const entry = createMemo(
+    on(session.identity.sessionKey, (key) => ({
+      explicit: !!location.hash || !!layout.pendingMessage.peek(key),
+      pinned: readingPositions.get(key)?.pinned ?? true,
+    })),
+  )
   const [state, setState] = createStore({
     messageID: undefined as string | undefined,
     pendingMessage: undefined as string | undefined,
@@ -21,7 +28,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     },
     follow: {
       sessionKey: session.identity.sessionKey(),
-      pinned: true,
+      pinned: !entry().explicit && entry().pinned,
     },
     refs: {
       scroller: undefined as HTMLDivElement | undefined,
@@ -31,16 +38,33 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   })
   // The single source of truth for "follow the newest content". The virtualizer pins and unpins
   // it from scroll geometry; everything else only expresses explicit intent.
-  const pinned = () => state.follow.sessionKey !== session.identity.sessionKey() || state.follow.pinned
-  const pin = () => setState("follow", { sessionKey: session.identity.sessionKey(), pinned: true })
+  const pinned = () =>
+    state.follow.sessionKey !== session.identity.sessionKey()
+      ? !entry().explicit && entry().pinned
+      : state.follow.pinned
+  let cancelRestoration = () => {}
+  const restorations = new Set<string>()
+  const restoring = () => restorations.has(session.identity.sessionKey())
+  const follow = (value: boolean) => {
+    const key = session.identity.sessionKey()
+    readingPositions.follow(key, value)
+    setState("follow", { sessionKey: key, pinned: value })
+  }
+  readingPositions.follow(session.identity.sessionKey(), state.follow.pinned)
+  const pin = () => follow(true)
+  const pause = () => {
+    cancelRestoration()
+    follow(false)
+  }
   const unpin = () => {
     if (!scroller || scroller.scrollHeight - scroller.clientHeight <= 1) return
-    setState("follow", { sessionKey: session.identity.sessionKey(), pinned: false })
+    pause()
   }
   let scroller: HTMLDivElement | undefined
   let dockHeight = 0
   let revealMessage = (_id: string, _partID?: string) => {}
   let scrollToEnd = () => {}
+  let scrollToOffset = (_offset: number, _behavior: ScrollBehavior) => {}
   let scrollMark = 0
   let messageMark = 0
   let scrollStateFrame: number | undefined
@@ -98,6 +122,18 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       if (target) updateScrollState(target)
     })
   }
+  createEffect(
+    on(
+      session.identity.sessionKey,
+      () => {
+        follow(untrack(pinned))
+        setState("messageID", undefined)
+        setState("pendingMessage", undefined)
+        setState("scroll", { overflow: false, jump: false })
+      },
+      { defer: true },
+    ),
+  )
   const { clearMessageHash, scrollToMessage } = useSessionHashScroll({
     sessionKey: session.identity.sessionKey,
     sessionID: () => session.identity.params.id,
@@ -111,15 +147,16 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     setPendingMessage: (value) => setState("pendingMessage", value),
     setActiveMessage,
     follow: {
-      unpin,
+      unpin: pause,
       toBottom: () => {
-        pin()
-        scrollToEnd()
+        if (pinned()) scrollToEnd()
       },
     },
+    onNavigate: () => cancelRestoration(),
     scroller: () => scroller,
     anchor,
     revealMessage: (id) => revealMessage(id),
+    scrollToOffset: (offset, behavior) => scrollToOffset(offset, behavior),
     scheduleScrollState,
     consumePendingMessage: (key) => layout.pendingMessage.consume(key),
   })
@@ -174,7 +211,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       historyRequests.delete(owner.key)
     }
     if (!owner.current() || timeline.messages().length <= before) return
-    if (pinned() || !scroller || scroller.scrollTop >= 200 || !timeline.history.more()) return
+    if (restoring() || pinned() || !scroller || scroller.scrollTop >= 200 || !timeline.history.more()) return
     if (historyContinuationFrame !== undefined) cancelAnimationFrame(historyContinuationFrame)
     historyContinuationFrame = requestAnimationFrame(() => {
       historyContinuationFrame = undefined
@@ -183,6 +220,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   }
   const onHistoryScroll = () => {
     if (
+      restoring() ||
       historyRequests.has(session.ownership.key()) ||
       timeline.history.loading() ||
       pinned() ||
@@ -196,7 +234,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     if (fillFrame !== undefined) return
     fillFrame = requestAnimationFrame(() => {
       fillFrame = undefined
-      if (!session.identity.params.id || !timeline.ready()) return
+      if (restoring() || !session.identity.params.id || !timeline.ready()) return
       if (!pinned() || timeline.history.loading() || !scroller) return
       if (scroller.scrollHeight > scroller.clientHeight + 1 || !timeline.history.more()) return
       void loadOlder()
@@ -213,23 +251,10 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   )
   createEffect(
     on(
-      session.identity.sessionKey,
-      () => {
-        pin()
-        setState("messageID", undefined)
-        setState("pendingMessage", undefined)
-        setState("scroll", { overflow: false, jump: false })
-      },
-      { defer: true },
-    ),
-  )
-  createEffect(
-    on(
       () => session.identity.params.id,
       (id, previous) => {
         if (!id || !previous || id === previous || state.messageID || state.pendingMessage || location.hash) return
-        pin()
-        scrollToEnd()
+        if (pinned()) scrollToEnd()
       },
     ),
   )
@@ -275,7 +300,8 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       if (next === dockHeight) return
       const delta = next - dockHeight
       const stick = scroller
-        ? pinned() || scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 10 + Math.max(0, delta)
+        ? pinned() ||
+          (!restoring() && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 10 + Math.max(0, delta))
         : false
       dockHeight = next
       if (stick) scrollToEnd()
@@ -302,6 +328,17 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     scroll: state.scroll,
     scroller: () => state.refs.scroller,
     view: {
+      pause,
+      explicitNavigation: () =>
+        !!location.hash || !!state.pendingMessage || !!layout.pendingMessage.peek(session.identity.sessionKey()),
+      history: { ...timeline.history, settled: () => !timeline.resource.loading },
+      setRestoring: (key: string, value: boolean) => {
+        if (value) restorations.add(key)
+        if (!value) restorations.delete(key)
+      },
+      setCancelRestoration: (cancel: () => void) => {
+        cancelRestoration = cancel
+      },
       anchor,
       markUserScroll,
       onHistoryScroll,
@@ -322,6 +359,9 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       setScrollRef,
       setScrollToEnd: (scroll: () => void) => {
         scrollToEnd = scroll
+      },
+      setScrollToOffset: (scroll: (offset: number, behavior: ScrollBehavior) => void) => {
+        scrollToOffset = scroll
       },
       unpin,
     },

@@ -65,7 +65,7 @@ export function SessionScreen(props: { session: SessionModel }) {
     sessionID: session.identity.sessionID,
     scrollRef: timeline.scroller,
     revealMessage: timeline.actions.revealMessage,
-    pauseAutoScroll: timeline.view.unpin,
+    pauseAutoScroll: timeline.view.pause,
   })
   const messagesReady = timeline.ready
   createEffect(() => {
@@ -254,6 +254,10 @@ export function SessionScreen(props: { session: SessionModel }) {
         onUnpin={timeline.view.unpin}
         onUserScroll={timeline.view.markUserScroll}
         onHistoryScroll={timeline.view.onHistoryScroll}
+        explicitNavigation={timeline.view.explicitNavigation}
+        history={timeline.view.history}
+        setRestoring={timeline.view.setRestoring}
+        setCancelRestoration={timeline.view.setCancelRestoration}
         onSelectionInteraction={timeline.view.selectionInteraction}
         pinned={timeline.view.pinned()}
         centered={screen.centered()}
@@ -266,6 +270,7 @@ export function SessionScreen(props: { session: SessionModel }) {
         anchor={timeline.view.anchor}
         setRevealMessage={timeline.view.setRevealMessage}
         setScrollToEnd={timeline.view.setScrollToEnd}
+        setScrollToOffset={timeline.view.setScrollToOffset}
         search={
           <Show when={active()}>
             <TimelineSearchBar controller={timelineSearch} />

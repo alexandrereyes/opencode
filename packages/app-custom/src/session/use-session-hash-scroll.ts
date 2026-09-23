@@ -19,6 +19,8 @@ export const useSessionHashScroll = (input: {
   scroller: () => HTMLDivElement | undefined
   anchor: (id: string) => string
   revealMessage?: (id: string) => void
+  scrollToOffset: (offset: number, behavior: ScrollBehavior) => void
+  onNavigate?: () => void
   scheduleScrollState: (el: HTMLDivElement) => void
   consumePendingMessage: (key: string) => string | undefined
 }) => {
@@ -70,7 +72,9 @@ export const useSessionHashScroll = (input: {
     const sticky = root.querySelector("[data-session-title]")
     const inset = sticky instanceof HTMLElement ? sticky.offsetHeight : 0
     const top = Math.max(0, a.top - b.top + root.scrollTop - inset)
-    root.scrollTo({ top, behavior })
+    // Supersede the virtualizer's reveal-by-index target before its next
+    // measurement reconciliation; a native write would leave that target alive.
+    input.scrollToOffset(top, behavior)
     return true
   }
 
@@ -86,6 +90,7 @@ export const useSessionHashScroll = (input: {
   }
 
   const scrollToMessage = (message: SessionMessageUser, behavior: ScrollBehavior = "smooth") => {
+    input.onNavigate?.()
     cancel()
     if (input.currentMessageId() !== message.id) input.setActiveMessage(message)
     input.revealMessage?.(message.id)
@@ -132,6 +137,7 @@ export const useSessionHashScroll = (input: {
 
   createEffect(() => {
     const hash = location.hash
+    if (hash) input.onNavigate?.()
     if (!hash) clearing = false
     if (!input.sessionID() || !input.messagesReady()) return
     cancel()
@@ -158,6 +164,8 @@ export const useSessionHashScroll = (input: {
 
     if (!targetId && !clearing) targetId = messageIdFromHash(location.hash)
     if (!targetId) return
+
+    input.onNavigate?.()
 
     const pending = input.pendingMessage() === targetId
     const msg = messageById().get(targetId)

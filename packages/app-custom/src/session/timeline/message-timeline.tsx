@@ -40,6 +40,7 @@ import { ChatQuoteAnchors } from "@/composer/chat-quote-anchors"
 import type { ComposerState } from "@/composer/state"
 import type { ChatQuote } from "@/composer/schema"
 import { userPresentation } from "../user-presentation"
+import { readingPositions } from "./reading-position"
 
 type BackgroundTask = {
   id: string
@@ -370,6 +371,10 @@ type MessageTimelineProps = {
   onUnpin: () => void
   onUserScroll: (target?: EventTarget | null) => void
   onHistoryScroll: () => void
+  explicitNavigation?: () => boolean
+  history?: { more: () => boolean; loading: () => boolean; settled: () => boolean; loadOlder: () => Promise<void> }
+  setRestoring?: (key: string, value: boolean) => void
+  setCancelRestoration?: (cancel: () => void) => void
   onSelectionInteraction: (event: MouseEvent) => void
   pinned: boolean
   centered: boolean
@@ -382,6 +387,7 @@ type MessageTimelineProps = {
   anchor: (id: string) => string
   setRevealMessage?: (fn: (id: string, partID?: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
+  setScrollToOffset?: (fn: (offset: number, behavior: ScrollBehavior) => void) => void
   search?: JSX.Element
 }
 
@@ -486,7 +492,13 @@ function MessageTimelineView(
   const [quoteRoot, setQuoteRoot] = createStore<{ element?: HTMLDivElement }>({})
   const virtualized = createTimelineVirtualizer({
     active: () => props.active !== false,
-    sessionKey: () => `${server.key}/${props.data.sessionID()}`,
+    sessionKey: props.session.identity.sessionKey,
+    readingAnchor: () => readingPositions.get(props.session.identity.sessionKey())?.anchor,
+    onLeave: (key, anchor) => readingPositions.anchor(key, anchor),
+    explicitNavigation: props.explicitNavigation,
+    history: props.history,
+    setRestoring: props.setRestoring,
+    setCancelRestoration: props.setCancelRestoration,
     presentationKey: () => JSON.stringify(props.data.timelineDetail()),
     projection,
     showHeader,
@@ -540,6 +552,7 @@ function MessageTimelineView(
     },
     setRevealMessage: props.setRevealMessage,
     setScrollToEnd: props.setScrollToEnd,
+    setScrollToOffset: props.setScrollToOffset,
   })
   const VirtualizedTimeline = virtualized.View
   const [title, setTitle] = createStore({

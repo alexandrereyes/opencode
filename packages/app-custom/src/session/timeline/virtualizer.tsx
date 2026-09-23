@@ -11,6 +11,7 @@ import { TimelineRow } from "@opencode/session-ui-custom/timeline/projection"
 import { useLanguage } from "@/runtime/i18n/language"
 import {
   batch,
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -18,6 +19,7 @@ import {
   on,
   onCleanup,
   onMount,
+  untrack,
   Show,
   type Accessor,
   type JSX,
@@ -27,6 +29,7 @@ import { createMediaQuery } from "@solid-primitives/media"
 import type { createTimelineProjection } from "./projection"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { filterVirtualIndexes } from "./virtual-items"
+import type { ReadingAnchor } from "./reading-position"
 
 const fallbackItemSize = 60
 const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
@@ -67,12 +70,19 @@ type Input = {
   onSelectionInteraction: (event: MouseEvent) => void
   onUserScroll: (target?: EventTarget | null) => void
   onHistoryScroll: () => void
+  readingAnchor?: () => ReadingAnchor | undefined
+  onLeave?: (key: string, anchor: ReadingAnchor) => void
+  explicitNavigation?: () => boolean
+  history?: { more: () => boolean; loading: () => boolean; settled: () => boolean; loadOlder: () => Promise<void> }
+  setRestoring?: (key: string, value: boolean) => void
+  setCancelRestoration?: (cancel: () => void) => void
   canRenderImmediately?: (
     row: TimelineRow.TimelineRow,
     disclosure: Readonly<Record<string, boolean | undefined>>,
   ) => boolean
   setRevealMessage?: (fn: (id: string, partID?: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
+  setScrollToOffset?: (fn: (offset: number, behavior: ScrollBehavior) => void) => void
 }
 
 type ViewProps = {
@@ -191,6 +201,143 @@ export function createTimelineVirtualizer(input: Input) {
   let reportOffset: ((offset: number, scrolling: boolean) => void) | undefined
   let reportRect: ((rect: { width: number; height: number }) => void) | undefined
   let batchingColdSizes = false
+  let logicalOffset: number | undefined
+  const recovery = {
+    attempt: undefined as
+      | undefined
+      | {
+          anchor: ReadingAnchor
+          deadline: number
+          pages: number
+          loading: boolean
+          frame: number
+          measured: Element | undefined
+          stable: number
+          geometry: string
+        },
+    entered: false,
+  }
+
+  function finishRestoration(reason: "cancel" | "complete" | "timeout" | "error" = "cancel") {
+    const attempt = recovery.attempt
+    if (!attempt) return
+    cancelAnimationFrame(attempt.frame)
+    recovery.attempt = undefined
+    const root = listRoot()
+    if (root) {
+      scrollTop = root.scrollTop
+      maxScroll = root.scrollHeight - root.clientHeight
+      if (active() && maxScroll <= 1 && (reason === "complete" || reason === "timeout")) input.onPin()
+      if (active()) input.onScheduleScrollState(root)
+    }
+    input.setRestoring?.(ownerSessionKey, false)
+  }
+
+  function leave() {
+    if (!recovery.entered) return
+    recovery.entered = false
+    if (recovery.attempt) {
+      finishRestoration()
+      return
+    }
+    // The virtualizer offset already includes the iOS translation. Sticky user
+    // containers span a whole group, so their DOM rectangles are not row bounds.
+    const offset = logicalOffset ?? virtualizer.scrollOffset ?? scrollTop
+    const item = virtualizer.measurementsCache.find((item) => item.start <= offset && offset < item.end)
+    const row = item && rows()[item.index]
+    if (!item || !row) return
+    input.onLeave?.(ownerSessionKey, {
+      rowKey: String(item.key),
+      messageID: row.userMessageID,
+      offset: Math.max(0, offset - item.start),
+    })
+  }
+
+  function restore() {
+    recovery.entered = true
+    input.setCancelRestoration?.(finishRestoration)
+    const anchor = input.readingAnchor?.()
+    if (!anchor || input.pinned() || input.explicitNavigation?.()) return
+    const attempt = {
+      anchor,
+      deadline: performance.now() + 3000,
+      pages: 0,
+      loading: false,
+      frame: 0,
+      measured: undefined as Element | undefined,
+      stable: 0,
+      geometry: "",
+    }
+    recovery.attempt = attempt
+    input.setRestoring?.(ownerSessionKey, true)
+    const frame = () => {
+      if (recovery.attempt !== attempt) return
+      if (!active() || input.explicitNavigation?.()) {
+        finishRestoration()
+        return
+      }
+      if (performance.now() >= attempt.deadline) {
+        finishRestoration("timeout")
+        return
+      }
+      attempt.frame = requestAnimationFrame(frame)
+      if (attempt.loading || input.history?.loading()) {
+        attempt.stable = 0
+        return
+      }
+      const settled = input.history?.settled() ?? true
+      const exact = rowKeys().indexOf(anchor.rowKey)
+      const user =
+        exact < 0 ? rows().findIndex((row) => row._tag === "UserMessage" && row.userMessageID === anchor.messageID) : -1
+      const index = exact >= 0 ? exact : user >= 0 ? user : input.projection.messageRowIndex().get(anchor.messageID)
+      if (index === undefined && !settled) {
+        attempt.stable = 0
+        return
+      }
+      const root = listRoot()
+      if (!root?.isConnected || !root.clientHeight) return
+      if (index === undefined) {
+        if (input.history?.more() && attempt.pages < 3) {
+          attempt.pages += 1
+          attempt.loading = true
+          void input.history.loadOlder().then(
+            () => {
+              if (recovery.attempt === attempt) attempt.loading = false
+            },
+            () => {
+              if (recovery.attempt === attempt) finishRestoration("error")
+            },
+          )
+          return
+        }
+        input.onPin()
+        virtualizer.scrollToEnd()
+        finishRestoration("complete")
+        return
+      }
+      const item = virtualizer.measurementsCache[index]
+      if (!item) return
+      const element = virtualizer.elementsCache.get(item.key)
+      const measured = element?.isConnected && !element.style.minHeight
+      const ready = measured && !element.querySelector(pendingMarkdown)
+      if (measured && attempt.measured !== element) {
+        attempt.measured = element
+        attempt.stable = 0
+        virtualizer.measureElement(element)
+        return
+      }
+      if (!measured) attempt.measured = undefined
+      const desired = item.start + (measured && exact >= 0 ? Math.min(anchor.offset, Math.max(0, item.size - 1)) : 0)
+      const destination = Math.max(0, Math.min(desired, root.scrollHeight - root.clientHeight))
+      const geometry = `${item.key}/${item.start}/${item.size}/${destination}`
+      const write = Math.abs(root.scrollTop + rendering.scrollAdjustment - destination) > 1
+      attempt.stable = settled && ready && !write && geometry === attempt.geometry ? attempt.stable + 1 : 0
+      attempt.geometry = geometry
+      if (write) virtualizer.scrollToOffset(destination)
+      if (attempt.stable >= 2) finishRestoration("complete")
+    }
+    attempt.frame = requestAnimationFrame(frame)
+  }
 
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     get count() {
@@ -211,7 +358,7 @@ export function createTimelineVirtualizer(input: Input) {
         // Rows and the sizer use the opposite translation while native touch
         // scrolling keeps its own offset. Range selection uses the logical offset.
         batch(() => {
-          const logicalOffset = offset + rendering.scrollAdjustment
+          logicalOffset = offset + rendering.scrollAdjustment
           callback(rendering.scrollAdjustment ? Math.max(0, logicalOffset) : offset, scrolling)
           // Reconcile both start boundaries in one native write. Gradually
           // clamping row translations lets the compositor paint between
@@ -262,6 +409,10 @@ export function createTimelineVirtualizer(input: Input) {
       setRendering("scrollAdjustment", 0)
       if (virtualContent) virtualContent.style.height = `${instance.getTotalSize()}px`
       elementScroll(offset, options, instance)
+      // Navigation can leave this view before the native scroll event reports
+      // the committed (possibly clamped) write back to the virtualizer.
+      const root = listRoot()
+      if (root?.isConnected) logicalOffset = root.scrollTop
     },
     get getItemKey() {
       return getItemKey()
@@ -354,6 +505,8 @@ export function createTimelineVirtualizer(input: Input) {
   }
 
   function prepareNavigation() {
+    if (!active()) return
+    finishRestoration()
     if (touchStart === undefined) touchScrolling = false
     flushTouchAdjustment()
   }
@@ -374,6 +527,22 @@ export function createTimelineVirtualizer(input: Input) {
   )
   const virtualRowKeys = createMemo(() => virtualizer.getVirtualItems().map((item) => String(item.key)))
 
+  createComputed(
+    on(active, (value) =>
+      untrack(() => {
+        if (!value) {
+          leave()
+          return
+        }
+        restore()
+      }),
+    ),
+  )
+  createEffect(() => {
+    if (active() && input.explicitNavigation?.()) finishRestoration()
+  })
+  onCleanup(leave)
+
   createEffect(() => {
     if (!active()) return
     const root = listRoot()
@@ -390,6 +559,7 @@ export function createTimelineVirtualizer(input: Input) {
     })
     input.setRevealMessage?.((id, partID) => {
       if (!active()) return
+      prepareNavigation()
       const partIndex = partID
         ? rows().findIndex(
             (row) => row._tag === "AssistantPart" && row.group.type === "part" && row.group.ref.partID === partID,
@@ -397,12 +567,17 @@ export function createTimelineVirtualizer(input: Input) {
         : -1
       const index = partIndex >= 0 ? partIndex : input.projection.messageRowIndex().get(id)
       if (index === undefined) return
-      prepareNavigation()
       virtualizer.scrollToIndex(index, { align: "center" })
     })
-    input.setScrollToEnd?.(() => {
-      if (!active() || !listRoot()?.isConnected) return
+    input.setScrollToOffset?.((offset, behavior) => {
+      if (!active()) return
       prepareNavigation()
+      virtualizer.scrollToOffset(offset, { behavior: behavior === "smooth" ? "smooth" : "auto" })
+    })
+    input.setScrollToEnd?.(() => {
+      if (!active()) return
+      prepareNavigation()
+      if (!listRoot()?.isConnected) return
       input.onPin()
       virtualizer.scrollToEnd()
     })
@@ -502,6 +677,8 @@ export function createTimelineVirtualizer(input: Input) {
   // Upward input is the one intent geometry cannot recover: nudging up while still a pixel from
   // the end must stop following, even though the resulting position still looks like the end.
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
+    if (!active()) return
+    finishRestoration()
     input.onUserScroll(event.target)
     const header =
       event.target instanceof Element ? event.target.closest<HTMLElement>("[data-sticky-user] [data-scrollable]") : null
@@ -510,6 +687,8 @@ export function createTimelineVirtualizer(input: Input) {
   }
 
   const handleListTouchStart = (event: TouchEvent) => {
+    if (!active()) return
+    finishRestoration()
     clearTouchTarget()
     input.onUserScroll(event.target)
     touchScrolling = true
@@ -560,6 +739,8 @@ export function createTimelineVirtualizer(input: Input) {
   // Drag-selecting past the edge and dragging the scrollbar both scroll without a wheel or key,
   // so a held pointer is what separates those from the virtualizer's own measurement adjustments.
   const handleListPointerDown = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
+    if (!active()) return
+    finishRestoration()
     input.onUserScroll(event.target)
     pointerHeld = true
   }
@@ -576,10 +757,12 @@ export function createTimelineVirtualizer(input: Input) {
   })
 
   const handleListKeyDown = (event: KeyboardEvent & { currentTarget: HTMLDivElement }) => {
+    if (!active()) return
     const key = scrollKey(event)
     if (!key) return
     if (!isScrollKeyTarget(event.target, key)) return
     if (scrollKeyOwner(event.currentTarget, event.target, key) !== event.currentTarget) return
+    finishRestoration()
     input.onUserScroll(event.currentTarget)
     if (upwardKeys.has(key)) input.onUnpin()
   }
@@ -596,11 +779,12 @@ export function createTimelineVirtualizer(input: Input) {
     maxScroll = root.scrollHeight - root.clientHeight
     const atEnd = maxScroll - scrollTop <= endEpsilon
     const arrived = scrollTop > previousTop + endEpsilon || maxScroll < previousMaxScroll
-    if (maxScroll <= 1 || (atEnd && arrived)) input.onPin()
-    else if ((pointerHeld || touchScrolling) && scrollTop < previousTop - endEpsilon) input.onUnpin()
+    const pin = !recovery.attempt && (maxScroll <= 1 || (atEnd && arrived))
+    if (pin) input.onPin()
+    if (!pin && (pointerHeld || touchScrolling) && scrollTop < previousTop - endEpsilon) input.onUnpin()
     settleColdBottom()
     input.onScheduleScrollState(root)
-    input.onHistoryScroll()
+    if (!recovery.attempt) input.onHistoryScroll()
   }
 
   function View(props: ViewProps) {
@@ -655,7 +839,7 @@ export function createTimelineVirtualizer(input: Input) {
               // The optimistic row can paint before ResizeObserver corrects the tail estimates.
               // Measure the mounted tail and pin it in this render's microtask instead.
               queueMicrotask(() => {
-                if (!input.pinned() || !virtualContent?.isConnected) return
+                if (!active() || !input.pinned() || !virtualContent?.isConnected) return
                 virtualizer.elementsCache.forEach((item) => {
                   if (item.isConnected) virtualizer.resizeItem(virtualizer.indexFromElement(item), item.offsetHeight)
                 })
@@ -781,6 +965,7 @@ export function createTimelineVirtualizer(input: Input) {
       input.setScrollRef(undefined)
       input.setRevealMessage?.(() => {})
       input.setScrollToEnd?.(() => {})
+      input.setScrollToOffset?.(() => {})
     }
   })
 
