@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { explorerAbsolute, explorerDisplay, explorerParent, explorerQuery, explorerRows, explorerSubmission } from "./explorer-query"
+import { explorerAbsolute, explorerBlocked, explorerDisplay, explorerParent, explorerQuery, explorerRows, explorerSubmission } from "./explorer-query"
 
 const home = "/Users/alex"
 
@@ -48,17 +48,17 @@ describe("project explorer", () => {
       { name: "openchamber", absolute: "/Users/alex/Dev/openchamber/" },
     ]
     const added = new Set(["/Users/alex/Dev/openchamber"])
-    expect(explorerRows({ entries, filter: "", hidden: false, added }).map((row) => row.name)).toEqual([
+    expect(explorerRows({ entries, filter: "", hidden: false, added, home }).map((row) => row.name)).toEqual([
       "Abacato",
       "openchamber",
       "opencode",
     ])
-    expect(explorerRows({ entries, filter: "OPEN", hidden: false, added })).toEqual([
-      { name: "openchamber", absolute: "/Users/alex/Dev/openchamber", added: true },
-      { name: "opencode", absolute: "/Users/alex/Dev/opencode", added: false },
+    expect(explorerRows({ entries, filter: "OPEN", hidden: false, added, home })).toEqual([
+      { name: "openchamber", absolute: "/Users/alex/Dev/openchamber", added: true, blocked: false },
+      { name: "opencode", absolute: "/Users/alex/Dev/opencode", added: false, blocked: false },
     ])
-    expect(explorerRows({ entries, filter: ".c", hidden: false, added }).map((row) => row.name)).toEqual([".config"])
-    expect(explorerRows({ entries, filter: "", hidden: true, added })).toHaveLength(4)
+    expect(explorerRows({ entries, filter: ".c", hidden: false, added, home }).map((row) => row.name)).toEqual([".config"])
+    expect(explorerRows({ entries, filter: "", hidden: true, added, home })).toHaveLength(4)
   })
 
   test("chooses between selected, existing, added, and new project targets", () => {
@@ -82,5 +82,19 @@ describe("project explorer", () => {
       path: "/Users/alex/Dev/added",
     })
     expect(explorerSubmission({ ...base, query: "~/Dev/open", readable: false })).toBeUndefined()
+    expect(explorerSubmission({ ...base, query: "~/" })).toBeUndefined()
+    expect(explorerSubmission({ ...base, query: "/Users/alex/" })).toBeUndefined()
+    expect(explorerSubmission({ ...base, query: "/" })).toBeUndefined()
+  })
+
+  test("blocks the home directory and filesystem roots", () => {
+    expect(explorerBlocked("/Users/alex/", home)).toBe(true)
+    expect(explorerBlocked("/", home)).toBe(true)
+    expect(explorerBlocked("C:/", "")).toBe(true)
+    expect(explorerBlocked("/Users/alex/Dev", home)).toBe(false)
+    expect(explorerBlocked("/Users", "")).toBe(false)
+    expect(
+      explorerRows({ entries: [{ name: "alex", absolute: "/Users/alex" }], filter: "", hidden: false, added: new Set(), home }),
+    ).toEqual([{ name: "alex", absolute: "/Users/alex", added: false, blocked: true }])
   })
 })

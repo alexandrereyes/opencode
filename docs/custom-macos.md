@@ -337,7 +337,8 @@ The path field is both location and filter: text up to the last `/` is the brows
 and the rest filters its children by prefix, starting at `~/`. Arrow keys move, Enter opens the
 highlighted folder (or `..`), and Cmd/Ctrl+Enter adds the typed path. Home also allows batch
 selection with the checkboxes or Space while browsing; each row's `+` adds that folder at once.
-Existing projects are marked **Added**, and **Show hidden** reveals dot folders.
+Existing projects are marked **Added**, and **Show hidden** reveals dot folders. The server
+home directory and filesystem roots cannot be added, so browsing `~/` never adds home by accident.
 
 When the typed final segment does not exist, the action becomes **Create and add**. The
 `custom.directories` plugin RPC creates only that final folder, so a missing parent fails

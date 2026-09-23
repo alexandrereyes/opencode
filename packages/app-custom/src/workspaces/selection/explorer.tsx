@@ -27,7 +27,9 @@ interface ProjectExplorerDialogProps {
   location?: LocationRef
 }
 
-type Row = { type: "up"; path: string } | { type: "directory"; name: string; absolute: string; added: boolean }
+type Row =
+  | { type: "up"; path: string }
+  | { type: "directory"; name: string; absolute: string; added: boolean; blocked: boolean }
 
 const submitKeybind = parseKeybind("mod+enter")
 const decodeCreateFailure = Schema.decodeUnknownOption(
@@ -80,7 +82,13 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
   const added = createMemo(() => new Set(ctx.projects.list().map((project) => trimPickerPath(project.worktree))))
   const listing = () => (state.listing?.key === browsed() ? state.listing : undefined)
   const directories = createMemo(() =>
-    explorerRows({ entries: listing()?.entries ?? [], filter: query().filter, hidden: state.hidden, added: added() }),
+    explorerRows({
+      entries: listing()?.entries ?? [],
+      filter: query().filter,
+      hidden: state.hidden,
+      added: added(),
+      home: state.home,
+    }),
   )
   const rows = createMemo<Row[]>(() => {
     const parent = explorerParent(state.query, state.home)
@@ -223,7 +231,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
     if (event.key === " " && props.multiple && !query().filter) {
       event.preventDefault()
       const row = rows()[state.highlighted]
-      if (row?.type === "directory" && !row.added) toggle(row.absolute)
+      if (row?.type === "directory" && !row.added && !row.blocked) toggle(row.absolute)
     }
   }
 
@@ -318,11 +326,13 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
                           <Show when={row.type === "directory" ? row : undefined}>
                             {(directory) => (
                               <Show
-                                when={!directory().added}
+                                when={!directory().added && !directory().blocked}
                                 fallback={
-                                  <span class="project-explorer-badge">
-                                    {language.t("dialog.projectExplorer.added")}
-                                  </span>
+                                  <Show when={directory().added}>
+                                    <span class="project-explorer-badge">
+                                      {language.t("dialog.projectExplorer.added")}
+                                    </span>
+                                  </Show>
                                 }
                               >
                                 <div class="project-explorer-row-actions" onClick={(event) => event.stopPropagation()}>

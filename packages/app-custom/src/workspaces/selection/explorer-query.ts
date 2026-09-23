@@ -38,11 +38,18 @@ export function explorerParent(query: string, home: string) {
   return explorerDisplay(parent, home)
 }
 
+// The home directory and filesystem roots are never projects; blocking them avoids adding them by accident.
+export function explorerBlocked(path: string, home: string) {
+  const value = trimPickerPath(path)
+  return value === pickerRoot(value) || (!!home && value === trimPickerPath(home))
+}
+
 export function explorerRows(input: {
   entries: ReadonlyArray<{ name: string; absolute: string }>
   filter: string
   hidden: boolean
   added: ReadonlySet<string>
+  home: string
 }) {
   const filter = input.filter.toLowerCase()
   const hidden = input.hidden || input.filter.startsWith(".")
@@ -53,6 +60,7 @@ export function explorerRows(input: {
       name: entry.name,
       absolute: trimPickerPath(entry.absolute),
       added: input.added.has(trimPickerPath(entry.absolute)),
+      blocked: explorerBlocked(entry.absolute, input.home),
     }))
 }
 
@@ -66,7 +74,7 @@ export function explorerSubmission(input: {
 }) {
   if (input.selected.length > 0) return { type: "selected" as const, paths: [...input.selected] }
   const current = explorerQuery(input.query, input.home)
-  if (!current.target || !input.readable) return
+  if (!current.target || !input.readable || explorerBlocked(current.target, input.home)) return
   if (input.added.has(current.target)) return { type: "added" as const, path: current.target }
   if (!current.filter || input.rows.some((row) => row.name === current.filter))
     return { type: "existing" as const, path: current.target }
