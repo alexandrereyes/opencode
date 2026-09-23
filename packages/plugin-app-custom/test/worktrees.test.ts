@@ -114,6 +114,21 @@ describe("worktrees", () => {
     ).rejects.toThrow("The worktree identity changed")
   })
 
+  test("inspects a worktree when the main checkout row carries a stale strategy and a sibling is gone", async () => {
+    const fixture = await repository("stale-root")
+    const inspection = await Effect.runPromise(
+      inspectWorktree(
+        inventory([
+          { directory: fixture.root, strategy: "git" },
+          { directory: fixture.linked, strategy: "git" },
+          { directory: path.join(path.dirname(fixture.root), "gone"), strategy: "git" },
+        ]),
+        fixture.linked,
+      ),
+    )
+    expect(inspection).toMatchObject({ directory: AbsolutePath.make(fixture.linked), branch: "feature" })
+  })
+
   test("reports a stored worktree removed outside OpenCode as missing", async () => {
     const fixture = await repository("missing")
     await $`git worktree remove ${fixture.linked}`.cwd(fixture.root).quiet()

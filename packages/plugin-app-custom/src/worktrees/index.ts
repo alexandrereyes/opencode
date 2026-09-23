@@ -51,13 +51,14 @@ export function inspectWorktree(ctx: WorktreeContext, directory: string) {
     })
     return yield* Effect.tryPromise({
       try: async (signal) => {
-        const stored = await findStored(inventory, target)
+        const known = await resolveInventory(inventory)
+        const stored = findStored(known, target)
         if (stored.strategy !== "git") throw new Error(`Worktree strategy ${stored.strategy} cannot inspect removal`)
         const repository = await discover(target, signal)
         const entries = await worktreeList(repository, signal)
         const linked = entries.find((entry) => entry.directory === target && entry.kind === "linked")
         if (!linked) throw new Error(`Directory is not a linked Git worktree: ${target}`)
-        await verifyOwner(inventory, entries, target)
+        verifyOwner(known, entries, target)
         const status = await command(["git", "status", "--porcelain"], repository.worktree, signal)
         requireSuccess(status, "Failed to inspect Git worktree")
         const identity = await identityFor(repository.gitDirectory)
@@ -174,11 +175,18 @@ export function removeWorktree(ctx: WorktreeContext, input: Worktrees.DeleteInpu
   })
 }
 
-async function findStored(inventory: readonly { directory: string; strategy?: string }[], directory: string) {
-  const entries = await Promise.all(
-    inventory.map(async (item) => ({ ...item, canonical: await canonical(item.directory) })),
+// Sibling worktrees removed outside OpenCode keep their stored path until a refresh prunes them.
+async function resolveInventory(inventory: readonly { directory: string; strategy?: string }[]) {
+  return Promise.all(
+    inventory.map(async (item) => ({
+      ...item,
+      canonical: await canonical(item.directory).catch(() => path.normalize(item.directory)),
+    })),
   )
-  const stored = entries.find((item) => item.canonical === directory)
+}
+
+function findStored(inventory: readonly { canonical: string; strategy?: string }[], directory: string) {
+  const stored = inventory.find((item) => item.canonical === directory)
   if (!stored?.strategy) throw new Error(`Invalid worktree directory: ${directory}`)
   return stored
 }
@@ -198,14 +206,14 @@ function unavailable(
   return new Error(`Worktree directory no longer exists: ${directory}`, { cause: { missing: true } })
 }
 
-async function verifyOwner(
-  inventory: readonly { directory: string; strategy?: string }[],
+function verifyOwner(
+  inventory: readonly { canonical: string }[],
   entries: readonly { directory: string; kind: "main" | "linked" }[],
   target: string,
 ) {
   const owner = entries.find((entry) => entry.kind === "main")?.directory
-  const roots = await Promise.all(inventory.filter((item) => !item.strategy).map((item) => canonical(item.directory)))
-  if (!owner || !roots.some((root) => root === owner))
+  // Any stored directory can own the target: a main checkout row may carry a stale strategy that refresh never clears.
+  if (!owner || !inventory.some((item) => item.canonical === owner))
     throw new Error(`Directory is not a worktree of the requested project: ${target}`)
 }
 
