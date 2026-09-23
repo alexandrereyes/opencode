@@ -21,7 +21,7 @@ Transformar o pedido em uma feature do fork pessoal, validar e publicar seguindo
 | Fork (`origin`) | `https://github.com/alexandrereyes/opencode.git` |
 | Oficial (`upstream`) | `https://github.com/anomalyco/opencode.git` |
 | Base das features e destino de integração | `origin/custom` |
-| Linha oficial acompanhada pelo sync | `upstream/beta` |
+| Linha upstream integrada | `upstream/v2` (fonte do canal `latest`; `beta` parou na 2.0.6) |
 | Checkout principal conhecido | `/Users/alexandremartins/Dev/opencode` |
 | Worktree da feature inicial de apps | `/Users/alexandremartins/Dev/opencode2` |
 | Worktree do updater | `/Users/alexandremartins/Dev/opencode-updater` |
@@ -109,6 +109,8 @@ git push -u origin <feature-curta>
 
 ### Integrar upstream em `custom`
 
+Integre de `upstream/v2`, que gera o canal oficial `latest`. Prefira o commit de origem do release publicado (`metadata.github.sha` em `https://opencode.ai/update/api/latest/cli/npm`); a tag de release só acrescenta o bump de versão. Registre baseline, pontos de integração e validação em `docs/upstream-beta-merge.md`.
+
 Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active` ou `reconcile`) de `docs/upstream-overrides.md` com essa revisão e atualize o registro na própria integração:
 
 - Merge sem conflito ou ancestralidade não provam equivalência. O Git pode manter a cópia local e a versão upstream lado a lado; cherry-pick, patch e squash geram SHAs diferentes; o PR pode ter mudado depois da revisão registrada. Compare a mudança upstream final com o código local em comportamento, API, schema/migrations e testes.
@@ -127,7 +129,7 @@ Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active
 - Após adoção, o proxy 4096 aponta para o backend custom privado 4178, e o wrapper de `opencode2` usa endpoint explícito, sem alterar o binário oficial. O supervisor reserva 4097 para evitar respawn legado. Não altere o registro oficial enquanto seu processo estiver vivo.
 - A preparação pode ocorrer durante uso. A ativação deve passar pela barreira de manutenção e esperar idle, tentando novamente a cada 120 segundos. Não substitua isso por `pgrep`, checagem isolada de `/api/session/active` ou leitura do SQLite.
 - Não mate um processo ocupado para acelerar instalação. Um processo vivo pode estar idle; a API de manutenção é a autoridade para a troca coordenada.
-- O sync verifica commits a cada 300 segundos com ferramentas determinísticas e só prepara versão nova quando necessário. Quando houver conflito/falha de código, a política desejada é orquestrador/revisor **Astra Medium**, com worker **Astra Medium** pelo **llm-proxy**, iterando e validando antes de integração automática. Confirme os IDs reais e a implementação vigente, sem inventar nomes de modelos.
+- Não há sync automático: o updater periódico foi aposentado (veja `docs/custom-macos.md`). A integração upstream é manual, seguindo [Integrar upstream em `custom`](#integrar-upstream-em-custom), e a instalação usa `bun run custom:update` (skill `update-custom-app`).
 - Se a mudança afetar o próprio controlador, siga seu procedimento documentado de atualização e retomada; não suponha que sair da sessão de agente reinicia o launchd ou instala código novo.
 - Preserve a instalação e os dados oficiais durante a preparação. A adoção principal deve manter os caminhos de persistência e fazer backup antes de migrations. Se a primeira troca está bloqueada pela sessão atual, informe **preparada/pendente**, nunca **ativada**.
 
