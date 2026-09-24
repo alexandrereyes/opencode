@@ -301,6 +301,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
         onHistoryScroll={timeline.view.onHistoryScroll}
         explicitNavigation={timeline.view.explicitNavigation}
         history={timeline.view.history}
+        historyAdmission={timeline.view.historyAdmission}
         setRestoring={timeline.view.setRestoring}
         setCancelRestoration={timeline.view.setCancelRestoration}
         onSelectionInteraction={timeline.view.selectionInteraction}

@@ -30,6 +30,7 @@ import type { createTimelineProjection } from "./projection"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { filterVirtualIndexes } from "./virtual-items"
 import type { ReadingAnchor } from "./reading-position"
+import { defersScrollWrites, type HistoryAdmission } from "./history-admission"
 
 const fallbackItemSize = 60
 const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
@@ -37,6 +38,9 @@ const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
 // exactly to the end, while a one-pixel nudge upward is a deliberate move away from it.
 const endEpsilon = 0.5
 const upwardKeys = new Set(["up", "page-up", "home"])
+// Longer than TanStack's 150ms post-touchend grace and isScrolling reset, so an
+// admitted prepend anchors with an immediate write instead of a deferred one.
+const historySettleDelay = 200
 const cache = new Map<
   string,
   {
@@ -74,6 +78,7 @@ type Input = {
   onLeave?: (key: string, anchor: ReadingAnchor) => void
   explicitNavigation?: () => boolean
   history?: { more: () => boolean; loading: () => boolean; settled: () => boolean; loadOlder: () => Promise<void> }
+  historyAdmission?: Pick<HistoryAdmission, "held" | "hold" | "release">
   setRestoring?: (key: string, value: boolean) => void
   setCancelRestoration?: (cancel: () => void) => void
   canRenderImmediately?: (
@@ -97,6 +102,7 @@ export function createTimelineVirtualizer(input: Input) {
   const language = useLanguage()
   const active = () => input.active?.() !== false
   const isDesktop = createMediaQuery("(min-width: 768px)")
+  const deferredScrollWrites = defersScrollWrites()
   const topOffset = () => (input.showHeader() ? 64 : isDesktop() ? 0 : 16)
   const ownerSessionKey = input.sessionKey()
   const entry = cache.get(ownerSessionKey)
@@ -373,6 +379,9 @@ export function createTimelineVirtualizer(input: Input) {
           if (!scrolling && touchStart === undefined) finishTouchScroll()
         })
         settleColdBottom()
+        // Any reported scroll, including our own anchoring write, defers iOS corrections.
+        if (scrolling) holdHistory()
+        else scheduleHistoryAdmission()
       }
       return observeElementOffsetReconnectAware(instance, reportOffset, () => {
         if (!active()) return
@@ -492,7 +501,10 @@ export function createTimelineVirtualizer(input: Input) {
     const adjust = addedKeys.has(String(item.key))
       ? item.end <= (instance.scrollOffset ?? 0) + instance.scrollAdjustments + instance.options.scrollMargin
       : first !== undefined && item.index < first
-    if (!touchScrolling || input.pinned()) return adjust
+    // iOS also defers while any scroll, including our own anchoring write, is
+    // still reported. Translate those corrections too instead of moving rows.
+    const deferred = touchScrolling || (deferredScrollWrites && instance.isScrolling)
+    if (!deferred || input.pinned()) return adjust
     // iOS defers native scroll writes until momentum ends. Keep the same visual
     // anchor now, rather than moving rows now and snapping the viewport back later.
     if (adjust) touchAdjustment += delta
@@ -509,7 +521,53 @@ export function createTimelineVirtualizer(input: Input) {
     finishRestoration()
     if (touchStart === undefined) touchScrolling = false
     flushTouchAdjustment()
+    // Explicit navigation writes the offset anyway and may target a held page.
+    admitHistory()
   }
+
+  let historyTimer: ReturnType<typeof setTimeout> | undefined
+
+  function holdHistory() {
+    if (!deferredScrollWrites || !input.historyAdmission) return
+    input.historyAdmission.hold()
+    scheduleHistoryAdmission()
+  }
+
+  function scheduleHistoryAdmission() {
+    if (!input.historyAdmission?.held()) return
+    clearTimeout(historyTimer)
+    historyTimer = setTimeout(() => {
+      historyTimer = undefined
+      // Release reschedules while the finger is still down.
+      if (active() && touchStart !== undefined) return
+      const root = listRoot()
+      // Rubber-banding reports offsets outside the scrollable range; admitting
+      // there would anchor against a position Safari is about to discard.
+      const bouncing = !!root && (root.scrollTop < 0 || root.scrollTop > root.scrollHeight - root.clientHeight + 1)
+      if (active() && (virtualizer.isScrolling || bouncing)) {
+        scheduleHistoryAdmission()
+        return
+      }
+      admitHistory()
+    }, historySettleDelay)
+  }
+
+  function admitHistory() {
+    clearTimeout(historyTimer)
+    historyTimer = undefined
+    if (!input.historyAdmission?.held()) return
+    flushTouchAdjustment()
+    input.historyAdmission.release()
+    // Admission may leave the reader near the top without a native scroll event.
+    requestAnimationFrame(() => {
+      if (active() && !recovery.attempt) input.onHistoryScroll()
+    })
+  }
+  onCleanup(() => {
+    clearTimeout(historyTimer)
+    // Cached inactive timelines share the admission and must not release the active hold.
+    if (active()) input.historyAdmission?.release()
+  })
 
   function flushTouchAdjustment() {
     const adjustment = rendering.scrollAdjustment
@@ -679,6 +737,7 @@ export function createTimelineVirtualizer(input: Input) {
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
     if (!active()) return
     finishRestoration()
+    holdHistory()
     input.onUserScroll(event.target)
     const header =
       event.target instanceof Element ? event.target.closest<HTMLElement>("[data-sticky-user] [data-scrollable]") : null
@@ -693,6 +752,7 @@ export function createTimelineVirtualizer(input: Input) {
     input.onUserScroll(event.target)
     touchScrolling = true
     touchStart = event.touches[0]?.clientY
+    holdHistory()
     const root = listRoot()
     const nested = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-scrollable]") : null
     touchNested = !!nested && nested !== root && nested.scrollHeight > nested.clientHeight
@@ -726,6 +786,7 @@ export function createTimelineVirtualizer(input: Input) {
     clearTouchTarget()
     touchStart = undefined
     if (!virtualizer.isScrolling) finishTouchScroll()
+    scheduleHistoryAdmission()
   }
 
   function clearTouchTarget() {

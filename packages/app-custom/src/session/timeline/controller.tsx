@@ -19,6 +19,7 @@ import { showToast } from "@/shell/notifications/toast"
 import { usePlatform } from "@/runtime/platform/platform"
 import { applyTimelineMessageHandoff, timelineChildTitle, visibleTimelineMessages } from "./controller-projection"
 import { createTimelineProjection } from "./projection"
+import { admitMessages, type HistoryAdmission } from "./history-admission"
 import { useServer } from "@/runtime/server/current"
 import { getSessionMessageHandoff } from "@/session/handoff"
 import type { ReasoningMode } from "@opencode/session-ui-custom/timeline/projection"
@@ -45,7 +46,10 @@ export type TimelineSessionSource = {
   history: Pick<SessionModel["history"], "messages">
 }
 
-export function createTimelineController(input: { session: TimelineSessionSource }) {
+export function createTimelineController(input: {
+  session: TimelineSessionSource
+  historyAdmission?: Pick<HistoryAdmission, "held">
+}) {
   const navigate = useNavigate()
   const sdk = useWorkspaceLocation()
   const serverSDK = useServerSDK()
@@ -63,13 +67,21 @@ export function createTimelineController(input: { session: TimelineSessionSource
       getSessionMessageHandoff(input.session.identity.sessionKey()),
     ),
   )
-  const projectedMessages = createMemo(() => {
+  const visibleMessages = createMemo(() => {
     const id = input.session.identity.sessionID()
     return visibleTimelineMessages(
       handedOffMessages(),
       id ? data.session.pending.list(id) : [],
       input.session.data.info()?.revert?.messageID,
     )
+  })
+  let admittedFirst: string | undefined
+  // Returning the unchanged visible array keeps hold/release from reprojecting.
+  const projectedMessages = createMemo(() => {
+    const held = input.historyAdmission?.held() ?? false
+    const result = admitMessages(visibleMessages(), admittedFirst, held)
+    admittedFirst = result[0]?.id
+    return result
   })
   const pendingUserMessageIDs = createMemo(() => {
     const id = input.session.identity.sessionID()

@@ -26,6 +26,7 @@ import { createSessionTimelineRowRenderer } from "@opencode/session-ui-custom/ti
 import { getReadyMarkdown, preloadMarkdown } from "@opencode/session-ui-custom/markdown-cache"
 import { createTimelineController, type TimelineController, type TimelineSessionSource } from "./controller"
 import { createTimelineVirtualizer } from "./virtualizer"
+import type { HistoryAdmission } from "./history-admission"
 import { containsDirectory, isWorkspaceDirectory, workspaceDirectories } from "@/workspaces/paths"
 import { SessionWorkspaceMenu } from "@/session/timeline/session-workspace-menu"
 import { getProjectAvatarVariant } from "@/shell/state/layout"
@@ -383,6 +384,7 @@ type MessageTimelineProps = {
   onHistoryScroll: () => void
   explicitNavigation?: () => boolean
   history?: { more: () => boolean; loading: () => boolean; settled: () => boolean; loadOlder: () => Promise<void> }
+  historyAdmission?: HistoryAdmission
   setRestoring?: (key: string, value: boolean) => void
   setCancelRestoration?: (cancel: () => void) => void
   onSelectionInteraction: (event: MouseEvent) => void
@@ -402,7 +404,10 @@ type MessageTimelineProps = {
 }
 
 export function MessageTimeline(props: MessageTimelineProps) {
-  const controller = createTimelineController({ session: props.session })
+  const controller = createTimelineController({
+    session: props.session,
+    historyAdmission: props.historyAdmission,
+  })
   const tail = props.pinned ? controller.data.projection.rows().at(-1) : undefined
   if (tail?._tag === "AssistantPart" && tail.group.type === "part") {
     const message = controller.data.projection.messageByID().get(tail.group.ref.messageID)
@@ -508,6 +513,7 @@ function MessageTimelineView(
     onLeave: (key, anchor) => readingPositions.anchor(key, anchor),
     explicitNavigation: props.explicitNavigation,
     history: props.history,
+    historyAdmission: props.historyAdmission,
     setRestoring: props.setRestoring,
     setCancelRestoration: props.setCancelRestoration,
     presentationKey: () => JSON.stringify(props.data.timelineDetail()),

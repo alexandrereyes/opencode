@@ -6,6 +6,7 @@ import { createStore } from "solid-js/store"
 import { useLayout } from "@/shell/state/layout"
 import type { SessionModel } from "../model"
 import { useSessionHashScroll } from "../use-session-hash-scroll"
+import { createHistoryAdmission } from "./history-admission"
 import { createTimelineModel } from "./model"
 import { readingPositions } from "./reading-position"
 
@@ -13,6 +14,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   const layout = useLayout()
   const location = useLocation()
   const timeline = createTimelineModel({ session })
+  const historyAdmission = createHistoryAdmission()
   const entry = createMemo(
     on(session.identity.sessionKey, (key) => ({
       explicit: !!location.hash || !!layout.pendingMessage.peek(key),
@@ -127,6 +129,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       session.identity.sessionKey,
       () => {
         follow(untrack(pinned))
+        historyAdmission.release()
         setState("messageID", undefined)
         setState("pendingMessage", undefined)
         setState("scroll", { overflow: false, jump: false })
@@ -211,6 +214,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       historyRequests.delete(owner.key)
     }
     if (!owner.current() || timeline.messages().length <= before) return
+    historyAdmission.loaded()
     if (restoring() || pinned() || !scroller || scroller.scrollTop >= 200 || !timeline.history.more()) return
     if (historyContinuationFrame !== undefined) cancelAnimationFrame(historyContinuationFrame)
     historyContinuationFrame = requestAnimationFrame(() => {
@@ -223,6 +227,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       restoring() ||
       historyRequests.has(session.ownership.key()) ||
       timeline.history.loading() ||
+      historyAdmission.waiting() ||
       pinned() ||
       !scroller ||
       scroller.scrollTop >= 200
@@ -332,6 +337,7 @@ export function createSessionTimelineInteraction(session: SessionModel) {
       explicitNavigation: () =>
         !!location.hash || !!state.pendingMessage || !!layout.pendingMessage.peek(session.identity.sessionKey()),
       history: { ...timeline.history, settled: () => !timeline.resource.loading },
+      historyAdmission,
       setRestoring: (key: string, value: boolean) => {
         if (value) restorations.add(key)
         if (!value) restorations.delete(key)

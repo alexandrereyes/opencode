@@ -271,6 +271,18 @@ stale reads, execution completion/interruption, and viewport/unmount cancellatio
 browser Solid runtime. Browser verification
 is prepared in `e2e/regression/agent-dashboard.spec.ts` for an isolated reviewer-run server.
 
+## iOS timeline history
+
+TanStack Virtual defers scroll corrections on iOS WebKit while a touch, momentum or any reported
+scroll is active, because a programmatic write would cancel momentum. An older page admitted then
+moved the rows under the reader and snapped back when scrolling stopped. On iOS (including iPadOS
+touch and trackpad), older pages are still fetched during the gesture but enter the timeline only
+200ms after scrolling settles, so the prepend anchors with one immediate write. Later automatic
+pages wait until the held page is admitted; explicit navigation admits it at once. Size corrections
+made while any scroll is still reported, not only during touch, use the existing touch translation
+instead of the deferred write. Other platforms are unchanged. `e2e/regression/mobile-history-admission.spec.ts` covers the
+held drag with an iPhone user agent in Chromium; physical Safari remains the final validation.
+
 ## Mobile composer
 
 On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submits the
