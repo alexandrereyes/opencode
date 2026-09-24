@@ -9,6 +9,7 @@ function inline(input: Omit<ImageAttachmentPart, "blob"> & { dataUrl: string }):
     type: "inline",
     attachment: { ...input, blob: { id: input.id, url: input.dataUrl } },
     dataUrl: input.dataUrl,
+    path: `/remote/tmp/${input.filename}`,
   }
 }
 
@@ -178,6 +179,29 @@ describe("buildPromptRequest", () => {
 
     expect(uploads).toHaveLength(2)
     expect(uploads.map((file) => file.name)).toEqual(["a.png", "b.pdf"])
+  })
+
+  test("gives inline media a model-visible path without presentation references", () => {
+    const result = buildPromptRequest({
+      prompt: [{ type: "text", content: "print this", start: 0, end: 10 }],
+      context: [],
+      attachments: [
+        inline({
+          type: "image",
+          id: "pdf",
+          filename: "doc.pdf",
+          mime: "application/pdf",
+          dataUrl: "data:application/pdf;base64,BBB",
+        }),
+      ],
+      text: "print this",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.text).toBe("print this\nAttached file: `/remote/tmp/doc.pdf`")
+    expect(result.displayText).toBe("print this")
+    expect(result.files).toEqual([{ uri: "data:application/pdf;base64,BBB", mime: "application/pdf", name: "doc.pdf" }])
+    expect(result.attachments).toEqual([])
   })
 
   test("adds path-delivered binaries to model text and presentation metadata", () => {

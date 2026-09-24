@@ -187,7 +187,11 @@ story("pastes same-named images at the selection and submits their exact referen
       }
     })
     .toEqual({
-      text: "before [photo.png] [photo-2.png]! after",
+      text: [
+        "before [photo.png] [photo-2.png]! after",
+        "Attached file: `/tmp/uploads/photo.png`",
+        "Attached file: `/tmp/uploads/photo-2.png`",
+      ].join("\n"),
       files: [
         { data: true, name: "photo.png", mention: { text: "[photo.png]", start: 7, end: 18 } },
         { data: true, name: "photo-2.png", mention: { text: "[photo-2.png]", start: 19, end: 32 } },

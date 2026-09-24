@@ -117,6 +117,11 @@ export function formatAttachmentReference(input: PromptAttachmentReference) {
   return `Attached file: \`${input.path}\``
 }
 
+// Resubmission redelivers every attachment, so each earlier reference line is stale.
+export function stripAttachmentReferences(text: string) {
+  return text.replace(/(^|\n)Attached file: `[^\n]*`(?=\n|$)/g, "")
+}
+
 export function formatCommentNote(input: { path: string; selection?: FileSelection; comment: string }) {
   const start = input.selection ? Math.min(input.selection.startLine, input.selection.endLine) : undefined
   const end = input.selection ? Math.max(input.selection.startLine, input.selection.endLine) : undefined

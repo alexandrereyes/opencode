@@ -440,7 +440,7 @@ async function sendCommand(
       value.prompt.some((part) => part.type === "snippet")
         ? request.displayText.split(" ").slice(1).join(" ")
         : command.arguments,
-      ...request.attachments.map(formatAttachmentReference),
+      ...request.fileReferences.map(formatAttachmentReference),
       ...request.apps.map(formatAppContext),
       ...formatSessionContexts(request.sessions),
       formatChatQuotes(value.quotes),

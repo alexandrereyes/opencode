@@ -27,6 +27,7 @@ type PromptRequest = {
   sessions: Extract<Prompt[number], { type: "session" }>[]
   quotes: ChatQuote[]
   attachments: PromptAttachmentReference[]
+  fileReferences: PromptAttachmentReference[]
 }
 
 type ContextFile = {
@@ -172,11 +173,16 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
         ]
       : [],
   )
+  const fileReferences = input.attachments.map((item) => ({
+    name: item.attachment.filename,
+    mime: item.attachment.mime,
+    path: item.path,
+  }))
 
   return {
     text: [
       ...(text.trim() ? [text] : []),
-      ...attachments.map(formatAttachmentReference),
+      ...fileReferences.map(formatAttachmentReference),
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
       ...formatSessionContexts(sessions),
@@ -191,6 +197,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     sessions,
     quotes: input.quotes ?? [],
     attachments,
+    fileReferences,
   }
 }
 

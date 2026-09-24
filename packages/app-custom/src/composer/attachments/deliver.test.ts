@@ -74,6 +74,35 @@ describe("deliverAttachments", () => {
     expect(result[2]).toMatchObject({ type: "path", path: "/remote/tmp/sample.bin" })
   })
 
+  test("stages native media on the server while keeping it inline", async () => {
+    const uploaded: File[] = []
+    const result = await deliverAttachments([attachment("application/pdf")], {
+      ...destination({ image: true, pdf: true }),
+      upload: async (file) => {
+        uploaded.push(file)
+        return "/remote/tmp/doc.pdf"
+      },
+    })
+
+    expect(result[0]).toMatchObject({
+      type: "inline",
+      dataUrl: "data:application/pdf;base64,AQID",
+      path: "/remote/tmp/doc.pdf",
+    })
+    expect([...new Uint8Array(await uploaded[0]!.arrayBuffer())]).toEqual([1, 2, 3])
+  })
+
+  test("uses a local source path for native media without uploading", async () => {
+    const result = await deliverAttachments([attachment("image/png", "/local/photo.png")], {
+      ...destination({ image: true, pdf: true }, true),
+      upload: async () => {
+        throw new Error("unexpected upload")
+      },
+    })
+
+    expect(result[0]).toMatchObject({ type: "inline", path: "/local/photo.png" })
+  })
+
   test("uses a local source path for unsupported media without uploading", async () => {
     let uploaded = false
     const result = await deliverAttachments([attachment("application/zip", "/local/archive.zip")], {

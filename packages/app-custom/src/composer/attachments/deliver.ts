@@ -14,8 +14,9 @@ export function nativeAttachment(mime: string, size: number, input: AttachmentDe
   return mime === "application/pdf" && input.pdf
 }
 
+// Native media also gets a server path so tools can act on the file the model reads inline.
 export type DeliveredAttachment =
-  | { type: "inline"; attachment: ImageAttachmentPart; dataUrl: string }
+  | { type: "inline"; attachment: ImageAttachmentPart; dataUrl: string; path: string }
   | { type: "path"; attachment: ComposerAttachment; path: string }
 
 export function deliverAttachments(attachments: ComposerAttachment[], destination: AttachmentDestination) {
@@ -24,17 +25,22 @@ export function deliverAttachments(attachments: ComposerAttachment[], destinatio
       if (attachment.type === "path") return { type: "path", attachment, path: attachment.path }
       // Legacy drafts can still contain text or oversized blobs; migrate their delivery too.
       const blob = await blobData(attachment.blob)
+      const path = await stage(attachment, blob, destination)
       if (nativeAttachment(attachment.mime, blob.size, destination.input)) {
-        return { type: "inline", attachment, dataUrl: await blobDataUrl(attachment.blob, attachment.mime) }
+        return { type: "inline", attachment, dataUrl: await blobDataUrl(attachment.blob, attachment.mime), path }
       }
-      if (destination.local && attachment.sourcePath) return { type: "path", attachment, path: attachment.sourcePath }
-      const file = new File([blob], attachment.filename, { type: attachment.mime })
-      const path = await uploads.track(
-        { id: crypto.randomUUID(), filename: file.name, mime: attachment.mime, size: file.size },
-        (report, signal) => destination.upload(file, report, signal),
-      )
-      if (!path) throw new DOMException("Upload aborted", "AbortError")
       return { type: "path", attachment, path }
     }),
   )
+}
+
+async function stage(attachment: ImageAttachmentPart, blob: Blob, destination: AttachmentDestination) {
+  if (destination.local && attachment.sourcePath) return attachment.sourcePath
+  const file = new File([blob], attachment.filename, { type: attachment.mime })
+  const path = await uploads.track(
+    { id: crypto.randomUUID(), filename: file.name, mime: attachment.mime, size: file.size },
+    (report, signal) => destination.upload(file, report, signal),
+  )
+  if (!path) throw new DOMException("Upload aborted", "AbortError")
+  return path
 }

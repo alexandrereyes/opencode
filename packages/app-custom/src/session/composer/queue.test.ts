@@ -35,7 +35,7 @@ const queued = [
 const nativeDestination: AttachmentDestination = {
   input: { image: true, pdf: true },
   local: false,
-  upload: () => Promise.reject(new Error("Native attachments must not upload")),
+  upload: (file) => Promise.resolve(`/remote/${file.name}`),
 }
 
 describe("queuedPromptRows", () => {
@@ -309,7 +309,7 @@ test("queue edits remove and replace uncited inline files while preserving exter
     type: "user",
     delivery: "queue",
     payload: {
-      text: "Ask @agent with @skill",
+      text: "Ask @agent with @skill\nAttached file: `/remote/remove.pdf`",
       files: [
         { data: "b2xkIHBkZg==", mime: "application/pdf", source: { type: "inline" }, name: "remove.pdf" },
         { data: "b2xkIGJpbmFyeQ==", mime: "application/octet-stream", source: { type: "inline" }, name: "replace.bin" },
@@ -372,7 +372,7 @@ test("queue edits remove and replace uncited inline files while preserving exter
       mention: undefined,
     },
   ])
-  expect(uploads).toEqual(["replace.bin"])
+  expect(uploads).toEqual(["keep.png", "replace.bin"])
   expect(result.agents).toEqual([{ name: "agent", mention: { text: "@agent", start: 4, end: 10 } }])
   expect(result.skills).toEqual([{ id: "skill", mention: { text: "@skill", start: 16, end: 22 } }])
   expect(result.metadata).toMatchObject({
@@ -382,6 +382,8 @@ test("queue edits remove and replace uncited inline files while preserving exter
     attachments: [{ name: "replace.bin", mime: "application/octet-stream", path: "/remote/replace.bin" }],
   })
   expect(result.text.match(/Attached file: `\/remote\/replace\.bin`/g)).toHaveLength(1)
+  expect(result.text.match(/Attached file: `\/remote\/keep\.png`/g)).toHaveLength(1)
+  expect(result.text.match(/Attached file:/g)).toHaveLength(2)
 })
 
 test("queued staged image citations preserve remapped ranges through snippet expansion", async () => {

@@ -238,6 +238,7 @@ function ComposerStory(props: {
                       type: "inline" as const,
                       attachment: part,
                       dataUrl,
+                      path: `/tmp/uploads/${part.filename}`,
                     })),
                   ]
                 : [],

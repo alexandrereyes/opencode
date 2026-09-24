@@ -10,7 +10,7 @@ import type { ComposerAttachment } from "@/composer/types"
 import { clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
 import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
-import { formatAttachmentReference, readPromptPresentation } from "@/composer/comment-note"
+import { readPromptPresentation, stripAttachmentReferences } from "@/composer/comment-note"
 import { extractPromptSessions, extractSessionPrompt } from "@/composer/prompt"
 import { formatSessionContext } from "@/composer/session-reference"
 import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
@@ -367,7 +367,6 @@ export async function editedPromptInput(
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
   const previousPresentation = readPromptPresentation(payload?.metadata)
-  const previousAttachments = previousPresentation?.attachments ?? []
   const previousQuotes = formatChatQuotes(readChatQuotes(payload?.metadata?.quotes))
   const original =
     previousQuotes && payload?.text.endsWith(previousQuotes)
@@ -379,13 +378,7 @@ export async function editedPromptInput(
       value.replace(`\n${formatSessionContext(session)}`, "").replace(formatSessionContext(session), ""),
     notes,
   )
-  const retainedNotes = previousAttachments.reduce(
-    (value, attachment) =>
-      value
-        .replace(`\n${formatAttachmentReference(attachment)}`, "")
-        .replace(formatAttachmentReference(attachment), ""),
-    retainedSessions,
-  )
+  const retainedNotes = stripAttachmentReferences(retainedSessions)
   const mention = (value: { start: number; end: number; text: string } | undefined) => {
     if (!value) return undefined
     const start = text.indexOf(value.text)
