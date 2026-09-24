@@ -78,7 +78,9 @@
   padding: 4px;
   border-radius: 8px;
   background: var(--v2-background-bg-layer-01);
-  box-shadow: var(--v2-elevation-floating);
+  box-shadow:
+    0 0 0 2px var(--v2-border-border-strong),
+    var(--v2-elevation-floating);
   transform: translateX(-50%);
 
   button {
