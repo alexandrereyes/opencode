@@ -278,10 +278,19 @@ scroll is active, because a programmatic write would cancel momentum. An older p
 moved the rows under the reader and snapped back when scrolling stopped. On iOS (including iPadOS
 touch and trackpad), older pages are still fetched during the gesture but enter the timeline only
 200ms after scrolling settles, so the prepend anchors with one immediate write. Later automatic
-pages wait until the held page is admitted; explicit navigation admits it at once. Size corrections
-made while any scroll is still reported, not only during touch, use the existing touch translation
-instead of the deferred write. Other platforms are unchanged. `e2e/regression/mobile-history-admission.spec.ts` covers the
-held drag with an iPhone user agent in Chromium; physical Safari remains the final validation.
+pages wait until the held page is admitted; explicit navigation admits it at once.
+
+Row size corrections made during a touch, momentum, any reported scroll or the 200ms after release
+use the existing visual translation. On iOS that translation is transferred to the native offset only
+after the same settle point, never at release or near the top: Safari applies a write made during a
+gesture or momentum one frame late, after the rows have already dropped their translation. Other
+platforms are unchanged.
+
+`e2e/regression/mobile-history-admission.spec.ts` covers the held drag with an iPhone user agent in
+Chromium. The fix was also measured in Safari on an iOS 26.1 Simulator (Xcode), driving touch swipes
+with AXe against the real BTW improve session and sampling row positions every frame: the production
+build before the fix showed reversals of 670–2,700 px; afterward at most two shifts of up to 180 px remained,
+at the top of history when the loaded content shrinks at scroll position zero.
 
 ## New session layout
 

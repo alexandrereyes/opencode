@@ -38,9 +38,9 @@ const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
 // exactly to the end, while a one-pixel nudge upward is a deliberate move away from it.
 const endEpsilon = 0.5
 const upwardKeys = new Set(["up", "page-up", "home"])
-// Longer than TanStack's 150ms post-touchend grace and isScrolling reset, so an
-// admitted prepend anchors with an immediate write instead of a deferred one.
-const historySettleDelay = 200
+// Longer than TanStack's 150ms post-touchend grace and isScrolling reset, so the
+// iOS write after settling is immediate instead of deferred by TanStack.
+const settleDelay = 200
 const cache = new Map<
   string,
   {
@@ -200,6 +200,7 @@ export function createTimelineVirtualizer(input: Input) {
   let touchNested = false
   let touchScrolling = false
   let touchAdjustment = 0
+  let touchEndedAt = -Infinity
   let pointerHeld = false
   let maxScroll = 0
   let virtualContent: HTMLDivElement | undefined
@@ -373,15 +374,19 @@ export function createTimelineVirtualizer(input: Input) {
           if (
             rendering.scrollAdjustment !== 0 &&
             root &&
+            // iOS applies a native write under a held finger or during momentum
+            // only a frame later, after the rows dropped their translation.
+            // It waits for the settle timer below instead.
+            !deferredScrollWrites &&
             (logicalOffset <= 0 || offset <= 0 || (touchStart !== undefined && offset <= root.clientHeight))
           )
             flushTouchAdjustment()
-          if (!scrolling && touchStart === undefined) finishTouchScroll()
+          if (!scrolling && touchStart === undefined && !deferredScrollWrites) finishTouchScroll()
         })
         settleColdBottom()
         // Any reported scroll, including our own anchoring write, defers iOS corrections.
         if (scrolling) holdHistory()
-        else scheduleHistoryAdmission()
+        else scheduleSettle()
       }
       return observeElementOffsetReconnectAware(instance, reportOffset, () => {
         if (!active()) return
@@ -502,8 +507,11 @@ export function createTimelineVirtualizer(input: Input) {
       ? item.end <= (instance.scrollOffset ?? 0) + instance.scrollAdjustments + instance.options.scrollMargin
       : first !== undefined && item.index < first
     // iOS also defers while any scroll, including our own anchoring write, is
-    // still reported. Translate those corrections too instead of moving rows.
-    const deferred = touchScrolling || (deferredScrollWrites && instance.isScrolling)
+    // still reported, and for a grace period after release. Translate those
+    // corrections too instead of moving rows.
+    const deferred =
+      touchScrolling ||
+      (deferredScrollWrites && (instance.isScrolling || performance.now() - touchEndedAt < settleDelay))
     if (!deferred || input.pinned()) return adjust
     // iOS defers native scroll writes until momentum ends. Keep the same visual
     // anchor now, rather than moving rows now and snapping the viewport back later.
@@ -525,36 +533,41 @@ export function createTimelineVirtualizer(input: Input) {
     admitHistory()
   }
 
-  let historyTimer: ReturnType<typeof setTimeout> | undefined
+  let settleTimer: ReturnType<typeof setTimeout> | undefined
 
   function holdHistory() {
-    if (!deferredScrollWrites || !input.historyAdmission) return
-    input.historyAdmission.hold()
-    scheduleHistoryAdmission()
+    if (!deferredScrollWrites) return
+    input.historyAdmission?.hold()
+    scheduleSettle()
   }
 
-  function scheduleHistoryAdmission() {
-    if (!input.historyAdmission?.held()) return
-    clearTimeout(historyTimer)
-    historyTimer = setTimeout(() => {
-      historyTimer = undefined
+  // iOS writes only after the finger, momentum and rubber band have settled.
+  // Translated corrections and held history pages are applied together then.
+  function scheduleSettle() {
+    if (!deferredScrollWrites) return
+    if (!touchScrolling && !rendering.scrollAdjustment && !input.historyAdmission?.held()) return
+    clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined
       // Release reschedules while the finger is still down.
       if (active() && touchStart !== undefined) return
       const root = listRoot()
-      // Rubber-banding reports offsets outside the scrollable range; admitting
+      // Rubber-banding reports offsets outside the scrollable range; writing
       // there would anchor against a position Safari is about to discard.
       const bouncing = !!root && (root.scrollTop < 0 || root.scrollTop > root.scrollHeight - root.clientHeight + 1)
       if (active() && (virtualizer.isScrolling || bouncing)) {
-        scheduleHistoryAdmission()
+        scheduleSettle()
         return
       }
+      if (!active()) return
+      finishTouchScroll()
       admitHistory()
-    }, historySettleDelay)
+    }, settleDelay)
   }
 
   function admitHistory() {
-    clearTimeout(historyTimer)
-    historyTimer = undefined
+    clearTimeout(settleTimer)
+    settleTimer = undefined
     if (!input.historyAdmission?.held()) return
     flushTouchAdjustment()
     input.historyAdmission.release()
@@ -564,7 +577,7 @@ export function createTimelineVirtualizer(input: Input) {
     })
   }
   onCleanup(() => {
-    clearTimeout(historyTimer)
+    clearTimeout(settleTimer)
     // Cached inactive timelines share the admission and must not release the active hold.
     if (active()) input.historyAdmission?.release()
   })
@@ -785,8 +798,9 @@ export function createTimelineVirtualizer(input: Input) {
   const handleListTouchEnd = () => {
     clearTouchTarget()
     touchStart = undefined
-    if (!virtualizer.isScrolling) finishTouchScroll()
-    scheduleHistoryAdmission()
+    touchEndedAt = performance.now()
+    if (!virtualizer.isScrolling && !deferredScrollWrites) finishTouchScroll()
+    scheduleSettle()
   }
 
   function clearTouchTarget() {
