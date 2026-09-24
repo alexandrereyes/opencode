@@ -56,6 +56,14 @@ export const BranchEntry = Schema.Struct({
   branch: optional(Schema.String),
 }).annotate({ identifier: "Worktrees.BranchEntry" })
 
+export interface LocatedDirectory extends Schema.Schema.Type<typeof LocatedDirectory> {}
+export const LocatedDirectory = Schema.Struct({
+  directory: AbsolutePath,
+  worktree: AbsolutePath,
+  canonical: AbsolutePath,
+  branch: optional(Schema.String),
+}).annotate({ identifier: "Worktrees.LocatedDirectory" })
+
 const OperationFailed = Schema.Struct({
   message: Schema.String,
   forceRequired: optional(Schema.Boolean),
@@ -78,6 +86,10 @@ export const Definition = Rpc.define({
     branches: {
       input: Schema.toStandardSchemaV1(Schema.Struct({})),
       output: Schema.toStandardSchemaV1(Schema.Array(BranchEntry)),
+    },
+    locate: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ directories: Schema.Array(AbsolutePath) })),
+      output: Schema.toStandardSchemaV1(Schema.Array(LocatedDirectory)),
     },
   },
   events: {},

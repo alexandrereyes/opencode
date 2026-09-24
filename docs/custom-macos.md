@@ -44,9 +44,12 @@ MCP services are Location-scoped and connect eagerly, so each materialized Locat
 process per local MCP server, for example `safaridriver --mcp` (about 3 MB) and
 `codex-computer-use-mcp` (about 65 MB of Node). `LocationActivity` evicts a Location, stopping
 those processes, after 60 minutes without session events and no active execution; the server log
-records `location services evicted`. Tens of processes shortly after a restart are expected: the
-custom sidebar loads worktrees for every expanded project, which materializes each project
-Location. Location keys compare directory strings exactly, so case variants of one directory on
+records `location services evicted`. The custom sidebar resolves worktree roots and branch labels
+for groups and Recent rows through the `custom.worktrees` `locate` RPC in the server default
+Location, so listing worktrees or sessions does not boot their Locations. Each expanded project
+still boots its own Location once per page load, because the upstream `worktree.refresh` endpoint
+asks that Location's plugins for worktree strategies. Opening a session boots its Location as
+before. Location keys compare directory strings exactly, so case variants of one directory on
 the case-insensitive macOS filesystem (`~/Dev/x` and `~/dev/x`) become separate Locations with
 duplicate processes. Initialization and tool discovery do not create Safari's automation window or consume its one
 active WebDriver session. Once automation starts, Safari still permits only one active session

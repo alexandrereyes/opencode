@@ -1,6 +1,8 @@
 import { createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { LocationGetOutput, WorktreeDirectory } from "@opencode/client/promise"
+import type { WorktreeDirectory } from "@opencode/client/promise"
+import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
+import { AbsolutePath } from "@opencode/schema/schema"
 import type { ServerCtx } from "@/runtime/server/runtime"
 import type { DraftTab, Tab } from "@/shell/tabs/tabs"
 import { getFilename } from "@opencode/util/path"
@@ -89,12 +91,15 @@ export function worktreeKey(project: string, directory: string) {
   return JSON.stringify([project, "worktree", /^[a-z]:\//i.test(key) || key.startsWith("//") ? key.toLowerCase() : key])
 }
 
+// Worktree root of a session directory. `projectID` is known only when Location metadata was loaded.
+export type SidebarLocation = { worktree: string; canonical: string; projectID?: string }
+
 export function sidebarWorktrees(
   project: Project,
   rows: SidebarSession[],
   metadata: {
     cachedInventory?: readonly WorktreeDirectory[]
-    location: (directory: string) => LocationGetOutput | undefined
+    location: (directory: string) => SidebarLocation | undefined
     branch: (directory: string) => string | undefined
   },
 ) {
@@ -149,9 +154,11 @@ export function sidebarWorktrees(
       }
       const location = metadata.location(directory)
       const owned =
-        location?.project.id === row.session.projectID && sameDirectory(location.project.canonical, project.directory)
+        location !== undefined &&
+        (location.projectID === undefined || location.projectID === row.session.projectID) &&
+        sameDirectory(location.canonical, project.directory)
       const known = owned
-        ? location.project.directory
+        ? location.worktree
         : candidates?.find((candidate) => containsDirectory(candidate, directory))
       const worktree = known ?? directory
       if (sameDirectory(worktree, project.directory)) {
@@ -208,15 +215,26 @@ export function visibleWorktreeSessions(
   ]
 }
 
+// Metadata comes from global inventory and custom Git RPCs sent to the server's default Location.
+// Requests addressed to each project, worktree or session directory would boot its Location,
+// including every configured MCP server process, merely to render sidebar labels.
 export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "sdk">) {
-  const [state, setState] = createStore({ loaded: {} as Record<string, boolean> })
+  const [state, setState] = createStore({
+    loaded: {} as Record<string, boolean>,
+    located: {} as Record<string, SidebarLocation>,
+    branches: {} as Record<string, string | undefined>,
+  })
   const requests = new Map<string, Promise<unknown>>()
+  // Directories requested since the last connection; requests from the same tick share one RPC.
+  const batch = { requested: new Set<string>(), pending: [] as string[], flush: undefined as Promise<void> | undefined }
   const lifetime = { disposed: false }
   onCleanup(() => {
     lifetime.disposed = true
   })
   createEffect(() => {
-    if (ctx.sdk.connection.status() === "connected") requests.clear()
+    if (ctx.sdk.connection.status() !== "connected") return
+    requests.clear()
+    batch.requested.clear()
   })
   const once = (key: string, load: () => Promise<unknown>) => {
     const previous = requests.get(key)
@@ -225,6 +243,36 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
     requests.set(key, request)
     return request
   }
+  const locate = (directories: readonly string[]) => {
+    if (ctx.sdk.connection.status() !== "connected") return Promise.resolve()
+    directories
+      .filter((directory) => !batch.requested.has(pathKey(directory)))
+      .forEach((directory) => {
+        batch.requested.add(pathKey(directory))
+        batch.pending.push(directory)
+      })
+    if (batch.flush || !batch.pending.length) return batch.flush ?? Promise.resolve()
+    batch.flush = Promise.resolve().then(() => {
+      const next = batch.pending.splice(0)
+      batch.flush = undefined
+      return ctx.sdk.api
+        .rpc(Worktrees.Definition)
+        .locate({ directories: next.map((directory) => AbsolutePath.make(directory)) })
+        .then((located) => {
+          if (lifetime.disposed) return
+          located.forEach((item) => {
+            setState("located", pathKey(item.directory), { worktree: item.worktree, canonical: item.canonical })
+            setState("branches", pathKey(item.directory), item.branch)
+            setState("branches", pathKey(item.worktree), item.branch)
+          })
+        })
+        .catch(() => next.forEach((directory) => batch.requested.delete(pathKey(directory))))
+    })
+    return batch.flush
+  }
+  // Loaded Locations keep branches live; others show the snapshot from the latest request.
+  const branch = (directory: string) =>
+    ctx.data.location.vcs.info({ directory })?.branch.current ?? state.branches[pathKey(directory)]
   const inventoryIdentity = (project: Project) => {
     const location = ctx.data.location.info({ directory: project.directory })?.project
     return { id: location?.id ?? project.metadata?.id, directory: location?.canonical ?? project.directory }
@@ -235,11 +283,18 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
         const identity = inventoryIdentity(project)
         return identity.id ? ctx.sync.worktrees.cached(identity.id, identity.directory) : undefined
       })(),
-      location: (directory) => ctx.data.location.info({ directory }),
-      branch: (directory) => ctx.data.location.vcs.info({ directory })?.branch.current,
+      location: (directory) => {
+        const info = ctx.data.location.info({ directory })
+        if (info)
+          return { worktree: info.project.directory, canonical: info.project.canonical, projectID: info.project.id }
+        return state.located[pathKey(directory)]
+      },
+      branch,
     })
   return {
     group,
+    branch,
+    locate,
     async load(demand: () => { project: Project; rows: SidebarSession[] } | undefined) {
       const initial = demand()
       if (
@@ -249,10 +304,8 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
       )
         return
       const project = initial.project
-      await once(`project-location:${pathKey(project.directory)}`, () =>
-        ctx.data.location.syncInfo({ directory: project.directory }),
-      )
-      if (lifetime.disposed) return
+      // The server project list supplies the inventory identity. Until it arrives, the caller's
+      // effect reruns when `project.metadata` changes; asking Location instead would boot it.
       const identity = inventoryIdentity(project)
       const projectID = identity.id
       if (!projectID) return
@@ -261,39 +314,30 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
         if (inventory && !lifetime.disposed) setState("loaded", project.key, true)
       })
       if (lifetime.disposed) return
-      const locations = demand()
-      if (!locations || ctx.sdk.connection.status() !== "connected") return
-      // Inventory containment resolves subdirectories without a request per session. Only
-      // unmatched directories need Location's authoritative worktree root (no full bootstrap).
-      const currentIdentity = inventoryIdentity(locations.project)
+      const current = demand()
+      if (!current || ctx.sdk.connection.status() !== "connected") return
+      // Inventory containment resolves subdirectories without a request per session. Unmatched
+      // directories need their worktree root, and every resolved group needs a branch label.
+      const currentIdentity = inventoryIdentity(current.project)
       const inventory = currentIdentity.id
         ? ctx.sync.worktrees.cached(currentIdentity.id, currentIdentity.directory)
         : undefined
-      await Promise.all(
-        [
+      await locate([
+        ...[
           ...new Set(
-            locations.rows
-              .filter((row) => row.project === locations.project.key)
+            current.rows
+              .filter((row) => row.project === current.project.key)
               .map((row) => row.session.location.directory),
           ),
-        ]
-          .filter(
-            (directory) =>
-              !sameDirectory(directory, locations.project.directory) &&
-              !inventory?.some((item) => containsDirectory(item.directory, directory)),
-          )
-          .map((directory) =>
-            once(`location:${worktreeKey(project.key, directory)}`, () => ctx.data.location.syncInfo({ directory })),
-          ),
-      )
-      if (lifetime.disposed) return
-      const branches = demand()
-      if (!branches || ctx.sdk.connection.status() !== "connected") return
-      await Promise.all(
-        group(branches.project, branches.rows)
+        ].filter(
+          (directory) =>
+            !sameDirectory(directory, current.project.directory) &&
+            !inventory?.some((item) => containsDirectory(item.directory, directory)),
+        ),
+        ...group(current.project, current.rows)
           .groups.filter((item) => item.resolved)
-          .map((item) => once(`branch:${item.key}`, () => ctx.data.location.vcs.sync({ directory: item.directory }))),
-      )
+          .map((item) => item.directory),
+      ])
     },
   }
 }

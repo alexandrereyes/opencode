@@ -55,6 +55,7 @@ export function TabNavItem(props: {
   projectLabel?: string
   projectMetadataIcon?: boolean
   showProjectBranch?: boolean
+  projectBranch?: string
   chatMetadataIcon?: boolean
   chat?: boolean
   compact?: boolean
@@ -121,8 +122,10 @@ export function TabNavItem(props: {
   createEffect(() => {
     const ctx = serverCtx()
     const session = props.session
+    // Project-branch labels arrive through `projectBranch`; syncing VCS here would boot the
+    // Location of every listed session.
     if (
-      !(mobileTabs?.open() || props.showProjectBranch) ||
+      !mobileTabs?.open() ||
       !ctx ||
       !session ||
       chat() ||
@@ -135,7 +138,7 @@ export function TabNavItem(props: {
     const name = props.projectLabel ?? (settings.appearance.showProjectName() && projectName())
     const session = props.session
     if (!name || !props.showProjectBranch || !session || chat()) return name
-    const branch = serverCtx()?.data.location.vcs.info(session.location)?.branch.current
+    const branch = props.projectBranch ?? serverCtx()?.data.location.vcs.info(session.location)?.branch.current
     return `${name} · ${branch && branch !== "HEAD" ? branch : "-"}`
   })
   const mobileProjectLabel = createMemo(() => {

@@ -39,9 +39,39 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
       delete: (input, context) =>
         removeWorktree(worktrees, input).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
       branches: () => worktreeBranches(ctx.location.directory),
+      locate: (input) => locateDirectories(input.directories),
     })
     .pipe(Effect.orDie)
 })
+
+// Git worktree root, main checkout (as Project.resolve derives them) and branch, without
+// booting a Location (and its MCP processes) per directory. Directories outside Git are omitted.
+export function locateDirectories(directories: readonly string[]) {
+  return Effect.tryPromise(async (signal) => {
+    const lists = new Map<string, ReturnType<typeof worktreeList>>()
+    const located = await Promise.all(
+      directories.map(async (directory) => {
+        const repository = await discover(directory, signal).catch(() => undefined)
+        if (!repository) return []
+        const worktree = await canonical(repository.worktree)
+        const list = lists.get(repository.commonDirectory) ?? worktreeList(repository, signal)
+        lists.set(repository.commonDirectory, list)
+        const entries = await list.catch(() => [])
+        const main = entries.find((entry) => entry.kind === "main")
+        return [
+          {
+            directory: AbsolutePath.make(directory),
+            worktree,
+            canonical:
+              repository.gitDirectory === repository.commonDirectory ? worktree : (main?.directory ?? worktree),
+            branch: entries.find((entry) => entry.directory === worktree)?.branch,
+          },
+        ]
+      }),
+    )
+    return located.flat()
+  }).pipe(Effect.orElseSucceed(() => []))
+}
 
 export function inspectWorktree(ctx: WorktreeContext, directory: string) {
   return Effect.gen(function* () {

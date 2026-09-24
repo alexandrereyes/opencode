@@ -5,7 +5,14 @@ import os from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
 import { AbsolutePath } from "@opencode/schema/schema"
-import { inspectWorktree, operationFailed, removeWorktree, worktreeBranches, type WorktreeContext } from "../src/worktrees"
+import {
+  inspectWorktree,
+  locateDirectories,
+  operationFailed,
+  removeWorktree,
+  worktreeBranches,
+  type WorktreeContext,
+} from "../src/worktrees"
 import { Worktrees } from "../src/worktrees/rpc"
 
 const directories: string[] = []
@@ -17,7 +24,7 @@ afterEach(async () => {
 describe("worktrees", () => {
   test("publishes the frozen browser-safe RPC contract", () => {
     expect(Worktrees.Definition.id).toBe("custom.worktrees")
-    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches"])
+    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches", "locate"])
     expect(Object.keys(Worktrees.Definition.methods.inspect.errors)).toEqual(["operation_failed"])
     expect(
       Schema.encodeSync(Worktrees.DeleteInput)(
@@ -92,6 +99,36 @@ describe("worktrees", () => {
     expect(await Effect.runPromise(worktreeBranches(fixture.root))).toEqual(expected)
     expect(await Effect.runPromise(worktreeBranches(fixture.linked))).toEqual(expected)
     expect(await Effect.runPromise(worktreeBranches(path.dirname(fixture.root)))).toEqual([])
+  })
+
+  test("locates worktree roots, the main checkout, and branches without Location services", async () => {
+    const fixture = await repository("locate")
+    const nested = path.join(fixture.linked, "nested")
+    await fs.mkdir(nested)
+    const detached = path.join(path.dirname(fixture.root), "detached")
+    await $`git worktree add --detach ${detached}`.cwd(fixture.root).quiet()
+    const outside = path.dirname(fixture.root)
+    const located = await Effect.runPromise(locateDirectories([fixture.root, nested, detached, outside]))
+    expect(located).toEqual([
+      {
+        directory: AbsolutePath.make(fixture.root),
+        worktree: AbsolutePath.make(fixture.root),
+        canonical: AbsolutePath.make(fixture.root),
+        branch: "main",
+      },
+      {
+        directory: AbsolutePath.make(nested),
+        worktree: AbsolutePath.make(fixture.linked),
+        canonical: AbsolutePath.make(fixture.root),
+        branch: "feature",
+      },
+      {
+        directory: AbsolutePath.make(detached),
+        worktree: AbsolutePath.make(await fs.realpath(detached)),
+        canonical: AbsolutePath.make(fixture.root),
+        branch: undefined,
+      },
+    ])
   })
 
   test("rejects roots, wrong owners, changed identities, and unsupported strategies", async () => {
