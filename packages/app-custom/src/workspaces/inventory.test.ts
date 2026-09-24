@@ -5,28 +5,55 @@ import { createWorktreeInventory, withWorktreeInventory, worktreeInventoryKey } 
 import { ServerScope } from "@/runtime/server/scope"
 import { normalizeProjectInfo, updateProjectInfo } from "@/runtime/server/global-sync/utils"
 
-function setup(list: (directory: string) => Promise<WorktreeDirectory[]>) {
+function setup(list: (directory: string) => Promise<WorktreeDirectory[]>, check = async () => ({ drift: false })) {
   const client = new QueryClient()
   const calls: string[] = []
+  const operations: string[] = []
   const updates: Array<[string, WorktreeDirectory[]]> = []
   const inventory = createWorktreeInventory({
     scope: ServerScope.local,
     queryClient: client,
+    check: async (input) => {
+      expect(input.projectID).toBe("project")
+      operations.push("check")
+      return check()
+    },
     api: () => ({
       refresh: async (input) => {
+        operations.push("refresh")
         expect(input.projectID).toBe("project")
       },
       list: (input) => {
+        operations.push("list")
         calls.push(input.projectID)
         return list("/repo")
       },
     }),
     updated: (_projectID, directory, items) => updates.push([directory, items]),
   })
-  return { client, calls, updates, inventory }
+  return { client, calls, updates, inventory, operations }
 }
 
 describe("createWorktreeInventory", () => {
+  test.each(["drift", "error"])("refreshes and relists on %s, then events only relist", async (mode) => {
+    const responses = [[{ directory: "/repo" }], [{ directory: "/repo" }, { directory: "/new", strategy: "git" }]]
+    const result = setup(
+      async () => responses.shift() ?? [],
+      async () => {
+        if (mode === "error") throw new Error("RPC unavailable")
+        return { drift: true }
+      },
+    )
+    expect(await result.inventory.load("project", "/repo")).toEqual([
+      { directory: "/repo" },
+      { directory: "/new", strategy: "git" },
+    ])
+    expect(result.operations).toEqual(["list", "check", "refresh", "list"])
+    await result.inventory.refresh("project", "/repo")
+    expect(result.operations).toEqual(["list", "check", "refresh", "list", "list"])
+    result.client.clear()
+  })
+
   test("loads once per project, shares in-flight work, and publishes the result", async () => {
     const gate = Promise.withResolvers<void>()
     const setupResult = setup(async (directory) => {
@@ -46,6 +73,7 @@ describe("createWorktreeInventory", () => {
       ["/repo", [{ directory: "/repo" }, { directory: "/repo/feature", strategy: "git" }]],
     ])
     expect(setupResult.inventory.cached("project", "/repo/")).toHaveLength(2)
+    expect(setupResult.operations).toEqual(["list", "check"])
     setupResult.client.clear()
   })
 

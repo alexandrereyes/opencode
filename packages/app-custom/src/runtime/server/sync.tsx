@@ -27,6 +27,7 @@ import {
   worktreeInventoryViewKey,
 } from "@/workspaces/inventory"
 import { sameDirectory } from "@/workspaces/paths"
+import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
 
 type GlobalStore = {
   path: Path
@@ -90,6 +91,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     scope: serverSDK.scope,
     queryClient,
     api: () => serverSDK.api.worktree,
+    // No location: the default Location can check Git without booting each project.
+    check: (input) => serverSDK.api.rpc(Worktrees.Definition).check(input),
     updated: (projectID, directory, items) => {
       setGlobalStore("project", (projects) => updateWorktreeInventory(projects, projectID, directory, items))
       for (const key of [

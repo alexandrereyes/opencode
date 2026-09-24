@@ -46,9 +46,15 @@ process per local MCP server, for example `safaridriver --mcp` (about 3 MB) and
 those processes, after 60 minutes without session events and no active execution; the server log
 records `location services evicted`. The custom sidebar resolves worktree roots and branch labels
 for groups and Recent rows through the `custom.worktrees` `locate` RPC in the server default
-Location, so listing worktrees or sessions does not boot their Locations. Each expanded project
-still boots its own Location once per page load, because the upstream `worktree.refresh` endpoint
-asks that Location's plugins for worktree strategies. Opening a session boots its Location as
+Location, so listing worktrees or sessions does not boot their Locations. On first inventory load,
+the web app lists stored rows and calls `custom.worktrees.check` without a Location override.
+This read-only Git drift check refreshes through the official `worktree.refresh` endpoint only
+for missing directories, newly discovered directories, or linked worktrees whose stored rows
+are still unowned; RPC failures and unknown strategies also fall back to the official refresh.
+An unchanged expanded project therefore does not boot its Location. Explicit refresh actions
+are unchanged, and only core writes the inventory. When integrating upstream, reconcile this
+check with `Worktree.refresh`, its insert/conflict ownership rules, and the built-in Git strategy;
+the custom plugin currently registers no worktree strategies. Opening a session boots its Location as
 before. Location keys compare directory strings exactly, so case variants of one directory on
 the case-insensitive macOS filesystem (`~/Dev/x` and `~/dev/x`) become separate Locations with
 duplicate processes. Initialization and tool discovery do not create Safari's automation window or consume its one
