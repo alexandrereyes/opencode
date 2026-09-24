@@ -41,7 +41,7 @@ function Section(props: {
           class="-rotate-90 group-open:rotate-0 rtl:rotate-90 rtl:group-open:rotate-0"
         />
         <span>{props.title}</span>
-        <span class="ms-auto text-12-regular text-v2-text-text-muted tabular-nums">{props.count}</span>
+        <span class="text-12-regular text-v2-text-text-muted tabular-nums">{props.count}</span>
       </summary>
       <div class="mt-1 flex min-w-0 flex-col gap-2">{props.children}</div>
     </details>
@@ -172,7 +172,20 @@ export function ContextOverview(props: {
         aria-label={language.t("context.overview.session")}
       >
         <h2 class="flex min-w-0 items-center gap-2 text-14-medium text-text-strong">
-          <bdi dir="ltr" class="min-w-0 flex-1 truncate" title={directory()}>
+          {/* Mobile already shows the session title in the header. */}
+          <Show when={info()?.title}>
+            {(title) => (
+              <>
+                <bdi dir="auto" class="hidden min-w-0 max-w-[40%] truncate md:block" title={title()}>
+                  {title()}
+                </bdi>
+                <span aria-hidden="true" class="hidden shrink-0 text-v2-text-text-muted md:inline">
+                  ·
+                </span>
+              </>
+            )}
+          </Show>
+          <bdi dir="ltr" class="min-w-0 truncate" title={directory()}>
             {displayDirectory()}
           </bdi>
           <Icon name="branch" size="small" class="shrink-0 text-v2-icon-icon-muted" />
@@ -209,7 +222,10 @@ export function ContextOverview(props: {
             </bdi>
           </span>
           <Show when={props.cacheHit != null}>
-            <span class="ms-auto text-12-regular text-v2-text-text-muted tabular-nums">
+            <span aria-hidden="true" class="text-v2-text-text-muted">
+              ·
+            </span>
+            <span class="text-v2-text-text-muted tabular-nums">
               {language.t("context.overview.cacheHit", {
                 percent: new Intl.NumberFormat(language.intl(), {
                   style: "percent",
@@ -220,15 +236,18 @@ export function ContextOverview(props: {
           </Show>
         </div>
         <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
-        <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">
+        <div class="flex flex-wrap items-baseline gap-x-1 gap-y-2 text-12-regular text-v2-text-text-muted tabular-nums">
           <span>
             {language.t("context.overview.costs", {
               session: money(info()?.cost ?? 0),
               subagents: familyPending() || familyFailed() ? "—" : money(childCost()),
             })}
           </span>
+          <span aria-hidden="true">·</span>
           <span class="text-text-base">
-            {familyPending() || familyFailed() ? "—" : money((info()?.cost ?? 0) + childCost())}
+            {language.t("context.overview.total", {
+              cost: familyPending() || familyFailed() ? "—" : money((info()?.cost ?? 0) + childCost()),
+            })}
           </span>
         </div>
       </section>
@@ -263,19 +282,19 @@ export function ContextOverview(props: {
               return (
                 <A
                   href={sessionHref(server.key, child.id)}
-                  class="flex min-h-9 min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
+                  class="flex min-h-9 min-w-0 flex-col justify-center rounded-md px-2 py-1 hover:bg-surface-raised-base focus-visible:outline-2 focus-visible:outline-border-active"
                 >
-                  <span class="min-w-0 flex-1">
-                    <bdi class="block truncate" title={live().title}>
+                  <span class="flex min-w-0 items-baseline gap-1.5">
+                    <bdi class="min-w-0 truncate" title={live().title}>
                       <TextShimmer
                         text={live().title ?? child.id}
                         active={data.session.status(child.id) === "running"}
                       />
                     </bdi>
-                    <SubagentContext child={live()} />
-                  </span>
-                  <span class="shrink-0 text-end text-12-regular text-v2-text-text-muted">
-                    <span class="block">
+                    <span aria-hidden="true" class="shrink-0 text-v2-text-text-muted">
+                      ·
+                    </span>
+                    <span class="shrink-0 text-12-medium text-text-strong">
                       {language.t(
                         data.session.status(child.id) === "running"
                           ? "context.overview.running"
@@ -284,10 +303,8 @@ export function ContextOverview(props: {
                             : "context.overview.idle",
                       )}
                     </span>
-                    <Show when={live().cost > 0}>
-                      <span class="block tabular-nums">{money(live().cost)}</span>
-                    </Show>
                   </span>
+                  <SubagentContext child={live()} cost={live().cost > 0 ? money(live().cost) : undefined} />
                 </A>
               )
             }}
@@ -382,20 +399,21 @@ export function ContextOverview(props: {
           <Show when={mcp()?.length} fallback={<p class="text-v2-text-text-muted">{language.t("dialog.mcp.empty")}</p>}>
             <For each={mcp()}>
               {(item) => (
-                <div class="flex min-h-9 min-w-0 items-center justify-between gap-3">
+                <div class="flex min-h-9 min-w-0 items-center gap-3">
+                  <Switch
+                    appearance="standard"
+                    aria-label={item.name}
+                    class="shrink-0"
+                    checked={item.status.status === "connected"}
+                    disabled={toggleMcp.isPending || item.status.status === "pending"}
+                    onChange={() => toggleMcp.mutate(item.name)}
+                  />
                   <span class="min-w-0">
                     <bdi class="block truncate">{item.name}</bdi>
                     <span class="text-12-regular text-v2-text-text-muted">
                       {language.t(`mcp.status.${item.status.status}`)}
                     </span>
                   </span>
-                  <Switch
-                    appearance="standard"
-                    aria-label={item.name}
-                    checked={item.status.status === "connected"}
-                    disabled={toggleMcp.isPending || item.status.status === "pending"}
-                    onChange={() => toggleMcp.mutate(item.name)}
-                  />
                 </div>
               )}
             </For>

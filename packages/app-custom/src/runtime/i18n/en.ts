@@ -177,6 +177,7 @@ export const dict = {
   "context.overview.context": "Context",
   "context.overview.cacheHit": "Cache hit {{percent}}",
   "context.overview.costs": "Session {{session}} · Subagents {{subagents}}",
+  "context.overview.total": "Total {{cost}}",
   "context.overview.project": "Project",
   "context.overview.subscriptions": "Subscriptions",
   "sidebar.proxy.title": "LLM proxy",

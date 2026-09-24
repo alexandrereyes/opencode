@@ -6,7 +6,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import type { SubagentInfo } from "@/session/family"
 import { latestContextMessage, measuredContext, subagentContext } from "./subagent-context-usage"
 
-export function SubagentContext(props: { child: SubagentInfo }) {
+export function SubagentContext(props: { child: SubagentInfo; cost?: string }) {
   const data = useData()
   const language = useLanguage()
   const context = createMemo(() =>
@@ -18,7 +18,7 @@ export function SubagentContext(props: { child: SubagentInfo }) {
   return (
     <span
       data-slot="subagent-context"
-      class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-12-regular text-v2-text-text-muted"
+      class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-2 text-12-regular text-v2-text-text-muted"
     >
       <span class="inline-flex min-w-0 items-center gap-1.5">
         <Icon name="subagent" size="small" class="shrink-0" />
@@ -26,6 +26,7 @@ export function SubagentContext(props: { child: SubagentInfo }) {
           {props.child.agent ?? "—"}
         </bdi>
       </span>
+      <span aria-hidden="true">·</span>
       <span class="inline-flex items-center gap-1.5" aria-label={language.t("context.overview.context")}>
         <Show when={context()?.usage != null}>
           <ProgressCircle
@@ -56,6 +57,7 @@ export function SubagentContext(props: { child: SubagentInfo }) {
         </bdi>
       </span>
       <Show when={context()?.cacheHit != null}>
+        <span aria-hidden="true">·</span>
         <span class="tabular-nums">
           {language.t("context.overview.cacheHit", {
             percent: new Intl.NumberFormat(language.intl(), { style: "percent", maximumFractionDigits: 1 }).format(
@@ -63,6 +65,10 @@ export function SubagentContext(props: { child: SubagentInfo }) {
             ),
           })}
         </span>
+      </Show>
+      <Show when={props.cost}>
+        <span aria-hidden="true">·</span>
+        <span class="tabular-nums">{props.cost}</span>
       </Show>
     </span>
   )

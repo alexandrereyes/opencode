@@ -386,6 +386,7 @@ test("shows the worktree path and prompt cache hit rate in the usage header", as
   await page.getByRole("tab", { name: "Usage", exact: true }).click()
   const header = page.getByRole("region", { name: "Session", exact: true })
   await expect(header.getByRole("heading")).toContainText("~/SmokeProject")
+  await expect(header.getByRole("heading").getByText("Uncommitted changes inquiry", { exact: true })).toBeHidden()
   await expect(header.getByText("Cache hit 81.8%", { exact: true })).toBeVisible()
   const subagent = page.locator('[data-slot="context-overview"]').getByRole("link", { name: /Inspect child navigation/ })
   await expect(subagent.getByLabel("Context", { exact: true })).toHaveText("81K (40.5%)")
