@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
+import { bundleRelease } from "./custom-signing"
 
 const repository = path.resolve(import.meta.dirname, "../../..")
 export const label = "local.opencode.custom-manual"
@@ -159,13 +160,12 @@ export async function prepare(home: string, dryRun = false) {
     false,
   )
   const staging = path.join(work, "release")
-  await mkdir(`${staging}/bin`, { recursive: true })
-  await mkdir(`${staging}/plugin`)
-  await copyFile(
+  await mkdir(`${staging}/plugin`, { recursive: true })
+  await bundleRelease(
+    home,
+    staging,
     path.join(source, `packages/cli/dist/cli-${process.platform}-${process.arch}/bin/opencode`),
-    `${staging}/bin/opencode`,
   )
-  await chmod(`${staging}/bin/opencode`, 0o755)
   const reported = await command([`${staging}/bin/opencode`, "--version"], work, env)
   if (reported !== `opencode v${env.OPENCODE_VERSION}`) throw new Error(`Unexpected CLI version: ${reported}`)
   await command([`${staging}/bin/opencode`, "--help"], work, env)

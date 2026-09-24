@@ -1,10 +1,11 @@
 // Explicit integration check: only a fresh temporary database and an ephemeral
 // loopback port. Never discovers, registers, or controls an installed service.
-import { chmod, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readlink, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
 import { artifacts, command, publish, seal } from "./custom-release"
+import { bundle, bundleRelease } from "./custom-signing"
 
 const binary = process.argv[2]
 if (!binary || !path.isAbsolute(binary))
@@ -31,11 +32,9 @@ const commit = version.replace("0.0.0-custom.", "")
 if (!/^[a-f0-9]{40}$/.test(commit))
   throw new Error(`Expected a commit-versioned custom binary; received ${JSON.stringify(version)}`)
 const release = `${work}/releases/${commit}`
-await mkdir(`${release}/bin`, { recursive: true })
-await mkdir(`${release}/plugin`)
+await mkdir(`${release}/plugin`, { recursive: true })
 await mkdir(`${work}/home/project`, { recursive: true })
-await copyFile(binary, `${release}/bin/opencode`)
-await chmod(`${release}/bin/opencode`, 0o755)
+await bundleRelease(work, release, binary)
 await command(
   [
     process.execPath,
@@ -109,8 +108,14 @@ try {
   const web = await fetch(`http://127.0.0.1:${port}/`, { headers })
   if (!web.ok || !(await web.text()).includes("/_assets/")) throw new Error("Embedded custom web failed")
   const files = Array.from(new Bun.Glob("**/*").scanSync({ cwd: release, onlyFiles: true })).sort()
-  if (JSON.stringify(files) !== JSON.stringify([...artifacts, "manual-release.json"].sort()))
-    throw new Error("Unexpected compact release payload")
+  const expected = [
+    ...artifacts.filter((file) => file !== "bin/opencode"),
+    "manual-release.json",
+    ...["Info.plist", "MacOS/opencode", "_CodeSignature/CodeResources"].map((file) => `${bundle}/Contents/${file}`),
+  ].sort()
+  if (JSON.stringify(files) !== JSON.stringify(expected)) throw new Error("Unexpected compact release payload")
+  if ((await readlink(`${release}/bin/opencode`)) !== `../${bundle}/Contents/MacOS/opencode`)
+    throw new Error("bin/opencode must point into the signed bundle")
   console.log(
     JSON.stringify(
       {

@@ -25,7 +25,10 @@ are checked with isolated XDG directories. No server is started during prepare.
 
 Each `releases/<sha>` contains:
 
-- `bin/opencode`: compiled CLI/TUI with version `0.0.0-custom.<sha>`;
+- `OpenCode Custom.app`: signed bundle (`local.opencode.custom`) holding the compiled CLI/TUI
+  with version `0.0.0-custom.<sha>`;
+- `bin/opencode`: relative symlink to the bundle executable, used by launchers and hashed
+  through the link;
 - `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
 - `server-config.json`: update disabled, the absolute release-owned plugin path, and the
   local `safari-devtools` MCP server (`/usr/bin/safaridriver --mcp`);
@@ -56,6 +59,23 @@ hashes are verified before activation and reuse. Failed build directories are re
 for diagnosis and can be removed manually. The binary serves its embedded custom web
 with `opencode serve`; there is no production source server or second Bun executable.
 Its compiled version is the health version; no environment variable substitutes a commit.
+
+### macOS privacy permissions
+
+macOS attributes privacy grants such as Accessibility or Screen Recording, requested by child
+tools like Computer Use MCP servers, to the launchd-owned server. Unbundled executables are
+identified by path and ad-hoc signatures by cdhash, so each release previously appeared as a
+new `opencode` entry and asked again. Prepare now places the binary in `OpenCode Custom.app`
+with the fixed bundle identifier `local.opencode.custom` and signs it with a persistent local
+certificate, giving every release the same designated requirement:
+`identifier "local.opencode.custom" and certificate leaf = H"<certificate sha1>"`.
+
+The first prepare creates `signing/signing.keychain-db` (directory 0700, file 0600) with a
+self-signed "OpenCode Custom Local Signing" certificate. The keychain is not added to the
+user search list; prepare unlocks it with an empty password and passes it to `codesign`
+explicitly, so updates never show Keychain prompts. Keep this directory: deleting it creates a
+new certificate and macOS asks for the grants once more. Releases prepared before this
+change keep their old identity; rolling back to one asks again.
 
 Manual retention is explicit:
 
