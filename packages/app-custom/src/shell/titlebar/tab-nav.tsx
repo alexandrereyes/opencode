@@ -489,18 +489,14 @@ export function TabNavItem(props: {
               }
             >
               {(session) => (
-                <Show
-                  when={!chat()}
-                  fallback={<Icon name="speech-bubble" class="text-v2-icon-icon-muted" />}
-                >
-                  <SessionTabAvatar
-                    project={project()}
-                    directory={session.location.directory}
-                    sessionId={session.id}
-                    server={props.server}
-                    unread={props.unread}
-                  />
-                </Show>
+                <SessionTabAvatar
+                  project={project()}
+                  directory={session.location.directory}
+                  sessionId={session.id}
+                  server={props.server}
+                  unread={props.unread}
+                  icon={chat() ? <Icon name="speech-bubble" class="text-v2-icon-icon-muted" /> : undefined}
+                />
               )}
             </Show>
           </span>

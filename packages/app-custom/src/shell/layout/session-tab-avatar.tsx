@@ -4,7 +4,7 @@ import { displayName, getProjectAvatarSource } from "@/shell/layout/helpers"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
 import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
-import { Show } from "solid-js"
+import { Show, type JSX } from "solid-js"
 
 export function SessionTabAvatar(props: {
   project?: LocalProject
@@ -12,6 +12,7 @@ export function SessionTabAvatar(props: {
   sessionId: string
   server: ServerConnection.Key
   unread?: boolean
+  icon?: JSX.Element
 }) {
   const state = useSessionTabAvatarState(
     () => props.server,
@@ -24,6 +25,7 @@ export function SessionTabAvatar(props: {
       directory={props.directory}
       unread={props.unread ?? state.unread()}
       loading={!props.unread && state.loading()}
+      icon={props.icon}
     />
   )
 }
@@ -33,17 +35,25 @@ export function SessionTabAvatarView(props: {
   directory: string
   unread: boolean
   loading: boolean
+  icon?: JSX.Element
 }) {
   return (
     <Show
       when={props.loading}
       fallback={
-        <ProjectAvatar
-          fallback={displayName(props.project ?? { worktree: props.directory })}
-          src={getProjectAvatarSource(props.project?.id, props.project?.icon)}
-          variant={getProjectAvatarVariant(props.project?.icon?.color)}
-          unread={props.unread}
-        />
+        <Show
+          when={props.icon}
+          fallback={
+            <ProjectAvatar
+              fallback={displayName(props.project ?? { worktree: props.directory })}
+              src={getProjectAvatarSource(props.project?.id, props.project?.icon)}
+              variant={getProjectAvatarVariant(props.project?.icon?.color)}
+              unread={props.unread}
+            />
+          }
+        >
+          {props.icon}
+        </Show>
       }
     >
       <SessionProgressIndicatorV2 />
