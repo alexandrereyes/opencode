@@ -14,7 +14,8 @@ export async function expectSessionTitle(page: Page, title: string) {
     await expect(trigger.locator('span[dir="auto"]')).toHaveText(title, { timeout: APP_READY_TIMEOUT })
     return
   }
-  await expectAppVisible(page.getByRole("heading", { name: title }))
+  // The usage tab also has a heading that starts with the session title.
+  await expectAppVisible(page.getByRole("heading", { name: title, exact: true }))
 }
 
 export async function expectSessionReady(page: Page, input: { server: string; sessionID: string; title: string }) {
