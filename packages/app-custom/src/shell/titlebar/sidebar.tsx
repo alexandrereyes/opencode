@@ -313,7 +313,12 @@ export function SessionSidebar(props: {
       if (!Number.isFinite(date.getTime())) return
       return { at: at(), dateTime: date.toISOString(), title: dateFormat().format(date) }
     })
-    const ctx = () => indexes().find((entry) => ServerConnection.key(entry.connection) === props.item.server)?.ctx
+    const entry = () => indexes().find((item) => ServerConnection.key(item.connection) === props.item.server)
+    const ctx = () => entry()?.ctx
+    const branchLabel = () => !!props.projectMetadataIcon && !props.item.chat
+    createEffect(() => {
+      if (branchLabel()) void entry()?.worktrees.locate([props.item.session.location.directory])
+    })
     const tab = () =>
       tabs.store.find(
         (tab) => tab.type === "session" && tab.server === props.item.server && tab.sessionId === props.item.session.id,
@@ -338,6 +343,7 @@ export function SessionSidebar(props: {
         compact={props.compact}
         projectMetadataIcon={props.projectMetadataIcon}
         showProjectBranch={props.projectMetadataIcon}
+        projectBranch={branchLabel() ? entry()?.worktrees.branch(props.item.session.location.directory) : undefined}
         chatMetadataIcon={props.item.chat && props.projectMetadataIcon}
         chat={props.item.chat}
         projectLabel={props.item.chat ? language.t("session.new.chats") : projectLabel(props.item.project)}

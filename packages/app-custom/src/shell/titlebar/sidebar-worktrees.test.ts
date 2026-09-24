@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import type { LocationGetOutput } from "@opencode/client/promise"
 import { ServerConnection } from "@/runtime/server/registry"
 import { workspaceDraftTarget } from "@/workspaces/paths"
 import {
@@ -18,6 +17,7 @@ import {
   visibleWorktreeSessions,
   withoutPreparingSessions,
   worktreeKey,
+  type SidebarLocation,
 } from "./sidebar-worktrees"
 
 const server = ServerConnection.Key.make("http://localhost:1234")
@@ -51,7 +51,7 @@ const project = sidebarProjects(
 )[0]
 const metadata = {
   cachedInventory: [{ directory: "/repo" }, { directory: "/trees/feat" }, { directory: "/repo/nested" }],
-  location: (_directory: string): LocationGetOutput | undefined => undefined,
+  location: (_directory: string): SidebarLocation | undefined => undefined,
   branch: (directory: string) => (directory === "/trees/feat" ? "feat/payments" : undefined),
 }
 
@@ -141,12 +141,19 @@ test("incremental inventory/Location/branch never loses rows; unavailable and de
     "sub",
   ])
   const location = (directory: string) =>
-    directory === "/trees/feat/src"
-      ? { directory, project: { id: "repo", canonical: "/repo", directory: "/trees/feat" } }
-      : undefined
+    directory === "/trees/feat/src" ? { worktree: "/trees/feat", canonical: "/repo", projectID: "repo" } : undefined
   const located = sidebarWorktrees(project, rows, { ...metadata, cachedInventory: undefined, location, branch: () => "HEAD" })
+  // Git-located roots carry no project ID; the canonical checkout alone establishes ownership.
+  const gitLocated = sidebarWorktrees(project, rows, {
+    ...metadata,
+    cachedInventory: undefined,
+    location: (directory) => (directory === "/trees/feat/src" ? { worktree: "/trees/feat", canonical: "/repo" } : undefined),
+  })
+  expect(gitLocated.groups.find((group) => group.directory === "/trees/feat")?.rows.map((row) => row.session.id)).toEqual([
+    "sub",
+  ])
   const ready = sidebarWorktrees(project, rows, metadata)
-  for (const group of [cold, located, ready]) {
+  for (const group of [cold, located, gitLocated, ready]) {
     expect([...group.root, ...group.groups.flatMap((item) => item.rows)].map((row) => row.key).sort()).toEqual(
       rows.map((row) => row.key).sort(),
     )
@@ -176,7 +183,7 @@ test("same basename/branch gets distinct labels while identical directories and 
     {
     cachedInventory: [{ directory: "/a/feat" }, { directory: "/a/feat/" }, { directory: "/b/feat" }],
     branch: () => "same-branch",
-    location: (directory) => ({ directory, project: { id: "other", canonical: "/other", directory: "/a/feat" } }),
+    location: () => ({ worktree: "/a/feat", canonical: "/other", projectID: "other" }),
     },
   )
   expect(group.groups).toHaveLength(2)
@@ -485,10 +492,7 @@ test("an existing-worktree handoff stays single while the real row arrives and p
   const inventory = {
     cachedInventory: [{ directory: "/opencode" }, { directory: "/repository" }],
     branch: () => undefined,
-    location: (directory: string): LocationGetOutput => ({
-      directory,
-      project: { id: "f001", canonical: "/repository", directory: "/repository" },
-    }),
+    location: (): SidebarLocation => ({ worktree: "/repository", canonical: "/repository", projectID: "f001" }),
   }
   const grouped = sidebarWorktrees(parent, [], inventory)
   const target = workspaceDraftTarget("/repository", "/opencode")

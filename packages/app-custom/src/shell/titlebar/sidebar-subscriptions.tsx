@@ -39,7 +39,8 @@ export function SidebarSubscriptions(props: {
           : tab?.type === "session"
             ? ctx.data.session.get(tab.routeSessionId ?? tab.sessionId)?.location.directory
             : undefined
-      return { ctx, directory: directory ?? ctx.projects.list()[0]?.worktree ?? "" }
+      // Quota status is process-global; without a tab, the server default Location avoids booting a project.
+      return { ctx, directory: directory ?? "" }
     },
     undefined,
     { equals: (a, b) => a?.ctx === b?.ctx && a?.directory === b?.directory },
