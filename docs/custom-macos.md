@@ -40,9 +40,15 @@ plugins and differently named MCP servers remain available, while the release-ow
 policy and `safari-devtools` definition win if an earlier document uses the same keys. It does
 not edit `~/.config/opencode`.
 
-MCP services are Location-scoped and connect eagerly, so each materialized Location may retain
-one idle `safaridriver --mcp` process until that Location is invalidated or the server stops.
-Initialization and tool discovery do not create Safari's automation window or consume its one
+MCP services are Location-scoped and connect eagerly, so each materialized Location retains one
+process per local MCP server, for example `safaridriver --mcp` (about 3 MB) and
+`codex-computer-use-mcp` (about 65 MB of Node). `LocationActivity` evicts a Location, stopping
+those processes, after 60 minutes without session events and no active execution; the server log
+records `location services evicted`. Tens of processes shortly after a restart are expected: the
+custom sidebar loads worktrees for every expanded project, which materializes each project
+Location. Location keys compare directory strings exactly, so case variants of one directory on
+the case-insensitive macOS filesystem (`~/Dev/x` and `~/dev/x`) become separate Locations with
+duplicate processes. Initialization and tool discovery do not create Safari's automation window or consume its one
 active WebDriver session. Once automation starts, Safari still permits only one active session
 across Locations; a concurrent Location must report the conflict rather than fall back to the
 user's ordinary Safari. The `@Safari DevTools` prompt context carries that instruction.
@@ -76,6 +82,33 @@ user search list; prepare unlocks it with an empty password and passes it to `co
 explicitly, so updates never show Keychain prompts. Keep this directory: deleting it creates a
 new certificate and macOS asks for the grants once more. Releases prepared before this
 change keep their old identity; rolling back to one asks again.
+
+#### Granting permissions once
+
+A background server whose identity lacks a grant often gets no prompt: Computer Use fails with
+`bootstrapTimedOut` instead. This happened on every release before the stable identity; audit
+records in `~/.direct-computer-use/audit/direct-computer-use.jsonl` show the first
+`official_error` right after the activation that changed the identity. To grant the identity:
+
+1. In System Settings → Privacy & Security, add
+   `~/.local/share/opencode-custom-v2/current/OpenCode Custom.app` with **+** (use ⌘⇧G for the
+   hidden path) or by dragging it from Finder, and enable it in:
+   - Accessibility (listed as "Controle do Dispositivo e Acesso a Dados" in pt-BR);
+   - Screen & System Audio Recording;
+   - App Management, when requested.
+2. Remove the obsolete `opencode` entries with the `exec` icon; they belong to old cdhashes.
+3. Restart the server once so the running process picks up the grants, for example from a
+   detached `tmux` session when it hosts the current conversation:
+   `launchctl kickstart -k gui/$(id -u)/local.opencode.custom-manual`. This is the only
+   lifecycle action outside `custom:*`; it keeps the current release and does not change pointers.
+4. Verify with the Computer Use `list_apps` and `get_app_state` tools (the latter needs Screen
+   Recording for its screenshot).
+
+To tell a missing grant from a Computer Use regression, run the official client
+(`~/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient mcp`)
+from Terminal.app. It gets past bootstrap and reports `Sender process is not authenticated`,
+because only an OpenAI-signed Codex parent is accepted. `bootstrapTimedOut` only from the
+server context points to the server identity's grants.
 
 Manual retention is explicit:
 
