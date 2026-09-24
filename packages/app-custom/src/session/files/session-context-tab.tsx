@@ -21,6 +21,7 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useSessionLayout } from "@/session/session-layout"
 import { createSessionContextFormatter } from "./session-context-format"
 import { ContextOverview } from "./context-overview"
+import { cacheHitRate } from "./subagent-context-usage"
 
 function Stat(props: { label: string; value: JSX.Element }) {
   return (
@@ -132,6 +133,7 @@ export function SessionContextTab(props: { active?: boolean }) {
       input: message.tokens.input,
       total,
       usage: model?.limit.context ? Math.round((total / model.limit.context) * 100) : null,
+      cacheHit: cacheHitRate(message.tokens),
     }
   })
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
@@ -275,7 +277,12 @@ export function SessionContextTab(props: { active?: boolean }) {
       onScroll={handleScroll}
     >
       <div data-slot="session-usage-content" class="px-4 pt-3 pb-6 flex flex-col gap-5">
-        <ContextOverview tokens={ctx()?.total} usage={ctx()?.usage} active={props.active ?? true} />
+        <ContextOverview
+          tokens={ctx()?.total}
+          usage={ctx()?.usage}
+          cacheHit={ctx()?.cacheHit}
+          active={props.active ?? true}
+        />
         <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
           <For each={stats}>
             {(stat) => <Stat label={language.t(stat.label as Parameters<typeof language.t>[0])} value={stat.value()} />}

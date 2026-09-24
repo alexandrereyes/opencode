@@ -1,5 +1,7 @@
 import { createEffect, createMemo, For, on, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
+import { useQuery } from "@tanstack/solid-query"
+import { Directories } from "@opencode/plugin-app-custom/directories/rpc"
 import { Icon } from "@opencode/ui-custom/icon"
 import { ProgressCircle } from "@opencode/ui-custom/progress-circle"
 import { Switch } from "@opencode/ui-custom/switch"
@@ -15,7 +17,6 @@ import { useWorkspaceLocation } from "@/workspaces/location"
 import { useSessionLayout } from "@/session/session-layout"
 import { useMcpToggle } from "@/providers/connect/mcp"
 import { sessionHref } from "@/shell/routes/session"
-import { getFilename } from "@opencode/util/path"
 import { createSubagentList } from "./subagent-list"
 import { SUBAGENT_PAGE_SIZE } from "@/session/family"
 import { SubagentContext } from "./subagent-context"
@@ -82,7 +83,12 @@ function Loading() {
   )
 }
 
-export function ContextOverview(props: { tokens?: number; usage?: number | null; active: boolean }) {
+export function ContextOverview(props: {
+  tokens?: number
+  usage?: number | null
+  cacheHit?: number | null
+  active: boolean
+}) {
   const language = useLanguage()
   const dialog = useDialog()
   const data = useData()
@@ -134,11 +140,26 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
       maximumFractionDigits: 4,
     }).format(value)
   const childCost = () => snapshot()?.cost ?? 0
-  const project = createMemo(() => {
-    const id = info()?.projectID
-    return id ? data.project.get(id) : undefined
+  // V2 sync does not publish the home directory, so the custom plugin reports it when available.
+  const home = useQuery(() => ({
+    queryKey: [sdk.scope, "custom-directories-home"],
+    enabled: sdk.connection.status() === "connected",
+    staleTime: Infinity,
+    retry: false,
+    queryFn: () =>
+      sdk.api
+        .rpc(Directories.Definition)
+        .home({}, { location: { directory: directory() } })
+        .then((result) => result.path.replace(/[\\/]+$/, "")),
+  }))
+  const displayDirectory = createMemo(() => {
+    const root = home.data
+    if (!root) return directory()
+    if (directory() === root) return "~"
+    return /^[\\/]/.test(directory().slice(root.length)) && directory().startsWith(root)
+      ? `~${directory().slice(root.length)}`
+      : directory()
   })
-  const projectName = createMemo(() => project()?.name || getFilename(project()?.canonical ?? directory()))
   const branch = createMemo(() => data.location.vcs.info({ directory: directory() })?.branch.current ?? "—")
   const mcp = createMemo(() =>
     data.location.mcp.server.list({ directory: directory() })?.toSorted((a, b) => a.name.localeCompare(b.name)),
@@ -151,11 +172,11 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
         aria-label={language.t("context.overview.session")}
       >
         <h2 class="flex min-w-0 items-center gap-2 text-14-medium text-text-strong">
-          <bdi dir="auto" class="min-w-0 max-w-[50%] truncate" title={projectName()}>
-            {projectName()}
+          <bdi dir="ltr" class="min-w-0 flex-1 truncate" title={directory()}>
+            {displayDirectory()}
           </bdi>
           <Icon name="branch" size="small" class="shrink-0 text-v2-icon-icon-muted" />
-          <bdi dir="auto" class="min-w-0 flex-1 truncate" title={branch()}>
+          <bdi dir="auto" class="min-w-0 max-w-[40%] shrink-0 truncate" title={branch()}>
             {branch()}
           </bdi>
         </h2>
@@ -187,6 +208,16 @@ export function ContextOverview(props: { tokens?: number; usage?: number | null;
               {props.usage != null ? ` (${props.usage}%)` : ""}
             </bdi>
           </span>
+          <Show when={props.cacheHit != null}>
+            <span class="ms-auto text-12-regular text-v2-text-text-muted tabular-nums">
+              {language.t("context.overview.cacheHit", {
+                percent: new Intl.NumberFormat(language.intl(), {
+                  style: "percent",
+                  maximumFractionDigits: 1,
+                }).format(props.cacheHit ?? 0),
+              })}
+            </span>
+          </Show>
         </div>
         <Meter value={props.usage ?? null} label={language.t("context.overview.context")} />
         <div class="flex flex-wrap items-baseline justify-between gap-2 text-12-regular text-v2-text-text-muted tabular-nums">

@@ -55,6 +55,15 @@ export function SubagentContext(props: { child: SubagentInfo }) {
           </Show>
         </bdi>
       </span>
+      <Show when={context()?.cacheHit != null}>
+        <span class="tabular-nums">
+          {language.t("context.overview.cacheHit", {
+            percent: new Intl.NumberFormat(language.intl(), { style: "percent", maximumFractionDigits: 1 }).format(
+              context()?.cacheHit ?? 0,
+            ),
+          })}
+        </span>
+      </Show>
     </span>
   )
 }

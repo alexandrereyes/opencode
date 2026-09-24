@@ -32,5 +32,12 @@ export function subagentContext(context: MeasuredContext | undefined, models: re
   return {
     total,
     usage: model && model.limit.context > 0 ? Math.round((total / model.limit.context) * 1000) / 10 : null,
+    cacheHit: cacheHitRate(context.tokens),
   }
+}
+
+/** Share of the prompt served from cache reads; `input` already excludes cache reads and writes. */
+export function cacheHitRate(tokens: MeasuredContext["tokens"]) {
+  const prompt = tokens.input + tokens.cache.read + tokens.cache.write
+  return prompt > 0 ? tokens.cache.read / prompt : null
 }

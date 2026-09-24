@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { OpenCodeEvent } from "@opencode/client/promise"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 import { fixture } from "../performance/timeline/session-timeline-stress.fixture"
 import { installStressSessionTabs, stressSessionHref } from "../performance/timeline/timeline-test-helpers"
 
@@ -340,6 +340,57 @@ test("context tab retains selection across sessions and shows live quota and sub
   await expect(overview.getByRole("meter", { name: "Available Pro 20x pool", exact: true })).toHaveCount(0)
   await overview.getByRole("link", { name: /Inspect child navigation|Live child title/ }).click()
   await expect(page).toHaveURL(new RegExp(`${fixture.childID}$`))
+})
+
+test("shows the worktree path and prompt cache hit rate in the usage header", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOpenCodeServer(page, {
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    home: "C:/OpenCode",
+    pageMessages: (id) => ({
+      items: (fixture.messages[id]?.slice(-2) ?? []).map((message) =>
+        message.type === "assistant"
+          ? { ...message, tokens: { input: 100, output: 200, reasoning: 0, cache: { read: 900, write: 100 } } }
+          : message,
+      ),
+    }),
+  })
+  const child = fixture.sessions.find((session) => session.id === fixture.childID)
+  if (!child) throw new Error("Missing child fixture")
+  await page.route("**/api/rpc/custom.session-family/snapshot*", (route) =>
+    route.fulfill({ json: { output: { count: 1, cost: 0, active: [], forms: [], permissions: [] } } }),
+  )
+  await page.route("**/api/rpc/custom.session-family/page*", (route) =>
+    route.fulfill({
+      json: {
+        output: {
+          data: [
+            {
+              ...currentSession({ ...child, agent: "explore" }, fixture.directory),
+              context: {
+                id: "msg_child_context",
+                tokens: { input: 20_000, output: 1_000, reasoning: 0, cache: { read: 60_000, write: 0 } },
+                model: { providerID: "opencode", id: "claude-opus-4-6" },
+              },
+            },
+          ],
+        },
+      },
+    }),
+  )
+  await installStressSessionTabs(page)
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await page.getByRole("tab", { name: "Usage", exact: true }).click()
+  const header = page.getByRole("region", { name: "Session", exact: true })
+  await expect(header.getByRole("heading")).toContainText("~/SmokeProject")
+  await expect(header.getByText("Cache hit 81.8%", { exact: true })).toBeVisible()
+  const subagent = page.locator('[data-slot="context-overview"]').getByRole("link", { name: /Inspect child navigation/ })
+  await expect(subagent.getByLabel("Context", { exact: true })).toHaveText("81K (40.5%)")
+  await expect(subagent.getByText("Cache hit 75%", { exact: true })).toBeVisible()
+  await page.locator('[data-slot="context-overview"]').screenshot({ path: test.info().outputPath("usage-header.png") })
 })
 
 test("shows every background task inline, including tasks beyond the old ten-item limit", async ({ page }) => {

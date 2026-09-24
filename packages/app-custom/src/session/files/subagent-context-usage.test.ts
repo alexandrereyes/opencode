@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ModelInfo, SessionMessageInfo } from "@opencode/client/promise"
-import { latestContextMessage, measuredContext, subagentContext } from "./subagent-context-usage"
+import { cacheHitRate, latestContextMessage, measuredContext, subagentContext } from "./subagent-context-usage"
 
 const message = (id: string, created: number, input?: number, model = "large"): SessionMessageInfo => ({
   id,
@@ -19,7 +19,7 @@ const models = [
 describe("subagent measured context", () => {
   test("uses the last measured call, never the cumulative session consumption", () => {
     const measured = latestContextMessage([message("old", 1, 900_000), message("new", 2, 86_000)])
-    expect(subagentContext(measuredContext(measured), models)).toEqual({ total: 86_800, usage: 8.3 })
+    expect(subagentContext(measuredContext(measured), models)).toEqual({ total: 86_800, usage: 8.3, cacheHit: 500 / 86_500 })
   })
 
   test("keeps distinct children and the measured model independent", () => {
@@ -35,7 +35,13 @@ describe("subagent measured context", () => {
 
   test("unknown usage and unknown limits are not reported as zero percent", () => {
     expect(subagentContext(measuredContext(latestContextMessage([message("pending", 1)])), models)).toBeUndefined()
-    expect(subagentContext(measuredContext(message("measured", 1, 86_000)))).toEqual({ total: 86_800, usage: null })
+    expect(subagentContext(measuredContext(message("measured", 1, 86_000)))).toEqual({ total: 86_800, usage: null, cacheHit: 500 / 86_500 })
+  })
+
+  test("cache hit rate counts cache reads against the full prompt, including cache writes", () => {
+    expect(cacheHitRate({ input: 100, output: 200, reasoning: 0, cache: { read: 900, write: 100 } })).toBe(900 / 1_100)
+    expect(cacheHitRate({ input: 2_000, output: 10, reasoning: 0, cache: { read: 0, write: 2_000 } })).toBe(0)
+    expect(cacheHitRate({ input: 0, output: 10, reasoning: 0, cache: { read: 0, write: 0 } })).toBeNull()
   })
 
   test("a live measurement wins over an older in-flight response regardless of array order", () => {
