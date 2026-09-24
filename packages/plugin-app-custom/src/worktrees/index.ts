@@ -40,6 +40,10 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
         removeWorktree(worktrees, input).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
       branches: () => worktreeBranches(ctx.location.directory),
       locate: (input) => locateDirectories(input.directories),
+      check: (input, context) =>
+        checkWorktrees({ list: () => ctx.worktree.list({ projectID: input.projectID }) }, input.directory).pipe(
+          Effect.mapError((error) => operationFailed(error, context.error)),
+        ),
     })
     .pipe(Effect.orDie)
 })
@@ -71,6 +75,44 @@ export function locateDirectories(directories: readonly string[]) {
     )
     return located.flat()
   }).pipe(Effect.orElseSucceed(() => []))
+}
+
+// Mirror Worktree.refresh's Git discovery and ownership rules, leaving all writes to core.
+export function checkWorktrees(ctx: Pick<WorktreeContext, "list">, directory: string) {
+  return Effect.gen(function* () {
+    const stored = yield* ctx.list().pipe(Effect.mapError((error) => new Error(message(error))))
+    if (stored.some((item) => item.strategy !== undefined && item.strategy !== "git")) return { drift: true }
+    return yield* Effect.tryPromise({
+      try: async (signal) => {
+        const existing = await Promise.all(
+          stored.map((item) =>
+            fs.stat(item.directory).then(
+              (stat) => stat.isDirectory(),
+              () => false,
+            ),
+          ),
+        )
+        if (existing.some((exists) => !exists)) return { drift: true }
+        const roots = new Set([directory, ...stored.filter((item) => !item.strategy).map((item) => item.directory)])
+        const discovered = (
+          await Promise.all(
+            Array.from(roots, async (root) => {
+              const repository = await discover(root, signal).catch(() => undefined)
+              if (!repository) return []
+              return worktreeList(repository, signal, true).catch(() => [])
+            }),
+          )
+        ).flat()
+        return {
+          drift: discovered.some((entry) => {
+            const row = stored.find((item) => item.directory === entry.directory)
+            return !row || (entry.kind === "linked" && row.strategy === undefined)
+          }),
+        }
+      },
+      catch: (cause) => new Error(message(cause)),
+    })
+  })
 }
 
 export function inspectWorktree(ctx: WorktreeContext, directory: string) {
@@ -275,7 +317,7 @@ async function discover(directory: string, signal: AbortSignal): Promise<Reposit
   }
 }
 
-async function worktreeList(repository: Repository, signal: AbortSignal) {
+async function worktreeList(repository: Repository, signal: AbortSignal, skipUnavailable = false) {
   const result = await command(["git", "worktree", "list", "--porcelain"], repository.worktree, signal)
   requireSuccess(result, "Failed to list Git worktrees")
   return Promise.all(
@@ -297,8 +339,19 @@ async function worktreeList(repository: Repository, signal: AbortSignal) {
           ? [{ directory, branch: branch || undefined, kind: index === 0 ? ("main" as const) : ("linked" as const) }]
           : []
       })
-      .map(async (entry) => ({ ...entry, directory: await canonical(entry.directory) })),
-  )
+      .map(async (entry) => {
+        if (!skipUnavailable) return [{ ...entry, directory: await canonical(entry.directory) }]
+        // Core skips unavailable entries individually, not the whole repository's discovery.
+        if (
+          !(await fs.stat(entry.directory).then(
+            (stat) => stat.isDirectory(),
+            () => false,
+          ))
+        )
+          return []
+        return [{ ...entry, directory: await canonical(entry.directory) }]
+      }),
+  ).then((entries) => entries.flat())
 }
 
 async function identityFor(gitDirectory: string) {

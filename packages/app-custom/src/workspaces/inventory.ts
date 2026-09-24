@@ -44,6 +44,7 @@ export function createWorktreeInventory(input: {
   scope: ServerScope
   queryClient: QueryClient
   api: () => Pick<ServerApi["worktree"], "list" | "refresh">
+  check: (input: { projectID: string; directory: string }) => Promise<{ drift: boolean }>
   updated: (projectID: string, directory: string, worktrees: WorktreeDirectory[]) => void
 }) {
   const revisions = new Map<string, number>()
@@ -52,11 +53,17 @@ export function createWorktreeInventory(input: {
     queryFn: async () => {
       const key = `${projectID}:${pathKey(directory)}`
       const revision = revisions.get(key) ?? 0
-      if (!input.queryClient.getQueryData(worktreeInventoryKey(input.scope, projectID, directory)))
-        await input.api().refresh({ projectID })
+      const cached = input.queryClient.getQueryData(worktreeInventoryKey(input.scope, projectID, directory))
       return input
         .api()
         .list({ projectID })
+        .then(async (items) => {
+          if (cached) return items
+          const checked = await input.check({ projectID, directory }).catch(() => ({ drift: true }))
+          if (!checked.drift) return items
+          await input.api().refresh({ projectID })
+          return input.api().list({ projectID })
+        })
         .then((items) => {
           if ((revisions.get(key) ?? 0) !== revision)
             return (

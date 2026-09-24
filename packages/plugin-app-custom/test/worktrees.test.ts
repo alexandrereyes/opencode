@@ -6,6 +6,7 @@ import path from "node:path"
 import { Effect, Schema } from "effect"
 import { AbsolutePath } from "@opencode/schema/schema"
 import {
+  checkWorktrees,
   inspectWorktree,
   locateDirectories,
   operationFailed,
@@ -24,7 +25,7 @@ afterEach(async () => {
 describe("worktrees", () => {
   test("publishes the frozen browser-safe RPC contract", () => {
     expect(Worktrees.Definition.id).toBe("custom.worktrees")
-    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches", "locate"])
+    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches", "locate", "check"])
     expect(Object.keys(Worktrees.Definition.methods.inspect.errors)).toEqual(["operation_failed"])
     expect(
       Schema.encodeSync(Worktrees.DeleteInput)(
@@ -46,6 +47,56 @@ describe("worktrees", () => {
       message: "Removal rejected",
       data: { message: "Removal rejected", forceRequired: true },
     })
+  })
+
+  test("checks unchanged inventory, additions, claims, stale root ownership and removals", async () => {
+    const fixture = await repository("check")
+    const rows = [{ directory: fixture.root }, { directory: fixture.linked, strategy: "git" }]
+    const check = (items = rows) => Effect.runPromise(checkWorktrees(inventory(items), fixture.root))
+    expect(await check()).toEqual({ drift: false })
+    const alias = path.join(path.dirname(fixture.root), "alias")
+    await fs.symlink(fixture.root, alias)
+    expect(await Effect.runPromise(checkWorktrees(inventory(rows), alias))).toEqual({ drift: false })
+    expect(await check([{ directory: fixture.root, strategy: "git" }, rows[1]])).toEqual({ drift: false })
+    expect(await check([{ directory: fixture.root }, { directory: fixture.linked }])).toEqual({ drift: true })
+    expect(await check([{ directory: fixture.root, strategy: "copy" }, rows[1]])).toEqual({ drift: true })
+    const added = path.join(path.dirname(fixture.root), "added")
+    await $`git worktree add -b added ${added}`.cwd(fixture.root).quiet()
+    expect(await check()).toEqual({ drift: true })
+    await fs.rm(added, { recursive: true })
+    // A dangling Git entry must not hide valid discoveries or cause drift on its own.
+    expect(await check()).toEqual({ drift: false })
+    expect(await check([{ directory: fixture.root }])).toEqual({ drift: true })
+    await fs.rm(fixture.linked, { recursive: true })
+    expect(await check()).toEqual({ drift: true })
+  })
+
+  test("checks non-git directories and discovers every stored unowned root", async () => {
+    const fixture = await repository("roots")
+    const outside = path.dirname(fixture.root)
+    expect(await Effect.runPromise(checkWorktrees(inventory([{ directory: outside }]), outside))).toEqual({
+      drift: false,
+    })
+    expect(
+      await Effect.runPromise(
+        checkWorktrees(inventory([{ directory: outside }, { directory: fixture.root }]), outside),
+      ),
+    ).toEqual({ drift: true })
+    expect(
+      await Effect.runPromise(
+        checkWorktrees(
+          inventory([
+            { directory: outside },
+            { directory: fixture.root },
+            { directory: fixture.linked, strategy: "git" },
+          ]),
+          outside,
+        ),
+      ),
+    ).toEqual({ drift: false })
+    expect(
+      await Effect.runPromise(checkWorktrees(inventory([{ directory: path.join(outside, "missing") }]), outside)),
+    ).toEqual({ drift: true })
   })
 
   test("inspects, force-removes, and cleans local and remote branches", async () => {

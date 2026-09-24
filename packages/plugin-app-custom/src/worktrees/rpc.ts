@@ -1,6 +1,7 @@
 export * as Worktrees from "./rpc.js"
 
 import { Rpc } from "@opencode/plugin/rpc"
+import { Project } from "@opencode/schema/project"
 import { AbsolutePath, optional } from "@opencode/schema/schema"
 import { Schema } from "effect"
 
@@ -90,6 +91,11 @@ export const Definition = Rpc.define({
     locate: {
       input: Schema.toStandardSchemaV1(Schema.Struct({ directories: Schema.Array(AbsolutePath) })),
       output: Schema.toStandardSchemaV1(Schema.Array(LocatedDirectory)),
+    },
+    check: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ projectID: Project.ID, directory: AbsolutePath })),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ drift: Schema.Boolean })),
+      errors: { operation_failed: Schema.toStandardSchemaV1(OperationFailed) },
     },
   },
   events: {},
