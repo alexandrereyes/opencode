@@ -37,6 +37,8 @@ import { createSidebarSelection } from "./sidebar-selection"
 import { createModifierHold, sidebarShortcuts } from "./sidebar-shortcuts"
 import { SidebarWorktreeDelete, useSidebarWorktreeDelete } from "./sidebar-worktree-delete"
 import { usePreferences } from "@/preferences/context"
+import { useProjectPicker } from "@/workspaces/selection/picker"
+import { homeProjectDirectories } from "@/shell/layout/helpers"
 import {
   attentionGroups,
   orderSidebarProjects,
@@ -74,6 +76,7 @@ export function SessionSidebar(props: {
   const lifecycle = useSessionLifecycleActions()
   const preferences = usePreferences()
   const worktreeDelete = useSidebarWorktreeDelete(lifecycle.archiveMany, lifecycle.pending)
+  const pickDirectory = useProjectPicker()
   const saved = global.sidebar.store
   const setSaved = global.sidebar.set
   const ready = global.sidebar.ready
@@ -99,6 +102,23 @@ export function SessionSidebar(props: {
   const indexes = inventory.indexes
   const chatTarget = createMemo(() => chatActionServer(props.currentTab?.server, inventory.chatRoots()))
   const gesture = { dragged: false }
+  const addProject = () => {
+    const servers = global.servers.list()
+    const server = servers.find((item) => ServerConnection.key(item) === props.currentTab?.server) ?? servers[0]
+    if (!server) return
+    pickDirectory({
+      server,
+      title: language.t("command.project.open"),
+      multiple: true,
+      onSelect: (result) => {
+        const directories = homeProjectDirectories(result)
+        if (!directories[0]) return
+        const ctx = global.ensureServerCtx(server)
+        directories.forEach((directory) => ctx.projects.open(directory))
+        ctx.projects.touch(directories[0])
+      },
+    })
+  }
   const timer = setInterval(() => setState("now", Date.now()), 60_000)
   onCleanup(() => clearInterval(timer))
   command.register("sidebar-tab-cycle", () =>
@@ -496,6 +516,17 @@ export function SessionSidebar(props: {
         aria-label={language.t("sidebar.actions")}
         class="flex h-7 shrink-0 items-center gap-1 pt-1 [app-region:no-drag]"
       >
+        <Tooltip value={language.t("home.project.add")}>
+          <IconButton
+            type="button"
+            variant="ghost-muted"
+            size="normal"
+            icon={<Icon name="folder-add-left" />}
+            data-action="sidebar-add-project"
+            aria-label={language.t("home.project.add")}
+            onClick={addProject}
+          />
+        </Tooltip>
         <Tooltip value={language.t("sidebar.search.placeholder")}>
           <IconButton
             ref={searchButton}
