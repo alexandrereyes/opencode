@@ -643,5 +643,6 @@ test("launcher pins release and explicit server, preserves cwd, and rejects mana
   expect(await blocked.exited).toBe(2)
   expect(output.server).toContain('exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port 4178')
   expect(plist(home)).toContain("&amp;")
+  expect(plist(home)).toContain("<key>ProcessType</key><string>Interactive</string>")
   expect(plist(home)).not.toContain("fixture-secret")
 })

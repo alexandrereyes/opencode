@@ -175,7 +175,10 @@ the operation. Backups live under `backups/<timestamp>-<uuid>/database.sqlite` w
 `activation.json` identifying the previous/target release and database path. These
 are database backups, not backups of config, credentials, external files or services.
 
-Then activation writes runtime-owned launchers, switches `current`, bootstraps the
+The job plist sets `ProcessType` to `Interactive`. Without it, launchd applies light CPU and
+I/O throttling to agents, which makes the server lose scheduling priority under load.
+
+Then activation writes runtime-owned launchers and the job plist, switches `current`, bootstraps the
 job and waits up to 90 checks for **authenticated HTTP 200 with the exact target
 version**. It preserves the password, database and config paths. This is an explicit
 service interruption; schedule it between active work where possible. Existing TUI
