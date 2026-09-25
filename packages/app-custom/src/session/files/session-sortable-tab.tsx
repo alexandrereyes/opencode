@@ -8,16 +8,15 @@ export function FileVisual(props: {
   active?: boolean
   temporary?: boolean
   notFound?: boolean
+  directory?: boolean
 }): JSX.Element {
+  const node = () => ({ path: props.path, type: props.directory ? ("directory" as const) : ("file" as const) })
   return (
     <div class="flex items-center gap-x-1.5 min-w-0">
-      <Show
-        when={!props.active}
-        fallback={<FileIcon node={{ path: props.path, type: "file" }} class="size-4 shrink-0" />}
-      >
+      <Show when={!props.active} fallback={<FileIcon node={node()} class="size-4 shrink-0" />}>
         <span class="relative inline-flex size-4 shrink-0">
-          <FileIcon node={{ path: props.path, type: "file" }} class="absolute inset-0 size-4 tab-fileicon-color" />
-          <FileIcon node={{ path: props.path, type: "file" }} mono class="absolute inset-0 size-4 tab-fileicon-mono" />
+          <FileIcon node={node()} class="absolute inset-0 size-4 tab-fileicon-color" />
+          <FileIcon node={node()} mono class="absolute inset-0 size-4 tab-fileicon-mono" />
         </span>
       </Show>
       <span

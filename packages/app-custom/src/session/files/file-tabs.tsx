@@ -13,6 +13,7 @@ import { Tabs } from "@opencode/ui-custom/tabs"
 import { ScrollView } from "@opencode/ui-custom/scroll-view"
 import { artifactKind } from "@/workspaces/files/artifact"
 import { ArtifactView } from "./artifact-view"
+import { DirectoryView } from "./directory-view"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/workspaces/files/model"
 import { useComments } from "@/composer/comments"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -448,6 +449,7 @@ export function SessionFileView(props: SessionFileViewProps) {
   const content = () => (
     <div class="relative h-full min-h-0 flex flex-col">
       <Switch>
+        <Match when={state()?.entries}>{(entries) => <DirectoryView path={path() ?? ""} entries={entries()} />}</Match>
         <Match when={state()?.loaded ? state()?.content : undefined}>
           {(value) => (
             <Show

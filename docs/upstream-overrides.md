@@ -342,6 +342,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Installation:** none
 - **Result after upstream:** pending
 
+### Reread artifacts when opening a preview — https://github.com/anomalyco/opencode/pull/51036
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `7460d855ac906d9f604fdf7beb934cc19dc2614b`, 2026-09-25
+- **Local change:** `packages/app-custom/src/session/files/open-artifact.tsx` forces `file.load(path, { force: true })` when an agent-referenced path opens, matching upstream. The same custom change also opens directory references as listing tabs (custom-only): a failed read that lists successfully stores `entries` in `packages/app-custom/src/workspaces/files/model.tsx` and renders `src/session/files/directory-view.tsx` instead of an error toast. Upstream's Playwright regression spec is not ported.
+- **Tests:** app-custom typecheck passes. Playwright against the live backend at 1280×720 and 390×844 verified that absolute and workspace-relative directory references open listing tabs, listing entries open nested directories and image previews, file references still open, and missing paths still toast.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes `open-artifact.tsx`; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Timeline image attachment previews in custom UI — https://github.com/anomalyco/opencode/pull/49111
 
 - **Kind:** adaptation

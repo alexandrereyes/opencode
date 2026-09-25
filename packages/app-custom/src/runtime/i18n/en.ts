@@ -972,6 +972,7 @@ export const dict = {
 
   "toast.file.loadFailed.title": "Failed to load file",
   "file.error.notFound": "File not found: {{name}}",
+  "file.directory.empty": "This folder is empty",
   "toast.file.listFailed.title": "Failed to list files",
 
   "toast.context.noLineSelection.title": "No line selection",

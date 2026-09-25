@@ -42,7 +42,14 @@ export function SortableTab(props: {
   const content = createMemo(() => {
     const value = path()
     if (!value) return
-    return <FileVisual path={value} temporary={props.temporary} notFound={notFound()} />
+    return (
+      <FileVisual
+        path={value}
+        temporary={props.temporary}
+        notFound={notFound()}
+        directory={!!file.get(value)?.entries}
+      />
+    )
   })
   return (
     <div ref={sortable.ref} class="h-full flex items-center">

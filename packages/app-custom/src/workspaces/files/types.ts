@@ -32,6 +32,12 @@ export type FileState = {
   notFound?: boolean
   error?: string
   content?: FileContent
+  entries?: DirectoryEntry[]
+}
+
+export type DirectoryEntry = {
+  path: string
+  type: "file" | "directory"
 }
 
 export function selectionFromLines(range: SelectedLineRange): FileSelection {

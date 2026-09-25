@@ -25,7 +25,10 @@ export const { use: useArtifactOpener, provider: ArtifactOpenerProvider } = crea
     const layout = useSessionLayout()
     const [state, setState] = createStore({ opened: 0 })
     const resolve = (href: string, base = "") => {
-      const value = href.replaceAll("\\", "/").replace(/:\d+(?::\d+)?$/, "")
+      const value = href
+        .replaceAll("\\", "/")
+        .replace(/:\d+(?::\d+)?$/, "")
+        .replace(/(.)\/+$/, "$1")
       if (/^[a-z]:\//i.test(value) || value.startsWith("/")) return file.normalize(value)
       const relative = resolveArtifactPath(base, value)
       if (relative !== undefined) return file.normalize(relative)
@@ -38,7 +41,8 @@ export const { use: useArtifactOpener, provider: ArtifactOpenerProvider } = crea
       const directory = location().directory
       const sessionKey = layout.sessionKey()
       const tabs = layout.tabs()
-      await file.load(path)
+      // Always reread: V2 publishes no workspace file change events, so a cached copy can be stale.
+      await file.load(path, { force: true })
       if (location().directory !== directory || layout.sessionKey() !== sessionKey || !file.get(path)?.loaded) return
       const tab = file.tab(path)
       tabs.open(tab)

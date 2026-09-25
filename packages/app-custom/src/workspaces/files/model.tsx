@@ -30,13 +30,14 @@ import { createFileTreeStore } from "./tree-store"
 import { invalidateFromWatcher } from "./watcher"
 import {
   selectionFromLines,
+  type DirectoryEntry,
   type FileState,
   type FileSelection,
   type FileViewState,
   type SelectedLineRange,
 } from "./types"
 
-export type { FileSelection, SelectedLineRange, FileViewState, FileState }
+export type { DirectoryEntry, FileSelection, SelectedLineRange, FileViewState, FileState }
 export { selectionFromLines }
 export {
   evictContentLru,
@@ -145,8 +146,39 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           draft.loading = false
           draft.notFound = false
           draft.content = content
+          draft.entries = undefined
         }),
       )
+    }
+
+    const setDirectory = (file: string, entries: DirectoryEntry[]) => {
+      setStore(
+        "file",
+        file,
+        produce((draft) => {
+          draft.loaded = true
+          draft.loading = false
+          draft.notFound = false
+          draft.error = undefined
+          draft.content = undefined
+          draft.entries = entries
+        }),
+      )
+    }
+
+    // The read endpoint rejects directories, so a failed read is retried as a listing before reporting it.
+    const listDirectory = (file: string) => {
+      const root = path.absolute(file) ? file.replace(/(.)\/+$/, "$1") : undefined
+      return serverSDK.api.file
+        .list(root ? { location: { directory: root } } : { path: file, location: { directory: scope() } })
+        .then((x) =>
+          x.data
+            .map((entry) => ({
+              path: (root ? `${root.replace(/\/$/, "")}/${entry.path}` : entry.path).replace(/\/+$/, ""),
+              type: entry.type,
+            }))
+            .toSorted((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1)),
+        )
     }
 
     const setLoadError = (file: string, message: string, notFound = false) => {
@@ -200,8 +232,10 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           touchFileContent(file, approxBytes(content))
           evictContent(new Set([file]))
         })
-        .catch((e) => {
+        .catch(async (e) => {
+          const entries = isFileNotFoundError(e) ? undefined : await listDirectory(file).catch(() => undefined)
           if (scope() !== directory) return
+          if (entries) return setDirectory(file, entries)
           setLoadError(
             file,
             formatServerError(e, language.t, language.t("error.chain.unknown")),
