@@ -166,6 +166,8 @@ const source = {
   "ui.promptInput.steer": "Steer",
   "ui.promptInput.queue": "Queue",
   "ui.promptInput.steerHint": "Send without interrupting",
+  "ui.promptInput.expand": "Expand composer",
+  "ui.promptInput.collapse": "Collapse composer",
 
   "ui.tabs.close": "Close tab",
 

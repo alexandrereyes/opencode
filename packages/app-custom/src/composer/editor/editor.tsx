@@ -4,6 +4,7 @@ import {
   createResource,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -108,7 +109,52 @@ export function ComposerEditor(props: ComposerEditorProps) {
   let nextTrackedSelectionOrder = 0
   let controlsViewport!: HTMLDivElement
   let controlsContent!: HTMLDivElement
+  let formHost!: HTMLFormElement
+  let scrollViewport: HTMLDivElement | undefined
   const [overflow, setOverflow] = createStore({ start: false, end: false })
+  const [expansion, setExpansion] = createStore({ expanded: false, height: 0 })
+  const measureExpanded = () => {
+    const scroll = scrollViewport?.parentElement
+    if (!scroll) return
+    const viewport = window.visualViewport
+    const visible = viewport?.height ?? window.innerHeight
+    const chrome = formHost.offsetHeight - scroll.offsetHeight
+    // In a session the dock sits below a shrinkable timeline, so the editor may take the whole panel.
+    // Elsewhere (new session) the composer grows downward until the bottom of the visible viewport.
+    const dock = rootHost.closest<HTMLElement>('[data-component="session-composer-dock"]')
+    const bound = dock?.parentElement
+    const available =
+      dock && bound
+        ? bound.clientHeight - composerSiblingsHeight(bound, dock) - (dock.offsetHeight - formHost.offsetHeight) - chrome
+        : (viewport?.offsetTop ?? 0) +
+          visible -
+          scroll.getBoundingClientRect().top -
+          (formHost.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom)
+    setExpansion("height", Math.max(120, Math.floor(Math.min(available, visible - chrome) - 12)))
+  }
+  createEffect(() => {
+    if (!expansion.expanded) return
+    const dock = rootHost.closest<HTMLElement>('[data-component="session-composer-dock"]')
+    const observer = new ResizeObserver(measureExpanded)
+    ;[formHost, dock, dock?.parentElement].forEach((element) => element && observer.observe(element))
+    window.addEventListener("resize", measureExpanded)
+    window.visualViewport?.addEventListener("resize", measureExpanded)
+    measureExpanded()
+    onCleanup(() => {
+      observer.disconnect()
+      window.removeEventListener("resize", measureExpanded)
+      window.visualViewport?.removeEventListener("resize", measureExpanded)
+    })
+  })
+  // Sending clears the draft; return to the compact composer like other chat apps do.
+  createEffect(
+    on(
+      () => !!props.controller.value(),
+      (filled, previous) => {
+        if (previous && !filled) setExpansion("expanded", false)
+      },
+    ),
+  )
   const updateOverflow = () => {
     const offset = Math.abs(controlsViewport.scrollLeft)
     setOverflow({
@@ -520,8 +566,10 @@ export function ComposerEditor(props: ComposerEditorProps) {
         </Show>
       </Show>
       <form
+        ref={formHost}
         data-component="composer"
         data-compact={props.compact ? "true" : undefined}
+        data-expanded={expansion.expanded ? "true" : undefined}
         data-dock-border-underlay={props.borderUnderlay ? "true" : undefined}
         class="group/composer relative w-full overflow-clip bg-v2-background-bg-base"
         classList={{
@@ -555,9 +603,17 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
         <ScrollView
           data-component="composer-scroll"
-          class={props.compact ? "min-h-[64px] max-h-[180px]" : "min-h-[60px] max-h-[180px]"}
+          class={
+            props.compact
+              ? "min-h-[64px] max-h-[180px]"
+              : expansion.expanded && expansion.height
+                ? "min-h-[60px]"
+                : "min-h-[60px] max-h-[180px]"
+          }
+          style={expansion.expanded && expansion.height ? { height: `${expansion.height}px` } : undefined}
           viewportRef={(element) => {
             element.tabIndex = -1
+            scrollViewport = element
           }}
         >
           <div
@@ -568,6 +624,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
             style={{
               "unicode-bidi": state.mode === "normal" ? "plaintext" : undefined,
               "text-align": "start",
+              "--composer-editor-min-height":
+                expansion.expanded && expansion.height ? `${expansion.height}px` : undefined,
             }}
           />
           <Show when={!props.controller.value()}>
@@ -615,6 +673,23 @@ export function ComposerEditor(props: ComposerEditorProps) {
                 />
               </div>
             </Show>
+            <Tooltip
+              placement="top"
+              value={expansion.expanded ? i18n.t("ui.promptInput.collapse") : i18n.t("ui.promptInput.expand")}
+            >
+              <IconButton
+                data-action="composer-expand"
+                type="button"
+                icon={<Icon name={expansion.expanded ? "minimize" : "maximize"} size="large" />}
+                variant="ghost-muted"
+                size="large"
+                aria-label={expansion.expanded ? i18n.t("ui.promptInput.collapse") : i18n.t("ui.promptInput.expand")}
+                aria-pressed={expansion.expanded}
+                // Keep the editor focused so touch keyboards stay open while toggling.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setExpansion("expanded", (expanded) => !expanded)}
+              />
+            </Tooltip>
             <div
               ref={controlsViewport}
               data-slot="composer-controls"
@@ -696,6 +771,25 @@ export function ComposerEditor(props: ComposerEditorProps) {
         </Show>
       </form>
     </div>
+  )
+}
+
+// Height of the dock's in-flow siblings that cannot shrink (e.g. mobile tabs); flexible ones yield to the composer.
+function composerSiblingsHeight(bound: HTMLElement, dock: HTMLElement) {
+  const style = getComputedStyle(bound)
+  const fixed = Array.from(bound.children).filter((element): element is HTMLElement => {
+    if (!(element instanceof HTMLElement) || element === dock) return false
+    const child = getComputedStyle(element)
+    return child.display !== "none" && child.position !== "absolute" && child.position !== "fixed"
+  })
+  return (
+    fixed.reduce(
+      (total, element) => total + (getComputedStyle(element).flexGrow === "0" ? element.offsetHeight : 0),
+      0,
+    ) +
+    fixed.length * (parseFloat(style.rowGap) || 0) +
+    (parseFloat(style.paddingTop) || 0) +
+    (parseFloat(style.paddingBottom) || 0)
   )
 }
 
