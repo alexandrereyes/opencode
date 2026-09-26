@@ -53,8 +53,10 @@ it.effect(
       expect(summary.next).toBeUndefined()
       expect(summary.active.map((session) => session.id)).toEqual([ids[0], ids[153]])
       const first = yield* family.read({ sessionID: root, limit: 10 }, active)
-      expect(first.data.map((session) => session.id)).toEqual(ids.slice(0, 10))
-      expect(first.next).toBe(ids[9])
+      const ordered = [ids[153], ids[0], ...ids.slice(1, 153).toReversed()]
+      expect(first.data.map((session) => session.id)).toEqual(ordered.slice(0, 10))
+      expect(first.next).toBe(ordered[9])
+      expect(first.data[0]?.time.archived).toBeDefined()
       // Updating a listed row cannot change pagination position.
       yield* database.db
         .update(SessionTable)
@@ -62,15 +64,69 @@ it.effect(
         .where(eq(SessionTable.id, ids[0]))
         .run()
       const second = yield* family.read({ sessionID: root, limit: 10, after: first.next }, active)
-      expect(second.data.map((session) => session.id)).toEqual(ids.slice(10, 20))
-      const last = yield* family.read({ sessionID: root, limit: 10, after: ids[149] }, active)
-      expect(last.data.map((session) => session.id)).toEqual(ids.slice(150))
-      expect(last.data.at(-1)?.time.archived).toBeDefined()
+      expect(second.data.map((session) => session.id)).toEqual(ordered.slice(10, 20))
+      const last = yield* family.read({ sessionID: root, limit: 10, after: ordered[149] }, active)
+      expect(last.data.map((session) => session.id)).toEqual(ordered.slice(150))
       expect(last.next).toBeUndefined()
       const nested = yield* family.read({ sessionID: ids[0] }, active)
       expect(nested.count).toBe(54)
       expect(nested.cost).toBe(27)
     }),
+)
+
+it.effect("paginates running rank, last execution, creation fallback and ID ties without skips", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const family = yield* SessionFamily.Service
+    const root = Session.ID.make("ses_order_root")
+    const ids = Array.from({ length: 7 }, (_, i) => Session.ID.make(`ses_order_${i}`))
+    yield* database.db
+      .insert(ProjectTable)
+      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/repo"), sandboxes: [] })
+      .onConflictDoNothing()
+      .run()
+    yield* database.db
+      .insert(SessionTable)
+      .values(
+        [root, ...ids].map((id, i) => ({
+          id,
+          project_id: Project.ID.global,
+          slug: id,
+          directory: AbsolutePath.make("/repo"),
+          version: "test",
+          parent_id: i ? root : undefined,
+          time_created: [0, 1, 2, 3, 4, 5, 6, 6][i],
+          time_updated: 999,
+          time_idle: [null, 10, 20, 30, 40, null, null, null][i],
+        })),
+      )
+      .run()
+    const active = new Set([ids[0], ids[1]])
+    const walk = (after?: Session.ID): Effect.Effect<Session.ID[]> =>
+      Effect.gen(function* () {
+        const page = yield* family.read({ sessionID: root, limit: 1, after }, active)
+        return [...page.data.map((row) => row.id), ...(page.next ? yield* walk(page.next) : [])]
+      })
+    expect(yield* walk()).toEqual([ids[1], ids[0], ids[3], ids[2], ids[6], ids[5], ids[4]])
+    expect((yield* family.read({ sessionID: root, limit: 10 }, new Set())).data.map((row) => row.id)).toEqual([
+      ids[3],
+      ids[2],
+      ids[1],
+      ids[0],
+      ids[6],
+      ids[5],
+      ids[4],
+    ])
+    yield* Effect.forEach([root, Session.ID.make("ses_missing")], (after) =>
+      Effect.gen(function* () {
+        const page = yield* family.read({ sessionID: root, limit: 10, after }, active)
+        expect(page.data).toEqual([])
+        expect(page.next).toBeUndefined()
+        expect(page.count).toBe(7)
+        expect(page.active.map((row) => row.id)).toEqual([ids[0], ids[1]])
+      }),
+    )
+  }),
 )
 
 it.effect("reads each page row's latest measured assistant context without decoding transcripts", () =>
@@ -143,13 +199,13 @@ it.effect("reads each page row's latest measured assistant context without decod
       ])
       .run()
     const page = yield* family.read({ sessionID: root, limit: 10 }, new Set())
-    expect(page.data.map((session) => session.id)).toEqual([measured, unmeasured])
-    expect(page.data[0]?.context).toEqual({
+    expect(page.data.map((session) => session.id)).toEqual([unmeasured, measured])
+    expect(page.data[1]?.context).toEqual({
       id: SessionMessage.ID.make("msg_context_new"),
       tokens: tokens(500),
       model: { providerID: Provider.ID.make("anthropic"), id: Model.ID.make("claude") },
     })
-    expect(page.data[1]?.context).toBeUndefined()
+    expect(page.data[0]?.context).toBeUndefined()
     expect(page.active).toEqual([])
   }),
 )

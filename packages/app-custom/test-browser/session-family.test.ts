@@ -212,11 +212,12 @@ test("a listed member's step refreshes page context in place and keeps the shown
     data: { sessionID: child(12).id, assistantMessageID: "msg_y", tokens: context(1).tokens },
   })
   await new Promise((resolve) => setTimeout(resolve, 175))
-  expect(value.requests.slice(count + 1).map((request) => request.method).toSorted()).toEqual([
-    "page",
-    "page",
-    "snapshot",
-  ])
+  expect(
+    value.requests
+      .slice(count + 1)
+      .map((request) => request.method)
+      .toSorted(),
+  ).toEqual(["page", "page", "snapshot"])
   expect(value.list.state.children).toHaveLength(20)
   expect(value.list.state.loading).toBeFalse()
   expect(value.list.state.subagentLimit).toBe(20)
@@ -224,6 +225,30 @@ test("a listed member's step refreshes page context in place and keeps the shown
   await value.list.load(true)
   expect(value.requests.at(-1)?.input).toMatchObject({ after: child(19).id, limit: 10 })
   expect(value.list.state.children).toHaveLength(30)
+})
+
+test.each([
+  { type: "session.execution.started", data: { sessionID: child(140).id } },
+  { type: "session.execution.succeeded", data: { sessionID: child(140).id } },
+  { type: "session.execution.failed", data: { sessionID: child(140).id, error: { type: "test", message: "Failed" } } },
+  { type: "session.execution.interrupted", data: { sessionID: child(140).id, reason: "user" } },
+] as const)("$type invalidates pages even for an unlisted member and reloads the shown depth", async (event) => {
+  const value = fixture()
+  await tick()
+  await value.list.load(true)
+  const count = value.requests.length
+  const version = value.families.get("ses_root")?.version ?? 0
+  value.events.publish({ ...event, id: "evt_execution", created: 2 })
+  await new Promise((resolve) => setTimeout(resolve, 175))
+  expect(value.families.get("ses_root")?.version).toBe(version + 1)
+  expect(
+    value.requests
+      .slice(count)
+      .map((request) => request.method)
+      .toSorted(),
+  ).toEqual(["page", "page", "snapshot"])
+  expect(value.list.state.children).toHaveLength(20)
+  expect(value.list.state.subagentLimit).toBe(20)
 })
 
 test("in-flight optional pages are cancelled on collapse and cannot hydrate the shared cache after navigation", async () => {
@@ -277,8 +302,12 @@ test("new descendant permissions are automatic, text deltas do not refresh, and 
     }),
   )
   await new Promise((resolve) => setTimeout(resolve, 175))
-  expect(value.requests).toHaveLength(count + 1)
-  expect(value.requests.at(-1)?.method).toBe("snapshot")
+  expect(
+    value.requests
+      .slice(count)
+      .map((request) => request.method)
+      .toSorted(),
+  ).toEqual(["page", "snapshot"])
   value.events.publish({
     type: "permission.replied",
     id: "evt_reply_permission",

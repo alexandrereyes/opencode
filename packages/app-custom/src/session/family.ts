@@ -114,6 +114,11 @@ export function createSessionFamilies(input: {
       const settledForm = event.type === "form.replied" || event.type === "form.cancelled" ? event.data.id : undefined
       const settledPermission = event.type === "permission.replied" ? event.data.requestID : undefined
       const topology = event.type === "session.created" || event.type === "session.deleted"
+      const execution =
+        event.type === "session.execution.started" ||
+        event.type === "session.execution.succeeded" ||
+        event.type === "session.execution.failed" ||
+        event.type === "session.execution.interrupted"
       // Page rows carry measured context, so a listed member's step or revert changes page data.
       const measured =
         event.type === "session.step.ended" ||
@@ -128,10 +133,7 @@ export function createSessionFamilies(input: {
         settledPermission ||
         event.type === "form.created" ||
         event.type === "permission.asked" ||
-        event.type === "session.execution.started" ||
-        event.type === "session.execution.succeeded" ||
-        event.type === "session.execution.failed" ||
-        event.type === "session.execution.interrupted"
+        execution
       if (!relevant) return
       cache.forEach((work, id) => {
         work.dirty = true
@@ -146,7 +148,7 @@ export function createSessionFamilies(input: {
         const listed =
           measured !== undefined &&
           [...work.pages.values()].some((page) => page.data.some((session) => session.id === measured))
-        if (topology || listed) {
+        if (topology || execution || listed) {
           work.pages.clear()
           work.pageRevision++
           work.pagesDirty = true

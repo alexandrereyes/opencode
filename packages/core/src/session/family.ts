@@ -1,6 +1,6 @@
 export * as SessionFamily from "./family.js"
 
-import { and, asc, getTableColumns, getTableName, gt, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, lt, or, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Session } from "@opencode/schema/session"
 import { SessionFamily } from "@opencode/schema/session-family"
@@ -91,8 +91,21 @@ const layer = Layer.effect(
           .where(descendants)
           .get()
           .pipe(Effect.orDie)
+        const rank = active.size
+          ? sql<number>`case when ${inArray(SessionTable.id, [...active])} then 0 else 1 end`
+          : sql<number>`${1}`
+        const executed = sql<number>`coalesce(${SessionTable.time_idle}, ${SessionTable.time_created})`
+        const anchor =
+          input.limit !== undefined && input.after
+            ? yield* database.db
+                .select({ rank, executed, id: SessionTable.id })
+                .from(SessionTable)
+                .where(and(descendants, eq(SessionTable.id, input.after)))
+                .get()
+                .pipe(Effect.orDie)
+            : undefined
         const rows =
-          input.limit === undefined
+          input.limit === undefined || (input.after && !anchor)
             ? []
             : yield* database.db
                 .select({
@@ -113,8 +126,19 @@ const layer = Layer.effect(
                   )`,
                 })
                 .from(SessionTable)
-                .where(and(descendants, input.after ? gt(SessionTable.id, input.after) : undefined))
-                .orderBy(asc(SessionTable.id))
+                .where(
+                  and(
+                    descendants,
+                    anchor
+                      ? or(
+                          gt(rank, anchor.rank),
+                          and(eq(rank, anchor.rank), lt(executed, anchor.executed)),
+                          and(eq(rank, anchor.rank), eq(executed, anchor.executed), lt(SessionTable.id, anchor.id)),
+                        )
+                      : undefined,
+                  ),
+                )
+                .orderBy(asc(rank), desc(executed), desc(SessionTable.id))
                 .limit(input.limit + 1)
                 .all()
                 .pipe(Effect.orDie)

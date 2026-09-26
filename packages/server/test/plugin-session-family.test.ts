@@ -49,7 +49,12 @@ it.live("serves bounded family pages and pending descendants through the actual 
               id,
               parentID: i === 153 ? ids[0] : root.id,
               title: `Child ${i}`,
-              time: { ...root.time, ...(i === 150 ? { archived: 1 } : {}) },
+              time: {
+                ...root.time,
+                created: 1000 + i,
+                ...(i < 3 ? { idle: 2000 - i } : {}),
+                ...(i === 150 ? { archived: 1 } : {}),
+              },
             },
             messages:
               i === 0 || i === 153
@@ -129,6 +134,7 @@ it.live("serves bounded family pages and pending descendants through the actual 
       client.rpc(Family.Definition).page({ sessionID: root.id, limit: 10 }, { location }),
     )
     expect(page.data).toHaveLength(10)
+    expect(page.data.map((item) => item.id)).toEqual([...ids.slice(0, 3), ...ids.slice(147).toReversed()])
     const second = yield* Effect.promise(() =>
       client.rpc(Family.Definition).page({ sessionID: root.id, limit: 10, after: page.next }, { location }),
     )
@@ -141,7 +147,15 @@ it.live("serves bounded family pages and pending descendants through the actual 
         )
         return [...next.data, ...(yield* walk(next.next))]
       })
-    const measured = [...page.data, ...second.data, ...(yield* walk(second.next))].filter((item) => item.context)
+    const all = [...page.data, ...second.data, ...(yield* walk(second.next))]
+    expect(all.map((item) => item.id)).toEqual([...ids.slice(0, 3), ...ids.slice(3).toReversed()])
+    expect(new Set(all.map((item) => item.id)).size).toBe(154)
+    expect(
+      yield* Effect.promise(() =>
+        client.rpc(Family.Definition).page({ sessionID: root.id, limit: 10, after: root.id }, { location }),
+      ),
+    ).toEqual({ data: [] })
+    const measured = all.filter((item) => item.context)
     expect(measured.map((item) => item.id)).toEqual([ids[1]])
     expect(measured[0]?.context).toEqual({
       id: "msg_family_1_measured",
