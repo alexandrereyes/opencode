@@ -3,12 +3,6 @@
   width: 100%;
 }
 
-/* Expanded composer: the whole editing area stays clickable, not just the written lines. */
-[data-component="composer"][data-expanded="true"] [data-slot="composer-editor-host"] > .cm-editor,
-[data-component="composer"][data-expanded="true"] [data-slot="composer-editor-host"] > .cm-editor .cm-content {
-  min-height: var(--composer-editor-min-height);
-}
-
 [data-component="composer-editor"] [data-mention="snippet"] {
   color: var(--v2-text-text-accent);
 }
