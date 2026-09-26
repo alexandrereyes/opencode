@@ -524,6 +524,20 @@ Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The 
 `GET /api/server/subscriptions` endpoint reads `/_admin/status` server-side and returns only quota
 metadata. Weekly percentages are shown as remaining quota; dates are quota resets, not subscription
 or OAuth expirations. Missing/stale usage is marked explicitly. No credits balance is displayed.
+The same `custom.subscriptions` RPC also reads the separate Anthropic pool from
+`/_admin/anthropic/status`, normalizing `*_max_20x`/`*_max_5x` tiers to Max 20x/Max 5x and
+counting banked resets from unpaused Anthropic grants. A 404 or 503 means the proxy has no
+enabled Anthropic pool, so the pool is hidden instead of reported as a failure. The sidebar
+footer, under an "LLM proxy" heading, shows one row per pool (Codex and Claude) with its
+combined weekly meter, balance in Pro 20x or Max 20x equivalents, days to the next renewal, and
+banked resets; Claude also shows a chip with the average five-hour quota, tinted when it runs
+low. Selecting a row opens the details popover (desktop) or panel (mobile) on that pool's tab
+and highlights the row. Each tab is one card: plans and account count, balance with the
+combined meter and pace marker, accounts grouped by plan with availability, each account's 7d
+meter (or side-by-side 5h/7d meters when a five-hour window exists) and a short status badge,
+and a footer with the next renewal date and banked resets. Exact renewal and expiry times are
+in tooltips; the update time and refresh button sit below the card. The two pools are never
+combined, matching the proxy's lack of cross-provider failover.
 Panel tab selection is persisted per server and Session, including across Location changes.
 The chat/side-panel divider width is a shared local preference: resizing it in any Session
 applies to existing and new Sessions and survives reloads. Narrow windows clamp the rendered

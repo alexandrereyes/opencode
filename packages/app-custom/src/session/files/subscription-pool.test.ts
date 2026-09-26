@@ -313,3 +313,26 @@ test("summarizes each tier and keeps Plus weekly and five-hour balances independ
     fiveHourRemaining: null,
   })
 })
+
+test("supports Anthropic Max tiers and ranks Max 20x like Pro 20x", () => {
+  expect(subscriptionCapacity({ ...account, plan: "max20x" })).toBe("available")
+  expect(subscriptionCapacity({ ...account, plan: "max5x" })).toBe("available")
+  expect(subscriptionCapacity({ ...account, plan: "default_claude_ai" })).toBe("outside")
+  expect(
+    subscriptionAccounts([
+      { ...account, id: "unknown", plan: "default_claude_ai" },
+      { ...account, id: "max5x", plan: "max5x" },
+      { ...account, id: "max20x", plan: "max20x" },
+    ]).map((item) => item.id),
+  ).toEqual(["max20x", "max5x", "unknown"])
+  expect(
+    subscriptionPool(
+      [
+        { ...account, plan: "max20x", remaining: 31 },
+        { ...account, plan: "max5x" },
+      ],
+      Date.now(),
+      "max20x",
+    ),
+  ).toMatchObject({ total: 1, equivalents: 0.31 })
+})

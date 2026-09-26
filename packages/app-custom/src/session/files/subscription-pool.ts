@@ -3,7 +3,7 @@ import type { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rp
 type Account = Subscriptions.Account
 
 export function subscriptionPlanSupported(plan: string | null) {
-  return plan === "pro" || plan === "prolite" || plan === "plus"
+  return plan === "pro" || plan === "prolite" || plan === "plus" || plan === "max20x" || plan === "max5x"
 }
 
 export function subscriptionCapacity(account: Account, now = Date.now()) {
@@ -31,7 +31,13 @@ export function subscriptionAccounts(accounts: readonly Subscriptions.Account[],
     return 1
   }
   const planRank = (account: Account) =>
-    account.plan === "pro" ? 0 : account.plan === "prolite" ? 1 : account.plan === "plus" ? 2 : 3
+    account.plan === "pro" || account.plan === "max20x"
+      ? 0
+      : account.plan === "prolite" || account.plan === "max5x"
+        ? 1
+        : account.plan === "plus"
+          ? 2
+          : 3
   // Preserve source order among equally ranked accounts.
   return accounts.toSorted((a, b) => planRank(a) - planRank(b) || rank(a) - rank(b))
 }

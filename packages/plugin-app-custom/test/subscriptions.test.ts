@@ -9,6 +9,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
   const server = Bun.serve({
     port: 0,
     fetch(request) {
+      if (new URL(request.url).pathname === "/_admin/anthropic/status") return new Response("missing", { status: 404 })
       expect(new URL(request.url).pathname).toBe("/_admin/status")
       return Response.json({
         oauth: { accessToken: "oauth-private" },
@@ -104,24 +105,148 @@ test("normalizes quota metadata without returning account secrets and preserves 
         hasCapacity: null,
       },
     ],
+    anthropic: { status: "disabled", accounts: [] },
+  })
+  expect(JSON.stringify(result)).not.toContain("private")
+})
+
+test("normalizes the Anthropic pool with tiers, both quota windows and active grants", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === "/_admin/status") return Response.json({ accounts: [] })
+      expect(new URL(request.url).pathname).toBe("/_admin/anthropic/status")
+      return Response.json({
+        provider: "anthropic",
+        accounts: [
+          {
+            account: {
+              id: "claude",
+              email: "claude@example.test",
+              organizationId: "org-private",
+              subscriptionTier: "default_claude_max_5x",
+              name: null,
+              enabled: true,
+              authenticationState: "Authenticated",
+            },
+            cooldownSeconds: 0,
+            usage: {
+              observedAt: "2026-09-26T22:41:16Z",
+              fiveHourPercent: 1,
+              weeklyPercent: 69,
+              hasCapacity: true,
+              planType: "default_claude_max_20x",
+              weeklyResetAt: "2026-09-29T11:59:59Z",
+              fiveHourResetAt: "2026-09-27T03:09:59Z",
+            },
+            usageAgeSeconds: 60,
+            inventory: {
+              observedAt: "2026-09-26T22:41:17Z",
+              available: [],
+              grants: [
+                { id: "later", resetsLeft: 2, resetsTotal: 2, endsAt: "2026-11-01T00:00:00Z", paused: false },
+                { id: "first", resetsLeft: 1, resetsTotal: 1, endsAt: "2026-10-22T16:00:00Z", paused: false },
+                { id: "open", resetsLeft: 1, resetsTotal: 1, endsAt: null, paused: false },
+                { id: "used", resetsLeft: 0, resetsTotal: 1, endsAt: "2026-10-01T00:00:00Z", paused: false },
+                { id: "paused", resetsLeft: 1, resetsTotal: 1, endsAt: "2026-10-02T00:00:00Z", paused: true },
+              ],
+              eligible: true,
+            },
+          },
+          {
+            account: {
+              id: "unknown",
+              email: "unknown@example.test",
+              subscriptionTier: null,
+              name: "Unknown",
+              enabled: true,
+              authenticationState: "Authenticated",
+            },
+            cooldownSeconds: 0,
+            usage: null,
+            usageAgeSeconds: null,
+            inventory: null,
+          },
+        ],
+      })
+    },
+  })
+  const result = await Effect.runPromise(
+    withProxy(server.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
+  )
+  expect(result).toEqual({
+    status: "ok",
+    accounts: [],
+    anthropic: {
+      status: "ok",
+      accounts: [
+        {
+          id: "claude",
+          name: "claude@example.test",
+          enabled: true,
+          plan: "max20x",
+          authenticated: true,
+          cooldownSeconds: 0,
+          bankedResets: {
+            available: 4,
+            earliestExpiresAt: "2026-10-22T16:00:00Z",
+            latestExpiresAt: "2026-11-01T00:00:00Z",
+            nonExpiring: 1,
+          },
+          fiveHourRemaining: 99,
+          fiveHourResetAt: "2026-09-27T03:09:59Z",
+          remaining: 31,
+          resetAt: "2026-09-29T11:59:59Z",
+          observedAt: "2026-09-26T22:41:16Z",
+          stale: false,
+          hasCapacity: true,
+        },
+        {
+          id: "unknown",
+          name: "Unknown",
+          enabled: true,
+          plan: null,
+          authenticated: true,
+          cooldownSeconds: 0,
+          bankedResets: null,
+          fiveHourRemaining: null,
+          fiveHourResetAt: null,
+          remaining: null,
+          resetAt: null,
+          observedAt: null,
+          stale: true,
+          hasCapacity: null,
+        },
+      ],
+    },
   })
   expect(JSON.stringify(result)).not.toContain("private")
 })
 
 test("returns explicit states for missing configuration and failed or malformed responses", async () => {
-  expect(await Effect.runPromise(withProxy("", read()))).toEqual({ status: "unconfigured", accounts: [] })
-  const failed = Bun.serve({ port: 0, fetch: () => new Response("no", { status: 503 }) })
+  expect(await Effect.runPromise(withProxy("", read()))).toEqual({
+    status: "unconfigured",
+    accounts: [],
+    anthropic: { status: "disabled", accounts: [] },
+  })
+  const failed = Bun.serve({ port: 0, fetch: () => new Response("no", { status: 500 }) })
   expect(
     await Effect.runPromise(
       withProxy(failed.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => failed.stop(true)))),
     ),
-  ).toEqual({ status: "unavailable", accounts: [] })
+  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
+  const disabled = Bun.serve({ port: 0, fetch: () => new Response("no", { status: 503 }) })
+  expect(
+    await Effect.runPromise(
+      withProxy(disabled.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => disabled.stop(true)))),
+    ),
+  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "disabled", accounts: [] } })
   const malformed = Bun.serve({ port: 0, fetch: () => Response.json({ unexpected: true }) })
   expect(
     await Effect.runPromise(
       withProxy(malformed.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => malformed.stop(true)))),
     ),
-  ).toEqual({ status: "unavailable", accounts: [] })
+  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
 })
 
 test("times out an unresponsive proxy after eight seconds", async () => {
@@ -130,7 +255,7 @@ test("times out an unresponsive proxy after eight seconds", async () => {
   const result = await Effect.runPromise(
     withProxy(server.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
   )
-  expect(result).toEqual({ status: "unavailable", accounts: [] })
+  expect(result).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
   expect(performance.now() - started).toBeGreaterThanOrEqual(7_500)
 }, 10_000)
 

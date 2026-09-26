@@ -23,34 +23,36 @@ it.live(
       const fixture = path.resolve(import.meta.dir, "../../plugin-app-custom/test/fixture/mcp-server.ts")
       const proxy = Bun.serve({
         port: 0,
-        fetch: () =>
-          Response.json({
-            accounts: [
-              {
-                account: {
-                  id: "quota",
-                  name: null,
-                  email: "quota@example.test",
-                  enabled: true,
-                  planType: "pro",
-                  authenticationState: "Authenticated",
-                  oauth: { accessToken: "private" },
-                },
-                usage: {
-                  weeklyPercent: 25,
-                  weeklyResetAt: null,
-                  observedAt: "2026-09-12T12:00:00Z",
-                  hasCapacity: true,
-                  planType: "pro",
-                },
-                usageAgeSeconds: 0,
-                cooldownSeconds: 0,
-                bankedResets: null,
-                fiveHourRemaining: null,
-                fiveHourResetAt: null,
-              },
-            ],
-          }),
+        fetch: (request) =>
+          new URL(request.url).pathname === "/_admin/anthropic/status"
+            ? new Response(null, { status: 404 })
+            : Response.json({
+                accounts: [
+                  {
+                    account: {
+                      id: "quota",
+                      name: null,
+                      email: "quota@example.test",
+                      enabled: true,
+                      planType: "pro",
+                      authenticationState: "Authenticated",
+                      oauth: { accessToken: "private" },
+                    },
+                    usage: {
+                      weeklyPercent: 25,
+                      weeklyResetAt: null,
+                      observedAt: "2026-09-12T12:00:00Z",
+                      hasCapacity: true,
+                      planType: "pro",
+                    },
+                    usageAgeSeconds: 0,
+                    cooldownSeconds: 0,
+                    bankedResets: null,
+                    fiveHourRemaining: null,
+                    fiveHourResetAt: null,
+                  },
+                ],
+              }),
       })
       const previousProxy = process.env.OPENCODE_LLM_PROXY_URL
       process.env.OPENCODE_LLM_PROXY_URL = proxy.url.toString()
@@ -147,6 +149,7 @@ it.live(
             hasCapacity: true,
           },
         ],
+        anthropic: { status: "disabled", accounts: [] },
       })
       expect(JSON.stringify(subscriptions)).not.toContain("private")
 

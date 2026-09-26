@@ -29,10 +29,18 @@ export const Account = Schema.Struct({
   hasCapacity: Schema.NullOr(Schema.Boolean),
 }).annotate({ identifier: "Subscriptions.Account" })
 
+export interface Pool extends Schema.Schema.Type<typeof Pool> {}
+export const Pool = Schema.Struct({
+  // `disabled` means the proxy does not expose this pool, so clients hide it instead of reporting a failure.
+  status: Schema.Literals(["ok", "unavailable", "disabled"]),
+  accounts: Schema.Array(Account),
+}).annotate({ identifier: "Subscriptions.Pool" })
+
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   status: Schema.Literals(["ok", "unconfigured", "unavailable"]),
   accounts: Schema.Array(Account),
+  anthropic: Pool,
 }).annotate({ identifier: "Subscriptions.Info" })
 
 export const Definition = Rpc.define({
