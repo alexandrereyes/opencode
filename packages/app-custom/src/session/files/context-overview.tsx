@@ -149,7 +149,7 @@ export function ContextOverview(props: {
     queryFn: () =>
       sdk.api
         .rpc(Directories.Definition)
-        .home({}, { location: { directory: directory() } })
+        .home({})
         .then((result) => result.path.replace(/[\\/]+$/, "")),
   }))
   const displayDirectory = createMemo(() => {

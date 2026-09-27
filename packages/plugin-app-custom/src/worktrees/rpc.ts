@@ -92,6 +92,11 @@ export const Definition = Rpc.define({
       input: Schema.toStandardSchemaV1(Schema.Struct({ directories: Schema.Array(AbsolutePath) })),
       output: Schema.toStandardSchemaV1(Schema.Array(LocatedDirectory)),
     },
+    available: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ directory: AbsolutePath })),
+      output: Schema.toStandardSchemaV1(Schema.Boolean),
+      errors: { operation_failed: Schema.toStandardSchemaV1(OperationFailed) },
+    },
     check: {
       input: Schema.toStandardSchemaV1(Schema.Struct({ projectID: Project.ID, directory: AbsolutePath })),
       output: Schema.toStandardSchemaV1(Schema.Struct({ drift: Schema.Boolean })),

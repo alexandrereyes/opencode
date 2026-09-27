@@ -41,7 +41,7 @@ export function SidebarSubscriptions(props: {
           : tab?.type === "session"
             ? ctx.data.session.get(tab.routeSessionId ?? tab.sessionId)?.location.directory
             : undefined
-      // Quota status is process-global; without a tab, the server default Location avoids booting a project.
+      // Quota status is process-global; the request uses the server default Location.
       return { ctx, directory: directory ?? "" }
     },
     undefined,
@@ -51,7 +51,7 @@ export function SidebarSubscriptions(props: {
     source,
     data: await source.ctx.sdk.api
       .rpc(Subscriptions.Definition)
-      .list({}, { location: { directory: source.directory } })
+      .list({})
       .catch(() => ({
         status: "unavailable" as const,
         accounts: [],

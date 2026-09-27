@@ -7,6 +7,7 @@ import { Effect, Schema } from "effect"
 import { AbsolutePath } from "@opencode/schema/schema"
 import {
   checkWorktrees,
+  directoryAvailable,
   inspectWorktree,
   locateDirectories,
   operationFailed,
@@ -23,9 +24,27 @@ afterEach(async () => {
 })
 
 describe("worktrees", () => {
+  test("checks removed and non-git directories without discovering a Location", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "directory-available-"))
+    directories.push(root)
+    expect(await Effect.runPromise(directoryAvailable(root))).toBe(true)
+    await fs.writeFile(path.join(root, "file"), "content")
+    expect(await Effect.runPromise(directoryAvailable(path.join(root, "file")))).toBe(false)
+    expect(await Effect.runPromise(directoryAvailable(path.join(root, "file", "child")))).toBe(false)
+    await fs.rm(root, { recursive: true })
+    expect(await Effect.runPromise(directoryAvailable(root))).toBe(false)
+  })
+
   test("publishes the frozen browser-safe RPC contract", () => {
     expect(Worktrees.Definition.id).toBe("custom.worktrees")
-    expect(Object.keys(Worktrees.Definition.methods)).toEqual(["inspect", "delete", "branches", "locate", "check"])
+    expect(Object.keys(Worktrees.Definition.methods)).toEqual([
+      "inspect",
+      "delete",
+      "branches",
+      "locate",
+      "available",
+      "check",
+    ])
     expect(Object.keys(Worktrees.Definition.methods.inspect.errors)).toEqual(["operation_failed"])
     expect(
       Schema.encodeSync(Worktrees.DeleteInput)(

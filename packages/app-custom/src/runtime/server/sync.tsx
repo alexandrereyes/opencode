@@ -28,6 +28,7 @@ import {
 } from "@/workspaces/inventory"
 import { sameDirectory } from "@/workspaces/paths"
 import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
+import type { createDirectoryGuard } from "./directory-guard"
 
 type GlobalStore = {
   path: Path
@@ -53,7 +54,11 @@ function makeQueryOptionsApi(scope: ServerScope, serverAPI: () => ServerApi) {
 }
 export type QueryOptionsApi = ReturnType<typeof makeQueryOptionsApi>
 
-export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
+export function createServerSyncContextInner(
+  serverSDK: ServerSDK,
+  data: Data,
+  directories: ReturnType<typeof createDirectoryGuard>,
+) {
   const language = useLanguage()
   const platform = usePlatform()
   const owner = getOwner()
@@ -192,10 +197,15 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
     children.pin(key)
     const promise = Promise.resolve().then(async () => {
       const child = children.ensureChild(directory)
+      if (!(await directories.available(directory))) {
+        child[1]("status", "complete")
+        return
+      }
       await Promise.all([
         data.location.sync({ directory }),
         bootstrapDirectory({
           directory,
+          run: (load) => directories.run(directory, load),
           scope: serverSDK.scope,
           mcp: children.mcp(key),
           global: {
@@ -342,8 +352,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
   }
 }
 
-export function createServerSyncContext(serverSDK: ServerSDK, data: Data) {
-  return createServerSyncContextInner(serverSDK, data)
+export function createServerSyncContext(
+  serverSDK: ServerSDK,
+  data: Data,
+  directories: ReturnType<typeof createDirectoryGuard>,
+) {
+  return createServerSyncContextInner(serverSDK, data, directories)
 }
 
 export type ServerSync = ReturnType<typeof createServerSyncContext>

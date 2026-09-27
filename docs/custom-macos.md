@@ -54,8 +54,14 @@ are still unowned; RPC failures and unknown strategies also fall back to the off
 An unchanged expanded project therefore does not boot its Location. Explicit refresh actions
 are unchanged, and only core writes the inventory. When integrating upstream, reconcile this
 check with `Worktree.refresh`, its insert/conflict ownership rules, and the built-in Git strategy;
-the custom plugin currently registers no worktree strategies. Opening a session boots its Location as
-before. Location keys compare directory strings exactly, so case variants of one directory on
+the custom plugin currently registers no worktree strategies. Before syncing Location catalogs,
+the custom app calls `custom.worktrees.available` in the default Location once per directory and
+connection. A confirmed missing directory skips catalog requests while session history remains
+readable. Catalog failures recheck availability to detect terminal removals after the cold check;
+other failures retain normal error reporting. Reconnecting or reloading clears this availability
+cache, allowing restored directories to load again. This does not change the inventory cache or
+its cold drift check. Opening a session in an existing directory boots its Location as before.
+Location keys compare directory strings exactly, so case variants of one directory on
 the case-insensitive macOS filesystem (`~/Dev/x` and `~/dev/x`) become separate Locations with
 duplicate processes. Initialization and tool discovery do not create Safari's automation window or consume its one
 active WebDriver session. Once automation starts, Safari still permits only one active session

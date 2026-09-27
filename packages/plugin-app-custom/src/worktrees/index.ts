@@ -40,6 +40,8 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
         removeWorktree(worktrees, input).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
       branches: () => worktreeBranches(ctx.location.directory),
       locate: (input) => locateDirectories(input.directories),
+      available: (input, context) =>
+        directoryAvailable(input.directory).pipe(Effect.mapError((error) => operationFailed(error, context.error))),
       check: (input, context) =>
         checkWorktrees({ list: () => ctx.worktree.list({ projectID: input.projectID }) }, input.directory).pipe(
           Effect.mapError((error) => operationFailed(error, context.error)),
@@ -47,6 +49,21 @@ export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx:
     })
     .pipe(Effect.orDie)
 })
+
+// Runs in the default Location: checking a historical directory must not boot its services.
+export function directoryAvailable(directory: string) {
+  return Effect.tryPromise({
+    try: () =>
+      fs.stat(directory).then(
+        (stat) => stat.isDirectory(),
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT" || error.code === "ENOTDIR") return false
+          throw error
+        },
+      ),
+    catch: (error) => new Error(message(error)),
+  })
+}
 
 // Git worktree root, main checkout (as Project.resolve derives them) and branch, without
 // booting a Location (and its MCP processes) per directory. Directories outside Git are omitted.

@@ -139,7 +139,7 @@ export function useOpenInApp(input: { path: () => string }) {
     server: () => server.key,
     location: input.path,
     status: sdk.connection.status,
-    list: (directory) => sdk.api.rpc(NativeApps.Definition).list({}, { location: { directory } }),
+    list: () => sdk.api.rpc(NativeApps.Definition).list({}),
   })
 
   const os = createMemo(() =>

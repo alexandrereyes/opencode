@@ -121,6 +121,7 @@ export const loadPathQuery = (scope: ServerScope, directory: string | null, api:
 
 export async function bootstrapDirectory(input: {
   directory: string
+  run: (load: () => Promise<void>) => Promise<void>
   scope: ServerScope
   mcp: boolean
   api: {
@@ -149,8 +150,12 @@ export async function bootstrapDirectory(input: {
     seededProject
       ? undefined
       : () =>
-          retry(() => input.api.location.get({ location: { directory: input.directory } })).then((location) =>
-            input.setStore("project", location.project.id),
+          retry(() =>
+            input.run(() =>
+              input.api.location.get({ location: { directory: input.directory } }).then((location) => {
+                input.setStore("project", location.project.id)
+              }),
+            ),
           ),
   ].filter((task): task is () => Promise<void> => !!task)
 

@@ -26,6 +26,8 @@ import { usePreferences } from "@/preferences/context"
 import { Schema } from "effect"
 import { createSessionFamilies } from "@/session/family"
 import { Persistence } from "@/runtime/persistence/schema"
+import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
+import { createDirectoryGuard, guardLocationSync } from "./directory-guard"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -205,6 +207,8 @@ function createServerController(
   const connKey = ServerConnection.key(conn)
   const sdk = createServerSdkContext(conn, scope)
   const snippets = createServerSnippets(sdk)
+  const directories = createDirectoryGuard((directory) => sdk.api.rpc(Worktrees.Definition).available({ directory }))
+  onCleanup(sdk.event.on("server.connected", () => directories.clear()))
   const source = createData({
     api: () => sdk.api,
     initialMessageLimit: () => (timelinePreset(settings.general.timelineDetail())?.id === "compact" ? 40 : 20),
@@ -222,6 +226,7 @@ function createServerController(
       })
     },
   })
+  guardLocationSync(source, directories)
   const data = createDesktopData({
     data: source,
     remove: (sessionID) => sdk.api.session.remove({ sessionID }),
@@ -240,7 +245,7 @@ function createServerController(
     })
   onCleanup(data.on("session.archived", (event) => hideSession(event.data.sessionID)))
   onCleanup(data.on("session.deleted", (event) => hideSession(event.data.sessionID)))
-  const sync = createServerSyncContext(sdk, data)
+  const sync = createServerSyncContext(sdk, data, directories)
   createPermissionAutoApprover({ sdk, data, pending: families.permissions })
   const notification = createServerNotificationState({ sdk, data, key: connKey, coordinator: notificationCoordinator })
 
