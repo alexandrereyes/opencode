@@ -5,6 +5,9 @@ const directory = "/repo/home-location"
 const worktree = `${directory}/.worktrees/crisp-cactus`
 const now = Date.now()
 
+// Headless Chrome hands the first navigation a spare renderer that misses touch hover/pointer emulation.
+test.use({ launchOptions: { args: ["--disable-features=SpareRendererForSitePerProcess"] } })
+
 async function setup(page: Page) {
   const located: string[][] = []
   await mockOpenCodeServer(page, {
@@ -85,8 +88,7 @@ test.describe("touch", () => {
 
   test("touch rows show the worktree and branch without hover", async ({ page }) => {
     const located = await setup(page)
-    // Chrome can apply the touch media emulation after the first navigation.
-    await expect.poll(() => page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true)
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true)
     const tree = row(page, "Worktree work")
     const location = tree.locator('[data-component="home-session-location"]')
     await expect(location).toHaveCSS("opacity", "1")

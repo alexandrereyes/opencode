@@ -6,7 +6,14 @@ const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${pr
 const directory = "/repo/attachment-touch"
 const sessionID = "ses_attachment_touch_123456789"
 
-test.use({ serviceWorkers: "block", hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+test.use({
+  serviceWorkers: "block",
+  hasTouch: true,
+  isMobile: true,
+  viewport: { width: 390, height: 844 },
+  // Headless Chrome hands the first navigation a spare renderer that misses touch hover/pointer emulation.
+  launchOptions: { args: ["--disable-features=SpareRendererForSitePerProcess"] },
+})
 
 test("attachment remove buttons stay visible without hover on touch devices", async ({ page }) => {
   await mockOpenCodeServer(page, {
@@ -49,7 +56,7 @@ test("attachment remove buttons stay visible without hover on touch devices", as
     subscriptions: { status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } },
   })
   await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
-  await expect.poll(() => page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true)
+  expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true)
   const editor = page.getByRole("textbox", { name: "Prompt", exact: true })
   await expect(editor).toBeEditable()
   await editor.evaluate((element) => {
