@@ -148,7 +148,11 @@ export function createComposerEditor(input: {
       input.view.add?.onAttach()
       return
     }
-    attachments.pick(() => fileInput?.click())
+    // The add menu leaves focus on its trigger, so return it to the editor once files are picked.
+    attachments.pick(
+      () => fileInput?.click(),
+      () => restoreFocus(),
+    )
   }
   const contextList = useFilteredList<ComposerSuggestion>({
     items: async (query) => {
@@ -533,7 +537,9 @@ export function createComposerEditor(input: {
       fileInput = element
     },
     addAttachments(files: File[]) {
-      if (attachments) void attachments.addAttachments(files)
+      if (!attachments) return
+      void attachments.addAttachments(files)
+      restoreFocus()
     },
     appendBlockquote(content: string) {
       dispatch({ type: "mode.normal" })

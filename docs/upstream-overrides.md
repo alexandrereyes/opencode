@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Return composer focus after picking files — https://github.com/anomalyco/opencode/pull/50864
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `9c8a63e852722a9bced4a0de1179de58a85dfa20` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): return composer focus after picking files`; `packages/app-custom/src/composer/{attachments/attachments.ts,editor/interaction.ts}` and `packages/app-custom/e2e/regression/composer-file-picker-focus.spec.ts`. Ports only the focus return: the native picker resolves through a completion callback and the browser file input's change handler restores focus to the composer that started the pick. The thumbnail `<Suspense>` is not ported; the custom keyed attachment rows, stable blob resource, and `url.latest` preview already avoid detaching the session. Focus targets only the picking composer; while `/btw` hides the main editor, focusing it is a no-op and CodeMirror does not move the DOM selection of an unfocused view, so the visible side composer keeps focus.
+- **Tests:** the new Playwright regression at 1440×900 and 390×844 fails on `cde61cb22` (editor inactive after picking) and passes with the fix, including typing into the editor. A one-off Playwright check (not committed) completed a pending pick after opening `/btw`: the side composer kept focus and received the typed text. App-custom typecheck and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Attachment remove buttons on touch devices — https://github.com/anomalyco/opencode/pull/51047
 
 - **Kind:** adaptation
@@ -307,7 +318,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` (see its entry).
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` and the focus part of #50864 by `fix(app): return composer focus after picking files` (see their entries); #51124 remains.
 
 ### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
 
@@ -318,7 +329,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50864 keeps composer focus after attaching files, overlapping the custom focus fix. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50864 keeps composer focus after attaching files, overlapping the custom focus fix. The custom port is unchanged; comparison is deferred to the next custom UI port. Compared in `fix(app): return composer focus after picking files`: the custom keyed rows, stable blob resource, and `url.latest` thumbnail already keep the session attached, so upstream's thumbnail `<Suspense>` is not adopted; only its picker focus return is ported (see its entry).
 
 ### Failed-send history and bounded toasts — https://github.com/anomalyco/opencode/pull/49717
 

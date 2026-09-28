@@ -305,12 +305,15 @@ export function createComposerAttachments(
     addAttachments,
     handlePaste,
     handleDrop,
-    pick(fallback: () => void) {
+    pick(fallback: () => void, done: () => void) {
       if (!input.picker) {
         fallback()
         return
       }
-      void input.picker({ defaultPath: input.directory(), multiple: true }, (file) => add(file)).catch(input.onError)
+      void input
+        .picker({ defaultPath: input.directory(), multiple: true }, (file) => add(file))
+        .then(done)
+        .catch(input.onError)
     },
   }
 }
