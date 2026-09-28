@@ -2,9 +2,13 @@ import { describe, expect, test } from "bun:test"
 import type { SessionInboxInfo } from "@opencode/client/promise"
 import { Session } from "@opencode/schema/session"
 import { EditorState } from "@codemirror/state"
-import { editedPromptInput, queuedPrompt, queuedPromptAttachments, queuedPromptRows } from "./queue"
-import type { ImageAttachmentPart, SessionPart } from "@/composer/state"
-import type { AttachmentDestination } from "@/composer/attachments/deliver"
+import { Skill } from "@opencode/schema/skill"
+import { editedPromptInput, queuedPrompt, queuedPromptAttachments, queuedPromptRows, queuedPromptUndo } from "./queue"
+import type { ImageAttachmentPart, Prompt, SessionPart } from "@/composer/state"
+import type { AttachmentDestination, DeliveredAttachment } from "@/composer/attachments/deliver"
+import type { ChatQuote } from "@/composer/schema"
+import { buildPromptRequest } from "@/composer/request"
+import { isAttachment } from "@/composer/prompt-parts"
 import { readPromptPresentation } from "@/composer/comment-note"
 import { formatSessionContext } from "@/composer/session-reference"
 import {
@@ -490,4 +494,174 @@ test("queue edits replace matching hidden path metadata without duplicating its 
 
   expect(result.metadata.attachments).toEqual([attachment])
   expect(result.text.match(/Attached file: `\/remote\/archive\.zip`/g)).toHaveLength(1)
+})
+
+describe("queuedPromptUndo", () => {
+  // Mirrors the admitted payload of a real submission: data URIs become inline files.
+  const admit = (prompt: Prompt, attachments: DeliveredAttachment[], quotes: ChatQuote[] = []) => {
+    const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
+    const request = buildPromptRequest({ prompt, context: [], attachments, text, sessionDirectory: "/repo", quotes })
+    return {
+      ...queued[0],
+      payload: {
+        text: request.text,
+        files: request.files.map((file) =>
+          file.uri.startsWith("data:")
+            ? {
+                data: file.uri.slice(file.uri.indexOf(",") + 1),
+                mime: file.mime,
+                source: { type: "inline" as const },
+                name: file.name,
+                mention: file.mention,
+              }
+            : {
+                data: "",
+                mime: file.mime,
+                source: { type: "uri" as const, uri: file.uri },
+                name: file.name,
+                mention: file.mention,
+              },
+        ),
+        agents: request.agents,
+        skills: request.skills,
+        metadata: {
+          displayText: request.displayText,
+          apps: request.apps,
+          sessions: request.sessions,
+          comments: request.comments,
+          quotes: request.quotes,
+          attachments: request.attachments,
+        },
+      },
+    } satisfies Extract<SessionInboxInfo, { type: "user" }>
+  }
+  const image: ImageAttachmentPart = {
+    type: "image",
+    id: "shot",
+    filename: "shot.png",
+    mime: "image/png",
+    blob: { id: "data:image/png;base64,aGk=", url: "data:image/png;base64,aGk=" },
+    mention: { text: "[shot.png]", start: 48, end: 58 },
+  }
+  const path = {
+    type: "path" as const,
+    id: "log",
+    filename: "run.log",
+    mime: "text/plain",
+    path: "/remote/run.log",
+    mention: { text: "[run.log]", start: 63, end: 72 },
+  }
+  const session: SessionPart = {
+    type: "session",
+    content: "@Earlier",
+    start: 72,
+    end: 80,
+    session: { id: Session.ID.make("ses_earlier"), server: "local", title: "Earlier" },
+  }
+  const prompt: Prompt = [
+    { type: "text", content: "Compare ", start: 0, end: 8 },
+    {
+      type: "file",
+      content: "@src/a.ts",
+      start: 8,
+      end: 17,
+      path: "src/a.ts",
+      selection: { startLine: 2, endLine: 4, startChar: 0, endChar: 0 },
+    },
+    { type: "text", content: " with ", start: 17, end: 23 },
+    { type: "agent", content: "@build", start: 23, end: 29, name: "build" },
+    { type: "text", content: " using ", start: 29, end: 36 },
+    {
+      type: "skill",
+      content: "$review",
+      start: 36,
+      end: 43,
+      id: Skill.ID.make("review"),
+      name: Skill.Name.make("review"),
+    },
+    { type: "text", content: " see [shot.png] and [run.log]", start: 43, end: 72 },
+    session,
+    image,
+    path,
+  ]
+  const quote: ChatQuote = { id: "q1", messageID: "msg_a", partID: "prt_a", text: "earlier answer", comment: "why?" }
+
+  test("restores structured parts, attachments, and quotes, and resends the same request", () => {
+    const deliveries: DeliveredAttachment[] = [
+      { type: "inline", attachment: image, dataUrl: "data:image/png;base64,aGk=", path: "/remote/shot.png" },
+      { type: "path", attachment: path, path: path.path },
+    ]
+    const item = admit(prompt, deliveries, [quote])
+
+    const restored = queuedPromptUndo(item, "/repo")
+    expect(restored?.quotes).toEqual([quote])
+    expect(restored?.prompt.map((part) => part.type)).toEqual(prompt.map((part) => part.type))
+    const attachments = restored!.prompt.filter(isAttachment)
+    const again = admit(
+      restored!.prompt,
+      [
+        {
+          type: "inline",
+          attachment: attachments[0] as ImageAttachmentPart,
+          dataUrl: "data:image/png;base64,aGk=",
+          path: "/remote/shot.png",
+        },
+        { type: "path", attachment: attachments[1]!, path: path.path },
+      ],
+      restored!.quotes,
+    )
+    expect(again.payload).toEqual(item.payload)
+  })
+
+  test("keeps MCP resource references as text", () => {
+    const text = "Read @guide"
+    const item = admit(
+      [
+        { type: "text", content: "Read ", start: 0, end: 5 },
+        {
+          type: "file",
+          content: "@guide",
+          start: 5,
+          end: 11,
+          path: "docs://guide",
+          url: "docs://guide",
+          source: {
+            type: "resource",
+            text: { value: "@guide", start: 0, end: 6 },
+            clientName: "docs",
+            uri: "docs://guide",
+          },
+        },
+      ],
+      [],
+    )
+    expect(item.payload.text).toBe(`${text}\nMCP resource docs://guide (server: docs)`)
+    expect(queuedPromptUndo(item, "/repo")?.prompt).toEqual([
+      { type: "text", content: text, start: 0, end: 11 },
+      { type: "text", content: "\nMCP resource docs://guide (server: docs)", start: 11, end: 52 },
+    ])
+  })
+
+  test("refuses prompts whose context the draft cannot hold", () => {
+    const comment = admit([{ type: "text", content: "fix it", start: 0, end: 6 }], [])
+    const withComment = {
+      ...comment,
+      payload: {
+        ...comment.payload,
+        text: `${comment.payload.text}\nThe user made the following comment regarding line 2 of src/a.ts: tighten`,
+        files: [
+          {
+            data: "",
+            mime: "text/plain",
+            source: { type: "uri" as const, uri: "file:///repo/src/a.ts?start=2&end=2" },
+          },
+        ],
+        metadata: { ...comment.payload.metadata, comments: [{ path: "src/a.ts", comment: "tighten" }] },
+      },
+    }
+    const hidden = { ...comment, payload: { ...comment.payload, files: withComment.payload.files } }
+
+    expect(queuedPromptUndo(withComment, "/repo")).toBeUndefined()
+    expect(queuedPromptUndo(hidden, "/repo")).toBeUndefined()
+  })
 })

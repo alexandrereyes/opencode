@@ -226,6 +226,7 @@ function ComposerStory(props: {
               confirmEdit() {},
               cancelEdit() {},
               editFirst: () => false,
+              undoing: () => false,
             }
           : undefined,
         onSubmit: async () => {

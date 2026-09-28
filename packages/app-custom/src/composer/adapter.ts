@@ -52,6 +52,7 @@ export type ComposerSubmissionBarrier = {
 // is loaded in the editor.
 export type ComposerQueue = {
   count: Accessor<number>
+  undoing: Accessor<boolean>
   // Delivery a plain submit uses right now.
   delivery: Accessor<ComposerDelivery>
   // Delivery offered on Mod+Enter and the toolbar hint button; undefined hides the hint.

@@ -131,6 +131,7 @@ async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>,
     onPrompt: mock.onPrompt,
     onInboxChange: mock.onInboxChange,
     events: mock.events,
+    subscriptions: { status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } },
   })
   await page.route("**/api/session/*/inbox/*", async (route) => {
     if (route.request().method() !== "PATCH") return route.fallback()
@@ -281,6 +282,46 @@ test("editing restores the existing draft and replaces only the original queue p
   expect(mock.changes.map((change) => change.action)).toEqual(["cancel", "cancel", "cancel"])
   expect(mock.log[0]).toBe("prompt:queue")
 })
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844],
+]) {
+  test(`undo restores a queued prompt after the draft and keeps unrestorable prompts queued at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height })
+    const mock = createQueueMock([
+      {
+        text: "tighten the error copy\nAttached file: `/remote/document.pdf`",
+        files: [{ data: "cGRm", mime: "application/pdf", name: "document.pdf", source: { type: "inline" } }],
+        metadata: { displayText: "tighten the error copy", comments: [], attachments: [] },
+      },
+      {
+        text: "fix it\nThe user made the following comment regarding line 2 of src/a.ts: tighten",
+        files: [{ data: "", mime: "text/plain", source: { type: "uri", uri: "file:///repo/src/a.ts?start=2&end=2" } }],
+        metadata: { displayText: "fix it", comments: [{ path: "src/a.ts", comment: "tighten" }] },
+      },
+    ])
+    const view = await openSession(page, mock)
+    await expect(view.rows).toHaveCount(2)
+    await view.input.fill("my in-progress draft")
+
+    const commented = view.rows.filter({ hasText: "fix it" })
+    await commented.locator('[data-action="session-queue-undo"]').click()
+    await expect(
+      page.getByText("This queued prompt can't be restored without losing context. Edit it in the queue instead."),
+    ).toBeVisible()
+    await expect(view.rows).toHaveCount(2)
+    expect(mock.changes).toEqual([])
+
+    await view.rows.filter({ hasText: "tighten the error copy" }).locator('[data-action="session-queue-undo"]').click()
+    await expect(view.rows).toHaveCount(1)
+    await expect(view.input.locator(".cm-line")).toHaveText(["my in-progress draft", "", "tighten the error copy"])
+    await expect(view.composer.locator('div[data-attachment-id="inb_seed_1:file:0"]')).toContainText("document.pdf")
+    expect(mock.changes).toEqual([{ inboxID: "inb_seed_1", action: "cancel" }])
+  })
+}
 
 for (const delivery of ["steer", "queue"] as const) {
   test(`keeps finished tools above a pending ${delivery === "queue" ? "queue-to-steer" : "steer"} follow-up`, async ({

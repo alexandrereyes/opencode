@@ -3,22 +3,31 @@ import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import type { SessionInboxInfo } from "@opencode/client/promise"
 import { SessionMessage } from "@opencode/schema/session-message"
+import { Skill } from "@opencode/schema/skill"
+import { Schema } from "effect"
 import type { ComposerDelivery } from "@/composer/adapter"
 import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import type { ComposerAttachment } from "@/composer/types"
-import { clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
+import { appendPrompt, clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
 import { buildPromptRequest } from "@/composer/request"
 import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
 import { readPromptPresentation, stripAttachmentReferences } from "@/composer/comment-note"
-import { extractPromptSessions, extractSessionPrompt } from "@/composer/prompt"
+import {
+  buildPrompt,
+  extractPromptSessions,
+  extractSessionPrompt,
+  selectionFromFileUrl,
+  type PromptInline,
+} from "@/composer/prompt"
 import { formatSessionContext } from "@/composer/session-reference"
 import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
-import type { ChatQuote } from "@/composer/schema"
+import { AppPart, type ChatQuote } from "@/composer/schema"
 import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
+import { decodeFilePath, stripFileProtocol, stripQueryAndHash } from "@/workspaces/files/path"
 import { useLanguage } from "@/runtime/i18n/language"
 import { showToast } from "@/shell/notifications/toast"
 
@@ -50,6 +59,7 @@ export function createSessionQueue(input: {
     mutationFn: async (
       change:
         | { type: "reorder"; inboxIDs: string[] }
+        | { type: "undo"; item: QueuedPrompt; prompt: Prompt; quotes: ChatQuote[] }
         | {
             type: "edit"
             inboxIDs: string[]
@@ -63,6 +73,22 @@ export function createSessionQueue(input: {
           },
     ) => {
       if (change.type === "reorder") return rewrite(change.inboxIDs)
+      if (change.type === "undo") {
+        await server.api.session.inbox.cancel({ sessionID: input.sessionID, inboxID: change.item.id })
+        // Read the draft after cancelling so anything typed meanwhile is kept ahead of the restored prompt.
+        const draft = input.draft.current()
+        const prompt = promptLength(draft)
+          ? appendPrompt(draft, change.prompt)
+          : [...change.prompt, ...draft.filter(isAttachment)]
+        const quotes = input.draft.quotes.all().map((quote) => ({ ...quote }))
+        input.draft.quotes.replace([
+          ...quotes,
+          ...change.quotes.filter((quote) => !quotes.some((item) => item.id === quote.id)),
+        ])
+        input.draft.set(prompt, promptLength(prompt))
+        input.restoreFocus(promptLength(prompt))
+        return
+      }
       const replacement = await editedPromptInput(
         input.sessionID,
         location().directory,
@@ -149,6 +175,22 @@ export function createSessionQueue(input: {
   const remove = (id: string) => {
     if (state.editing?.id === id) cancelEdit()
     return server.api.session.inbox.cancel({ sessionID: input.sessionID, inboxID: id }).catch(() => notify())
+  }
+  const undo = (id: string) => {
+    if (mutation.isPending || state.editing || input.draft.revert.pending()) return
+    const item = queued().find((entry) => entry.id === id)
+    if (!item) return
+    if (input.draft.mode.current() !== "normal") {
+      showToast({ title: language.t("session.queue.undoShell") })
+      return
+    }
+    // Conversion is checked before cancelling so a prompt that cannot be restored stays queued.
+    const restored = queuedPromptUndo(item, location().directory)
+    if (!restored) {
+      showToast({ title: language.t("session.queue.undoUnavailable") })
+      return
+    }
+    mutation.mutate({ type: "undo", item, ...restored })
   }
   const reorder = (inboxIDs: string[]) => {
     if (mutation.isPending) return Promise.resolve()
@@ -241,9 +283,11 @@ export function createSessionQueue(input: {
     editFirst,
     rows,
     busy: () => mutation.isPending || input.draft.revert.pending(),
+    undoing: () => mutation.isPending && mutation.variables?.type === "undo",
     working: input.working,
     steer,
     remove,
+    undo,
     edit,
     reorder,
   }
@@ -254,7 +298,7 @@ export type SessionQueue = ReturnType<typeof createSessionQueue>
 // The slice of the queue the panel renders and drives.
 export type SessionQueueView = Pick<
   SessionQueue,
-  "rows" | "editing" | "working" | "busy" | "steer" | "remove" | "edit" | "reorder"
+  "rows" | "editing" | "working" | "busy" | "steer" | "remove" | "undo" | "edit" | "reorder"
 >
 
 export function queuedPromptRows(items: QueuedPrompt[], replacement?: { original: string; replacement: string }) {
@@ -326,6 +370,139 @@ export function queuedPromptAttachments(item: QueuedPrompt): ComposerAttachment[
       }),
     ),
   ]
+}
+
+const RESOURCE_REFERENCE = /(^|\n)(MCP resource \S+ \(server: [^\n]*\))(?=\n|$)/g
+
+// Undo cancels the queued prompt, so everything it sent must come back as composer parts.
+// The rebuilt draft is serialized again with the submission builder and compared with the
+// queued payload; anything that would not be sent the same way (for example review comment
+// context) refuses the undo instead of being dropped. Attachment reference lines and MCP
+// resource references are the only text the builder does not regenerate from the draft:
+// attachments are redelivered on the next send and resource references stay as text.
+export function queuedPromptUndo(item: QueuedPrompt, directory: string) {
+  const payload = item.payload
+  const presentation = readPromptPresentation(payload.metadata)
+  if (presentation?.comments.length) return
+  const display = presentation?.displayText ?? payload.text
+  const prefix = display.trim() ? display : ""
+  if (!payload.text.startsWith(prefix)) return
+  const quotes = readChatQuotes(payload.metadata?.quotes)
+  const quoted = quotes.flatMap((quote) => quote.commentPrompt ?? [])
+  const apps = Schema.decodeUnknownOption(Schema.Struct({ apps: Schema.Array(AppPart) }))(payload.metadata)
+  const allApps = apps._tag === "Some" ? apps.value.apps : []
+  const sessions = extractPromptSessions(payload.metadata)
+  // Metadata lists the prompt's own apps and sessions before those of its quotes.
+  const ownApps = allApps.slice(0, allApps.length - quoted.filter((part) => part.type === "app").length)
+  const ownSessions = sessions.slice(0, sessions.length - quoted.filter((part) => part.type === "session").length)
+  const files = payload.files ?? []
+  const inline: PromptInline[] = [
+    ...ownApps.map((part) => ({ ...part, value: part.content })),
+    ...ownSessions.map((part) => ({ ...part, value: part.content })),
+    ...files.flatMap((file): PromptInline[] =>
+      file.mention && file.source.type === "uri" && file.source.uri.startsWith("file://")
+        ? [
+            {
+              type: "file",
+              start: file.mention.start,
+              end: file.mention.end,
+              value: file.mention.text,
+              path: decodeFilePath(stripQueryAndHash(stripFileProtocol(file.source.uri))),
+              selection: selectionFromFileUrl(file.source.uri),
+              mime: file.mime,
+              filename: file.name,
+            },
+          ]
+        : [],
+    ),
+    ...(payload.agents ?? []).flatMap((agent): PromptInline[] =>
+      agent.mention
+        ? [
+            {
+              type: "agent",
+              start: agent.mention.start,
+              end: agent.mention.end,
+              value: agent.mention.text,
+              name: agent.name,
+            },
+          ]
+        : [],
+    ),
+    ...(payload.skills ?? []).flatMap((skill): PromptInline[] =>
+      skill.mention
+        ? [
+            {
+              type: "skill",
+              start: skill.mention.start,
+              end: skill.mention.end,
+              value: skill.mention.text,
+              id: Skill.ID.make(skill.id),
+              name: Skill.Name.make(skill.name),
+            },
+          ]
+        : [],
+    ),
+  ]
+  const text = buildPrompt(display, inline, [])
+  const attachments = queuedPrompt(item).filter(isAttachment)
+  const delivered = files.filter((file) => file.source.type === "inline").length
+  if (attachments.filter((part) => part.type === "image").length !== delivered) return
+
+  const tail = payload.text.slice(prefix.length)
+  const references = [...tail.matchAll(/(^|\n)Attached file: `[^\n]*`(?=\n|$)/g)].length
+  if (references !== delivered + (presentation?.attachments.length ?? 0)) return
+  const resources = [...tail.matchAll(RESOURCE_REFERENCE)].map((match) => match[2]!)
+  const rest = stripAttachmentReferences(tail).replace(RESOURCE_REFERENCE, "")
+  const request = buildPromptRequest({
+    prompt: text,
+    context: [],
+    attachments: [],
+    text: display,
+    sessionDirectory: directory,
+    quotes,
+  })
+  if (request.text !== prefix + (prefix ? rest : rest.replace(/^\n/, ""))) return
+  const mention = (value: { start: number; end: number; text: string } | undefined) =>
+    value && [value.start, value.end, value.text]
+  const same = (left: unknown[], right: unknown[]) => JSON.stringify(left) === JSON.stringify(right)
+  if (
+    !same(
+      files.flatMap((file) => (file.source.type === "uri" ? [[file.source.uri, mention(file.mention)]] : [])),
+      request.files.map((file) => [file.uri, mention(file.mention)]),
+    ) ||
+    !same(
+      (payload.agents ?? []).map((agent) => [agent.name, mention(agent.mention)]),
+      request.agents.map((agent) => [agent.name, mention(agent.mention)]),
+    ) ||
+    !same(
+      (payload.skills ?? []).map((skill) => [skill.id, mention(skill.mention)]),
+      request.skills.map((skill) => [skill.id, mention(skill.mention)]),
+    ) ||
+    !same(
+      allApps.map((part) => [part.content, part.start, part.end, part.app]),
+      request.apps.map((part) => [part.content, part.start, part.end, part.app]),
+    ) ||
+    !same(
+      sessions.map((part) => [part.content, part.start, part.end, part.session.id, part.session.server]),
+      request.sessions.map((part) => [part.content, part.start, part.end, part.session.id, part.session.server]),
+    )
+  )
+    return
+
+  const resource = resources.join("\n")
+  const length = promptLength(text)
+  const body: Prompt = resource
+    ? [
+        ...text,
+        {
+          type: "text",
+          content: `${prefix ? "\n" : ""}${resource}`,
+          start: length,
+          end: length + resource.length + (prefix ? 1 : 0),
+        },
+      ]
+    : text
+  return { prompt: [...body, ...attachments], quotes }
 }
 
 function queuedAttachmentID(item: QueuedPrompt, index: number) {

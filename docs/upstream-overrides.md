@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Undo queued prompts into the composer — https://github.com/anomalyco/opencode/pull/51124
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `beeb14e910775230d24355a7533b2e4d4e05a53b` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(app): undo queued prompts into the composer`; `packages/app-custom/src/session/composer/{queue.ts,queue.test.ts,queue-panel.tsx}`, `src/composer/{adapter.ts,model.ts,prompt.ts,composer.stories.tsx}`, `src/runtime/i18n/en.ts`, and `e2e/regression/session-queue.spec.ts`. A queued row has an Undo action that cancels the inbox item (`session.inbox.cancel`) and puts the prompt back into the draft after anything already typed, with its quotes merged by ID; submit is blocked while it runs. Instead of upstream's `queuedPromptUndoDraft()`, `queuedPromptUndo()` rebuilds the custom algebra from the full sent payload: `@file` mentions (path and line range from the file URI), agents, skills, app and session parts, cited and uncited inline images, staged `path` attachments with their mentions, and structured quotes. MCP resource reference lines stay as text. Before cancelling, the rebuilt draft is serialized again with `buildPromptRequest` and compared with the queued text, files, agents, skills, apps, and sessions; attachment reference lines are only counted, because attachments are redelivered on send. Anything the draft cannot hold, such as review-comment context or unmentioned file context, keeps the item queued and shows an English message. Existing guards stay: no undo in shell mode (message), while editing a queued item, or while a revert is pending; the queue panel remains hidden while `/btw` occupies the composer. `buildPrompt` and `selectionFromFileUrl` in `composer/prompt.ts` are exported for this. The upstream TUI keybind and upstream's read-only editor during undo are not ported (the draft is read after the cancel, so typing meanwhile is kept).
+- **Tests:** unit tests cover the round trip (restored parts resubmit exactly the queued payload), MCP resource text, and refusal for comment and hidden file context; Playwright against the mock server at 1440×900 and 390×844 restores a queued prompt with its attachment after an existing draft, and leaves an unrestorable prompt queued with the message and no cancel request. App-custom typecheck, unit suite, and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Provider account switching — https://github.com/anomalyco/opencode/pull/51266
 
 - **Kind:** adaptation
@@ -384,7 +395,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` and the focus part of #50864 by `fix(app): return composer focus after picking files` (see their entries); #51124 remains.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` the focus part of #50864 by `fix(app): return composer focus after picking files`, and #51124 by `feat(app): undo queued prompts into the composer` (see their entries).
 
 ### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
 

@@ -6,7 +6,7 @@ import { Skill } from "@opencode/schema/skill"
 import { Schema } from "effect"
 import { AppPart, SessionPart } from "./schema"
 
-type Inline =
+export type PromptInline =
   | {
       type: "file"
       start: number
@@ -40,7 +40,7 @@ type Inline =
   | (AppPart & { value: string })
   | (SessionPart & { value: string })
 
-function selectionFromFileUrl(url: string): Extract<Inline, { type: "file" }>["selection"] {
+export function selectionFromFileUrl(url: string): Extract<PromptInline, { type: "file" }>["selection"] {
   const queryIndex = url.indexOf("?")
   if (queryIndex === -1) return undefined
   const params = new URLSearchParams(url.slice(queryIndex + 1))
@@ -68,7 +68,7 @@ export function extractPromptFromMessage(
     if (path.startsWith(prefix)) return path.slice(prefix.length)
     return path
   }
-  const inline: Inline[] = []
+  const inline: PromptInline[] = []
   const apps = Schema.decodeUnknownOption(Schema.Struct({ apps: Schema.Array(AppPart) }))(message.metadata)
   if (apps._tag === "Some") inline.push(...apps.value.apps.map((part) => ({ ...part, value: part.content })))
   inline.push(...sessionInline(message.metadata))
@@ -132,7 +132,7 @@ export function extractPromptComments(message: SessionMessageUser) {
   return readPromptPresentation(message.metadata)?.comments ?? []
 }
 
-function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart[]): Prompt {
+export function buildPrompt(text: string, inline: PromptInline[], images: ImageAttachmentPart[]): Prompt {
   inline.sort((a, b) => {
     if (a.start !== b.start) return a.start - b.start
     return a.end - b.end
@@ -153,7 +153,7 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
     position += content.length
   }
 
-  const pushFile = (item: Extract<Inline, { type: "file" }>) => {
+  const pushFile = (item: Extract<PromptInline, { type: "file" }>) => {
     const content = item.value
     const attachment: FileAttachmentPart = {
       type: "file",
@@ -169,7 +169,7 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
     position += content.length
   }
 
-  const pushAgent = (item: Extract<Inline, { type: "agent" }>) => {
+  const pushAgent = (item: Extract<PromptInline, { type: "agent" }>) => {
     const content = item.value
     const mention: AgentPart = {
       type: "agent",
@@ -182,7 +182,7 @@ function buildPrompt(text: string, inline: Inline[], images: ImageAttachmentPart
     position += content.length
   }
 
-  const pushSkill = (item: Extract<Inline, { type: "skill" }>) => {
+  const pushSkill = (item: Extract<PromptInline, { type: "skill" }>) => {
     const content = item.value
     const skill: SkillPart = {
       type: "skill",
