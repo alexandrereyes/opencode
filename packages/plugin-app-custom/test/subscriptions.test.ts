@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { ConfigProvider, Effect } from "effect"
-import { read } from "../src/subscriptions"
+import { read, writeAutomation } from "../src/subscriptions"
 
 const withProxy = <A>(url: string, effect: Effect.Effect<A>) =>
   effect.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENCODE_LLM_PROXY_URL: url } }))))
@@ -12,6 +12,8 @@ test("normalizes quota metadata without returning account secrets and preserves 
       if (new URL(request.url).pathname === "/_admin/anthropic/status") return new Response("missing", { status: 404 })
       expect(new URL(request.url).pathname).toBe("/_admin/status")
       return Response.json({
+        mode: "Enabled",
+        resetAutomation: { enabled: false, paused: true, issue: null, authorization: "private" },
         oauth: { accessToken: "oauth-private" },
         accounts: [
           {
@@ -105,7 +107,8 @@ test("normalizes quota metadata without returning account secrets and preserves 
         hasCapacity: null,
       },
     ],
-    anthropic: { status: "disabled", accounts: [] },
+    automation: { enabled: false },
+    anthropic: { status: "disabled", accounts: [], automation: null },
   })
   expect(JSON.stringify(result)).not.toContain("private")
 })
@@ -118,6 +121,8 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
       expect(new URL(request.url).pathname).toBe("/_admin/anthropic/status")
       return Response.json({
         provider: "anthropic",
+        mode: "DryRun",
+        resetAutomation: { enabled: true, paused: false },
         accounts: [
           {
             account: {
@@ -177,6 +182,7 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
   expect(result).toEqual({
     status: "ok",
     accounts: [],
+    automation: null,
     anthropic: {
       status: "ok",
       accounts: [
@@ -218,6 +224,7 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
           hasCapacity: null,
         },
       ],
+      automation: { enabled: true },
     },
   })
   expect(JSON.stringify(result)).not.toContain("private")
@@ -227,26 +234,71 @@ test("returns explicit states for missing configuration and failed or malformed 
   expect(await Effect.runPromise(withProxy("", read()))).toEqual({
     status: "unconfigured",
     accounts: [],
-    anthropic: { status: "disabled", accounts: [] },
+    automation: null,
+    anthropic: { status: "disabled", accounts: [], automation: null },
   })
   const failed = Bun.serve({ port: 0, fetch: () => new Response("no", { status: 500 }) })
   expect(
     await Effect.runPromise(
       withProxy(failed.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => failed.stop(true)))),
     ),
-  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
+  ).toEqual({
+    status: "unavailable",
+    accounts: [],
+    automation: null,
+    anthropic: { status: "unavailable", accounts: [], automation: null },
+  })
   const disabled = Bun.serve({ port: 0, fetch: () => new Response("no", { status: 503 }) })
   expect(
     await Effect.runPromise(
       withProxy(disabled.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => disabled.stop(true)))),
     ),
-  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "disabled", accounts: [] } })
+  ).toEqual({
+    status: "unavailable",
+    accounts: [],
+    automation: null,
+    anthropic: { status: "disabled", accounts: [], automation: null },
+  })
   const malformed = Bun.serve({ port: 0, fetch: () => Response.json({ unexpected: true }) })
   expect(
     await Effect.runPromise(
       withProxy(malformed.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => malformed.stop(true)))),
     ),
-  ).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
+  ).toEqual({
+    status: "unavailable",
+    accounts: [],
+    automation: null,
+    anthropic: { status: "unavailable", accounts: [], automation: null },
+  })
+})
+
+test("writes the automation switch to the provider-specific proxy route", async () => {
+  const requests: { path: string; method: string; body: unknown }[] = []
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname
+      requests.push({ path, method: request.method, body: await request.json() })
+      if (path === "/_admin/anthropic/banked-resets") return new Response("conflict", { status: 409 })
+      return Response.json({ enabled: true, paused: false, mode: "Enabled", loaded: true, blocked: false, issue: null })
+    },
+  })
+  const [codex, anthropic] = await Effect.runPromise(
+    withProxy(
+      server.url.toString(),
+      Effect.all([
+        writeAutomation({ provider: "codex", enabled: true }),
+        writeAutomation({ provider: "anthropic", enabled: false }),
+      ]),
+    ).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
+  )
+  expect(codex).toEqual({ enabled: true })
+  expect(anthropic).toBeNull()
+  expect(requests).toEqual([
+    { path: "/_admin/banked-resets", method: "PUT", body: { enabled: true } },
+    { path: "/_admin/anthropic/banked-resets", method: "PUT", body: { enabled: false } },
+  ])
+  expect(await Effect.runPromise(withProxy("", writeAutomation({ provider: "codex", enabled: false })))).toBeNull()
 })
 
 test("times out an unresponsive proxy after eight seconds", async () => {
@@ -255,7 +307,12 @@ test("times out an unresponsive proxy after eight seconds", async () => {
   const result = await Effect.runPromise(
     withProxy(server.url.toString(), read()).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
   )
-  expect(result).toEqual({ status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } })
+  expect(result).toEqual({
+    status: "unavailable",
+    accounts: [],
+    automation: null,
+    anthropic: { status: "unavailable", accounts: [], automation: null },
+  })
   expect(performance.now() - started).toBeGreaterThanOrEqual(7_500)
 }, 10_000)
 

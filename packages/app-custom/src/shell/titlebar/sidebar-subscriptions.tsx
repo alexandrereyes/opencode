@@ -6,10 +6,13 @@ import { Popover } from "@opencode/ui-custom/popover"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { SegmentedControl, SegmentedControlItem } from "@opencode/ui-custom/segmented-control"
 import { Spinner } from "@opencode/ui-custom/spinner"
+import { Switch } from "@opencode/ui-custom/switch"
 import { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useLanguage } from "@/runtime/i18n/language"
+import { formatServerError } from "@/runtime/server/errors"
+import { showToast } from "@/shell/notifications/toast"
 import type { Tab } from "@/shell/tabs/tabs"
 import {
   subscriptionAccounts,
@@ -31,7 +34,13 @@ export function SidebarSubscriptions(props: {
 }) {
   const global = useGlobal()
   const language = useLanguage()
-  const [state, setState] = createStore({ open: false, now: Date.now(), provider: "codex" as Provider })
+  const [state, setState] = createStore({
+    open: false,
+    now: Date.now(),
+    provider: "codex" as Provider,
+    // Optimistic switch values while the proxy applies them.
+    pending: {} as Partial<Record<Provider, boolean>>,
+  })
   const source = createMemo(
     () => {
       const tab = props.currentTab
@@ -57,11 +66,14 @@ export function SidebarSubscriptions(props: {
     data: await source.ctx.sdk.api
       .rpc(Subscriptions.Definition)
       .list({})
-      .catch(() => ({
-        status: "unavailable" as const,
-        accounts: [],
-        anthropic: { status: "unavailable" as const, accounts: [] },
-      })),
+      .catch(
+        (): Subscriptions.Info => ({
+          status: "unavailable",
+          accounts: [],
+          automation: null,
+          anthropic: { status: "unavailable", accounts: [], automation: null },
+        }),
+      ),
   }))
   // An optional status must not suspend the shell while its first request is pending.
   const subscription = () => {
@@ -72,7 +84,9 @@ export function SidebarSubscriptions(props: {
     const data = createMemo(() => {
       const info = subscription()
       if (!info) return
-      return provider === "codex" ? { status: info.status, accounts: info.accounts } : info.anthropic
+      return provider === "codex"
+        ? { status: info.status, accounts: info.accounts, automation: info.automation }
+        : info.anthropic
     })
     const unit = PROVIDERS[provider].unit
     const accounts = createMemo(() => subscriptionAccounts(data()?.accounts ?? [], state.now))
@@ -98,9 +112,14 @@ export function SidebarSubscriptions(props: {
       ),
       nextRenewal: createMemo(() => {
         const first = renewals()?.min
-        return first === undefined ? undefined : Math.max(0, Math.ceil((first - state.now) / 86_400_000))
+        return first === undefined ? undefined : formatSubscriptionCountdown(new Date(first).toISOString(), state.now)
       }),
       ready: () => data()?.status === "ok",
+      automation: () => {
+        const automation = data()?.automation
+        if (!automation) return
+        return { enabled: state.pending[provider] ?? automation.enabled }
+      },
     }
   }
   const codex = view("codex")
@@ -113,6 +132,36 @@ export function SidebarSubscriptions(props: {
   const refresh = () => {
     setState("now", Date.now())
     void actions.refetch()
+  }
+  const setAutomation = (provider: Provider, enabled: boolean) => {
+    const current = source()
+    if (!current) return
+    setState("pending", provider, enabled)
+    current.ctx.sdk.api
+      .rpc(Subscriptions.Definition)
+      .setAutomation({ provider, enabled })
+      .then((automation) =>
+        actions.mutate((result) =>
+          result?.source === current
+            ? {
+                source: current,
+                data:
+                  provider === "codex"
+                    ? { ...result.data, automation }
+                    : { ...result.data, anthropic: { ...result.data.anthropic, automation } },
+              }
+            : result,
+        ),
+      )
+      .catch((error) => {
+        showToast({
+          variant: "error",
+          title: language.t("sidebar.proxy.autoReset.failed"),
+          description: formatServerError(error, language.t),
+        })
+        refresh()
+      })
+      .finally(() => setState("pending", provider, undefined))
   }
   createEffect(() => {
     source()
@@ -246,15 +295,20 @@ export function SidebarSubscriptions(props: {
                     >
                       <Show when={item.ready() && item.nextRenewal() !== undefined}>
                         <Icon name="clock" size="small" />
-                        {language.plural("sidebar.proxy.renewalDays", item.nextRenewal() ?? 0)}
+                        {item.nextRenewal()}
                       </Show>
                     </span>
                     <span
                       class="col-start-4 row-start-2 flex items-center gap-1 justify-self-end tabular-nums"
-                      title={language.t(PROVIDERS[item.provider].keys.banked)}
+                      classList={{ "text-v2-text-text-faint": item.automation()?.enabled === false }}
+                      title={language.t(
+                        item.automation()?.enabled === false
+                          ? "sidebar.proxy.autoReset.paused"
+                          : PROVIDERS[item.provider].keys.banked,
+                      )}
                     >
                       <Show when={item.ready()}>
-                        <Icon name="refresh" size="small" />
+                        <Icon name={item.automation()?.enabled === false ? "pause" : "refresh"} size="small" />
                         {item.pool().banked?.available ?? "—"}
                       </Show>
                     </span>
@@ -384,6 +438,58 @@ export function SidebarSubscriptions(props: {
                           </Show>
                         </div>
                       </header>
+                      <div
+                        class="flex flex-wrap border-t border-border-weak-base text-12-regular leading-text-compact text-v2-text-text-muted tabular-nums"
+                        data-slot="subscription-summary"
+                      >
+                        <span
+                          class="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap px-3 py-2.5"
+                          title={language.t("context.overview.renewalMin", {
+                            date: item.renewals() ? date(item.renewals()!.min, true) : "—",
+                          })}
+                        >
+                          <Icon name="clock" size="small" class="shrink-0" />
+                          <span class="shrink-0 text-text-strong">{item.nextRenewal() ?? "—"}</span>
+                          <Show when={item.renewals()}>{(renewals) => <span>{shortDate(renewals().min)}</span>}</Show>
+                        </span>
+                        <span
+                          class="flex min-w-0 items-center gap-1.5 border-s border-border-weak-base px-3 py-2.5"
+                          title={
+                            (item.pool().banked?.available ?? 0) > 0
+                              ? language.t("context.overview.expiryMin", {
+                                  date:
+                                    item.pool().banked?.earliest == null
+                                      ? language.t("context.overview.noExpiry")
+                                      : date(item.pool().banked!.earliest!),
+                                })
+                              : undefined
+                          }
+                        >
+                          <Icon name="refresh" size="small" class="shrink-0" />
+                          <span class="truncate text-text-strong">
+                            {item.pool().banked === null
+                              ? language.t("context.overview.accountBankedUnknown")
+                              : language.plural("sidebar.proxy.bankedCount", item.pool().banked!.available)}
+                          </span>
+                        </span>
+                        <Show when={item.automation()}>
+                          {(automation) => (
+                            <span
+                              class="flex min-w-0 items-center border-s border-border-weak-base px-3 py-2.5"
+                              data-slot="subscription-auto-reset"
+                            >
+                              <Switch
+                                checked={automation().enabled}
+                                disabled={state.pending[item.provider] !== undefined}
+                                onChange={(enabled) => setAutomation(item.provider, enabled)}
+                                class="text-v2-text-text-muted"
+                              >
+                                {language.t("sidebar.proxy.autoReset.label")}
+                              </Switch>
+                            </span>
+                          )}
+                        </Show>
+                      </div>
                       <div class="flex min-w-0 flex-col gap-4 border-t border-border-weak-base p-3">
                         <For each={item.groups()}>
                           {(group) => (
@@ -415,42 +521,6 @@ export function SidebarSubscriptions(props: {
                           )}
                         </For>
                       </div>
-                      <footer class="flex flex-wrap border-t border-border-weak-base text-12-regular leading-text-compact text-v2-text-text-muted tabular-nums">
-                        <span
-                          class="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap px-3 py-2.5"
-                          title={language.t("context.overview.renewalMin", {
-                            date: item.renewals() ? date(item.renewals()!.min, true) : "—",
-                          })}
-                        >
-                          <Icon name="clock" size="small" class="shrink-0" />
-                          <span class="shrink-0 text-text-strong">
-                            {item.nextRenewal() === undefined
-                              ? "—"
-                              : language.plural("sidebar.proxy.renewalDays", item.nextRenewal()!)}
-                          </span>
-                          <Show when={item.renewals()}>{(renewals) => <span>{shortDate(renewals().min)}</span>}</Show>
-                        </span>
-                        <span
-                          class="flex min-w-0 items-center gap-1.5 border-s border-border-weak-base px-3 py-2.5"
-                          title={
-                            (item.pool().banked?.available ?? 0) > 0
-                              ? language.t("context.overview.expiryMin", {
-                                  date:
-                                    item.pool().banked?.earliest == null
-                                      ? language.t("context.overview.noExpiry")
-                                      : date(item.pool().banked!.earliest!),
-                                })
-                              : undefined
-                          }
-                        >
-                          <Icon name="refresh" size="small" class="shrink-0" />
-                          <span class="truncate text-text-strong">
-                            {item.pool().banked === null
-                              ? language.t("context.overview.accountBankedUnknown")
-                              : language.plural("sidebar.proxy.bankedCount", item.pool().banked!.available)}
-                          </span>
-                        </span>
-                      </footer>
                     </section>
                   </Show>
                 </Show>

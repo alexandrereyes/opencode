@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Config, Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Subscriptions } from "./rpc.js"
 
 // Decode only quota metadata. Admin credentials and OAuth data never cross this boundary.
@@ -23,7 +23,12 @@ const BankedResets = Schema.Struct({
   nonExpiring: Schema.Finite,
 })
 
+const Automation = Schema.Struct({ enabled: Schema.Boolean })
+
+const AutomationFields = { resetAutomation: Schema.optional(Automation) }
+
 const Status = Schema.Struct({
+  ...AutomationFields,
   accounts: Schema.Array(
     Schema.Struct({
       account: Schema.Struct({
@@ -43,6 +48,7 @@ const Status = Schema.Struct({
 })
 
 const AnthropicStatus = Schema.Struct({
+  ...AutomationFields,
   accounts: Schema.Array(
     Schema.Struct({
       account: Schema.Struct({
@@ -74,33 +80,76 @@ const AnthropicStatus = Schema.Struct({
 })
 
 export const registerSubscriptions = Effect.fn("Subscriptions.register")(function* (ctx: Plugin.Context) {
-  yield* ctx.rpc.register(Subscriptions.Definition, { list: () => read() }).pipe(Effect.orDie)
+  yield* ctx.rpc
+    .register(Subscriptions.Definition, {
+      list: () => read(),
+      setAutomation: (input, context) =>
+        writeAutomation(input).pipe(
+          Effect.flatMap((automation) =>
+            automation
+              ? Effect.succeed(automation)
+              : Effect.fail(context.error("update_failed", "The LLM proxy did not accept the change", {})),
+          ),
+        ),
+    })
+    .pipe(Effect.orDie)
 })
 
 export const read = Effect.fn("Subscriptions.read")(function* () {
   const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url)
-    return { status: "unconfigured" as const, accounts: [], anthropic: { status: "disabled" as const, accounts: [] } }
+    return {
+      status: "unconfigured" as const,
+      accounts: [],
+      automation: null,
+      anthropic: { status: "disabled" as const, accounts: [], automation: null },
+    }
   const base = url.replace(/\/$/, "")
   const [codex, anthropic] = yield* Effect.all([readCodex(base), readAnthropic(base)], { concurrency: 2 })
-  return { status: codex.status, accounts: codex.accounts, anthropic }
+  return { status: codex.status, accounts: codex.accounts, automation: codex.automation, anthropic }
+})
+
+// Resolves to null when the proxy is unconfigured, unreachable, or rejects the change.
+export const writeAutomation = Effect.fn("Subscriptions.writeAutomation")(function* (input: {
+  provider: "codex" | "anthropic"
+  enabled: boolean
+}) {
+  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  if (!url) return null
+  const path = input.provider === "codex" ? "/_admin/banked-resets" : "/_admin/anthropic/banked-resets"
+  return yield* Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client.execute(
+      HttpClientRequest.put(`${url.replace(/\/$/, "")}${path}`).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ enabled: input.enabled }),
+      ),
+    )
+    if (response.status !== 200) return null
+    const data = yield* Schema.decodeUnknownEffect(Automation)(yield* response.json)
+    return { enabled: data.enabled }
+  }).pipe(
+    Effect.timeout("15 seconds"),
+    Effect.orElseSucceed(() => null),
+    Effect.provide(FetchHttpClient.layer),
+  )
 })
 
 const readCodex = (base: string) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const response = yield* client.get(`${base}/_admin/status`)
-    if (response.status !== 200) return { status: "unavailable" as const, accounts: [] }
+    if (response.status !== 200) return { status: "unavailable" as const, accounts: [], automation: null }
     const data = yield* Schema.decodeUnknownEffect(Status)(yield* response.json)
     return {
       status: "ok" as const,
       accounts: data.accounts.map((item) =>
         account(item, item.usage?.planType ?? item.account.planType, item.bankedResets ?? null),
       ),
+      automation: automation(data),
     }
   }).pipe(
     Effect.timeout("8 seconds"),
-    Effect.orElseSucceed(() => ({ status: "unavailable" as const, accounts: [] })),
+    Effect.orElseSucceed(() => ({ status: "unavailable" as const, accounts: [], automation: null })),
     Effect.provide(FetchHttpClient.layer),
   )
 
@@ -109,8 +158,9 @@ const readAnthropic = (base: string) =>
     const client = yield* HttpClient.HttpClient
     const response = yield* client.get(`${base}/_admin/anthropic/status`)
     // Proxies without the Anthropic pool answer 404, and a disabled pool answers 503.
-    if (response.status === 404 || response.status === 503) return { status: "disabled" as const, accounts: [] }
-    if (response.status !== 200) return { status: "unavailable" as const, accounts: [] }
+    if (response.status === 404 || response.status === 503)
+      return { status: "disabled" as const, accounts: [], automation: null }
+    if (response.status !== 200) return { status: "unavailable" as const, accounts: [], automation: null }
     const data = yield* Schema.decodeUnknownEffect(AnthropicStatus)(yield* response.json)
     return {
       status: "ok" as const,
@@ -121,12 +171,18 @@ const readAnthropic = (base: string) =>
           item.inventory ? anthropicBankedResets(item.inventory.grants) : null,
         ),
       ),
+      automation: automation(data),
     }
   }).pipe(
     Effect.timeout("8 seconds"),
-    Effect.orElseSucceed(() => ({ status: "unavailable" as const, accounts: [] })),
+    Effect.orElseSucceed(() => ({ status: "unavailable" as const, accounts: [], automation: null })),
     Effect.provide(FetchHttpClient.layer),
   )
+
+// Older proxies omit the automation fields; the client then hides the switch.
+function automation(data: { resetAutomation?: { enabled: boolean } }) {
+  return data.resetAutomation ? { enabled: data.resetAutomation.enabled } : null
+}
 
 function account(
   item: {

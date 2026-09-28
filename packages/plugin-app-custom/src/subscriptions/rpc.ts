@@ -29,17 +29,24 @@ export const Account = Schema.Struct({
   hasCapacity: Schema.NullOr(Schema.Boolean),
 }).annotate({ identifier: "Subscriptions.Account" })
 
+export interface Automation extends Schema.Schema.Type<typeof Automation> {}
+export const Automation = Schema.Struct({ enabled: Schema.Boolean }).annotate({
+  identifier: "Subscriptions.Automation",
+})
+
 export interface Pool extends Schema.Schema.Type<typeof Pool> {}
 export const Pool = Schema.Struct({
   // `disabled` means the proxy does not expose this pool, so clients hide it instead of reporting a failure.
   status: Schema.Literals(["ok", "unavailable", "disabled"]),
   accounts: Schema.Array(Account),
+  automation: Schema.NullOr(Automation),
 }).annotate({ identifier: "Subscriptions.Pool" })
 
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   status: Schema.Literals(["ok", "unconfigured", "unavailable"]),
   accounts: Schema.Array(Account),
+  automation: Schema.NullOr(Automation),
   anthropic: Pool,
 }).annotate({ identifier: "Subscriptions.Info" })
 
@@ -49,6 +56,13 @@ export const Definition = Rpc.define({
     list: {
       input: Schema.toStandardSchemaV1(Schema.Struct({})),
       output: Schema.toStandardSchemaV1(Info),
+    },
+    setAutomation: {
+      input: Schema.toStandardSchemaV1(
+        Schema.Struct({ provider: Schema.Literals(["codex", "anthropic"]), enabled: Schema.Boolean }),
+      ),
+      output: Schema.toStandardSchemaV1(Automation),
+      errors: { update_failed: Schema.toStandardSchemaV1(Schema.Struct({})) },
     },
   },
   events: {},

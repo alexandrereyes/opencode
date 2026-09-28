@@ -149,7 +149,8 @@ it.live(
             hasCapacity: true,
           },
         ],
-        anthropic: { status: "disabled", accounts: [] },
+        automation: null,
+        anthropic: { status: "disabled", accounts: [], automation: null },
       })
       expect(JSON.stringify(subscriptions)).not.toContain("private")
 
