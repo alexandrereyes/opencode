@@ -1,5 +1,6 @@
 import { Key } from "@solid-primitives/keyed"
 import { Icon } from "@opencode/ui-custom/icon"
+import { Button } from "@opencode/ui-custom/button"
 import { TextInput } from "@opencode/ui-custom/text-input"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { For, Show, createEffect, createMemo, type Component } from "solid-js"
@@ -7,7 +8,9 @@ import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
-import { displayName } from "@/shell/layout/helpers"
+import { displayName, homeProjectDirectories } from "@/shell/layout/helpers"
+import { useProjectPicker } from "@/workspaces/selection/picker"
+import { useSshAuthenticate } from "@/servers/ssh/authenticate"
 import type { LocalProject } from "@/shell/state/layout"
 import { InlineServerSelect } from "@/settings/server-select"
 import { DialogEditProject } from "./project-dialog"
@@ -18,9 +21,38 @@ export const SettingsProjects: Component = () => {
   const dialog = useDialog()
   const language = useLanguage()
   const global = useGlobal()
+  const picker = useProjectPicker()
+  const authenticate = useSshAuthenticate()
   const [store, setStore] = createStore({ allServers: true, filter: "" })
   let search: HTMLInputElement | undefined
   const selected = global.settings.server.selected
+  const add = () => {
+    const server = selected()
+    if (!server) return
+    const choose = () =>
+      picker({
+        server,
+        title: language.t("command.project.open"),
+        multiple: true,
+        onSelect: (result) =>
+          homeProjectDirectories(result).forEach((directory) =>
+            global.ensureServerCtx(server).projects.open(directory),
+          ),
+      })
+    if (authenticate(server, choose)) return
+    if (global.servers.health[ServerConnection.key(server)]?.healthy === false) return
+    choose()
+  }
+  const Empty = () => (
+    <div class="flex flex-col items-center gap-3 py-12 text-center text-v2-text-text-muted text-13-regular">
+      {emptyMessage()}
+      <Show when={!query()}>
+        <Button variant="neutral" onClick={add}>
+          {language.t("command.project.open")}
+        </Button>
+      </Show>
+    </div>
+  )
   const multiple = createMemo(() => global.servers.list().length > 1)
   const projects = createMemo(() => {
     const server = selected()
@@ -83,6 +115,9 @@ export const SettingsProjects: Component = () => {
               onServerSelect={() => setStore("allServers", false)}
             />
           </Show>
+          <Button variant="neutral" onClick={add}>
+            {language.t("command.project.open")}
+          </Button>
         </div>
         <Show when={searchable()}>
           <div class="settings-tab-search">
@@ -114,10 +149,7 @@ export const SettingsProjects: Component = () => {
           when={store.allServers}
           fallback={
             <div class="flex flex-col gap-2 w-full">
-              <Show
-                when={filteredProjects().length > 0}
-                fallback={<div class="py-12 text-center text-v2-text-text-muted text-13-regular">{emptyMessage()}</div>}
-              >
+              <Show when={filteredProjects().length > 0} fallback={<Empty />}>
                 <Show when={selected()} keyed>
                   {(server) => (
                     <div class="settings-section">
@@ -143,10 +175,7 @@ export const SettingsProjects: Component = () => {
           }
         >
           <div class="flex flex-col gap-8 w-full">
-            <Show
-              when={filteredGroups().length > 0}
-              fallback={<div class="py-12 text-center text-v2-text-text-muted text-13-regular">{emptyMessage()}</div>}
-            >
+            <Show when={filteredGroups().length > 0} fallback={<Empty />}>
               <For each={filteredGroups()}>
                 {(group) => (
                   <div class="settings-section">

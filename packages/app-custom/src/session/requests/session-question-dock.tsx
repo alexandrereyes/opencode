@@ -3,6 +3,8 @@ import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@opencode/ui-custom/button"
 import { IconButton } from "@opencode/ui-custom/icon-button"
+import { Tooltip } from "@opencode/ui-custom/tooltip"
+import { useCommand } from "@/shell/commands/command"
 import { DockPrompt } from "@opencode/session-ui-custom/dock-prompt"
 import { Icon } from "@opencode/ui-custom/icon"
 import { useSpring } from "@opencode/ui-custom/motion-spring"
@@ -15,6 +17,7 @@ import { useServerSDK } from "@/runtime/server/client"
 import { ScopedKey } from "@/runtime/server/scope"
 
 const cache = new Map<string, { tab: number; answers: string[][]; custom: string[]; customOn: boolean[] }>()
+const IS_MAC = typeof navigator === "object" && /(Mac|iPod|iPhone|iPad)/.test(navigator.platform)
 
 type QuestionField = FormStringField | FormMultiselectField
 
@@ -70,6 +73,7 @@ function Option(props: {
 export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () => void }> = (props) => {
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const command = useCommand()
   const cacheKey = ScopedKey.from(serverSDK.scope, props.request.id)
 
   const questions = createMemo(() =>
@@ -372,6 +376,17 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
       return
     }
 
+    const previous = IS_MAC
+      ? event.metaKey && !event.ctrlKey && !event.altKey && event.key === "["
+      : event.altKey && !event.ctrlKey && !event.metaKey && event.key === "ArrowLeft"
+    if (previous) {
+      if (event.repeat) return
+      event.preventDefault()
+      event.stopPropagation()
+      back()
+      return
+    }
+
     const mod = (event.metaKey || event.ctrlKey) && !event.altKey
     if (mod && event.key === "Enter") {
       if (event.repeat) return
@@ -483,6 +498,17 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
     if (!store.minimized) focus(pickFocus(tab))
   }
 
+  command.register("session.question.back", () => [
+    {
+      id: "session.question.back",
+      title: language.t("ui.common.back"),
+      keybind: IS_MAC ? "mod+[" : "alt+arrowleft",
+      hidden: true,
+      when: (event) => event.target instanceof Node && !!root?.contains(event.target),
+      onSelect: back,
+    },
+  ])
+
   const minimize = () => {
     if (sending()) return
     setStore("editing", false)
@@ -545,9 +571,17 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
             </Button>
             <div data-slot="question-footer-actions">
               <Show when={store.tab > 0}>
-                <Button variant="neutral" size="large" disabled={sending()} onClick={back}>
-                  {language.t("ui.common.back")}
-                </Button>
+                <Tooltip value={IS_MAC ? "⌘[" : `${language.t("common.key.alt")}+←`}>
+                  <Button
+                    variant="neutral"
+                    size="large"
+                    disabled={sending()}
+                    onClick={back}
+                    aria-keyshortcuts={IS_MAC ? "Meta+[" : "Alt+ArrowLeft"}
+                  >
+                    {language.t("ui.common.back")}
+                  </Button>
+                </Tooltip>
               </Show>
               <Button
                 variant={last() ? "submit" : "neutral"}
@@ -557,6 +591,9 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
                 aria-keyshortcuts="Meta+Enter Control+Enter"
               >
                 {last() ? language.t("ui.common.submit") : language.t("ui.common.next")}
+                <span aria-hidden="true" class="text-11-medium opacity-60">
+                  {IS_MAC ? "⌘⏎" : `${language.t("common.key.ctrl")}+⏎`}
+                </span>
               </Button>
             </div>
           </>

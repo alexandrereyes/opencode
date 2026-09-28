@@ -1,4 +1,6 @@
 import { Icon } from "@opencode/ui-custom/icon"
+import { IconButton } from "@opencode/ui-custom/icon-button"
+import { useGlobal } from "@/runtime/server/runtime"
 import { Menu } from "@opencode/ui-custom/menu"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -15,6 +17,9 @@ export function SettingsProjectRow(props: {
 }) {
   const language = useLanguage()
   const actions = useProjectActions()
+  const global = useGlobal()
+  const directories = () => [props.project.worktree, ...(props.project.sandboxes ?? [])]
+  const notification = () => global.ensureServerCtx(props.server).notification
   const [store, setStore] = createStore({ menu: undefined as { x: number; y: number } | undefined })
   let row: HTMLDivElement | undefined
   let button: HTMLButtonElement | undefined
@@ -33,7 +38,7 @@ export function SettingsProjectRow(props: {
       data-component="settings-project-row"
       data-project-path={props.project.worktree}
       data-server={ServerConnection.key(props.server)}
-      class="settings-project-row group"
+      class="settings-project-row group flex items-center"
       onContextMenu={(event) => {
         event.preventDefault()
         openMenu(event.clientX, event.clientY)
@@ -45,7 +50,7 @@ export function SettingsProjectRow(props: {
         aria-label={displayName(props.project)}
         aria-haspopup="menu"
         aria-expanded={!!store.menu}
-        class="settings-project-row-content"
+        class="settings-project-row-content min-w-0 flex-1"
         onClick={() => props.onOpen(props.project)}
         onKeyDown={(event) => {
           if (event.key !== "ContextMenu" && (event.key !== "F10" || !event.shiftKey)) return
@@ -73,6 +78,18 @@ export function SettingsProjectRow(props: {
           class="shrink-0 text-v2-icon-icon-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
         />
       </button>
+      <IconButton
+        class="me-4 shrink-0"
+        icon={<Icon name="ellipsis" size="small" />}
+        variant="ghost"
+        aria-label={language.t("common.moreOptions")}
+        aria-haspopup="menu"
+        aria-expanded={!!store.menu}
+        onClick={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect()
+          openMenu(bounds.left, bounds.bottom)
+        }}
+      />
       <Menu
         modal={false}
         placement="bottom-start"
@@ -110,6 +127,12 @@ export function SettingsProjectRow(props: {
               {language.t("common.rename")}
             </Menu.Item>
             <Menu.Separator />
+            <Menu.Item
+              disabled={!directories().some((directory) => notification().project.unseenCount(directory) > 0)}
+              onSelect={() => directories().forEach((directory) => notification().project.markViewed(directory))}
+            >
+              {language.t("sidebar.project.clearNotifications")}
+            </Menu.Item>
             <Menu.Item
               onSelect={() => {
                 actionSelected = true

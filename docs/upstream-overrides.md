@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Project settings actions and question shortcuts — https://github.com/anomalyco/opencode/pull/49172
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `95cfca73b0345885a122ff77fff06351cec9a382` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(app): add project settings actions and question shortcuts`; `packages/app-custom/src/settings/workspaces/{projects.tsx,project-row.tsx}`, `src/session/requests/session-question-dock.tsx`, and `e2e/regression/{settings-project-actions,question-shortcuts}.spec.ts`. Adds Open project in the header and empty state through the existing custom project explorer and SSH authentication hook, opening selected directories on the selected server. Keeps all-servers grouping and DialogEditProject. An explicit row options button opens the same custom menu as right click; closing still uses the custom confirmation and focus restoration. Clear notifications uses the existing per-server notification model for the project and its sandboxes. Question back shortcuts and back/submit hints are ported; unlike upstream's session-wide registration, the back command requires the keyboard event target to be inside the question dock, preserving CodeMirror and unrelated navigation shortcuts. Existing local submit handling remains. Finder/Electron paths, settings filters and timeline-detail slider changes are excluded.
+- **Tests:** four Playwright regressions with the scoped mock at 1440×900 and 390×844 pass: explicit options, notification clearing, close cancellation/focus restoration, confirmed removal, empty-state project picker and re-add, question back preserving the answer, and shortcut submission with exact payload. Spec-local fixtures provide subscriptions, server info and family snapshots missing from the shared mock. App-custom typecheck and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Console device-flow feedback — https://github.com/anomalyco/opencode/pull/48501
 
 - **Kind:** adaptation
