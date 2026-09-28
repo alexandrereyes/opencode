@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Theme seeds, light contrast, and token typos — https://github.com/anomalyco/opencode/pull/50517
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `b4866520679e7a74c688223b30356d1c29f18e4f` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(ui): port theme contrast and seed fixes`; `packages/ui-custom/src/theme/{color.ts,color.test.ts}` and `packages/ui-custom/src/theme/themes/{catppuccin-frappe,catppuccin-macchiato,catppuccin,kanagawa,oc-2}.json`. `color.ts` and the four Catppuccin/Kanagawa themes were identical to upstream `8ce629be2`, so they now match upstream `dd786c62a` (WCAG green luminance weight, corrected light/dark seeds and overrides). In `oc-2.json` only the `icon-weak-base` typo (`#C7C7C7`) is ported; the custom theme name and `v2-icon-icon-faint` value are kept.
+- **Tests:** new `color.test.ts` fails on `cde61cb22` (12.74 instead of 15.3 for green on black) and passes; ui-custom theme tests and typecheck and root `bun run check` pass. The four themes rendered a session in light and dark at 1440×900 and 390×844 against an isolated mock server.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Return composer focus after picking files — https://github.com/anomalyco/opencode/pull/50864
 
 - **Kind:** adaptation
