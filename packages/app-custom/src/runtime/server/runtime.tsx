@@ -177,22 +177,22 @@ function createGlobalModels() {
       return target[property as keyof typeof target]
     },
   }) as typeof local
-  const [recent] = createResource(
-    async () => {
-      const value = local.recent
-      await ready.promise
-      return value
-    },
-    (value) => value,
-    { initialValue: [] },
-  )
+  // Suspend readers only until persisted state loads. Refetching on every change would put the
+  // session route into its Suspense fallback, detaching the screen and resetting the timeline scroll.
+  const [loaded] = createResource(async () => {
+    await ready.promise
+    return true
+  })
 
   return {
     store,
     set: setLocal,
     preferences,
     ready,
-    recent: () => recent()!,
+    recent: () => {
+      loaded()
+      return local.recent
+    },
   }
 }
 

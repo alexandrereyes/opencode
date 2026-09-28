@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Keep the session mounted when switching models — https://github.com/anomalyco/opencode/pull/50865
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `fabf56781cee45b6ebe5aecd4b7b4c7bf5033fa5` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): keep timeline mounted when switching models`; `packages/app-custom/src/runtime/server/runtime.tsx` and `packages/app-custom/e2e/regression/session-model-switch-mount.spec.ts`. Same approach as upstream: model recents suspend readers only until persisted state loads, then read the store directly, so pushing a recent no longer puts the session route into its Suspense fallback. The custom `createGlobalModels` keeps its legacy `models` preference import, remote profile sync, and `user`/`variant` proxy.
+- **Tests:** the new Playwright regression at 1440×900 and 390×844 fails on `cde61cb22` (timeline viewport detached, scroll lost) and passes with the fix (5 repeats each); app-custom typecheck and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Compatibility skill watcher storm — https://github.com/anomalyco/opencode/commit/7784b3ee0d033da3eab101e45882387f4a3e1eaa
 
 - **Kind:** adaptation
