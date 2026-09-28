@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### GitHub mark on Markdown links — https://github.com/anomalyco/opencode/pull/51000
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `0bc8b8dbeb9540842ae5a69bb5c9af3182999522` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(session-ui): mark GitHub links in Markdown`; `packages/session-ui-custom/src/components/{markdown.css,markdown-github.svg}` and `packages/app-custom/e2e/regression/markdown-github-mark.spec.ts`. Ports only the GitHub mark: a `::before` pseudo-element masked with the local SVG (inlined as a data URI by the build) on `a.external-link` elements whose href is `github.com` or a path under it. Not ported: the Google favicon service, the globe fallback, and the favicon `<img>` handling in `markdown.tsx`/`image-preview.tsx`, so no third-party request is made; because the mark is not an image, the custom image-preview handling and local-link/inline-path references are untouched.
+- **Tests:** a Playwright regression against the mock server at 1440×900 and 390×844 checks the 14px mark on a GitHub link, no mark on another site or a `github.com.evil.example` lookalike, no images or preview buttons in the message, and no request to a non-local host; it fails on `cde61cb22`. The app-custom production build inlines the SVG; root `bun run check` passes.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Nested session tabs and ancestor trail — https://github.com/anomalyco/opencode/pull/51064
 
 - **Kind:** adaptation
