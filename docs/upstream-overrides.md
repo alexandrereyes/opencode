@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### MCP resource mentions as read references — https://github.com/anomalyco/opencode/pull/50680
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `33b686feb9f5c4b668b4584ae46746f1dfba2ef3` (commit reviewed), 2026-09-28
+- **Local change:** `fix(app): send MCP resource mentions as references`; `packages/app-custom/src/composer/{request.ts,submit.ts,submit.test.ts}`. Upstream removed the composer `@resource` suggestion and exposed `list_mcp_resources`/`read_mcp_resource` as Code Mode tools. The custom composer keeps the suggestion, but no longer sends a selected resource as a `file` attachment (core accepts only `file:` URIs, and a `file:` URI would read a local server file). Each resource in the prompt or quote comments, including resources restored from old drafts or history with `source.type === "resource"`, is sent as the text line `MCP resource <uri> (server: <server>)` after the prompt text, for prompts and slash commands. It is a reference for the model to read, not pre-attached content. The model reads it through `read_mcp_resource`, which is only reachable inside Code Mode, so it requires the agent's `execute` permission and the tool's `opencode_read_mcp_resource` permission. The draft schema is unchanged.
+- **Tests:** new submit tests for prompts and commands fail on `cde61cb22` (resource sent as a `file` attachment) and pass; app-custom unit suite, typecheck, and root `bun run check` pass. A one-off Playwright check against the mock server at 1440×900 and 390×844 selected the `@guide` suggestion and captured the admitted text line with no files.
+- **Status:** active
+- **Reconcile or remove when:** upstream changes composer resource mentions or the MCP resource tools; compare and update the custom delivery
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Theme seeds, light contrast, and token typos — https://github.com/anomalyco/opencode/pull/50517
 
 - **Kind:** adaptation

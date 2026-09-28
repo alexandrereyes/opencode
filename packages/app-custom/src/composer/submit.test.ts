@@ -295,6 +295,53 @@ describe("Composer submission", () => {
     })
   }
 
+  for (const command of [false, true]) {
+    test(`sends MCP resource mentions as references for ${command ? "commands" : "prompts"}`, async () => {
+      const state = createMemoryComposerState().capture()
+      const prefix = command ? "/review " : ""
+      state.set([
+        { type: "text", content: `${prefix}Read `, start: 0, end: prefix.length + 5 },
+        {
+          type: "file",
+          path: "docs://guide",
+          content: "@guide",
+          start: prefix.length + 5,
+          end: prefix.length + 11,
+          mime: "text/plain",
+          filename: "guide",
+          url: "docs://guide",
+          source: {
+            type: "resource",
+            text: { value: "@guide", start: 0, end: 6 },
+            clientName: "docs",
+            uri: "docs://guide",
+          },
+        },
+      ])
+      const completed = Promise.withResolvers<{ text: string; files?: readonly unknown[] }>()
+      const target = session({
+        calls: [],
+        prompt: async (value) => completed.resolve(value),
+        command: async (value) => completed.resolve(value),
+      })
+      const adapter: ActiveComposerAdapter = {
+        kind: "active-session",
+        state,
+        ready: () => true,
+        controls,
+        working: () => false,
+        session: () => target,
+        interrupt: async () => undefined,
+        submitted() {},
+        setEditor() {},
+      }
+      await submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+      const sent = await completed.promise
+      expect(sent.text).toBe("Read @guide\nMCP resource docs://guide (server: docs)")
+      expect(sent.files).toEqual([])
+    })
+  }
+
   test("sends a quote-only prompt and restores its comment after a failed admission", async () => {
     const state = createMemoryComposerState().capture()
     const id = state.quotes.add({ messageID: "msg_answer", partID: "msg_answer:text:0", text: "Quoted passage" })

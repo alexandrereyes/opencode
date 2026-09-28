@@ -28,6 +28,7 @@ type PromptRequest = {
   quotes: ChatQuote[]
   attachments: PromptAttachmentReference[]
   fileReferences: PromptAttachmentReference[]
+  resources: string[]
 }
 
 type ContextFile = {
@@ -70,7 +71,8 @@ const parseCommentMentions = (comment: string) => {
   })
 }
 
-const isFileAttachment = (part: Prompt[number]): part is FileAttachmentPart => part.type === "file"
+const isFileAttachment = (part: Prompt[number]): part is FileAttachmentPart =>
+  part.type === "file" && part.source?.type !== "resource"
 const isAgentAttachment = (part: Prompt[number]): part is AgentPart => part.type === "agent"
 const isSkillAttachment = (part: Prompt[number]): part is SkillPart => part.type === "skill"
 
@@ -94,6 +96,12 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     id: attachment.id,
     name: attachment.name,
   }))
+  // Core accepts only file: URIs as attachments, so MCP resources become references the model reads itself.
+  const resources = [...prompt, ...quotePrompt].flatMap((part) =>
+    part.type === "file" && part.source?.type === "resource"
+      ? [`MCP resource ${part.source.uri} (server: ${part.source.clientName})`]
+      : [],
+  )
   const files = prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)
     return {
@@ -183,6 +191,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     text: [
       ...(text.trim() ? [text] : []),
       ...fileReferences.map(formatAttachmentReference),
+      ...resources,
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
       ...formatSessionContexts(sessions),
@@ -198,6 +207,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     quotes: input.quotes ?? [],
     attachments,
     fileReferences,
+    resources,
   }
 }
 

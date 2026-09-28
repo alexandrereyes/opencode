@@ -441,6 +441,7 @@ async function sendCommand(
         ? request.displayText.split(" ").slice(1).join(" ")
         : command.arguments,
       ...request.fileReferences.map(formatAttachmentReference),
+      ...request.resources,
       ...request.apps.map(formatAppContext),
       ...formatSessionContexts(request.sessions),
       formatChatQuotes(value.quotes),
