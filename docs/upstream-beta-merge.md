@@ -1,3 +1,47 @@
+# V2 integration — 2026-09-28
+
+## Baselines
+
+- Custom parent: `d0eae5000`.
+- Integrated upstream: `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (`upstream/v2`,
+  after the 2.0.18 release sync).
+- Merged directly on `custom`.
+- Runtime: Bun 1.4.2.
+
+The upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` trees
+match the integrated upstream revision exactly. The upstream UI work in this range
+is not ported yet; `docs/upstream-overrides.md` marks the affected custom ports as
+`reconcile`.
+
+## Integration points
+
+- `packages/core/src/tool/read-filesystem.ts`: take upstream's line-counting
+  `makeTextPage` call (#51011) and keep the custom `Effect.die(new Error(...))`.
+- `bun.lock`: regenerated with `bun install` from upstream's lockfile.
+- Upstream removed the unused `SessionRunnerRetry.transient` (#51667); compaction
+  now runs its own retry loop through `SessionRunnerRetry.policy`, which still
+  carries the custom frozen HTTP metadata into the `session.retry` hook. The custom
+  test for `transient` is removed; the policy metadata tests remain.
+- The custom app-mentions MCP fixture adds upstream's new `Mcp.Interface.resources`
+  (#50680).
+- `opencode pair` now prints single-use `/auth/connect/<code>` links (#50970). The
+  server still accepts the password, but the custom web QR scanner does not decode
+  these links until the pairing UI is ported.
+- Regenerating the Client from source produces no changes.
+
+Shared implementation overlap against the fixed upstream baseline, measured with
+the command below using `dd786c62a`: **55 modified upstream files, 682 added lines,
+65 removed lines**.
+
+## Validation
+
+- Frozen dependency installation and root `bun run check` pass.
+- Core 5,560 passed, 21 skipped; Server 69 (three skipped); CLI 328 (nine
+  skipped); custom plugin 57.
+- Core's 12 failures are environment-only: the known `preload.test.ts` home
+  isolation check, and 11 new upstream GitLab OAuth tests (#50422) that need
+  local port 8080, which OrbStack occupies on this machine.
+
 # V2 integration — 2026-09-23
 
 ## Baselines

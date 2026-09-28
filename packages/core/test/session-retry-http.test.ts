@@ -6,8 +6,7 @@ import { Provider } from "@opencode/schema/provider"
 import { Session } from "@opencode/schema/session"
 import { SessionRunnerRetry } from "@opencode/core/session/runner/retry"
 import { toSessionError } from "@opencode/core/session/to-session-error"
-import { Effect, Fiber, Queue } from "effect"
-import { TestClock } from "effect/testing"
+import { Effect } from "effect"
 import { it } from "./lib/effect"
 
 const sessionID = Session.ID.make("ses_retry_http")
@@ -74,40 +73,5 @@ it.effect("transport failures have no invented HTTP metadata", () =>
           expect(event).not.toHaveProperty("http")
         }),
     })
-  }),
-)
-
-it.effect("native retry waits the hook deadline and remains interruptible", () =>
-  Effect.gen(function* () {
-    const scheduled = yield* Queue.unbounded<void>()
-    const attempts: number[] = []
-    const run = Effect.gen(function* () {
-      const decide = yield* SessionRunnerRetry.policy(sessionID)
-      return yield* Effect.suspend(() => {
-        attempts.push(1)
-        return attempts.length % 2 === 1 ? Effect.fail(cause) : Effect.succeed("done")
-      }).pipe(
-        SessionRunnerRetry.transient(decide, {
-          agent,
-          model,
-          hook: (event) =>
-            Effect.gen(function* () {
-              event.decision = { retry: true, delay: 18_000_000 }
-              yield* Queue.offer(scheduled, undefined)
-            }),
-        }),
-      )
-    })
-    const first = yield* run.pipe(Effect.forkChild)
-    yield* Queue.take(scheduled)
-    yield* TestClock.adjust("17999999 millis")
-    expect(attempts).toHaveLength(1)
-    yield* TestClock.adjust("1 millis")
-    expect(yield* Fiber.join(first)).toBe("done")
-    const second = yield* run.pipe(Effect.forkChild)
-    yield* Queue.take(scheduled)
-    yield* Fiber.interrupt(second)
-    yield* TestClock.adjust("1 day")
-    expect(attempts).toHaveLength(3)
   }),
 )

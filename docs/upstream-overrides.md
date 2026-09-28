@@ -114,7 +114,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 ### Compatibility skill watcher storm — https://github.com/anomalyco/opencode/commit/7784b3ee0d033da3eab101e45882387f4a3e1eaa
 
 - **Kind:** adaptation
-- **Reviewed upstream revision:** `affa57e40f44fbd294c18199ecab5879c0ae0d70` (`upstream/v2`, where `compatibility.ts` is still identical to the version introduced by `7784b3ee0d033da3eab101e45882387f4a3e1eaa`), 2026-09-23
+- **Reviewed upstream revision:** `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (`upstream/v2`, where `compatibility.ts` is still identical to the version introduced by `7784b3ee0d033da3eab101e45882387f4a3e1eaa`), 2026-09-28; previously `affa57e40f44fbd294c18199ecab5879c0ae0d70`, 2026-09-23
 - **Local change:** `fix(core): stop compatibility skill watcher storms`; `packages/core/src/config/plugin/compatibility.ts`, `packages/core/test/config/skill.test.ts`. There is no upstream fix. Upstream reloads on every raw `config.changes()` event without a debounce, and every refresh runs `FiberMap.clear` and resubscribes all watches. Every Location runs the plugin, so a single event under `~/.agents` or `~/.claude` became N×events full rescans, native watcher restarts, and `skill.updated` notifications. That storm froze the shared server (observed on 2026-09-23: ~30k refreshes in 22 minutes). Locally: config changes are filtered to `.claude`/`.agents` roots and share the existing 100 ms debounce; watches are reconciled so only watches that left the source set are released; claude and agents roots that resolve to the same directory are scanned once; `ctx.skill.reload()` runs only when the loaded skills changed. Related open issues: https://github.com/anomalyco/opencode/issues/47505 and https://github.com/anomalyco/opencode/issues/50594.
 - **Tests:** `bun test test/config test/filesystem` in `packages/core` (281 pass); the new `ConfigCompatibilityPlugin.Plugin` test fails against the upstream file (6 reloads for a 5-event burst) and passes locally; full `packages/core` suite passes except the environment-only `preload.test.ts` home isolation check; `bun run check` passes.
 - **Status:** active
@@ -161,10 +161,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `788f0affcbec8b3609eb943977e6da36ae02ddf9`, `080b7671dea45a693b537c1e358e89ab14463d0d` (commits reviewed/applied), 2026-09-23
 - **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/servers/connect/{pairing.ts,pairing.test.ts,scanner.tsx}`. Scan raw JSON, legacy query/fragment codes, and direct base64url /connect links. Port the prerequisite optional URL payload and URL decoder from #49291, but not desktop pairing UI or link generation. CLI/backend already contain the direct-link changes.
 - **Tests:** app-custom typecheck and root `bun run check` passed; three focused tests passed covering raw/legacy codes, origin fallback, Unicode credentials, malformed payloads, and rejected schemes.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50970 and #50972 replace password pairing with single-use `/auth/connect/<code>` links, and `opencode pair` now prints only that format, which the custom scanner does not decode or redeem. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Custom scrollbar mount measurement — [#49778](https://github.com/anomalyco/opencode/pull/49778)
 
@@ -194,10 +194,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `3bf8a5a8cfb4826d9c06f35898b6cb42670385cf`, 2026-09-23
 - **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/settings/providers/{providers.tsx,popular.ts,popular.test.ts}`. Ported the upstream credential-method filter into a tested helper while preserving custom server-scoped settings and ordering.
 - **Tests:** app-custom `bun run test:unit` (1120 pass, 1 skip); four focused Popular-list cases cover fresh installs, stored keys, OAuth accounts, and catalog loading. App-custom typecheck and root `bun run check` pass.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 (Console and Go device-flow sign-in) and #51266 (provider account switching) change `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Console browser sign-in — https://github.com/anomalyco/opencode/pull/50267
 
@@ -205,10 +205,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `fbacf6a1268473e38788d196cf60ddfab3b47e27`, 2026-09-23
 - **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/providers/connect/{controller.ts,dialog.tsx}`, `src/settings/providers/providers.tsx`, `src/runtime/server/{types.ts,global-sync/utils.ts}`, `src/runtime/i18n/en.ts`, and `test-browser/{provider-connection.test.ts,fixtures/provider-connection.ts}`. Shared Console OAuth for Zen/Go, hidden defaults, non-suspending loading, browser opening, polling, retry, expiry, cancellation, Go-specific key storage, account badges, and integration-aware disconnect. Retains native authorization links for popup-blocked browsers and custom dialog/settings styling; cancels still-open attempts on polling transport failure. Preserves custom model-visibility preferences rather than copying upstream's automatic show-all preference mutation. Composer commands and icon redesign are outside this port.
 - **Tests:** app-custom `bun run test:unit` (1120 pass, 1 skip), `bun run test:browser` (220 pass), and the isolated controller fixture (10 pass); app-custom typecheck/build and root `bun run check` (39 tasks) pass. Playwright CLI checked Chrome at 1440×900 and iPhone WebKit at 390×844 against isolated source port 4185: real OAuth start/browser URL/polling, visible-link fallback with automatic opening suppressed, API-key switch/cancellation, and injected failure/retry. No OAuth login completed or real credentials submitted; test processes stopped.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 moves Console and Go sign-in to the device flow and #51266 adds provider account switching in `providers/connect` and `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Go monthly pricing copy — https://github.com/anomalyco/opencode/pull/50473
 
@@ -238,10 +238,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `1464545665ba892c2d2886f4456acc9a584aa156`, 2026-09-23
 - **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/index.css`. Center the existing 1000px conversation beside the custom 280px panel in the upstream 1320–1640px chat-width range, preserving RTL and reduced motion. The custom start screen has no summary cards, so #49429 was evaluated but not ported.
 - **Tests:** root `bun run check`, app-custom typecheck and build passed; unit suite 1118 passed/1 skipped, browser suite 219 passed, focused Playwright regressions 8 passed; desktop and mobile browser inspection passed.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386 keeps the session summary as an overlay and changes `index.css`. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Summary layout coordination — https://github.com/anomalyco/opencode/pull/48449
 
@@ -249,10 +249,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `9f3ba44c4a4a8ba3c9fa36694af06bb0a2baa367`, 2026-09-23
 - **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{screen.tsx,review/model.ts,timeline/message-timeline.tsx}` and `src/index.css`. Port summary-open coordination, fixed edge anchoring, bounded scrolling, and resize offset freezing to the existing custom popover; retain the mobile drawer.
 - **Tests:** focused Playwright LTR/RTL tests verify timeline/composer translation, resize settlement and closing; drawer dismissal regression; app-custom typecheck, unit/browser suites and build all passed.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386 keeps the session summary as an overlay. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Expandable services and configuration — https://github.com/anomalyco/opencode/pull/48445
 
@@ -260,10 +260,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `41430842506e8952580a2fa1af25aa88d8ea896d`, 2026-09-23
 - **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/shell/status/{body.tsx,service-status.ts}` and `src/session/timeline/message-timeline.tsx`. Reuse existing service configuration actions, retries, refresh subscriptions, and custom LSP derivation in compact expandable tabs instead of adding upstream's nested service popovers. Browser clients retain working copy-path actions even for a local server without native reveal APIs.
 - **Tests:** status derivation unit tests; focused Playwright tests expand/collapse all four services using pointer and keyboard and verify configuration actions and unclipped labels; app-custom typecheck, unit/browser suites and build all passed.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51001 starts MCP sign-in from a row click in the session summary services. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Services in the custom session summary — https://github.com/anomalyco/opencode/pull/48103
 
@@ -271,10 +271,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `d6c22b3bf531533980dc633a1dac5e38c64fe458`, 2026-09-23
 - **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{timeline/message-timeline.tsx,header/session-header.tsx,review/view.tsx}`, `src/shell/status/`, and `src/runtime/i18n/en.ts`. Preserve project, location, changes, move actions and background tasks; add a compact MCP/plugins/skills/LSP status row. Reuse the custom status body, suppress redundant session titlebar/mobile status entry points when a summary exists, and retain standalone status for drafts and child sessions.
 - **Tests:** app-custom unit/browser suites, typecheck and build; focused Playwright service, session-header and mobile drawer regressions all passed; screenshots inspected at 1440×900, 1024×900 and 390×844.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386, #51001, and #51288 change the session summary and its project icon resolution. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Staged composer attachments — https://github.com/anomalyco/opencode/pull/49467
 
@@ -282,10 +282,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `f04c3fd82bf98cb911f5c1c7b25f9cded0b86722` (#49467), `469e1c035ee3f1343f02b60c0aab22136fdb4f2a` (https://github.com/anomalyco/opencode/pull/49647), `90112f52db59a8f2ec412c66c6677193bf5dc7b8` (https://github.com/anomalyco/opencode/pull/49682), 2026-09-23
 - **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer`, `packages/app-custom/src/session/composer/queue.ts`, `packages/app-custom/src/shell/shell.tsx`, `packages/app-custom/src/runtime/i18n/en.ts`, `packages/ui-custom/src/feedback/toast`. Streams non-native, text, and over-20-MiB files directly to the server with cancellable progress. Path parts extend the custom CodeMirror attachment/reference algebra, including image citations, undo, snippets, drafts, history, and queued edits. Retains a delivery adapter for legacy blob drafts and model capability changes; keeps the custom composer rather than adopting upstream's editor.
 - **Tests:** app-custom unit and browser-condition suites, all three affected package typechecks, root `bun run check`, app-custom production build; isolated-server browser checks at 1440×900 and 390×844 include 21-MiB streaming progress, picker attachment, image paste, staged reference removal/undo, and draft reload. Follow-up `fix(app): expose sent attachment paths` checks the full path on both collapsed summaries and expanded attachment cards, declares image/PDF capabilities in the shared model fixture, and exercises the dropped-text streaming endpoint. The collapsed-path title expectation also failed on `db3a4d551`; the follow-up adds the missing collapsed affordance rather than weakening that assertion.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
 
@@ -293,10 +293,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `47f66de8dda535de9f2e2c3bfdbeaad774ad6e82`, 2026-09-23
 - **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/runtime/persistence/drafts.ts`, `packages/app-custom/src/composer/{schema.ts,model.ts,submit.ts,editor/editor.tsx}`. Restored image references keep IDs without reading bytes until thumbnail, preview, or delivery; retains custom image citation metadata and legacy path-delivery support. `fix(app): preserve composer focus with attachments` keys attachment rows by ID and loads thumbnail bytes by stable blob ID without suspending the surrounding session. Existing URLs render synchronously; cold previews use an empty initial value and the resource's latest value. This avoids a Promise-backed thumbnail detaching the editor and Context panel on each document edit.
 - **Tests:** lazy draft/cache/persistence tests, app-custom unit and browser-condition suites, typechecks, root check, production build, browser draft reload. Added desktop/mobile Playwright focus, caret, DOM-detachment, thumbnail-identity, and remove/undo regressions; both focus cases fail on integrated `3413919c7` and pass with the fix. Real isolated-backend measurements over 31 key events: image on `db3a4d551` = 0 editor/Context detachments, image on `3413919c7` = 21 each with lost focus, fixed image and 21-MiB path attachment = 0 at 1440×900 and 390×844. All three servers used empty provider lists and no inherited OpenCode environment.
-- **Status:** active
+- **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50864 keeps composer focus after attaching files, overlapping the custom focus fix. The custom port is unchanged; comparison is deferred to the next custom UI port.
 
 ### Failed-send history and bounded toasts — https://github.com/anomalyco/opencode/pull/49717
 
@@ -342,17 +342,6 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Installation:** none
 - **Result after upstream:** pending
 
-### Reread artifacts when opening a preview — https://github.com/anomalyco/opencode/pull/51036
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `7460d855ac906d9f604fdf7beb934cc19dc2614b`, 2026-09-25
-- **Local change:** `packages/app-custom/src/session/files/open-artifact.tsx` forces `file.load(path, { force: true })` when an agent-referenced path opens, matching upstream. The same custom change also opens directory references as listing tabs (custom-only): a failed read that lists successfully stores `entries` in `packages/app-custom/src/workspaces/files/model.tsx` and renders `src/session/files/directory-view.tsx` instead of an error toast. Upstream's Playwright regression spec is not ported.
-- **Tests:** app-custom typecheck passes. Playwright against the live backend at 1280×720 and 390×844 verified that absolute and workspace-relative directory references open listing tabs, listing entries open nested directories and image previews, file references still open, and missing paths still toast.
-- **Status:** active
-- **Reconcile or remove when:** the next upstream integration that changes `open-artifact.tsx`; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending
-
 ### Timeline image attachment previews in custom UI — https://github.com/anomalyco/opencode/pull/49111
 
 - **Kind:** adaptation
@@ -380,4 +369,13 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Resolved entries
 
-_None._
+### Reread artifacts when opening a preview — https://github.com/anomalyco/opencode/pull/51036
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `7460d855ac906d9f604fdf7beb934cc19dc2614b`, 2026-09-25
+- **Local change:** `packages/app-custom/src/session/files/open-artifact.tsx` forces `file.load(path, { force: true })` when an agent-referenced path opens, matching upstream. The same custom change also opens directory references as listing tabs (custom-only): a failed read that lists successfully stores `entries` in `packages/app-custom/src/workspaces/files/model.tsx` and renders `src/session/files/directory-view.tsx` instead of an error toast. Upstream's Playwright regression spec is not ported.
+- **Tests:** app-custom typecheck passes. Playwright against the live backend at 1280×720 and 390×844 verified that absolute and workspace-relative directory references open listing tabs, listing entries open nested directories and image previews, file references still open, and missing paths still toast.
+- **Status:** resolved
+- **Reconcile or remove when:** the next upstream integration that changes `open-artifact.tsx`; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** upstream merged #51036 as `7460d855ac906d9f604fdf7beb934cc19dc2614b`, the reviewed revision, and no later upstream commit through `dd786c62a` changes `open-artifact.tsx`. Reconciled by `chore: merge upstream v2 (2.0.18) into custom` (`docs/upstream-overrides.md`). Outcome: custom port kept; `packages/app-custom` forces the reread exactly as upstream, and the directory listing tabs remain a custom-only behavior.
