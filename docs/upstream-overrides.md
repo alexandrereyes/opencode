@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Tool count spacing — https://github.com/anomalyco/opencode/pull/50356
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `e31f78af78da624dd0c9aa487cdf47509a6bd2d7` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(session-ui): space tool counts with gaps`; `packages/session-ui-custom/src/{components/message-part.css,tools/tool-renderer.tsx}` and `packages/app-custom/e2e/regression/tool-count-spacing.spec.ts`. The custom tool-group summary already had upstream's split label structure but spaced it with literal trailing spaces; it now uses upstream's 4px flex gaps (which also separates a trailing locale suffix from the tool names) and tabular numerals for the count. The custom font-size token is kept; upstream's component-test updates are not ported (the custom packages have no Storybook stories).
+- **Tests:** a Playwright regression against the mock server at 1440×900 and 390×844 checks the tabular count and 4px gaps on both sides of the count; it fails on `cde61cb22`. Existing accessible-name checks (`Used 1 Agent`) still pass; session-ui-custom unit suite and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### GitHub mark on Markdown links — https://github.com/anomalyco/opencode/pull/51000
 
 - **Kind:** adaptation
