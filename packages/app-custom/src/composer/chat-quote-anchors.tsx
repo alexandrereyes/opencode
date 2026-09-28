@@ -66,7 +66,11 @@ export function ChatQuoteAnchors(props: { root?: HTMLElement; active: boolean; q
           (body) => [body.closest('[data-component="text-part"]')?.getAttribute("data-timeline-part-id"), body],
         ),
       )
-      const mounted = new Set<Element>([root, ...bodies.values()])
+      // Highlights are portaled above the shell, so clip them under the /btw panel overlaying the timeline.
+      const panel = region?.querySelector(':scope > [data-slot="session-btw-panel"]')
+      const covered = panel ? Math.min(bounds.bottom, panel.getBoundingClientRect().top) : bounds.bottom
+      const visible = new DOMRect(bounds.left, bounds.top, bounds.width, Math.max(0, covered - bounds.top))
+      const mounted = new Set<Element>([root, ...bodies.values(), ...(panel ? [panel] : [])])
       observed.forEach((body) => {
         if (mounted.has(body)) return
         resize.unobserve(body)
@@ -82,7 +86,7 @@ export function ChatQuoteAnchors(props: { root?: HTMLElement; active: boolean; q
         if (!body) return []
         const range = resolveChatQuoteAnchor(body, quote)
         if (!range) return []
-        const rects = quoteRects(range, root, bounds)
+        const rects = quoteRects(range, root, visible)
         if (!rects.length) return []
         const last = rects[rects.length - 1]!
         // Use the paragraph gutter rather than covering the next character when
@@ -138,8 +142,10 @@ export function ChatQuoteAnchors(props: { root?: HTMLElement; active: boolean; q
       const anchor = hit(event)
       if (anchor) quotes.editor.open(anchor.id)
     }
+    const region = root.closest("main")?.querySelector('[data-component="composer-region"]')
     const mutation = new MutationObserver(schedule)
     mutation.observe(root, { childList: true, subtree: true, characterData: true })
+    if (region) mutation.observe(region, { childList: true })
     root.addEventListener("pointermove", hover)
     root.addEventListener("pointerleave", leave)
     root.addEventListener("click", click)
