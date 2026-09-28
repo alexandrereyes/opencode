@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Attachment remove buttons on touch devices — https://github.com/anomalyco/opencode/pull/51047
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `dca73ba9e3782e2b41983faca5854a9d56a3c482` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): show attachment remove buttons on touch devices`; `packages/app-custom/src/composer/editor/editor.tsx` and `packages/app-custom/e2e/regression/composer-attachment-touch.spec.ts`. Comment and attachment remove buttons use the existing `hover-reveal` utility, so they stay visible when the device cannot hover. The custom staged-upload cancel button is already always visible and is unchanged; upstream's component story test is replaced by an e2e regression because the custom packages have no Storybook stories.
+- **Tests:** the new Playwright regression (touch, 390×844) fails on `cde61cb22` (opacity 0) and passes with the fix, including tap-to-remove; app-custom typecheck and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Keep the session mounted when switching models — https://github.com/anomalyco/opencode/pull/50865
 
 - **Kind:** adaptation
@@ -296,7 +307,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` (see its entry).
 
 ### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
 
