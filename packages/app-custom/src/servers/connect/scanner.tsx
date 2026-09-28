@@ -3,7 +3,7 @@ import { onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { useLanguage } from "@/runtime/i18n/language"
-import { decodePairingScan } from "./pairing"
+import { decodePairingScan, pairingLink, redeemPairingLink } from "./pairing"
 
 export function PairingScanner(props: {
   onScan: (value: NonNullable<ReturnType<typeof decodePairingScan>>) => void
@@ -22,12 +22,21 @@ export function PairingScanner(props: {
       video,
       (result) => {
         const pairing = decodePairingScan(result.data)
-        if (!pairing) {
+        if (pairing) {
+          scanner.stop()
+          props.onScan(pairing)
+          return
+        }
+        const link = pairingLink(result.data)
+        if (!link) {
           setState("error", language.t("server.connect.scan.invalid"))
           return
         }
         scanner.stop()
-        props.onScan(pairing)
+        void redeemPairingLink(link).then((redeemed) => {
+          if (redeemed) return props.onScan(redeemed)
+          setState("error", language.t("server.connect.link.expired"))
+        })
       },
       { preferredCamera: "environment", maxScansPerSecond: 10, returnDetailedScanResult: true },
     )

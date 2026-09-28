@@ -8,13 +8,13 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCheckServerHealth } from "@/runtime/server/health"
 import { useServers } from "@/runtime/server/registry"
-import { serverAddress } from "./pairing"
+import { pairingLink, redeemPairingLink, serverAddress } from "./pairing"
 import { isMixedContent } from "./browser"
 import "./screen.css"
 
 const PairingScanner = lazy(() => import("./scanner").then((module) => ({ default: module.PairingScanner })))
 
-export function ConnectServerScreen() {
+export function ConnectServerScreen(props: { url?: string } = {}) {
   const language = useLanguage()
   const platform = usePlatform()
   const servers = useServers()
@@ -36,7 +36,13 @@ export function ConnectServerScreen() {
     },
     { initialValue: false },
   )
-  const [state, setState] = createStore({ url: "", password: "", urls: [] as string[], error: "", scanning: false })
+  const [state, setState] = createStore({
+    url: props.url ?? "",
+    password: "",
+    urls: [] as string[],
+    error: "",
+    scanning: false,
+  })
   const connectionError = () =>
     language.t(
       platform.platform === "web" && isMixedContent(location.href, state.url)
@@ -45,6 +51,16 @@ export function ConnectServerScreen() {
     )
   const request = useMutation(() => ({
     mutationFn: async () => {
+      const link = pairingLink(state.url)
+      if (link) {
+        const redeemed = await redeemPairingLink(link)
+        if (!redeemed) {
+          setState("error", language.t("server.connect.link.expired"))
+          return
+        }
+        // Keep the token in the form so a failed connection check can retry without the spent code.
+        setState({ url: link.url, password: redeemed.password })
+      }
       const url = serverAddress(state.url)
       if (!url) {
         setState("error", language.t("server.connect.address.invalid"))

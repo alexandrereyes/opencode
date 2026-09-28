@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### One-time pairing links and unauthorized servers — https://github.com/anomalyco/opencode/pull/50970, https://github.com/anomalyco/opencode/pull/50972
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `eccf0b3b7b70f6980f6f7ccdb0cad566bbc37ab5`, `2caba90a63e1eb0155ca43496ca6e8eed895e217` (commits reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): redeem one-time pairing links`; `packages/app-custom/src/servers/connect/{pairing.ts,pairing.test.ts,scanner.tsx,screen.tsx,dialog.tsx}`, `src/runtime/server/{health.ts,health.test.ts,runtime.tsx}`, `src/shell/routes/routes.tsx`, `src/runtime/i18n/en.ts`, `vite.pwa.ts`, and `e2e/service-worker/cache.spec.ts`. Ports `pairingLink()`/`redeemPairingLink()` but keeps the custom raw JSON, legacy query/fragment, and base64url `/connect` decoders (the scanner tries them first) and returns the custom `{ urls, password }` shape. The connect screen and the server dialog accept a pasted `/auth/connect/<code>` link, redeem it, and put the base URL and token into the form before the health check, so a retry never reuses the spent code; spent or expired codes show an English-only error. Health reports `{ healthy: false, unauthorized: true }` without retrying; the global runtime disposes an unauthorized server's controller and does not recreate it until health recovers. When the only server is an unauthorized HTTP server, the connect screen replaces the app with its URL prefilled. The PWA navigation fallback excludes `/auth` so opened links reach the server. Not ported: upstream's removal of password pairing and legacy decoders, the desktop/TUI pairing UI, and the `/connect` route removal (custom has no such route).
+- **Tests:** pairing-link and unauthorized-health unit tests (ported from upstream) pass; the service-worker navigation test now covers `/auth/connect/<code>` and fails with the old denylist. Against an isolated password-protected source server (temporary XDG/DB/config dirs, no inherited `OPENCODE_*`) and the app-custom dev server, Playwright at 1440×900 and 390×844 verified: unauthorized lone server → connect screen with the URL prefilled; a real `POST /api/pair` link pasted into the connect screen and into the Add server dialog is redeemed and stored as the base URL plus token, surviving reload; a spent link shows the expired error in both places; the manual password path still connects; with a wrong stored password the credentialed `/api/event` requests drop from 5 to 0 in 5 s (base `cde61cb22` keeps reconnecting) and a fresh link recovers the server. QR scanning of links was not exercised (no camera). App-custom unit suite, typecheck, and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Unified session project resolution — https://github.com/anomalyco/opencode/pull/51288
 
 - **Kind:** adaptation
@@ -238,10 +249,10 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `788f0affcbec8b3609eb943977e6da36ae02ddf9`, `080b7671dea45a693b537c1e358e89ab14463d0d` (commits reviewed/applied), 2026-09-23
 - **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/servers/connect/{pairing.ts,pairing.test.ts,scanner.tsx}`. Scan raw JSON, legacy query/fragment codes, and direct base64url /connect links. Port the prerequisite optional URL payload and URL decoder from #49291, but not desktop pairing UI or link generation. CLI/backend already contain the direct-link changes.
 - **Tests:** app-custom typecheck and root `bun run check` passed; three focused tests passed covering raw/legacy codes, origin fallback, Unicode credentials, malformed payloads, and rejected schemes.
-- **Status:** reconcile
+- **Status:** active
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50970 and #50972 replace password pairing with single-use `/auth/connect/<code>` links, and `opencode pair` now prints only that format, which the custom scanner does not decode or redeem. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50970 and #50972 replace password pairing with single-use `/auth/connect/<code>` links, and `opencode pair` now prints only that format, which the custom scanner does not decode or redeem. The custom port is unchanged; comparison is deferred to the next custom UI port. Reconciled in `fix(app): redeem one-time pairing links`: the custom decoders stay, and the scanner, connect screen, and server dialog now also redeem `/auth/connect/<code>` links (see that entry).
 
 ### Custom scrollbar mount measurement — [#49778](https://github.com/anomalyco/opencode/pull/49778)
 

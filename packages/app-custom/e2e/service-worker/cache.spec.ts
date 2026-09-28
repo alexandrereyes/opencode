@@ -85,6 +85,8 @@ const fixture = test.extend<{ site: Site }, { builds: Record<string, Record<stri
         return void response.writeHead(200, { "content-type": "text/html" }).end("<title>Worker observer</title>")
       if (path === "/api/health")
         return void response.writeHead(200, { "content-type": "application/json" }).end('{"healthy":true}')
+      if (path === "/auth/connect/code")
+        return void response.writeHead(200, { "content-type": "text/plain" }).end("paired")
       if (path === "/sw.js" && state.legacy && state.version === "old") {
         // Model the shipped worker's shared precache name and cache-first navigation behavior.
         const urls = Object.keys(builds.old).filter(
@@ -346,11 +348,14 @@ fixture("upgrades the legacy shared precache only after old tabs close", async (
   await expect(observer.getByRole("status")).toHaveText("new nested lazy loaded")
 })
 
-fixture("does not substitute cached HTML for API or missing asset navigations", async ({ page, site }) => {
+fixture("does not substitute cached HTML for API, pairing, or missing asset navigations", async ({ page, site }) => {
   await install(page, site.url)
   const api = await page.goto(`${site.url}/api/health`)
   expect(await api?.json()).toEqual({ healthy: true })
   expect(api?.fromServiceWorker()).toBe(false)
+  const pairing = await page.goto(`${site.url}/auth/connect/code`)
+  expect(await pairing?.text()).toBe("paired")
+  expect(pairing?.fromServiceWorker()).toBe(false)
   const asset = await page.goto(`${site.url}/_assets/missing.js`)
   expect(asset?.status()).toBe(404)
   expect(await asset?.text()).toBe("Not found")

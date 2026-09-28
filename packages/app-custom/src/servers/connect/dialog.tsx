@@ -18,6 +18,7 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { useCheckServerHealth } from "@/runtime/server/health"
 import { usePlatform } from "@/runtime/platform/platform"
 import { isMixedContent } from "./browser"
+import { pairingLink, redeemPairingLink } from "./pairing"
 import "@/settings/settings.css"
 
 type FormMode = "list" | "add" | "edit"
@@ -177,6 +178,16 @@ function createFormController(options: { onSelect?: () => void } = {}) {
 
   const request = useMutation(() => ({
     mutationFn: async () => {
+      const link = pairingLink(store.values.url)
+      if (link) {
+        const redeemed = await redeemPairingLink(link)
+        if (!redeemed) {
+          setStore("error", language.t("server.connect.link.expired"))
+          return
+        }
+        // Keep the token in the form so a failed connection check can retry without the spent code.
+        setStore("values", { url: link.url, password: redeemed.password })
+      }
       const normalized = normalizeServerUrl(store.values.url)
       if (!normalized) {
         reset()
