@@ -1,13 +1,17 @@
 import { Button } from "@opencode/ui-custom/button"
 import { Badge } from "@opencode/ui-custom/badge"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
+import { Icon } from "@opencode/ui-custom/icon"
+import { Menu } from "@opencode/ui-custom/menu"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { showToast } from "@/shell/notifications/toast"
 import { useProviders } from "@/providers/catalog/providers"
 import { useIntegrations } from "@/providers/catalog/integrations"
 import { createMemo, type Component, For, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
+import { useData } from "@/runtime/server/current"
 import { CONSOLE_INTEGRATION } from "@/providers/connect/controller"
 import { DialogConnectProvider, useProviderConnectController } from "@/providers/connect/dialog"
 import { SettingsServerScope } from "@/settings/server-scope"
@@ -15,6 +19,7 @@ import { InlineServerSelect } from "@/settings/server-select"
 import { SettingsList } from "@/settings/list"
 import "@/settings/settings.css"
 import { popularConnections } from "./popular"
+import { activeProviderAccount, providerAccounts, type ProviderAccount } from "./accounts"
 
 type ProviderSource = "env" | "api" | "account" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -39,9 +44,11 @@ export const SettingsProviders: Component<{
   const dialog = useDialog()
   const language = useLanguage()
   const serverSdk = useServerSDK()
+  const data = useData()
   const providers = useProviders(() => props.directory)
   const integrations = useIntegrations(() => props.directory)
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
+  const [state, setState] = createStore({ credentialID: undefined as string | undefined })
   const integration = (item: ProviderItem) =>
     integrations.list().find((entry) => entry.id === (item.integrationID ?? item.id))
 
@@ -102,6 +109,8 @@ export const SettingsProviders: Component<{
     return currentSource !== "env" && currentSource !== "config"
   }
 
+  const canManageAccounts = (item: ProviderItem) => providerAccounts(integration(item)).length > 0
+
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
 
   const disconnect = async (item: ProviderItem) => {
@@ -126,6 +135,129 @@ export const SettingsProviders: Component<{
         const message = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description: message })
       })
+  }
+
+  const refreshAccounts = async () => {
+    const location = props.directory ? { directory: props.directory } : undefined
+    data.location.integration.invalidate(location)
+    data.location.provider.invalidate(location)
+    data.location.model.invalidate(location)
+    await Promise.all([
+      data.location.integration.sync(location),
+      data.location.provider.sync(location),
+      data.location.model.sync(location),
+    ])
+  }
+
+  const accountError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    showToast({ title: language.t("common.requestFailed"), description: message })
+  }
+
+  const activate = async (item: ProviderItem, account: ProviderAccount) => {
+    if (activeProviderAccount(integration(item))?.id === account.id) return
+    setState("credentialID", account.id)
+    await serverSdk.api.credential
+      .activate({ credentialID: account.id })
+      .then(refreshAccounts)
+      .then(() =>
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.providers.account.switched.title", { provider: item.name }),
+          description: language.t("settings.providers.account.switched.description", { account: account.label }),
+        }),
+      )
+      .catch(accountError)
+      .finally(() => setState("credentialID", undefined))
+  }
+
+  const remove = async (item: ProviderItem, account: ProviderAccount) => {
+    const final = providerAccounts(integration(item)).length === 1
+    setState("credentialID", account.id)
+    await serverSdk.api.credential
+      .remove({ credentialID: account.id })
+      .then(refreshAccounts)
+      .then(() =>
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: final
+            ? language.t("provider.disconnect.toast.disconnected.title", { provider: item.name })
+            : language.t("settings.providers.account.removed.title", { account: account.label }),
+          description: final
+            ? language.t("provider.disconnect.toast.disconnected.description", { provider: item.name })
+            : language.t("settings.providers.account.removed.description", { provider: item.name }),
+        }),
+      )
+      .catch(accountError)
+      .finally(() => setState("credentialID", undefined))
+  }
+
+  // A flat menu instead of upstream's removal submenu stays usable on touch screens.
+  function AccountMenu(menuProps: { provider: ProviderItem }) {
+    const accounts = () => providerAccounts(integration(menuProps.provider))
+    const active = () => activeProviderAccount(integration(menuProps.provider))
+    const busy = () => state.credentialID !== undefined
+
+    return (
+      <Menu placement="bottom-end" gutter={6} modal={false}>
+        <Menu.Trigger
+          as={Button}
+          size="normal"
+          variant="ghost-muted"
+          class="settings-provider-account-trigger"
+          aria-label={language.t("settings.providers.account.manage", { provider: menuProps.provider.name })}
+        >
+          <span>{active()?.label}</span>
+          <Icon name="chevron-down" size="small" />
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Content class="settings-provider-account-menu">
+            <Menu.Group>
+              <Menu.GroupLabel>{language.t("settings.providers.account.group")}</Menu.GroupLabel>
+              <Menu.RadioGroup
+                value={active()?.id}
+                onChange={(credentialID) => {
+                  const account = accounts().find((item) => item.id === credentialID)
+                  if (account) void activate(menuProps.provider, account)
+                }}
+              >
+                <For each={accounts()}>
+                  {(account) => (
+                    <Menu.RadioItem value={account.id} closeOnSelect disabled={busy()}>
+                      <span class="settings-provider-account-label">{account.label}</span>
+                    </Menu.RadioItem>
+                  )}
+                </For>
+              </Menu.RadioGroup>
+            </Menu.Group>
+            <Menu.Item disabled={busy()} onSelect={() => connect(menuProps.provider.id)}>
+              {language.t("settings.providers.account.add")}
+            </Menu.Item>
+            <Menu.Separator />
+            <Menu.Group>
+              <Menu.GroupLabel>{language.t("settings.providers.account.removeGroup")}</Menu.GroupLabel>
+              <For each={accounts()}>
+                {(account) => (
+                  <Menu.Item
+                    disabled={busy()}
+                    badge={account.id === active()?.id ? language.t("settings.providers.account.active") : undefined}
+                    onSelect={() => void remove(menuProps.provider, account)}
+                  >
+                    <span class="settings-provider-account-label">{account.label}</span>
+                  </Menu.Item>
+                )}
+              </For>
+            </Menu.Group>
+            <Menu.Separator />
+            <Menu.Item disabled={busy()} onSelect={() => void disconnect(menuProps.provider)}>
+              {language.t("settings.providers.account.disconnectAll")}
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Portal>
+      </Menu>
+    )
   }
 
   return (
@@ -164,16 +296,23 @@ export const SettingsProviders: Component<{
                       </div>
                     </div>
                     <Show
-                      when={canDisconnect(item)}
+                      when={canManageAccounts(item)}
                       fallback={
-                        <span class="settings-provider-env-hint">
-                          {language.t("settings.providers.connected.environmentDescription")}
-                        </span>
+                        <Show
+                          when={canDisconnect(item)}
+                          fallback={
+                            <span class="settings-provider-env-hint">
+                              {language.t("settings.providers.connected.environmentDescription")}
+                            </span>
+                          }
+                        >
+                          <Button size="normal" variant="ghost-muted" onClick={() => void disconnect(item)}>
+                            {language.t("common.disconnect")}
+                          </Button>
+                        </Show>
                       }
                     >
-                      <Button size="normal" variant="ghost-muted" onClick={() => void disconnect(item)}>
-                        {language.t("common.disconnect")}
-                      </Button>
+                      <AccountMenu provider={item} />
                     </Show>
                   </div>
                 )}

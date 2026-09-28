@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Provider account switching — https://github.com/anomalyco/opencode/pull/51266
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `684721efb8c4e753431b2e9e851716e34e410e42` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(app): switch provider accounts in settings`; `packages/app-custom/src/settings/providers/{accounts.ts,accounts.test.ts,providers.tsx}`, `src/settings/settings.css`, and `src/runtime/i18n/en.ts`. A connected provider with stored credentials shows its active account (the server's active-first order) in a menu that activates another account (`credential.activate`), adds one through the existing connect dialog, and removes a single account (`credential.remove`), then invalidates and resyncs integration, provider, and model data. Differences from upstream: account removal is a flat menu group instead of a submenu, so the same menu works on touch screens (no `ui-custom` menu change is needed); the custom integration-aware "Disconnect all" stays in the menu as a separate action; providers without credentials keep the plain Disconnect button or the environment hint. Custom account badges, server-scoped settings (`InlineServerSelect`), the shared Console integration lookup, and model-visibility preferences are unchanged (no automatic `models.show`). English source strings only.
+- **Tests:** the upstream account-order helper tests pass; app-custom typecheck, unit suite, and root `bun run check` pass. Against an isolated source server (temporary XDG/DB/config dirs, no inherited `OPENCODE_*`) with two fixture OpenAI API-key credentials, Playwright at 1440×900 and 390×844 switched the active account, removed one account, opened Add account, and disconnected all, checking the server's credential list after each step.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### One-time pairing links and unauthorized servers — https://github.com/anomalyco/opencode/pull/50970, https://github.com/anomalyco/opencode/pull/50972
 
 - **Kind:** adaptation
@@ -285,7 +296,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 (Console and Go device-flow sign-in) and #51266 (provider account switching) change `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 (Console and Go device-flow sign-in) and #51266 (provider account switching) change `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port. #51266 is ported by `feat(app): switch provider accounts in settings` (see its entry); #48501 remains.
 
 ### Console browser sign-in — https://github.com/anomalyco/opencode/pull/50267
 
@@ -296,7 +307,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 moves Console and Go sign-in to the device flow and #51266 adds provider account switching in `providers/connect` and `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 moves Console and Go sign-in to the device flow and #51266 adds provider account switching in `providers/connect` and `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port. #51266 is ported by `feat(app): switch provider accounts in settings` (see its entry); #48501 remains.
 
 ### Go monthly pricing copy — https://github.com/anomalyco/opencode/pull/50473
 
