@@ -324,6 +324,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ### Custom tab gestures and compact icons — [#49964](https://github.com/anomalyco/opencode/pull/49964), [#49460](https://github.com/anomalyco/opencode/pull/49460)
 
+- **Comparison at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`:** #51064 is ported in `97abe55e5` (root-grouped nested tabs and ancestor trail); #51288 in `bc4e2c9f7` supplies shared project identity to tab/sidebar consumers. Touch thresholds, non-modal menus, drag-navigation suppression, compact icons and the mobile drawer's no-reorder guard remain custom. Neither identity change replaces the gesture implementation; desktop and 390×844 navigation checks are recorded in those entries.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `7020944359f9d6500d743ad7ba03d5d441e475bf`, `a5b3802ca3fcb95331fb56f3532c2b28b293b7ca` (commits reviewed/applied), 2026-09-23
 - **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/shell/titlebar/{tab-gesture.ts,tab-gesture.test.ts,tab-nav.tsx,tab-nav.css,tab-strip.tsx}`. Port touch thresholds, non-modal context menus, vertical drag navigation suppression, and compact icon container rules. Retain the custom `onReorder` guard: the inventory-sorted mobile drawer intentionally supplies no reorder callback, while reorderable strips support touch.
@@ -344,17 +345,6 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Installation:** none
 - **Result after upstream:** pending
 
-### Custom direct-link QR scanning — [#49971](https://github.com/anomalyco/opencode/pull/49971), prerequisite [#49291](https://github.com/anomalyco/opencode/pull/49291)
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `788f0affcbec8b3609eb943977e6da36ae02ddf9`, `080b7671dea45a693b537c1e358e89ab14463d0d` (commits reviewed/applied), 2026-09-23
-- **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/servers/connect/{pairing.ts,pairing.test.ts,scanner.tsx}`. Scan raw JSON, legacy query/fragment codes, and direct base64url /connect links. Port the prerequisite optional URL payload and URL decoder from #49291, but not desktop pairing UI or link generation. CLI/backend already contain the direct-link changes.
-- **Tests:** app-custom typecheck and root `bun run check` passed; three focused tests passed covering raw/legacy codes, origin fallback, Unicode credentials, malformed payloads, and rejected schemes.
-- **Status:** active
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50970 and #50972 replace password pairing with single-use `/auth/connect/<code>` links, and `opencode pair` now prints only that format, which the custom scanner does not decode or redeem. The custom port is unchanged; comparison is deferred to the next custom UI port. Reconciled in `fix(app): redeem one-time pairing links`: the custom decoders stay, and the scanner, connect screen, and server dialog now also redeem `/auth/connect/<code>` links (see that entry).
-
 ### Custom scrollbar mount measurement — [#49778](https://github.com/anomalyco/opencode/pull/49778)
 
 - **Kind:** adaptation
@@ -368,6 +358,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ### Custom session and workspace UI polish — [#49668](https://github.com/anomalyco/opencode/pull/49668), [#50265](https://github.com/anomalyco/opencode/pull/50265), [#49122](https://github.com/anomalyco/opencode/pull/49122), [#49080](https://github.com/anomalyco/opencode/pull/49080), [#48927](https://github.com/anomalyco/opencode/pull/48927), [#50437](https://github.com/anomalyco/opencode/pull/50437), [#49779](https://github.com/anomalyco/opencode/pull/49779), [#48735](https://github.com/anomalyco/opencode/pull/48735)
 
+- **Comparison at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`:** `bc4e2c9f7` ports #51288's unified project resolution into the shared custom server context and its session/sidebar consumers. It uses canonical project identity without replacing explicit worktree selection, custom chat admission, non-VCS review behavior, file labels, closed-panel animation or untitled labels. The resolver tests and two-viewport checks are recorded in the dedicated #51288 entry.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `3355c93efdb5b5c69873d81eec0a93fa849d385e`, `8aebed170a14d3e3d841883dd2d3d171529d745c`, `73e7b7bc7935380f284c8b4607a973838c2f1424`, `23402629c59e3c8a68f88ddc86882ac5bf501ff5`, `0a3dc169613f98300d71a778a6cf7f40b04fee74`, `51d2b667600386684822ef6a9eff64f59542bdc5`, `b447627f5f6662b018e29e7769f5d02d3da2845c`, `b629b458f70ab46d0c2097007ee111e9b3de1fc2` (commits reviewed/applied), 2026-09-23
 - **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/{new-session/composer-adapter.ts,session/review,session/timeline/controller.tsx,workspaces/files/model.tsx,runtime/i18n/en.ts,index.css,settings/keybinds/keybinds.tsx}`. Use canonical roots for local sessions while preserving explicit worktree selection and custom chat admission; make non-VCS review ready/empty; derive listed basenames; shorten queued attachment/context labels; retain closed panel animation state; import the shortcut search icon eagerly; align untitled session labels. The custom timeline controller delegates deletion elsewhere, so only its three existing fallback sites change.
@@ -376,28 +367,6 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
 - **Result after upstream:** pending
-
-### Console account visibility with a Zen key — https://github.com/anomalyco/opencode/pull/50763
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `3bf8a5a8cfb4826d9c06f35898b6cb42670385cf`, 2026-09-23
-- **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/settings/providers/{providers.tsx,popular.ts,popular.test.ts}`. Ported the upstream credential-method filter into a tested helper while preserving custom server-scoped settings and ordering.
-- **Tests:** app-custom `bun run test:unit` (1120 pass, 1 skip); four focused Popular-list cases cover fresh installs, stored keys, OAuth accounts, and catalog loading. App-custom typecheck and root `bun run check` pass.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 (Console and Go device-flow sign-in) and #51266 (provider account switching) change `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port. #51266 is ported by `feat(app): switch provider accounts in settings` (see its entry); #48501 remains.
-
-### Console browser sign-in — https://github.com/anomalyco/opencode/pull/50267
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `fbacf6a1268473e38788d196cf60ddfab3b47e27`, 2026-09-23
-- **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/providers/connect/{controller.ts,dialog.tsx}`, `src/settings/providers/providers.tsx`, `src/runtime/server/{types.ts,global-sync/utils.ts}`, `src/runtime/i18n/en.ts`, and `test-browser/{provider-connection.test.ts,fixtures/provider-connection.ts}`. Shared Console OAuth for Zen/Go, hidden defaults, non-suspending loading, browser opening, polling, retry, expiry, cancellation, Go-specific key storage, account badges, and integration-aware disconnect. Retains native authorization links for popup-blocked browsers and custom dialog/settings styling; cancels still-open attempts on polling transport failure. Preserves custom model-visibility preferences rather than copying upstream's automatic show-all preference mutation. Composer commands and icon redesign are outside this port.
-- **Tests:** app-custom `bun run test:unit` (1120 pass, 1 skip), `bun run test:browser` (220 pass), and the isolated controller fixture (10 pass); app-custom typecheck/build and root `bun run check` (39 tasks) pass. Playwright CLI checked Chrome at 1440×900 and iPhone WebKit at 390×844 against isolated source port 4185: real OAuth start/browser URL/polling, visible-link fallback with automatic opening suppressed, API-key switch/cancellation, and injected failure/retry. No OAuth login completed or real credentials submitted; test processes stopped.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending final register reconciliation. Against integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`, #51266 is ported by `feat(app): switch provider accounts in settings`; #48501 is selectively ported by `feat(app): clarify Console sign-in states and errors` (see both entries). Native link fallback, cancel-on-transport-failure, Go keys, integration-aware disconnect/account badges, custom model visibility and server selection are retained deliberately; model onboarding and Electron-specific behavior remain excluded.
 
 ### Go monthly pricing copy — https://github.com/anomalyco/opencode/pull/50473
 
@@ -420,72 +389,6 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
 - **Result after upstream:** pending
-
-### Center the conversation beside summaries — https://github.com/anomalyco/opencode/pull/49620
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `1464545665ba892c2d2886f4456acc9a584aa156`, 2026-09-23
-- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/index.css`. Center the existing 1000px conversation beside the custom 280px panel in the upstream 1320–1640px chat-width range, preserving RTL and reduced motion. The custom start screen has no summary cards, so #49429 was evaluated but not ported.
-- **Tests:** root `bun run check`, app-custom typecheck and build passed; unit suite 1118 passed/1 skipped, browser suite 219 passed, focused Playwright regressions 8 passed; desktop and mobile browser inspection passed.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386 keeps the session summary as an overlay and changes `index.css`. The custom port is unchanged; comparison is deferred to the next custom UI port.
-
-### Summary layout coordination — https://github.com/anomalyco/opencode/pull/48449
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `9f3ba44c4a4a8ba3c9fa36694af06bb0a2baa367`, 2026-09-23
-- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{screen.tsx,review/model.ts,timeline/message-timeline.tsx}` and `src/index.css`. Port summary-open coordination, fixed edge anchoring, bounded scrolling, and resize offset freezing to the existing custom popover; retain the mobile drawer.
-- **Tests:** focused Playwright LTR/RTL tests verify timeline/composer translation, resize settlement and closing; drawer dismissal regression; app-custom typecheck, unit/browser suites and build all passed.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386 keeps the session summary as an overlay. The custom port is unchanged; comparison is deferred to the next custom UI port.
-
-### Expandable services and configuration — https://github.com/anomalyco/opencode/pull/48445
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `41430842506e8952580a2fa1af25aa88d8ea896d`, 2026-09-23
-- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/shell/status/{body.tsx,service-status.ts}` and `src/session/timeline/message-timeline.tsx`. Reuse existing service configuration actions, retries, refresh subscriptions, and custom LSP derivation in compact expandable tabs instead of adding upstream's nested service popovers. Browser clients retain working copy-path actions even for a local server without native reveal APIs.
-- **Tests:** status derivation unit tests; focused Playwright tests expand/collapse all four services using pointer and keyboard and verify configuration actions and unclipped labels; app-custom typecheck, unit/browser suites and build all passed.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51001 starts MCP sign-in from a row click in the session summary services. The custom port is unchanged; comparison is deferred to the next custom UI port.
-
-### Services in the custom session summary — https://github.com/anomalyco/opencode/pull/48103
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `d6c22b3bf531533980dc633a1dac5e38c64fe458`, 2026-09-23
-- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{timeline/message-timeline.tsx,header/session-header.tsx,review/view.tsx}`, `src/shell/status/`, and `src/runtime/i18n/en.ts`. Preserve project, location, changes, move actions and background tasks; add a compact MCP/plugins/skills/LSP status row. Reuse the custom status body, suppress redundant session titlebar/mobile status entry points when a summary exists, and retain standalone status for drafts and child sessions.
-- **Tests:** app-custom unit/browser suites, typecheck and build; focused Playwright service, session-header and mobile drawer regressions all passed; screenshots inspected at 1440×900, 1024×900 and 390×844.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386, #51001, and #51288 change the session summary and its project icon resolution. The custom port is unchanged; comparison is deferred to the next custom UI port. #51288 is ported by `fix(app): unify session project resolution` (see its entry); the summary keeps the custom avatar rendering.
-
-### Staged composer attachments — https://github.com/anomalyco/opencode/pull/49467
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `f04c3fd82bf98cb911f5c1c7b25f9cded0b86722` (#49467), `469e1c035ee3f1343f02b60c0aab22136fdb4f2a` (https://github.com/anomalyco/opencode/pull/49647), `90112f52db59a8f2ec412c66c6677193bf5dc7b8` (https://github.com/anomalyco/opencode/pull/49682), 2026-09-23
-- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer`, `packages/app-custom/src/session/composer/queue.ts`, `packages/app-custom/src/shell/shell.tsx`, `packages/app-custom/src/runtime/i18n/en.ts`, `packages/ui-custom/src/feedback/toast`. Streams non-native, text, and over-20-MiB files directly to the server with cancellable progress. Path parts extend the custom CodeMirror attachment/reference algebra, including image citations, undo, snippets, drafts, history, and queued edits. Retains a delivery adapter for legacy blob drafts and model capability changes; keeps the custom composer rather than adopting upstream's editor.
-- **Tests:** app-custom unit and browser-condition suites, all three affected package typechecks, root `bun run check`, app-custom production build; isolated-server browser checks at 1440×900 and 390×844 include 21-MiB streaming progress, picker attachment, image paste, staged reference removal/undo, and draft reload. Follow-up `fix(app): expose sent attachment paths` checks the full path on both collapsed summaries and expanded attachment cards, declares image/PDF capabilities in the shared model fixture, and exercises the dropped-text streaming endpoint. The collapsed-path title expectation also failed on `db3a4d551`; the follow-up adds the missing collapsed affordance rather than weakening that assertion.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #51047 shows attachment remove buttons on touch devices, #50864 keeps composer focus after attaching files, and #51124 undoes queued prompts back into the input. The custom port is unchanged; comparison is deferred to the next custom UI port. #51047 is ported by `fix(app): show attachment remove buttons on touch devices` the focus part of #50864 by `fix(app): return composer focus after picking files`, and #51124 by `feat(app): undo queued prompts into the composer` (see their entries).
-
-### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
-
-- **Kind:** adaptation
-- **Reviewed upstream revision:** `47f66de8dda535de9f2e2c3bfdbeaad774ad6e82`, 2026-09-23
-- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/runtime/persistence/drafts.ts`, `packages/app-custom/src/composer/{schema.ts,model.ts,submit.ts,editor/editor.tsx}`. Restored image references keep IDs without reading bytes until thumbnail, preview, or delivery; retains custom image citation metadata and legacy path-delivery support. `fix(app): preserve composer focus with attachments` keys attachment rows by ID and loads thumbnail bytes by stable blob ID without suspending the surrounding session. Existing URLs render synchronously; cold previews use an empty initial value and the resource's latest value. This avoids a Promise-backed thumbnail detaching the editor and Context panel on each document edit.
-- **Tests:** lazy draft/cache/persistence tests, app-custom unit and browser-condition suites, typechecks, root check, production build, browser draft reload. Added desktop/mobile Playwright focus, caret, DOM-detachment, thumbnail-identity, and remove/undo regressions; both focus cases fail on integrated `3413919c7` and pass with the fix. Real isolated-backend measurements over 31 key events: image on `db3a4d551` = 0 editor/Context detachments, image on `3413919c7` = 21 each with lost focus, fixed image and 21-MiB path attachment = 0 at 1440×900 and 390×844. All three servers used empty provider lists and no inherited OpenCode environment.
-- **Status:** reconcile
-- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
-- **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50864 keeps composer focus after attaching files, overlapping the custom focus fix. The custom port is unchanged; comparison is deferred to the next custom UI port. Compared in `fix(app): return composer focus after picking files`: the custom keyed rows, stable blob resource, and `url.latest` thumbnail already keep the session attached, so upstream's thumbnail `<Suspense>` is not adopted; only its picker focus return is ported (see its entry).
 
 ### Failed-send history and bounded toasts — https://github.com/anomalyco/opencode/pull/49717
 
@@ -522,6 +425,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ### Rich artifact tabs in the custom browser UI — https://github.com/anomalyco/opencode/pull/49882
 
+- **Comparison at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`:** #51000 is selectively ported in `87163c04d` as an inline-SVG GitHub mark on external Markdown links. It does not replace the custom local-link/inline-path resolver, rich file/directory tabs or sandboxed browser previews. Third-party favicons and upstream favicon image handling are excluded, so the mark introduces neither an external request nor an artifact-image preview target; desktop/mobile regression evidence is in that entry.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `60ed84ecd193ce09f1343cbea074fc2aa8e4a554`, 2026-09-23
 - **Local change:** `feat(app): port rich artifact tabs and timeline image previews`; `packages/app-custom/src/session/files`, `src/session/screen.tsx`, `src/session/browser`, `src/workspaces/files`, `src/runtime`, `packages/session-ui-custom/src/components/markdown*`, `src/context/markdown.tsx`, and `packages/cli/src/services/web-ui.ts`. Local markdown links and inline path references open existing custom file tabs; mobile opens the existing Files view. Ported media/document/table/font classification and viewers with compact preview/source/download controls rather than upstream's metadata toolbar. Browser-only HTML stays in an opaque-origin sandbox instead of Electron file URL handoff; nested Markdown references resolve relative to the artifact. Preserves custom timeline, side-panel, and mobile layout. The shared web shell CSP minimally allows blob frames, media, and fonts so installed browser previews work; script policy is unchanged.
@@ -533,6 +437,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ### Timeline image attachment previews in custom UI — https://github.com/anomalyco/opencode/pull/49111
 
+- **Comparison at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`:** #51000's GitHub mark (`87163c04d`) uses a CSS pseudo-element, preserving the custom Markdown/Read image preview and keyboard/touch controls. Upstream favicon `<img>` classification and preview changes are not copied because this port creates no image node. The GitHub-mark tests at both sizes assert no preview button/image is introduced by the mark.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `24dff6929dce6ed4a90f53e65dbd80df5f014e83`, 2026-09-23
 - **Local change:** `feat(app): port rich artifact tabs and timeline image previews`; `packages/session-ui-custom/src/components/image-preview.tsx`, `src/components/markdown.tsx`, `src/components/markdown.css`, `src/components/message-part.css`, `src/tools/tool-renderer.tsx`, and component fixtures/tests. Reuses the existing `@opencode/ui-custom/image-preview` attachment dialog for Markdown and Read-tool images, including keyboard activation and touch-close controls. Custom message attachment behavior is preserved.
@@ -557,6 +462,96 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Result after upstream:** pending
 
 ## Resolved entries
+
+### Custom direct-link QR scanning — [#49971](https://github.com/anomalyco/opencode/pull/49971), prerequisite [#49291](https://github.com/anomalyco/opencode/pull/49291)
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `788f0affcbec8b3609eb943977e6da36ae02ddf9`, `080b7671dea45a693b537c1e358e89ab14463d0d`, 2026-09-23
+- **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/app-custom/src/servers/connect/{pairing.ts,pairing.test.ts,scanner.tsx}`. Raw JSON, legacy query/fragment codes and direct base64url /connect links, including optional URL payload/origin fallback; desktop pairing UI/link generation excluded.
+- **Tests:** original three decoder cases, app-custom typecheck and root check passed; the one-time pairing entry records its additional redemption/unauthorized tests.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #49971/#49291 merged in the reviewed revisions; integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` adds #50970/#50972. Custom port kept and extended by `27ef86db6` (`fix(app): redeem one-time pairing links`): scanner, connect screen and server dialog redeem `/auth/connect/<code>` while retaining legacy decoders. The obsolete statement that CLI links were unsupported is superseded. Reconciliation recorded by `docs: reconcile upstream UI overrides` in this file; no upstream follow-up remains for the original port.
+
+### Console account visibility with a Zen key — https://github.com/anomalyco/opencode/pull/50763
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `3bf8a5a8cfb4826d9c06f35898b6cb42670385cf`, 2026-09-23
+- **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/settings/providers/{providers.tsx,popular.ts,popular.test.ts}`. Credential-method filtering in a tested helper, retaining custom server scope and ordering.
+- **Tests:** original Popular-list cases cover fresh installs, stored keys, OAuth and catalog loading; unit suite 1120 pass/1 skip, package typecheck and root check passed.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #50763 merged as the reviewed revision; compared with integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`, `packages/app/src/settings/providers/providers.tsx` popular filter. Custom `popular.ts` uses the same first credential connection's `method !== "oauth"` rule and the same no-account deduplication. Port kept; account switching (`1f832d354`) and selective Console feedback (`549d22ec5`) preserve it. Decision recorded by `docs: reconcile upstream UI overrides` in this file; no follow-up remains.
+
+### Console browser sign-in — https://github.com/anomalyco/opencode/pull/50267
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `fbacf6a1268473e38788d196cf60ddfab3b47e27`, 2026-09-23
+- **Local change:** `feat(app): port Console sign-in and provider copy`; `packages/app-custom/src/providers/connect/{controller.ts,dialog.tsx}`, `src/settings/providers/providers.tsx`, `src/runtime/server/{types.ts,global-sync/utils.ts}`, `src/runtime/i18n/en.ts`, `test-browser/{provider-connection.test.ts,fixtures/provider-connection.ts}`. Shared Zen/Go OAuth, defaults, non-suspending loading, browser link, polling/retry/expiry/cancellation, Go keys, account badges and integration-aware disconnect. Native popup-blocked fallback, custom styling and visibility preferences retained; composer/icon redesign excluded.
+- **Tests:** original unit suite 1120 pass/1 skip, browser suite 220 pass, controller fixture 10 pass, typecheck/build/root check passed; original isolated 4185 Chrome 1440×900 and WebKit 390×844 checks covered real start, native fallback, key switching/cancellation and injected failure/retry. `549d22ec5` adds 14 controller and 3 remote cases plus isolated Chrome checks at both sizes; no real Console authorization completed.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #50267 merged in the reviewed revision; compared against integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`. Port kept and selectively updated for #51266 in `1f832d354` and #48501 in `549d22ec5`. Conditional defaults, explicit refresh states/retry, actionable errors and remote disclosure adopted. Native links, cancellation after polling failure, Go keys, account badges/disconnect, model visibility and InlineServerSelect retained intentionally; model onboarding and Electron behavior excluded by decision. `docs: reconcile upstream UI overrides` records the completed reconciliation in this file; the newer selective-port entries document future comparisons.
+
+### Center the conversation beside summaries — https://github.com/anomalyco/opencode/pull/49620
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `1464545665ba892c2d2886f4456acc9a584aa156`, 2026-09-23
+- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/index.css`. Centers the 1000px conversation beside the custom 280px panel within the 1320–1640px chat range, with RTL/reduced motion. #49429 was evaluated but excluded because the custom start screen has no summary cards.
+- **Tests:** original root check, app typecheck/build, unit 1118 pass/1 skip, browser 219 pass, focused Playwright 8 pass and desktop/mobile inspection passed.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #49620 merged as reviewed; upstream diverged in #50386 (`f24fdeca7037804af8c30f21c9ddf65db1562b97`), integrated at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`, removing the offset for an overlay. Custom `index.css` retains summary-open container-query translation and its RTL inverse deliberately, preserving custom centering. `docs: reconcile upstream UI overrides` records the keep-custom decision in this file; no pending port of #50386.
+
+### Summary layout coordination — https://github.com/anomalyco/opencode/pull/48449
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `9f3ba44c4a4a8ba3c9fa36694af06bb0a2baa367`, 2026-09-23
+- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{screen.tsx,review/model.ts,timeline/message-timeline.tsx}` and `src/index.css`. Summary-open coordination, edge anchoring, bounded scrolling and resize offset freezing in the custom popover; mobile drawer retained.
+- **Tests:** original LTR/RTL translation, resize settlement, close and drawer dismissal regressions; app typecheck, unit/browser suites and build passed.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #48449 merged as reviewed; #50386 (`f24fdeca7037804af8c30f21c9ddf65db1562b97`) in integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` removes upstream's offset coordination. Custom layout coordination is intentionally kept together with conversation centering and the mobile drawer. Completed keep-custom decision recorded by `docs: reconcile upstream UI overrides` in this file, with no upstream follow-up remaining.
+
+### Expandable services and configuration — https://github.com/anomalyco/opencode/pull/48445
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `41430842506e8952580a2fa1af25aa88d8ea896d`, 2026-09-23
+- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/shell/status/{body.tsx,service-status.ts}`, `src/session/timeline/message-timeline.tsx`. Compact expandable services reuse configuration, retries, refresh subscriptions and custom LSP derivation instead of nested upstream popovers. Browser copy-path actions retained without native reveal.
+- **Tests:** original status derivation tests and pointer/keyboard expansion of all four services, configuration actions/unclipped labels; package checks/build and root check passed.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #48445 merged as reviewed; #51001 (`8d5eb3bf9`) in integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` starts MCP sign-in on row click. Custom `StatusBody` already calls `useMcpToggle` from its row and switch handlers, preserving the same sign-in action through the custom service layout. Equivalent behavior retained, not duplicated. `docs: reconcile upstream UI overrides` records the finished decision in this file.
+
+### Services in the custom session summary — https://github.com/anomalyco/opencode/pull/48103
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `d6c22b3bf531533980dc633a1dac5e38c64fe458`, 2026-09-23
+- **Local change:** `feat(app): consolidate services in custom session summaries`; `packages/app-custom/src/session/{timeline/message-timeline.tsx,header/session-header.tsx,review/view.tsx}`, `src/shell/status/`, `src/runtime/i18n/en.ts`. Compact MCP/plugins/skills/LSP row, preserving project/location/changes/move/background tasks. Reuses custom status body, suppresses duplicate session status entry points and retains standalone status for drafts/children.
+- **Tests:** original unit/browser suites, typechecks/build, focused service/header/mobile drawer checks passed; screenshots at 1440×900, 1024×900 and 390×844.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #48103 merged as reviewed; compared with integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`. #50386's overlay-only layout is intentionally declined, #51001 sign-in is already supplied by StatusBody/useMcpToggle, and #51288 project identity is ported in `bc4e2c9f7` while preserving the custom avatar. The custom services summary is kept with all identified follow-ups decided/applied. `docs: reconcile upstream UI overrides` records this reconciliation in this file.
+
+### Staged composer attachments — https://github.com/anomalyco/opencode/pull/49467
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `f04c3fd82bf98cb911f5c1c7b25f9cded0b86722` (#49467), `469e1c035ee3f1343f02b60c0aab22136fdb4f2a` (https://github.com/anomalyco/opencode/pull/49647), `90112f52db59a8f2ec412c66c6677193bf5dc7b8` (https://github.com/anomalyco/opencode/pull/49682), 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer`, `src/session/composer/queue.ts`, `src/shell/shell.tsx`, `src/runtime/i18n/en.ts`, `packages/ui-custom/src/feedback/toast`. Cancellable streaming for non-native/text/over-20-MiB files; path parts preserve custom CodeMirror attachment/reference algebra, image citations, undo, snippets, drafts/history and queue edits. Legacy blob/model-capability delivery adapter retained.
+- **Tests:** original unit/browser suites, three package typechecks, root check/build and isolated 1440×900/390×844 checks covered 21-MiB progress, picker/paste, staged reference removal/undo and reload. `fix(app): expose sent attachment paths` added full-path affordances, image/PDF fixture capabilities and dropped-text streaming; the collapsed-path assertion also failed on `db3a4d551`, documenting the pre-existing missing affordance. Follow-up port entries record touch, focus and queued-prompt round-trip regressions.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** the reviewed attachment revisions are integrated in upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`. Custom composer retained; #51047 is ported in `bb0c512ac`, #50864 focus return in `489817bfa`, and #51124 queue undo in `f93b17bee`, preserving the full custom payload algebra and refusing unrestorable drafts. `3ce21be39` makes touch specs deterministic. All identified follow-ups decided/applied; `docs: reconcile upstream UI overrides` records completion in this file.
+
+### Lazy draft image bytes — https://github.com/anomalyco/opencode/pull/49703
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `47f66de8dda535de9f2e2c3bfdbeaad774ad6e82`, 2026-09-23
+- **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/runtime/persistence/drafts.ts`, `src/composer/{schema.ts,model.ts,submit.ts,editor/editor.tsx}`. Reads image bytes only for thumbnail/preview/delivery, keeping IDs, citation metadata and legacy delivery. `fix(app): preserve composer focus with attachments` keys rows by ID and thumbnail resources by blob ID, with synchronous existing URLs and `url.latest` for cold previews, avoiding session/editor suspension during edits.
+- **Tests:** original draft/cache/persistence suites, package/root checks/build, reload and desktop/mobile focus/caret/detachment/thumbnail/remove/undo regressions. Focus cases fail on `3413919c7`; isolated 31-key-event measurements: `db3a4d551` image = 0 detachments, `3413919c7` image = 21 with lost focus, fixed image/21-MiB path = 0 at both sizes. Servers used empty providers and no inherited OpenCode environment.
+- **Status:** resolved
+- **Installation:** none
+- **Result after upstream:** #49703 merged as reviewed, compared with #50864 in integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`. `489817bfa` ports picker focus return; custom keyed rows, stable blob resource and `url.latest` already avoid detachment, so upstream thumbnail Suspense is intentionally not adopted. Custom implementation kept with no remaining follow-up; reconciliation recorded by `docs: reconcile upstream UI overrides` in this file.
 
 ### Reread artifacts when opening a preview — https://github.com/anomalyco/opencode/pull/51036
 
