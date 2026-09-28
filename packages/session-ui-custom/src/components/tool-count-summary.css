@@ -85,7 +85,8 @@
   }
 
   [data-slot="tool-count-summary-prefix"][data-active="true"] {
-    max-width: 1ch;
+    max-width: none;
+    white-space: pre;
     margin-right: 0.45ch;
     opacity: 1;
     filter: blur(0);

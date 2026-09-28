@@ -66,6 +66,10 @@ const source = {
   "ui.sessionTurn.diffs.more": "+{{count}} more files",
 
   "ui.sessionTurn.retry.retrying": "retrying",
+  "ui.sessionTurn.retry.attemptWaiting.one": "Attempt {{attempt}} - retrying in {{count}}s",
+  "ui.sessionTurn.retry.attemptWaiting.other": "Attempt {{attempt}} - retrying in {{count}}s",
+  "ui.sessionTurn.retry.attemptRetryingNow": "Attempt {{attempt}} - retrying",
+  "ui.sessionTimeline.notice.restart": "Continuing after restart",
   "ui.sessionTurn.retry.inSeconds": "in {{seconds}}s",
   "ui.sessionTurn.retry.attempt": "attempt #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - attempt #{{attempt}}",

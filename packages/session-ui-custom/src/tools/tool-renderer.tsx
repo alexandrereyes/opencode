@@ -514,7 +514,7 @@ export function CurrentContextToolGroup(props: {
     () => props.busy || tools().some((tool) => tool.state.status === "streaming" || tool.state.status === "running"),
   )
   const names = createMemo(() =>
-    [
+    i18n.list([
       ...new Set(
         props.parts.flatMap((part) => {
           if (part.type !== "tool" && part.type !== "shell") return []
@@ -530,7 +530,7 @@ export function CurrentContextToolGroup(props: {
           ]
         }),
       ),
-    ].join(", "),
+    ]),
   )
   const label = createMemo(() => {
     const thoughts = props.parts.filter((part) => part.type === "reasoning").length

@@ -193,6 +193,22 @@ export function loadInitialLocale() {
   return initialLocale
 }
 
+export function richTemplateParts<Value>(template: string, params: Record<string, Value>) {
+  return template
+    .split(/({{\s*[^}]+?\s*}})/g)
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^{{\s*([^}]+?)\s*}}$/)
+      return match ? (params[match[1]] ?? "") : part
+    })
+}
+
+export function localizedListParts<Value>(locale: string, items: readonly Value[]) {
+  return new Intl.ListFormat(locale, { style: "long", type: "conjunction" })
+    .formatToParts(items.map((_, index) => String(index)))
+    .map((part) => (part.type === "element" ? items[Number(part.value)] : part.value))
+}
+
 export const { use: useLanguage, provider: LanguageProvider } = createSimpleContext({
   name: "Language",
   gate: false,
@@ -235,6 +251,19 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       pluralForm(key, pluralCategory(intl(), count), { ...params, count })
 
     const label = (value: Locale) => DESKTOP_NATIVE_LABELS[value]
+    const tDynamic = <Key extends Extract<keyof Dictionary, string>>(
+      key: TranslationKey<Key>,
+      source: string,
+      params?: Record<string, string | number | boolean>,
+    ) => (intl().toLowerCase().split("-")[0] === "en" ? resolveTemplate(source, params) : t(key, params))
+    const rich = <Key extends Extract<keyof Dictionary, string>>(
+      key: TranslationKey<Key>,
+      params: Record<string, JSX.Element>,
+    ) => {
+      const current = (dictionary.loading ? base : (dictionary() ?? base)) as Record<string, string>
+      return richTemplateParts(current[key] ?? key, params)
+    }
+    const list = (items: readonly JSX.Element[]) => localizedListParts(intl(), items)
 
     createEffect(() => {
       if (typeof document !== "object") return
@@ -262,6 +291,9 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       locales: LOCALES,
       label,
       t,
+      tDynamic,
+      rich,
+      list,
       plural,
       pluralForm,
       setLocale(next: Locale) {

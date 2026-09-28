@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Structured notice and list i18n APIs — https://github.com/anomalyco/opencode/pull/50204
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `5253661d36b9e6cb519b5465f74abbd2d9bd713f` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(i18n): port structured notices and localized lists`; `packages/app-custom/src/runtime/i18n/language{.tsx,.test.ts}`, `packages/ui-custom/src/context/i18n{.tsx,.test.ts}`, `packages/ui-custom/src/i18n/en.ts`, `packages/session-ui-custom/src/{components/session-retry.tsx,components/tool-count-summary.tsx,components/tool-count-summary.css,timeline/session-timeline-row.tsx,tools/tool-renderer.tsx}`, and `packages/app-custom/e2e/regression/structured-notices.spec.ts`. Ports tDynamic, localized string/rich lists, rich template interpolation and the source/derived UI i18n boundary while retaining independent custom layout direction. Notices prefer instructionSources/notice metadata and retain the old English-description fallback. Retry copy uses complete pluralized phrases. Animated count separators and tool-name lists use the locale APIs; active separators are no longer clipped to one character. Keeps custom segmented tool-group labels, tabular counts, 4px spacing, notice grouping, and custom tool handling; does not copy upstream's replacement of segmented group labels or its translation batch. Only the four English retry/restart keys needed by these consumers are added.
+- **Tests:** UI i18n tests cover runtime English/fallback, localized list separators and complete retry phrases; app language tests cover rich placeholders and element identity in lists. Playwright at 1440×900 and 390×844 verifies metadata-only notices plus old-event fallback (2 pass), and existing custom tool-count spacing (2 pass). Root `bun run check` passes.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Project settings actions and question shortcuts — https://github.com/anomalyco/opencode/pull/49172
 
 - **Kind:** adaptation
@@ -149,6 +160,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `e31f78af78da624dd0c9aa487cdf47509a6bd2d7` (commit reviewed/applied), 2026-09-28
 - **Local change:** `fix(session-ui): space tool counts with gaps`; `packages/session-ui-custom/src/{components/message-part.css,tools/tool-renderer.tsx}` and `packages/app-custom/e2e/regression/tool-count-spacing.spec.ts`. The custom tool-group summary already had upstream's split label structure but spaced it with literal trailing spaces; it now uses upstream's 4px flex gaps (which also separates a trailing locale suffix from the tool names) and tabular numerals for the count. The custom font-size token is kept; upstream's component-test updates are not ported (the custom packages have no Storybook stories).
+- **Comparison:** #50204 subsequently flattened the upstream group label. The selective i18n port retains the custom segmented title, tabular count and 4px gaps while localizing the tool-name list; the original two viewport regressions still pass.
 - **Tests:** a Playwright regression against the mock server at 1440×900 and 390×844 checks the tabular count and 4px gaps on both sides of the count; it fails on `cde61cb22`. Existing accessible-name checks (`Used 1 Agent`) still pass; session-ui-custom unit suite and root `bun run check` pass.
 - **Status:** active
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
@@ -303,6 +315,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Kind:** adaptation
 - **Reviewed upstream revision:** `41e5d1b6b69b768a1d79c1c012a2bc5de1dc9bf3`, `93a37958a78c81d211240dbe7cc53b04754e7221`, `f1149efee7ce08f7d819c48d8b69482441bd0592`, `4fa6ca00e5500cb8d6419bc013fcbb00ce9958c7`, `a71bb4d38c3397173726ac581c27a31e9f5eba99`, `2816d1c849cc1a103f90e0215966c8080d65e95f` (commits reviewed/applied), 2026-09-23
 - **Local change:** `fix(app): port upstream UI polish to custom packages`; `packages/session-ui-custom/src/{timeline,tools,components/message-part.css}`, related component tests, and `packages/ui-custom/src/i18n/en.ts`. Keep compaction/model dividers separate, narrow Notice to exclude idle, group edit/write/patch diffs, remove the titleless sticky gap, label arbitrary search providers, and use Updates styling for notice-only groups. Preserve custom empty-file write rows and custom imports; #47821 is type parity only because idle filtering and backend contracts already exist.
+- **Comparison at `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`:** #50356's gap-based count spacing is ported; #50204's structured notice metadata, legacy fallback and localized lists are ported by `feat(i18n): port structured notices and localized lists`. Upstream's flattened tool-group title is intentionally not taken: the custom segmented count/title and grouping remain, verified by the spacing and structured-notice regressions.
 - **Tests:** custom package typechecks and root `bun run check` passed; all 209 session-ui unit tests passed. All 30 focused file-tool, patch-group, tool-group, and session-tool-projection component cases passed across the initial run and focused reruns after adapting grouped-file assertions (installed Chrome channel). Notice disclosure also checked at 390×844 with English text and forced RTL.
 - **Status:** active
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
