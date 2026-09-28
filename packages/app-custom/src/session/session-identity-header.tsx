@@ -7,7 +7,7 @@ import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useNavigate } from "@solidjs/router"
-import { createMemo, createResource, Show, type ParentProps } from "solid-js"
+import { createMemo, createResource, For, Show, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useServer } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -234,6 +234,91 @@ export function SessionProjectMenu(props: {
   )
 }
 
+export function SessionAncestorTrail(props: {
+  sessionID: string
+  parentID: string
+  parentTitle?: string
+  trailing: boolean
+}) {
+  const server = useServer()
+  const tabs = useTabs()
+  const navigate = useNavigate()
+  const language = useLanguage()
+  const ancestors = createMemo(() => {
+    const path: { id: string; title: string; direct: boolean }[] = []
+    const seen = new Set([props.sessionID])
+    let id: string | undefined = props.parentID
+    while (id && !seen.has(id)) {
+      seen.add(id)
+      const info = server.ctx.data.session.get(id)
+      path.unshift({
+        id,
+        title:
+          sessionTitle(info?.title ?? (id === props.parentID ? props.parentTitle : undefined)) ??
+          language.t("session.tab.session"),
+        direct: id === props.parentID,
+      })
+      id = info?.parentID
+    }
+    return path
+  })
+  const open = (id: string) => {
+    const tab = tabs.store.find(
+      (item) =>
+        item.type === "session" &&
+        item.server === server.key &&
+        (item.sessionId === props.sessionID || item.routeSessionId === props.sessionID),
+    )
+    if (tab?.type === "session") tabs.rememberSessionRoute(tab, id, server.ctx.data.session.get(id)?.parentID)
+    navigate(sessionHref(server.key, id))
+  }
+
+  return (
+    <div class="flex min-w-0 max-w-full items-center">
+      <div
+        data-slot="session-title-ancestors"
+        class="flex min-w-0 items-center overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <For each={ancestors()}>
+          {(ancestor, index) => (
+            <>
+              <button
+                type="button"
+                data-slot={ancestor.direct ? "session-title-parent" : "session-title-ancestor"}
+                data-session-id={ancestor.id}
+                title={ancestor.title}
+                dir="auto"
+                class="max-w-[min(200px,40vw)] shrink-0 truncate pl-2 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:text-v2-text-text-muted"
+                onClick={() => open(ancestor.id)}
+              >
+                {ancestor.title}
+              </button>
+              <Show when={index() < ancestors().length - 1}>
+                <span
+                  data-slot="session-title-separator"
+                  class="-translate-y-[0.5px] shrink-0 pl-2 pr-1 text-[11px] font-medium text-v2-text-text-faint"
+                  aria-hidden="true"
+                >
+                  /
+                </span>
+              </Show>
+            </>
+          )}
+        </For>
+      </div>
+      <Show when={props.trailing}>
+        <span
+          data-slot="session-title-separator"
+          class="-translate-y-[0.5px] shrink-0 pl-2 pr-1 text-[11px] font-medium text-v2-text-text-faint"
+          aria-hidden="true"
+        >
+          /
+        </span>
+      </Show>
+    </div>
+  )
+}
+
 export function SessionIdentityHeader(props: { sessionID: string; session?: SessionInfo }) {
   const server = useServer()
   const [chatRootValue] = createResource(
@@ -244,7 +329,6 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
   const language = useLanguage()
   const pending = createMemo(() => tabs.pendingSession(server.key, props.sessionID))
   const settings = useSettings()
-  const navigate = useNavigate()
   const tab = createMemo(() =>
     tabs.store.find(
       (item) =>
@@ -263,15 +347,11 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
     if (current?.type !== "session" || current.routeSessionId !== props.sessionID) return
     return current.routeParentId ?? current.sessionId
   })
-  const parent = createMemo(() => {
-    const id = parentID()
-    return id ? server.ctx.data.session.get(id) : undefined
-  })
   const parentTitle = createMemo(() => {
     const id = parentID()
     const current = tab()
     return sessionTitle(
-      parent()?.title ?? (current?.type === "session" && current.sessionId === id ? info()?.title : undefined),
+      (id ? server.ctx.data.session.get(id)?.title : undefined) ?? (current?.type === "session" && current.sessionId === id ? info()?.title : undefined),
     )
   })
   const directory = createMemo(
@@ -299,13 +379,6 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
     import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && settings.general.showProjectIcon() && !!directory()
   const workspaceSession = createMemo(() => !!pending() || isWorkspaceDirectory(project(), directory() ?? ""))
   const chat = createMemo(() => isChatDirectory(directory() ?? "", chatRootValue()))
-  const navigateParent = () => {
-    const id = parentID()
-    const current = tab()
-    if (!id || current?.type !== "session") return
-    tabs.rememberSessionRoute(current, id, parent()?.parentID)
-    navigate(sessionHref(server.key, id))
-  }
 
   return (
     <Show when={title() || parentTitle() || showProjectIcon()}>
@@ -320,27 +393,15 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
                 showProjectIcon={showProjectIcon()}
                 chat={!!tab()?.chat || undefined}
               />
-              <Show when={parentTitle()}>
-                {(value) => (
-                  <button
-                    type="button"
-                    data-slot="session-title-parent"
-                    dir="auto"
-                    class="min-w-0 max-w-[40%] truncate pl-2 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:text-v2-text-text-muted"
-                    onClick={navigateParent}
-                  >
-                    {value()}
-                  </button>
+              <Show when={parentID()}>
+                {(id) => (
+                  <SessionAncestorTrail
+                    sessionID={props.sessionID}
+                    parentID={id()}
+                    parentTitle={parentTitle()}
+                    trailing={!!title()}
+                  />
                 )}
-              </Show>
-              <Show when={parentTitle() && title()}>
-                <span
-                  data-slot="session-title-separator"
-                  class="-translate-y-[0.5px] pl-2 pr-1 text-[11px] font-medium text-v2-text-text-faint"
-                  aria-hidden="true"
-                >
-                  /
-                </span>
               </Show>
               <Show when={title()}>
                 {(value) => (
@@ -348,6 +409,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
                     data-slot={parentID() ? "session-title-child" : undefined}
                     dir="auto"
                     class="w-fit truncate rounded-[6px] px-1 py-1 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base"
+                    classList={{ "max-w-[45%] shrink-0": !!parentID() }}
                   >
                     {value()}
                   </h1>

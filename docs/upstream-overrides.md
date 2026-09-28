@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Nested session tabs and ancestor trail — https://github.com/anomalyco/opencode/pull/51064
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `ad53e39d2e6c222ea35aa4b8331616a9f85b4ef5` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): group nested session tabs under their root`; `packages/app-custom/src/shell/titlebar/titlebar.tsx`, `src/session/{session-identity-header.tsx,timeline/message-timeline.tsx}`, and `e2e/regression/subagent-child-navigation.spec.ts`. As upstream, the titlebar resolves a routed session's root with the existing `rootSession` helper (cycle detection, fetched ancestors remembered in the data cache, `data.session.root` fallback) and keys descendant tabs by that root; the identity and timeline headers render `SessionAncestorTrail`, a scrollable breadcrumb of every ancestor that navigates through `rememberSessionRoute`, while the active title keeps up to 45% of the row. Chat identity, tab order and preferences, the drawer, touch gestures, and file/artifact tabs are unchanged; the timeline controller keeps its now unused `navigateParent` action as upstream does. The custom phone layout (below the desktop breakpoint) does not render the session title header, so the trail appears from the desktop breakpoint up; at 390×844 the mobile titlebar keeps the current title and the drawer lists the root session once.
+- **Tests:** three Playwright regressions ported from upstream (direct nested link opens in the root tab, full ancestor path with navigation, active title and separator kept in view at 820×720 with keyboard navigation to the root) fail on `cde61cb22` and pass; they use the horizontal tab strip and pass the mock `subscriptions` shape. Checked at 1440×900 and at 390×844 (drawer shows only the root tab, titlebar shows the current title). App-custom typecheck, unit suite, and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Undo queued prompts into the composer — https://github.com/anomalyco/opencode/pull/51124
 
 - **Kind:** adaptation
