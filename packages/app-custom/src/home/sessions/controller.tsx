@@ -2,6 +2,7 @@ import type { SessionInfo } from "@opencode/client/promise"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { skipToken, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { DateTime } from "luxon"
+import { createMediaQuery } from "@solid-primitives/media"
 import { type Accessor, createEffect, createMemo, createResource, type JSX, startTransition, untrack } from "solid-js"
 import { useCommand } from "@/shell/commands/command"
 import {
@@ -23,7 +24,8 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { sessionLabel } from "@/session/title"
 import { showToast } from "@/shell/notifications/toast"
 import type { HomeController } from "../model"
-import { buildHomeSessionRecords, homeProjectForSession, type HomeSessionRecord } from "./records"
+import { buildHomeSessionRecords, homeProjectForSession, homeSessionLocation, type HomeSessionRecord } from "./records"
+import { createSidebarWorktrees } from "@/shell/titlebar/sidebar-worktrees"
 import { chatRoot, knownChatRoot, shouldRegisterSessionProject } from "@/runtime/chats"
 
 export type { HomeSessionRecord } from "./records"
@@ -97,6 +99,27 @@ export function createHomeSessionsController(home: HomeController) {
   const records = createMemo(() => allRecords().slice(0, HOME_SESSION_LIMIT))
   const groups = createMemo(() => groupSessions(records(), language))
   const prefetched = new Set<string>()
+
+  // Branches come from the batched worktree RPC on the default Location, as in the sidebar:
+  // per-directory VCS requests would boot a Location for every session directory.
+  const worktrees = createMemo(() => {
+    const ctx = home.server.focusedContext()
+    return ctx ? createSidebarWorktrees(ctx) : undefined
+  })
+  const location = (record: HomeSessionRecord) => {
+    if (record.chat) return
+    const directory = record.session.location.directory
+    return homeSessionLocation(directory, worktrees()?.branch(directory))
+  }
+  const revealLocations = (record?: HomeSessionRecord) =>
+    void worktrees()?.locate(
+      (record ? [record] : records()).filter((item) => !item.chat).map((item) => item.session.location.directory),
+    )
+  // Touch screens cannot hover or hold Alt, so their rows show locations as soon as they are listed.
+  const touch = createMediaQuery("(hover: none)")
+  createEffect(() => {
+    if (touch()) revealLocations()
+  })
 
   createEffect(() => {
     const ctx = home.server.focusedContext()
@@ -200,6 +223,10 @@ export function createHomeSessionsController(home: HomeController) {
   return {
     copy: {
       language,
+    },
+    location: {
+      value: location,
+      reveal: revealLocations,
     },
     data: {
       records,

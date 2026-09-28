@@ -16,6 +16,8 @@ export function HomeSessions(props: {
           language={props.sessions.copy.language}
           groups={props.sessions.data.groups()}
           loading={props.sessions.data.loading()}
+          location={props.sessions.location.value}
+          onRevealLocations={props.sessions.location.reveal}
           showProjectName={props.sessions.session.showProjectName()}
           server={server()}
           canCreateSession={props.sessions.session.canCreate()}

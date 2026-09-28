@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Worktree and branch in Home session rows — https://github.com/anomalyco/opencode/pull/49793
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `bfcaf1b0cd1be8c081d67928c93f699f59bc362f` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(app): show session worktrees and branches on Home`; `packages/app-custom/src/home/sessions/{alt-hold.ts,alt-hold.test.ts,records.ts,records.test.ts,controller.tsx,region.tsx,view.tsx,view.css}` and `e2e/regression/home-session-location.spec.ts`. Enabled for the web rather than gated on Electron. Home session rows and search results show the session directory's worktree name and branch: pointer devices reveal it on row hover or while Alt is held, as upstream; touch devices (`hover: none`) show it without hover, on the phone layout's secondary line next to the project name, where it takes only the room left and truncates first. Branches come from the custom batched `custom.worktrees` locate RPC on the default Location (reusing `createSidebarWorktrees`, deduplicated per directory and per connection) instead of upstream's per-directory `vcs` sync, which would boot a Location for each session directory; hover requests one directory, Alt and touch request the listed directories in one call. Chat sessions show no location. The phone layout's label column now wraps title / secondary line instead of stacking every label, keeping rows at their existing height.
+- **Tests:** ported alt-hold and location-label unit tests; a Playwright regression checks hover and Alt reveal with one locate request per new directory at 1440×900, and touch rows at 390×844 showing worktree and branch without hover from a single request. The touch case needs a warmed browser in the local Chrome channel (it passes when run with its file; as a first test in a worker Chrome ignores the touch media emulation, which also affects `composer-attachment-touch.spec.ts`). App-custom typecheck, unit suite, and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Tool count spacing — https://github.com/anomalyco/opencode/pull/50356
 
 - **Kind:** adaptation

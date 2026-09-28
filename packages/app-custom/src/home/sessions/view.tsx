@@ -15,6 +15,8 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { SessionTabAvatarView } from "@/shell/layout/session-tab-avatar"
 import { sessionLabel } from "@/session/title"
 import { shouldOpenSessionInBackground } from "./open"
+import { createAltHold } from "./alt-hold"
+import { createMediaQuery } from "@solid-primitives/media"
 import "./view.css"
 import {
   HomeSessionStatusController,
@@ -45,6 +47,8 @@ export type HomeSessionsViewProps = {
   language: ReturnType<typeof useLanguage>
   groups: HomeSessionGroup[]
   loading: boolean
+  location: (record: HomeSessionRecord) => { worktree: string; branch: string | undefined } | undefined
+  onRevealLocations: (record?: HomeSessionRecord) => void
   showProjectName: boolean
   server: ServerConnection.Key
   canCreateSession: boolean
@@ -88,8 +92,25 @@ type HomeSessionRowUI = {
   editor: { id: string; draft: string; renaming: boolean } | undefined
 }
 
+// Pointer devices reveal a session's worktree and branch on hover or while Alt is held.
+type HomeSessionLocationReveal = {
+  touch: boolean
+  showLocations: boolean
+  hoveredSession: string | undefined
+  onHoverSession: (sessionID: string | undefined) => void
+}
+
 export function HomeSessionsView(props: HomeSessionsViewProps) {
   const [rowUI, setRowUI] = createStore<HomeSessionRowUI>({ menu: undefined, editor: undefined })
+  const [hover, setHover] = createStore<{ sessionID: string | undefined }>({ sessionID: undefined })
+  const showLocations = createAltHold(true, props.onRevealLocations)
+  const touch = createMediaQuery("(hover: none)")
+  const reveal = (): HomeSessionLocationReveal => ({
+    touch: touch(),
+    showLocations: showLocations(),
+    hoveredSession: hover.sessionID,
+    onHoverSession: (sessionID) => setHover("sessionID", sessionID),
+  })
   return (
     <section
       ref={props.onSetHoverTarget}
@@ -100,7 +121,7 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
         class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-1 pt-6 md:pb-3 lg:pt-12"
         onWheel={props.onWheel}
       >
-        <HomeSessionSearch {...props} />
+        <HomeSessionSearch {...props} {...reveal()} />
         <Show when={props.groups.length > 0 && props.canCreateSession}>
           <div class="pointer-events-none absolute right-0 top-[68px] z-20 flex md:top-[84px] lg:top-[108px]">
             <Button
@@ -161,7 +182,15 @@ export function HomeSessionsView(props: HomeSessionsViewProps) {
                           rows would be disposed mid-interaction whenever a
                           sync response lands. */}
                       <Key each={group().sessions} by={(record) => record.session.id}>
-                        {(record) => <HomeSessionRow {...props} record={record()} rowUI={rowUI} setRowUI={setRowUI} />}
+                        {(record) => (
+                          <HomeSessionRow
+                            {...props}
+                            {...reveal()}
+                            record={record()}
+                            rowUI={rowUI}
+                            setRowUI={setRowUI}
+                          />
+                        )}
                       </Key>
                     </div>
                   </>
@@ -232,7 +261,7 @@ function HomeSessionLeading(props: {
   )
 }
 
-function HomeSessionSearch(props: HomeSessionsViewProps) {
+function HomeSessionSearch(props: HomeSessionsViewProps & HomeSessionLocationReveal) {
   return (
     <div class="w-full">
       <div ref={props.onSetSearchRoot} data-component="home-session-search" class="relative z-30 w-full">
@@ -372,12 +401,14 @@ function HomeSessionSearch(props: HomeSessionsViewProps) {
 }
 
 function HomeSessionSearchResultRow(
-  props: HomeSessionsViewProps & {
-    record: HomeSessionRecord
-    selected: boolean
-  },
+  props: HomeSessionsViewProps &
+    HomeSessionLocationReveal & {
+      record: HomeSessionRecord
+      selected: boolean
+    },
 ) {
   const title = createMemo(() => sessionLabel(props.record.session))
+  const location = createMemo(() => props.location(props.record))
   const showProjectName = () => props.showProjectName && props.record.projectName
   const key = () => homeSessionSearchKey(props.record)
 
@@ -398,7 +429,12 @@ function HomeSessionSearchResultRow(
       classList={{
         "bg-v2-overlay-simple-overlay-hover": props.selected,
       }}
-      onMouseEnter={() => props.onSearchHighlight(props.record)}
+      onMouseEnter={() => {
+        props.onSearchHighlight(props.record)
+        props.onHoverSession(props.record.session.id)
+        props.onRevealLocations(props.record)
+      }}
+      onMouseLeave={() => props.onHoverSession(undefined)}
       onMouseDown={(event) => {
         if (event.button === 1) event.preventDefault()
       }}
@@ -419,6 +455,7 @@ function HomeSessionSearchResultRow(
         <Show when={showProjectName()}>
           <HomeSessionProjectName name={props.record.projectName} search />
         </Show>
+        <HomeSessionLocation {...props} location={location()} />
       </div>
     </button>
   )
@@ -447,13 +484,15 @@ function HomeSessionGroupHeader(props: {
 }
 
 function HomeSessionRow(
-  props: HomeSessionsViewProps & {
-    record: HomeSessionRecord
-    rowUI: HomeSessionRowUI
-    setRowUI: SetStoreFunction<HomeSessionRowUI>
-  },
+  props: HomeSessionsViewProps &
+    HomeSessionLocationReveal & {
+      record: HomeSessionRecord
+      rowUI: HomeSessionRowUI
+      setRowUI: SetStoreFunction<HomeSessionRowUI>
+    },
 ) {
   const title = createMemo(() => sessionLabel(props.record.session))
+  const location = createMemo(() => props.location(props.record))
   const showProjectName = () => props.showProjectName && props.record.projectName
   const sessionID = () => props.record.session.id
   const menu = () => (props.rowUI.menu?.id === sessionID() ? props.rowUI.menu : undefined)
@@ -524,6 +563,11 @@ function HomeSessionRow(
       data-project-name={!!showProjectName()}
       data-session-id={props.record.session.id}
       class="group/session relative flex h-10 min-w-0 items-center rounded-[6px] outline-none focus:outline-none focus-visible:outline-none"
+      onMouseEnter={() => {
+        props.onHoverSession(sessionID())
+        props.onRevealLocations(props.record)
+      }}
+      onMouseLeave={() => props.onHoverSession(undefined)}
       onContextMenu={(event) => {
         // While renaming, keep the native menu so paste and spelling work.
         if (editor()) return
@@ -660,6 +704,7 @@ function HomeSessionRow(
             <Show when={showProjectName()}>
               <HomeSessionProjectName name={props.record.projectName} />
             </Show>
+            <HomeSessionLocation {...props} location={location()} />
           </div>
         </button>
       </Show>
@@ -756,6 +801,51 @@ function HomeSessionTitle(props: { title: string; showProjectName: boolean; sear
     >
       {props.title}
     </span>
+  )
+}
+
+function HomeSessionLocation(
+  props: HomeSessionLocationReveal & {
+    record: HomeSessionRecord
+    location: { worktree: string; branch: string | undefined } | undefined
+  },
+) {
+  const show = () => props.showLocations || props.hoveredSession === props.record.session.id
+  return (
+    <Show when={props.location}>
+      {(location) => (
+        <span
+          data-component="home-session-location"
+          dir="ltr"
+          aria-hidden={!show() && !props.touch ? true : undefined}
+          class={`
+            flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-v2-text-text-muted
+            ease-out motion-reduce:transition-none
+          `}
+          classList={{
+            "-ms-2 max-w-0 shrink-0 opacity-0": !show(),
+            "max-w-[60%] shrink-0 opacity-100": show(),
+            // Moving between rows swaps the reveal at once instead of animating two rows together.
+            "transition-[max-width,opacity] duration-[120ms]": !(
+              !props.showLocations &&
+              props.hoveredSession !== undefined &&
+              props.hoveredSession !== props.record.session.id
+            ),
+          }}
+        >
+          <Icon name="outline-worktree" class="shrink-0 text-v2-icon-icon-muted" />
+          <span class="min-w-0 overflow-hidden text-ellipsis [font-weight:440]">{location().worktree}</span>
+          <Show when={location().branch}>
+            {(branch) => (
+              <>
+                <Icon name="branch" class="shrink-0 text-v2-icon-icon-muted" />
+                <span class="min-w-0 overflow-hidden text-ellipsis [font-weight:440]">{branch()}</span>
+              </>
+            )}
+          </Show>
+        </span>
+      )}
+    </Show>
   )
 }
 

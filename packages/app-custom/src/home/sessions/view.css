@@ -15,23 +15,46 @@
     padding-block: 0;
   }
 
+  /* The title takes the first line; the project name and any worktree location share the second. */
   [data-project-name="true"] [data-slot="home-session-labels"] {
     display: flex;
     min-width: 0;
     flex: 1;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 8px;
     text-align: start;
   }
 
   [data-project-name="true"] [data-slot="home-session-labels"] > * {
     max-width: 100%;
-    flex: none;
+    flex: 0 1 auto;
   }
 
-  [data-component="home-session-project-name"] {
+  [data-project-name="true"] [data-slot="home-session-labels"] > [data-component="home-session-title"],
+  [data-project-name="true"] [data-slot="home-session-labels"] > [data-component="home-session-rename"] {
+    flex-basis: 100%;
+  }
+
+  /* A zero basis keeps the location on the project line, where it takes only the remaining room. */
+  [data-project-name="true"] [data-slot="home-session-labels"] > [data-component="home-session-location"] {
+    flex: 1 10 0%;
+    max-width: none;
+  }
+
+  [data-component="home-session-project-name"],
+  [data-component="home-session-location"] {
     font-size: var(--font-size-small);
     line-height: var(--line-height-compact);
+  }
+}
+
+/* Touch screens cannot hover or hold Alt, so the location stays visible and gives way first. */
+@media (hover: none) {
+  [data-component="home-session-location"] {
+    max-width: 40%;
+    flex-shrink: 10;
+    margin-inline-start: 0;
+    opacity: 1;
   }
 }
