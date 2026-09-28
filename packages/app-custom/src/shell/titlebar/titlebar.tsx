@@ -34,7 +34,6 @@ import { MobileTabProvider } from "./mobile-tab-actions"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
-import { projectForSession } from "@/shell/layout/helpers"
 import { workspaceDraftTarget } from "@/workspaces/paths"
 import { useSettingsDialog } from "@/settings/command"
 import { usePreferences } from "@/preferences/context"
@@ -51,7 +50,7 @@ import { visibleWorktreeSessions } from "./sidebar-worktrees"
 import { mobileSessionTabs, mobileTabIsOpen } from "./mobile-session-tabs"
 import { newChatDraft } from "@/new-session/chats"
 import { showToast } from "@/shell/notifications/toast"
-import { resolveChatIdentity } from "@/runtime/chats"
+import { isChatDirectory, knownChatRoot, resolveChatIdentity } from "@/runtime/chats"
 import { RefreshApp } from "./refresh-app"
 import { canRefreshApplication, refreshApplication } from "@/runtime/platform/service-worker"
 import devIcon from "../../../../desktop/icons/dev/64x64.png"
@@ -369,10 +368,7 @@ export function Titlebar(props: {
                   )
                     return openChat(connection, model)
                   const ctx = connection ? global.ensureServerCtx(connection) : undefined
-                  const project = ctx
-                    ? projectForSession(activeSession, ctx.projects.list()) ??
-                      projectForSession(activeSession, ctx.sync.data.project)
-                    : undefined
+                  const project = ctx?.projects.forSession(activeSession)
                   void tabs.newDraft(
                     {
                       server: sessionTab.server,
@@ -634,7 +630,11 @@ export function Titlebar(props: {
               const value = session()
               if (!tab || !value) return
               const conn = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
-              return projectForSession(value, conn ? global.ensureServerCtx(conn).projects.list() : [])
+              if (!conn) return
+              const ctx = global.ensureServerCtx(conn)
+              // Chat sessions have no project; keep the directory fallback like the tab strip.
+              if (tab.chat || isChatDirectory(value.location.directory, knownChatRoot(ctx.sdk))) return
+              return ctx.projects.forSession(value)
             })
             const currentTitle = () => {
               if (layout.route().type === "agent-dashboard") return language.t("dashboard.title")

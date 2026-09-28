@@ -17,6 +17,7 @@ export function buildHomeSessionRecords(input: {
   projects: () => LocalProject[]
   chatRoot?: () => string | undefined
   chatLabel?: () => string
+  resolveProject?: (session: SessionInfo) => LocalProject | undefined
 }) {
   const selected = input.projectDirectories()
   const directories = selected ? new Set(selected.map(pathKey)) : undefined
@@ -27,11 +28,12 @@ export function buildHomeSessionRecords(input: {
     .sort(compareSessionTime)
     .map((session) => {
       const chat = isChatDirectory(session.location.directory, input.chatRoot?.())
-      const project = homeProjectForSession(session, input.projects()) ?? {
-        id: session.projectID,
-        worktree: session.location.directory,
-        expanded: false,
-      }
+      const project = (chat ? undefined : input.resolveProject?.(session)) ??
+        homeProjectForSession(session, input.projects()) ?? {
+          id: session.projectID,
+          worktree: session.location.directory,
+          expanded: false,
+        }
       return {
         session,
         project,

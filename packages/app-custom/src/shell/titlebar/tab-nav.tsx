@@ -11,7 +11,7 @@ import { TextShimmer } from "@opencode/ui-custom/text-shimmer"
 import { useServerCtx } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection, serverName, useServers } from "@/runtime/server/registry"
-import { displayName, projectForSession } from "@/shell/layout/helpers"
+import { displayName } from "@/shell/layout/helpers"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
 import type { SessionInfo } from "@opencode/client/promise"
@@ -107,7 +107,7 @@ export function TabNavItem(props: {
   const project = createMemo(() => {
     const session = props.session
     if (!session || chat()) return
-    return projectForSession(session, serverCtx()?.projects.list() ?? [])
+    return serverCtx()?.projects.forSession(session)
   })
   const title = createMemo(() => {
     const session = props.session

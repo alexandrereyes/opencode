@@ -456,7 +456,7 @@ function MessageTimelineView(
     const session = props.session.data.info()
     const projects = server.ctx.sync.data.project
     return session
-      ? projectForSession(session, projects)
+      ? server.ctx.projects.detailsForSession(session)
       : projects.find((item) => containsDirectory(item.worktree, sessionDirectory()))
   })
   const workspaceSession = createMemo(() => isWorkspaceDirectory(project(), sessionDirectory()))
@@ -464,7 +464,7 @@ function MessageTimelineView(
   const avatarProject = createMemo(() => {
     const session = props.session.data.info()
     if (!session) return
-    return projectForSession(session, server.ctx.projects.list()) ?? project()
+    return server.ctx.projects.forSession(session)
   })
   const projectAvatar = () => (
     <ProjectAvatar

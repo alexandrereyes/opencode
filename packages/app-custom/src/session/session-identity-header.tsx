@@ -12,7 +12,7 @@ import { createStore } from "solid-js/store"
 import { useServer } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
-import { displayName, errorMessage, getProjectAvatarSource, projectForSession } from "@/shell/layout/helpers"
+import { displayName, errorMessage, getProjectAvatarSource } from "@/shell/layout/helpers"
 import { getProjectAvatarVariant, useLayout, type LocalProject } from "@/shell/state/layout"
 import { tabKey, useTabs } from "@/shell/tabs/tabs"
 import { useSettings } from "@/settings/model"
@@ -284,11 +284,8 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
   )
   const project = createMemo(() => {
     if (isChatDirectory(directory() ?? "", chatRootValue())) return
+    if (props.session) return server.ctx.projects.forSession(props.session)
     const projects = server.ctx.projects.list()
-    if (props.session)
-      return (
-        projectForSession(props.session, projects) ?? projectForSession(props.session, server.ctx.sync.data.project)
-      )
     const value = directory()
     if (!value) return undefined
     const key = pathKey(value)

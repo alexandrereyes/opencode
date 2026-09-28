@@ -13,6 +13,7 @@ import {
   homeSessionServerStatus,
   latestRootSession,
   projectForSession,
+  resolveSessionDetailsProject,
   sortedRootSessions,
   toggleHomeProjectSelection,
 } from "./helpers"
@@ -176,17 +177,46 @@ describe("layout workspace helpers", () => {
       worktrees: [{ directory: "/repo" }, { directory: "/workspaces/feature", strategy: "git" }],
     }
 
-    expect(projectForSession(session({ id: "feature", directory: "/workspaces/feature/packages/app" }), [project])).toBe(
-      project,
-    )
+    expect(
+      projectForSession(session({ id: "feature", directory: "/workspaces/feature/packages/app" }), [project]),
+    ).toBe(project)
   })
 
   test("finds the enriched project for a nested workspace when its session project id is stale", () => {
     const project = { id: "updated", worktree: "/repo", sandboxes: ["/workspaces/feature"] }
 
-    expect(projectForSession(session({ id: "feature", directory: "/workspaces/feature/packages/app" }), [project])).toBe(
-      project,
-    )
+    expect(
+      projectForSession(session({ id: "feature", directory: "/workspaces/feature/packages/app" }), [project]),
+    ).toBe(project)
+  })
+
+  test("resolves worktrees sharing a project id by directory, sandbox, then most specific root", () => {
+    const main = { id: "project", worktree: "/repo" }
+    const feature = { id: "project", worktree: "/work/feature", sandboxes: ["/work/feature-sandbox"] }
+    const nested = { id: "project", worktree: "/work/feature/packages/app" }
+    const projects = [main, feature, nested]
+
+    expect(projectForSession(session({ id: "a", directory: "/work/feature" }), projects)).toBe(feature)
+    expect(projectForSession(session({ id: "b", directory: "/work/feature-sandbox" }), projects)).toBe(feature)
+    expect(projectForSession(session({ id: "c", directory: "/work/feature/packages/app/src" }), projects)).toBe(nested)
+  })
+
+  test("keeps synced worktree metadata with the opened project's appearance for session details", () => {
+    const opened = { id: "project", worktree: "/work/feature", name: "Feature", icon: { color: "pink" } }
+    const synced = {
+      id: "project",
+      worktree: "/work/feature",
+      name: "Repository",
+      icon: { color: "blue" },
+      sandboxes: ["/work/feature-sandbox"],
+      vcs: "git",
+    }
+
+    expect(resolveSessionDetailsProject(session({ id: "a", directory: "/work/feature" }), [opened], [synced])).toEqual({
+      ...synced,
+      name: "Feature",
+      icon: { color: "pink" },
+    })
   })
 
   test("formats fallback project display name", () => {

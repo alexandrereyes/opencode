@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Unified session project resolution — https://github.com/anomalyco/opencode/pull/51288
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `ee5b67eb84358067c8119fca269bb58154e32250` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): unify session project resolution`; `packages/app-custom/src/shell/layout/{helpers.ts,helpers.test.ts}`, `src/runtime/server/runtime.tsx`, `src/shell/titlebar/{tab-nav.tsx,titlebar.tsx}`, `src/session/{session-identity-header.tsx,screen.tsx,timeline/message-timeline.tsx}`, `src/shell/commands/palette.ts`, and `src/home/sessions/{records.ts,records.test.ts,controller.tsx}`. Same resolver as upstream: a unique project-ID match wins, while projects sharing an ID resolve by exact directory, then sandbox, then the most specific ancestor root; `projects.forSession` prefers opened projects (keeping the custom per-workspace icon override from `enrich`) and `projects.detailsForSession` keeps synced worktree metadata with the opened project's name and icon for the summary and timeline. Wired into the horizontal tab strip, mobile titlebar, new-draft target, session identity header, timeline header/avatar, session summary, command palette, and Home session records. Chat sessions keep resolving to no project: the tab strip, header, palette, and Home records already skip chats, and the mobile titlebar now skips them too because the shared resolver also consults synced projects. The custom summary keeps its avatar prop rather than upstream's `ProjectIcon` swap. The custom sidebar keeps its own directory-first inventory and is not changed.
+- **Tests:** new helper tests (shared-ID precedence; details metadata plus appearance) and a Home records test fail on `cde61cb22` and pass; app-custom unit suite, typecheck, and root `bun run check` pass. Against the mock server with two opened projects sharing an ID, the session in the worktree shows the worktree project's avatar in the 390×844 mobile titlebar (`cde61cb22` showed the main repository) and in the 1440×900 horizontal tab.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Settings destination in the URL — https://github.com/anomalyco/opencode/pull/50364
 
 - **Kind:** adaptation
@@ -340,7 +351,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386, #51001, and #51288 change the session summary and its project icon resolution. The custom port is unchanged; comparison is deferred to the next custom UI port.
+- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #50386, #51001, and #51288 change the session summary and its project icon resolution. The custom port is unchanged; comparison is deferred to the next custom UI port. #51288 is ported by `fix(app): unify session project resolution` (see its entry); the summary keeps the custom avatar rendering.
 
 ### Staged composer attachments — https://github.com/anomalyco/opencode/pull/49467
 

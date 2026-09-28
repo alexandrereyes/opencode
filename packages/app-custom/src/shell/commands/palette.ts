@@ -11,7 +11,7 @@ import { useLayout, type LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useServerSDK } from "@/runtime/server/client"
 import { findSessionTab, useTabs } from "@/shell/tabs/tabs"
-import { displayName, projectForSession } from "@/shell/layout/helpers"
+import { displayName, resolveProjectForSession } from "@/shell/layout/helpers"
 import {
   chatRoot,
   isChatDirectory,
@@ -271,9 +271,7 @@ export function createServerSessionEntries(props: {
     })
     if (current.signal.aborted) return []
     const opened = props.opened()
-    const openedByID = new Map(opened.flatMap((project) => (project.id ? [[project.id, project] as const] : [])))
     const stored = props.stored().map((project) => ({ ...project, expanded: false }))
-    const storedByID = new Map(stored.map((project) => [project.id, project] as const))
     return Promise.all([
       props.load(search, current.signal).then(
         (result) => result.data,
@@ -292,7 +290,7 @@ export function createServerSessionEntries(props: {
           const chat = props.isChat?.(session) || isChatDirectory(session.location.directory, props.chatRoot?.())
           const project = chat
             ? undefined
-            : (projectForSession(session, opened, openedByID) ?? projectForSession(session, stored, storedByID))
+            : resolveProjectForSession(session, opened, stored)
           return {
             id: `session:${props.server}:${session.id}`,
             type: "session" as const,

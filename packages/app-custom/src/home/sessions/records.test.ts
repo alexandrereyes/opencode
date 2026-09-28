@@ -48,6 +48,21 @@ describe("buildHomeSessionRecords", () => {
     expect(records.map((record) => record.session.id)).toEqual(["a"])
   })
 
+  test("uses the shared session project resolver outside chats", () => {
+    const worktree = { id: "project-a", worktree: "/repo/a-feature", name: "Feature", expanded: true } as LocalProject
+    const records = buildHomeSessionRecords({
+      sessions: () => [session("w", "/repo/a-feature", "project-a"), session("chat", "/data/chats/one", "project-a")],
+      projectDirectories: () => undefined,
+      projects: () => [opened],
+      resolveProject: () => worktree,
+      chatRoot: () => "/data/chats",
+      chatLabel: () => "Chats",
+    })
+
+    expect(records.find((record) => record.session.id === "w")?.projectName).toBe("Feature")
+    expect(records.find((record) => record.session.id === "chat")?.project).toBe(opened)
+  })
+
   test("labels a worktree session with its project before that project's inventory has loaded", () => {
     const records = buildHomeSessionRecords({
       sessions: () => [session("w", "/repo/a/.worktrees/feature", "project-a")],

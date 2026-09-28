@@ -89,6 +89,7 @@ export function createHomeSessionsController(home: HomeController) {
       sessions: indexedSessions,
       projectDirectories,
       projects: home.project.list,
+      resolveProject: (session) => home.server.focusedContext()?.projects.forSession(session),
       chatRoot: () => chat(),
       chatLabel: () => language.t("session.new.chats"),
     }),
@@ -219,6 +220,7 @@ export function createHomeSessionsController(home: HomeController) {
           sessions: () => [result],
           projectDirectories,
           projects: home.project.list,
+          resolveProject: ctx.projects.forSession,
           chatRoot: () => knownChatRoot(ctx.sdk),
           chatLabel: () => language.t("session.new.chats"),
         })[0]

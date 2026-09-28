@@ -28,6 +28,8 @@ import { createSessionFamilies } from "@/session/family"
 import { Persistence } from "@/runtime/persistence/schema"
 import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
 import { createDirectoryGuard, guardLocationSync } from "./directory-guard"
+import type { SessionInfo } from "@opencode/client/promise"
+import { resolveProjectForSession, resolveSessionDetailsProject } from "@/shell/layout/helpers"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -269,6 +271,13 @@ function createServerController(
   }
 
   const projectsList = createMemo(() => projects.list().map(enrich))
+  const forSession = (session: SessionInfo) => {
+    const project = resolveProjectForSession(session, projectsList(), sync.data.project)
+    if (!project) return
+    return "expanded" in project ? project : { ...project, expanded: false }
+  }
+  const detailsForSession = (session: SessionInfo) =>
+    resolveSessionDetailsProject(session, projectsList(), sync.data.project)
   const recentlyClosedList = createMemo(() => {
     const known = new Set(sync.data.project.map((project) => pathKey(project.worktree)))
     return projects
@@ -291,6 +300,8 @@ function createServerController(
     projects: {
       ...projects,
       list: projectsList,
+      forSession,
+      detailsForSession,
       recentlyClosed: recentlyClosedList,
     },
     notification,
