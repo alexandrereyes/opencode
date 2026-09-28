@@ -76,7 +76,7 @@ test("recording a new session shortcut stays in settings until recording finishe
   await page.keyboard.press("Control+t")
 
   await expect(binding).toHaveText("Ctrl+T")
-  await expect(page).toHaveURL("/settings")
+  await expect(page).toHaveURL("/settings?tab=shortcuts")
   await expect(page.locator("[data-titlebar-tab]")).toHaveCount(0)
   await page.keyboard.press("Control+t")
   await expect(page).toHaveURL(/\/new-session\?draftId=.+$/)

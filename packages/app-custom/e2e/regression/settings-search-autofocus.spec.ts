@@ -42,7 +42,7 @@ test("focuses model and shortcut searches while preserving Option shortcut recor
   await expect(binding).toHaveText(
     await page.evaluate(() => (/Mac|iPod|iPhone|iPad/.test(navigator.platform) ? "⌥L" : "Alt+L")),
   )
-  await expect(page).toHaveURL("/settings")
+  await expect(page).toHaveURL("/settings?tab=shortcuts")
 
   await settings.getByRole("tab", { name: "Models", exact: true }).click()
   await expect(settings.getByRole("searchbox", { name: "Search models", exact: true })).toBeFocused()

@@ -103,7 +103,8 @@ export function SettingsScreen() {
 
   createEffect(() => {
     const view = surface.view()
-    if (view.type === "root") return
+    // A restored route must not be redirected against a server list that is still loading.
+    if (view.type === "root" || !servers.hydrated()) return
     const server = targetServer()
     if (!server) {
       surface.back()

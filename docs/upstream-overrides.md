@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Settings destination in the URL — https://github.com/anomalyco/opencode/pull/50364
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `27dfac3d3640fc9285640c0e613e38b07309b206` (commit reviewed/applied), 2026-09-28
+- **Local change:** `fix(app): keep settings destination across reloads`; `packages/app-custom/src/settings/{route.ts,route.test.ts,surface.tsx,shell.tsx}`, `packages/app-custom/src/runtime/server/registry.tsx`, `packages/app-custom/src/shell/titlebar/{history.ts,history.test.ts}`, `packages/app-custom/e2e/regression/settings-route-refresh.spec.ts`, and URL expectations in three existing settings specs. The settings `tab`, `server`, `project`, and `subtab` are parsed and validated from `/settings?...` using the custom page list (including `snippets`); search reveal state (`target`, `searchActivation`) stays in history state, and only those fields are read from older history entries that stored a whole view. Unlike upstream, a project page records `parent=server` when it was opened from a server's project list, because custom projects can also be opened from the root all-servers list and back navigation follows the origin rather than the server count. The redirect of a missing server waits for the persisted server list (`hydrated`, as upstream exposes it); custom has no WSL/SSH inventory in that list and no upstream single-server redirects, so none are added. Titlebar history replaces one entry across settings URLs. Not ported: `SettingsSearchField` and the keybind/model/project search changes of the same PR.
+- **Tests:** route parse/serialize tests (custom pages, project origin, invalid combinations, stale history state) and the upstream titlebar history test pass; the new Playwright regression at 1440×900 and 390×844 reloads a root page (Snippets) and a project Extensions → LSPs page and returns to root Projects; it fails on `cde61cb22` (URL stays `/settings`). App-custom unit suite, typecheck, and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### MCP resource mentions as read references — https://github.com/anomalyco/opencode/pull/50680
 
 - **Kind:** adaptation

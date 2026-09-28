@@ -87,7 +87,7 @@ test("session settings use the remote server context", async ({ page }) => {
   await expect(sessionHeading).toBeVisible()
   await expect(page.locator('[data-titlebar-tab][data-active="true"]')).toContainText(sessionB.title)
   await page.keyboard.press("Control+]")
-  await expect(page).toHaveURL("/settings")
+  await expect(page).toHaveURL("/settings?tab=models")
   await expect(settings.getByRole("tab", { name: "Models", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(page.locator('[data-titlebar-tab][data-active="true"]')).toHaveCount(0)
   await page.keyboard.press("Escape")

@@ -222,7 +222,7 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
     servers?: Array<ServerConnection.Any>
   }) => {
     const preferences = usePreferences()
-    const [store, setStore, raw] = persisted(
+    const [store, setStore, raw, hydrated] = persisted(
       {
         ...Persist.global("server"),
         sync: true,
@@ -327,6 +327,7 @@ export const { use: useServers, provider: ServersProvider } = createSimpleContex
       get visible() {
         return visibleServers()
       },
+      hydrated,
       isHidden(key: ServerConnection.Key) {
         return store.hidden[key] ?? false
       },
