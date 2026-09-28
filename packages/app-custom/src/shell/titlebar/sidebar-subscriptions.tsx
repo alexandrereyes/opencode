@@ -531,6 +531,9 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
           {
             label: language.t("sidebar.proxy.windowFiveHour"),
             value: remaining(account().fiveHourRemaining),
+            countdown: account().fiveHourResetAt
+              ? formatSubscriptionExpiry(account().fiveHourResetAt!, props.now)
+              : null,
             title: renews(account().fiveHourResetAt),
             meter: language.t("context.overview.fiveHourAccount", { account: account().name }),
             pace: null,
@@ -540,6 +543,7 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
     {
       label: formatSubscriptionCountdown(account().resetAt, props.now),
       value: remaining(account().remaining),
+      countdown: null,
       title: renews(account().resetAt),
       meter: language.t("context.overview.weeklyAccount", { account: account().name }),
       pace: pace(),
@@ -559,6 +563,7 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
       >
         {percent(window.value)}
       </span>
+      <Show when={window.countdown}>{(countdown) => <span class="tabular-nums"> ({countdown()})</span>}</Show>
     </span>
   )
   const meter = (window: ReturnType<typeof windows>[number]) => (

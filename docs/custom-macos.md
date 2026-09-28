@@ -541,7 +541,8 @@ low. Selecting a row opens the details popover (desktop) or panel (mobile) on th
 and highlights the row. Each tab is one card: plans and account count, balance with the
 combined meter and pace marker, accounts grouped by plan with availability, each account's weekly
 meter and renewal countdown (`7.3d`, `7h`, or `10m`), and a short status badge. Five-hour windows
-retain their `5h` label and appear alongside the weekly meter only while the weekly quota is not
+retain their `5h` label, followed by the percentage and the time until that window renews
+(`5h 60% (2h 15m)`), and appear alongside the weekly meter only while the weekly quota is not
 exhausted. The email occupies the first row with a trailing banked-reset summary, including zero:
 `2 reset (7d 8h)`. Minutes appear only below one day, for example `8h 10m` or `10m`.
 The parenthesized countdown is the nearest banked-reset expiration when dated,
