@@ -530,6 +530,7 @@ export const dict = {
   "provider.connect.method.headless": "Headless",
   "provider.connect.status.inProgress": "Authorization in progress…",
   "provider.connect.status.waiting": "Waiting for authorization…",
+  "provider.connect.status.refreshing": "Connected. Loading your models…",
   "provider.connect.status.failed": "Authorization failed: {{error}}",
   "provider.connect.apiKey.description":
     "Enter your {{provider}} API key to connect your account and use {{provider}} models in OpenCode.",
@@ -572,6 +573,15 @@ export const dict = {
   "provider.connect.console.apiKey.link": "Open the Console",
   "provider.connect.console.opening": "Opening your browser…",
   "provider.connect.console.code.placeholder": "Requesting a code…",
+  "provider.connect.console.expired": "This sign-in request has expired. Start again to get a new device code.",
+  "provider.connect.console.denied": "Access was denied in Console. Try again when you're ready to connect.",
+  "provider.connect.console.statusFailed": "Couldn't check authorization. Check your server connection and try again.",
+  "provider.connect.console.startFailed": "Couldn't start sign-in. Check your server connection and try again.",
+  "provider.connect.console.refreshFailed":
+    "Your account is connected, but we couldn't load your models. Try again to refresh them.",
+  "provider.connect.remote.title": "Connecting on “{{server}}”",
+  "provider.connect.remote.description":
+    "Your OpenCode credentials will be stored on this server. Models will be available through this server.",
   "provider.connect.toast.connected.title": "{{provider}} connected",
   "provider.connect.toast.connected.description": "{{provider}} models are now available to use.",
 

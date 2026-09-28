@@ -36,6 +36,7 @@ function boundary() {
     connects: [] as unknown[],
     keys: [] as unknown[],
     refreshed: 0,
+    refreshFailures: 0,
     completed: 0,
     polls: 0,
   }
@@ -85,12 +86,16 @@ mock.module("@/runtime/server/current", () => ({
       invalidate() {},
       sync: async () => {
         active.calls.refreshed++
+        if (active.calls.refreshFailures === 0) return
+        active.calls.refreshFailures--
+        throw new Error("Catalog unavailable")
       },
     }
     return { location: { integration: resource, provider: resource, model: resource } }
   },
 }))
-const { createProviderConnectionController, consoleIntegration } = await import("@/providers/connect/controller")
+const { createProviderConnectionController, consoleIntegration, providerFormDefaults } =
+  await import("@/providers/connect/controller")
 
 async function fixture(auto = true) {
   active = boundary()
@@ -129,14 +134,60 @@ test("starts shared Console OAuth with hidden defaults, opens browser, polls and
   expect(app.calls.opened).toEqual([authorization.url])
   expect(app.calls.polls).toBe(1)
   expect(app.controller.authorization()).toEqual(authorization)
+  expect(app.controller.auth.state()).toBe("waiting")
   app.controller.auth.open()
   expect(app.calls.opened).toHaveLength(2)
   app.status.resolve({ data: { status: "complete", time: authorization.time } })
   await drain()
   expect(app.calls.refreshed).toBe(3)
+  expect(app.controller.auth.state()).toBe("ready")
   expect(app.calls.completed).toBe(1)
   app.dispose()
   expect(app.calls.cancelled).toEqual([])
+})
+
+test("hidden defaults only apply when their conditions hold", () => {
+  expect(
+    providerFormDefaults([
+      { type: "string", key: "deployment", hidden: true, default: "cloud", title: "Deployment" },
+      {
+        type: "string",
+        key: "region",
+        hidden: true,
+        default: "us",
+        title: "Region",
+        when: [{ key: "deployment", op: "eq", value: "cloud" }],
+      },
+      {
+        type: "string",
+        key: "host",
+        hidden: true,
+        default: "localhost",
+        title: "Host",
+        when: [{ key: "deployment", op: "eq", value: "self-hosted" }],
+      },
+      { type: "string", key: "token", title: "Token", default: "visible" },
+    ]),
+  ).toEqual({ deployment: "cloud", region: "us" })
+})
+
+test("a catalog refresh failure after sign-in retries the refresh without signing in again", async () => {
+  const app = await fixture()
+  app.connected.resolve({ data: authorization })
+  await drain()
+  app.calls.refreshFailures = 1
+  app.status.resolve({ data: { status: "complete", time: authorization.time } })
+  await drain()
+  expect(app.controller.auth.state()).toBe("error")
+  expect(app.controller.auth.error()).toBe("provider.connect.console.refreshFailed")
+  expect(app.calls.completed).toBe(0)
+  app.controller.auth.retry()
+  expect(app.controller.auth.state()).toBe("refreshing")
+  await drain()
+  expect(app.controller.auth.state()).toBe("ready")
+  expect(app.calls.completed).toBe(1)
+  expect(app.calls.connects).toHaveLength(1)
+  expect(app.calls.polls).toBe(1)
 })
 
 test("multiple methods show selection instead of a permanent spinner", async () => {
@@ -166,6 +217,21 @@ test("server rejection exposes its message and does not complete", async () => {
   expect(app.controller.auth.error()).toBe("Authorization denied")
   expect(app.calls.completed).toBe(0)
 })
+
+for (const item of [
+  { reason: "access_denied", message: "provider.connect.console.denied" },
+  { reason: "expired_token", message: "provider.connect.console.expired" },
+]) {
+  test(`Console device rejection ${item.reason} gets a specific message`, async () => {
+    const app = await fixture()
+    app.connected.resolve({ data: authorization })
+    app.status.resolve({
+      data: { status: "failed", message: `Device authorization failed: ${item.reason}`, time: authorization.time },
+    })
+    await drain()
+    expect(app.controller.auth.error()).toBe(item.message)
+  })
+}
 
 test("closing cancels an active attempt and ignores late status completion", async () => {
   const app = await fixture()
@@ -203,7 +269,7 @@ test("start failure is visible and retry starts another request", async () => {
   const app = await fixture()
   app.connected.reject(new Error("Authorization unavailable"))
   await drain()
-  expect(app.controller.auth.error()).toBe("Authorization unavailable")
+  expect(app.controller.auth.error()).toBe("provider.connect.console.startFailed")
   expect(app.controller.busy()).toBe(false)
   app.controller.auth.retry()
   await drain()
@@ -216,7 +282,7 @@ test("polling failure cancels the still-open attempt and exposes the error", asy
   await drain()
   app.status.reject(new Error("Connection lost"))
   await drain()
-  expect(app.controller.auth.error()).toBe("Connection lost")
+  expect(app.controller.auth.error()).toBe("provider.connect.console.statusFailed")
   expect(app.calls.cancelled).toEqual([authorization.attemptID])
 })
 
@@ -226,5 +292,5 @@ test("expired authorization gets an actionable error", async () => {
   await drain()
   app.status.resolve({ data: { status: "expired", time: authorization.time } })
   await drain()
-  expect(app.controller.auth.error()).toBe("provider.connect.oauth.expired")
+  expect(app.controller.auth.error()).toBe("provider.connect.console.expired")
 })

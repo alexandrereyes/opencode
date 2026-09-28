@@ -17,12 +17,15 @@ import { useProviders } from "@/providers/catalog/providers"
 import { useIntegrations } from "@/providers/catalog/integrations"
 import { CustomProviderForm } from "@/providers/credentials/dialog"
 import { decode64 } from "@/runtime/persistence/base64"
+import { useServerSDK } from "@/runtime/server/client"
 import {
   CONSOLE_PROVIDERS,
   consoleIntegration,
   createProviderConnectionController,
+  providerFormDefaults,
   type ProviderConnectMethod,
 } from "./controller"
+import { authServerName, RemoteAuthNotice } from "./remote"
 
 const CUSTOM_ID = "_custom"
 type IntegrationForm = NonNullable<ProviderConnectMethod["form"]>[number]
@@ -263,6 +266,7 @@ function ProviderConnection(props: {
   const dialog = useDialog()
   const params = useParams()
   const language = useLanguage()
+  const sdk = useServerSDK()
   const providers = useProviders(() => props.directory)
   const integrations = useIntegrations(() => props.directory)
   const directory = () => props.directory ?? decode64(params.dir)
@@ -317,8 +321,11 @@ function ProviderConnection(props: {
   }
 
   function AuthFormView() {
+    const defaults = providerFormDefaults(controller.currentMethod()?.form)
     const [formStore, setFormStore] = createStore({
-      value: {} as Record<string, string>,
+      value: Object.fromEntries(
+        Object.entries(defaults).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : [])),
+      ) as Record<string, string>,
       index: 0,
     })
 
@@ -668,7 +675,15 @@ function ProviderConnection(props: {
         />
         <div class="text-14-regular text-text-base flex items-center gap-4">
           <Spinner />
-          <span>{language.t(ready() ? "provider.connect.status.waiting" : "provider.connect.console.opening")}</span>
+          <span role="status">
+            {language.t(
+              controller.auth.state() === "refreshing"
+                ? "provider.connect.status.refreshing"
+                : ready()
+                  ? "provider.connect.status.waiting"
+                  : "provider.connect.console.opening",
+            )}
+          </span>
         </div>
       </div>
     )
@@ -689,8 +704,13 @@ function ProviderConnection(props: {
           </Switch>
         </div>
       </div>
-      <div class="flex min-h-0 flex-1 flex-col">
+      <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div>
+          <Show when={isConsole() && authServerName(sdk.server) !== undefined}>
+            <div class="mb-5">
+              <RemoteAuthNotice server={sdk.server} />
+            </div>
+          </Show>
           <Switch>
             <Match
               when={
@@ -721,7 +741,9 @@ function ProviderConnection(props: {
                 <div class="flex items-center gap-x-2">
                   <Icon name="circle-ban-sign" class="text-icon-critical-base" />
                   <span role="alert">
-                    {language.t("provider.connect.status.failed", { error: controller.auth.error() ?? "" })}
+                    {isConsole()
+                      ? controller.auth.error()
+                      : language.t("provider.connect.status.failed", { error: controller.auth.error() ?? "" })}
                   </span>
                 </div>
                 <Button variant="neutral" onClick={() => controller.auth.retry()}>

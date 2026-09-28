@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### Console device-flow feedback — https://github.com/anomalyco/opencode/pull/48501
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `b7d707cd642642062e8bf89e29337804a6a280d2` (commit reviewed/applied), 2026-09-28
+- **Local change:** `feat(app): clarify Console sign-in states and errors`; `packages/app-custom/src/providers/connect/{controller.ts,dialog.tsx,remote.tsx,remote.test.ts}`, `src/runtime/i18n/en.ts`, and `test-browser/fixtures/provider-connection.ts`. Ports conditional hidden defaults, explicit waiting/refreshing/ready states, Console-specific start/poll/denied/expired/catalog-refresh messages, catalog-only retry after successful authorization, and a server-scoped remote credential notice. Keeps custom completion toast/dialog close, native authorization-link fallback, cancellation after transport failure, Go-specific keys, integration-aware disconnect/account badges, model visibility preferences, and InlineServerSelect. The form area scrolls so adding the remote notice keeps the custom API-key switch reachable on phones. Excluded: `global.models.show`, retaining attempts after transport errors, model onboarding (`prepare`/`prepareConsoleCatalog`/`catalogPending`/`noModels`), InlineServerSelect replacement, provider grouping/ProviderModelIcon, `openBrowser`/`browserFailed`/copy-link, and `return_window`/Electron. #50204 only renames the unsupported-form i18n key in the upstream controller; that unrelated existing custom hardcoded error is not changed here.
+- **Tests:** controller fixture 14/14 and remote-identity tests 3/3 pass; root `bun run check` passes. Full browser suite: 226 pass and the five previously reported sidebar failures. Playwright CLI with installed Chrome and an isolated source server (4731, temporary XDG/DB/config, no inherited OPENCODE variables) checked 1440×900 and 390×844: real device-code start/native link, injected denied/expired-token responses, catalog failure followed by Retry closing without another login, and remote notice through a browser-routed `remote.test` alias of the isolated backend. No remote notice on loopback. The mobile API-key switch remains reachable by scrolling and opens its form. No actual Console authorization completed.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Worktree and branch in Home session rows — https://github.com/anomalyco/opencode/pull/49793
 
 - **Kind:** adaptation
@@ -362,7 +373,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
-- **Result after upstream:** pending. Integration of upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (2026-09-28) changed the same upstream UI: #48501 moves Console and Go sign-in to the device flow and #51266 adds provider account switching in `providers/connect` and `settings/providers`. The custom port is unchanged; comparison is deferred to the next custom UI port. #51266 is ported by `feat(app): switch provider accounts in settings` (see its entry); #48501 remains.
+- **Result after upstream:** pending final register reconciliation. Against integrated upstream `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e`, #51266 is ported by `feat(app): switch provider accounts in settings`; #48501 is selectively ported by `feat(app): clarify Console sign-in states and errors` (see both entries). Native link fallback, cancel-on-transport-failure, Go keys, integration-aware disconnect/account badges, custom model visibility and server selection are retained deliberately; model onboarding and Electron-specific behavior remain excluded.
 
 ### Go monthly pricing copy — https://github.com/anomalyco/opencode/pull/50473
 
