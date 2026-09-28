@@ -17,7 +17,12 @@ import {
   subscriptionPace,
   subscriptionPool,
 } from "@/session/files/subscription-pool"
-import { formatSubscriptionDate } from "./subscription-date"
+import {
+  formatSubscriptionCountdown,
+  formatSubscriptionDate,
+  formatSubscriptionExpiry,
+  formatSubscriptionShortDate,
+} from "./subscription-date"
 
 export function SidebarSubscriptions(props: {
   currentTab?: Tab
@@ -132,8 +137,7 @@ export function SidebarSubscriptions(props: {
         }).format(item.pool().equivalents!)
   const date = (value: number | string, weekdayFirst = false) =>
     formatSubscriptionDate(value, language.intl(), weekdayFirst)
-  const shortDate = (value: number) =>
-    new Intl.DateTimeFormat(language.intl(), { weekday: "short", day: "numeric", month: "short" }).format(value)
+  const shortDate = (value: number) => formatSubscriptionShortDate(value, language.intl())
   const planLabel = (plan: string | null) =>
     plan === "pro" || plan === "prolite" || plan === "plus" || plan === "max20x" || plan === "max5x"
       ? language.t(`sidebar.proxy.${plan}`)
@@ -395,16 +399,25 @@ export function SidebarSubscriptions(props: {
                                   </span>
                                 </div>
                               </Show>
-                              <For each={group.accounts}>
-                                {(account) => <SubscriptionAccount account={account} now={state.now} />}
-                              </For>
+                              <div class="flex min-w-0 flex-col gap-3">
+                                <For each={group.accounts}>
+                                  {(account, index) => (
+                                    <>
+                                      <Show when={index() > 0}>
+                                        <hr class="m-0 w-full scale-y-50 border-0 border-t border-border-base" />
+                                      </Show>
+                                      <SubscriptionAccount account={account} now={state.now} />
+                                    </>
+                                  )}
+                                </For>
+                              </div>
                             </div>
                           )}
                         </For>
                       </div>
-                      <footer class="grid grid-cols-2 border-t border-border-weak-base text-12-regular leading-text-compact text-v2-text-text-muted tabular-nums">
+                      <footer class="flex flex-wrap border-t border-border-weak-base text-12-regular leading-text-compact text-v2-text-text-muted tabular-nums">
                         <span
-                          class="flex min-w-0 items-center gap-1.5 px-3 py-2.5"
+                          class="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap px-3 py-2.5"
                           title={language.t("context.overview.renewalMin", {
                             date: item.renewals() ? date(item.renewals()!.min, true) : "—",
                           })}
@@ -415,9 +428,7 @@ export function SidebarSubscriptions(props: {
                               ? "—"
                               : language.plural("sidebar.proxy.renewalDays", item.nextRenewal()!)}
                           </span>
-                          <Show when={item.renewals()}>
-                            {(renewals) => <span class="truncate">{shortDate(renewals().min)}</span>}
-                          </Show>
+                          <Show when={item.renewals()}>{(renewals) => <span>{shortDate(renewals().min)}</span>}</Show>
                         </span>
                         <span
                           class="flex min-w-0 items-center gap-1.5 border-s border-border-weak-base px-3 py-2.5"
@@ -512,9 +523,10 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
     if (weeklyExhausted()) return ACCOUNT_STATUS.weeklyExhausted
     if (capacity() === "unavailable" && account().fiveHourRemaining === 0) return ACCOUNT_STATUS.fiveHourExhausted
     if (capacity() === "unavailable") return ACCOUNT_STATUS.noCapacity
+    return ACCOUNT_STATUS.available
   }
   const windows = () => [
-    ...(account().fiveHourRemaining !== null || account().fiveHourResetAt !== null
+    ...(!weeklyExhausted() && (account().fiveHourRemaining !== null || account().fiveHourResetAt !== null)
       ? [
           {
             label: language.t("sidebar.proxy.windowFiveHour"),
@@ -526,7 +538,7 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
         ]
       : []),
     {
-      label: language.t("sidebar.proxy.windowSevenDay"),
+      label: formatSubscriptionCountdown(account().resetAt, props.now),
       value: remaining(account().remaining),
       title: renews(account().resetAt),
       meter: language.t("context.overview.weeklyAccount", { account: account().name }),
@@ -561,10 +573,29 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
   )
   return (
     <div role="group" aria-label={account().name} class="flex min-w-0 flex-col gap-2">
-      <div class="flex min-w-0 items-center gap-2 text-12-regular leading-text-compact">
-        <bdi class="min-w-0 flex-1 truncate text-text-base" title={account().name}>
-          {account().name}
-        </bdi>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-12-regular leading-text-compact">
+        <span class="flex w-full min-w-0 items-center justify-between gap-2 text-text-base">
+          <bdi class="min-w-0 truncate font-[700]" title={account().name}>
+            {account().name}
+          </bdi>
+          <span class="flex shrink-0 items-center gap-1 text-v2-text-text-muted tabular-nums">
+            <Show when={account().bankedResets} fallback="—">
+              {(banked) => language.plural("sidebar.proxy.accountResets", banked().available)}
+            </Show>
+            <Show when={(account().bankedResets?.available ?? 0) > 0 && account().bankedResets?.earliestExpiresAt}>
+              {(expiry) => (
+                <span
+                  class="shrink-0 text-v2-text-text-muted tabular-nums"
+                  title={language.t("context.overview.expiryMin", {
+                    date: formatSubscriptionDate(expiry(), language.intl()),
+                  })}
+                >
+                  ({formatSubscriptionExpiry(expiry(), props.now)})
+                </span>
+              )}
+            </Show>
+          </span>
+        </span>
         <Show when={status()}>
           {(item) => (
             <span class={`${BADGE} ${TONE[item().tone]}`} title={language.t(item().title)}>
@@ -573,20 +604,24 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
           )}
         </Show>
         <Show when={windows().length === 1}>
-          <span title={windows()[0].title}>{value(windows()[0])}</span>
+          <span class="ms-auto" title={windows()[0].title}>
+            {value(windows()[0])}
+          </span>
         </Show>
       </div>
-      <Show when={windows().length > 1} fallback={<div title={windows()[0].title}>{meter(windows()[0])}</div>}>
-        <div class="grid grid-cols-2 gap-4">
-          <For each={windows()}>
-            {(window) => (
-              <div class="flex min-w-0 flex-col gap-1.5" title={window.title}>
-                <div class="flex text-12-regular leading-text-compact">{value(window)}</div>
-                {meter(window)}
-              </div>
-            )}
-          </For>
-        </div>
+      <Show when={!weeklyExhausted()}>
+        <Show when={windows().length > 1} fallback={<div title={windows()[0].title}>{meter(windows()[0])}</div>}>
+          <div class="grid grid-cols-2 gap-4">
+            <For each={windows()}>
+              {(window) => (
+                <div class="flex min-w-0 flex-col gap-1.5" title={window.title}>
+                  <div class="flex text-12-regular leading-text-compact">{value(window)}</div>
+                  {meter(window)}
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
       </Show>
     </div>
   )
@@ -596,12 +631,14 @@ const BADGE =
   "inline-flex h-4 shrink-0 items-center rounded-[4px] border-[0.5px] px-1 text-[length:var(--font-size-x-small)] font-medium leading-[var(--line-height-tight)] whitespace-nowrap"
 
 const TONE = {
+  success: "border-v2-state-border-success bg-v2-state-bg-success text-v2-state-fg-success",
   neutral: "border-v2-border-border-base bg-v2-background-bg-layer-02 text-v2-text-text-muted",
   warning: "border-v2-state-border-warning bg-v2-state-bg-warning text-v2-state-fg-warning",
   danger: "border-v2-state-border-danger bg-v2-state-bg-danger text-v2-state-fg-danger",
 } as const
 
 const ACCOUNT_STATUS = {
+  available: { label: "sidebar.proxy.badge.available", title: "sidebar.proxy.badge.available", tone: "success" },
   disabled: { label: "sidebar.proxy.badge.disabled", title: "context.overview.disabled", tone: "neutral" },
   reauthenticate: {
     label: "sidebar.proxy.badge.reauthenticate",
@@ -657,7 +694,7 @@ function SubscriptionSurface(props: {
           placement="top-start"
           gutter={8}
           title={props.title}
-          class="w-[360px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
+          class="w-[440px] max-w-[calc(100vw-24px)] [&_[data-slot=popover-body]]:max-h-[65vh] [&_[data-slot=popover-body]]:overflow-y-auto"
           triggerAs="button"
           triggerProps={{ type: "button", "aria-label": props.label, class: triggerClass }}
           trigger={props.trigger}

@@ -539,9 +539,19 @@ combined weekly meter, balance in Pro 20x or Max 20x equivalents, days to the ne
 banked resets; Claude also shows a chip with the average five-hour quota, tinted when it runs
 low. Selecting a row opens the details popover (desktop) or panel (mobile) on that pool's tab
 and highlights the row. Each tab is one card: plans and account count, balance with the
-combined meter and pace marker, accounts grouped by plan with availability, each account's 7d
-meter (or side-by-side 5h/7d meters when a five-hour window exists) and a short status badge,
-and a footer with the next renewal date and banked resets. Exact renewal and expiry times are
+combined meter and pace marker, accounts grouped by plan with availability, each account's weekly
+meter and renewal countdown (`7.3d`, `7h`, or `10m`), and a short status badge. Five-hour windows
+retain their `5h` label and appear alongside the weekly meter only while the weekly quota is not
+exhausted. The email occupies the first row with a trailing banked-reset summary, including zero:
+`2 reset (7d 8h)`. Minutes appear only below one day, for example `8h 10m` or `10m`.
+The parenthesized countdown is the nearest banked-reset expiration when dated,
+with the exact timestamp in a tooltip; unknown inventory shows a dash. The next row pairs a status
+badge (green `available` for ready accounts) with the single weekly quota aligned at the end.
+Weekly-exhausted accounts omit empty quota bars while retaining their status and percentage.
+A hairline separates every pair of consecutive accounts in the same plan. Quota meters belong to
+their account; plan headings and the footer provide separation at group boundaries instead.
+The footer shows the next renewal weekday, numeric date,
+24-hour time (`dom., 04/10 08:33`), and pooled banked resets. Exact renewal and expiry times are
 in tooltips; the update time and refresh button sit below the card. The two pools are never
 combined, matching the proxy's lack of cross-provider failover.
 Panel tab selection is persisted per server and Session, including across Location changes.
