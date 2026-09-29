@@ -1,5 +1,8 @@
 import { createEffect, createMemo, createResource, For, onCleanup, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Button } from "@opencode/ui-custom/button"
+import { useDialog } from "@opencode/ui-custom/context/dialog"
+import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { Popover } from "@opencode/ui-custom/popover"
@@ -34,12 +37,15 @@ export function SidebarSubscriptions(props: {
 }) {
   const global = useGlobal()
   const language = useLanguage()
+  const dialog = useDialog()
   const [state, setState] = createStore({
     open: false,
     now: Date.now(),
     provider: "codex" as Provider,
     // Optimistic switch values while the proxy applies them.
     pending: {} as Partial<Record<Provider, boolean>>,
+    // Accounts with a manual reset request in flight, keyed by provider and account ID.
+    resetting: {} as Record<string, boolean>,
   })
   const source = createMemo(
     () => {
@@ -162,6 +168,61 @@ export function SidebarSubscriptions(props: {
         refresh()
       })
       .finally(() => setState("pending", provider, undefined))
+  }
+  const consumeReset = (provider: Provider, account: Subscriptions.Account) => {
+    const current = source()
+    const key = `${provider}:${account.id}`
+    if (!current || state.resetting[key]) return
+    setState("resetting", key, true)
+    current.ctx.sdk.api
+      .rpc(Subscriptions.Definition)
+      .consumeReset({ provider, accountId: account.id })
+      .then(() => showToast({ title: language.t("sidebar.proxy.manualReset.success", { account: account.name }) }))
+      .catch((error: unknown) => {
+        const type = typeof error === "object" && error !== null && "type" in error ? error.type : undefined
+        showToast({
+          variant: "error",
+          title: language.t(
+            type === "no_credit"
+              ? "sidebar.proxy.manualReset.noCredit"
+              : type === "busy"
+                ? "sidebar.proxy.manualReset.busy"
+                : "sidebar.proxy.manualReset.failed",
+            { account: account.name },
+          ),
+        })
+      })
+      .finally(() => {
+        setState("resetting", key, false)
+        refresh()
+      })
+  }
+  const confirmReset = (provider: Provider, account: Subscriptions.Account) => {
+    if (state.resetting[`${provider}:${account.id}`]) return
+    void dialog.show(() => (
+      <Dialog fit>
+        <DialogHeader hideClose>
+          <DialogTitleGroup
+            title={language.t("sidebar.proxy.manualReset.title")}
+            description={language.t("sidebar.proxy.manualReset.confirm", { account: account.name })}
+          />
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </Button>
+          <Button
+            variant="contrast"
+            onClick={() => {
+              dialog.close()
+              consumeReset(provider, account)
+            }}
+          >
+            {language.t("sidebar.proxy.manualReset.action")}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    ))
   }
   createEffect(() => {
     source()
@@ -512,7 +573,12 @@ export function SidebarSubscriptions(props: {
                                       <Show when={index() > 0}>
                                         <hr class="m-0 w-full scale-y-50 border-0 border-t border-border-base" />
                                       </Show>
-                                      <SubscriptionAccount account={account} now={state.now} />
+                                      <SubscriptionAccount
+                                        account={account}
+                                        now={state.now}
+                                        resetting={state.resetting[`${item.provider}:${account.id}`] === true}
+                                        onReset={() => confirmReset(item.provider, account)}
+                                      />
                                     </>
                                   )}
                                 </For>
@@ -571,7 +637,12 @@ const PROVIDERS = {
   },
 } as const
 
-function SubscriptionAccount(props: { account: Subscriptions.Account; now: number }) {
+function SubscriptionAccount(props: {
+  account: Subscriptions.Account
+  now: number
+  resetting: boolean
+  onReset: () => void
+}) {
   const language = useLanguage()
   const account = () => props.account
   const capacity = () => subscriptionCapacity(account(), props.now)
@@ -655,7 +726,24 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
           </bdi>
           <span class="flex shrink-0 items-center gap-1 text-v2-text-text-muted tabular-nums">
             <Show when={account().bankedResets} fallback="—">
-              {(banked) => language.plural("sidebar.proxy.accountResets", banked().available)}
+              {(banked) => (
+                <Show
+                  when={banked().available > 0}
+                  fallback={language.plural("sidebar.proxy.accountResets", banked().available)}
+                >
+                  <button
+                    type="button"
+                    class="cursor-pointer rounded-sm tabular-nums hover:underline focus-visible:outline-2 focus-visible:outline-border-active disabled:cursor-default disabled:opacity-60 disabled:no-underline"
+                    disabled={props.resetting}
+                    aria-busy={props.resetting}
+                    aria-label={language.t("sidebar.proxy.manualReset.label", { account: account().name })}
+                    title={language.t("sidebar.proxy.manualReset.label", { account: account().name })}
+                    onClick={() => props.onReset()}
+                  >
+                    {language.plural("sidebar.proxy.accountResets", banked().available)}
+                  </button>
+                </Show>
+              )}
             </Show>
             <Show when={(account().bankedResets?.available ?? 0) > 0 && account().bankedResets?.earliestExpiresAt}>
               {(expiry) => (

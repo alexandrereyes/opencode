@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { ConfigProvider, Effect } from "effect"
-import { read, writeAutomation } from "../src/subscriptions"
+import { consumeReset, read, writeAutomation } from "../src/subscriptions"
 
 const withProxy = <A>(url: string, effect: Effect.Effect<A>) =>
   effect.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENCODE_LLM_PROXY_URL: url } }))))
@@ -299,6 +299,65 @@ test("writes the automation switch to the provider-specific proxy route", async 
     { path: "/_admin/anthropic/banked-resets", method: "PUT", body: { enabled: false } },
   ])
   expect(await Effect.runPromise(withProxy("", writeAutomation({ provider: "codex", enabled: false })))).toBeNull()
+})
+
+test("consumes a banked reset through the provider-specific proxy route and maps failures", async () => {
+  const requests: { path: string; method: string }[] = []
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname
+      requests.push({ path, method: request.method })
+      if (path === "/_admin/accounts/one/banked-resets/consume")
+        return Response.json({ code: "reset", windowsReset: 2, httpStatus: 200, succeeded: true, token: "private" })
+      if (path === "/_admin/anthropic/accounts/one/banked-resets/consume")
+        return Response.json({ code: "rejected", windowsReset: 0, httpStatus: 400, succeeded: false })
+      if (path === "/_admin/accounts/empty/banked-resets/consume")
+        return Response.json({ error: "no_credit" }, { status: 409 })
+      if (path === "/_admin/anthropic/accounts/busy/banked-resets/consume")
+        return Response.json({ error: "busy" }, { status: 409 })
+      if (path === "/_admin/accounts/token/banked-resets/consume")
+        return Response.json({ error: "token_unavailable" }, { status: 409 })
+      if (path === "/_admin/accounts/upstream/banked-resets/consume")
+        return Response.json({ error: "upstream" }, { status: 502 })
+      return new Response("missing", { status: 404 })
+    },
+  })
+  const results = await Effect.runPromise(
+    withProxy(
+      server.url.toString(),
+      Effect.all([
+        consumeReset({ provider: "codex", accountId: "one" }),
+        consumeReset({ provider: "anthropic", accountId: "one" }),
+        consumeReset({ provider: "codex", accountId: "empty" }),
+        consumeReset({ provider: "anthropic", accountId: "busy" }),
+        consumeReset({ provider: "codex", accountId: "token" }),
+        consumeReset({ provider: "codex", accountId: "upstream" }),
+        consumeReset({ provider: "codex", accountId: "unknown" }),
+      ]),
+    ).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
+  )
+  expect(results).toEqual([
+    { status: "ok", result: { code: "reset", windowsReset: 2 } },
+    { status: "consume_failed" },
+    { status: "no_credit" },
+    { status: "busy" },
+    { status: "consume_failed" },
+    { status: "consume_failed" },
+    { status: "consume_failed" },
+  ])
+  expect(requests).toEqual([
+    { path: "/_admin/accounts/one/banked-resets/consume", method: "POST" },
+    { path: "/_admin/anthropic/accounts/one/banked-resets/consume", method: "POST" },
+    { path: "/_admin/accounts/empty/banked-resets/consume", method: "POST" },
+    { path: "/_admin/anthropic/accounts/busy/banked-resets/consume", method: "POST" },
+    { path: "/_admin/accounts/token/banked-resets/consume", method: "POST" },
+    { path: "/_admin/accounts/upstream/banked-resets/consume", method: "POST" },
+    { path: "/_admin/accounts/unknown/banked-resets/consume", method: "POST" },
+  ])
+  expect(await Effect.runPromise(withProxy("", consumeReset({ provider: "codex", accountId: "one" })))).toEqual({
+    status: "consume_failed",
+  })
 })
 
 test("times out an unresponsive proxy after eight seconds", async () => {

@@ -50,6 +50,11 @@ export const Info = Schema.Struct({
   anthropic: Pool,
 }).annotate({ identifier: "Subscriptions.Info" })
 
+export interface ResetResult extends Schema.Schema.Type<typeof ResetResult> {}
+export const ResetResult = Schema.Struct({ code: Schema.String, windowsReset: Schema.Number }).annotate({
+  identifier: "Subscriptions.ResetResult",
+})
+
 export const Definition = Rpc.define({
   id: "custom.subscriptions",
   methods: {
@@ -63,6 +68,17 @@ export const Definition = Rpc.define({
       ),
       output: Schema.toStandardSchemaV1(Automation),
       errors: { update_failed: Schema.toStandardSchemaV1(Schema.Struct({})) },
+    },
+    consumeReset: {
+      input: Schema.toStandardSchemaV1(
+        Schema.Struct({ provider: Schema.Literals(["codex", "anthropic"]), accountId: Schema.String }),
+      ),
+      output: Schema.toStandardSchemaV1(ResetResult),
+      errors: {
+        no_credit: Schema.toStandardSchemaV1(Schema.Struct({})),
+        busy: Schema.toStandardSchemaV1(Schema.Struct({})),
+        consume_failed: Schema.toStandardSchemaV1(Schema.Struct({})),
+      },
     },
   },
   events: {},

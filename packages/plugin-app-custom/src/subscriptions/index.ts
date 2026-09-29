@@ -91,6 +91,14 @@ export const registerSubscriptions = Effect.fn("Subscriptions.register")(functio
               : Effect.fail(context.error("update_failed", "The LLM proxy did not accept the change", {})),
           ),
         ),
+      consumeReset: (input, context) =>
+        consumeReset(input).pipe(
+          Effect.flatMap((result) =>
+            result.status === "ok"
+              ? Effect.succeed(result.result)
+              : Effect.fail(context.error(result.status, RESET_FAILURES[result.status], {})),
+          ),
+        ),
     })
     .pipe(Effect.orDie)
 })
@@ -130,6 +138,50 @@ export const writeAutomation = Effect.fn("Subscriptions.writeAutomation")(functi
   }).pipe(
     Effect.timeout("15 seconds"),
     Effect.orElseSucceed(() => null),
+    Effect.provide(FetchHttpClient.layer),
+  )
+})
+
+const RESET_FAILURES = {
+  no_credit: "The account has no banked reset available",
+  busy: "The account is already applying a reset",
+  consume_failed: "The LLM proxy could not apply the reset",
+}
+
+const ResetResponse = Schema.Struct({
+  code: Schema.String,
+  windowsReset: Schema.Finite,
+  succeeded: Schema.Boolean,
+})
+
+const ResetConflict = Schema.Struct({ error: Schema.Literals(["no_credit", "busy"]) })
+
+// Consumes one banked reset; a 200 answer whose upstream call did not succeed counts as a failure.
+export const consumeReset = Effect.fn("Subscriptions.consumeReset")(function* (input: {
+  provider: "codex" | "anthropic"
+  accountId: string
+}) {
+  const failed = { status: "consume_failed" as const }
+  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  if (!url) return failed
+  const prefix = input.provider === "codex" ? "/_admin/accounts/" : "/_admin/anthropic/accounts/"
+  return yield* Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client.execute(
+      HttpClientRequest.post(
+        `${url.replace(/\/$/, "")}${prefix}${encodeURIComponent(input.accountId)}/banked-resets/consume`,
+      ),
+    )
+    if (response.status === 409)
+      return { status: (yield* Schema.decodeUnknownEffect(ResetConflict)(yield* response.json)).error }
+    if (response.status !== 200) return failed
+    const data = yield* Schema.decodeUnknownEffect(ResetResponse)(yield* response.json)
+    if (!data.succeeded) return failed
+    return { status: "ok" as const, result: { code: data.code, windowsReset: data.windowsReset } }
+  }).pipe(
+    // Longer than other proxy calls: the proxy observes usage before and after its single send (~75s worst case).
+    Effect.timeout("90 seconds"),
+    Effect.orElseSucceed(() => failed),
     Effect.provide(FetchHttpClient.layer),
   )
 })
