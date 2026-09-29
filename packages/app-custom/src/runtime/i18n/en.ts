@@ -181,6 +181,8 @@ export const dict = {
   "context.overview.project": "Project",
   "context.overview.subscriptions": "Subscriptions",
   "sidebar.proxy.title": "LLM proxy",
+  "sidebar.proxy.selectAccount": "Show {{account}} in the sidebar",
+  "sidebar.proxy.clearSelection": "Show the pool summary again",
   "sidebar.proxy.details": "LLM proxy usage and accounts",
   "sidebar.proxy.balance": "Pro · {{percent}}",
   "sidebar.proxy.quota": "Pro · {{percent}} quota",

@@ -1,5 +1,8 @@
 import { createEffect, createMemo, createResource, For, onCleanup, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Schema } from "effect"
+import { persisted } from "@/runtime/persistence/storage"
+import { Persistence } from "@/runtime/persistence/schema"
 import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Dialog, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
@@ -38,6 +41,11 @@ export function SidebarSubscriptions(props: {
   const global = useGlobal()
   const language = useLanguage()
   const dialog = useDialog()
+  const [preferences, setPreferences] = persisted(
+    "subscription-selection.v1",
+    Persistence.struct({ accounts: Persistence.record(Schema.String) }),
+    { accounts: {} },
+  )
   const [state, setState] = createStore({
     open: false,
     now: Date.now(),
@@ -96,6 +104,12 @@ export function SidebarSubscriptions(props: {
     })
     const unit = PROVIDERS[provider].unit
     const accounts = createMemo(() => subscriptionAccounts(data()?.accounts ?? [], state.now))
+    const selectionKey = () => `${source()?.ctx.sdk.scope}:${provider}`
+    const account = createMemo(() => accounts().find((account) => account.id === preferences.accounts[selectionKey()]))
+    const summary = createMemo(() => {
+      const selected = account()
+      return subscriptionPool(selected ? [selected] : accounts(), state.now, selected?.plan ?? unit)
+    })
     const renewals = createMemo(() => {
       const resets = accounts().flatMap((account) =>
         account.plan === unit && account.enabled && account.authenticated && account.resetAt
@@ -108,6 +122,18 @@ export function SidebarSubscriptions(props: {
       provider,
       data,
       accounts,
+      account,
+      summary,
+      select: (id: string) => {
+        setPreferences("accounts", selectionKey(), account()?.id === id ? "" : id)
+        setState("open", false)
+        props.onOpenChange?.(false)
+      },
+      summaryRenewal: () => {
+        const selected = account()
+        const reset = selected ? selected.resetAt : renewals()?.min
+        return reset == null ? undefined : formatSubscriptionCountdown(new Date(reset).toISOString(), state.now)
+      },
       renewals,
       pool: createMemo(() => subscriptionPool(data()?.accounts ?? [], state.now, unit)),
       groups: createMemo(() =>
@@ -249,7 +275,12 @@ export function SidebarSubscriptions(props: {
     formatSubscriptionDate(value, language.intl(), weekdayFirst)
   const shortDate = (value: number) => formatSubscriptionShortDate(value, language.intl())
   const planLabel = (plan: string | null) =>
-    plan === "promax" || plan === "pro" || plan === "prolite" || plan === "plus" || plan === "max20x" || plan === "max5x"
+    plan === "promax" ||
+    plan === "pro" ||
+    plan === "prolite" ||
+    plan === "plus" ||
+    plan === "max20x" ||
+    plan === "max5x"
       ? language.t(`sidebar.proxy.${plan}`)
       : (plan ?? language.t("context.overview.planUnknown"))
   const updated = () => {
@@ -307,16 +338,28 @@ export function SidebarSubscriptions(props: {
                         <span
                           class="size-1.5 shrink-0 rounded-full"
                           classList={{
-                            "bg-icon-success-base": item.ready() && item.pool().ready > 0,
-                            "bg-icon-warning-base": !item.ready() || item.pool().ready === 0,
+                            "bg-icon-success-base": item.ready() && item.summary().ready > 0,
+                            "bg-icon-warning-base": !item.ready() || item.summary().ready === 0,
                           }}
                         />
                       </Show>
-                      <span class="truncate text-text-base">{language.t(PROVIDERS[item.provider].keys.label)}</span>
+                      <span class="shrink-0 text-text-base">{language.t(PROVIDERS[item.provider].keys.label)}</span>
+                      <Show when={item.account()}>
+                        {(account) => (
+                          <>
+                            <span class={`${BADGE} ${TONE.neutral} uppercase`} title={account().name}>
+                              {planLabel(account().plan)}
+                            </span>
+                            <span class="min-w-0 truncate text-v2-text-text-muted" title={account().name}>
+                              {account().name}
+                            </span>
+                          </>
+                        )}
+                      </Show>
                     </span>
                     <span class="col-start-2 row-start-2 flex items-center">
                       <QuotaMeter
-                        value={item.ready() ? item.pool().availableRemaining : null}
+                        value={item.ready() ? item.summary().availableRemaining : null}
                         label={language.t("context.overview.weeklyAccount", {
                           account: language.t(PROVIDERS[item.provider].keys.label),
                         })}
@@ -325,38 +368,57 @@ export function SidebarSubscriptions(props: {
                     <span
                       class="col-start-3 row-start-1 tabular-nums"
                       title={
-                        item.pool().equivalents === null ? language.t(PROVIDERS[item.provider].keys.unknown) : undefined
+                        item.account()?.name ??
+                        (item.pool().equivalents === null
+                          ? language.t(PROVIDERS[item.provider].keys.unknown)
+                          : undefined)
                       }
                     >
                       <Show
                         when={item.ready()}
                         fallback={language.t(subscription() ? "sidebar.proxy.unavailable" : "common.loading")}
                       >
-                        <span class="font-semibold text-text-strong">{equivalents(item)}</span>
-                        <span class="ms-1">{language.t(PROVIDERS[item.provider].keys.plan)}</span>
+                        <span class="font-semibold text-text-strong">
+                          {item.account()
+                            ? item.summary().availableRemaining === null
+                              ? "—"
+                              : percent(item.summary().availableRemaining!)
+                            : equivalents(item)}
+                        </span>
+                        <Show when={!item.account()}>
+                          <span class="ms-1">{language.t(PROVIDERS[item.provider].keys.plan)}</span>
+                        </Show>
                       </Show>
                     </span>
                     <span class="col-start-3 row-start-2 flex items-center">
                       <Show
-                        when={item.provider === "anthropic" && item.ready() && item.pool().fiveHourRemaining !== null}
+                        when={
+                          item.provider === "anthropic" && item.ready() && item.summary().fiveHourRemaining !== null
+                        }
                       >
                         <span
-                          class={`${BADGE} ${TONE[quotaTone(item.pool().fiveHourRemaining!)]} tabular-nums`}
-                          title={language.t("sidebar.proxy.fiveHourAverage")}
+                          class={`${BADGE} ${TONE[quotaTone(item.summary().fiveHourRemaining!)]} tabular-nums`}
+                          title={item.account()?.name ?? language.t("sidebar.proxy.fiveHourAverage")}
                         >
                           {language.t("sidebar.proxy.fiveHourShort", {
-                            percent: percent(item.pool().fiveHourRemaining!),
+                            percent: percent(item.summary().fiveHourRemaining!),
                           })}
                         </span>
                       </Show>
                     </span>
                     <span
                       class="col-start-4 row-start-1 flex items-center gap-1 justify-self-end tabular-nums"
-                      title={language.t(PROVIDERS[item.provider].keys.renewal)}
+                      title={
+                        item.account()
+                          ? language.t("sidebar.proxy.renews", {
+                              date: item.account()!.resetAt ? date(item.account()!.resetAt!) : "—",
+                            })
+                          : language.t(PROVIDERS[item.provider].keys.renewal)
+                      }
                     >
-                      <Show when={item.ready() && item.nextRenewal() !== undefined}>
+                      <Show when={item.ready() && item.summaryRenewal() !== undefined}>
                         <Icon name="clock" size="small" />
-                        {item.nextRenewal()}
+                        {item.summaryRenewal()}
                       </Show>
                     </span>
                     <span
@@ -370,7 +432,7 @@ export function SidebarSubscriptions(props: {
                     >
                       <Show when={item.ready()}>
                         <Icon name={item.automation()?.enabled === false ? "pause" : "refresh"} size="small" />
-                        {item.pool().banked?.available ?? "—"}
+                        {item.summary().banked?.available ?? "—"}
                       </Show>
                     </span>
                   </div>
@@ -575,6 +637,8 @@ export function SidebarSubscriptions(props: {
                                       </Show>
                                       <SubscriptionAccount
                                         account={account}
+                                        selected={item.account()?.id === account.id}
+                                        onSelect={() => item.select(account.id)}
                                         now={state.now}
                                         resetting={state.resetting[`${item.provider}:${account.id}`] === true}
                                         onReset={() => confirmReset(item.provider, account)}
@@ -639,6 +703,8 @@ const PROVIDERS = {
 
 function SubscriptionAccount(props: {
   account: Subscriptions.Account
+  selected: boolean
+  onSelect: () => void
   now: number
   resetting: boolean
   onReset: () => void
@@ -718,7 +784,26 @@ function SubscriptionAccount(props: {
     />
   )
   return (
-    <div role="group" aria-label={account().name} class="flex min-w-0 flex-col gap-2">
+    <div
+      role="group"
+      aria-label={account().name}
+      class="relative isolate flex min-w-0 cursor-pointer flex-col gap-2 rounded-md p-1.5 hover:bg-v2-background-bg-layer-02"
+      classList={{ "bg-v2-background-bg-layer-02 ring-1 ring-border-active": props.selected }}
+      onClick={(event) => {
+        if (event.target.closest("button")) return
+        props.onSelect()
+      }}
+    >
+      <button
+        type="button"
+        class="absolute inset-0 -z-10 cursor-pointer rounded-md focus-visible:outline-2 focus-visible:outline-border-active"
+        aria-pressed={props.selected}
+        aria-label={language.t("sidebar.proxy.selectAccount", { account: account().name })}
+        title={language.t(props.selected ? "sidebar.proxy.clearSelection" : "sidebar.proxy.selectAccount", {
+          account: account().name,
+        })}
+        onClick={props.onSelect}
+      />
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-12-regular leading-text-compact">
         <span class="flex w-full min-w-0 items-center justify-between gap-2 text-text-base">
           <bdi class="min-w-0 truncate font-[700]" title={account().name}>
