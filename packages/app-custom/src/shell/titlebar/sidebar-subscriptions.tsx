@@ -188,7 +188,7 @@ export function SidebarSubscriptions(props: {
     formatSubscriptionDate(value, language.intl(), weekdayFirst)
   const shortDate = (value: number) => formatSubscriptionShortDate(value, language.intl())
   const planLabel = (plan: string | null) =>
-    plan === "pro" || plan === "prolite" || plan === "plus" || plan === "max20x" || plan === "max5x"
+    plan === "promax" || plan === "pro" || plan === "prolite" || plan === "plus" || plan === "max20x" || plan === "max5x"
       ? language.t(`sidebar.proxy.${plan}`)
       : (plan ?? language.t("context.overview.planUnknown"))
   const updated = () => {

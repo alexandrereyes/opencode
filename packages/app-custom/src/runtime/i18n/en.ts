@@ -189,6 +189,7 @@ export const dict = {
   "sidebar.proxy.unavailable": "Unavailable",
   "sidebar.proxy.accounts": "Accounts",
   "sidebar.proxy.groupCapacity": "{{ready}}/{{total}} available",
+  "sidebar.proxy.promax": "Pro Max",
   "sidebar.proxy.pro": "Pro 20x",
   "sidebar.proxy.prolite": "Pro 5x",
   "sidebar.proxy.plus": "Plus",
