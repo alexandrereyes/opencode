@@ -113,6 +113,10 @@ export function ComposerEditor(props: ComposerEditorProps) {
   let scrollViewport: HTMLDivElement | undefined
   const [overflow, setOverflow] = createStore({ start: false, end: false })
   const [expansion, setExpansion] = createStore({ expanded: false, height: 0 })
+  const caretRect = () => {
+    const head = editorView?.state.selection.main.head
+    return head === undefined ? undefined : (editorView?.coordsAtPos(head) ?? undefined)
+  }
   const measureExpanded = () => {
     const scroll = scrollViewport?.parentElement
     if (!scroll) return
@@ -545,6 +549,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
             <ComposerEditorPopover
               floating={placement === "floating"}
               anchor={() => rootHost}
+              caret={expansion.expanded ? caretRect : undefined}
               emptyLabel={i18n.t("ui.promptInput.noMatchingItems")}
               items={props.controller.suggestions()}
               activeID={state.popover.type === "closed" ? undefined : state.popover.activeID}
@@ -1105,6 +1110,7 @@ export function composerAgentTone(option?: ComposerOption) {
 export function ComposerEditorPopover(props: {
   floating?: boolean
   anchor?: () => HTMLElement
+  caret?: () => { top: number; bottom: number } | undefined
   emptyLabel: string
   items: ComposerSuggestion[]
   activeID?: string
@@ -1128,6 +1134,39 @@ export function ComposerEditorPopover(props: {
     for (let parent = anchor.parentElement; parent; parent = parent.parentElement) ancestors.push(parent)
     const update = () => {
       const bounds = anchor.getBoundingClientRect()
+      const caret = props.caret?.()
+      if (caret) {
+        // An expanded composer fills the panel, so there is no room above it; follow the caret instead.
+        const viewport = window.visualViewport
+        const clipped = props.floating
+          ? []
+          : ancestors
+              .filter((parent) => getComputedStyle(parent).overflowY !== "visible")
+              .map((parent) => parent.getBoundingClientRect())
+        const upper = Math.max(viewport?.offsetTop ?? 0, ...clipped.map((rect) => rect.top))
+        const lower = Math.min(
+          (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
+          ...clipped.map((rect) => rect.bottom),
+        )
+        const above = caret.top - 4 - upper - 8
+        const below = lower - caret.bottom - 4 - 8
+        const flip = above < 320 && below > above
+        const target = flip ? caret.bottom + 4 : caret.top - 4
+        popover.style.translate = flip ? "none" : ""
+        popover.style.maxHeight = `${Math.max(0, Math.min(320, flip ? below : above))}px`
+        if (!props.floating) {
+          popover.style.top = `${target - bounds.top}px`
+          return
+        }
+        popover.style.left = "0px"
+        popover.style.top = "0px"
+        popover.style.width = `${bounds.width}px`
+        const origin = popover.getBoundingClientRect()
+        popover.style.left = `${bounds.left - origin.left}px`
+        popover.style.top = `${target - (flip ? origin.top : origin.bottom)}px`
+        return
+      }
+      popover.style.translate = ""
       if (props.floating) {
         popover.style.left = "0px"
         popover.style.top = "0px"
@@ -1143,6 +1182,7 @@ export function ComposerEditorPopover(props: {
         popover.style.top = `${edge}px`
         return
       }
+      popover.style.top = ""
       const clippedTop = Math.max(
         0,
         ...ancestors
@@ -1163,6 +1203,17 @@ export function ComposerEditorPopover(props: {
     window.visualViewport?.addEventListener("resize", update)
     window.visualViewport?.addEventListener("scroll", update)
     update()
+    // The caret moves while typing the query; measure after CodeMirror finishes its DOM update.
+    createEffect(
+      on(
+        () => [props.caret, props.items],
+        () => {
+          const frame = requestAnimationFrame(update)
+          onCleanup(() => cancelAnimationFrame(frame))
+        },
+        { defer: true },
+      ),
+    )
     onCleanup(() => {
       observer.disconnect()
       window.removeEventListener("scroll", update, true)
