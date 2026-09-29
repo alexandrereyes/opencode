@@ -611,9 +611,9 @@ function SubscriptionAccount(props: { account: Subscriptions.Account; now: numbe
         ]
       : []),
     {
-      label: formatSubscriptionCountdown(account().resetAt, props.now),
+      label: language.t("sidebar.proxy.windowSevenDay"),
       value: remaining(account().remaining),
-      countdown: null,
+      countdown: account().resetAt ? formatSubscriptionExpiry(account().resetAt!, props.now) : null,
       title: renews(account().resetAt),
       meter: language.t("context.overview.weeklyAccount", { account: account().name }),
       pace: pace(),
