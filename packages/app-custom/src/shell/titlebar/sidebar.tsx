@@ -241,9 +241,9 @@ export function SessionSidebar(props: {
       })
     return sidebarSelectableSessions({
       mode: "projects",
-      chats: chats(),
-      pinned: pinned(),
-      recent: recent(),
+      chats: saved.collapsed["section:chats"] ? [] : chats(),
+      pinned: saved.collapsed["section:recent"] ? [] : pinned(),
+      recent: saved.collapsed["section:recent"] ? [] : recent(),
       projects: projects().map((project) => projectRows(project.key)),
     })
   })
@@ -256,7 +256,15 @@ export function SessionSidebar(props: {
     tabs.select(tabs.addSessionTab({ server: item.server, sessionId: item.session.id, chat: item.chat }))
   const shortcuts = createMemo(() => sidebarShortcuts(selectable().map((item) => item.key)))
   // Project groups repeat sessions already listed above; only their first row is numbered.
-  const listedAbove = createMemo(() => new Set([...chats(), ...pinned(), ...recent()].map((item) => item.key)))
+  const listedAbove = createMemo(
+    () =>
+      new Set(
+        [
+          ...(saved.collapsed["section:chats"] ? [] : chats()),
+          ...(saved.collapsed["section:recent"] ? [] : [...pinned(), ...recent()]),
+        ].map((item) => item.key),
+      ),
+  )
   const holding = createModifierHold()
   // Control on every platform: Safari consumes Cmd+1-9 for tab switching before the page sees the digit.
   command.register("sidebar-session-shortcuts", () =>
@@ -450,6 +458,7 @@ export function SessionSidebar(props: {
   }
   const Section = (props: {
     title: JSX.Element
+    collapseKey?: string
     rows: SidebarSession[]
     projectMetadataIcon?: boolean
     preparing?: Tab[]
@@ -470,17 +479,33 @@ export function SessionSidebar(props: {
       <Show when={rows().items.length || props.preparing?.length}>
         <section ref={element} class="mt-4 first:mt-0">
           <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-[600] leading-5 text-v2-text-text-base">
-            {props.title}
-          </h2>
-          <div class="flex flex-col gap-0">
-            <Show when={props.preparing?.length}>
-              <PreparingStrip tabs={props.preparing!} projectLabel={preparingLabel} />
+            <Show when={props.collapseKey} fallback={props.title}>
+              {(key) => (
+                <button
+                  type="button"
+                  class="flex h-5 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                  aria-expanded={!saved.collapsed[key()]}
+                  onClick={() => setSaved("collapsed", key(), !saved.collapsed[key()])}
+                >
+                  {props.title}
+                  <Show when={saved.collapsed[key()] && sidebarActivity(props.rows)}>
+                    {(activity) => <SessionActivityMarker activity={activity()} />}
+                  </Show>
+                </button>
+              )}
             </Show>
-            <Key each={rows().items} by="key">
-              {(item) => <Row item={item()} projectMetadataIcon={props.projectMetadataIcon} />}
-            </Key>
-          </div>
-          {props.children}
+          </h2>
+          <Show when={!props.collapseKey || !saved.collapsed[props.collapseKey]}>
+            <div class="flex flex-col gap-0">
+              <Show when={props.preparing?.length}>
+                <PreparingStrip tabs={props.preparing!} projectLabel={preparingLabel} />
+              </Show>
+              <Key each={rows().items} by="key">
+                {(item) => <Row item={item()} projectMetadataIcon={props.projectMetadataIcon} />}
+              </Key>
+            </div>
+            {props.children}
+          </Show>
         </section>
       </Show>
     )
@@ -729,8 +754,18 @@ export function SessionSidebar(props: {
               <>
                 <section class="first:mt-0">
                   <h2 class="mb-1 flex h-5 items-center gap-1.5 px-1.5 text-[15px] font-[600] leading-5 text-v2-text-text-base">
-                    <Icon name="speech-bubble" size="small" class="text-v2-icon-icon-muted" />
-                    <span>{language.t("sidebar.sessions.chats")}</span>
+                    <button
+                      type="button"
+                      class="flex h-5 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                      aria-expanded={!saved.collapsed["section:chats"]}
+                      onClick={() => setSaved("collapsed", "section:chats", !saved.collapsed["section:chats"])}
+                    >
+                      <Icon name="speech-bubble" size="small" class="text-v2-icon-icon-muted" />
+                      <span>{language.t("sidebar.sessions.chats")}</span>
+                      <Show when={saved.collapsed["section:chats"] && sidebarActivity(chats())}>
+                        {(activity) => <SessionActivityMarker activity={activity()} />}
+                      </Show>
+                    </button>
                     <Tooltip value={language.t("sidebar.sessions.chats.new")}>
                       <button
                         type="button"
@@ -746,14 +781,17 @@ export function SessionSidebar(props: {
                       </button>
                     </Tooltip>
                   </h2>
-                  <div class="flex flex-col gap-0">
-                    <PreparingStrip tabs={chatPreparing().map((item) => item.tab)} />
-                    <Key each={chats()} by="key">
-                      {(item) => <Row item={item()} />}
-                    </Key>
-                  </div>
+                  <Show when={!saved.collapsed["section:chats"]}>
+                    <div class="flex flex-col gap-0">
+                      <PreparingStrip tabs={chatPreparing().map((item) => item.tab)} />
+                      <Key each={chats()} by="key">
+                        {(item) => <Row item={item()} />}
+                      </Key>
+                    </div>
+                  </Show>
                 </section>
                 <Section
+                  collapseKey="section:recent"
                   title={
                     <>
                       <Icon name="history" size="small" class="text-v2-icon-icon-muted" />
