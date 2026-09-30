@@ -1,4 +1,4 @@
-import { createMemo, createResource, mapArray } from "solid-js"
+import { createEffect, createMemo, createResource, mapArray } from "solid-js"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, serverName } from "@/runtime/server/registry"
 import { useSettings } from "@/settings/model"
@@ -28,6 +28,14 @@ export function createSidebarSessions(options: {
       const server = ServerConnection.key(connection)
       const ctx = global.ensureServerCtx(connection)
       const projects = createMemo(() => ctx.projects.list())
+      // Directory matches alone cannot identify duplicate or differently-cased project roots; the Location
+      // lookup resolves their project ID so rows and project groups share one key.
+      createEffect(() => {
+        if (ctx.sdk.connection.status() !== "connected") return
+        projects()
+          .filter((project) => !project.id)
+          .forEach((project) => void ctx.data.location.sync({ directory: project.worktree }).catch(() => undefined))
+      })
       const inventory = createMemo(() => sidebarProjectInventory(server, projects()))
       const [chat] = createResource(
         () => (ctx.sdk.connection.status() === "connected" ? ctx.sdk.connection.epoch() + 1 : undefined),
