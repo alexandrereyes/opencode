@@ -332,6 +332,7 @@ export function SessionSidebar(props: {
     item: SidebarSession
     compact?: boolean
     projectMetadataIcon?: boolean
+    worktreeLabel?: boolean
     numbered?: boolean
   }) => {
     // Recent's monotonic rank and metadata updates are not interaction timestamps.
@@ -374,7 +375,13 @@ export function SessionSidebar(props: {
         projectBranch={branchLabel() ? entry()?.worktrees.branch(props.item.session.location.directory) : undefined}
         chatMetadataIcon={props.item.chat && props.projectMetadataIcon}
         chat={props.item.chat}
-        projectLabel={props.item.chat ? language.t("session.new.chats") : projectLabel(props.item.project)}
+        projectLabel={
+          props.item.chat
+            ? language.t("session.new.chats")
+            : props.worktreeLabel
+              ? getFilename(props.item.session.location.directory) || props.item.session.location.directory
+              : projectLabel(props.item.project)
+        }
         closable={tabs.store.some((value) => tabKey(value) === tabKey(tab()))}
         active={sessions().current === props.item.key}
         unread={props.item.attention !== undefined}
@@ -785,7 +792,7 @@ export function SessionSidebar(props: {
                     <div class="flex flex-col gap-0">
                       <PreparingStrip tabs={chatPreparing().map((item) => item.tab)} />
                       <Key each={chats()} by="key">
-                        {(item) => <Row item={item()} />}
+                        {(item) => <Row item={item()} compact />}
                       </Key>
                     </div>
                   </Show>
@@ -920,7 +927,7 @@ export function SessionSidebar(props: {
                                     <PreparingStrip tabs={preparingGroups().get(key)?.root ?? []} />
                                   </Show>
                                   <Key each={visible()} by="key">
-                                    {(item) => <Row item={item()} projectMetadataIcon numbered={!listedAbove().has(item().key)} />}
+                                    {(item) => <Row item={item()} projectMetadataIcon worktreeLabel numbered={!listedAbove().has(item().key)} />}
                                   </Key>
                                 </div>
                                 <Show when={!collapsed() && tree().root.length > visible().length}>
@@ -1010,7 +1017,7 @@ export function SessionSidebar(props: {
                                             </Show>
                                             <Key each={visible()} by="key">
                                               {(item) => (
-                                                <Row item={item()} projectMetadataIcon numbered={!listedAbove().has(item().key)} />
+                                                <Row item={item()} projectMetadataIcon worktreeLabel numbered={!listedAbove().has(item().key)} />
                                               )}
                                             </Key>
                                           </div>
