@@ -878,7 +878,7 @@ export function SessionSidebar(props: {
                                 <div class="group/project flex h-7 items-center gap-1 rounded-[6px] hover:bg-v2-background-bg-layer-02">
                                   <button
                                     ref={handle}
-                                    class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[13px] leading-4 text-v2-text-text-base"
+                                    class="flex h-7 min-w-0 flex-1 touch-none items-center gap-1.5 px-1.5 text-start text-[15px] leading-5 text-v2-text-text-base"
                                     classList={{
                                       "cursor-grab": state.drag !== key,
                                       "cursor-grabbing": state.drag === key,
@@ -920,7 +920,7 @@ export function SessionSidebar(props: {
                                     <PreparingStrip tabs={preparingGroups().get(key)?.root ?? []} />
                                   </Show>
                                   <Key each={visible()} by="key">
-                                    {(item) => <Row item={item()} compact numbered={!listedAbove().has(item().key)} />}
+                                    {(item) => <Row item={item()} projectMetadataIcon numbered={!listedAbove().has(item().key)} />}
                                   </Key>
                                 </div>
                                 <Show when={!collapsed() && tree().root.length > visible().length}>
@@ -1010,7 +1010,7 @@ export function SessionSidebar(props: {
                                             </Show>
                                             <Key each={visible()} by="key">
                                               {(item) => (
-                                                <Row item={item()} compact numbered={!listedAbove().has(item().key)} />
+                                                <Row item={item()} projectMetadataIcon numbered={!listedAbove().has(item().key)} />
                                               )}
                                             </Key>
                                           </div>
