@@ -331,14 +331,14 @@ export function PromptProjectSelector(props: {
           data-mobile-menu="session-location"
           ref={contentRef}
           id="prompt-project-menu"
-          class="w-[288px] max-w-[calc(100vw-32px)] overflow-hidden !rounded-lg border-0 !p-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none [&[data-closed]]:!animate-none"
+          class="w-[288px] max-w-[calc(100vw-32px)] max-h-[calc(var(--kb-popper-content-available-height)-max(env(safe-area-inset-top),env(safe-area-inset-bottom)))] overflow-hidden !rounded-lg border-0 !p-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none [&[data-closed]]:!animate-none"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onPointerDownOutside={dismiss.preventTriggerRestore}
           onFocusOutside={dismiss.preventTriggerRestore}
           onCloseAutoFocus={dismiss.onCloseAutoFocus}
         >
-          <div class="flex flex-col">
-            <div class="flex h-9 items-center gap-2 border-b border-v2-border-border-muted pl-3 pr-2.5 text-v2-icon-icon-muted">
+          <div class="flex min-h-0 flex-1 flex-col">
+            <div class="flex h-9 shrink-0 items-center gap-2 border-b border-v2-border-border-muted pl-3 pr-2.5 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" class="shrink-0" />
               <input
                 ref={(el) => props.controller.setSearchRef(el)}
@@ -395,7 +395,7 @@ export function PromptProjectSelector(props: {
                 </button>
               </Show>
             </div>
-            <div class="max-h-[min(420px,60dvh)] overflow-y-auto p-1">
+            <div class="max-h-[min(420px,60dvh)] min-h-0 flex-1 overflow-y-auto overscroll-contain p-1">
               <Show
                 when={props.controller.servers().length > 1}
                 fallback={
@@ -443,8 +443,8 @@ export function PromptProjectSelector(props: {
               </Show>
             </div>
           </div>
-          <div class="h-px bg-v2-border-border-muted" />
-          <div class="flex flex-col p-1">
+          <div class="h-px shrink-0 bg-v2-border-border-muted" />
+          <div class="flex shrink-0 flex-col p-1">
             <Show
               when={props.controller.servers().length > 1}
               fallback={

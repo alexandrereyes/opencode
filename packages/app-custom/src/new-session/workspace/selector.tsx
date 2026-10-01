@@ -118,7 +118,7 @@ export function PromptWorkspaceSelector(props: {
             <Menu.Content
               data-mobile-menu="session-location"
               data-component="prompt-workspace-menu"
-              class="max-h-[min(480px,66.667dvh)] w-max min-w-[200px] max-w-[min(384px,calc(100vw-32px))] overflow-y-auto !rounded-lg !p-1 [&_[data-component=menu-v2-item]]:!rounded-md [&_[role=menuitem]:not([data-action=prompt-workspace-new])]:!h-8 [&_[role=menuitem]:not([data-action=prompt-workspace-new])]:!px-2.5"
+              class="max-h-[min(480px,66.667dvh,calc(var(--kb-popper-content-available-height)-max(env(safe-area-inset-top),env(safe-area-inset-bottom))))] w-max min-w-[200px] max-w-[min(384px,calc(100vw-32px))] overflow-y-auto !rounded-lg !p-1 [&_[data-component=menu-v2-item]]:!rounded-md [&_[role=menuitem]:not([data-action=prompt-workspace-new])]:!h-8 [&_[role=menuitem]:not([data-action=prompt-workspace-new])]:!px-2.5"
               onOpenAutoFocus={(event) => {
                 if (!searchable()) return
                 event.preventDefault()
