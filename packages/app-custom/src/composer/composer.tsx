@@ -43,6 +43,8 @@ export function Composer(props: { class?: string; model: ComposerModel; borderUn
           <ChatQuotes
             quotes={quotes()}
             completion={props.model.completion}
+            attachments={props.model.attachmentConfig}
+            openAttachment={props.model.openAttachment}
             onEditingChange={(editing) => setState("editingQuote", editing)}
             onDone={() => {
               if (window.matchMedia("(min-width: 768px)").matches) props.model.restoreFocus()

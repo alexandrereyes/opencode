@@ -112,6 +112,70 @@ describe("buildPromptRequest", () => {
     })
   })
 
+  test("delivers quote comment attachments after the prompt's own and attributes them to their quote", () => {
+    const own = inline({ type: "image", id: "own", filename: "own.png", mime: "image/png", dataUrl: "data:own" })
+    const picture: ImageAttachmentPart = {
+      type: "image",
+      id: "pic",
+      filename: "pic.png",
+      mime: "image/png",
+      blob: { id: "hash", url: "blob:local" },
+      mention: { text: "[pic.png]", start: 4, end: 13 },
+    }
+    const scan: ImageAttachmentPart = {
+      type: "image",
+      id: "scan",
+      filename: "scan.png",
+      mime: "image/png",
+      blob: { id: "data:image/png;base64,c2Nhbg==", url: "data:image/png;base64,c2Nhbg==" },
+    }
+    const result = buildPromptRequest({
+      prompt: [{ type: "text", content: "Question", start: 0, end: 8 }, own.attachment],
+      context: [],
+      attachments: [
+        own,
+        { type: "inline", attachment: picture, dataUrl: "data:pic", path: "/remote/tmp/pic.png" },
+        { type: "path", attachment: scan, path: "/remote/tmp/scan.png" },
+      ],
+      text: "Question",
+      sessionDirectory: "/repo",
+      quotes: [
+        {
+          id: "quote",
+          messageID: "message",
+          partID: "part",
+          text: "Quoted text",
+          comment: "see [pic.png]",
+          commentPrompt: [{ type: "text", content: "see [pic.png]", start: 0, end: 13 }, picture, scan],
+        },
+      ],
+    })
+
+    expect(result.files).toEqual([
+      { uri: "data:own", mime: "image/png", name: "own.png", mention: undefined },
+      { uri: "data:pic", mime: "image/png", name: "pic.png", mention: undefined },
+    ])
+    expect(result.fileReferences.map((file) => file.path)).toEqual(["/remote/tmp/own.png"])
+    expect(result.attachments).toEqual([])
+    expect(result.text).toBe(
+      [
+        "Question",
+        "Attached file: `/remote/tmp/own.png`",
+        "Comments on earlier assistant messages:",
+        "",
+        "1. Quoted from message message (part part):",
+        "> Quoted text",
+        "User comment: see [pic.png]",
+        "Image attached to this comment: pic.png",
+        "File attached to this comment: `/remote/tmp/scan.png`",
+      ].join("\n"),
+    )
+    expect(result.quotes[0]?.commentPrompt?.slice(1)).toEqual([
+      { ...picture, blob: { id: "hash", url: "" } },
+      { type: "path", id: "scan", filename: "scan.png", mime: "image/png", path: "/remote/tmp/scan.png" },
+    ])
+  })
+
   test("preserves and expands semantic references from quote comments", () => {
     const result = buildPromptRequest({
       prompt: [{ type: "text", content: "Question", start: 0, end: 8 }],

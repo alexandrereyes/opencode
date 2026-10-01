@@ -56,6 +56,7 @@ export function createComposerModel(
   const language = useLanguage()
   const platform = usePlatform()
   const prompt = adapter.state
+  const submittable = () => available() && !prompt.quotes.editor.uploading()
   let editor: HTMLDivElement | undefined
   const btw = createComposerBtw(adapter, () => editor)
 
@@ -532,12 +533,12 @@ export function createComposerModel(
         keybind: () => command.keybindParts("model.variant.cycle"),
       },
       submit: {
-        available,
+        available: submittable,
         stopping,
         working: adapter.working,
         queue: options?.queue,
         onSubmit: (submitOptions) => {
-          if (!available()) return
+          if (!submittable()) return
           const queue = options?.queue
           if (queue?.undoing()) return
           // Confirming an edit re-admits the queued prompt instead of sending

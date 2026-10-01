@@ -591,7 +591,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
         onDragLeave={props.controller.onDragLeave}
         onDrop={props.controller.onDrop}
       >
-        <Show when={!props.compact && state.mode === "normal"}>
+        <Show when={state.mode === "normal"}>
           <ComposerAttachments
             attachments={props.controller.attachments()}
             uploads={props.controller.uploads()}
@@ -804,9 +804,10 @@ export function ComposerAttachments(props: {
   onUploadCancel?: (id: string) => void
   comments?: ComposerComment[]
   activeCommentID?: string
-  removeLabel: string
+  removeLabel?: string
   onAttachmentClick?: (attachment: ComposerAttachment) => void
-  onAttachmentRemove: (attachment: ComposerAttachment) => void
+  // Omitted for read-only lists.
+  onAttachmentRemove?: (attachment: ComposerAttachment) => void
   onCommentClick?: (comment: ComposerComment) => void
   onCommentRemove?: (comment: ComposerComment) => void
 }) {
@@ -886,16 +887,20 @@ export function ComposerAttachments(props: {
                       }}
                     </Show>
                   </Tooltip>
-                  <button
-                    type="button"
-                    data-action="remove-attachment"
-                    data-attachment-id={attachment().id}
-                    onClick={() => props.onAttachmentRemove(attachment())}
-                    class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center hover-reveal group-hover:opacity-100"
-                    aria-label={props.removeLabel}
-                  >
-                    <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
-                  </button>
+                  <Show when={props.onAttachmentRemove}>
+                    {(remove) => (
+                      <button
+                        type="button"
+                        data-action="remove-attachment"
+                        data-attachment-id={attachment().id}
+                        onClick={() => remove()(attachment())}
+                        class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center hover-reveal group-hover:opacity-100"
+                        aria-label={props.removeLabel}
+                      >
+                        <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
+                      </button>
+                    )}
+                  </Show>
                 </div>
               )
             }}

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { extractPromptComments, extractPromptFromMessage } from "./prompt"
+import { restoreChatQuotes } from "./chat-quote"
 
 describe("extractPromptFromMessage", () => {
   test("restores multiple uploaded attachments", () => {
@@ -31,6 +32,39 @@ describe("extractPromptFromMessage", () => {
         filename: "b.pdf",
         mime: "application/pdf",
         blob: expect.objectContaining({ id: expect.any(String) }),
+      },
+    ])
+  })
+
+  test("leaves trailing quote comment images to their quotes", () => {
+    const quote = {
+      id: "q1",
+      messageID: "msg_a",
+      partID: "prt_a",
+      text: "earlier",
+      comment: "",
+      commentPrompt: [{ type: "image", id: "pic", filename: "pic.png", mime: "image/png", blob: { id: "hash" } }],
+    }
+    const message = {
+      id: "msg_1",
+      type: "user",
+      text: "check these",
+      metadata: { displayText: "check these", comments: [], quotes: [quote] },
+      files: [
+        { data: "AAA", mime: "image/png", source: { type: "inline" }, name: "a.png" },
+        { data: "cGlj", mime: "image/png", source: { type: "inline" }, name: "pic.png" },
+      ],
+      time: { created: 1 },
+    } satisfies SessionMessageUser
+
+    expect(extractPromptFromMessage(message).slice(1)).toMatchObject([{ type: "image", filename: "a.png" }])
+    expect(restoreChatQuotes(message.metadata.quotes, message.files).quotes[0]?.commentPrompt).toEqual([
+      {
+        type: "image",
+        id: "pic",
+        filename: "pic.png",
+        mime: "image/png",
+        blob: { id: "data:image/png;base64,cGlj", url: "data:image/png;base64,cGlj" },
       },
     ])
   })

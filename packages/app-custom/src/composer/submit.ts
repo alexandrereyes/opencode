@@ -14,7 +14,7 @@ import { setCursorPosition } from "./editor/dom"
 import { deliverAttachments, type AttachmentDestination } from "./attachments/deliver"
 import type { ModelSelection } from "@/providers/models/selection"
 import type { ChatQuote } from "./schema"
-import { formatChatQuotes } from "./chat-quote"
+import { chatQuoteAttachments, formatChatQuotes } from "./chat-quote"
 import { formatSessionContexts } from "./session-reference"
 import { formatAttachmentReference } from "./comment-note"
 
@@ -289,9 +289,12 @@ function readSubmission(
     .join("")
   const mode = input.mode()
   if (mode === "shell" && !text.trim()) return
-  const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
   const comments = context.filter((item) => !!item.comment?.trim()).length
   const quotes = mode === "normal" ? input.adapter.state.quotes.all().map((quote) => ({ ...quote })) : []
+  // Quote images follow the prompt's own, matching their delivery order.
+  const images = [...prompt, ...chatQuoteAttachments(quotes)].filter(
+    (part): part is ImageAttachmentPart => part.type === "image",
+  )
   if (!text.trim() && !prompt.some(isAttachment) && comments === 0 && quotes.length === 0) return
 
   const controls = input.adapter.controls()
@@ -444,7 +447,7 @@ async function sendCommand(
       ...request.resources,
       ...request.apps.map(formatAppContext),
       ...formatSessionContexts(request.sessions),
-      formatChatQuotes(value.quotes),
+      formatChatQuotes(request.quotes),
     ]
       .filter(Boolean)
       .join("\n"),
@@ -529,7 +532,10 @@ async function buildSubmissionRequest(
   const request = buildPromptRequest({
     prompt: value.prompt,
     context: value.context,
-    attachments: await deliverAttachments(value.prompt.filter(isAttachment), destination),
+    attachments: await deliverAttachments(
+      [...value.prompt.filter(isAttachment), ...chatQuoteAttachments(value.quotes)],
+      destination,
+    ),
     text: value.text,
     sessionDirectory: session.directory,
     quotes: value.quotes,

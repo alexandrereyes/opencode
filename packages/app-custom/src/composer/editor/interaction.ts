@@ -398,6 +398,7 @@ export function createComposerEditor(input: {
       searchContextFiles: input.searchContextFiles,
       onContextQuery: input.onContextQuery,
     },
+    attachmentConfig: input.attachments,
     suggestions,
     dispatch,
     onKeyDown,

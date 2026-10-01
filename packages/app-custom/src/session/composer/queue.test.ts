@@ -9,6 +9,8 @@ import type { AttachmentDestination, DeliveredAttachment } from "@/composer/atta
 import type { ChatQuote } from "@/composer/schema"
 import { buildPromptRequest } from "@/composer/request"
 import { isAttachment } from "@/composer/prompt-parts"
+import { chatQuoteAttachments } from "@/composer/chat-quote"
+import type { ComposerAttachment } from "@/composer/types"
 import { readPromptPresentation } from "@/composer/comment-note"
 import { formatSessionContext } from "@/composer/session-reference"
 import {
@@ -611,6 +613,73 @@ describe("queuedPromptUndo", () => {
       restored!.quotes,
     )
     expect(again.payload).toEqual(item.payload)
+  })
+
+  test("restores quote comment attachments from the trailing files and resends the same request", () => {
+    const picture: ImageAttachmentPart = {
+      type: "image",
+      id: "pic",
+      filename: "pic.png",
+      mime: "image/png",
+      blob: { id: "hash-pic", url: "blob:local" },
+      mention: { text: "[pic.png]", start: 4, end: 13 },
+    }
+    const doc = {
+      type: "path" as const,
+      id: "doc",
+      filename: "doc.pdf",
+      mime: "application/pdf",
+      path: "/remote/doc.pdf",
+    }
+    const commented: ChatQuote = {
+      ...quote,
+      comment: "see [pic.png]",
+      commentPrompt: [{ type: "text", content: "see [pic.png]", start: 0, end: 13 }, picture, doc],
+    }
+    const deliveries = (main: ComposerAttachment[], quoted: ComposerAttachment[]): DeliveredAttachment[] => [
+      {
+        type: "inline",
+        attachment: main[0] as ImageAttachmentPart,
+        dataUrl: "data:image/png;base64,aGk=",
+        path: "/remote/shot.png",
+      },
+      { type: "path", attachment: main[1]!, path: path.path },
+      {
+        type: "inline",
+        attachment: quoted[0] as ImageAttachmentPart,
+        dataUrl: "data:image/png;base64,cGlj",
+        path: "/remote/pic.png",
+      },
+      { type: "path", attachment: quoted[1]!, path: doc.path },
+    ]
+    const item = admit(prompt, deliveries([image, path], [picture, doc]), [commented])
+    expect(item.payload.text).toContain(
+      "Image attached to this comment: pic.png\nFile attached to this comment: `/remote/doc.pdf`",
+    )
+    expect(item.payload.files.at(-1)).toMatchObject({ data: "cGlj", source: { type: "inline" }, mention: undefined })
+    expect(item.payload.metadata.quotes[0]?.commentPrompt?.[1]).toEqual({
+      ...picture,
+      blob: { id: "hash-pic", url: "" },
+    })
+
+    expect(
+      queuedPrompt(item)
+        .filter(isAttachment)
+        .map((part) => part.id),
+    ).toEqual([queuedPrompt(item).find((part) => part.type === "image")!.id, `${item.id}:path:0`])
+    const restored = queuedPromptUndo(item, "/repo")
+    expect(restored?.prompt.map((part) => part.type)).toEqual(prompt.map((part) => part.type))
+    expect(restored?.quotes[0]?.commentPrompt?.slice(1)).toEqual([
+      { ...picture, blob: { id: "data:image/png;base64,cGlj", url: "data:image/png;base64,cGlj" } },
+      doc,
+    ])
+    const again = admit(
+      restored!.prompt,
+      deliveries(restored!.prompt.filter(isAttachment), chatQuoteAttachments(restored!.quotes)),
+      restored!.quotes,
+    )
+    expect(again.payload.text).toBe(item.payload.text)
+    expect(again.payload.files).toEqual(item.payload.files)
   })
 
   test("keeps MCP resource references as text", () => {

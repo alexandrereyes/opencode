@@ -36,6 +36,8 @@ export type ComposerAttachmentConfig = {
   getPathForFile?: (file: File) => string
   onDragCancel?: (callback: () => void) => () => void
   store?: (file: File) => Promise<{ id: string; url: string }>
+  // Only one editor may claim drops outside every composer form.
+  documentDrop?: boolean
 }
 
 export function createComposerAttachments(
@@ -280,6 +282,7 @@ export function createComposerAttachments(
   onMount(() => {
     const cancel = input.onDragCancel?.(clearDrag)
     if (cancel) onCleanup(cancel)
+    if (input.documentDrop === false) return
     makeEventListener(document, "dragover", (event) => {
       if (input.isDialogActive()) return
       event.preventDefault()
@@ -293,6 +296,8 @@ export function createComposerAttachments(
       if (event.key === "Escape") clearDrag()
     })
     makeEventListener(document, "drop", handleDrop)
+    // Another editor (a quote comment) may consume the drop before it bubbles here.
+    makeEventListener(document, "drop", clearDrag, { capture: true })
   })
 
   return {

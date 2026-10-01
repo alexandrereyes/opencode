@@ -10,7 +10,7 @@ import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ImageAttachmentPart, Prompt } from "@/composer/state"
 import type { ComposerAttachment } from "@/composer/types"
 import { appendPrompt, clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
-import { buildPromptRequest } from "@/composer/request"
+import { buildPromptRequest, deliveredChatQuotes } from "@/composer/request"
 import { deliverAttachments, type AttachmentDestination } from "@/composer/attachments/deliver"
 import { readPromptPresentation, stripAttachmentReferences } from "@/composer/comment-note"
 import {
@@ -21,7 +21,7 @@ import {
   type PromptInline,
 } from "@/composer/prompt"
 import { formatSessionContext } from "@/composer/session-reference"
-import { formatChatQuotes, readChatQuotes } from "@/composer/chat-quote"
+import { chatQuoteAttachments, formatChatQuotes, readChatQuotes, restoreChatQuotes } from "@/composer/chat-quote"
 import { AppPart, type ChatQuote } from "@/composer/schema"
 import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import { useData } from "@/runtime/server/current"
@@ -216,7 +216,7 @@ export function createSessionQueue(input: {
     })
     const prompt = queuedPrompt(item)
     input.draft.mode.set("normal")
-    input.draft.quotes.replace(readChatQuotes(item.payload.metadata?.quotes))
+    input.draft.quotes.replace(queuedQuotes(item).quotes)
     input.draft.set(prompt, promptLength(prompt))
     input.restoreFocus(promptLength(prompt))
     return true
@@ -248,7 +248,7 @@ export function createSessionQueue(input: {
       text.trim() === queuedPromptText(item) &&
       images.length === original.length &&
       images.every((image, index) => image.id === original[index]?.id) &&
-      JSON.stringify(quotes) === JSON.stringify(readChatQuotes(item.payload.metadata?.quotes))
+      JSON.stringify(quotes) === JSON.stringify(queuedQuotes(item).quotes)
     if (pristine && delivery === "queue") return cancelEdit()
     mutation.mutate({
       type: "edit",
@@ -318,11 +318,16 @@ export function queuedPromptText(item: QueuedPrompt) {
   return typeof display === "string" ? display : item.payload.text
 }
 
+// The prompt's own files, and its quotes with their images restored from the trailing files.
+function queuedQuotes(item: QueuedPrompt) {
+  return restoreChatQuotes(item.payload.metadata?.quotes, item.payload.files)
+}
+
 export function queuedPrompt(item: QueuedPrompt): Prompt {
   const text = queuedPromptText(item)
   return [
     ...extractSessionPrompt(text, item.payload.metadata),
-    ...(item.payload.files?.flatMap((file, index) => {
+    ...queuedQuotes(item).files.flatMap((file, index) => {
       const mention = queuedImageMention(file, text)
       if (!mention) return []
       const filename = mention.text.slice(1, -1)
@@ -337,14 +342,14 @@ export function queuedPrompt(item: QueuedPrompt): Prompt {
           mention,
         },
       ]
-    }) ?? []),
+    }),
     ...queuedPromptAttachments(item),
   ]
 }
 
 export function queuedPromptAttachments(item: QueuedPrompt): ComposerAttachment[] {
   return [
-    ...(item.payload.files ?? []).flatMap((file, index): ImageAttachmentPart[] => {
+    ...queuedQuotes(item).files.flatMap((file, index): ImageAttachmentPart[] => {
       if (!isComposerAttachment(file)) return []
       return [
         {
@@ -387,7 +392,8 @@ export function queuedPromptUndo(item: QueuedPrompt, directory: string) {
   const display = presentation?.displayText ?? payload.text
   const prefix = display.trim() ? display : ""
   if (!payload.text.startsWith(prefix)) return
-  const quotes = readChatQuotes(payload.metadata?.quotes)
+  const restored = queuedQuotes(item)
+  const quotes = restored.quotes
   const quoted = quotes.flatMap((quote) => quote.commentPrompt ?? [])
   const apps = Schema.decodeUnknownOption(Schema.Struct({ apps: Schema.Array(AppPart) }))(payload.metadata)
   const allApps = apps._tag === "Some" ? apps.value.apps : []
@@ -445,7 +451,7 @@ export function queuedPromptUndo(item: QueuedPrompt, directory: string) {
   ]
   const text = buildPrompt(display, inline, [])
   const attachments = queuedPrompt(item).filter(isAttachment)
-  const delivered = files.filter((file) => file.source.type === "inline").length
+  const delivered = restored.files.filter((file) => file.source.type === "inline").length
   if (attachments.filter((part) => part.type === "image").length !== delivered) return
 
   const tail = payload.text.slice(prefix.length)
@@ -540,7 +546,9 @@ export async function editedPromptInput(
   quotes: ChatQuote[],
 ) {
   const attachments = await deliverAttachments(prompt.filter(isAttachment), destination)
+  const quoted = await deliverAttachments(chatQuoteAttachments(quotes), destination)
   const request = buildPromptRequest({ prompt, context: [], attachments, text, sessionDirectory: directory })
+  const sent = deliveredChatQuotes(quotes, quoted)
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
   const previousPresentation = readPromptPresentation(payload?.metadata)
@@ -583,7 +591,7 @@ export async function editedPromptInput(
   ]
   return {
     sessionID,
-    text: [request.text, retainedNotes.trim(), formatChatQuotes(quotes)].filter(Boolean).join("\n"),
+    text: [request.text, retainedNotes.trim(), formatChatQuotes(sent)].filter(Boolean).join("\n"),
     files: [
       ...(payload?.files?.flatMap((file) => {
         if (queuedImageMention(file, display) || isComposerAttachment(file)) return []
@@ -597,6 +605,12 @@ export async function editedPromptInput(
         ]
       }) ?? []),
       ...request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
+      // Quote images stay last so a later restore can find them.
+      ...quoted.flatMap((item) =>
+        item.type === "inline"
+          ? [{ uri: item.dataUrl, name: item.attachment.sourcePath ?? item.attachment.filename, mention: undefined }]
+          : [],
+      ),
     ],
     agents: agents.map((agent) => ({ name: agent.name, mention: mention(agent.mention) })),
     skills: skills.map((skill) => ({ id: skill.id, mention: mention(skill.mention) })),
@@ -604,7 +618,7 @@ export async function editedPromptInput(
       ...payload?.metadata,
       displayText: request.displayText,
       sessions: request.sessions,
-      quotes,
+      quotes: sent,
       comments: previousPresentation?.comments ?? request.comments,
       attachments: request.attachments,
     },

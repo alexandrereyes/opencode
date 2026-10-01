@@ -9,13 +9,18 @@ import type { ComposerState, Prompt } from "./state"
 import { createMemoryComposerState } from "./state"
 import { flushPersisted } from "@/runtime/persistence/persist"
 import type { ChatQuote } from "./schema"
-import { ComposerEditor } from "./editor/editor"
+import type { ComposerAttachment } from "./types"
+import type { ComposerAttachmentConfig } from "./attachments/attachments"
+import { chatQuoteAttachments } from "./chat-quote"
+import { ComposerAttachments, ComposerEditor } from "./editor/editor"
 import { createComposerEditor, type ComposerEditorModel } from "./editor/interaction"
 import "./chat-quotes.css"
 
 export function ChatQuotes(props: {
   quotes: ComposerState["quotes"]
   completion: ComposerEditorModel["completion"]
+  attachments?: ComposerAttachmentConfig
+  openAttachment?: (attachment: ComposerAttachment) => void
   onEditingChange: (editing: boolean) => void
   onDone: () => void
 }) {
@@ -58,8 +63,9 @@ export function ChatQuotes(props: {
   })
   onCleanup(() => props.onEditingChange(false))
   const done = () => {
+    if (props.quotes.editor.uploading()) return
     const quote = editing()
-    if (quote && !quote.comment.trim()) props.quotes.remove(quote.id)
+    if (quote && !quote.comment.trim() && chatQuoteAttachments([quote]).length === 0) props.quotes.remove(quote.id)
     flushPersisted()
     props.quotes.editor.close()
     setState("open", false)
@@ -138,7 +144,10 @@ export function ChatQuotes(props: {
                   label={language.t("chatQuotes.userComment")}
                   placeholder={language.t("chatQuotes.placeholder")}
                   completion={props.completion}
+                  attachments={props.attachments}
+                  openAttachment={props.openAttachment}
                   onInput={(value, prompt) => props.quotes.update(quote.id, value, prompt)}
+                  onUploadingChange={props.quotes.editor.setUploading}
                   onDone={done}
                 />
               </article>
@@ -173,6 +182,10 @@ export function ChatQuotes(props: {
                   <Show when={quote.comment}>
                     <p dir="auto">{quote.comment}</p>
                   </Show>
+                  <ComposerAttachments
+                    attachments={chatQuoteAttachments([quote])}
+                    onAttachmentClick={props.openAttachment}
+                  />
                 </article>
               )}
             </For>
@@ -201,7 +214,10 @@ function QuoteCommentEditor(props: {
   label: string
   placeholder: string
   completion: ComposerEditorModel["completion"]
+  attachments?: ComposerAttachmentConfig
+  openAttachment?: (attachment: ComposerAttachment) => void
   onInput: (value: string, prompt: Prompt) => void
+  onUploadingChange: (uploading: boolean) => void
   onDone: () => void
 }) {
   const state = createMemoryComposerState()
@@ -218,6 +234,9 @@ function QuoteCommentEditor(props: {
     snippets: props.completion.snippets,
     searchContextFiles: props.completion.searchContextFiles,
     onContextQuery: props.completion.onContextQuery,
+    openAttachment: props.openAttachment,
+    // The main composer keeps the file picker shortcut and drops outside any composer.
+    attachments: props.attachments && { ...props.attachments, picker: undefined, documentDrop: false },
     view: {
       allowShell: false,
       placeholder: () => props.placeholder,
@@ -225,6 +244,8 @@ function QuoteCommentEditor(props: {
     },
   })
   createEffect(on(editor.parts, (prompt) => props.onInput(editor.value(), prompt), { defer: true }))
+  createEffect(() => props.onUploadingChange(editor.uploads().length > 0))
+  onCleanup(() => props.onUploadingChange(false))
   return (
     <>
       <label

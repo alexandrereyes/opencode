@@ -12,7 +12,7 @@ import {
 import type { DeliveredAttachment } from "@/composer/attachments/deliver"
 import { expandSnippets, isAttachment } from "./prompt-parts"
 import type { ChatQuote } from "./schema"
-import { formatChatQuotes } from "./chat-quote"
+import { chatQuoteAttachments, formatChatQuotes } from "./chat-quote"
 import { formatSessionContexts } from "./session-reference"
 
 // Network fields feed both boundaries; display fields keep desktop-only rendering details in the local echo.
@@ -154,6 +154,8 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     return [file, ...mentions]
   })
 
+  const quoted = new Set(chatQuoteAttachments(input.quotes ?? []).map((part) => part.id))
+  const quotes = deliveredChatQuotes(input.quotes ?? [], input.attachments)
   const imageMentions = new Map(
     prompt.flatMap((part) => (isAttachment(part) ? [[part.id, part.mention] as const] : [])),
   )
@@ -170,7 +172,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       : [],
   )
   const attachments = input.attachments.flatMap((item) =>
-    item.type === "path"
+    item.type === "path" && !quoted.has(item.attachment.id)
       ? [
           {
             name: item.attachment.filename,
@@ -181,11 +183,12 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
         ]
       : [],
   )
-  const fileReferences = input.attachments.map((item) => ({
-    name: item.attachment.filename,
-    mime: item.attachment.mime,
-    path: item.path,
-  }))
+  // Quote attachments are referenced inside their quote instead.
+  const fileReferences = input.attachments.flatMap((item) =>
+    quoted.has(item.attachment.id)
+      ? []
+      : [{ name: item.attachment.filename, mime: item.attachment.mime, path: item.path }],
+  )
 
   return {
     text: [
@@ -195,7 +198,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
       ...comments.map(formatCommentNote),
       ...apps.map(formatAppContext),
       ...formatSessionContexts(sessions),
-      ...(input.quotes?.length ? [formatChatQuotes(input.quotes)] : []),
+      ...(quotes.length ? [formatChatQuotes(quotes)] : []),
     ].join("\n"),
     displayText: text,
     files: [...files, ...quoteFiles, ...context, ...inline],
@@ -204,11 +207,42 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     comments,
     apps,
     sessions,
-    quotes: input.quotes ?? [],
+    quotes,
     attachments,
     fileReferences,
     resources,
   }
+}
+
+// Sent quotes record how each attachment was delivered: inline images travel as message files after
+// the prompt's own, and everything else is referenced by its server path.
+export function deliveredChatQuotes(quotes: ChatQuote[], attachments: DeliveredAttachment[]): ChatQuote[] {
+  const delivered = new Map(attachments.map((item) => [item.attachment.id, item]))
+  return quotes.map((quote) => {
+    if (!quote.commentPrompt?.some(isAttachment)) return quote
+    return {
+      ...quote,
+      commentPrompt: quote.commentPrompt.map((part) => {
+        if (part.type !== "image" && part.type !== "path") return part
+        const item = delivered.get(part.id)
+        if (item?.type === "path")
+          return {
+            type: "path" as const,
+            id: part.id,
+            filename: part.filename,
+            mime: part.mime,
+            path: item.path,
+            ...(part.mention ? { mention: part.mention } : {}),
+          }
+        if (part.type === "path") return part
+        // The bytes travel in the message files; keep only a draft-local id, never a data URL.
+        return {
+          ...part,
+          blob: { id: part.blob.id && !part.blob.id.startsWith("data:") ? part.blob.id : part.id, url: "" },
+        }
+      }),
+    }
+  })
 }
 
 export function formatAppContext(part: Extract<Prompt[number], { type: "app" }>) {

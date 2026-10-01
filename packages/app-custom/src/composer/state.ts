@@ -96,7 +96,8 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
   const [quoteEditor, setQuoteEditor] = createStore<{
     id: string
     position?: { left: number; top: number; bottom: number }
-  }>({ id: "" })
+    uploading: boolean
+  }>({ id: "", uploading: false })
   const actions = createComposerActions(setStore)
   const settled = Promise.resolve(true)
   let pendingRevert: Promise<boolean> | undefined
@@ -197,6 +198,9 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
         open: (id: string) => setQuoteEditor({ id, position: undefined }),
         close: () => setQuoteEditor({ id: "", position: undefined }),
         place: (position: typeof quoteEditor.position) => setQuoteEditor("position", position),
+        // An attachment still uploading in the open quote editor would be lost if it closed or the draft were sent.
+        uploading: () => quoteEditor.uploading,
+        setUploading: (uploading: boolean) => setQuoteEditor("uploading", uploading),
       },
       add(input: Omit<ChatQuote, "id" | "comment">) {
         const quote = { ...input, id: uuid(), comment: "" }

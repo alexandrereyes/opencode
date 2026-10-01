@@ -2,6 +2,7 @@ import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillP
 import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { readPromptPresentation } from "./comment-note"
+import { restoreChatQuotes } from "./chat-quote"
 import { Skill } from "@opencode/schema/skill"
 import { Schema } from "effect"
 import { AppPart, SessionPart } from "./schema"
@@ -73,7 +74,8 @@ export function extractPromptFromMessage(
   if (apps._tag === "Some") inline.push(...apps.value.apps.map((part) => ({ ...part, value: part.content })))
   inline.push(...sessionInline(message.metadata))
   const images: ImageAttachmentPart[] = []
-  for (const file of message.files ?? []) {
+  // Quote images are restored with their quotes, not as attachments of the prompt.
+  for (const file of restoreChatQuotes(message.metadata?.quotes, message.files).files) {
     const mention = file.mention
     const uri = file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`
     if (mention) {

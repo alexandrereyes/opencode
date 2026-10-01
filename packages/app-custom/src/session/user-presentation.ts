@@ -2,6 +2,7 @@ import type { SessionMessageUser } from "@opencode/client/promise"
 import type { SessionUserPresentation } from "@opencode/session-ui-custom/timeline/row"
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
 import { extractPromptSessions } from "@/composer/prompt"
+import { chatQuoteAttachments } from "@/composer/chat-quote"
 import { formatSessionReferences } from "@/composer/session-reference"
 
 export function userPresentation(message: SessionMessageUser): SessionUserPresentation {
@@ -14,7 +15,13 @@ export function userPresentation(message: SessionMessageUser): SessionUserPresen
     displayText: value?.displayText,
     copyText: copyText ? formatSessionReferences(copyText, sessions) : undefined,
     comments: value?.comments ?? (parsed ? [parsed] : []),
-    references: value?.attachments,
+    // Quote images delivered inline already render as message files; only path references need listing.
+    references: value && [
+      ...value.attachments,
+      ...chatQuoteAttachments(value.quotes).flatMap((part) =>
+        part.type === "path" ? [{ name: part.filename, mime: part.mime, path: part.path }] : [],
+      ),
+    ],
     quotes: value?.quotes,
     sessions: sessions.map((session) => ({ start: session.start, end: session.end })),
   }

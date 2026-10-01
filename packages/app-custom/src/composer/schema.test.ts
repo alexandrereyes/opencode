@@ -140,6 +140,37 @@ describe("composer persistence schemas", () => {
     ])
   })
 
+  test("round-trips quote comment attachments with lazy image references", () => {
+    const decode = Schema.decodeUnknownSync(
+      Persistence.withInitial(ComposerStore, { prompt: DEFAULT_PROMPT, context: { items: [] } }),
+    )
+    const quote = { id: "quote", messageID: "message", partID: "part", text: "Quoted", comment: "see [image.png]" }
+    const path = {
+      type: "path" as const,
+      id: "doc",
+      filename: "doc.pdf",
+      mime: "application/pdf",
+      path: "/remote/doc.pdf",
+    }
+    const value = decode({
+      quotes: [
+        {
+          ...quote,
+          commentPrompt: [
+            { type: "text", content: "see [image.png]", start: 0, end: 15 },
+            { ...image, blob: { id: "hash" }, mention: { text: "[image.png]", start: 4, end: 15 } },
+            path,
+          ],
+        },
+      ],
+    })
+    expect(value.quotes?.[0]?.commentPrompt?.slice(1)).toEqual([
+      { ...image, blob: { id: "hash", url: "" }, mention: { text: "[image.png]", start: 4, end: 15 } },
+      path,
+    ])
+    expect(decode(Schema.encodeSync(ComposerStore)(value))).toEqual(value)
+  })
+
   test("preserves file source variants through canonical round trips", () => {
     const sourceText = { value: "@source", start: 0, end: 7 }
     const sources: NonNullable<FileAttachmentPart["source"]>[] = [

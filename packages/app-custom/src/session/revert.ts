@@ -7,7 +7,7 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useLanguage } from "@/runtime/i18n/language"
 import { extractPromptComments, extractPromptFromMessage } from "@/composer/prompt"
-import { readChatQuotes } from "@/composer/chat-quote"
+import { restoreChatQuotes } from "@/composer/chat-quote"
 import { showToast } from "@/shell/notifications/toast"
 
 type SessionApi = ReturnType<typeof useServerSDK>["api"]["session"]
@@ -82,7 +82,7 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
         return false
       })
   const restore = (target: ReturnType<typeof prompt.capture>, message: SessionMessageUser) => {
-    target.quotes.replace(readChatQuotes(message.metadata?.quotes))
+    target.quotes.replace(restoreChatQuotes(message.metadata?.quotes, message.files).quotes)
     target.set(
       extractPromptFromMessage(message, {
         directory: environment.directory(),
