@@ -53,6 +53,20 @@ test("keeps exhausted accounts in the combined quota denominator", () => {
   })
 })
 
+test("counts each Pro Max account as one Pro 20x quota in the Pro balance", () => {
+  const promax = { ...account, id: "promax", plan: "promax", remaining: 80, observedAt: "2026-09-10T07:00:00Z" }
+  expect(subscriptionPool([{ ...account, remaining: 40 }, promax])).toMatchObject({
+    total: 2,
+    ready: 2,
+    equivalents: 1.2,
+    availableRemaining: 60,
+    observedAt: Date.parse("2026-09-10T07:00:00Z"),
+  })
+  expect(subscriptionPool([promax, { ...promax, remaining: null }]).equivalents).toBeNull()
+  expect(subscriptionPool([promax], Date.now(), "promax")).toMatchObject({ total: 1, equivalents: 0.8 })
+  expect(subscriptionPool([promax], Date.now(), "prolite").total).toBe(0)
+})
+
 test("weekly equivalents keep a fixed scale as accounts exhaust and can exceed one full quota", () => {
   const exhausted = { ...account, id: "b", remaining: 0, hasCapacity: false }
   const available = { ...account, remaining: 36 }

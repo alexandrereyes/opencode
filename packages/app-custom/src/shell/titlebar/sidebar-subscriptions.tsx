@@ -25,6 +25,7 @@ import {
   subscriptionCapacity,
   subscriptionPace,
   subscriptionPool,
+  subscriptionPoolIncludes,
 } from "@/session/files/subscription-pool"
 import {
   formatSubscriptionCountdown,
@@ -112,7 +113,7 @@ export function SidebarSubscriptions(props: {
     })
     const renewals = createMemo(() => {
       const resets = accounts().flatMap((account) =>
-        account.plan === unit && account.enabled && account.authenticated && account.resetAt
+        subscriptionPoolIncludes(unit, account.plan) && account.enabled && account.authenticated && account.resetAt
           ? [Date.parse(account.resetAt)]
           : [],
       )

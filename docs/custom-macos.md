@@ -535,8 +535,8 @@ The same `custom.subscriptions` RPC also reads the separate Anthropic pool from
 counting banked resets from unpaused Anthropic grants. A 404 or 503 means the proxy has no
 enabled Anthropic pool, so the pool is hidden instead of reported as a failure. The sidebar
 footer, under an "LLM proxy" heading, shows one row per pool (Codex and Claude) with its
-combined weekly meter, balance in Pro 20x or Max 20x equivalents, days to the next renewal, and
-banked resets; Claude also shows a chip with the average five-hour quota, tinted when it runs
+combined weekly meter, balance in Pro 20x or Max 20x equivalents (each Pro Max account counts as
+one Pro 20x quota), days to the next renewal, and banked resets; Claude also shows a chip with the average five-hour quota, tinted when it runs
 low. Selecting a row opens the details popover (desktop) or panel (mobile) on that pool's tab
 and highlights the row. Each tab is one card: plans and account count, balance with the
 combined meter and pace marker, accounts grouped by plan with availability, each account's weekly

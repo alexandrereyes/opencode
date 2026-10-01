@@ -44,8 +44,15 @@ export function subscriptionAccounts(accounts: readonly Subscriptions.Account[],
   return accounts.toSorted((a, b) => planRank(a) - planRank(b) || rank(a) - rank(b))
 }
 
+// The Pro 20x balance also counts each Pro Max account as one Pro 20x quota.
+export function subscriptionPoolIncludes(pool: string, plan: string | null) {
+  return plan === pool || (pool === "pro" && plan === "promax")
+}
+
 export function subscriptionPool(accounts: readonly Subscriptions.Account[], now = Date.now(), plan = "pro") {
-  const members = accounts.filter((account) => account.plan === plan && account.enabled && account.authenticated)
+  const members = accounts.filter(
+    (account) => subscriptionPoolIncludes(plan, account.plan) && account.enabled && account.authenticated,
+  )
   const measured = members.filter(
     (account) => !account.stale && account.remaining !== null && !renewalPassed(account, now),
   )
