@@ -92,7 +92,7 @@ test("launchd waits for both removal and process exit even with a free port", as
       server.value = Bun.serve({
         hostname: "127.0.0.1",
         port,
-        fetch: () => Response.json({ version: `0.0.0-custom.${second}` }),
+        fetch: () => Response.json({ version: `0.0.0-custom.${second}`, pid: 12345 }),
       })
     }
     return run(args)
@@ -114,6 +114,7 @@ test("launchd retries explicit in-progress responses but reconciles a registered
   expect(fixtureHost.state.bootstraps).toBe(2)
   await service.start()
   expect(fixtureHost.state.bootstraps).toBe(2)
+  expect(await service.pid()).toBe(12345)
 })
 
 test.each(["permanent", "transient"])("launchd bounds %s bootstrap failure", async (kind) => {
@@ -410,6 +411,9 @@ test("SQLite backup includes committed WAL content and leaves source intact", as
 test("activation dry-run and rollback refusal never invoke lifecycle or change current", async () => {
   const home = await fixture()
   const service = {
+    async pid() {
+      throw new Error("must not query PID")
+    },
     async start() {
       throw new Error("must not start")
     },
@@ -438,13 +442,16 @@ test.each([false, true])(
             return new Response(null, { status: 401 })
           const endpoint = state.version === `0.0.0-custom.${first}` ? "/api/health" : "/api/info"
           if (new URL(request.url).pathname !== endpoint) return new Response(null, { status: 404 })
-          return Response.json({ healthy: true, version: state.version })
+          return Response.json({ healthy: true, version: state.version, pid: process.pid })
         },
       })
     const stateServer = { value: serve(0) }
     const port = stateServer.value.port!
     await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
     const service = {
+      async pid() {
+        return process.pid
+      },
       async stop() {
         state.stops++
         await stateServer.value.stop(true)
@@ -490,6 +497,9 @@ test.each([false, true])(
         second,
         { skipBackup },
         {
+          async pid() {
+            throw new Error("must not query PID before a failed startup")
+          },
           async stop() {
             calls.push("stop")
           },
@@ -535,6 +545,9 @@ test.each(["waiting-port", "healthcheck"])("reporter failure at %s does not inte
         },
       },
       {
+        async pid() {
+          return process.pid
+        },
         async stop() {
           state.stops++
         },
@@ -549,7 +562,7 @@ test.each(["waiting-port", "healthcheck"])("reporter failure at %s does not inte
                 `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`
               )
                 return new Response(null, { status: 401 })
-              return Response.json({ version: `0.0.0-custom.${second}` })
+              return Response.json({ version: `0.0.0-custom.${second}`, pid: process.pid })
             },
           })
         },
@@ -577,6 +590,9 @@ test("cleanup failure retains the original startup cause", async () => {
     second,
     { skipBackup: true },
     {
+      async pid() {
+        throw new Error("must not query PID before a failed startup")
+      },
       async stop() {
         state.stops++
         if (state.stops === 2) throw new Error("fixture cleanup failure")
@@ -611,6 +627,9 @@ test("another service on the configured port is never stopped, including a non-J
         second,
         {},
         {
+          async pid() {
+            throw new Error("must not query another service")
+          },
           async stop() {
             calls.push("stop")
           },
@@ -627,22 +646,303 @@ test("another service on the configured port is never stopped, including a non-J
   }
 })
 
-test("launcher pins release and explicit server, preserves cwd, and rejects managed lifecycle", async () => {
+test.each(["different", "missing", "unregistered"])(
+  "activation rejects a matching release with a %s process identity",
+  async (identity) => {
+    const home = await fixture()
+    const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+    const port = listener.port
+    listener.stop(true)
+    await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
+    const state = { stops: 0, server: undefined as ReturnType<typeof Bun.serve> | undefined }
+    try {
+      await expect(
+        activate(
+          home,
+          second,
+          { skipBackup: true },
+          {
+            async pid() {
+              return identity === "unregistered" ? undefined : process.pid
+            },
+            async stop() {
+              state.stops++
+            },
+            async start() {
+              state.server = Bun.serve({
+                hostname: "127.0.0.1",
+                port,
+                fetch: () =>
+                  Response.json({
+                    version: `0.0.0-custom.${second}`,
+                    pid: identity === "missing" ? undefined : identity === "different" ? process.pid + 1 : process.pid,
+                  }),
+              })
+            },
+          },
+        ),
+      ).rejects.toThrow("Healthcheck PID")
+      expect(state.stops).toBe(2)
+      expect(await pointer(home, "current")).toBe(second)
+      expect(await pointer(home, "previous")).toBe(first)
+      // Cleanup belongs to the launchd job; it must not terminate the other listener.
+      expect((await health(home, port)).ready).toBe(true)
+    } finally {
+      await state.server?.stop(true)
+    }
+  },
+)
+
+test("already-active shortcut verifies the launchd PID before claiming success", async () => {
   const home = await fixture()
-  const config = await settings(home)
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => Response.json({ version: `0.0.0-custom.${first}`, pid: process.pid }),
+  })
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: server.port }))
+  const service = {
+    async pid() {
+      return process.pid + 1
+    },
+    async start() {
+      throw new Error("must not start")
+    },
+    async stop() {
+      throw new Error("must not stop")
+    },
+  }
+  try {
+    await expect(activate(home, first, { skipBackup: true }, service)).rejects.toThrow("Healthcheck PID")
+    service.pid = async () => process.pid
+    await activate(home, first, { skipBackup: true }, service)
+    expect(await pointer(home, "current")).toBe(first)
+  } finally {
+    await server.stop(true)
+  }
+})
+
+async function launcherFixture(port = 4178, environment: Record<string, string> = {}) {
+  const home = await fixture()
+  const config = { ...(await settings(home)), port, environment }
   const output = scripts(home, config)
   await Bun.write(`${home}/launcher`, output.tui)
   await Bun.write(
     `${home}/releases/${first}/bin/opencode`,
-    '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@" "$OPENCODE_DISABLE_AUTOUPDATE"\n',
+    '#!/bin/sh\nprintf "%s\\0" "$PWD" "$OPENCODE_DISABLE_AUTOUPDATE" "${OPENCODE_CONFIG_DIR-}" "${OPENCODE_DB-}" "${XDG_CONFIG_HOME-}" "$@"\n',
   )
   await chmod(`${home}/releases/${first}/bin/opencode`, 0o755)
-  const result = await command(["sh", `${home}/launcher`, "a directory"], home)
-  expect(result.split("\n")).toEqual([home, "a directory", "--server", "http://127.0.0.1:4178", "1"])
-  const blocked = Bun.spawn(["sh", `${home}/launcher`, "service", "restart"], { stdout: "ignore", stderr: "ignore" })
-  expect(await blocked.exited).toBe(2)
-  expect(output.server).toContain('exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port 4178')
-  expect(plist(home)).toContain("&amp;")
-  expect(plist(home)).toContain("<key>ProcessType</key><string>Interactive</string>")
-  expect(plist(home)).not.toContain("fixture-secret")
+  await command(["/bin/sh", "-n", `${home}/launcher`], home)
+  return {
+    home,
+    config,
+    output,
+    async run(args: string[]) {
+      const child = Bun.spawn(["/bin/sh", `${home}/launcher`, ...args], {
+        cwd: home,
+        env: {
+          ...process.env,
+          OPENCODE_CONFIG_DIR: "/caller-config",
+          OPENCODE_DB: "/caller.db",
+          XDG_CONFIG_HOME: "/caller-xdg",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      return { code, stdout, stderr }
+    },
+  }
+}
+
+test("launcher inserts the explicit server at the command boundary and preserves operands", async () => {
+  const fixture = await launcherFixture()
+  const server = ["--server", "http://127.0.0.1:4178"]
+  const cases = [
+    { input: [], output: server },
+    { input: ["a directory"], output: [...server, "a directory"] },
+    { input: ["--", "service"], output: [...server, "--", "service"] },
+    { input: ["run", "--", "x"], output: ["run", ...server, "--", "x"] },
+    { input: ["run", "service"], output: ["run", ...server, "service"] },
+    { input: ["run", "update", "uninstall", "serve"], output: ["run", ...server, "update", "uninstall", "serve"] },
+    { input: ["run", "", "line\nline", "a ' quote"], output: ["run", ...server, "", "line\nline", "a ' quote"] },
+    { input: ["api", "get", "/api/info"], output: ["api", ...server, "get", "/api/info"] },
+    { input: ["--print-logs", "run", "x"], output: ["--print-logs", "run", ...server, "x"] },
+    { input: ["--print-logs", "false", "run"], output: ["--print-logs", "false", "run", ...server] },
+    { input: ["--log-level", "debug", "run"], output: ["--log-level", "debug", "run", ...server] },
+    { input: ["--log-level=info", "run"], output: ["--log-level=info", "run", ...server] },
+    { input: ["--prompt", "service"], output: ["--prompt", "service", ...server] },
+    { input: ["--session", "id", "--continue"], output: ["--session", "id", "--continue", ...server] },
+    { input: ["auth", "--print-logs", "list"], output: ["auth", "--print-logs", "list", ...server] },
+    { input: ["session", "export", "id"], output: ["session", "export", ...server, "id"] },
+    ...["mini", "models", "stats", "reload"].map((name) => ({ input: [name], output: [name, ...server] })),
+    ...["login", "logout", "switch"].map((name) => ({ input: ["auth", name], output: ["auth", name, ...server] })),
+    ...["list", "delete", "import"].map((name) => ({ input: ["session", name], output: ["session", name, ...server] })),
+  ]
+  for (const entry of cases) {
+    const result = await fixture.run(entry.input)
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(result.stdout.split("\0")).toEqual([
+      fixture.home,
+      "1",
+      "/caller-config",
+      "/caller.db",
+      "/caller-xdg",
+      ...entry.output,
+      "",
+    ])
+  }
+  expect(fixture.output.server).toContain('exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port 4178')
+  expect(plist(fixture.home)).toContain("&amp;")
+  expect(plist(fixture.home)).toContain("<key>ProcessType</key><string>Interactive</string>")
+  expect(plist(fixture.home)).not.toContain("fixture-secret")
+})
+
+test("launcher passes audited local commands without a server flag and with runtime paths", async () => {
+  const fixture = await launcherFixture()
+  for (const args of [
+    ["mcp", "add", "fixture", "--global", "--", "cmd", "update"],
+    ["--print-logs", "mcp", "add", "fixture", "--", "cmd"],
+    ["plugin", "add", "example-plugin"],
+    ["plugin", "remove", "example-plugin"],
+    ["debug", "paths", "db"],
+    ["plugin", "--help"],
+  ]) {
+    const result = await fixture.run(args)
+    expect(result.code).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(result.stdout.split("\0")).toEqual([
+      fixture.home,
+      "1",
+      fixture.config.config,
+      fixture.config.database,
+      `${fixture.home}/config`,
+      ...args,
+      "",
+    ])
+  }
+})
+
+test("runtime-specific XDG defaults remain isolated while explicit overrides are honored", async () => {
+  const fixture = await launcherFixture(4178, { XDG_CONFIG_HOME: "/user config" })
+  expect(fixture.output.server).toContain("export XDG_CONFIG_HOME='/user config'")
+  const result = await fixture.run(["debug", "paths"])
+  expect(result.code).toBe(0)
+  expect(result.stdout.split("\0")[4]).toBe("/user config")
+})
+
+test("launcher rejects lifecycle commands and unsafe handlers with actionable alternatives", async () => {
+  const fixture = await launcherFixture()
+  const cases = [
+    ...["serve", "upgrade", "update", "uninstall"].map((name) => ({ input: [name], message: "custom:*" })),
+    ...["start", "stop", "restart", "set", "unset"].map((name) => ({ input: ["service", name], message: "custom:*" })),
+    { input: ["--print-logs", "serve"], message: "custom:*" },
+    { input: ["--print-logs", "false", "serve"], message: "custom:*" },
+    { input: ["--log-level", "debug", "service", "--print-logs", "restart"], message: "custom:*" },
+    { input: ["--prompt", "a prompt", "serve"], message: "custom:*" },
+    { input: ["mcp", "list"], message: 'opencode api mcp.list --param "location[directory]=$PWD"' },
+    { input: ["mcp", "auth"], message: "/mcps" },
+    { input: ["mcp", "logout"], message: "opencode auth" },
+    { input: ["plugin", "list"], message: "opencode api plugin.list" },
+    { input: ["plugin", "check"], message: "opencode api plugin.check" },
+    {
+      input: ["plugin", "update"],
+      message: 'opencode api plugin.update --param "location[directory]=$PWD" --data \'{"targets":["<package>"]}\'',
+    },
+    { input: ["debug", "config"], message: "opencode api config.get" },
+    { input: ["debug", "agents"], message: "opencode api agent.list" },
+    { input: ["pair"], message: "opencode api server.pair" },
+    { input: ["acp"], message: "private server" },
+    { input: ["service", "status", "extra"], message: "Unexpected argument" },
+    { input: ["service", "get", "password", "extra"], message: "Unexpected argument" },
+  ]
+  for (const entry of cases) {
+    const result = await fixture.run(entry.input)
+    expect(result.code).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain(entry.message)
+  }
+  for (const flag of [
+    "--standalone",
+    "--standalone=true",
+    "--server",
+    "--server=http://other",
+    "--password=x",
+    "--wizard",
+    "--no-wizard",
+  ]) {
+    for (const args of [[flag], ["run", flag], ["run", "--", flag], [flag, "run"]]) {
+      const result = await fixture.run(args)
+      expect(result.code).toBe(2)
+      expect(result.stdout).toBe("")
+    }
+  }
+})
+
+test("launcher service reads use the runtime credential and never invoke the binary", async () => {
+  const fixture = await launcherFixture(41234)
+  const version = await fixture.run(["service", "get", "password", "--version"])
+  expect(version.code).toBe(0)
+  expect(version.stdout).not.toContain("fixture-secret")
+  expect(version.stdout.split("\0").slice(5, -1)).toEqual(["service", "get", "password", "--version"])
+  // Read adapters work even when a release is unavailable; they cannot elect a server.
+  await rm(`${fixture.home}/current`)
+  expect(await fixture.run(["service", "get", "password"])).toEqual({ code: 0, stdout: "fixture-secret\n", stderr: "" })
+  expect(await fixture.run(["--print-logs", "service", "get", "port"])).toEqual({
+    code: 0,
+    stdout: "41234\n",
+    stderr: "",
+  })
+  expect(await fixture.run(["service", "get", "hostname"])).toEqual({ code: 0, stdout: "127.0.0.1\n", stderr: "" })
+  const help = await fixture.run(["service", "get", "password", "--help"])
+  expect(help.code).toBe(0)
+  expect(help.stdout).toContain("Usage:")
+  expect(help.stdout).not.toContain("fixture-secret")
+  await rm(`${fixture.home}/password`)
+  expect((await fixture.run(["service", "get", "password"])).code).not.toBe(0)
+  expect(await fixture.run(["service", "status"])).toEqual({ code: 0, stdout: "stopped\n", stderr: "" })
+  expect(await Bun.file(`${fixture.home}/password`).exists()).toBe(false)
+})
+
+test("launcher service status checks authenticated health, legacy health, and stopped states", async () => {
+  const state = { code: 200, legacy: false, requests: [] as string[] }
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname
+      state.requests.push(path)
+      if (request.headers.get("authorization") !== `Basic ${Buffer.from("opencode:fixture-secret").toString("base64")}`)
+        return new Response(null, { status: 401 })
+      if (state.legacy && path === "/api/info") return new Response(null, { status: 404 })
+      return Response.json({ version: "fixture", pid: process.pid }, { status: state.code })
+    },
+  })
+  const fixture = await launcherFixture(server.port!)
+  try {
+    expect(await fixture.run(["service", "status"])).toEqual({
+      code: 0,
+      stdout: `http://127.0.0.1:${server.port}\n`,
+      stderr: "",
+    })
+    state.legacy = true
+    expect((await fixture.run(["service", "status"])).stdout).toBe(`http://127.0.0.1:${server.port}\n`)
+    expect(state.requests).toEqual(["/api/info", "/api/info", "/api/health"])
+    state.legacy = false
+    for (const code of [401, 500, 503]) {
+      state.code = code
+      expect(await fixture.run(["service", "status"])).toEqual({ code: 0, stdout: "stopped\n", stderr: "" })
+    }
+    state.code = 200
+    await Bun.write(`${fixture.home}/password`, "wrong-password")
+    expect((await fixture.run(["service", "status"])).stdout).toBe("stopped\n")
+  } finally {
+    await server.stop(true)
+  }
+  expect(await fixture.run(["service", "status"])).toEqual({ code: 0, stdout: "stopped\n", stderr: "" })
 })

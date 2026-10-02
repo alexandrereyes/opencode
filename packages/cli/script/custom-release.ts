@@ -257,9 +257,18 @@ export async function health(home: string, port: number) {
             typeof body === "object" && body !== null && "version" in body && typeof body.version === "string"
               ? body.version
               : undefined,
+          pid:
+            typeof body === "object" &&
+            body !== null &&
+            "pid" in body &&
+            typeof body.pid === "number" &&
+            Number.isSafeInteger(body.pid) &&
+            body.pid > 0
+              ? body.pid
+              : undefined,
         }
       })
-      .catch(() => ({ ready: false, status: 0, version: undefined }))
+      .catch(() => ({ ready: false, status: 0, version: undefined, pid: undefined }))
   )
 }
 
@@ -277,9 +286,198 @@ export function scripts(home: string, config: Awaited<ReturnType<typeof settings
     .map(([key, value]) => `export ${key}=${quote(value)}`)
     .join("\n")
   return {
-    server: `#!/bin/sh\nset -eu\n${environment}\nrelease=$(cd ${quote(`${home}/current`)} && pwd -P)\nexport OPENCODE_PASSWORD="$(cat ${quote(`${home}/password`)})"\nexport OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"\ncd ${quote(home)}\nexec "$release/bin/opencode" serve --hostname 127.0.0.1 --port ${config.port}\n`,
-    tui: `#!/bin/sh\nset -eu\nfor arg in "$@"; do\n  case "$arg" in service|serve|upgrade|update|uninstall|--|--standalone|--standalone=*|--server|--server=*|--password|--password=*) echo 'Use custom:* for lifecycle; this launcher always connects to the custom server.' >&2; exit 2;; esac\ndone\nrelease=$(cd ${quote(`${home}/current`)} && pwd -P)\nexport OPENCODE_DISABLE_AUTOUPDATE=1\nexport OPENCODE_PASSWORD="$(cat ${quote(`${home}/password`)})"\nexec "$release/bin/opencode" "$@" --server ${quote(`http://127.0.0.1:${config.port}`)}\n`,
+    server: `#!/bin/sh
+set -eu
+${environment}
+release=$(cd ${quote(`${home}/current`)} && pwd -P)
+export OPENCODE_PASSWORD="$(cat ${quote(`${home}/password`)})"
+export OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"
+cd ${quote(home)}
+exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port ${config.port}
+`,
+    tui: launcher(home, config.port, environment),
   }
+}
+
+function launcher(home: string, port: number, environment: string) {
+  // Keep routing local to the custom distribution. Commands without ServerParams
+  // may start another service; only audited filesystem-only handlers pass through.
+  return `#!/bin/sh
+set -eu
+
+fail() {
+  printf '%s\\n' "$1" >&2
+  exit 2
+}
+
+for arg do
+  case "$arg" in
+    --standalone*|--server*|--password*)
+      fail 'This launcher always connects to the custom server; server overrides are not supported.' ;;
+    --wizard*|--no-wizard*)
+      # The native wizard can generate and run a new command without this launcher.
+      fail 'Use explicit commands with the custom launcher instead of --wizard.' ;;
+  esac
+done
+
+mode=remote
+insert=0
+route=
+help=
+display=
+classify() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --help|--help=*|-h|--no-help) help=1 ;;
+      --version|--version=*|-v|--no-version|--completions|--completions=*) display=1 ;;
+    esac
+    case "$1" in
+      --print-logs|--help|-h|--version|-v|--no-print-logs|--no-help|--no-version)
+        shift
+        insert=$((insert + 1))
+        case "\${1-}" in
+          true|false|yes|no|on|off|1|0) shift; insert=$((insert + 1)) ;;
+        esac
+        continue ;;
+      --print-logs=*|--help=*|--version=*|--log-level=*|--completions=*)
+        shift; insert=$((insert + 1)); continue ;;
+      --log-level|--completions)
+        [ "$#" -ge 2 ] || fail "Missing value for $1"
+        shift 2; insert=$((insert + 2)); continue ;;
+    esac
+
+    case "$route" in
+      '')
+        case "$1" in
+          serve|upgrade|update|uninstall)
+            fail 'Use custom:* for lifecycle and release updates.' ;;
+          acp)
+            fail 'acp starts a private server and is unavailable through this launcher. Use opencode api for the custom server API.' ;;
+          pair)
+            fail 'pair uses native service discovery. Use opencode api server.pair, then open /auth/connect/<code> on the custom server.' ;;
+          run|mini|api|models|stats|reload)
+            insert=$((insert + 1)); return ;;
+          auth|session|service|mcp|plugin|debug)
+            route=$1; shift; insert=$((insert + 1)); continue ;;
+          --prompt|--session|-s)
+            [ "$#" -ge 2 ] || fail "Missing value for $1"
+            shift 2; insert=$((insert + 2)); continue ;;
+          --prompt=*|--session=*|-s?*)
+            shift; insert=$((insert + 1)); continue ;;
+          --continue|-c|--auto|--yolo|--dangerously-skip-permissions|--no-continue|--no-auto|--no-yolo|--no-dangerously-skip-permissions)
+            shift
+            insert=$((insert + 1))
+            case "\${1-}" in
+              true|false|yes|no|on|off|1|0) shift; insert=$((insert + 1)) ;;
+            esac
+            continue ;;
+          --continue=*|--auto=*|--yolo=*|--dangerously-skip-permissions=*)
+            shift; insert=$((insert + 1)); continue ;;
+          --) return ;;
+          -*) fail "Unsupported option before the command: $1. Use opencode --help." ;;
+          *) return ;;
+        esac ;;
+      service)
+        case "$1" in
+          start|stop|restart|set|unset) fail 'Use custom:* for service lifecycle and configuration.' ;;
+          status|get) route="$route $1"; mode=service; shift; continue ;;
+          *) fail 'Use service status or service get password|port|hostname with this launcher.' ;;
+        esac ;;
+      'service get')
+        case "$1" in
+          password|port|hostname) route="$route $1"; shift; continue ;;
+          *) fail 'Use service get password|port|hostname with this launcher.' ;;
+        esac ;;
+      'service '*) fail "Unexpected argument for $route: $1" ;;
+    esac
+
+    case "$route:$1" in
+      auth:list|auth:login|auth:logout|auth:switch|session:list|session:delete|session:export|session:import)
+        insert=$((insert + 1)); return ;;
+      mcp:add|plugin:add|plugin:remove|debug:paths)
+        mode=local; return ;;
+      mcp:auth|mcp:logout)
+        fail 'MCP authentication uses native service discovery. Use /mcps in the custom TUI, or opencode auth login|logout.' ;;
+      mcp:list)
+        fail 'Use opencode api mcp.list --param "location[directory]=$PWD" to query the custom server.' ;;
+      plugin:list)
+        fail 'Use opencode api plugin.list --param "location[directory]=$PWD" to list custom server plugins.' ;;
+      plugin:check)
+        fail 'Use opencode api plugin.check --param "location[directory]=$PWD" --data "{}" for server plugin updates.' ;;
+      plugin:update)
+        fail ${quote(`Use opencode api plugin.update --param "location[directory]=$PWD" --data '{"targets":["<package>"]}' for server plugins.`)} ;;
+      debug:agents)
+        fail 'Use opencode api agent.list --param "location[directory]=$PWD" to query the custom server.' ;;
+      debug:config)
+        fail 'Use opencode api config.get --param "location[directory]=$PWD" to query the custom server configuration.' ;;
+      *) fail "Unsupported custom launcher command: $route $1. Use opencode $route --help." ;;
+    esac
+  done
+  # Bare command groups only display native help, never a server handler.
+  [ -z "$route" ] || mode=local
+  case "$route" in service*) mode=service ;; esac
+  # Version/completion actions short-circuit the native handler. Never return a
+  # service credential in place of an informational action.
+  if [ -n "$display" ] && [ -z "$help" ]; then mode=local; fi
+}
+classify "$@"
+
+server=${quote(`http://127.0.0.1:${port}`)}
+password_file=${quote(`${home}/password`)}
+if [ "$mode" = service ]; then
+  if [ -n "$help" ]; then
+    printf '%s\\n' 'Usage: opencode service status | get password|port|hostname'
+    exit 0
+  fi
+  case "$route" in
+    'service status')
+      if password=$(cat "$password_file" 2>/dev/null) && [ -n "$password" ]; then
+        authorization=$(printf 'opencode:%s' "$password" | base64 | tr -d '\\n')
+        for endpoint in /api/info /api/health; do
+          # Read credentials from stdin, not the process arguments or curlrc.
+          status=$(printf 'Authorization: Basic %s\\n' "$authorization" |
+            curl -q --silent --noproxy '*' --max-time 2 --header @- --output /dev/null --write-out '%{http_code}' "$server$endpoint") || status=000
+          case "$status" in
+            200) printf '%s\\n' "$server"; exit 0 ;;
+            404) continue ;;
+            *) break ;;
+          esac
+        done
+      fi
+      printf '%s\\n' stopped
+      exit 0 ;;
+    'service get password')
+      password=$(cat "$password_file")
+      [ -n "$password" ] || fail 'Runtime password is empty.'
+      printf '%s\\n' "$password"; exit 0 ;;
+    'service get port') printf '%s\\n' ${quote(String(port))}; exit 0 ;;
+    'service get hostname') printf '%s\\n' 127.0.0.1; exit 0 ;;
+    *) fail 'Use service status or service get password|port|hostname with this launcher.' ;;
+  esac
+fi
+
+release=$(cd ${quote(`${home}/current`)} && pwd -P)
+export OPENCODE_DISABLE_AUTOUPDATE=1
+if [ "$mode" = local ]; then
+  ${environment.replaceAll("\n", "\n  ")}
+  exec "$release/bin/opencode" "$@"
+fi
+
+export OPENCODE_PASSWORD="$(cat "$password_file")"
+# Rotate the original arguments once, inserting after the command path and
+# before its operands (including --). No eval or word splitting is involved.
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+  if [ "$insert" -eq 0 ]; then set -- "$@" --server "$server"; fi
+  arg=$1
+  shift
+  set -- "$@" "$arg"
+  insert=$((insert - 1))
+  remaining=$((remaining - 1))
+done
+if [ "$insert" -eq 0 ]; then set -- "$@" --server "$server"; fi
+exec "$release/bin/opencode" "$@"
+`
 }
 
 export function plist(home: string) {
@@ -297,7 +495,11 @@ export function plist(home: string) {
 </dict></plist>\n`
 }
 
-export type Service = { stop: () => Promise<void>; start: () => Promise<void> }
+export type Service = {
+  stop: () => Promise<void>
+  start: () => Promise<void>
+  pid: () => Promise<number | undefined>
+}
 
 export function portFree(port: number) {
   try {
@@ -361,6 +563,9 @@ export function launchd(
     return { pid: Number(result.stdout.match(/^\s*pid = (\d+)$/m)?.[1]) || undefined }
   }
   return {
+    async pid() {
+      return (await query())?.pid
+    },
     async stop() {
       const loaded = await query()
       if (!loaded) return
@@ -443,6 +648,7 @@ export async function activate(
   if (!options.skipBackup && !Bun.which("sqlite3")) throw new Error("sqlite3 is required for a consistent backup")
   const before = await health(home, config.port)
   if (previous === commit && before.ready && before.version === release.version) {
+    await verifyProcess(service, before.pid)
     console.log(`Already active ${commit}`)
     return
   }
@@ -487,6 +693,7 @@ export async function activate(
     for (let attempt = 0; attempt < 90; attempt++) {
       const result = await health(home, config.port)
       if (result.ready && result.version === release.version) {
+        await verifyProcess(service, result.pid)
         console.log(`Active ${commit}; launcher ${home}/bin/opencode2`)
         return
       }
@@ -503,6 +710,12 @@ export async function activate(
       { cause: error },
     )
   }
+}
+
+async function verifyProcess(service: Service, responding: number | undefined) {
+  const owned = await service.pid()
+  if (responding !== undefined && responding === owned) return
+  throw new Error(`Healthcheck PID ${responding ?? "missing"} does not match ${label} PID ${owned ?? "missing"}`)
 }
 
 async function reportProgress(report: ((phase: string) => Promise<void>) | undefined, phase: string) {

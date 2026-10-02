@@ -163,10 +163,20 @@ The defaults for a separately initialized runtime are port **4178**,
 `<runtime>/data/opencode/custom.db` and `<runtime>/config/opencode`. Migration instead
 copies the actual paths and environment from `environment.sh`. In the current installation
 these are `~/.local/share/opencode/opencode.db` and `~/.config/opencode`.
-The launcher preserves migrated XDG roots, falling back to runtime-specific roots. Identity/path variables
-override `environment`. Protect this file if it contains credentials. Never configure
+The server launcher preserves explicit XDG roots, falling back to runtime-specific roots for
+separately initialized runtimes. Identity/path variables override `environment`. Protect this file
+if it contains credentials. Never configure
 a second global or project-local copy of the custom plugin; every Location loads the
 release-owned plugin build through normal plugin configuration.
+
+For the primary installation, set `environment.XDG_CONFIG_HOME` in `manual.json` to the user's
+normal config root (`/Users/you/.config`). `OPENCODE_CONFIG_DIR` selects OpenCode configuration;
+it does not override XDG for child tools such as `gh`, Homebrew, Stripe, or SwiftPM. Without this
+explicit setting, those tools inherit `<runtime>/config` and may use a different login/configuration
+from the user's terminal. Check their existing logins before changing it. This setting takes effect
+on the next activation; it does not change the running server's environment. Keep `<runtime>/config`:
+the 4096 proxy reads `<runtime>/config/opencode/service-custom.json` by its fixed path, independent
+of XDG. The default remains isolated for development/test runtimes.
 
 Routine `custom:update` skips the database backup and does not require `sqlite3`.
 It still requires the existing database and password and verifies the authenticated
@@ -186,7 +196,11 @@ I/O throttling to agents, which makes the server lose scheduling priority under 
 
 Then activation writes runtime-owned launchers and the job plist, switches `current`, bootstraps the
 job and waits up to 90 checks for **authenticated HTTP 200 with the exact target
-version**. It preserves the password, database and config paths. This is an explicit
+version**. Before declaring success, the responding PID must match the PID reported by
+`launchctl print` for the runtime-owned job. This check also applies to the already-active
+shortcut: another process running the same binary/version is not proof of successful activation.
+A missing or different PID fails verification; cleanup only unloads the owned job, never the
+other listener. It preserves the password, database and config paths. This is an explicit
 service interruption; schedule it between active work where possible. Existing TUI
 processes keep their already-loaded version: reopen them with `opencode2` afterward.
 
@@ -253,15 +267,51 @@ same persistence and password and does not restart an already healthy target rel
 keeps the legacy global configuration directory while using the preserved password
 without rewriting its managed-service configuration/registration or entering election.
 
-The stable TUI launcher resolves `current` once, reads the existing password into
-`OPENCODE_PASSWORD`, disables automatic CLI updates and always passes
-`--server http://127.0.0.1:4178`. It preserves the caller's working directory and
-arguments. Managed-service, standalone, upgrade and server-override commands are
-rejected; use `custom:*` for lifecycle. As in the native CLI, bare `service` is a reserved
-subcommand, so use `./service` for a project with that name. `service-project` works as
-an ordinary positional directory. The launcher also rejects `--` so the injected server
-flag cannot be hidden behind an end-of-options marker. It neither discovers nor elects a beta server.
-For non-default runtimes, adjust the paths above consistently.
+The stable launcher resolves `current` once and disables automatic CLI updates. For the TUI,
+`run`, `mini`, `api`, `models`, `stats`, `reload`, and the supported `auth`/`session` subcommands,
+it reads the existing password into `OPENCODE_PASSWORD` and injects `--server` with the configured
+runtime URL (normally `http://127.0.0.1:4178`). It inserts the flag immediately after the command
+path, before operands or `--`, preserving the working directory and argument boundaries.
+For example, `opencode run -- service` sends the word `service`; it is not a lifecycle request.
+Known global flags such as `--print-logs` and `--log-level debug` can precede command names.
+
+The launcher provides read-only service adapters without native service discovery:
+
+- `service status`: authenticated health check; prints the configured URL when ready, otherwise
+  `stopped`. Both states exit successfully, matching the native status command. Credentials go to
+  curl through stdin, not its command arguments. No service is started.
+- `service get password`: prints the existing runtime password; never generates one.
+- `service get port` / `service get hostname`: prints the configured port / `127.0.0.1`.
+
+These adapters support `bun run dev:live` and `bun run dev:vite:live`. The installation still uses
+launchd supervision rather than the native managed-service registry.
+
+`mcp add`, `plugin add`, `plugin remove`, and `debug paths` use only local configuration/files and
+pass through without `--server`, using the runtime's configured environment and persistence paths.
+`mcp add example -- command args` retains the native `--` behavior. Commands whose native handlers
+would discover/start a server are rejected with a specific alternative:
+
+| Native command            | Custom-server alternative                                                                          |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| `mcp list`                | `opencode api mcp.list --param "location[directory]=$PWD"`                                         |
+| `mcp auth` / `mcp logout` | `/mcps` in the TUI or `opencode auth login` / `opencode auth logout`                               |
+| `plugin list`             | `opencode api plugin.list --param "location[directory]=$PWD"` (server plugins)                     |
+| `plugin check`            | `opencode api plugin.check --param "location[directory]=$PWD" --data '{}'`                         |
+| `plugin update`           | `opencode api plugin.update --param "location[directory]=$PWD" --data '{"targets":["<package>"]}'` |
+| `debug agents`            | `opencode api agent.list --param "location[directory]=$PWD"`                                       |
+| `debug config`            | `opencode api config.get --param "location[directory]=$PWD"`                                       |
+| `pair`                    | `opencode api server.pair`, then open `/auth/connect/<code>` on the custom server                  |
+
+Use `custom:*` for lifecycle. The launcher rejects top-level `serve`, `upgrade`/`update`,
+`uninstall`, and `service start/stop/restart/set/unset`. It also rejects `acp`, which creates a
+private server. User-supplied `--standalone*`, `--server*`, and `--password*` are rejected anywhere,
+including after `--`. Native wizard mode is unavailable because it can generate and execute a
+different command without passing through the launcher again. Ordinary prompt words such as
+`update`, `service`, and `serve` are not blocked. As in the native CLI, use `./service` for a
+project named `service`. For non-default runtimes, adjust the paths above consistently.
+
+Migration installs `~/.opencode/bin/opencode2`; an existing `opencode` alias/symlink to it continues
+to resolve the updated launcher. Migration and activation do not create that extra alias.
 
 The retired periodic updater, maintenance API, admission barrier, controller and
 updater LaunchAgent are not part of this flow. Nothing polls Git or schedules updates.
