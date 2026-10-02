@@ -137,6 +137,11 @@ export function SidebarSubscriptions(props: {
       },
       renewals,
       pool: createMemo(() => subscriptionPool(data()?.accounts ?? [], state.now, unit)),
+      // Undefined when no account reports a paid credit balance, so the badge stays hidden.
+      credits: createMemo(() => {
+        const balances = accounts().flatMap((account) => (account.credits === null ? [] : [account.credits]))
+        return balances.length ? balances.reduce((sum, balance) => sum + balance, 0) : undefined
+      }),
       groups: createMemo(() =>
         [...new Set(accounts().map((account) => account.plan))].map((plan) => ({
           plan,
@@ -502,9 +507,20 @@ export function SidebarSubscriptions(props: {
                             <ProviderIcon id={PROVIDERS[item.provider].icon} width={18} height={18} />
                           </span>
                           <div class="flex min-w-0 flex-1 flex-col">
-                            <h3 class="truncate text-14-medium text-text-strong">
-                              {language.t(PROVIDERS[item.provider].keys.label)}
-                            </h3>
+                            <div class="flex min-w-0 items-center gap-2">
+                              <h3 class="truncate text-14-medium text-text-strong">
+                                {language.t(PROVIDERS[item.provider].keys.label)}
+                              </h3>
+                              <Show when={item.credits() !== undefined}>
+                                <span class={`${BADGE} ${TONE.neutral} tabular-nums`}>
+                                  {language.plural("sidebar.proxy.creditCount", item.credits()!, {
+                                    amount: new Intl.NumberFormat(language.intl(), {
+                                      maximumFractionDigits: 0,
+                                    }).format(item.credits()!),
+                                  })}
+                                </span>
+                              </Show>
+                            </div>
                             <span class="truncate text-12-regular leading-text-compact text-v2-text-text-muted">
                               {language.t("sidebar.proxy.poolSummary", {
                                 plans: new Intl.ListFormat(language.intl(), { type: "unit" }).format(

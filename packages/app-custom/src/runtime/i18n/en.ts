@@ -220,6 +220,8 @@ export const dict = {
   "sidebar.proxy.poolSummary": "{{plans}} · {{accounts}}",
   "sidebar.proxy.accountCount.one": "{{count}} account",
   "sidebar.proxy.accountCount.other": "{{count}} accounts",
+  "sidebar.proxy.creditCount.one": "{{amount}} credit",
+  "sidebar.proxy.creditCount.other": "{{amount}} credits",
   "sidebar.proxy.bankedCount.one": "{{count}} banked",
   "sidebar.proxy.bankedCount.other": "{{count}} banked",
   "sidebar.proxy.autoReset.label": "Auto reset",

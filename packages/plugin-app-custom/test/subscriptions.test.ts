@@ -89,6 +89,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
         observedAt: "2026-09-09T20:00:00Z",
         stale: true,
         hasCapacity: false,
+        credits: null,
       },
       {
         id: "two",
@@ -105,6 +106,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
         observedAt: null,
         stale: true,
         hasCapacity: null,
+        credits: null,
       },
     ],
     automation: { enabled: false },
@@ -206,6 +208,7 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
           observedAt: "2026-09-26T22:41:16Z",
           stale: false,
           hasCapacity: true,
+          credits: null,
         },
         {
           id: "unknown",
@@ -222,6 +225,7 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
           observedAt: null,
           stale: true,
           hasCapacity: null,
+          credits: null,
         },
       ],
       automation: { enabled: true },

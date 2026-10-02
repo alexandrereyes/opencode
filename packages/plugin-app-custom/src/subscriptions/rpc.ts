@@ -27,6 +27,7 @@ export const Account = Schema.Struct({
   observedAt: Schema.NullOr(Schema.String),
   stale: Schema.Boolean,
   hasCapacity: Schema.NullOr(Schema.Boolean),
+  credits: Schema.NullOr(Schema.Number),
 }).annotate({ identifier: "Subscriptions.Account" })
 
 export interface Automation extends Schema.Schema.Type<typeof Automation> {}

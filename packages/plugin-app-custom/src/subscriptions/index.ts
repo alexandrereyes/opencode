@@ -13,6 +13,8 @@ const Usage = Schema.NullOr(
     observedAt: Schema.String,
     hasCapacity: Schema.Boolean,
     planType: Schema.NullOr(Schema.String),
+    // Paid ChatGPT credits; proxies before the credit fallback omit it.
+    credits: Schema.optional(Schema.NullOr(Schema.Struct({ balance: Schema.NullOr(Schema.Finite) }))),
   }),
 )
 
@@ -262,6 +264,7 @@ function account(
     observedAt: item.usage?.observedAt ?? null,
     stale: item.usageAgeSeconds === null || item.usageAgeSeconds < 0 || item.usageAgeSeconds > 65 * 60,
     hasCapacity: item.usage?.hasCapacity ?? null,
+    credits: item.usage?.credits?.balance ?? null,
   }
 }
 

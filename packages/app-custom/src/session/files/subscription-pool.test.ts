@@ -19,6 +19,7 @@ const account = {
   fiveHourResetAt: null,
   remaining: 5,
   hasCapacity: true,
+  credits: null,
   observedAt: "2026-09-10T08:00:00Z",
   resetAt: null,
   bankedResets: null,
