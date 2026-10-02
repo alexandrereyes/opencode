@@ -24,6 +24,8 @@ with `--custom` (embedding **app-custom**, not app). CLI `--version` and `--help
 are checked with isolated XDG directories. Before publication, `custom-parser-smoke.ts` checks
 the compiled binary's rejection of an inherited `--server` on unsupported commands, version
 actions triggered by `--version=false` / `--no-version`, `--` operand handling, and help actions.
+It also inspects help for the local/API routes and their ancestors, rejecting local flags or aliases
+named `--help`, `-h`, `--version`, or `-v` that could shadow the global actions.
 The harmless `debug paths home` handler is the execution sentinel. A changed parser contract
 fails preparation rather than silently changing launcher safety. No server is started during prepare.
 
@@ -311,10 +313,15 @@ would discover/start a server are rejected with a specific alternative:
 | `debug config`            | `opencode api config.get --param "location[directory]=$PWD"`                                       |
 | `pair`                    | `opencode api server.pair`, then open `/auth/connect/<code>` on the custom server                  |
 
-`--help` or `-h` before `--` passes through to native help without a server flag, including
-`mcp list --help`, `pair --help`, and `-h serve`. The compiled-binary parser smoke verifies that
-help exits without invoking the command handler. Server/password/standalone overrides remain
-blocked even on help requests. A literal `--help` after `--` remains an operand.
+`--help` or `-h` before `--` passes through to native help without a server flag only for the
+audited local/API routes, including `mcp list --help` and `pair --help`. Normal client commands
+such as `run` retain their explicit server flag on help requests. Lifecycle commands, including
+`serve`, `upgrade`/`update`, `uninstall`, mutating `service` commands and `acp`, remain blocked
+even with help. The compiled-binary parser smoke verifies global action handling and rejects
+shadowing local help/version aliases on the pass-through routes. It requests help before the
+command path so that inspecting a newly shadowing alias does not execute that command.
+Server/password/standalone overrides remain blocked even on help requests. A literal `--help`
+after `--` remains an operand.
 
 Use `custom:*` for lifecycle. The launcher rejects top-level `serve`, `upgrade`/`update`,
 `uninstall`, and `service start/stop/restart/set/unset`. It also rejects `acp`, which creates a

@@ -85,8 +85,54 @@ export async function verifyParser(binary: string, version: string) {
       )
         throw new Error(`CLI parser smoke: help did not short-circuit the handler: ${JSON.stringify(result)}`)
     }
-    console.log("CLI parser smoke passed: server flag rejection, version actions, -- operands, help actions")
+    // Put help before the command so the root consumes the global action before
+    // descending into a command that may have acquired a shadowing local flag.
+    // Include ancestors and filesystem-only routes, which also pass through.
+    for (const command of [
+      ["mcp"],
+      ["mcp", "add"],
+      ["mcp", "list"],
+      ["mcp", "auth"],
+      ["mcp", "logout"],
+      ["plugin"],
+      ["plugin", "add"],
+      ["plugin", "remove"],
+      ["plugin", "list"],
+      ["plugin", "check"],
+      ["plugin", "update"],
+      ["debug"],
+      ["debug", "paths"],
+      ["debug", "agents"],
+      ["debug", "config"],
+      ["pair"],
+      ["service"],
+      ["service", "get"],
+      ["service", "status"],
+    ]) {
+      const result = await run(["--help", ...command])
+      if (result.code !== 0)
+        throw new Error(`CLI parser smoke: could not inspect ${command.join(" ")} flags: ${JSON.stringify(result)}`)
+      verifyActionFlags(result.stdout, command.join(" "))
+    }
+    console.log(
+      "CLI parser smoke passed: server flag rejection, version actions, -- operands, help actions, no local action aliases",
+    )
   } finally {
     await rm(work, { recursive: true, force: true })
   }
+}
+
+export function verifyActionFlags(help: string, command: string) {
+  const sections = help.split(/(?=^[A-Z][A-Z ]*$)/m)
+  if (
+    !sections.some((section) => section.startsWith("USAGE\n")) ||
+    !sections.some((section) => section.startsWith("GLOBAL FLAGS\n"))
+  )
+    throw new Error(`CLI parser smoke: unrecognized help sections for ${command}`)
+  const shadow = sections
+    .filter((section) => !section.startsWith("GLOBAL FLAGS\n"))
+    .flatMap((section) => section.split("\n"))
+    .map((line) => line.trim().split(/\s{2,}/)[0])
+    .find((flags) => flags.startsWith("-") && /(?:^|[\s,])(?:--help|-h|--version|-v)(?=[\s,=]|$)/.test(flags))
+  if (shadow) throw new Error(`CLI parser smoke: ${command} has a local help/version flag: ${shadow}`)
 }

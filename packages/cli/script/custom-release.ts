@@ -363,6 +363,7 @@ classify() {
           acp)
             fail 'acp starts a private server and is unavailable through this launcher. Use opencode api for the custom server API.' ;;
           pair)
+            if [ -n "$help" ]; then mode=local; return; fi
             fail 'pair uses native service discovery. Use opencode api server.pair, then open /auth/connect/<code> on the custom server.' ;;
           run|mini|api|models|stats|reload)
             insert=$((insert + 1)); return ;;
@@ -400,6 +401,13 @@ classify() {
       'service '*) fail "Unexpected argument for $route: $1" ;;
     esac
 
+    # Help is an exception only for audited API commands, never for lifecycle.
+    if [ -n "$help" ]; then
+      case "$route:$1" in
+        mcp:list|mcp:auth|mcp:logout|plugin:list|plugin:check|plugin:update|debug:agents|debug:config)
+          mode=local; return ;;
+      esac
+    fi
     case "$route:$1" in
       auth:list|auth:login|auth:logout|auth:switch|session:list|session:delete|session:export|session:import)
         insert=$((insert + 1)); return ;;
@@ -429,8 +437,7 @@ classify() {
   # service credential in place of an informational action.
   if [ -n "$display" ] && [ -z "$help" ]; then mode=local; fi
 }
-if [ -n "$help" ]; then mode=local; fi
-if [ -z "$help" ]; then classify "$@"; fi
+classify "$@"
 
 server=${quote(`http://127.0.0.1:${port}`)}
 password_file=${quote(`${home}/password`)}

@@ -5,6 +5,7 @@ import { migrate } from "../script/custom-migrate"
 import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "../script/custom-config"
+import { verifyActionFlags } from "../script/custom-parser-smoke"
 import {
   activate,
   artifacts,
@@ -778,6 +779,7 @@ test("launcher inserts the explicit server at the command boundary and preserves
     { input: ["--", "service"], output: [...server, "--", "service"] },
     { input: ["run", "--", "x"], output: ["run", ...server, "--", "x"] },
     { input: ["run", "--", "--help"], output: ["run", ...server, "--", "--help"] },
+    { input: ["run", "--help"], output: ["run", ...server, "--help"] },
     { input: ["run", "service"], output: ["run", ...server, "service"] },
     { input: ["run", "update", "uninstall", "serve"], output: ["run", ...server, "update", "uninstall", "serve"] },
     { input: ["run", "", "line\nline", "a ' quote"], output: ["run", ...server, "", "line\nline", "a ' quote"] },
@@ -824,10 +826,15 @@ test("launcher passes audited local commands without a server flag and with runt
     ["debug", "paths", "db"],
     ["plugin", "--help"],
     ["mcp", "list", "--help"],
+    ["mcp", "auth", "--help"],
+    ["mcp", "logout", "-h"],
+    ["plugin", "list", "--help"],
+    ["plugin", "check", "--help"],
+    ["plugin", "update", "-h"],
+    ["debug", "agents", "--help"],
+    ["debug", "config", "--help"],
     ["pair", "--help"],
-    ["-h", "serve"],
-    ["service", "restart", "--help"],
-    ["service", "get", "password", "--help"],
+    ["-h", "pair"],
   ]) {
     const result = await fixture.run(args)
     expect(result.code).toBe(0)
@@ -842,6 +849,55 @@ test("launcher passes audited local commands without a server flag and with runt
       "",
     ])
   }
+})
+
+test("help never bypasses lifecycle routing or admits unreviewed subcommands", async () => {
+  const fixture = await launcherFixture()
+  for (const command of [
+    ["serve"],
+    ["upgrade"],
+    ["update"],
+    ["uninstall"],
+    ["acp"],
+    ...["start", "stop", "restart", "set", "unset"].map((name) => ["service", name]),
+    ["mcp", "unreviewed"],
+    ["plugin", "unreviewed"],
+    ["debug", "unreviewed"],
+  ]) {
+    for (const flag of ["--help", "-h"]) {
+      for (const args of [
+        [flag, ...command],
+        [...command, flag],
+        [command[0], flag, ...command.slice(1)],
+      ]) {
+        const result = await fixture.run(args)
+        expect(result.code).toBe(2)
+        expect(result.stdout).toBe("")
+      }
+    }
+  }
+  expect((await fixture.run(["serve", "-h", "0.0.0.0"])).code).toBe(2)
+})
+
+test("compiled help inventory distinguishes local aliases from global action flags", () => {
+  const help = (local: string) => `DESCRIPTION
+  Fixture
+
+USAGE
+  opencode fixture
+
+FLAGS
+  ${local}
+
+GLOBAL FLAGS
+  --help, -h       Show help
+  --version, -v    Show version
+`
+  expect(() => verifyActionFlags(help("--hostname string  Listen address"), "fixture")).not.toThrow()
+  expect(() => verifyActionFlags(help("--helpful, --version-label string  Labels"), "fixture")).not.toThrow()
+  for (const flag of ["--hostname, -h string", "--help boolean", "--verbose, -v boolean", "--version string"])
+    expect(() => verifyActionFlags(help(`${flag}  Local option`), "fixture")).toThrow("local help/version flag")
+  expect(() => verifyActionFlags("Unknown help format", "fixture")).toThrow("unrecognized help sections")
 })
 
 test("runtime-specific XDG defaults remain isolated while explicit overrides are honored", async () => {
@@ -915,6 +971,10 @@ test("launcher service reads use the runtime credential and never invoke the bin
   expect(version.stdout.split("\0").slice(5, -1)).toEqual(["service", "get", "password", "--version"])
   // Read adapters work even when a release is unavailable; they cannot elect a server.
   await rm(`${fixture.home}/current`)
+  const help = await fixture.run(["service", "get", "password", "--help"])
+  expect(help.code).toBe(0)
+  expect(help.stdout).toContain("Usage:")
+  expect(help.stdout).not.toContain("fixture-secret")
   const configuration = await fixture.run(["service", "get"])
   expect(configuration.code).toBe(0)
   expect(configuration.stderr).toBe("")
