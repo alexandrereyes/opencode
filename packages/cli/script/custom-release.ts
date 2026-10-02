@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
 import { bundleRelease } from "./custom-signing"
+import { verifyParser } from "./custom-parser-smoke"
 
 const repository = path.resolve(import.meta.dirname, "../../..")
 export const label = "local.opencode.custom-manual"
@@ -169,6 +170,7 @@ export async function prepare(home: string, dryRun = false) {
   const reported = await command([`${staging}/bin/opencode`, "--version"], work, env)
   if (reported !== `opencode v${env.OPENCODE_VERSION}`) throw new Error(`Unexpected CLI version: ${reported}`)
   await command([`${staging}/bin/opencode`, "--help"], work, env)
+  await verifyParser(`${staging}/bin/opencode`, env.OPENCODE_VERSION)
   await command(
     [
       `${work}/bin/bun`,
@@ -310,6 +312,8 @@ fail() {
   exit 2
 }
 
+help=
+options=1
 for arg do
   case "$arg" in
     --standalone*|--server*|--password*)
@@ -318,12 +322,17 @@ for arg do
       # The native wizard can generate and run a new command without this launcher.
       fail 'Use explicit commands with the custom launcher instead of --wizard.' ;;
   esac
+  if [ -n "$options" ]; then
+    case "$arg" in
+      --) options= ;;
+      --help|-h) help=1 ;;
+    esac
+  fi
 done
 
 mode=remote
 insert=0
 route=
-help=
 display=
 classify() {
   while [ "$#" -gt 0 ]; do
@@ -420,7 +429,8 @@ classify() {
   # service credential in place of an informational action.
   if [ -n "$display" ] && [ -z "$help" ]; then mode=local; fi
 }
-classify "$@"
+if [ -n "$help" ]; then mode=local; fi
+if [ -z "$help" ]; then classify "$@"; fi
 
 server=${quote(`http://127.0.0.1:${port}`)}
 password_file=${quote(`${home}/password`)}
@@ -430,6 +440,9 @@ if [ "$mode" = service ]; then
     exit 0
   fi
   case "$route" in
+    'service get')
+      printf '%s\\n' ${quote(JSON.stringify({ hostname: "127.0.0.1", port }, null, 2))}
+      exit 0 ;;
     'service status')
       if password=$(cat "$password_file" 2>/dev/null) && [ -n "$password" ]; then
         authorization=$(printf 'opencode:%s' "$password" | base64 | tr -d '\\n')
@@ -459,7 +472,7 @@ fi
 release=$(cd ${quote(`${home}/current`)} && pwd -P)
 export OPENCODE_DISABLE_AUTOUPDATE=1
 if [ "$mode" = local ]; then
-  ${environment.replaceAll("\n", "\n  ")}
+${environment}
   exec "$release/bin/opencode" "$@"
 fi
 
@@ -648,7 +661,12 @@ export async function activate(
   if (!options.skipBackup && !Bun.which("sqlite3")) throw new Error("sqlite3 is required for a consistent backup")
   const before = await health(home, config.port)
   if (previous === commit && before.ready && before.version === release.version) {
-    await verifyProcess(service, before.pid)
+    await verifyProcess(service, before.pid, config.port).catch((cause: unknown) => {
+      throw new Error(
+        `Already-active check failed; no service, launcher or release pointer was changed. ${String(cause)}`,
+        { cause },
+      )
+    })
     console.log(`Already active ${commit}`)
     return
   }
@@ -693,7 +711,7 @@ export async function activate(
     for (let attempt = 0; attempt < 90; attempt++) {
       const result = await health(home, config.port)
       if (result.ready && result.version === release.version) {
-        await verifyProcess(service, result.pid)
+        await verifyProcess(service, result.pid, config.port)
         console.log(`Active ${commit}; launcher ${home}/bin/opencode2`)
         return
       }
@@ -712,10 +730,13 @@ export async function activate(
   }
 }
 
-async function verifyProcess(service: Service, responding: number | undefined) {
+async function verifyProcess(service: Service, responding: number | undefined, port: number) {
   const owned = await service.pid()
   if (responding !== undefined && responding === owned) return
-  throw new Error(`Healthcheck PID ${responding ?? "missing"} does not match ${label} PID ${owned ?? "missing"}`)
+  throw new Error(
+    `Healthcheck PID ${responding ?? "missing"} does not match ${label} PID ${owned ?? "missing"}. ` +
+      `Inspect with lsof -nP -iTCP:${port} -sTCP:LISTEN and launchctl print gui/${process.getuid!()}/${label} before retrying.`,
+  )
 }
 
 async function reportProgress(report: ((phase: string) => Promise<void>) | undefined, phase: string) {

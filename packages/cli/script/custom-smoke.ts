@@ -6,6 +6,7 @@ import path from "node:path"
 import { serverConfig } from "./custom-config"
 import { artifacts, command, publish, seal } from "./custom-release"
 import { bundle, bundleRelease } from "./custom-signing"
+import { verifyParser } from "./custom-parser-smoke"
 
 const binary = process.argv[2]
 if (!binary || !path.isAbsolute(binary))
@@ -31,6 +32,7 @@ const version = (await command([binary, "--version"], work, env)).replace("openc
 const commit = version.replace("0.0.0-custom.", "")
 if (!/^[a-f0-9]{40}$/.test(commit))
   throw new Error(`Expected a commit-versioned custom binary; received ${JSON.stringify(version)}`)
+await verifyParser(binary, version)
 const release = `${work}/releases/${commit}`
 await mkdir(`${release}/plugin`, { recursive: true })
 await mkdir(`${work}/home/project`, { recursive: true })

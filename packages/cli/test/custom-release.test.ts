@@ -700,7 +700,9 @@ test("already-active shortcut verifies the launchd PID before claiming success",
     port: 0,
     fetch: () => Response.json({ version: `0.0.0-custom.${first}`, pid: process.pid }),
   })
-  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: server.port }))
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port: server.port, environment: { FIXTURE_CHANGED: "new" } }))
+  await Bun.write(`${home}/bin/serve`, "previous server launcher")
+  await Bun.write(`${home}/bin/opencode2`, "previous client launcher")
   const service = {
     async pid() {
       return process.pid + 1
@@ -713,10 +715,18 @@ test("already-active shortcut verifies the launchd PID before claiming success",
     },
   }
   try {
-    await expect(activate(home, first, { skipBackup: true }, service)).rejects.toThrow("Healthcheck PID")
+    const failure = await activate(home, first, { skipBackup: true }, service).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(Error)
+    if (!(failure instanceof Error)) throw new Error("Expected PID verification failure")
+    expect(failure.message).toContain("no service, launcher or release pointer was changed")
+    expect(failure.message).toContain("Healthcheck PID")
+    expect(failure.message).toContain(`lsof -nP -iTCP:${server.port} -sTCP:LISTEN`)
+    expect(failure.message).toContain(`launchctl print gui/${process.getuid!()}/${label}`)
     service.pid = async () => process.pid
     await activate(home, first, { skipBackup: true }, service)
     expect(await pointer(home, "current")).toBe(first)
+    expect(await Bun.file(`${home}/bin/serve`).text()).toBe("previous server launcher")
+    expect(await Bun.file(`${home}/bin/opencode2`).text()).toBe("previous client launcher")
   } finally {
     await server.stop(true)
   }
@@ -767,6 +777,7 @@ test("launcher inserts the explicit server at the command boundary and preserves
     { input: ["a directory"], output: [...server, "a directory"] },
     { input: ["--", "service"], output: [...server, "--", "service"] },
     { input: ["run", "--", "x"], output: ["run", ...server, "--", "x"] },
+    { input: ["run", "--", "--help"], output: ["run", ...server, "--", "--help"] },
     { input: ["run", "service"], output: ["run", ...server, "service"] },
     { input: ["run", "update", "uninstall", "serve"], output: ["run", ...server, "update", "uninstall", "serve"] },
     { input: ["run", "", "line\nline", "a ' quote"], output: ["run", ...server, "", "line\nline", "a ' quote"] },
@@ -812,6 +823,11 @@ test("launcher passes audited local commands without a server flag and with runt
     ["plugin", "remove", "example-plugin"],
     ["debug", "paths", "db"],
     ["plugin", "--help"],
+    ["mcp", "list", "--help"],
+    ["pair", "--help"],
+    ["-h", "serve"],
+    ["service", "restart", "--help"],
+    ["service", "get", "password", "--help"],
   ]) {
     const result = await fixture.run(args)
     expect(result.code).toBe(0)
@@ -834,6 +850,13 @@ test("runtime-specific XDG defaults remain isolated while explicit overrides are
   const result = await fixture.run(["debug", "paths"])
   expect(result.code).toBe(0)
   expect(result.stdout.split("\0")[4]).toBe("/user config")
+})
+
+test("local launcher preserves multiline environment values exactly", async () => {
+  const value = "first line\nsecond 'quoted' $HOME\nlast\\part"
+  const fixture = await launcherFixture(4178, { FIXTURE_MULTILINE: value })
+  await Bun.write(`${fixture.home}/releases/${first}/bin/opencode`, '#!/bin/sh\nprintf "%s" "$FIXTURE_MULTILINE"\n')
+  expect(await fixture.run(["debug", "paths"])).toEqual({ code: 0, stdout: value, stderr: "" })
 })
 
 test("launcher rejects lifecycle commands and unsafe handlers with actionable alternatives", async () => {
@@ -876,7 +899,7 @@ test("launcher rejects lifecycle commands and unsafe handlers with actionable al
     "--wizard",
     "--no-wizard",
   ]) {
-    for (const args of [[flag], ["run", flag], ["run", "--", flag], [flag, "run"]]) {
+    for (const args of [[flag], ["run", flag], ["run", "--", flag], [flag, "run"], ["mcp", "list", "--help", flag]]) {
       const result = await fixture.run(args)
       expect(result.code).toBe(2)
       expect(result.stdout).toBe("")
@@ -892,6 +915,10 @@ test("launcher service reads use the runtime credential and never invoke the bin
   expect(version.stdout.split("\0").slice(5, -1)).toEqual(["service", "get", "password", "--version"])
   // Read adapters work even when a release is unavailable; they cannot elect a server.
   await rm(`${fixture.home}/current`)
+  const configuration = await fixture.run(["service", "get"])
+  expect(configuration.code).toBe(0)
+  expect(configuration.stderr).toBe("")
+  expect(JSON.parse(configuration.stdout)).toEqual({ hostname: "127.0.0.1", port: 41234 })
   expect(await fixture.run(["service", "get", "password"])).toEqual({ code: 0, stdout: "fixture-secret\n", stderr: "" })
   expect(await fixture.run(["--print-logs", "service", "get", "port"])).toEqual({
     code: 0,
@@ -899,10 +926,6 @@ test("launcher service reads use the runtime credential and never invoke the bin
     stderr: "",
   })
   expect(await fixture.run(["service", "get", "hostname"])).toEqual({ code: 0, stdout: "127.0.0.1\n", stderr: "" })
-  const help = await fixture.run(["service", "get", "password", "--help"])
-  expect(help.code).toBe(0)
-  expect(help.stdout).toContain("Usage:")
-  expect(help.stdout).not.toContain("fixture-secret")
   await rm(`${fixture.home}/password`)
   expect((await fixture.run(["service", "get", "password"])).code).not.toBe(0)
   expect(await fixture.run(["service", "status"])).toEqual({ code: 0, stdout: "stopped\n", stderr: "" })

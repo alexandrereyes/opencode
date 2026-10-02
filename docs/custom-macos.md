@@ -21,7 +21,11 @@ bun run custom:activate <full-40-character-sha>
 uses `git archive HEAD`, installs frozen dependencies in the snapshot, typechecks
 CLI/TUI, app-custom and plugin-app-custom, builds the plugin and compiles the CLI
 with `--custom` (embedding **app-custom**, not app). CLI `--version` and `--help`
-are checked with isolated XDG directories. No server is started during prepare.
+are checked with isolated XDG directories. Before publication, `custom-parser-smoke.ts` checks
+the compiled binary's rejection of an inherited `--server` on unsupported commands, version
+actions triggered by `--version=false` / `--no-version`, `--` operand handling, and help actions.
+The harmless `debug paths home` handler is the execution sentinel. A changed parser contract
+fails preparation rather than silently changing launcher safety. No server is started during prepare.
 
 Each `releases/<sha>` contains:
 
@@ -165,7 +169,8 @@ copies the actual paths and environment from `environment.sh`. In the current in
 these are `~/.local/share/opencode/opencode.db` and `~/.config/opencode`.
 The server launcher preserves explicit XDG roots, falling back to runtime-specific roots for
 separately initialized runtimes. Identity/path variables override `environment`. Protect this file
-if it contains credentials. Never configure
+if it contains credentials. Both generated launchers, `bin/serve` and `bin/opencode2`, also contain
+these environment values and are private (mode 0700). Never configure
 a second global or project-local copy of the custom plugin; every Location loads the
 release-owned plugin build through normal plugin configuration.
 
@@ -174,7 +179,10 @@ normal config root (`/Users/you/.config`). `OPENCODE_CONFIG_DIR` selects OpenCod
 it does not override XDG for child tools such as `gh`, Homebrew, Stripe, or SwiftPM. Without this
 explicit setting, those tools inherit `<runtime>/config` and may use a different login/configuration
 from the user's terminal. Check their existing logins before changing it. This setting takes effect
-on the next activation; it does not change the running server's environment. Keep `<runtime>/config`:
+on the next activation that actually starts the service, for example when selecting a different
+release. Selecting an already healthy current release returns without rewriting either launcher
+or restarting the service, so that no-op does not apply changes to `manual.json`.
+Editing the file does not change the running server's environment. Keep `<runtime>/config`:
 the 4096 proxy reads `<runtime>/config/opencode/service-custom.json` by its fixed path, independent
 of XDG. The default remains isolated for development/test runtimes.
 
@@ -282,6 +290,7 @@ The launcher provides read-only service adapters without native service discover
   curl through stdin, not its command arguments. No service is started.
 - `service get password`: prints the existing runtime password; never generates one.
 - `service get port` / `service get hostname`: prints the configured port / `127.0.0.1`.
+- `service get`: prints hostname and port as JSON, omitting the password and environment.
 
 These adapters support `bun run dev:live` and `bun run dev:vite:live`. The installation still uses
 launchd supervision rather than the native managed-service registry.
@@ -301,6 +310,11 @@ would discover/start a server are rejected with a specific alternative:
 | `debug agents`            | `opencode api agent.list --param "location[directory]=$PWD"`                                       |
 | `debug config`            | `opencode api config.get --param "location[directory]=$PWD"`                                       |
 | `pair`                    | `opencode api server.pair`, then open `/auth/connect/<code>` on the custom server                  |
+
+`--help` or `-h` before `--` passes through to native help without a server flag, including
+`mcp list --help`, `pair --help`, and `-h serve`. The compiled-binary parser smoke verifies that
+help exits without invoking the command handler. Server/password/standalone overrides remain
+blocked even on help requests. A literal `--help` after `--` remains an operand.
 
 Use `custom:*` for lifecycle. The launcher rejects top-level `serve`, `upgrade`/`update`,
 `uninstall`, and `service start/stop/restart/set/unset`. It also rejects `acp`, which creates a
