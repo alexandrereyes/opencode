@@ -500,7 +500,7 @@ test("executes a selected slash command after creating its worktree", async ({ p
     .toEqual([
       {
         sessionID: pending.sessionID,
-        body: { command: "review", text: "latest commit", files: [], agents: [], skills: [], delivery: "steer" },
+        body: { name: "review", text: "latest commit", files: [], agents: [], skills: [], delivery: "steer" },
       },
     ])
   await expect(pending.shimmer).toHaveCount(0)
@@ -564,6 +564,8 @@ async function openDraft(
   const sessions = [currentSession({ id: otherID, projectID, title: "Other session" }, directory)]
   await mockOpenCodeServer(page, {
     directory,
+    // These tab-strip assertions need server-synced horizontal preferences.
+    tabLayout: "horizontal",
     project,
     provider: {
       all: [
@@ -730,7 +732,6 @@ async function openDraft(
         ]),
       )
       if (reviewClosed) {
-        localStorage.setItem("settings.v3", JSON.stringify({ appearance: { tabLayout: "horizontal" } }))
         localStorage.setItem(
           "opencode.window.browser.dat:tabs.panes",
           JSON.stringify({ [`draft:${draftID}`]: { review: false } }),

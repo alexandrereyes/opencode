@@ -119,6 +119,7 @@ test("subagent context uses bounded measurements, stays local while pending, and
     data: {
       sessionID: fixture.childID,
       assistantMessageID: "msg_context_003",
+      started: 3,
       agent: "solmedium",
       model: { providerID: large.providerID, id: large.id },
     },

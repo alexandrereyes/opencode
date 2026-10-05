@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import type { JsonValue, OpenCodeEvent, SessionMessageInfo } from "@opencode/client/promise"
+import type { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
 import { Duration, Effect, Layer } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
@@ -19,6 +20,7 @@ export interface MockServerConfig {
   snippets?: unknown[]
   skills?: unknown[]
   subscriptions?: unknown
+  tabLayout?: "horizontal" | "vertical"
   pageMessages: (
     sessionId: string,
     limit: number,
@@ -280,12 +282,14 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
           }
           if (ctx.params.rpcID === "custom.subscriptions" && ctx.params.method === "list") {
             return Effect.succeed({
-              output: config.subscriptions ?? {
-                status: "unavailable",
-                accounts: [],
-                automation: null,
-                anthropic: { status: "disabled", accounts: [], automation: null },
-              },
+              output:
+                config.subscriptions ??
+                ({
+                  status: "unavailable",
+                  accounts: [],
+                  automation: null,
+                  anthropic: { status: "disabled", accounts: [], automation: null },
+                } satisfies Subscriptions.Info),
             })
           }
           if (ctx.params.rpcID === "custom.preferences") {
@@ -303,7 +307,7 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
                     followUpBehavior: "steer",
                     autoApprove: false,
                     autoSave: true,
-                    tabLayout: "vertical",
+                    tabLayout: config.tabLayout ?? "vertical",
                     notifications: { agent: true, permissions: true, errors: false },
                   },
                 },
