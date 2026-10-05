@@ -10,22 +10,7 @@ test.beforeEach(async ({ page }) => {
     directory: fixture.directory,
     project: fixture.project,
     pageMessages,
-  })
-  await page.route("**/api/session/*/rename", async (route) => {
-    if (route.request().method() !== "POST") return route.fallback()
-    const id = new URL(route.request().url()).pathname.split("/").at(-2)
-    const session = sessions.find((item) => item.id === id)
-    const payload: unknown = route.request().postDataJSON()
-    if (
-      !session ||
-      !payload ||
-      typeof payload !== "object" ||
-      !("title" in payload) ||
-      typeof payload.title !== "string"
-    )
-      throw new Error("Invalid rename request")
-    session.title = payload.title
-    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+    tabLayout: "horizontal",
   })
   await page.goto("/")
   await page.locator('[data-component="home-session-row"]').filter({ hasText: fixture.expected.targetTitle }).click()
@@ -38,9 +23,17 @@ for (const commit of ["Enter", "blur", "click outside"]) {
     const input = page.locator('input[data-slot="session-title-child"]')
     await expect(input).toBeFocused()
     await input.fill("Renamed session")
+    const renamed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        new URL(response.url()).pathname === `/api/session/${fixture.targetID}`,
+    )
     if (commit === "Enter") await input.press("Enter")
     if (commit === "blur") await input.press("Tab")
     if (commit === "click outside") await page.locator('[data-component="composer-editor"]').click()
+    const response = await renamed
+    expect(response.status()).toBe(204)
+    expect(response.request().postDataJSON()).toEqual({ title: "Renamed session" })
     await expect(page.getByRole("heading", { name: "Renamed session", exact: true })).toBeVisible()
     await expect(page.locator('[data-slot="titlebar-tabs"] a').filter({ hasText: "Renamed session" })).toBeVisible()
     await page.reload()
@@ -59,9 +52,10 @@ test("cancels the session heading with Escape", async ({ page }) => {
 })
 
 test("keeps the draft when saving the session heading fails", async ({ page }) => {
-  await page.route("**/api/session/*/rename", (route) =>
-    route.fulfill({ status: 500, headers: { "access-control-allow-origin": "*" } }),
-  )
+  await page.route(`**/api/session/${fixture.targetID}`, (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback()
+    return route.fulfill({ status: 500, headers: { "access-control-allow-origin": "*" } })
+  })
   await page.getByRole("heading", { name: fixture.expected.targetTitle, exact: true }).click()
   const input = page.locator('input[data-slot="session-title-child"]')
   await input.fill("Retry this title")
@@ -96,7 +90,13 @@ test("renames and closes the session tab from its context menu", async ({ page }
   const input = page.locator('[data-slot="tab-title"][contenteditable="true"]')
   await expect(input).toBeFocused()
   await input.fill("Renamed from tab")
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === `/api/session/${fixture.targetID}`,
+  )
   await input.press("Enter")
+  expect((await saved).status()).toBe(204)
   await expect(page.getByRole("heading", { name: "Renamed from tab", exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole("heading", { name: "Renamed from tab", exact: true })).toBeVisible()
@@ -120,7 +120,13 @@ test("renames an inactive tab without switching sessions", async ({ page }) => {
   const input = page.locator('[data-slot="tab-title"][contenteditable="true"]')
   await expect(input).toBeFocused()
   await input.fill("Inactive tab renamed")
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === `/api/session/${fixture.targetID}`,
+  )
   await input.press("Tab")
+  expect((await saved).status()).toBe(204)
   await expect(page.getByRole("heading", { name: fixture.expected.sourceTitle, exact: true })).toBeVisible()
   await expect(page).toHaveURL(new RegExp(`/session/${fixture.sourceID}$`))
   await page.locator('[data-slot="titlebar-tabs"] a').filter({ hasText: "Inactive tab renamed" }).click()

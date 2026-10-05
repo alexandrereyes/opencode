@@ -122,6 +122,7 @@ test.describe("smoke: session timeline", () => {
       directory: fixture.directory,
       project: fixture.project,
       pageMessages: (sessionID) => ({ items: fixture.messages[sessionID] ?? [] }),
+      tabLayout: "horizontal",
     })
     await configureSmokePage(page, fixture.directory)
     await page.addInitScript(
@@ -264,6 +265,7 @@ test.describe("smoke: session timeline", () => {
       directory: fixture.directory,
       project: fixture.project,
       pageMessages: (sessionID) => ({ items: fixture.messages[sessionID] ?? [] }),
+      tabLayout: "horizontal",
     })
     await configureSmokePage(page, fixture.directory)
     await page.addInitScript(
@@ -762,7 +764,7 @@ async function navigateToSession(page: Page, sessionId: string, expectedTitle: s
 
 async function switchTitlebarSession(page: Page, sessionID: string, title: string) {
   const href = `/server/${base64Encode(fixture.serverKey)}/session/${sessionID}`
-  const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
+  const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`)
   await expect(tab).toBeVisible()
   await tab.click()
   await expectSessionTitle(page, title)

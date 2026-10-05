@@ -10,15 +10,7 @@ test("renames, exports, and deletes a home session from its context menu", async
     directory: fixture.directory,
     project: fixture.project,
     pageMessages,
-  })
-  await page.route("**/api/session/*/rename", async (route) => {
-    const sessionID = new URL(route.request().url()).pathname.split("/").at(-2)
-    const session = sessions.find((item) => item.id === sessionID)
-    const payload: unknown = route.request().postDataJSON()
-    if (!payload || typeof payload !== "object" || !("title" in payload) || typeof payload.title !== "string")
-      throw new Error("Invalid rename payload")
-    if (session) session.title = payload.title
-    await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
+    tabLayout: "horizontal",
   })
   await page.addInitScript((directory) => {
     localStorage.setItem(
@@ -71,7 +63,7 @@ test("renames, exports, and deletes a home session from its context menu", async
   expect(await container.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none")
   await title.fill("Renamed from Home")
   const renamed = page.waitForRequest(
-    (request) => request.method() === "POST" && new URL(request.url()).pathname.endsWith("/rename"),
+    (request) => request.method() === "PATCH" && new URL(request.url()).pathname === `/api/session/${fixture.targetID}`,
   )
   await title.press("Enter")
   expect((await renamed).postDataJSON()).toEqual({ title: "Renamed from Home" })

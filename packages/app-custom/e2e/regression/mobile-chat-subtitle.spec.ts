@@ -40,7 +40,10 @@ test("mobile chat subtitles survive navigation updates while chat RPC is pending
   await expect(page.locator('[data-component="home-session-row"]').filter({ hasText: session.title })).toBeVisible()
   await page.getByRole("button", { name: "Tabs", exact: true }).tap()
   const drawer = page.locator('[data-slot="mobile-tabs-drawer"]')
-  const row = drawer.locator("[data-titlebar-tab]")
+  const row = drawer.locator("[data-titlebar-tab]").filter({
+    has: page.locator(`[data-titlebar-tab-link][href$="/session/${session.id}"]`),
+  })
+  await expect(row).toHaveCount(1)
   await expect(row.locator("[data-titlebar-tab-title]")).toHaveText(session.title)
   await expect(row.locator('[data-slot="tab-project"]')).toHaveText("Chats")
   rpc.hold = true
@@ -67,9 +70,9 @@ test("mobile chat subtitles survive navigation updates while chat RPC is pending
     durable: { aggregateID: session.id, seq: 4, version: 1 },
     data: { sessionID: session.id, location: { directory: session.directory }, projectID: fixture.project.id },
   })
-  await expect(row.locator('[data-slot="tab-project"]')).toHaveText("SmokeProject · main")
+  await expect(row.locator('[data-slot="tab-project"]')).toHaveText(`${fixture.project.name} · main`)
   const response = page.waitForResponse("**/api/rpc/custom.chats/info")
   release.resolve()
   await response
-  await expect(row.locator('[data-slot="tab-project"]')).toHaveText("SmokeProject · main")
+  await expect(row.locator('[data-slot="tab-project"]')).toHaveText(`${fixture.project.name} · main`)
 })
