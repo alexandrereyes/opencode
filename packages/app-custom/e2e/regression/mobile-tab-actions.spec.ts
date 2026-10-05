@@ -166,6 +166,11 @@ test("close tab acts immediately and adjusts the reveal width", async ({ page })
   await target.getByRole("button", { name: "Close tab", exact: true }).tap()
   await expect(page.getByRole("dialog", { name: "Close tab", exact: true })).toHaveCount(0)
   await expect(target.locator('[data-slot="mobile-tab-actions"]')).toHaveAttribute("data-action-count", "3")
+  await expect(target).toHaveAttribute("data-revealed", "true")
+  await expect(target.locator('[data-slot="mobile-tab-content"]')).toHaveCSS(
+    "transform",
+    "matrix(1, 0, 0, 1, -132, 0)",
+  )
   await swipe(page, target.locator("[data-titlebar-tab-link]"), -110)
   await expect(target.locator('[data-slot="mobile-tab-content"]')).toHaveCSS(
     "transform",

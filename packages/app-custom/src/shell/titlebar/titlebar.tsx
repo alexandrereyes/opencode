@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
-import { createStore, unwrap } from "solid-js/store"
+import { createStore, reconcile, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { IconButton } from "@opencode/ui-custom/icon-button"
@@ -21,7 +21,7 @@ import { createMediaQuery } from "@solid-primitives/media"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/shell/titlebar/session-events"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
-import { tabKey, useTabs } from "@/shell/tabs/tabs"
+import { tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import type { ComposerState } from "@/composer/persistence"
 import type { PromptModel } from "@/composer/state"
 import "./titlebar.css"
@@ -634,9 +634,19 @@ export function Titlebar(props: {
                 projects: mobileProjects().map((project) => mobileProjectRows(project.key)),
               })
             })
-            const orderedMobileTabs = createMemo(() =>
-              mobileSessionTabs(tabsStore, mobileCanonicalRows(), (tab) => !!tabs.pendingSession(tab.server, tab.sessionId)),
-            )
+            // Keep swipe rows mounted when a closed tab is rebuilt from the sidebar.
+            const [mobileTabRows, setMobileTabRows] = createStore<{ key: string; tab: Tab }[]>([])
+            createEffect(() => {
+              setMobileTabRows(
+                reconcile(
+                  mobileSessionTabs(tabsStore, mobileCanonicalRows(), (tab) =>
+                    !!tabs.pendingSession(tab.server, tab.sessionId),
+                  ).map((tab) => ({ key: tabKey(tab), tab: { ...tab } })),
+                  { key: "key" },
+                ),
+              )
+            })
+            const orderedMobileTabs = () => mobileTabRows.map((row) => row.tab)
             const mobileCanonicalSessions = createMemo(
               () =>
                 new Map(
