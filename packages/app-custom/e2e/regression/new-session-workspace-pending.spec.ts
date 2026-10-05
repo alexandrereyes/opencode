@@ -77,11 +77,11 @@ test("preserves draft MCP choices and the created worktree when MCP preparation 
   expect(mock.prompts).toEqual([])
   expect(mock.worktreeRequests).toEqual([{ projectID, from: directory, branch: "main" }])
 
-  await page.getByRole("button", { name: "Configured MCP servers", exact: true }).click()
-  const picker = page.getByRole("dialog", { name: "Configured MCP servers", exact: true })
-  await expect(picker.getByText("Failed", { exact: true })).toBeVisible()
-  await expect(picker.getByRole("switch")).toBeChecked()
-  await page.keyboard.press("Escape")
+  const failed = page
+    .getByRole("group", { name: "Configured MCP servers", exact: true })
+    .getByRole("switch", { name: "draft-server", exact: true })
+  await expect(failed).toHaveAttribute("data-status", "failed")
+  await expect(failed).toBeChecked()
 
   mock.retryMcp()
   await page.locator('[data-action="composer-submit"]').click()
@@ -762,13 +762,12 @@ async function openDraft(
 }
 
 async function chooseDraftMcp(page: Page, requests: { action: "connect" | "disconnect"; directory: string }[]) {
-  await page.getByRole("button", { name: "Configured MCP servers", exact: true }).click()
-  const picker = page.getByRole("dialog", { name: "Configured MCP servers", exact: true })
-  const toggle = picker.getByRole("switch")
-  await expect(picker.getByText("draft-server", { exact: true })).toBeVisible()
+  const toggle = page
+    .getByRole("group", { name: "Configured MCP servers", exact: true })
+    .getByRole("switch", { name: "draft-server", exact: true })
   // The source server is connected, but preview follows its fetched config default (disabled).
   await expect(toggle).not.toBeChecked()
-  await picker.locator('[data-slot="switch-control"]').click()
+  await toggle.click()
   await expect(toggle).toBeChecked()
   await expect
     .poll(() =>
@@ -781,7 +780,6 @@ async function chooseDraftMcp(page: Page, requests: { action: "connect" | "disco
     )
     .toBe(true)
   expect(requests).toEqual([])
-  await page.keyboard.press("Escape")
 }
 
 async function submitPending(page: Page, mock: Awaited<ReturnType<typeof openDraft>>, prompt = text) {
