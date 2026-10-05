@@ -149,7 +149,13 @@ test("rename opens the inline editor directly", async ({ page }) => {
   const title = target.locator('[data-titlebar-tab-title][contenteditable="true"]')
   await expect(title).toBeFocused()
   await title.fill("Renamed from mobile drawer")
+  const renamed = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === `/api/session/${fixture.targetID}`,
+  )
   await drawer(page).locator('[contenteditable="true"]').press("Enter")
+  expect((await renamed).status()).toBe(204)
   await expect(row(page, "Renamed from mobile drawer")).toBeVisible()
   await expect(page).toHaveURL(href(fixture.sourceID))
 })

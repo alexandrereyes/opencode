@@ -149,7 +149,8 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     }, 50)
     page.on("close", () => clearInterval(timer))
   }
-  const transport = createMockServerHandler(config)
+  const events: OpenCodeEvent[] = []
+  const transport = createMockServerHandler(config, events)
   page.on("close", () => void transport.dispose())
 
   await page.route("**/api/**", async (route) => {
@@ -172,6 +173,12 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
         body: body ? Uint8Array.from(body) : undefined,
       }),
     )
+    if (events.length) {
+      await page.evaluate(
+        (payloads) => (window as MockStreamWindow).__mockServerStream?.push(payloads),
+        events.splice(0) as unknown[],
+      )
+    }
     if (response.status === 404 && url.origin !== server) return route.fallback()
     return route.fulfill({
       status: response.status,
@@ -181,10 +188,12 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
   })
 }
 
-export function createMockServerHandler(config: MockServerConfig) {
+export function createMockServerHandler(config: MockServerConfig, events: OpenCodeEvent[] = []) {
   return HttpRouter.toWebHandler(
     HttpApiBuilder.layer(MockApi).pipe(
-      Layer.provide(mockHandlers(config, { cursors: new Map<string, string>(), nextCursor: 0 })),
+      Layer.provide(
+        mockHandlers(config, { cursors: new Map<string, string>(), nextCursor: 0, sequences: new Map() }, events),
+      ),
       Layer.provide(HttpServer.layerServices),
     ),
     { disableLogger: true },
@@ -194,11 +203,15 @@ export function createMockServerHandler(config: MockServerConfig) {
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
-  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "access-control-expose-headers": "x-next-cursor",
 }
 
-function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, string>; nextCursor: number }) {
+function mockHandlers(
+  config: MockServerConfig,
+  state: { cursors: Map<string, string>; nextCursor: number; sequences: Map<string, number> },
+  events: OpenCodeEvent[],
+) {
   const noContent = Effect.succeed(HttpApiSchema.NoContent.make())
   const delay = config.messageDelay === undefined ? Effect.void : Effect.sleep(Duration.millis(config.messageDelay))
   return HttpApiBuilder.group(MockApi, "mock", (handlers) =>
@@ -478,6 +491,30 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
             ? Effect.succeed({ data: currentSession(session, config.directory) })
             : Effect.fail(new MockNotFound({ message: "Session not found" }))
         },
+        sessionUpdate: (ctx) =>
+          Effect.gen(function* () {
+            const session = config.sessions.find((item) => item.id === ctx.params.sessionID)
+            if (!session) return yield* new MockNotFound({ message: "Session not found" })
+            if (ctx.payload.metadata !== undefined) session.metadata = ctx.payload.metadata
+            if (ctx.payload.permissions !== undefined) session.permissions = ctx.payload.permissions
+            if (ctx.payload.title) {
+              const seq = (state.sequences.get(session.id) ?? 0) + 1
+              state.sequences.set(session.id, seq)
+              const current = currentSession(session, config.directory)
+              const created = Date.now()
+              session.title = ctx.payload.title
+              session.time = { ...current.time, updated: created }
+              events.push({
+                id: `evt_mock_${session.id}_${seq}`,
+                created,
+                durable: { aggregateID: session.id, seq, version: 1 },
+                location: { ...current.location, directory: current.location.directory ?? config.directory },
+                type: "session.renamed",
+                data: { sessionID: session.id, title: ctx.payload.title },
+              })
+            }
+            return HttpApiSchema.NoContent.make()
+          }),
         sessionRemove: () => noContent,
         sessionShell: () => noContent,
         sessionForm: (ctx) => {

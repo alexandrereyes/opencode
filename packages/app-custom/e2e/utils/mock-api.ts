@@ -1,4 +1,6 @@
 import { Schema, SchemaGetter } from "effect"
+import { Session } from "@opencode/schema/session"
+import { Permission } from "@opencode/schema/permission"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 const Json = Schema.Json.pipe(
@@ -140,6 +142,18 @@ const Group = HttpApiGroup.make("mock")
     HttpApiEndpoint.get("sessionGet", "/api/session/:sessionID", {
       params: SessionParams,
       success: Json,
+      error: MockNotFound.pipe(HttpApiSchema.status(404)),
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("sessionUpdate", "/api/session/:sessionID", {
+      params: SessionParams,
+      payload: Schema.Struct({
+        title: Schema.optional(Schema.String),
+        metadata: Schema.optional(Session.Metadata),
+        permissions: Schema.optional(Permission.Ruleset),
+      }),
+      success: NoContent,
       error: MockNotFound.pipe(HttpApiSchema.status(404)),
     }),
   )

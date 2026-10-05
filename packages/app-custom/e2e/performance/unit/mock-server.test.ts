@@ -1,6 +1,63 @@
 import { expect, test } from "bun:test"
 import type { Page, Route } from "@playwright/test"
+import type { OpenCodeEvent } from "@opencode/client/promise"
 import { createMockServerHandler, mockOpenCodeServer } from "../../utils/mock-server"
+
+test("updates a session title with a no-content response and a rename event", async () => {
+  const events: OpenCodeEvent[] = []
+  const server = createMockServerHandler(
+    {
+      provider: {},
+      directory: "/workspace/rename",
+      project: {},
+      sessions: [{ id: "ses_rename", title: "Original title" }],
+      pageMessages: () => ({ items: [] }),
+    },
+    events,
+  )
+  try {
+    const response = await server.handler(
+      new Request("http://localhost/api/session/ses_rename", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Renamed title" }),
+      }),
+    )
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe("")
+    expect(events).toEqual([
+      {
+        id: "evt_mock_ses_rename_1",
+        created: expect.any(Number),
+        type: "session.renamed",
+        durable: { aggregateID: "ses_rename", seq: 1, version: 1 },
+        location: { directory: "/workspace/rename" },
+        data: { sessionID: "ses_rename", title: "Renamed title" },
+      },
+    ])
+    const session = await server.handler(new Request("http://localhost/api/session/ses_rename"))
+    expect(await session.json()).toMatchObject({ data: { id: "ses_rename", title: "Renamed title" } })
+    const missing = await server.handler(
+      new Request("http://localhost/api/session/ses_missing", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Missing title" }),
+      }),
+    )
+    expect(missing.status).toBe(404)
+    const invalid = await server.handler(
+      new Request("http://localhost/api/session/ses_rename", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: 123 }),
+      }),
+    )
+    expect(invalid.status).toBe(400)
+    expect(events).toHaveLength(1)
+  } finally {
+    await server.dispose()
+  }
+})
 
 test("serves an empty config document list for composer defaults", async () => {
   const server = createMockServerHandler({
