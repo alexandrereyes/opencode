@@ -112,6 +112,9 @@ export function useSessionLifecycleActions() {
     archive: async (server: ServerConnection.Key, session: SessionInfo) => {
       await run([{ server, session }], "archive")
     },
+    remove: async (server: ServerConnection.Key, session: SessionInfo) => {
+      await run([{ server, session }], "remove")
+    },
     showArchive: (server: ServerConnection.Key, session: SessionInfo) =>
       dialog.show(() => (
         <SessionActionConfirmationDialog

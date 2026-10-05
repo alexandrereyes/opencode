@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
 import { useLanguage } from "@/runtime/i18n/language"
+import { SessionDeleteButton } from "./session-delete-button"
 
 const actionWidth = 44
 const intentThreshold = 8
@@ -166,19 +167,11 @@ export function MobileTabActions(
             }}
           />
         </Show>
-        <IconButton
-          variant="ghost-muted"
+        <SessionDeleteButton
           data-action="mobile-tab-delete"
-          style={{ color: "var(--v2-state-fg-danger)" }}
-          icon={<Icon name="trash" />}
-          aria-label={language.t("common.delete")}
-          aria-disabled={props.pending}
+          disabled={props.pending}
           tabIndex={revealed() ? 0 : -1}
-          onClick={(event) => {
-            if (props.pending) return
-            event.currentTarget.focus({ preventScroll: true })
-            props.onDelete()
-          }}
+          onConfirm={props.onDelete}
         />
       </div>
       <div

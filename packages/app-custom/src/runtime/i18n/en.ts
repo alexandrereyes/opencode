@@ -1850,6 +1850,7 @@ export const dict = {
     'Delete session "{{name}}" and all its child sessions? This permanently deletes their messages and cannot be undone.',
   "session.delete.confirm": 'Delete session "{{name}}"?',
   "session.delete.button": "Delete session",
+  "session.delete.confirmAction": "Confirm deletion",
   "session.archive.title": "Archive session",
   "session.archive.confirm": 'Archive session "{{name}}"? You can restore it from archived sessions.',
 

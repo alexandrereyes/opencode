@@ -280,7 +280,12 @@ function mockHandlers(config: MockServerConfig, state: { cursors: Map<string, st
           }
           if (ctx.params.rpcID === "custom.subscriptions" && ctx.params.method === "list") {
             return Effect.succeed({
-              output: config.subscriptions ?? { status: "unavailable", accounts: [] },
+              output: config.subscriptions ?? {
+                status: "unavailable",
+                accounts: [],
+                automation: null,
+                anthropic: { status: "disabled", accounts: [], automation: null },
+              },
             })
           }
           if (ctx.params.rpcID === "custom.preferences") {

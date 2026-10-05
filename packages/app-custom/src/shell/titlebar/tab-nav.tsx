@@ -21,6 +21,7 @@ import { canOpenTabRename, forwardTabRef } from "./tab-gesture"
 import { TabPreviewPopover } from "./tab-popover"
 import { useSessionLifecycleActions } from "@/session/lifecycle-actions"
 import { MobileTabActions, useMobileTabs } from "./mobile-tab-actions"
+import { SessionDeleteButton } from "./session-delete-button"
 import { tabKey } from "@/shell/tabs/tabs"
 import { getRelativeTime } from "@/shell/time"
 import { getFilename } from "@opencode/util/path"
@@ -647,20 +648,13 @@ export function TabNavItem(props: {
                   }
                 }}
               />
-              <IconButton
+              <SessionDeleteButton
                 size="small"
-                variant="ghost-muted"
                 disabled={props.dragging || lifecyclePending()}
-                icon={<Icon name="trash" />}
-                style={{ color: "var(--v2-state-fg-danger)" }}
-                aria-label={language.t("common.delete")}
-                title={language.t("common.delete")}
-                on:click={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
+                onConfirm={() => {
                   if (props.session && !props.dragging && !lifecyclePending()) {
                     setPopoverOpen(false)
-                    void lifecycle.showDelete(props.server, props.session)
+                    void lifecycle.remove(props.server, props.session)
                   }
                 }}
               />
@@ -732,7 +726,7 @@ export function TabNavItem(props: {
                 if (props.session) void lifecycle.showArchive(props.server, props.session)
               }}
               onDelete={() => {
-                if (props.session) void lifecycle.showDelete(props.server, props.session)
+                if (props.session) void lifecycle.remove(props.server, props.session)
               }}
               onClose={() => {
                 if (!lifecyclePending()) props.onClose()
