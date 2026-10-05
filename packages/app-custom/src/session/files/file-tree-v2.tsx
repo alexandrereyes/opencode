@@ -6,6 +6,7 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   Show,
   splitProps,
   type ComponentProps,
@@ -146,7 +147,7 @@ export default function FileTreeV2(props: {
   const openIn = platform.platform === "desktop" ? useOpenInApp({ path: () => location().directory }) : undefined
   const live = () => props.allowed === undefined
   const draggable = () => props.draggable ?? true
-  const active = () => normalizeFileTreeV2Path(props.active ?? "")
+  const active = () => (file.absolute(props.active ?? "") ? "" : normalizeFileTreeV2Path(props.active ?? ""))
   const model = createMemo(() => (live() ? undefined : buildFileTreeV2Model(props.allowed ?? [])))
   const expanded = (path: string) => file.tree.state(path)?.expanded ?? !live()
   const rows = createMemo(() => {
@@ -182,9 +183,21 @@ export default function FileTreeV2(props: {
     void file.tree.list("")
   })
 
+  let scrolledActive: string | undefined
+  // Reveal on file/context changes, not when the user collapses a directory.
+  createEffect(
+    on([active, () => location().directory, live], ([path]) => {
+      scrolledActive = undefined
+      if (!path) return
+      const parts = path.split("/")
+      parts.slice(0, -1).forEach((_, index) => {
+        file.tree.expand(parts.slice(0, index + 1).join("/"), live() ? undefined : { list: false })
+      })
+    }),
+  )
+
   // Only scroll when the active path changes (or first appears in the tree).
   // Do not re-scroll when expand/collapse reshuffles `rows()`.
-  let scrolledActive: string | undefined
   createEffect(() => {
     const path = active()
     if (!path) {
@@ -196,9 +209,9 @@ export default function FileTreeV2(props: {
     if (scrolledActive === path) return
     scrolledActive = path
     queueMicrotask(() => {
+      if (active() !== path) return
       const next = rows().findIndex((row) => row.node.path === path)
       if (next < 0) return
-      if (virtualizer.range && next >= virtualizer.range.startIndex && next <= virtualizer.range.endIndex) return
       virtualizer.scrollToIndex(next, { align: "auto" })
     })
   })
