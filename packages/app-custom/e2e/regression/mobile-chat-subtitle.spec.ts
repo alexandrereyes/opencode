@@ -16,9 +16,8 @@ test("mobile chat subtitles survive navigation updates while chat RPC is pending
     time: { created: Date.now(), updated: Date.now() },
   }
   const events: OpenCodeEvent[] = []
-  const request = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
-  const rpc = { hold: false }
+  const rpc = { hold: false, pending: 0 }
   await mockOpenCodeServer(page, {
     directory: fixture.directory,
     project: fixture.project,
@@ -29,11 +28,13 @@ test("mobile chat subtitles survive navigation updates while chat RPC is pending
   })
   await page.route("**/api/rpc/custom.chats/info", async (route) => {
     if (route.request().method() === "OPTIONS") return route.fallback()
-    if (rpc.hold) {
-      request.resolve()
+    const held = rpc.hold
+    if (held) {
+      rpc.pending += 1
       await release.promise
     }
     await route.fulfill({ json: { output: { root } }, headers: { "access-control-allow-origin": "*" } })
+    if (held) rpc.pending -= 1
   })
   // No open session tab: the mobile drawer builds this item from the navigation index.
   await page.goto("/")
@@ -46,33 +47,59 @@ test("mobile chat subtitles survive navigation updates while chat RPC is pending
   await expect(row).toHaveCount(1)
   await expect(row.locator("[data-titlebar-tab-title]")).toHaveText(session.title)
   await expect(row.locator('[data-slot="tab-project"]')).toHaveText("Chats")
+  const mounted = await row.elementHandle()
+  if (!mounted) throw new Error("Mobile chat row did not mount")
   rpc.hold = true
 
-  for (const seq of [1, 2, 3]) {
-    session.title = `Mobile chat update ${seq}`
-    events.push({
-      id: `evt_chat_subtitle_${seq}`,
-      created: seq,
-      type: "session.renamed",
-      durable: { aggregateID: session.id, seq, version: 1 },
-      data: { sessionID: session.id, title: session.title },
-    })
-    await expect(row.locator("[data-titlebar-tab-title]")).toHaveText(session.title)
-    await request.promise
-    await expect(row.locator('[data-slot="tab-project"]')).toHaveText("Chats")
+  // Reconnection refreshes chat info even when navigation updates keep the row mounted.
+  events.push({ id: "evt_chat_reconnected", type: "server.connected", data: {} })
+  try {
+    await expect.poll(() => rpc.pending).toBeGreaterThan(0)
+    for (const seq of [1, 2, 3]) {
+      session.title = `Mobile chat update ${seq}`
+      events.push({
+        id: `evt_chat_subtitle_${seq}`,
+        created: seq,
+        type: "session.renamed",
+        durable: { aggregateID: session.id, seq, version: 1 },
+        data: { sessionID: session.id, title: session.title },
+      })
+      await expect(row.locator("[data-titlebar-tab-title]")).toHaveText(session.title)
+      await expect(row.locator('[data-slot="tab-project"]')).toHaveText("Chats")
+      expect(await mounted.evaluate((element) => element.isConnected)).toBe(true)
+      expect(rpc.pending).toBeGreaterThan(0)
+    }
+
+    for (const [index, move] of [
+      { directory: fixture.directory, label: `${fixture.project.name} · main` },
+      { directory: `${root}/moved-chat`, label: "Chats" },
+    ].entries()) {
+      session.directory = move.directory
+      events.push({
+        id: `evt_chat_subtitle_moved_${index}`,
+        created: index + 4,
+        type: "session.moved",
+        durable: { aggregateID: session.id, seq: index + 4, version: 1 },
+        data: { sessionID: session.id, location: { directory: session.directory }, projectID: fixture.project.id },
+      })
+      await expect(row.locator('[data-slot="tab-project"]')).toHaveText(move.label)
+      expect(await mounted.evaluate((element) => element.isConnected)).toBe(true)
+      expect(rpc.pending).toBeGreaterThan(0)
+    }
+  } finally {
+    release.resolve()
   }
+  await expect.poll(() => rpc.pending).toBe(0)
+  await expect(row.locator('[data-slot="tab-project"]')).toHaveText("Chats")
 
   session.directory = fixture.directory
   events.push({
-    id: "evt_chat_subtitle_moved",
-    created: 4,
+    id: "evt_chat_subtitle_moved_after_refresh",
+    created: 6,
     type: "session.moved",
-    durable: { aggregateID: session.id, seq: 4, version: 1 },
+    durable: { aggregateID: session.id, seq: 6, version: 1 },
     data: { sessionID: session.id, location: { directory: session.directory }, projectID: fixture.project.id },
   })
   await expect(row.locator('[data-slot="tab-project"]')).toHaveText(`${fixture.project.name} · main`)
-  const response = page.waitForResponse("**/api/rpc/custom.chats/info")
-  release.resolve()
-  await response
-  await expect(row.locator('[data-slot="tab-project"]')).toHaveText(`${fixture.project.name} · main`)
+  expect(await mounted.evaluate((element) => element.isConnected)).toBe(true)
 })
