@@ -295,8 +295,9 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await expect(editor.locator(`[data-mention="session"][data-id="${firstID}"]`)).toHaveText("@Shared work")
   await page.evaluate(() => {
     window.dispatchEvent(new Event("restore-client-rects"))
-    delete (window.visualViewport as Partial<VisualViewport>).offsetTop
-    delete (window.visualViewport as Partial<VisualViewport>).height
+    const viewport = window.visualViewport as { offsetTop?: number; height?: number }
+    delete viewport.offsetTop
+    delete viewport.height
     window.visualViewport?.dispatchEvent(new Event("resize"))
   })
   for (const value of [

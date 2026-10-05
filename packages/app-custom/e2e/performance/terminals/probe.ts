@@ -51,7 +51,8 @@ Terminal.prototype.open = function (element) {
     context.drawImage = function (...args: unknown[]) {
       probe.draws++
       if (hidden) probe.hiddenDraws++
-      draw.apply(this, args)
+      // oxlint-disable-next-line no-restricted-globals -- Forward every native drawImage overload without changing its receiver or arguments.
+      Reflect.apply(draw, this, args)
     }
   }
 }

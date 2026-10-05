@@ -48,6 +48,7 @@ async function setup(page: Page) {
       sandboxes: [],
     },
     sessions,
+    pageMessages: () => ({ items: [] }),
     // A pending question keeps the session execution running; the request must still win.
     sessionStatus: { ses_question: { type: "running" }, ses_busy: { type: "running" } },
     provider: {

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import type { SessionMessageInfo } from "@opencode/client/promise"
 import { base64Encode } from "@opencode/util/encode"
 import { timelinePresets } from "@opencode/session-ui-custom/timeline/detail"
 import { mockOpenCodeServer } from "../utils/mock-server"
@@ -24,7 +25,7 @@ for (const viewport of [
       provider: { all: [], connected: [], default: {} },
       sessions: [session()],
       subscriptions: { status: "unavailable", accounts: [], anthropic: { status: "unavailable", accounts: [] } },
-      pageMessages: () => ({
+      pageMessages: (): { items: SessionMessageInfo[] } => ({
         items: [
           userMessage(undefined, { created: 1 }),
           {

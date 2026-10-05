@@ -136,7 +136,8 @@ export async function installTimelineStreamProbe(
           }
           if (state.scroll.lastCallFrame === state.scroll.frame) state.scroll.sameFrameCalls += 1
           state.scroll.lastCallFrame = state.scroll.frame
-          scrollTo.apply(this, typeof first === "number" ? [first, second] : [first])
+          // oxlint-disable-next-line no-restricted-globals -- The probe forwards both native scrollTo overloads with their original receiver and arity.
+          Reflect.apply(scrollTo, this, typeof first === "number" ? [first, second] : [first])
         }
         Element.prototype.scrollTo = measuredScrollTo
         Object.defineProperty(Element.prototype, "scrollTop", {
