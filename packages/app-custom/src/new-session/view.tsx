@@ -97,7 +97,7 @@ export function NewSessionView(props: {
                 </Show>
               </div>
               <Composer model={props.composer} />
-              <Show when={props.project.selected()}>
+              <Show when={props.project.selected() || props.project.chat()}>
                 <DraftMcpBar mcp={props.mcp} />
               </Show>
             </div>
