@@ -147,6 +147,7 @@ it.live(
             observedAt: "2026-09-12T12:00:00Z",
             stale: false,
             hasCapacity: true,
+            credits: null,
           },
         ],
         automation: null,
