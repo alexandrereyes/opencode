@@ -1,9 +1,11 @@
 export * as LocationActivity from "./location-activity.js"
 
-import { Clock, Context, Duration, Effect, Layer, RcMap, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, RcMap, Schema } from "effect"
 import { Bus } from "./bus.js"
+import { Form } from "./form.js"
 import { Location } from "./location.js"
 import { LocationServiceMap } from "./location-service-map.js"
+import { Permission } from "./permission.js"
 import { SessionEvent } from "./session/event.js"
 import { SessionExecution } from "./session/execution.js"
 import { SessionStore } from "./session/store.js"
@@ -29,6 +31,16 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
         Effect.sync(() => {
           entries.set(key(ref), { ref, expiresAt: clock.currentTimeMillisUnsafe() + timeToLive })
         })
+      const awaitingUser = (ref: Location.Ref, sessionIDs: ReadonlySet<string>) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const services = yield* locations.contextEffectOption(ref)
+            if (Option.isNone(services)) return false
+            const forms = yield* Context.get(services.value, Form.Service).list()
+            const permissions = yield* Context.get(services.value, Permission.Service).list()
+            return [...forms, ...permissions].some((item) => sessionIDs.has(item.sessionID))
+          }),
+        ).pipe(Effect.orElseSucceed(() => false))
 
       const unsubscribe = yield* bus.listen((event) => {
         if (!isSessionEvent(event)) return Effect.void
@@ -58,6 +70,12 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
               const owners = active.flatMap((session) =>
                 session && key(session.location) === key(entry.ref) ? [session] : [],
               )
+              // Waiting on a question or permission emits no Session events; keep the
+              // Location alive instead of interrupting work the user has yet to answer.
+              if (owners.length > 0 && (yield* awaitingUser(entry.ref, new Set(owners.map((session) => session.id))))) {
+                yield* touch(entry.ref)
+                return
+              }
               // Invalidation only detaches the cache entry; borrowers retain the old
               // graph. Stop its executions and settle tool cleanup before detaching it.
               yield* Effect.forEach(
