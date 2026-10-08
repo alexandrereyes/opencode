@@ -57,6 +57,7 @@ export function TabNavItem(props: {
   projectMetadataIcon?: boolean
   showProjectBranch?: boolean
   projectBranch?: string
+  projectWorktree?: string
   chatMetadataIcon?: boolean
   chat?: boolean
   compact?: boolean
@@ -140,7 +141,9 @@ export function TabNavItem(props: {
     const session = props.session
     if (!name || !props.showProjectBranch || !session || chat()) return name
     const branch = props.projectBranch ?? serverCtx()?.data.location.vcs.info(session.location)?.branch.current
-    return `${name} · ${branch && branch !== "HEAD" ? branch : "-"}`
+    if (branch && branch !== "HEAD") return `${name} · ${branch}`
+    const worktree = getFilename(props.projectWorktree ?? session.location.directory)
+    return worktree && worktree !== name ? `${name} · ${worktree}` : name
   })
   const mobileProjectLabel = createMemo(() => {
     const session = props.session

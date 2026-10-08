@@ -373,6 +373,7 @@ export function SessionSidebar(props: {
         projectMetadataIcon={props.projectMetadataIcon}
         showProjectBranch={props.projectMetadataIcon}
         projectBranch={branchLabel() ? entry()?.worktrees.branch(props.item.session.location.directory) : undefined}
+        projectWorktree={branchLabel() ? entry()?.worktrees.worktree(props.item.session.location.directory) : undefined}
         chatMetadataIcon={props.item.chat && props.projectMetadataIcon}
         chat={props.item.chat}
         projectLabel={

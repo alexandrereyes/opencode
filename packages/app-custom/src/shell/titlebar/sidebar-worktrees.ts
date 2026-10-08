@@ -294,6 +294,8 @@ export function createSidebarWorktrees(ctx: Pick<ServerCtx, "sync" | "data" | "s
   return {
     group,
     branch,
+    worktree: (directory: string) =>
+      ctx.data.location.info({ directory })?.project.directory ?? state.located[pathKey(directory)]?.worktree,
     locate,
     async load(demand: () => { project: Project; rows: SidebarSession[] } | undefined) {
       const initial = demand()
