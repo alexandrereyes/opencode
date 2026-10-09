@@ -17,6 +17,9 @@ export { renderMermaidSvg } from "../src/components/markdown-mermaid"
 export { MarkdownWorkerDisposedError } from "../src/components/markdown-worker"
 export { preloadMarkdown }
 
+// Inline code naming one of these is a file link; any other path stays plain code.
+const existingFiles = new Set(["src/file.ts", "new/file.ts"])
+
 export async function mountMarkdown(options: {
   text: string
   streaming?: boolean
@@ -49,6 +52,7 @@ export async function mountMarkdown(options: {
           readImage={(path, signal) =>
             options.images ? readLocalImage(api, "C:/project", path, signal) : Promise.resolve(undefined)
           }
+          localFileExists={(path) => Promise.resolve(existingFiles.has(path))}
         >
           <Show when={visible()}>
             <Markdown

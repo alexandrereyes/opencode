@@ -64,7 +64,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
   const server = useServer()
   createEffect(() => {
     const sessionID = session.identity.sessionID()
-    if (sessionID) onCleanup(attachments.onPreview(server, sessionID, (path) => void artifacts.open(path)))
+    if (sessionID) onCleanup(attachments.onPreview(server, sessionID, (path) => void artifacts.open(path, "")))
   })
   const detailsProject = createMemo(() => {
     const info = session.data.info()
@@ -198,7 +198,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
   const review = createSessionReview({ session, screen, deferRender: () => store.deferRender })
   createEffect(
     on(
-      artifacts.opened,
+      [artifacts.opened, () => artifacts.picker().id],
       () => {
         if (isDesktop()) return
         session.layout.view().terminal.close()

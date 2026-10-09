@@ -37,7 +37,12 @@ import {
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 import { renderMermaidSvg } from "./markdown-mermaid"
 import { createMarkdownRenderer } from "./markdown-solid"
-import { useMarkdown, type OpenMarkdownLocalFile, type ReadMarkdownImage } from "../context/markdown"
+import {
+  useMarkdown,
+  type MarkdownLocalFileExists,
+  type OpenMarkdownLocalFile,
+  type ReadMarkdownImage,
+} from "../context/markdown"
 import { createMarkdownImages } from "./markdown-image"
 import { createImagePreview } from "./image-preview"
 
@@ -289,13 +294,34 @@ function markCodeLinks(root: HTMLDivElement) {
   }
 }
 
-function markInlineCode(root: HTMLDivElement) {
-  const codeNodes = Array.from(root.querySelectorAll(":not(pre) > code"))
-  for (const code of codeNodes) {
-    if (!(code instanceof HTMLElement)) continue
+// A path becomes a link once `localFileExists` says the file exists. A streaming block skips the check: its last code
+// span may still be half written, and the block renders again once it completes.
+function markInlineCode(
+  source: HTMLDivElement,
+  target: HTMLDivElement,
+  live: boolean,
+  localFileExists?: MarkdownLocalFileExists,
+) {
+  const checked = new Set<string>()
+  for (const code of source.querySelectorAll<HTMLElement>(":not(pre) > code")) {
     delete code.dataset.inlineCodeKind
-    const kind = inlineCodeKind(code.textContent ?? "")
-    if (kind) code.dataset.inlineCodeKind = kind
+    const text = (code.textContent ?? "").trim()
+    const kind = inlineCodeKind(text)
+    if (kind === "url") code.dataset.inlineCodeKind = kind
+    // Code inside a link already goes where the link does.
+    if (kind !== "path" || live || !localFileExists || code.closest("a") || checked.has(text)) continue
+    checked.add(text)
+    void Promise.resolve(localFileExists(text))
+      .then((exists) => {
+        if (!exists) return
+        target.querySelectorAll<HTMLElement>(":not(pre) > code").forEach((node) => {
+          if (node.closest("a") || (node.textContent ?? "").trim() !== text) return
+          node.dataset.inlineCodeKind = "path"
+          node.tabIndex = 0
+          node.setAttribute("role", "link")
+        })
+      })
+      .catch(() => undefined)
   }
 }
 
@@ -579,7 +605,7 @@ export function Markdown(
     })
     activeCodeKeys.clear()
     nextCodeKeys.forEach((key) => activeCodeKeys.add(key))
-    content.forEach((block, index) => updateBlock(container, index, block, labels))
+    content.forEach((block, index) => updateBlock(container, index, block, labels, markdown?.localFileExists))
     while (container.children.length > content.length) {
       const child = container.lastElementChild
       if (!child) break
@@ -668,7 +694,13 @@ function disposeCode(key: string) {
   disposeStreamingCode(key)
 }
 
-function updateBlock(container: HTMLDivElement, index: number, block: RenderedBlock, labels: CopyLabels) {
+function updateBlock(
+  container: HTMLDivElement,
+  index: number,
+  block: RenderedBlock,
+  labels: CopyLabels,
+  localFileExists?: MarkdownLocalFileExists,
+) {
   const current = container.children[index]
   if (block.mode === "code") {
     updateCodeBlock(container, current, block, labels)
@@ -678,19 +710,27 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
     current instanceof HTMLDivElement && current.dataset.markdownKey === block.key && !renderedCodeTokens.has(current)
       ? current
       : undefined
-  if (existing?.dataset.markdownHash === block.hash) return
+  if (existing?.dataset.markdownHash === block.hash) {
+    // A block that finishes streaming keeps its DOM and the user's selection; only its file paths get checked now.
+    if (existing.dataset.markdownMode === "live" && block.mode !== "live") {
+      existing.dataset.markdownMode = block.mode
+      markInlineCode(existing, existing, false, localFileExists)
+    }
+    return
+  }
 
   const next = existing ?? document.createElement("div")
   next.dataset.markdownBlock = ""
   next.dataset.markdownKey = block.key
   next.dataset.markdownHash = block.hash
+  next.dataset.markdownMode = block.mode
   next.style.display = "contents"
   const rendered = renderedMarkdown.get(next)
   // Keep live renderers in control of their DOM, including after completion.
   const source = rendered || block.mode === "live" ? document.createElement("div") : next
   if (source === next) disposeCopyButtons(next)
   source.innerHTML = block.html
-  markInlineCode(source)
+  markInlineCode(source, next, block.mode === "live", localFileExists)
   markCodeLinks(source)
 
   if (rendered) {

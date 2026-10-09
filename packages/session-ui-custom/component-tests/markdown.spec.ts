@@ -118,7 +118,7 @@ story("mounts cached completed Markdown with sanitized HTML and decorations", as
       fixture,
       text: [
         "# Completed response",
-        "`src/file.ts` and `https://example.com/docs` and [link](https://example.com)",
+        "`src/file.ts` and `missing.ts` and `https://example.com/docs` and [link](https://example.com)",
         '<img src="missing" onerror="alert(1)"><script>alert(2)</script><a href="javascript:alert(3)">unsafe</a>',
         "```ts\nconst answer = 42\n```",
       ].join("\n\n"),
@@ -394,6 +394,20 @@ story("keeps live elements and selection when a stream completes and later chang
   await expect(markdown.locator("[data-markdown-word]")).toHaveCount(0)
   await harness.getByRole("button", { name: "Toggle Markdown" }).click()
   await expect(markdown).toHaveCount(0)
+})
+
+story("links existing inline paths only after the stream completes", async ({ page }) => {
+  await page.evaluate(async (fixture) => {
+    const { mountMarkdown } = await import(fixture)
+    await mountMarkdown({ text: "See `src/file.ts` and `missing.ts`", streaming: true })
+  }, fixture)
+  const harness = page.getByTestId("markdown-fixture")
+  const markdown = harness.locator('[data-component="markdown"]')
+  await expect(markdown.locator(":not(pre) > code")).toHaveCount(2)
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveCount(0)
+  await harness.getByLabel("Streaming").uncheck()
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveText("src/file.ts")
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveAttribute("role", "link")
 })
 
 story("replaces completed DOM before live rendering and retains streamed code copy actions", async ({ page }) => {

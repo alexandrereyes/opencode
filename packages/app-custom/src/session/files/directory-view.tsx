@@ -22,7 +22,7 @@ export function DirectoryView(props: { path: string; entries: DirectoryEntry[] }
               <button
                 type="button"
                 class="w-full min-w-0 h-6 flex items-center gap-x-1.5 rounded-md px-1.5 text-start hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors cursor-pointer"
-                onClick={() => void artifacts.open(entry.path)}
+                onClick={() => void artifacts.open(entry.path, "")}
               >
                 <FileIcon node={entry} class="size-4 shrink-0" />
                 <span class="flex-1 min-w-0 text-12-medium text-text-weak whitespace-nowrap truncate">

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
+import { createEffect, createMemo, For, Match, on, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode/ui-custom/button"
 import { Markdown } from "@opencode/session-ui-custom/markdown"
@@ -118,6 +118,7 @@ function ArtifactMarkdown(props: { path: string; text: string }) {
         parent?.readImage?.(artifacts.resolve(src, dir()), signal) ?? Promise.resolve(undefined)
       }
       openLocalFile={(href) => void artifacts.open(href, dir())}
+      localFileExists={(href) => untrack(() => artifacts.exists(href, dir()))}
     >
       <div data-slot="artifact-document">
         <Markdown text={props.text} />

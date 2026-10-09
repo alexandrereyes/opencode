@@ -21,9 +21,16 @@ export function SessionMobileFiles() {
     pathFromTab: file.pathFromTab,
     normalizeTab: file.tab,
   })
-  const [store, setStore] = createStore({ browsing: !tabs.activeFileTab() })
   const artifacts = useArtifactOpener()
+  const [store, setStore] = createStore({ browsing: !tabs.activeFileTab() || artifacts.picker().pending })
   createEffect(on(artifacts.opened, () => setStore("browsing", false), { defer: true }))
+  createEffect(
+    on(
+      () => artifacts.picker().id,
+      () => setStore("browsing", true),
+      { defer: true },
+    ),
+  )
   const browsing = () => store.browsing || !tabs.activeFileTab()
   const active = createMemo(() => file.pathFromTab(tabs.activeFileTab() ?? ""))
   const kinds = new Map<string, Kind>()

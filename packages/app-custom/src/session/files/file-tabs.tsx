@@ -14,6 +14,7 @@ import { ScrollView } from "@opencode/ui-custom/scroll-view"
 import { artifactKind } from "@/workspaces/files/artifact"
 import { ArtifactView } from "./artifact-view"
 import { DirectoryView } from "./directory-view"
+import { useArtifactOpener } from "./open-artifact"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/workspaces/files/model"
 import { useComments } from "@/composer/comments"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -184,6 +185,7 @@ export function SessionFileView(props: SessionFileViewProps) {
   const language = useLanguage()
   const prompt = useComposerState()
   const fileComponent = useFileComponent()
+  const artifacts = useArtifactOpener()
   const { sessionKey, tabs, view } = useSessionLayout()
   const activeFileTab = createSessionTabs({
     tabs,
@@ -382,6 +384,19 @@ export function SessionFileView(props: SessionFileViewProps) {
     commentsUi.note.openComment(target.id, target.selection, { cancelDraft: true })
     requestAnimationFrame(() => comments.clearFocus())
   })
+
+  // A link to a line of this file stored its selection and scroll; show them even when the tab was already open.
+  createEffect(
+    on(
+      () => artifacts.reveal().id,
+      () => {
+        if (artifacts.reveal().path !== path()) return
+        setNote("selected", null)
+        scrollSync.queueRestore()
+      },
+      { defer: true },
+    ),
+  )
 
   let prev = {
     loaded: false,

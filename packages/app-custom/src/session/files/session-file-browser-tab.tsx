@@ -1,4 +1,4 @@
-import { createMemo, createUniqueId, Show } from "solid-js"
+import { createEffect, createMemo, createUniqueId, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createQuery, keepPreviousData } from "@tanstack/solid-query"
 import { Icon } from "@opencode/ui-custom/icon"
@@ -15,6 +15,7 @@ import { SessionFileView } from "@/session/files/file-tabs"
 import { applyFileListKeyDown, SessionFileList } from "@/session/files/list"
 import { pathKey } from "@/workspaces/path-key"
 import { useServer } from "@/runtime/server/current"
+import { useArtifactOpener } from "@/session/files/open-artifact"
 
 const emptyFiles: string[] = []
 
@@ -48,6 +49,16 @@ export function SessionFileBrowserTab(props: {
   const filter = () => store.filter
   const setFilter = (value: string) => setStore("filter", value)
   const setExplicitHighlight = (value: string) => setStore("explicitHighlight", value)
+  const artifacts = useArtifactOpener()
+  let filterElement: HTMLInputElement | undefined
+  // A message link that names several files opens this picker filtered to the path it named.
+  createEffect(() => {
+    if (!artifacts.picker().pending) return
+    const query = artifacts.takePicker()
+    if (query === undefined) return
+    setFilter(query)
+    if (!props.mobile) queueMicrotask(() => filterElement?.focus())
+  })
   const sidebarOpened = () => props.placeholder || props.state.sidebarOpened()
   const query = createMemo(() => filter().trim())
   const search = createQuery(() => {
@@ -111,7 +122,10 @@ export function SessionFileBrowserTab(props: {
           onFilterChange={setFilter}
           onFilterKeyDown={onFilterKeyDown}
           filterAutofocus={props.placeholder && !props.mobile}
-          filterRef={(element) => props.filterRef?.(element)}
+          filterRef={(element) => {
+            filterElement = element
+            props.filterRef?.(element)
+          }}
           filterControls={resultsID}
           filterActiveDescendant={highlighted() ? optionID(highlighted()!) : undefined}
           filterExpanded={query().length > 0 && files().length > 0}
