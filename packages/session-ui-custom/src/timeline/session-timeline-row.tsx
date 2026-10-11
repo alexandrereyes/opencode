@@ -5,7 +5,6 @@ import type {
   SessionStatus,
 } from "@opencode/client/promise"
 import { useI18n } from "@opencode/ui-custom/context/i18n"
-import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import type {
@@ -171,40 +170,42 @@ export function createSessionTimelineRowRenderer(input: {
       })
       const key = () => `context:${row().group.key}`
       return (
-        <SessionContextToolGroup
-          parts={parts()}
-          patchGroupKey={(tools) => {
-            const parts = tools.map((tool) => patchPartKeys.get(tool)!)
-            // After a split, only the subgroup with the earliest surviving member keeps the old anchor.
-            const key =
-              parts
-                .map((part) => patchGroupKeys.get(part))
-                .find((key) => key !== undefined && parts.includes(patchOwners().get(key)!)) ?? parts[0]!
-            parts.forEach((part) => patchGroupKeys.set(part, key))
-            return key
-          }}
-          reasoningDefaultOpen={
-            input.timelineDetail
-              ? input.timelineDetail().thinking.details === "expanded"
-              : input.reasoningMode() === "full"
-          }
-          reasoningOpen={(id) => input.disclosure.value(id)}
-          onReasoningOpenChange={(id, open) => input.disclosure.set(id, open)}
-          toolDefaultOpen={(tool) => (input.timelineDetail ? contentDefaultOpen(tool) : false)}
-          toolOpen={(id) => input.disclosure.value(`${row().group.key}:tool:${id}`)}
-          onToolOpenChange={(id, open) => input.disclosure.set(`${row().group.key}:tool:${id}`, open)}
-          fileOpen={(path) =>
-            input.disclosure.value(`patch:${path}`) ?? input.timelineDetail?.().edit.details === "expanded"
-          }
-          onFileOpenChange={(path, open) => input.disclosure.set(`patch:${path}`, open)}
-          open={input.disclosure.value(key()) === true}
-          busy={
-            workingTurn(row().userMessageID) &&
-            input.projection.lastAssistantGroupKey().get(row().userMessageID) === row().group.key
-          }
-          onOpenChange={(open) => input.disclosure.set(key(), open)}
-          onSizeChange={onSizeChange}
-        />
+        <div class="contents" data-notices-only={parts().every((part) => part.type === "notice") ? "" : undefined}>
+          <SessionContextToolGroup
+            parts={parts()}
+            patchGroupKey={(tools) => {
+              const parts = tools.map((tool) => patchPartKeys.get(tool)!)
+              // After a split, only the subgroup with the earliest surviving member keeps the old anchor.
+              const key =
+                parts
+                  .map((part) => patchGroupKeys.get(part))
+                  .find((key) => key !== undefined && parts.includes(patchOwners().get(key)!)) ?? parts[0]!
+              parts.forEach((part) => patchGroupKeys.set(part, key))
+              return key
+            }}
+            reasoningDefaultOpen={
+              input.timelineDetail
+                ? input.timelineDetail().thinking.details === "expanded"
+                : input.reasoningMode() === "full"
+            }
+            reasoningOpen={(id) => input.disclosure.value(id)}
+            onReasoningOpenChange={(id, open) => input.disclosure.set(id, open)}
+            toolDefaultOpen={(tool) => (input.timelineDetail ? contentDefaultOpen(tool) : false)}
+            toolOpen={(id) => input.disclosure.value(`${row().group.key}:tool:${id}`)}
+            onToolOpenChange={(id, open) => input.disclosure.set(`${row().group.key}:tool:${id}`, open)}
+            fileOpen={(path) =>
+              input.disclosure.value(`patch:${path}`) ?? input.timelineDetail?.().edit.details === "expanded"
+            }
+            onFileOpenChange={(path, open) => input.disclosure.set(`patch:${path}`, open)}
+            open={input.disclosure.value(key()) === true}
+            busy={
+              workingTurn(row().userMessageID) &&
+              input.projection.lastAssistantGroupKey().get(row().userMessageID) === row().group.key
+            }
+            onOpenChange={(open) => input.disclosure.set(key(), open)}
+            onSizeChange={onSizeChange}
+          />
+        </div>
       )
     }
 
@@ -378,6 +379,7 @@ export function createSessionTimelineRowRenderer(input: {
         "pt-4":
           (props.row._tag === "AssistantPart" || props.row._tag === "FinalAnswerDivider") &&
           props.row.spacing === "content",
+        "pt-6": props.row._tag === "Error",
       }}
     >
       <div data-component="session-turn" class="min-w-0 w-full relative" style={{ height: "auto" }}>
@@ -530,25 +532,12 @@ export function createSessionTimelineRowRenderer(input: {
           }
         >
           {(message) => (
-            <div
-              data-slot="session-timeline-notice"
-              data-type="location-switched"
-              class={`flex h-7 w-full min-w-0 items-center gap-2 py-1 text-[13px] leading-text-compact tracking-[-0.04px] text-v2-text-text-faint ${inset()}`}
-            >
-              <Tooltip
-                appearance="compact"
-                placement="top"
-                value={i18n.t("ui.sessionTimeline.notice.movedTooltip")}
-                class="shrink-0"
-                triggerTabIndex={0}
-              >
-                <bdi data-slot="session-timeline-notice-label" dir="auto" class="font-[530]">
-                  {i18n.t("ui.sessionTimeline.notice.movedTo")}
-                </bdi>
-              </Tooltip>{" "}
-              <bdi data-slot="session-timeline-notice-value" dir="ltr" class="min-w-0 truncate font-[440]">
-                {message().location.directory}
-              </bdi>
+            <div data-slot="session-timeline-notice" data-type="location-switched" class={`w-full py-2 ${inset()}`}>
+              <TimelineSeparator
+                label={i18n.t("ui.sessionTimeline.notice.movedTo")}
+                value={message().location.directory}
+                tooltip={i18n.t("ui.sessionTimeline.notice.movedTooltip")}
+              />
             </div>
           )}
         </Show>

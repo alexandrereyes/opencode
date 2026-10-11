@@ -5,6 +5,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client/promise"
 import { storyDocument, storyTool } from "../storybook/current-session-scenarios"
+import { timelinePresets } from "./detail"
 import { createTimelineProjection, Timeline, TimelineRow } from "./projection"
 
 describe("current session timeline rows", () => {
@@ -330,6 +331,67 @@ describe("current session timeline rows", () => {
       "part",
       "part",
     ])
+  })
+
+  test("keeps divider notices outside grouped context rows", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "move", time: { created: 1 } },
+      {
+        id: "msg_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [storyTool("tool_read", "read", "completed", {})],
+        time: { created: 2, completed: 3 },
+      },
+      { id: "msg_moved", type: "location-switched", location: { directory: "/tmp/next" }, time: { created: 4 } },
+      { id: "msg_skill", type: "skill", skill: "review", name: "Review", text: "instructions", time: { created: 5 } },
+    ] satisfies SessionMessageInfo[]
+    const rows = Timeline.constructSessionMessageRows(
+      source,
+      false,
+      { type: "idle" },
+      undefined,
+      false,
+      false,
+      undefined,
+      timelinePresets.find((preset) => preset.id === "compact")!.value,
+    ).rows
+
+    expect(rows.map(TimelineRow.key)).toEqual([
+      "user-message:msg_user",
+      "assistant-part:context:context:msg_assistant:tool_read",
+      "notice:msg_moved",
+      "assistant-part:context:message:msg_skill",
+    ])
+  })
+
+  test("spaces grouped updates after an assistant error like a following tool group", () => {
+    const rows = Timeline.constructSessionMessageRows(
+      [
+        { id: "msg_user", type: "user", text: "check", time: { created: 1 } },
+        {
+          id: "msg_failed",
+          type: "assistant",
+          agent: "build",
+          model: { id: "model", providerID: "provider" },
+          content: [],
+          error: { type: "ProviderError", message: "getaddrinfo ENOTFOUND opencode.ai" },
+          time: { created: 2, completed: 3 },
+        },
+        { id: "msg_updates", type: "system", text: "Instructions updated: core/mcp", time: { created: 4 } },
+      ],
+      false,
+      { type: "idle" },
+      undefined,
+      false,
+      false,
+      undefined,
+      timelinePresets.find((preset) => preset.id === "detailed")!.value,
+    ).rows
+
+    expect(rows.map((row) => row._tag)).toEqual(["UserMessage", "Error", "AssistantPart"])
+    expect(rows[2]).toMatchObject({ spacing: "tool", previousAssistantPart: false })
   })
 
   test("keeps assistant errors and retries before later notices", () => {

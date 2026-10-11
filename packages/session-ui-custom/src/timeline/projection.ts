@@ -288,7 +288,12 @@ export namespace Timeline {
             detail,
             new Set(
               messages
-                .filter((message) => message.type === "compaction" || message.type === "model-switched")
+                .filter(
+                  (message) =>
+                    message.type === "compaction" ||
+                    message.type === "model-switched" ||
+                    message.type === "location-switched",
+                )
                 .map((message) => message.id),
             ),
           )
@@ -510,7 +515,7 @@ function groupMessages(rows: TimelineRow.TimelineRow[], detail: TimelineDetail, 
         ? new TimelineRow.AssistantPart({
             userMessageID: row.userMessageID,
             previousAssistantPart: previous?._tag === "AssistantPart",
-            spacing: previous?._tag === "AssistantPart" ? "tool" : undefined,
+            spacing: previous?._tag === "AssistantPart" || previous?._tag === "Error" ? "tool" : undefined,
             group: {
               type: "context",
               key: `message:${row.messageID}`,
@@ -774,30 +779,29 @@ function toolGroupType(
 
 export function reasoningHeading(text: string): string | undefined {
   const markdown = text.replace(/\r\n?/g, "\n")
-  const html = markdown.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)
-  if (html?.[1]) {
-    const value = cleanHeading(html[1].replace(/<[^>]+>/g, " "))
-    if (value) return value
-  }
+  const html = lastHeading(markdown, /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, (value) => value.replace(/<[^>]+>/g, " "))
+  const atx = lastHeading(markdown, /^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/gm)
+  const setext = lastHeading(markdown, /^([^\n]+)\n(?:=+|-+)\s*$/gm)
+  const strong = lastHeading(markdown, /^\s*(?:\*\*((?:(?!\*\*).)+)\*\*|__((?:(?!__).)+)__)\s*$/gm)
+  const latest = [html, atx, strong].reduce<HeadingMatch | undefined>(
+    (best, current) => (!best || (current && current.index >= best.index) ? current : best),
+    undefined,
+  )
+  return (latest ?? setext)?.value
+}
 
-  const atx = markdown.match(/^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/m)
-  if (atx?.[1]) {
-    const value = cleanHeading(atx[1])
-    if (value) return value
-  }
+type HeadingMatch = { index: number; value: string }
 
-  const setext = markdown.match(/^([^\n]+)\n(?:=+|-+)\s*$/m)
-  if (setext?.[1]) {
-    const value = cleanHeading(setext[1])
-    if (value) return value
-  }
-
-  const strong = markdown.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)
-  if (strong?.[1]) {
-    const value = cleanHeading(strong[1])
-    if (value) return value
-  }
-  return undefined
+function lastHeading(
+  markdown: string,
+  pattern: RegExp,
+  transform?: (value: string) => string,
+): HeadingMatch | undefined {
+  return Array.from(markdown.matchAll(pattern)).reduce<HeadingMatch | undefined>((best, match) => {
+    const raw = match[1] ?? match[2] ?? ""
+    const value = cleanHeading(transform ? transform(raw) : raw)
+    return value ? { index: match.index, value } : best
+  }, undefined)
 }
 
 function cleanHeading(value: string) {

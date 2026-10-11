@@ -260,6 +260,15 @@
     gap: 0;
   }
 
+  [data-slot="user-message-meta-variant"] {
+    user-select: none;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
   [data-slot="user-message-meta-tail"] {
     user-select: none;
     flex: 0 0 auto;
@@ -707,6 +716,10 @@
 
 [data-component="collapsed-tool-group"] > [data-component="collapsible"].tool-collapsible {
   --tool-content-gap: 8px;
+}
+
+[data-notices-only] > [data-component="collapsed-tool-group"] > [data-component="collapsible"].tool-collapsible {
+  --tool-content-gap: 0px;
 }
 
 [data-component="context-tool-group-list"] {

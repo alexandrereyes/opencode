@@ -90,6 +90,17 @@ export const MissingStream = {
   ),
 }
 
+export const DefaultVariant = {
+  render: () => (
+    <FooterTimeline
+      messages={[
+        { ...input, metadata: { agent: "build", model: { ...message.model, variant: "default" } } },
+        { ...message, model: { ...message.model, variant: "default" } },
+      ]}
+    />
+  ),
+}
+
 function FooterTimeline(props: { messages: SessionMessageInfo[] }) {
   const document = () => ({
     sessionID: CURRENT_SESSION_ID,

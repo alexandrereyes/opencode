@@ -71,6 +71,11 @@ export async function writeClipboard(text: string): Promise<boolean> {
   )
 }
 
+// A "default" variant is the model's baseline, so message meta shows no variant for it.
+function modelVariant(model: SessionMessageAssistant["model"]) {
+  return model.variant === "default" ? undefined : model.variant
+}
+
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
     icon: "check" | "copy" | "reset" | "fork"
@@ -290,6 +295,7 @@ export function CurrentUserMessageDisplay(props: {
     const match = data.store.provider?.all?.get(props.model.providerID)
     return match?.models?.[props.model.id]?.name ?? props.model.id
   })
+  const variant = () => modelVariant(props.model)
   const timefmt = createMemo(() => new Intl.DateTimeFormat(i18n.locale(), { timeStyle: "short" }))
   const metaHead = createMemo(() => {
     const agent = props.agent
@@ -467,7 +473,22 @@ export function CurrentUserMessageDisplay(props: {
                 {metaHead()}
               </span>
             </Show>
-            <Show when={metaHead() && stamp()}>
+            <Show when={variant()}>
+              {(variant) => (
+                <>
+                  <Show when={metaHead()}>
+                    <span data-slot="user-message-meta-sep" class="text-12-regular text-text-weak cursor-default">
+                      {"\u00A0\u00B7\u00A0"}
+                    </span>
+                  </Show>
+                  <span data-slot="user-message-meta-variant" class="text-12-regular text-text-weak cursor-default">
+                    <Icon name="brain" size="small" />
+                    <span>{variant()}</span>
+                  </span>
+                </>
+              )}
+            </Show>
+            <Show when={(metaHead() || variant()) && stamp()}>
               <span data-slot="user-message-meta-sep" class="text-12-regular text-text-weak cursor-default">
                 {"\u00A0\u00B7\u00A0"}
               </span>
@@ -672,7 +693,7 @@ export function AssistantTextContent(props: {
     const tokensPerSecond = turnTokensPerSecond(props.message, props.messages ?? [props.message])
     return [
       { icon: "models", text: model() },
-      { icon: "brain", text: props.message.model.variant },
+      { icon: "brain", text: modelVariant(props.message.model) },
       { icon: "subagent", text: props.message.agent },
       {
         icon: "gauge",

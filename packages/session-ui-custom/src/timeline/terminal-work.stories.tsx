@@ -5,6 +5,7 @@ import { DataProvider } from "../context/data"
 import { SessionShellMessage } from "../tools/tool-renderer"
 import { CurrentSessionProviders, CurrentSessionTimelineStory } from "../storybook/current-session-story"
 import {
+  STORY_TIME,
   executeCodeDocument,
   expandedShellDocument,
   recoveryDocument,
@@ -176,6 +177,73 @@ export const ExecuteCode = {
       document={executeCodeDocument}
       width="786px"
       shellToolDefaultOpen
+    />
+  ),
+}
+
+export const ExecuteFailed = {
+  render: () => (
+    <CurrentSessionTimelineStory
+      title="Execute failed"
+      description="Failed Code Mode executions open to show the full code and the full error message."
+      document={storyDocument([
+        storyTool(
+          "tool_execute_search",
+          "execute",
+          "completed",
+          { code: 'const found = search({ namespace: "browser", offset: 20, limit: 30 });\nreturn found;\n' },
+          { output: "[]" },
+        ),
+        storyTool(
+          "tool_execute_failed_url",
+          "execute",
+          "completed",
+          {
+            code: 'const tab = await tools.browser.tabs.open({\n  url: "file:///C:/tmp/opencode/throne-of-glass-luke.html",\n  focus: true\n});\nconst shot = await tools.browser.screenshot({ tabID: tab.id, fullPage: true });\nreturn { tab, shot };\n',
+          },
+          {
+            output:
+              "Invalid browser URL. Use an HTTP/HTTPS URL or about:blank without embedded credentials. Paths and file:// URLs are not browser URLs; use browser.preview to show a local file to the user. The connected server must be able to reach the address; localhost refers to that server.",
+            metadata: { error: true },
+          },
+        ),
+        {
+          type: "reasoning",
+          text: "## Serving the page\n\nThe browser needs an HTTP URL, so I will serve the file locally.",
+          time: { created: STORY_TIME + 150, completed: STORY_TIME + 1_150 },
+        },
+        storyTool(
+          "tool_execute_serve",
+          "shell",
+          "completed",
+          {
+            command:
+              "bun -e \"Bun.serve({ port: 4399, fetch() { return new Response(Bun.file('C:/tmp/opencode/throne-of-glass-luke.html'), { headers: { 'content-type': 'text/html' } }) } })\"",
+          },
+          { output: "", metadata: { exit: 0 } },
+        ),
+        storyTool(
+          "tool_execute_failed_screenshot",
+          "execute",
+          "completed",
+          {
+            code: 'const tab = await tools.browser.tabs.open({\n  url: "http://localhost:4399",\n  focus: true\n});\nawait tools.browser.wait({ tabID: tab.id, condition: "load", timeoutMs: 5000 });\nconst shot = await tools.browser.screenshot({ tabID: tab.id, fullPage: true });\nreturn { tab, shot };\n',
+          },
+          {
+            output:
+              "[browser.operation_failed] browser.screenshot failed. Screenshot needs a visible tab. Call browser.tabs.focus and keep its desktop window visible.",
+            metadata: { error: true },
+          },
+        ),
+        storyTool(
+          "tool_execute_list",
+          "execute",
+          "completed",
+          { code: "const list = await tools.browser.tabs.list();\nreturn list;\n" },
+          { output: "[]" },
+        ),
+      ])}
+      width="786px"
     />
   ),
 }

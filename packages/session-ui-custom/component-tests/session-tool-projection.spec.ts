@@ -49,6 +49,27 @@ story("renders every tool error outcome without leaking hidden tools", async ({ 
   for (const name of names) await expect(timeline.locator(`[data-timeline-part-id="tool_error_${name}"]`)).toBeVisible()
 })
 
+story("expands a failed execute to its full code and error", async ({ mount }) => {
+  const timeline = await mount("current-session-terminal-work--execute-failed")
+  await timeline.getByRole("button", { name: /^Used 5 / }).click()
+  const failed = timeline.locator('[data-timeline-part-id="tool_execute_failed_url"]')
+  await failed.getByRole("button", { name: /Invalid browser URL/ }).click()
+  await expect(failed.locator('[data-slot="tool-error-card-subtitle"]')).toContainText(
+    "const shot = await tools.browser.screenshot({ tabID: tab.id, fullPage: true });",
+  )
+  await expect(failed.locator('[data-slot="card-description"]')).toContainText(
+    "The connected server must be able to reach the address; localhost refers to that server.",
+  )
+})
+
+story("shows the whole tool error when it has no detail separator", async ({ mount }) => {
+  const errors = await mount("components-tool-error-card--all")
+  const card = errors.locator('[data-kind="tool-error-card"][data-open="true"]')
+  await expect(card).toHaveCount(1)
+  await expect(card.locator('[data-slot="card-description"]')).toHaveText("Tool execution interrupted")
+  await expect(card.locator('[data-slot="tool-error-card-summary"]')).toHaveCount(0)
+})
+
 // Moved from packages/app/e2e/regression/session-timeline-tool-projection.spec.ts
 story("transitions shell and question through running error outcomes", async ({ mount }) => {
   const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "transition" } })

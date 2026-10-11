@@ -56,13 +56,18 @@
 
 @media (max-width: 47.999rem) {
   [data-session-title] {
-    background-image: linear-gradient(to bottom, var(--v2-background-bg-base) 52px, transparent);
     padding-bottom: 18px;
   }
 
-  [data-session-title] > div {
+  [data-slot="session-title-bar"] > div {
     min-height: 52px;
     height: 52px;
+  }
+
+  [data-slot="session-title-fade"] {
+    top: 52px;
+    height: 18px;
+    margin-top: -18px;
   }
 
   :is([data-slot="session-title-parent"], [data-slot="session-title-child"]) {
