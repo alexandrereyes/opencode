@@ -2,7 +2,7 @@ import type { FileDiffInfo } from "@opencode/client/promise"
 import type { SessionReviewLineComment } from "@opencode/session-ui-custom/session-review"
 import { previewSelectedLines } from "@opencode/session-ui-custom/pierre/selection-bridge"
 import { checksum } from "@opencode/util/encode"
-import { createQuery, skipToken, useQueryClient } from "@tanstack/solid-query"
+import { createQuery, useQueryClient } from "@tanstack/solid-query"
 import { debounce } from "@solid-primitives/scheduled"
 import { createEffect, createMemo, on, onCleanup, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -13,6 +13,7 @@ import { useLayout } from "@/shell/state/layout"
 import { useComposerState } from "@/composer/persistence"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useServerSDK } from "@/runtime/server/client"
+import { showToast } from "@/shell/notifications/toast"
 import { createOpenReviewFile } from "../helpers"
 import type { SessionModel } from "../model"
 import type { SessionScreenLayout } from "../screen-layout"
@@ -21,7 +22,6 @@ import { reviewDiffDirectory, reviewDiffNeedsLoad, reviewRootDirectory } from ".
 import type { DiffStyle } from "./review-tab"
 
 export type ChangeMode = "git" | "branch" | "turn"
-type VcsMode = "git" | "branch"
 
 export function createSessionReview(input: {
   session: SessionModel
@@ -42,6 +42,7 @@ export function createSessionReview(input: {
     detailsOpen: false,
     scroll: undefined as HTMLDivElement | undefined,
     pendingFile: undefined as string | undefined,
+    initializingGit: {} as Record<string, true | undefined>,
   })
   const mode = () => input.session.layout.view().review.mode() ?? "git"
   const selectedFile = () => input.session.layout.view().review.file()
@@ -64,15 +65,13 @@ export function createSessionReview(input: {
     ) {
       list.push("branch")
     }
+    // Turn snapshots are captured only for Git sessions.
+    if (project?.vcs === "git" && input.session.identity.params.id) list.push("turn")
     return list
   })
   const mobileChanges = createMemo(
     () => !input.session.isDesktop() && !input.screen.terminal.open() && state.mobileTab === "changes",
   )
-  const vcsMode = createMemo<VcsMode | undefined>(() => {
-    const value = mode()
-    return value === "git" || value === "branch" ? value : undefined
-  })
   const vcsKey = createMemo(
     () =>
       [
@@ -90,22 +89,30 @@ export function createSessionReview(input: {
           (input.session.tabs.activeTab() === "review" || !!input.session.tabs.activeFileTab()))
       : mobileChanges(),
   )
-  const vcsQuery = createQuery(() => {
-    const value = vcsMode()
+  const sessionID = () => input.session.identity.params.id ?? ""
+  const turnKey = () => [server.scope, "session-turn", sessionID()] as const
+  const diffQuery = createQuery(() => {
+    const value = mode()
+    const turn = value === "turn"
     return {
-      queryKey: [...vcsKey(), value] as const,
-      enabled: server.connection.status() === "connected" && wantsReview() && !!input.session.project()?.vcs,
+      queryKey: turn ? turnKey() : ([...vcsKey(), value] as const),
+      enabled:
+        server.connection.status() === "connected" &&
+        wantsReview() &&
+        !!input.session.project()?.vcs &&
+        (!turn || !!sessionID()),
       refetchOnMount: "always" as const,
-      refetchOnWindowFocus: true,
-      queryFn: value
-        ? () =>
+      // A finished turn does not change on focus or filesystem events; refresh it when the session goes idle.
+      refetchOnWindowFocus: !turn,
+      queryFn: turn
+        ? () => server.api.session.diff({ sessionID: sessionID() })
+        : () =>
             server.api.vcs
               .diff({
                 location: { directory: location().directory },
                 mode: value === "git" ? "working" : value,
               })
-              .then((result) => result.data)
-        : skipToken,
+              .then((result) => result.data),
     }
   })
   const detailsQuery = createQuery(() => ({
@@ -136,16 +143,13 @@ export function createSessionReview(input: {
     on(
       () => input.screen.review.open() || mobileChanges(),
       (open, previous) => {
-        if (!open || previous || !input.screen.files.open() || vcsQuery.isFetching) return
+        if (!open || previous || !input.screen.files.open() || diffQuery.isFetching) return
         refresh()
       },
       { defer: true },
     ),
   )
-  const diffs = () => {
-    if (mode() === "git" || mode() === "branch") return vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
-    return []
-  }
+  const diffs = () => (diffQuery.isFetched ? (diffQuery.data ?? []) : [])
   const activeFile = () => {
     const list = diffs()
     const selected = selectedFile()
@@ -155,17 +159,53 @@ export function createSessionReview(input: {
   const count = () => diffs().length
   const hasChanges = () => count() > 0
   const ready = () => {
-    // A project without VCS never enables vcsQuery, so its status stays "pending" forever.
+    // A project without VCS never enables diffQuery, so its status stays "pending" forever.
     const project = input.session.project()
     if (project && !project.vcs) return true
-    if (mode() === "git" || mode() === "branch") return !vcsQuery.isPending
-    return true
+    return !diffQuery.isPending
+  }
+  const lifetime = { disposed: false }
+  onCleanup(() => {
+    lifetime.disposed = true
+  })
+  // The request keeps the session it started for, so its cache refresh follows that session's Location; only the
+  // error feedback depends on which session is still shown.
+  const initializeGit = () => {
+    const id = sessionID()
+    if (state.initializingGit[id]) return
+    const ref = location().ref
+    if (server.connection.status() !== "connected") {
+      showToast({ variant: "error", title: language.t("common.requestFailed") })
+      return
+    }
+    setState("initializingGit", id, true)
+    void server.api.vcs
+      .init({ location: { directory: ref.directory }, provider: "git" })
+      .then(async () => {
+        if (lifetime.disposed) return
+        data.project.invalidate()
+        if (id) data.session.invalidate(id)
+        data.location.invalidate(ref)
+        data.location.vcs.invalidate(ref)
+        await data.project.sync()
+        if (lifetime.disposed) return
+        if (id) await data.session.sync(id)
+        if (lifetime.disposed) return
+        await Promise.all([data.location.syncInfo(ref), data.location.vcs.sync(ref)])
+      })
+      .catch((error: unknown) => {
+        if (lifetime.disposed || sessionID() !== id) return
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : undefined,
+        })
+      })
+      .finally(() => {
+        if (!lifetime.disposed) setState("initializingGit", id, undefined)
+      })
   }
   const loadDiff = async (path: string, version?: number): Promise<FileDiffInfo | undefined> => {
-    const value = vcsMode()
-    if (!value) return undefined
-    const root = reviewRootDirectory(input.session.project()?.worktree ?? location().directory)
-    const directory = reviewDiffDirectory(root, path)
     const source = diffs().find((diff) => diff.file === path)
     const valid = (diff: FileDiffInfo | undefined): FileDiffInfo | undefined => {
       if (!diff || !source) return undefined
@@ -173,6 +213,24 @@ export function createSessionReview(input: {
       if (reviewDiffNeedsLoad(diff)) return undefined
       return diff
     }
+    const value = mode()
+    // Oversized full-file patches come back empty; bounded context usually fits.
+    if (value === "turn") {
+      return queryClient
+        .fetchQuery({
+          queryKey: [...turnKey(), "bounded", version] as const,
+          staleTime: Number.POSITIVE_INFINITY,
+          retry: 2,
+          queryFn: () => server.api.session.diff({ sessionID: sessionID(), context: 3 }),
+        })
+        .then((result) => valid(result.find((diff) => diff.file === path)))
+        .catch((error: unknown) => {
+          console.debug("[session-review] failed to load bounded turn diff", { path, error })
+          return undefined
+        })
+    }
+    const root = reviewRootDirectory(input.session.project()?.worktree ?? location().directory)
+    const directory = reviewDiffDirectory(root, path)
     const request = (scope: string, context?: number) =>
       queryClient
         .fetchQuery({
@@ -357,6 +415,7 @@ export function createSessionReview(input: {
       (next, previous) => {
         if (next !== "idle" || previous === undefined || previous === "idle") return
         refresh()
+        void queryClient.invalidateQueries({ queryKey: turnKey() })
       },
       { defer: true },
     ),
@@ -402,7 +461,7 @@ export function createSessionReview(input: {
       diffs: () => (detailsQuery.isFetched ? (detailsQuery.data ?? []) : undefined),
       setOpen: (open: boolean) => setState("detailsOpen", open),
     },
-    diffVersion: () => vcsQuery.dataUpdatedAt,
+    diffVersion: () => diffQuery.dataUpdatedAt,
     diffStyle: {
       current: layout.review.diffStyle,
       set: (style: DiffStyle) => layout.review.setDiffStyle(style),
@@ -410,6 +469,8 @@ export function createSessionReview(input: {
     diffs,
     focusFile,
     hasChanges,
+    initializeGit,
+    initializingGit: () => !!state.initializingGit[sessionID()],
     loadDiff,
     mobile: {
       changes: mobileChanges,

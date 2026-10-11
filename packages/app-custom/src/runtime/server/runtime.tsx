@@ -312,6 +312,7 @@ function createServerController(
     snippets,
     families,
     sync,
+    directories,
     isLocal,
     projects: {
       ...projects,

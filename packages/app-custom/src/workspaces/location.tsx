@@ -1,7 +1,8 @@
 import { createSimpleContext } from "@opencode/ui-custom/context"
-import type { LocationGetOutput, LocationRef } from "@opencode/client/promise"
+import { isLocationNotFoundError, type LocationGetOutput, type LocationRef } from "@opencode/client/promise"
 import { retry } from "@opencode/util/retry"
 import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
 import { type LocationContext, useServerSDK } from "@/runtime/server/client"
 import { useData, useServer } from "@/runtime/server/current"
 export type { LocationContext } from "@/runtime/server/client"
@@ -9,6 +10,8 @@ export type { LocationContext } from "@/runtime/server/client"
 export type WorkspaceLocation = LocationContext & {
   readonly ref: LocationRef
   readonly current: LocationGetOutput | undefined
+  /** Set only when the server reports that this exact Location's folder does not exist. */
+  readonly missing: LocationRef | undefined
 }
 
 const context = createSimpleContext({
@@ -28,6 +31,7 @@ const context = createSimpleContext({
       },
     )
     const current = createMemo(() => data.location.info(ref()))
+    const [state, setState] = createStore<{ missing?: LocationRef }>({})
 
     createEffect(() => {
       const location = ref()
@@ -35,11 +39,24 @@ const context = createSimpleContext({
       onCleanup(() => {
         stale = true
       })
+      setState("missing", undefined)
       if (serverSDK.connection.status() !== "connected") return
-      // A failed sync does not prove the directory is missing. Keep recovery local to reads.
+      // Generic sync failures do not prove the directory is missing; only the server's typed
+      // LocationNotFoundError does, and retrying it cannot succeed until the folder changes. The custom
+      // directory guard skips a folder the plugin reports missing instead of failing, so its answer counts too.
       void retry(() => (stale ? Promise.resolve() : data.location.sync(location)), {
-        retryIf: () => !stale,
-      }).catch(() => undefined)
+        retryIf: (error) => !stale && !isLocationNotFoundError(error),
+      })
+        .then(() => server.ctx.directories.available(location.directory))
+        .then(
+          (available) => {
+            if (!stale && !available) setState("missing", location)
+          },
+          (error) => {
+            if (stale || !isLocationNotFoundError(error)) return
+            setState("missing", location)
+          },
+        )
     })
     createEffect(() => {
       const id = current()?.project.id
@@ -55,6 +72,7 @@ const context = createSimpleContext({
       ...location(),
       ref: ref(),
       current: current(),
+      missing: state.missing,
     }))
   },
 })

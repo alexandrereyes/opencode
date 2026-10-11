@@ -15,7 +15,7 @@ import {
   selectSessionUserMessages,
   selectVisibleSessionUserMessages,
 } from "./session-domain"
-import { useSessionLayout } from "./session-layout"
+import { useSessionLayout, useSessionMoveLayout } from "./session-layout"
 import { createSessionOwnership } from "./session-ownership"
 import { useTabs } from "@/shell/tabs/tabs"
 import { useServer } from "@/runtime/server/current"
@@ -30,6 +30,7 @@ export function useSessionModel() {
   const server = useServer()
   const shellTabs = useTabs()
   const attachments = useBrowserAttachments()
+  useSessionMoveLayout()
   const layout = useSessionLayout()
   const location = useWorkspaceLocation()
   const isDesktop = createMediaQuery("(min-width: 768px)")

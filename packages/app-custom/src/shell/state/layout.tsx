@@ -16,11 +16,11 @@ import { createScrollPersistence, type SessionScroll } from "./scroll"
 import { createPathHelpers } from "@/workspaces/files/path"
 import type { ProjectAvatarVariant } from "@opencode/ui-custom/project-avatar"
 import { SessionStateKey } from "@/runtime/server/scope"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./helpers"
+import { createSessionKeyReader, createSessionMoveTracker, ensureSessionKey, pruneSessionKeys } from "./helpers"
 import { requireServerKey } from "@/shell/routes/session"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./session-tabs"
 
-export { createSessionKeyReader, ensureSessionKey, pruneSessionKeys }
+export { createSessionKeyReader, createSessionMoveTracker, ensureSessionKey, pruneSessionKeys }
 
 export type { ProjectAvatarVariant }
 
@@ -458,6 +458,27 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             return
           }
           setStore("session", "width", width)
+        },
+        /**
+         * Replaces `to`'s scroll offsets and review state with copies of `from`'s, keeping `from`. Panel tabs are keyed
+         * by Session and need no copy. `to` counts as just used, then pruning runs as for any new key.
+         */
+        copyView(from: string, to: string) {
+          usage.used.set(to, Date.now())
+          batch(() => {
+            scroll.flush(from)
+            const current = store.sessionView[from]
+            setStore("sessionView", to, {
+              scroll: Object.fromEntries(
+                Object.entries(current?.scroll ?? {}).map(([key, value]) => [key, { x: value.x, y: value.y }]),
+              ),
+              reviewOpen: current?.reviewOpen ? [...current.reviewOpen] : undefined,
+              reviewMode: current?.reviewMode,
+              reviewFile: current?.reviewFile,
+            })
+            scroll.drop([to])
+            prune(usage.active ?? to)
+          })
         },
       },
       mobileSidebar: {

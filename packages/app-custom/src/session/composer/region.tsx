@@ -1,5 +1,5 @@
 import type { SessionUserActions } from "@opencode/session-ui-custom/message"
-import { getFilename } from "@opencode/util/path"
+import { getFilename, sameDirectory } from "@opencode/util/path"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner } from "@opencode/ui-custom/scroll-view"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -12,7 +12,7 @@ import { setCursorPosition } from "@/composer/editor/dom"
 import { promptLength } from "@/composer/prompt-parts"
 import { useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useData } from "@/runtime/server/current"
+import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { showToast } from "@/shell/notifications/toast"
 import { useLocal } from "@/providers/models/selection"
@@ -33,6 +33,7 @@ import { SessionRevertStatus } from "./revert-status"
 import { SessionQueuePanel } from "./queue-panel"
 import { resolveSessionComposerSelection } from "./selection"
 import { createSessionRequestModel } from "../requests/model"
+import { SessionLocationMissing } from "./location-missing"
 
 export function createActiveSessionRegion(input: {
   session: SessionModel
@@ -251,21 +252,45 @@ export function createActiveSessionRegion(input: {
 
 export type ActiveSessionRegionModel = ReturnType<typeof createActiveSessionRegion>
 
-export function ActiveSessionComposerRegion(props: { model: SessionComposerController }) {
+export function ActiveSessionComposerRegion(props: { session: SessionModel; model: SessionComposerController }) {
   const prompt = useComposerState()
+  const location = useWorkspaceLocation()
+  const server = useServer()
+  // Only a missing folder (typed LocationNotFoundError or the directory guard) for the session's own Location
+  // replaces the composer.
+  const missing = createMemo(() => {
+    const ref = location().missing
+    const info = props.session.data.info()
+    if (!ref || !info || !sameDirectory(info.location.directory, ref.directory)) return
+    return { sessionID: info.id, directory: info.location.directory }
+  })
+  const project = createMemo(() => {
+    const info = props.session.data.info()
+    return info ? server.ctx.projects.detailsForSession(info) : undefined
+  })
   return (
     <SessionComposerRegion
       controller={props.model.region}
       status={<SessionRevertStatus progress={() => prompt.capture().revert.progress()} />}
       composer={
-        <div class="relative">
-          <Show when={!props.model.composer.btw?.active()}>
-            <SessionQueuePanel queue={props.model.queue} />
-          </Show>
-          <div class="relative z-10">
-            <Composer model={props.model.composer} borderUnderlay />
-          </div>
-        </div>
+        <Show
+          when={missing()}
+          keyed
+          fallback={
+            <div class="relative">
+              <Show when={!props.model.composer.btw?.active()}>
+                <SessionQueuePanel queue={props.model.queue} />
+              </Show>
+              <div class="relative z-10">
+                <Composer model={props.model.composer} borderUnderlay />
+              </div>
+            </div>
+          }
+        >
+          {(current) => (
+            <SessionLocationMissing sessionID={current.sessionID} directory={current.directory} project={project()} />
+          )}
+        </Show>
       }
     />
   )

@@ -1,6 +1,6 @@
 import { useParams } from "@solidjs/router"
-import { createMemo } from "solid-js"
-import { useLayout } from "@/shell/state/layout"
+import { createComputed, createMemo, untrack } from "solid-js"
+import { createSessionMoveTracker, useLayout } from "@/shell/state/layout"
 import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useServerSDK } from "@/runtime/server/client"
@@ -48,4 +48,17 @@ export const useSessionLayout = () => {
     tabs: createMemo(() => layout.tabs(sessionKey)),
     view: createMemo(() => layout.view(sessionKey, panes)),
   }
+}
+
+// Session view state is stored per Location; a Session that moves carries it to its new key. Synchronous, so nothing
+// renders the new key before the copy lands.
+export const useSessionMoveLayout = () => {
+  const layout = useLayout()
+  const { params, sessionKey } = useSessionKey()
+  const track = createSessionMoveTracker()
+  createComputed(() => {
+    const to = sessionKey()
+    const from = track({ id: params.id, key: to, ready: layout.ready() })
+    if (from) untrack(() => layout.session.copyView(from, to))
+  })
 }

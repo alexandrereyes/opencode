@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { ServerConnection } from "@/runtime/server/registry"
 import { Persistence } from "@/runtime/persistence/schema"
 import { currentRoute, initialLayout, layoutPersistence, layoutSchema, sessionPanelKey } from "./layout"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./helpers"
+import { createSessionKeyReader, createSessionMoveTracker, ensureSessionKey, pruneSessionKeys } from "./helpers"
 
 test("settings has its own layout route", () => {
   expect(currentRoute("/settings", "")).toEqual({ type: "settings" })
@@ -146,6 +146,31 @@ describe("layout session-key helpers", () => {
     })
 
     expect(seen).toEqual(["dir/one", "dir/two"])
+  })
+})
+
+describe("createSessionMoveTracker", () => {
+  test("reports the previous key when the same session changes Location", () => {
+    const track = createSessionMoveTracker()
+    expect(track({ id: "ses_one", key: "local\u0000L29sZA/ses_one", ready: true })).toBeUndefined()
+    expect(track({ id: "ses_one", key: "local\u0000L29sZA/ses_one", ready: true })).toBeUndefined()
+    expect(track({ id: "ses_one", key: "local\u0000L25ldw/ses_one", ready: true })).toBe("local\u0000L29sZA/ses_one")
+    expect(track({ id: "ses_one", key: "local\u0000L25ldw/ses_one", ready: true })).toBeUndefined()
+  })
+
+  test("does not carry state between different sessions", () => {
+    const track = createSessionMoveTracker()
+    expect(track({ id: "ses_one", key: "local\u0000L29sZA/ses_one", ready: true })).toBeUndefined()
+    expect(track({ id: "ses_two", key: "local\u0000L25ldw/ses_two", ready: true })).toBeUndefined()
+    expect(track({ id: undefined, key: "local\u0000L25ldw", ready: true })).toBeUndefined()
+    expect(track({ id: "ses_one", key: "local\u0000L25ldw/ses_one", ready: true })).toBeUndefined()
+  })
+
+  test("keeps the first key until layout storage is ready", () => {
+    const track = createSessionMoveTracker()
+    expect(track({ id: "ses_one", key: "local\u0000L29sZA/ses_one", ready: false })).toBeUndefined()
+    expect(track({ id: "ses_one", key: "local\u0000L25ldw/ses_one", ready: false })).toBeUndefined()
+    expect(track({ id: "ses_one", key: "local\u0000L25ldw/ses_one", ready: true })).toBe("local\u0000L29sZA/ses_one")
   })
 })
 

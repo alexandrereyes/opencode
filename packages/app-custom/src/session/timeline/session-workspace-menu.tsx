@@ -1,3 +1,4 @@
+import { Button, type ButtonProps } from "@opencode/ui-custom/button"
 import { Menu } from "@opencode/ui-custom/menu"
 import { Icon } from "@opencode/ui-custom/icon"
 import { getFilename } from "@opencode/util/path"
@@ -17,6 +18,10 @@ export function SessionWorkspaceMenu(props: {
   sessionID: string
   project: Project
   directory: string
+  /** The session's directory no longer exists, so a new worktree starts from the project's root checkout. */
+  missing?: boolean
+  /** Renders the trigger as a button of this variant instead of a plain row. */
+  variant?: ButtonProps["variant"]
   placement?: ComponentProps<typeof Menu>["placement"]
   gutter?: number
   class?: string
@@ -64,6 +69,7 @@ export function SessionWorkspaceMenu(props: {
     if (store.selected || blocked()) return
     const sdk = serverSDK
     const sessionID = props.sessionID
+    const base = props.missing ? props.project.worktree : props.directory
     setStore("selected", selection)
 
     try {
@@ -72,8 +78,8 @@ export function SessionWorkspaceMenu(props: {
           ? await createWorktree({
               api: sdk.api,
               data,
-              directory: props.directory,
-              project: data.location.info({ directory: props.directory })?.project,
+              directory: base,
+              project: data.location.info({ directory: base })?.project,
             })
           : selection
       if (!destination) return
@@ -98,9 +104,20 @@ export function SessionWorkspaceMenu(props: {
       modal={false}
       onOpenChange={onOpenChange}
     >
-      <Menu.Trigger class={props.class} disabled={blocked()}>
-        {props.children}
-      </Menu.Trigger>
+      <Show
+        when={props.variant}
+        fallback={
+          <Menu.Trigger class={props.class} disabled={blocked()}>
+            {props.children}
+          </Menu.Trigger>
+        }
+      >
+        {(variant) => (
+          <Menu.Trigger as={Button} variant={variant()} class={props.class} disabled={blocked()}>
+            {props.children}
+          </Menu.Trigger>
+        )}
+      </Show>
       <Menu.Portal>
         <Menu.Content class={`w-[200px] ${props.contentClass ?? ""}`}>
           <Menu.Group>

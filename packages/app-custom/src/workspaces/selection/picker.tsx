@@ -1,7 +1,7 @@
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { ServerConnection } from "@/runtime/server/registry"
 import { usePlatform } from "@/runtime/platform/platform"
-import { type Component, lazy } from "solid-js"
+import { type Component, lazy, Suspense } from "solid-js"
 import type { LocationRef } from "@opencode/client/promise"
 import { directoryPickerKind } from "./policy"
 
@@ -46,6 +46,14 @@ function usePicker(View: Component<DirectoryPickerInput>) {
     const cancel = () => {
       if (!selected) input.onSelect(null)
     }
-    dialog.show(() => <View {...input} onSelect={onSelect} />, cancel)
+    // Dialogs render under the caller's owner, so loading the lazy chunk would otherwise suspend the caller's boundary.
+    dialog.show(
+      () => (
+        <Suspense>
+          <View {...input} onSelect={onSelect} />
+        </Suspense>
+      ),
+      cancel,
+    )
   }
 }

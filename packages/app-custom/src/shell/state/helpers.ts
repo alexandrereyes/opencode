@@ -36,3 +36,24 @@ export function pruneSessionKeys(input: {
     .sort((a, b) => score(b) - score(a))
     .slice(input.max)
 }
+
+/**
+ * Follows the routed Session's layout key. A key that changes for the same Session means it moved to another
+ * Location; the returned previous key is the state to carry. Until layout storage loads, the first key is kept, so a
+ * move before then copies from it once storage is ready instead of writing over unloaded state.
+ */
+export function createSessionMoveTracker() {
+  const last = { id: undefined as string | undefined, key: undefined as string | undefined }
+  return (input: { id?: string; key: string; ready: boolean }) => {
+    if (!input.id) return
+    if (last.id !== input.id) {
+      last.id = input.id
+      last.key = input.key
+      return
+    }
+    if (!input.ready || last.key === input.key) return
+    const from = last.key
+    last.key = input.key
+    return from
+  }
+}

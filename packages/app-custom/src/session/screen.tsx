@@ -371,7 +371,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
       </div>
 
       <Show when={composer.active()} keyed>
-        {(model) => <ActiveSessionComposerRegion model={model} />}
+        {(model) => <ActiveSessionComposerRegion session={session} model={model} />}
       </Show>
     </>
   )

@@ -1,4 +1,5 @@
 import { SessionReviewEmptyChangesV2 } from "@opencode/session-ui-custom/v2/session-review-empty-changes-v2"
+import { SessionReviewEmptyNoGitV2 } from "@opencode/session-ui-custom/v2/session-review-empty-no-git-v2"
 import { SessionReviewV2SidebarToggle } from "@opencode/session-ui-custom/v2/session-review-v2"
 import { Select } from "@opencode/ui-custom/select"
 import { Tabs } from "@opencode/ui-custom/tabs"
@@ -217,8 +218,10 @@ function ReviewContent(props: { review: SessionReviewModel }) {
         onFocusedCommentChange={props.review.comments.setFocus}
         classes={{
           root: "[&_[data-slot=session-review-list]]:pb-0 [&_[data-slot=accordion-trigger]]:!rounded-none [&_[data-slot=accordion-trigger]]:!border-x-0 [&_[data-slot=accordion-item]:first-child_[data-slot=accordion-trigger]]:!border-t-0 [&_[data-slot=accordion-item]:last-child:not([data-expanded])_[data-slot=accordion-trigger]]:!border-b-0 [&_[data-slot=accordion-item]:last-child_[data-slot=accordion-content]]:!border-b-0 [&_[data-slot=accordion-item]:last-child_[data-slot=session-review-diff-placeholder]]:!border-b-0 [&_[data-slot=accordion-content]]:!rounded-none [&_[data-slot=accordion-content]]:!border-x-0 [&_[data-slot=session-review-diff-placeholder]]:!rounded-none [&_[data-slot=session-review-diff-placeholder]]:!border-x-0",
-          header:
-            "!px-2 !h-10 !pb-0 relative before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:h-px before:bg-v2-border-border-base before:content-['']",
+          // Without Git the header has no mode selector, summary or actions, so it would be an empty row.
+          header: props.review.noGit()
+            ? "!hidden"
+            : "!px-2 !h-10 !pb-0 relative before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:h-px before:bg-v2-border-border-base before:content-['']",
           container: "!px-0",
         }}
       />
@@ -263,7 +266,7 @@ function ReviewTitle(props: { review: SessionReviewModel }) {
     return language.t("ui.sessionReview.title.lastTurn")
   }
   return (
-    <Show when={props.review.canReview()}>
+    <Show when={props.review.canReview() && props.review.options().length > 0}>
       <Select
         options={props.review.options()}
         current={props.review.mode()}
@@ -278,8 +281,7 @@ function ReviewTitle(props: { review: SessionReviewModel }) {
 
 function ReviewEmpty(props: { review: SessionReviewModel; loadingClass: string }) {
   const language = useLanguage()
-  const loading = () => (props.review.mode() === "git" || props.review.mode() === "branch") && !props.review.ready()
-  const noGit = () => props.review.noGit()
+  const loading = () => !props.review.ready()
   const text = () => {
     if (props.review.mode() === "git") return language.t("session.review.noUncommittedChanges")
     if (props.review.mode() === "branch") return language.t("session.review.noBranchChanges")
@@ -290,14 +292,9 @@ function ReviewEmpty(props: { review: SessionReviewModel; loadingClass: string }
       <Match when={loading()}>
         <div class={props.loadingClass}>{language.t("session.review.loadingChanges")}</div>
       </Match>
-      <Match when={noGit()}>
-        <div class="h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6">
-          <div class="flex flex-col gap-3">
-            <div class="text-14-medium text-text-strong">{language.t("session.review.noVcs.createGit.title")}</div>
-            <div class="text-14-regular text-text-base max-w-md" style={{ "line-height": "var(--line-height-normal)" }}>
-              {language.t("session.review.noVcs.createGit.description")}
-            </div>
-          </div>
+      <Match when={props.review.noGit()}>
+        <div class="h-full flex flex-col">
+          <SessionReviewEmptyNoGitV2 pending={props.review.initializingGit()} onInitGit={props.review.initializeGit} />
         </div>
       </Match>
       <Match when={true}>
@@ -311,19 +308,14 @@ function ReviewEmpty(props: { review: SessionReviewModel; loadingClass: string }
 
 function ReviewPanelEmpty(props: { review: SessionReviewModel }) {
   const language = useLanguage()
-  const loading = () => (props.review.mode() === "git" || props.review.mode() === "branch") && !props.review.ready()
-  const noGit = () => props.review.noGit()
+  const loading = () => !props.review.ready()
   return (
     <Switch>
       <Match when={loading()}>
         <div class="px-6 py-4 text-text-weak">{language.t("session.review.loadingChanges")}</div>
       </Match>
-      <Match when={noGit()}>
-        <div class="h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6">
-          <div class="text-14-regular text-text-weak max-w-56">
-            {language.t("session.review.noVcs.createGit.description")}
-          </div>
-        </div>
+      <Match when={props.review.noGit()}>
+        <SessionReviewEmptyNoGitV2 pending={props.review.initializingGit()} onInitGit={props.review.initializeGit} />
       </Match>
       <Match when={true}>
         <SessionReviewEmptyChangesV2 />
