@@ -517,6 +517,8 @@ export const dict = {
   "dialog.model.search.placeholder": "Search models",
   "dialog.model.empty": "No model results",
   "dialog.model.manage": "Manage models",
+  "dialog.model.chatgptPlan": "Using ChatGPT plan",
+  "dialog.model.chatgptManageUsage": "Manage usage",
   "dialog.model.favorites": "Favorites",
   "dialog.model.favorite.add": "Add to favorites",
   "dialog.model.favorite.remove": "Remove from favorites",
@@ -596,6 +598,16 @@ export const dict = {
   "provider.connect.remote.title": "Connecting on “{{server}}”",
   "provider.connect.remote.description":
     "Your OpenCode credentials will be stored on this server. Models will be available through this server.",
+  "provider.connect.remote.external.description":
+    "This method uses credentials configured on this server, such as a CLI sign-in or profile, not on this device. Models will be available through this server.",
+  "provider.connect.chatgptWelcome.title": "ChatGPT connected",
+  "provider.connect.chatgptWelcome.description": "Eligible requests in OpenCode can use your ChatGPT plan.",
+  "provider.connect.chatgptWelcome.usage": "Manage usage in ChatGPT settings",
+  "provider.connect.chatgptWelcome.confirm": "Got it",
+  "provider.connect.chatgptUsageLimit.title": "ChatGPT usage limit reached",
+  "provider.connect.chatgptUsageLimit.description": "Check your usage and limits in ChatGPT settings.",
+  "provider.connect.chatgptUsageLimit.manage": "Manage usage",
+  "provider.connect.chatgptUsageLimit.close": "Close",
   "provider.connect.toast.connected.title": "{{provider}} connected",
   "provider.connect.toast.connected.description": "{{provider}} models are now available to use.",
 

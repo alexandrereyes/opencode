@@ -21,6 +21,10 @@ import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
 import { ModelTooltip } from "./tooltip"
 import { useLanguage } from "@/runtime/i18n/language"
+import { ExternalLink } from "@/runtime/platform/external-link"
+import { useIntegrations } from "@/providers/catalog/integrations"
+import { CHATGPT_USAGE_URL } from "@/providers/connect/chatgpt"
+import { useWorkspaceLocation } from "@/workspaces/location"
 import { decode64 } from "@/runtime/persistence/base64"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
@@ -67,6 +71,8 @@ function createModelSelectorController(input: {
 }) {
   const model = input.model ?? useLocal().model
   const models = useModels()
+  const location = useWorkspaceLocation()
+  const integrations = useIntegrations(() => location().ref.directory)
   const allModels = createMemo(() =>
     model
       .list()
@@ -108,6 +114,12 @@ function createModelSelectorController(input: {
     current: () => {
       const value = model.current()
       return value ? modelKey(value) : undefined
+    },
+    // OpenAI models run on the ChatGPT plan when the active OpenAI connection is the ChatGPT sign-in.
+    chatgptPlan: () => {
+      if (model.current()?.provider.id !== "openai") return false
+      const connection = integrations.list().find((integration) => integration.id === "openai")?.connections[0]
+      return connection?.type === "credential" && connection.method === "oauth"
     },
     variants,
     variant: (item: ModelItem) => {
@@ -495,6 +507,22 @@ function ModelPicker(props: {
           <span class="min-w-0 flex-1 truncate">{language.t("dialog.model.manage")}</span>
         </button>
       </div>
+      <Show when={props.controller.chatgptPlan()}>
+        <div
+          data-slot="model-selector-chatgpt-plan"
+          class="flex min-h-10 items-center gap-2 border-t border-v2-border-border-muted px-3 py-2 text-[13px] leading-5 text-v2-text-text-base"
+        >
+          <ProviderIcon id="openai" width={14} height={14} class="shrink-0" />
+          <span class="min-w-0 flex-1 truncate">{language.t("dialog.model.chatgptPlan")}</span>
+          <ExternalLink
+            href={CHATGPT_USAGE_URL}
+            class="flex shrink-0 items-center gap-1 rounded-sm text-v2-text-text-muted !no-underline hover:text-v2-text-text-base focus-visible:outline focus-visible:outline-2"
+          >
+            {language.t("dialog.model.chatgptManageUsage")}
+            <Icon name="arrow-up-right" size="small" />
+          </ExternalLink>
+        </div>
+      </Show>
       <div class="flex h-7 shrink-0 items-center gap-3 border-t border-v2-border-border-muted px-3 text-[11px] font-[530] leading-[var(--line-height-tight)] tracking-[0.05px] text-v2-text-text-faint">
         <span>{language.t("dialog.model.hint.navigate")}</span>
         <Show when={activeRow() && props.controller.variants(activeRow()!.item).length > 0}>

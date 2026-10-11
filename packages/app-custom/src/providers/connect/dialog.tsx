@@ -3,6 +3,7 @@ import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Icon } from "@opencode/ui-custom/icon"
 import { List } from "@opencode/ui-custom/list"
 import { ProviderIcon } from "@opencode/ui-custom/provider-icon"
+import { RadioGroup, RadioItem } from "@opencode/ui-custom/radio"
 import { Spinner } from "@opencode/ui-custom/spinner"
 import { TextField } from "@opencode/ui-custom/text-field"
 import { DialogBody, DialogHeader, DialogTitle, Dialog } from "@opencode/ui-custom/dialog"
@@ -17,7 +18,10 @@ import { useProviders } from "@/providers/catalog/providers"
 import { useIntegrations } from "@/providers/catalog/integrations"
 import { CustomProviderForm } from "@/providers/credentials/dialog"
 import { decode64 } from "@/runtime/persistence/base64"
+import { Persist, persisted } from "@/runtime/persistence/storage"
+import { Persistence } from "@/runtime/persistence/schema"
 import { useServerSDK } from "@/runtime/server/client"
+import { Schema } from "effect"
 import {
   CONSOLE_PROVIDERS,
   consoleIntegration,
@@ -25,6 +29,8 @@ import {
   providerFormDefaults,
   type ProviderConnectMethod,
 } from "./controller"
+import { CHATGPT_TOKEN_SHARING_METHOD } from "./chatgpt"
+import { DialogChatGPTPlanWelcome } from "./chatgpt-welcome"
 import { authServerName, RemoteAuthNotice } from "./remote"
 
 const CUSTOM_ID = "_custom"
@@ -271,6 +277,11 @@ function ProviderConnection(props: {
   const integrations = useIntegrations(() => props.directory)
   const directory = () => props.directory ?? decode64(params.dir)
   const isConsole = () => CONSOLE_PROVIDERS.has(props.provider)
+  const [welcome, setWelcome, , welcomeReady] = persisted(
+    Persist.global("chatgpt-plan-welcome.v1"),
+    Persistence.struct({ seen: Schema.Boolean }),
+    { seen: false },
+  )
 
   const controller = createProviderConnectionController({
     provider: () => consoleIntegration(props.provider),
@@ -282,7 +293,16 @@ function ProviderConnection(props: {
       return index === -1 ? undefined : index
     },
     onComplete: () => {
+      const method = controller.currentMethod()
+      const chatgpt =
+        props.provider === "openai" && method?.type === "oauth" && method.id === CHATGPT_TOKEN_SHARING_METHOD
       dialog.close()
+      if (chatgpt)
+        void Promise.resolve(welcomeReady.promise).then(() => {
+          if (welcome.seen) return
+          setWelcome("seen", true)
+          void dialog.show(() => <DialogChatGPTPlanWelcome />)
+        })
       showToast({
         variant: "success",
         icon: "circle-check",
@@ -322,11 +342,22 @@ function ProviderConnection(props: {
 
   function AuthFormView() {
     const defaults = providerFormDefaults(controller.currentMethod()?.form)
-    const [formStore, setFormStore] = createStore({
+    const [formStore, setFormStore] = createStore<{
+      value: Record<string, string>
+      index: number
+      customOn: boolean
+      customText: string
+    }>({
       value: Object.fromEntries(
-        Object.entries(defaults).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : [])),
-      ) as Record<string, string>,
+        (controller.currentMethod()?.form ?? []).flatMap((field) =>
+          field.type === "string" && field.key in defaults && field.default !== undefined
+            ? [[field.key, field.default]]
+            : [],
+        ),
+      ),
       index: 0,
+      customOn: false,
+      customText: "",
     })
 
     const fields = createMemo<StringForm[]>(() => {
@@ -349,11 +380,14 @@ function ProviderConnection(props: {
         field: all[index],
       }
     })
+    // Visible defaults prefill the field but enter the answer only once that field is answered,
+    // because the server rejects values for fields whose conditions are not met.
+    const answer = (field: StringForm) => formStore.value[field.key] ?? field.default
     const valid = createMemo(() => {
       const item = current()
-      if (!item || item.field.options) return false
+      if (!item || (item.field.options && !item.field.custom)) return false
       if (!item.field.required) return true
-      return (formStore.value[item.field.key] ?? "").trim().length > 0
+      return (answer(item.field) ?? "").trim().length > 0
     })
 
     async function next(index: number, value: Record<string, string>) {
@@ -361,7 +395,7 @@ function ProviderConnection(props: {
       if (selected === undefined) return
       const next = fields().findIndex((field, i) => i > index && matches(field, value))
       if (next !== -1) {
-        setFormStore("index", next)
+        setFormStore({ index: next, customOn: false, customText: "" })
         return
       }
       await controller.auth.select(selected, value)
@@ -370,8 +404,9 @@ function ProviderConnection(props: {
     async function handleSubmit(e: SubmitEvent) {
       e.preventDefault()
       const item = current()
-      if (!item || item.field.options) return
-      if (!valid()) return
+      if (!item || !valid()) return
+      const value = answer(item.field)
+      if (value !== undefined) setFormStore("value", item.field.key, value)
       await next(item.index, formStore.value)
     }
 
@@ -386,16 +421,22 @@ function ProviderConnection(props: {
       if (!field?.options) return undefined
       return field
     })
+    const custom = () => {
+      const field = select()
+      if (!field?.custom) return false
+      const value = answer(field)
+      return formStore.customOn || (value !== undefined && !field.options?.some((option) => option.value === value))
+    }
 
     return (
-      <form onSubmit={handleSubmit} class="flex flex-col items-start gap-4">
+      <form onSubmit={handleSubmit} class="flex flex-col items-start gap-4 px-3">
         <Switch>
           <Match when={item()?.field.options === undefined}>
             <TextField
               type="text"
               label={text()?.title ?? ""}
               placeholder={text()?.placeholder}
-              value={text() ? (formStore.value[text()!.key] ?? "") : ""}
+              value={text() ? (answer(text()!) ?? "") : ""}
               onChange={(value) => {
                 const field = text()
                 if (!field) return
@@ -406,15 +447,68 @@ function ProviderConnection(props: {
               {language.t("common.continue")}
             </Button>
           </Match>
+          {/* Keyed so each field gets its own radio inputs; a reused group keeps the previous native selection. */}
+          <Match when={select()?.custom && select()} keyed>
+            {(field) => (
+              <>
+                <div class="flex w-full flex-col gap-3">
+                  <div class="text-14-regular text-text-base">{field.title}</div>
+                  <RadioGroup
+                    label={field.title}
+                    hideLabel
+                    description={field.description}
+                    value={
+                      custom()
+                        ? "custom"
+                        : String(field.options?.findIndex((option) => option.value === answer(field)))
+                    }
+                    onChange={(value) => {
+                      const option = field.options?.[Number(value)]
+                      if (option) {
+                        if (custom()) setFormStore("customText", answer(field) ?? "")
+                        setFormStore("customOn", false)
+                        setFormStore("value", field.key, option.value)
+                        return
+                      }
+                      setFormStore("customOn", true)
+                      setFormStore("value", field.key, formStore.customText)
+                    }}
+                  >
+                    <For each={field.options}>
+                      {(option, index) => (
+                        <RadioItem value={String(index())} label={option.label} description={option.description} />
+                      )}
+                    </For>
+                    <RadioItem value="custom" label={language.t("ui.messagePart.option.typeOwnAnswer")} />
+                    <Show when={custom()}>
+                      <div class="pl-6">
+                        <TextField
+                          ref={(input: HTMLInputElement) => queueMicrotask(() => input.focus())}
+                          type="text"
+                          label={language.t("ui.messagePart.option.typeOwnAnswer")}
+                          hideLabel
+                          placeholder={field.placeholder ?? language.t("ui.question.custom.placeholder")}
+                          value={answer(field) ?? ""}
+                          onChange={(value) => setFormStore("value", field.key, value)}
+                        />
+                      </div>
+                    </Show>
+                  </RadioGroup>
+                </div>
+                <Button class="w-auto" type="submit" size="large" variant="contrast" disabled={!valid()}>
+                  {language.t("common.continue")}
+                </Button>
+              </>
+            )}
+          </Match>
           <Match when={item()?.field.options !== undefined}>
             <div class="w-full flex flex-col gap-1.5">
               <div class="text-14-regular text-text-base">{select()?.title}</div>
               <div>
                 <List
-                  class="px-3"
                   items={select()?.options ?? []}
                   key={(x) => x.value}
-                  current={select()?.options?.find((x) => x.value === formStore.value[select()!.key])}
+                  current={select()?.options?.find((x) => x.value === answer(select()!))}
                   onSelect={(value) => {
                     if (!value) return
                     const field = select()
@@ -706,9 +800,21 @@ function ProviderConnection(props: {
       </div>
       <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div>
-          <Show when={isConsole() && authServerName(sdk.server) !== undefined}>
+          <Show
+            when={
+              (isConsole() || controller.currentMethod()?.type === "external") &&
+              authServerName(sdk.server) !== undefined
+            }
+          >
             <div class="mb-5">
-              <RemoteAuthNotice server={sdk.server} />
+              <RemoteAuthNotice
+                server={sdk.server}
+                description={
+                  controller.currentMethod()?.type === "external"
+                    ? language.t("provider.connect.remote.external.description")
+                    : undefined
+                }
+              />
             </div>
           </Show>
           <Switch>

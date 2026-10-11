@@ -7,11 +7,12 @@ import type {
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useServerSDK } from "@/runtime/server/client"
+import { formatServerError } from "@/runtime/server/errors"
 import { useData } from "@/runtime/server/current"
 import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 
-export type ProviderConnectMethod = Extract<IntegrationMethod, { type: "key" | "oauth" }>
+export type ProviderConnectMethod = Extract<IntegrationMethod, { type: "key" | "oauth" | "external" }>
 type Authorization = IntegrationOauthConnectOutput["data"]
 
 export const CONSOLE_INTEGRATION = "opencode"
@@ -28,7 +29,7 @@ export function providerFormDefaults(fields: ProviderConnectMethod["form"]) {
       const actual = answer[condition.key]
       if (actual === undefined) return false
       const equal = Array.isArray(actual)
-        ? typeof condition.value === "string" && actual.includes(condition.value)
+        ? actual.some((item) => item === condition.value)
         : actual === condition.value
       return condition.op === "eq" ? equal : !equal
     })
@@ -78,7 +79,8 @@ export function createProviderConnectionController(options: {
   )
   const methods = createMemo<ProviderConnectMethod[]>(() => {
     const values = integration.latest?.methods.filter(
-      (method): method is ProviderConnectMethod => method.type === "key" || method.type === "oauth",
+      (method): method is ProviderConnectMethod =>
+        method.type === "key" || method.type === "oauth" || method.type === "external",
     )
     if (values?.length) return [...values]
     return [{ type: "key", label: language.t("provider.connect.method.apiKey") }]
@@ -158,7 +160,6 @@ export function createProviderConnectionController(options: {
     )
   }
 
-  const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
   const cancelAttempt = () => {
     const attempt = polling.attempt
     polling.attempt = undefined
@@ -211,7 +212,9 @@ export function createProviderConnectionController(options: {
       cancelAttempt()
       dispatch({
         type: "auth.error",
-        error: isConsole() ? language.t("provider.connect.console.statusFailed") : errorMessage(result.error),
+        error: isConsole()
+          ? language.t("provider.connect.console.statusFailed")
+          : formatServerError(result.error, language.t),
       })
       return
     }
@@ -263,12 +266,29 @@ export function createProviderConnectionController(options: {
       dispatch({ type: "auth.answer", answer: Object.keys(merged).length ? merged : undefined })
       return
     }
-    if (selected.type !== "oauth") return
     if (selected.form?.some((field) => field.type !== "string")) {
       dispatch({ type: "auth.error", error: "This authentication form contains unsupported fields" })
       return
     }
     dispatch({ type: "auth.pending" })
+    if (selected.type === "external") {
+      const saved = await serverSDK.api.integration.connect
+        .external({
+          integrationID: options.provider(),
+          methodID: selected.id,
+          answer: Object.keys(merged).length ? merged : undefined,
+          location: location(),
+        })
+        .then(() => ({ ok: true as const }))
+        .catch((error) => ({ ok: false as const, error }))
+      if (polling.disposed || generation !== polling.generation) return
+      if (!saved.ok) {
+        dispatch({ type: "auth.error", error: formatServerError(saved.error, language.t) })
+        return
+      }
+      await finish()
+      return
+    }
     const result = await serverSDK.api.integration.oauth
       .connect({
         integrationID: options.provider(),
@@ -299,7 +319,9 @@ export function createProviderConnectionController(options: {
     if (!result.ok) {
       dispatch({
         type: "auth.error",
-        error: isConsole() ? language.t("provider.connect.console.startFailed") : errorMessage(result.error),
+        error: isConsole()
+          ? language.t("provider.connect.console.startFailed")
+          : formatServerError(result.error, language.t),
       })
       return
     }
@@ -340,7 +362,8 @@ export function createProviderConnectionController(options: {
       })
       .then(() => ({ ok: true as const }))
       .catch((error) => ({ ok: false as const, error }))
-    if (!result.ok) return errorMessage(result.error) || language.t("provider.connect.oauth.code.invalid")
+    if (!result.ok)
+      return formatServerError(result.error, language.t, language.t("provider.connect.oauth.code.invalid"))
     await finish()
     return undefined
   }
@@ -364,10 +387,12 @@ export function createProviderConnectionController(options: {
     currentMethod,
     methodIndex: () => store.methodIndex,
     authorization: () => store.authorization,
+    // An external method has no view of its own, so it stays busy while the catalogs refresh after saving.
     busy: () =>
       integration.loading ||
       (store.methodIndex === undefined && !store.auto && autoIndex() !== undefined) ||
-      store.state === "pending",
+      store.state === "pending" ||
+      (store.state === "refreshing" && currentMethod()?.type === "external"),
     auth: {
       state: () => store.state,
       error: () => store.error,

@@ -10,7 +10,7 @@ export function authServerName(server: ServerConnection.Any) {
   return serverName(server)
 }
 
-export function RemoteAuthNotice(props: { server: ServerConnection.Any }) {
+export function RemoteAuthNotice(props: { server: ServerConnection.Any; description?: string }) {
   const language = useLanguage()
   return (
     <Show when={authServerName(props.server)}>
@@ -23,7 +23,9 @@ export function RemoteAuthNotice(props: { server: ServerConnection.Any }) {
           <p class="font-medium text-v2-text-text-base">
             {language.t("provider.connect.remote.title", { server: name() })}
           </p>
-          <p class="text-v2-text-text-muted">{language.t("provider.connect.remote.description")}</p>
+          <p class="text-v2-text-text-muted">
+            {props.description ?? language.t("provider.connect.remote.description")}
+          </p>
         </div>
       )}
     </Show>
