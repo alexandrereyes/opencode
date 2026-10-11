@@ -107,7 +107,7 @@ git push -u origin <feature-curta>
 
 ### Integrar upstream em `custom`
 
-Integre de `upstream/v2`, que gera o canal oficial `latest`. Prefira o commit de origem do release publicado (`metadata.github.sha` em `https://opencode.ai/update/api/latest/cli/npm`); a tag de release só acrescenta o bump de versão. Registre baseline, pontos de integração e validação em `docs/upstream-beta-merge.md`.
+Integre de `upstream/v2`, que gera o canal oficial `latest`. Prefira o commit de origem do release publicado (`metadata.github.sha` em `https://opencode.ai/update/api/latest/cli/npm`); a tag de release só acrescenta o bump de versão. Registre baseline, pontos de integração e validação em `docs/upstream-integrations.md`.
 
 Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active` ou `reconcile`) de `docs/upstream-overrides.md` com essa revisão e atualize o registro na própria integração:
 

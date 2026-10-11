@@ -24,7 +24,7 @@ Add or update an entry in the same change that:
 Do not record custom features without an upstream counterpart, upstream PRs that
 are merely being watched but were not incorporated, or custom code adjusted to
 upstream API changes during a routine integration (those belong in the
-integration's own notes, such as `upstream-beta-merge.md`).
+integration's own notes in `upstream-integrations.md`).
 
 ## When to read it
 

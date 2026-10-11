@@ -1,6 +1,12 @@
-# V2 integration — 2026-10-11
+# Upstream integrations
 
-## Baselines
+Each upstream revision integrated into `custom`, newest first: its baselines,
+integration points, and validation. Upstream overrides and their reconciliation
+live in `docs/upstream-overrides.md`.
+
+## V2 integration — 2026-10-11
+
+### Baselines
 
 - Custom parent: `4c34a869d`.
 - Integrated upstream: `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (`upstream/v2`,
@@ -21,7 +27,7 @@ aborted on a blob the lazy fetch could not obtain and left the tree partly
 updated; fetching the 1,622 missing blobs of the target tree in one batch
 (`git fetch upstream --filter=blob:none --stdin`) before merging avoids it.
 
-## Integration points
+### Integration points
 
 - `@pierre/diffs` 1.5.1 (#51236) is a shared catalog bump, so its session-ui
   change is ported into `packages/session-ui-custom` (two-argument diff option
@@ -61,7 +67,7 @@ Shared implementation overlap against the fixed upstream baseline, measured with
 the command below using `5e73d5cb1`: **59 modified upstream files, 723 added lines,
 71 removed lines**.
 
-## Validation
+### Validation
 
 - `bun.lock` is regenerated with `bun install` from upstream's lockfile; frozen
   installation, root `bun run check`, and the custom web production build pass.
@@ -86,9 +92,9 @@ the command below using `5e73d5cb1`: **59 modified upstream files, 723 added lin
     not fixed on `upstream/v2`.
   - App-custom browser: the five known sidebar suites recorded on `4c34a869d`.
 
-# V2 integration — 2026-09-28
+## V2 integration — 2026-09-28
 
-## Baselines
+### Baselines
 
 - Custom parent: `d0eae5000`.
 - Integrated upstream: `dd786c62af18b8f53c1eea1b30c5b53460ea9f6e` (`upstream/v2`,
@@ -101,7 +107,7 @@ match the integrated upstream revision exactly. The upstream UI work in this ran
 is not ported yet; `docs/upstream-overrides.md` marks the affected custom ports as
 `reconcile`.
 
-## Integration points
+### Integration points
 
 - `packages/core/src/tool/read-filesystem.ts`: take upstream's line-counting
   `makeTextPage` call (#51011) and keep the custom `Effect.die(new Error(...))`.
@@ -121,7 +127,7 @@ Shared implementation overlap against the fixed upstream baseline, measured with
 the command below using `dd786c62a`: **55 modified upstream files, 682 added lines,
 65 removed lines**.
 
-## Validation
+### Validation
 
 - Frozen dependency installation and root `bun run check` pass.
 - Core 5,560 passed, 21 skipped; Server 69 (three skipped); CLI 328 (nine
@@ -130,9 +136,9 @@ the command below using `dd786c62a`: **55 modified upstream files, 682 added lin
   isolation check, and 11 new upstream GitLab OAuth tests (#50422) that need
   local port 8080, which OrbStack occupies on this machine.
 
-# V2 integration — 2026-09-23
+## V2 integration — 2026-09-23
 
-## Baselines
+### Baselines
 
 - Custom parent: `bea19bc71`.
 - Integrated upstream: `8ce629be225b551416d3009e87f02031824c5747` (`upstream/v2`,
@@ -145,7 +151,7 @@ the command below using `dd786c62a`: **55 modified upstream files, 682 added lin
 The upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` trees
 match the integrated upstream revision exactly.
 
-## Integration points
+### Integration points
 
 - Keep custom `session.archived` and replay-only `session.permissions.updated`
   alongside upstream's new `session.metadata.updated` event (schema, projector,
@@ -167,7 +173,7 @@ Shared implementation overlap against the fixed upstream baseline, measured with
 the command below using `8ce629be2`: **53 modified upstream files, 656 added lines,
 57 removed lines**.
 
-## Validation
+### Validation
 
 - Frozen dependency installation, root `bun run check` and custom web production
   build pass.
@@ -179,9 +185,9 @@ the command below using `8ce629be2`: **53 modified upstream files, 656 added lin
   one `host.test.ts` expectation differs only by the `/var` → `/private/var`
   symlink.
 
-# Beta integration — 2026-09-17
+## Beta integration — 2026-09-17
 
-## Baselines
+### Baselines
 
 - Custom parent: `804155bd7`.
 - Integrated upstream: `e5ecb5719de37759e06c57ff05ffc668e98f6f30` (`upstream/beta`, 2.0.6).
@@ -192,7 +198,7 @@ The upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` tree
 match the integrated upstream revision exactly. Custom web API adaptations are
 in `packages/app-custom`; its product behavior and independent UI remain intact.
 
-## Integration points
+### Integration points
 
 - Adapt custom consumers to project-scoped worktree APIs, session update/form
   APIs, `resume` interruption, inbox delivery updates and `time.created`.
@@ -221,7 +227,7 @@ git diff --numstat --diff-filter=M e5ecb5719de37759e06c57ff05ffc668e98f6f30 -- \
   packages/client/src packages/tui/src
 ```
 
-## Validation and baseline failures
+### Validation and baseline failures
 
 - Frozen dependency installation and root `bun run check` pass.
 - Custom web production build passes.
@@ -254,7 +260,7 @@ Test logs are retained under the session's temporary directory with the
 `merge-beta-` prefix, including `merge-beta-upstream-{client,sdk,cli}.log` and
 `merge-beta-custom-base-browser.log` for baseline evidence.
 
-## Follow-up: remaining test failures
+### Follow-up: remaining test failures
 
 - CLI subprocess fixtures now use the isolated environment helper and the
   intended service-config directory. The inherited `OPENCODE_CONFIG_DIR` had
