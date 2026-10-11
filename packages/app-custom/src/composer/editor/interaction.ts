@@ -256,7 +256,7 @@ export function createComposerEditor(input: {
     const result = transitionComposer(state, event, draft.state)
     const action = event.type === "popover.select" ? input.onSuggestionSelect?.(event.item) : undefined
     if (event.type === "popover.select") {
-      if (!action || state.popover.type !== "command-menu") result.commands.forEach(execute)
+      if (!action) result.commands.forEach(execute)
       if (action && event.item.kind === "command" && state.popover.type !== "command-menu") {
         draft.setPrompt(draft.state.prompt.filter(isAttachment), 0)
       }

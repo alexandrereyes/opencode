@@ -7,6 +7,7 @@ import { createEffect, createMemo, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection, useServers } from "@/runtime/server/registry"
+import { uuid } from "@/runtime/persistence/uuid"
 import { useTabs } from "@/shell/tabs/tabs"
 import { useDirectoryPicker } from "@/workspaces/selection/picker"
 import { useSsh } from "./context"
@@ -51,7 +52,7 @@ export function DialogSsh(props: {
   // Entry-point behavior is fixed for the lifetime of this dialog. Settings
   // connects without needing the project/tab contexts used by the palette.
   const openProject = props.openProject ? useOpenSshProject() : undefined
-  const id = props.config?.id ?? crypto.randomUUID()
+  const id = props.config?.id ?? uuid()
   let cancelButton: HTMLButtonElement | undefined
   const [state, setState] = createStore({
     target: props.config?.target ?? "",

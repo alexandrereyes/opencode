@@ -17,6 +17,7 @@ import { displayName } from "@/shell/layout/helpers"
 import { InlineServerSelect } from "../server-select"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
+import { uuid } from "@/runtime/persistence/uuid"
 import type { ServerSnippets } from "./server"
 import { SettingsList } from "../list"
 import { isSnippetConflict, snippetAliases, type Snippet } from "./model"
@@ -217,7 +218,7 @@ function SnippetDialog(props: {
     setState({ saving: true, error: "" })
     await props.catalog
       .save({
-        id: props.snippet?.id ?? crypto.randomUUID(),
+        id: props.snippet?.id ?? uuid(),
         name: state.name.trim(),
         description: state.description.trim(),
         aliases: snippetAliases(state.aliases),

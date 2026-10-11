@@ -15,6 +15,7 @@ import { getProjectAvatarVariant } from "@/shell/state/layout"
 import { useLanguage } from "@/runtime/i18n/language"
 import { displayName, getProjectAvatarSource } from "@/shell/layout/helpers"
 import { pathKey } from "@/workspaces/path-key"
+import { isProjectDirectory } from "@/workspaces/paths"
 import { handleDocumentSearchKeydown } from "@/shell/commands/search-keydown"
 import { createMenuDismissController } from "@/shell/commands/menu-dismiss"
 import { NEW_SESSION_TRIGGER } from "@/new-session/layout"
@@ -31,6 +32,7 @@ export type PromptProject = {
 export type PromptProjectControls = {
   available: PromptProject[]
   directory: string
+  projectID?: string
   server?: string
   chat: boolean
   pending: boolean
@@ -60,14 +62,20 @@ export function createPromptProjectController(input: {
   let searchRef: HTMLInputElement | undefined
 
   const current = () => {
-    const key = pathKey(input.controls().directory)
-    return input
-      .controls()
-      .available.find(
-        (project) =>
-          (!project.server || project.server.key === input.controls().server) &&
-          (pathKey(project.worktree) === key || project.sandboxes?.some((sandbox) => pathKey(sandbox) === key)),
-      )
+    const controls = input.controls()
+    const key = pathKey(controls.directory)
+    const projects = controls.available.filter((project) => !project.server || project.server.key === controls.server)
+    const exact = projects.find(
+      (project) => pathKey(project.worktree) === key || project.sandboxes?.some((sandbox) => pathKey(sandbox) === key),
+    )
+    if (exact || !controls.projectID) return exact
+    // Opened worktrees can share a project ID; prefer the most specific one containing the directory.
+    const matching = projects.filter((project) => project.id === controls.projectID)
+    return (
+      matching
+        .filter((project) => isProjectDirectory(project, controls.directory))
+        .sort((a, b) => b.worktree.length - a.worktree.length)[0] ?? matching[0]
+    )
   }
   const selected = () => (input.controls().chat ? undefined : (current() ?? input.controls().available[0]))
   const projects = () => {

@@ -1,5 +1,6 @@
 import { useCommand, type CommandOption } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
+import { DialogSelectModel } from "@/providers/models/select-dialog"
 import { useLocal, type ModelSelection } from "@/providers/models/selection"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { getCursorPosition, setCursorPosition } from "./editor/dom"
@@ -24,7 +25,7 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   const modelCommand = withCategory(language.t("command.category.model"))
   const agentCommand = withCategory(language.t("command.category.agent"))
 
-  const chooseModel = async () => {
+  const chooseModel = () => {
     const owner = sessionOwnership.capture()
     const editor = document.querySelector<HTMLElement>('[data-component="composer-editor"]')
     const cursor = editor ? getCursorPosition(editor) : null
@@ -38,7 +39,6 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
         if (cursor !== null) setCursorPosition(editor, cursor)
       })
     }
-    const { DialogSelectModel } = await import("@/providers/models/select-dialog")
     owner.run(() => {
       void dialog.show(() => <DialogSelectModel model={model} />, restoreComposer)
     })

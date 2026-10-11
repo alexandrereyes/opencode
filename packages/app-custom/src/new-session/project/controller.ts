@@ -106,6 +106,7 @@ export function createComposerProjectControls(props: {
   return createMemo<PromptProjectControls>(() => ({
     available: projects(),
     directory: location().directory,
+    projectID: location().current?.project.id,
     server: servers.list.length > 1 ? ServerConnection.key(projectServer()) : undefined,
     chat: !!tabs.draft(props.draftId).chat,
     pending: props.pending(),

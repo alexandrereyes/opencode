@@ -1,4 +1,5 @@
 import { blobData, blobDataUrl } from "@/runtime/persistence/drafts"
+import { uuid } from "@/runtime/persistence/uuid"
 import type { ImageAttachmentPart } from "../state"
 import type { ComposerAttachment } from "../types"
 import type { AttachmentDestination } from "./destination"
@@ -38,7 +39,7 @@ async function stage(attachment: ImageAttachmentPart, blob: Blob, destination: A
   if (destination.local && attachment.sourcePath) return attachment.sourcePath
   const file = new File([blob], attachment.filename, { type: attachment.mime })
   const path = await uploads.track(
-    { id: crypto.randomUUID(), filename: file.name, mime: attachment.mime, size: file.size },
+    { id: uuid(), filename: file.name, mime: attachment.mime, size: file.size },
     (report, signal) => destination.upload(file, report, signal),
   )
   if (!path) throw new DOMException("Upload aborted", "AbortError")

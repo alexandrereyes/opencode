@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@opencode/util/encode"
 import { mockOpenCodeServer } from "../utils/mock-server"
 
@@ -11,6 +11,19 @@ const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${pr
 test.use({ serviceWorkers: "block" })
 
 test("uploads a generic binary and renders its sent path reference", async ({ page }) => {
+  await expectBinaryUpload(page)
+})
+
+test("uploads a generic binary in a non-secure context without crypto.randomUUID", async ({ page }) => {
+  // Plain HTTP on a LAN address is not a secure context, so the browser omits crypto.randomUUID.
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", { configurable: true, value: undefined })
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false })
+  })
+  await expectBinaryUpload(page)
+})
+
+async function expectBinaryUpload(page: Page) {
   const prompts: Record<string, unknown>[] = []
   const uploads: { bytes: Buffer; path: string | null }[] = []
   await mockOpenCodeServer(page, {
@@ -97,4 +110,4 @@ test("uploads a generic binary and renders its sent path reference", async ({ pa
     sent.locator('[data-component="attachment-card"]').getByText("archive.zip", { exact: true }),
   ).toBeVisible()
   await expect(sent.locator('[data-component="attachment-card"]')).toHaveAttribute("title", remotePath)
-})
+}

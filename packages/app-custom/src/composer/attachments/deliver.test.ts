@@ -133,6 +133,28 @@ describe("deliverAttachments", () => {
     expect(result[0]).toMatchObject({ type: "path", path: "/remote/tmp/archive.zip" })
   })
 
+  test("uploads in a non-secure context without crypto.randomUUID", async () => {
+    const crypto = Object.getOwnPropertyDescriptor(globalThis, "crypto")
+    const secure = Object.getOwnPropertyDescriptor(globalThis, "isSecureContext")
+    // Plain HTTP on a LAN address exposes getRandomValues but neither randomUUID nor subtle.
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) },
+    })
+    Object.defineProperty(globalThis, "isSecureContext", { configurable: true, value: false })
+    try {
+      const result = await deliverAttachments([attachment("application/zip")], {
+        ...destination({ image: false, pdf: false }),
+        upload: async () => "/remote/tmp/archive.zip",
+      })
+      expect(result[0]).toMatchObject({ type: "path", path: "/remote/tmp/archive.zip" })
+    } finally {
+      if (crypto) Object.defineProperty(globalThis, "crypto", crypto)
+      if (secure) Object.defineProperty(globalThis, "isSecureContext", secure)
+      if (!secure) delete (globalThis as { isSecureContext?: boolean }).isSecureContext
+    }
+  })
+
   test("propagates upload failures", async () => {
     const error = new Error("upload failed")
     await expect(

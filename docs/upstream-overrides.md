@@ -111,6 +111,61 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### HTTP-safe UUID for attachment uploads — https://github.com/anomalyco/opencode/pull/51783
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `cb11287ae65e454345aa151bd1df13be75d61483` (commit reviewed/applied), 2026-10-11
+- **Local change:** `fix(app): port upstream robustness fixes`; `packages/app-custom/src/composer/attachments/{destination.ts,deliver.ts,deliver.test.ts}`, `src/settings/snippets/snippets.tsx`, `src/servers/ssh/dialog.tsx` and `e2e/regression/composer-binary-attachment.spec.ts`. As upstream, the upload path segment uses the existing `uuid()` helper (`src/runtime/persistence/uuid.ts`) instead of `crypto.randomUUID()`, which is undefined over plain HTTP on a LAN address. Beyond upstream's single call site: the custom upload tracker ID in `deliver.ts`, a new snippet's ID and a new SSH server's ID also used `crypto.randomUUID()` and now use the same helper (the snippet ID is any non-empty string and the SSH ID any string). No direct `crypto.randomUUID()` call remains in the three custom packages outside tests. Upstream's added `SAFETY` comment is not ported. #53501 (`da20865bb976eaede96d315a43eaa86e4b5d6e90`, restored comment notes) does not apply: the custom `comment-note.ts` has no `commentContextItem` and never mints a note ID with `crypto.randomUUID()` (new comment IDs already use `uuid()` in `composer/comments.tsx`), so its schema refactor is not ported.
+- **Tests:** a new `deliver.test.ts` case removes `crypto.randomUUID`/`subtle` and sets `isSecureContext = false`; it fails on `03a2551fc` (`crypto.randomUUID is not a function`) and passes. A new Playwright case in `composer-binary-attachment.spec.ts` uploads with `randomUUID` removed and `isSecureContext` false; it fails on `03a2551fc` (no upload request) and passes. A one-off run of the unchanged upload case against the dev server bound to the Mac's LAN address (`http://192.168.0.246:3472`, a real non-secure context) also failed on `03a2551fc` and passed with the fix. App-custom typecheck (app and e2e), unit suite (1321 pass), browser suite (228 pass; the five known sidebar failures) and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Keep live terminals through transient connect failures — https://github.com/anomalyco/opencode/pull/52232
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `10b11ba9462f28e46311280578039ccce3aadffa` (commit reviewed/applied), 2026-10-11
+- **Local change:** `fix(app): port upstream robustness fixes`; `packages/app-custom/src/session/terminal/terminal.tsx` and `e2e/regression/terminal-reconnect.spec.ts`. As upstream, a rejected `pty.connect` (for example a failed connect-ticket request) goes through the existing `retry()` backoff, which reports a connection error only when the PTY is exited or not found, instead of calling `fail()` directly. The custom terminal is otherwise unchanged. Upstream's mock-server additions (`MockPtyNotFound`, socket `close()`) are not ported; the custom regression routes the PTY endpoints and WebSocket in the spec itself.
+- **Tests:** the new Playwright regression closes the live socket with 1011, fails the next connect ticket with 503, and expects a third ticket, a second socket for the same PTY, the same terminal DOM node with an editable input and a single PTY creation. It runs at 1440×900 (terminal opened with Ctrl+Backquote) and at 390×844 with touch (terminal opened as the phone view from the navigation's More options → Terminal); both fail on `03a2551fc` (stops after two tickets) and pass. App-custom typecheck (app and e2e), unit suite (1321 pass), browser suite (228 pass; the five known sidebar failures) and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Alert only for open session tabs — https://github.com/anomalyco/opencode/pull/52204
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `bf97a0443fc1c4f44178067aa2439d0a6b129617` (commit reviewed/applied), 2026-10-11
+- **Local change:** `fix(app): port upstream robustness fixes`; `packages/app-custom/src/shell/notifications/notification.tsx` and `test-browser/{notification-alert.test.ts,fixtures/notification-alert.ts}`. Same as upstream: response-ready and error system notifications (`platform.notify`) now require an open tab for the session, the condition that already gated their sounds, while the in-app notification history (unseen counts and indicators) is still recorded for every root session.
+- **Tests:** upstream's unit test is ported as an isolated browser-suite fixture (it substitutes platform, settings, language and tab contexts in its own process, as other custom fixtures do); both cases fail on `03a2551fc` (the alert fires without an open tab) and pass. No Playwright check: the web `notify` is suppressed while the page is visible and focused, so headless runs cannot observe it. App-custom typecheck (app and e2e), unit suite (1321 pass), browser suite (228 pass; the five known sidebar failures) and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Select the new-session project by resolved ID — https://github.com/anomalyco/opencode/pull/52230
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `dd68d6eb795e4501141c88489e6ecb0624c2b898` (commit reviewed/applied), 2026-10-11
+- **Local change:** `fix(app): port upstream robustness fixes`; `packages/app-custom/src/new-session/project/{controller.ts,selector.tsx}`, `test-browser/{new-session-project-selection.test.ts,fixtures/new-session-project-selection.ts}` and `e2e/regression/new-session-project-resolved.spec.ts`. As upstream, the controls expose the Location's resolved `project.id`, and the selector, after the server filter and the exact worktree/sandbox match, falls back to a project with that ID, so a draft in a worktree missing from the inventory selects its project instead of the first listed one. Unlike upstream, when several opened projects share the ID (the shared-ID case of the #51288 entry), it prefers the most specific one whose root contains the draft directory and only then the first match. The custom Chats group and chat selection are unchanged (a chat draft still selects no project).
+- **Tests:** the ported selector tests (resolved ID before inventory, no cross-server match) plus exact-path precedence and shared-ID ancestor cases; three fail on `03a2551fc` and pass (the exact-path guard passes on both). The Playwright regression at 1440×900 and 390×844 opens a draft in an unlisted worktree with another project listed first: the trigger shows and checks the resolved project, with Chats still listed; it fails on `03a2551fc` (the other project is selected) and passes. App-custom typecheck (app and e2e), unit suite (1321 pass), browser suite (228 pass; the five known sidebar failures) and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
+### Focus the model search when /model opens its dialog — https://github.com/anomalyco/opencode/pull/53707
+
+- **Kind:** adaptation
+- **Reviewed upstream revision:** `98d57d0dd2def1f1482205e36ff62236209d1a9f` (commit reviewed/applied), 2026-10-11
+- **Local change:** `fix(app): port upstream robustness fixes`; `packages/app-custom/src/composer/{commands.tsx,editor/interaction.ts}` and `e2e/regression/{composer-model-dialog-focus,composer-slash-custom-focus}.spec.ts`. Both upstream parts are ported: `chooseModel` imports `DialogSelectModel` statically (the module is already in the composer's static graph through `ModelSelectorPopover`) so the dialog mounts and takes focus within the command, and a slash suggestion with an action no longer runs the machine's text replacement and `focus.editor` before the action (the existing prompt reset still clears `/model`). In the custom CodeMirror composer the static import is what fixes the lost keystrokes; the interaction change keeps parity with upstream and avoids briefly rewriting and refocusing the editor.
+- **Tests:** the new Playwright regression at 1440×900 and at 390×844 with touch emulation types `/model`, presses Enter and types immediately: the text lands in the dialog's search field and the composer stays empty; Escape returns focus to the composer, and the Commands-menu path keeps the draft while typing into the search. It fails on `03a2551fc` at both viewports (search empty) and with only the interaction change, and passes with the fix (10/10 with `--repeat-each=5`). The existing `composer-command-draft.spec.ts` passes. Because slash actions no longer get the machine's text replacement and `focus.editor`, every built-in slash command was compared with `03a2551fc` from the popover with Enter and with click (1440×900) or tap (390×844 touch): focus target, URL, open dialog, main draft and where typed text lands are identical for the custom-only `/btw` (side composer focused and typed into, main draft empty) and `/terminal` (terminal input focused, keys reach the PTY), and for `/model`, `/new`, `/export`, `/open` and `/mcp`; `/agent`, `/undo`, `/redo`, `/compact` and `/fork` are disabled in that fixture and were not exercised. `e2e/regression/composer-slash-custom-focus.spec.ts` guards `/btw` and `/terminal` in both selection modes and viewports; it passes on `03a2551fc` and with the change. App-custom typecheck (app and e2e), unit suite (1321 pass), browser suite (228 pass; the five known sidebar failures) and root `bun run check` pass.
+- **Status:** active
+- **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Calm diff word highlights with @pierre/diffs 1.5.1 — https://github.com/anomalyco/opencode/pull/51236
 
 - **Kind:** adaptation
@@ -261,7 +316,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `ee5b67eb84358067c8119fca269bb58154e32250` (commit reviewed/applied), 2026-09-28
 - **Local change:** `fix(app): unify session project resolution`; `packages/app-custom/src/shell/layout/{helpers.ts,helpers.test.ts}`, `src/runtime/server/runtime.tsx`, `src/shell/titlebar/{tab-nav.tsx,titlebar.tsx}`, `src/session/{session-identity-header.tsx,screen.tsx,timeline/message-timeline.tsx}`, `src/shell/commands/palette.ts`, and `src/home/sessions/{records.ts,records.test.ts,controller.tsx}`. Same resolver as upstream: a unique project-ID match wins, while projects sharing an ID resolve by exact directory, then sandbox, then the most specific ancestor root; `projects.forSession` prefers opened projects (keeping the custom per-workspace icon override from `enrich`) and `projects.detailsForSession` keeps synced worktree metadata with the opened project's name and icon for the summary and timeline. Wired into the horizontal tab strip, mobile titlebar, new-draft target, session identity header, timeline header/avatar, session summary, command palette, and Home session records. Chat sessions keep resolving to no project: the tab strip, header, palette, and Home records already skip chats, and the mobile titlebar now skips them too because the shared resolver also consults synced projects. The custom summary keeps its avatar prop rather than upstream's `ProjectIcon` swap. The custom sidebar keeps its own directory-first inventory and is not changed.
 - **Tests:** new helper tests (shared-ID precedence; details metadata plus appearance) and a Home records test fail on `cde61cb22` and pass; app-custom unit suite, typecheck, and root `bun run check` pass. Against the mock server with two opened projects sharing an ID, the session in the worktree shows the worktree project's avatar in the 390×844 mobile titlebar (`cde61cb22` showed the main repository) and in the 1440×900 horizontal tab.
-- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed the same consumers in #53727 (recent sessions in the empty palette), #53761, #51973, #53268, #53247, #53332, #53297, #52639, #52620 and #52369. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`; upstream changes not ported yet, so compare and port selectively.
+- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed the same consumers in #53727 (recent sessions in the empty palette), #53761, #51973, #53268, #53247, #53332, #53297, #52639, #52620 and #52369. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`; upstream changes not ported yet, so compare and port selectively. The new-session project selector, not one of these consumers, gains #52230's resolved-ID fallback in `fix(app): port upstream robustness fixes`, applying the same shared-ID preference for the most specific containing root (see its entry).
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
@@ -309,7 +364,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `9c8a63e852722a9bced4a0de1179de58a85dfa20` (commit reviewed/applied), 2026-09-28
 - **Local change:** `fix(app): return composer focus after picking files`; `packages/app-custom/src/composer/{attachments/attachments.ts,editor/interaction.ts}` and `packages/app-custom/e2e/regression/composer-file-picker-focus.spec.ts`. Ports only the focus return: the native picker resolves through a completion callback and the browser file input's change handler restores focus to the composer that started the pick. The thumbnail `<Suspense>` is not ported; the custom keyed attachment rows, stable blob resource, and `url.latest` preview already avoid detaching the session. Focus targets only the picking composer; while `/btw` hides the main editor, focusing it is a no-op and CodeMirror does not move the DOM selection of an unfocused view, so the visible side composer keeps focus.
 - **Tests:** the new Playwright regression at 1440×900 and 390×844 fails on `cde61cb22` (editor inactive after picking) and passes with the fix, including typing into the editor. A one-off Playwright check (not committed) completed a pending pick after opening `/btw`: the side composer kept focus and received the typed text. App-custom typecheck and root `bun run check` pass.
-- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed the composer files in #53076, #53267, #53707, #52217 and #52369. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`; upstream changes not ported yet, so compare and port selectively.
+- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed the composer files in #53076, #53267, #53707, #52217 and #52369. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`. `fix(app): port upstream robustness fixes` ports #53707 (see its entry) without changing the picker focus return; the other changes are not ported yet, so compare and port selectively.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
@@ -456,7 +511,7 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 - **Reviewed upstream revision:** `acfacede2d96fb6adf59b826491d3339d5d95261`, 2026-09-23
 - **Local change:** `feat(app): stage attachments in the custom composer`; `packages/app-custom/src/composer/editor/interaction.ts`. Uses upstream's attachment-paste guard while leaving ordinary and non-plain text paste to CodeMirror and preserving structured Session paste and custom image citation insertion.
 - **Tests:** clipboard guard tests for missing data, HTML/RTF, native image reading, and files; existing attachment ownership/reference tests; desktop/mobile paste and remove/undo checks.
-- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed `interaction.ts` in #53076 and #53707. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`; upstream changes not ported yet, so compare and port selectively.
+- **Comparison at `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (2.0.26):** upstream changed `interaction.ts` in #53076 and #53707. Custom port kept unchanged by `chore: merge upstream v2 (2.0.26) into custom`. `fix(app): port upstream robustness fixes` ports #53707's slash-action change (see its entry), which does not touch paste handling; #53076 is not ported yet, so compare and port selectively.
 - **Status:** reconcile
 - **Reconcile or remove when:** the next upstream integration that changes the same UI; compare and update the custom port
 - **Installation:** none
