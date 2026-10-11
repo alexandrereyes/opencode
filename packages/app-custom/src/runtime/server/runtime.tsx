@@ -1,5 +1,5 @@
 import { createSimpleContext } from "@opencode/ui-custom/context"
-import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner, onCleanup } from "solid-js"
+import { Accessor, createEffect, createMemo, createResource, createRoot, getOwner, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./registry"
 import { pathKey } from "@/workspaces/path-key"
@@ -61,19 +61,35 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
 
     const serverCtxs = new Map<ServerConnection.Key, ReturnType<typeof createServerController>>()
     const serverCtxDisposers = new Map<ServerConnection.Key, () => void>()
+    // The credentials each controller started with, as plain values: the listed connection is a store proxy that
+    // already reads the new password once the user saves it.
+    const serverCtxCredentials = new Map<ServerConnection.Key, string>()
 
     const owner = getOwner()
     if (!owner) throw new Error("Global provider requires a Solid owner")
 
-    const ensureServerCtx = (conn: ServerConnection.Any) => {
-      const key = ServerConnection.key(conn)
+    const disposeServerCtx = (key: ServerConnection.Key) => {
+      serverCtxDisposers.get(key)?.()
+      serverCtxDisposers.delete(key)
+      serverCtxCredentials.delete(key)
+      serverCtxs.delete(key)
+    }
+
+    const ensureServerCtx = (input: ServerConnection.Any) => {
+      const key = ServerConnection.key(input)
+      // Callers can hold an older copy of the connection; the listed one has the credentials the user saved last.
+      const conn = untrack(() => server.list.find((item) => ServerConnection.key(item) === key)) ?? input
       const existing = serverCtxs.get(key)
-      if (existing) return existing
+      if (existing && serverCtxCredentials.get(key) === credentials(conn)) return existing
+      // A controller keeps the credentials it started with, so a server signed in again under the same address needs
+      // a new one.
+      if (existing) disposeServerCtx(key)
       const serverCtx = createRoot((dispose) => {
         serverCtxDisposers.set(key, dispose)
         return createServerController(conn, server.scope(key), server.projects.forServer(key), notificationCoordinator)
       }, owner)
       serverCtxs.set(key, serverCtx)
+      serverCtxCredentials.set(key, credentials(conn))
       return serverCtx
     }
 
@@ -88,11 +104,8 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
 
     createEffect(() => {
       for (const [key] of serverCtxs) {
-        if (serverHealth[key]?.unauthorized || !server.list.find((conn) => ServerConnection.key(conn) === key)) {
-          serverCtxDisposers.get(key)?.()
-          serverCtxDisposers.delete(key)
-          serverCtxs.delete(key)
-        }
+        if (serverHealth[key]?.unauthorized || !server.list.find((conn) => ServerConnection.key(conn) === key))
+          disposeServerCtx(key)
       }
     })
 
@@ -326,4 +339,9 @@ export type ServerCtx = ReturnType<typeof createServerController>
 function isLocalHost(url: string) {
   const host = url.replace(/^https?:\/\//, "").split(":")[0]
   if (host === "localhost" || host === "127.0.0.1") return "local"
+}
+
+/** What an HTTP server's controller authenticates with; other servers keep one controller per id. */
+function credentials(conn: ServerConnection.Any) {
+  return conn.type === "http" ? `${conn.http.url}\n${conn.http.password ?? ""}` : ""
 }

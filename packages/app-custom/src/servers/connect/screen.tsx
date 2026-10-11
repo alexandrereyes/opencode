@@ -7,8 +7,9 @@ import { Wordmark } from "@opencode/ui-custom/wordmark"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCheckServerHealth } from "@/runtime/server/health"
-import { useServers } from "@/runtime/server/registry"
-import { pairingLink, redeemPairingLink, serverAddress } from "./pairing"
+import { ServerConnection, useServers } from "@/runtime/server/registry"
+import { pairingLink, serverAddress } from "./pairing"
+import { useRedeemPairing } from "./redeem"
 import { isMixedContent } from "./browser"
 import "./screen.css"
 
@@ -19,6 +20,7 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
   const platform = usePlatform()
   const servers = useServers()
   const check = useCheckServerHealth()
+  const redeem = useRedeemPairing()
   const cameraSupported =
     platform.platform === "web" && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia
   const [camera, cameraActions] = createResource(
@@ -49,17 +51,26 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
         ? "server.connect.mixedContent"
         : "server.connect.failed",
     )
+  // A pairing token works on every address of its server. Signing in again to the server that signed out keeps its
+  // address (e.g. localhost) even when the link names another one (e.g. 127.0.0.1 from opencode pair).
+  const target = async (url: string, password: string) => {
+    if (!props.url || props.url === url) return url
+    return (await check({ url: props.url, password })).healthy ? props.url : url
+  }
   const request = useMutation(() => ({
     mutationFn: async () => {
       const link = pairingLink(state.url)
       if (link) {
-        const redeemed = await redeemPairingLink(link)
-        if (!redeemed) {
-          setState("error", language.t("server.connect.link.expired"))
+        const redeemed = await redeem(link)
+        if ("error" in redeemed) {
+          setState("error", redeemed.error)
           return
         }
         // Keep the token in the form so a failed connection check can retry without the spent code.
-        setState({ url: link.url, password: redeemed.password })
+        setState({
+          url: await target(redeemed.pairing.urls[0], redeemed.pairing.password),
+          password: redeemed.pairing.password,
+        })
       }
       const url = serverAddress(state.url)
       if (!url) {
@@ -72,7 +83,11 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
         setState("error", connectionError())
         return
       }
-      servers.add({ type: "http", http })
+      // Signing in again keeps the name the user gave this server.
+      const existing = servers.list.find(
+        (server): server is ServerConnection.Http => server.type === "http" && server.http.url === url,
+      )
+      servers.add(existing ? { ...existing, http } : { type: "http", http })
     },
     onError: () => setState("error", connectionError()),
   }))

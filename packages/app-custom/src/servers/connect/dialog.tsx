@@ -18,7 +18,8 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { useCheckServerHealth } from "@/runtime/server/health"
 import { usePlatform } from "@/runtime/platform/platform"
 import { isMixedContent } from "./browser"
-import { pairingLink, redeemPairingLink } from "./pairing"
+import { pairingLink } from "./pairing"
+import { useRedeemPairing } from "./redeem"
 import "@/settings/settings.css"
 
 type FormMode = "list" | "add" | "edit"
@@ -141,6 +142,7 @@ function createFormController(options: { onSelect?: () => void } = {}) {
   const global = useGlobal()
   const language = useLanguage()
   const checkServerHealth = useCheckServerHealth()
+  const redeem = useRedeemPairing()
   const healthPreview = createServerHealthPreview(checkServerHealth)
   const [store, setStore] = createStore({
     mode: "list" as FormMode,
@@ -176,17 +178,28 @@ function createFormController(options: { onSelect?: () => void } = {}) {
       remove: (key) => server.remove(key),
     })
 
+  // A pairing token works on every address of its server. Signing in again to the edited server keeps its address
+  // (e.g. localhost) even when the link names another one (e.g. 127.0.0.1 from opencode pair).
+  const paired = async (url: string, password: string) => {
+    const original = store.mode === "edit" ? editing() : undefined
+    if (original?.type !== "http" || original.http.url === url) return url
+    return (await checkServerHealth({ url: original.http.url, password })).healthy ? original.http.url : url
+  }
+
   const request = useMutation(() => ({
     mutationFn: async () => {
       const link = pairingLink(store.values.url)
       if (link) {
-        const redeemed = await redeemPairingLink(link)
-        if (!redeemed) {
-          setStore("error", language.t("server.connect.link.expired"))
+        const redeemed = await redeem(link)
+        if ("error" in redeemed) {
+          setStore("error", redeemed.error)
           return
         }
         // Keep the token in the form so a failed connection check can retry without the spent code.
-        setStore("values", { url: link.url, password: redeemed.password })
+        setStore("values", {
+          url: await paired(redeemed.pairing.urls[0], redeemed.pairing.password),
+          password: redeemed.pairing.password,
+        })
       }
       const normalized = normalizeServerUrl(store.values.url)
       if (!normalized) {
@@ -198,8 +211,10 @@ function createFormController(options: { onSelect?: () => void } = {}) {
       if (store.mode === "edit" && !original) return
       const name = store.values.name.trim() || undefined
       const password = store.values.password || undefined
+      // Nothing changed: close, unless the server rejects these credentials, so saving checks them again.
       if (
         original?.type === "http" &&
+        !global.servers.health[ServerConnection.key(original)]?.unauthorized &&
         normalized === original.http.url &&
         name === original.displayName &&
         password === original.http.password
@@ -241,7 +256,15 @@ function createFormController(options: { onSelect?: () => void } = {}) {
     },
   }))
 
-  const preview = () => void healthPreview.preview(store.values, (status) => setStore("status", status))
+  const preview = () => {
+    // A pairing link is not a server address until it is redeemed, and redeeming spends it.
+    if (pairingLink(store.values.url)) {
+      healthPreview.cancel()
+      setStore("status", undefined)
+      return
+    }
+    void healthPreview.preview(store.values, (status) => setStore("status", status))
+  }
   const change = (field: keyof ServerFormValues, value: string) => {
     if (request.isPending) return
     setStore("values", field, value)
