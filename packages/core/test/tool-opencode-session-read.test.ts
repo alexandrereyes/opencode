@@ -57,7 +57,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
         target,
         options: {},
       })
-      if ("pending" in custom) throw new Error("Custom plugin was not loaded")
+      if ("pending" in custom || "blocked" in custom) throw new Error("Custom plugin was not loaded")
       const builtIn = { id: OpenCodeTools.Plugin.id, revision: "test", effect: OpenCodeTools.Plugin.effect }
       yield* plugins.activate([builtIn, custom])
 

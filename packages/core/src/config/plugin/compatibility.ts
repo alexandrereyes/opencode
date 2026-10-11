@@ -7,7 +7,6 @@ import { isDeepStrictEqual } from "node:util"
 import { Effect, FiberMap, PubSub, Semaphore, Stream } from "effect"
 import { Config } from "../../config.js"
 import { Watcher } from "../../filesystem/watcher.js"
-import { AbsolutePath } from "../../schema.js"
 import { Skill } from "../../skill.js"
 import { SkillFile } from "./skill-file.js"
 

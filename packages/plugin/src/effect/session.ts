@@ -162,11 +162,13 @@ export type SessionDomain = Pick<
   SessionApi<unknown>,
   | "create"
   | "get"
+  | "remove"
   | "switchAgent"
   | "switchModel"
   | "prompt"
   | "generate"
   | "command"
+  | "compact"
   | "synthetic"
   | "interrupt"
   | "update"

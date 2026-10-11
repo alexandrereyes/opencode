@@ -55,6 +55,8 @@ const npmLayer = Layer.succeed(
 
 const generateLayer = Layer.succeed(Generate.Service, Generate.Service.of({ text: () => Effect.succeed("") }))
 
+const configLayer = Config.testLayer()
+
 const permissionLayer = Layer.succeed(
   Permission.Service,
   Permission.Service.of({
@@ -75,6 +77,7 @@ const nodes = LayerNode.group([
   Location.node,
   Npm.node,
   Credential.node,
+  Config.node,
   Bus.node,
   Form.node,
   Generate.node,
@@ -110,11 +113,13 @@ const nodes = LayerNode.group([
 const replacements = [
   Location.node.replace(tempLocationLayer),
   Npm.node.replace(npmLayer),
-  Config.node.replace(Config.testLayer()),
+  Config.node.replace(configLayer),
   Mcp.node.replace(emptyMcpLayer),
   Generate.node.replace(generateLayer),
   Permission.node.replace(permissionLayer),
 ] as const
 
-export const PluginTestLayer = AppNodeBuilder.build(nodes, replacements)
-export const OfflinePluginTestLayer = AppNodeBuilder.build(nodes, [...replacements, offlineModels])
+export const PluginTestLayer = AppNodeBuilder.build(nodes, replacements).pipe(Layer.provideMerge(configLayer))
+export const OfflinePluginTestLayer = AppNodeBuilder.build(nodes, [...replacements, offlineModels]).pipe(
+  Layer.provideMerge(configLayer),
+)

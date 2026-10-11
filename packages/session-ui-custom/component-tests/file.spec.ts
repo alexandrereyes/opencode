@@ -13,10 +13,7 @@ for (const split of [false, true]) {
       await expect(additions).toHaveText(["select-text"])
       await expect(root.locator('[data-line-type="context"] [data-diff-span]')).toHaveCount(0)
       await expect(root.locator('[data-line-type="change-deletion"] [data-diff-span]')).toHaveText([
-        '"http" in',
-        "? error.reason.",
-        "response?.",
-        ": undefined",
+        '"http" in error.reason ? error.reason.http?.response?.headers["x-should-retry"] : undefined',
       ])
       await expect(additions).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
     })

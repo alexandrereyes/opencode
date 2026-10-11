@@ -1,3 +1,91 @@
+# V2 integration — 2026-10-11
+
+## Baselines
+
+- Custom parent: `4c34a869d`.
+- Integrated upstream: `5e73d5cb1f788637b1b3d5cf1298ea694cbad0c5` (`upstream/v2`,
+  source of the published 2.0.26 `latest` release; 443 commits after `dd786c62a`).
+  The 44 later `upstream/v2` commits, including the Effect 4.0.1 upgrade and #53641,
+  are not integrated.
+- Merged directly on `custom`.
+- Runtime: Bun 1.4.2.
+
+The upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, and
+`packages/tui` trees match the integrated upstream revision exactly. Upstream UI
+work in this range, including the move of GUI features into
+`packages/gui-extensions` (#52369), is not ported; `docs/upstream-overrides.md`
+marks the affected custom ports as `reconcile`.
+
+The local clone fetches `upstream` with `blob:none`. The first merge attempt
+aborted on a blob the lazy fetch could not obtain and left the tree partly
+updated; fetching the 1,622 missing blobs of the target tree in one batch
+(`git fetch upstream --filter=blob:none --stdin`) before merging avoids it.
+
+## Integration points
+
+- `@pierre/diffs` 1.5.1 (#51236) is a shared catalog bump, so its session-ui
+  change is ported into `packages/session-ui-custom` (two-argument diff option
+  types, `word-line` diffs, separator and annotation CSS, SSR fallback); see the
+  #51236 entry in `docs/upstream-overrides.md`.
+- `packages/core/src/filesystem.ts` takes upstream's streaming `read` (`File`) and
+  keeps the anticipated #53641 `list` failure; `packages/util/src/path.ts` adopts
+  the `upstream/v2` layout of #53641. Both files now equal `upstream/v2`.
+- Skill frontmatter keeps the custom `slash` field alongside upstream's
+  `disable-model-invocation` (#52747) and broader boolean parsing.
+- Plugin docs keep `session.scan`/`archive` next to upstream's `update` (formerly
+  `rename`), `move`, `compact`, `remove`, and `context`.
+- The CLI web UI archive takes upstream's binary format (#53643–#53645) and keeps
+  the `--custom` build of `packages/app-custom`. The web shell CSP keeps the custom
+  blob frame/media/font sources and adds upstream's `worker-src 'self' blob:`.
+- Storybook stays on the custom packages and does not load `gui-extensions` stories
+  or the `ExtensionStory` wrapper. CI runs upstream's new component-test steps
+  against `packages/session-ui-custom` and `packages/app-custom`.
+- Root `lint` adopts upstream's ast-grep GUI-extension rules and SDK doc check;
+  `bench:devex` stays on `packages/app-custom`.
+- Core test fixtures: the plugin layer adds `Config.node` with a shared
+  `configLayer` beside the custom `SessionFamily` and offline variant; the new
+  policy fixture supplies the custom `mcp.callTool`; the session-read test handles
+  upstream's blocked plugin load result; an unused import is removed for upstream's
+  `noUnusedLocals`.
+- Upstream desktop browser tests that #52369 removed are dropped with their custom
+  stabilizations.
+- Regenerating the Client from source restores the custom types (`slash`,
+  `session.archived`, `session.permissions.updated`, `created`). The Protocol
+  OpenAPI documents keep the merged text: regenerating also emits upstream drift
+  (for example #52668's `LocationNotFoundError`) that upstream's committed document
+  lacks.
+- New database migration `20261007190000_azure_cli_external_credential` turns
+  Azure CLI OAuth credentials into external references.
+
+Shared implementation overlap against the fixed upstream baseline, measured with
+the command below using `5e73d5cb1`: **59 modified upstream files, 723 added lines,
+71 removed lines**.
+
+## Validation
+
+- `bun.lock` is regenerated with `bun install` from upstream's lockfile; frozen
+  installation, root `bun run check`, and the custom web production build pass.
+- Core 6,598 passed, 23 skipped; Server 79 (five skipped); CLI 364 (nine skipped);
+  custom plugin 59; Client 224; SDK 36; CodeMode 1,373; Plugin 9; App-custom unit
+  1,320 (one skipped) and browser 226; Session-UI-custom 251; UI-custom 114.
+- Failures not caused by the merge:
+  - Core GitLab OAuth (11): local port 8080 is held by OrbStack.
+  - Core `Git trees` check-ignore and `Worktree` dirty-removal, custom plugin
+    worktree cleanup (2) and the server's custom worktree route: Git prints
+    localized (pt-BR) messages on this Mac. They pass with `LC_ALL=C`.
+  - Server OpenAI OAuth port fallback (2–3) and the custom worktree route: the
+    installed, signed-in Azure CLI makes upstream's Azure discovery (#50053,
+    #53794) call `management.azure.com`, which the test guard blocks. With an
+    empty `AZURE_CONFIG_DIR` and `LC_ALL=C` the Server suite passes completely.
+  - Core `LocationActivity eviction` (4): `82615eb0f` (`fix(core): keep locations
+    alive while awaiting user input`) intentionally keeps Locations with pending
+    questions alive, which these upstream tests reject. `location-activity.ts` is
+    unchanged by upstream in this range, and the tests pass with upstream's file.
+  - Client `exposes every standard HTTP API group`: upstream's own test omits
+    #53672's `integration.connect.external`; it also fails at `5e73d5cb1` and is
+    not fixed on `upstream/v2`.
+  - App-custom browser: the five known sidebar suites recorded on `4c34a869d`.
+
 # V2 integration — 2026-09-28
 
 ## Baselines
