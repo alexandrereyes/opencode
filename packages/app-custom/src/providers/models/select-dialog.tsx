@@ -379,12 +379,12 @@ function ModelPicker(props: {
           <Show when={store.search.trim()}>
             <button
               type="button"
-              class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover"
+              class="flex size-5 items-center justify-center rounded-sm bg-transparent text-v2-icon-icon-faint transition-colors hover:text-v2-icon-icon-base focus-visible:text-v2-icon-icon-base active:text-v2-icon-icon-base"
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => setSearch("")}
               aria-label={language.t("common.clear")}
             >
-              <Icon name="close" size="small" />
+              <Icon name="circle-xmark" />
             </button>
           </Show>
         </div>

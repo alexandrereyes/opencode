@@ -471,10 +471,13 @@ function SessionScreenContent(props: { session: SessionModel }) {
                   style={{ height: sideVisible() ? screen.side.region.height() : "100%" }}
                 >
                   <Show when={store.sideRegionPresent}>
+                    {/* A closed region stays mounted at zero height while the side terminal is open. Once its close
+                        animation is over, hide it, or its frame's shadow draws a flat line over the terminal's top edge. */}
                     <div
                       data-slot="session-side-region-presence"
                       data-opened={sideMotion().animateRegion ? sideMotion().region : undefined}
                       class="absolute inset-0"
+                      classList={{ invisible: !screen.side.region.open() && !sideMotion().animateRegion }}
                       onAnimationEnd={(event) => {
                         if (event.currentTarget !== event.target) return
                         if (event.animationName !== "side-region-presence-out") return

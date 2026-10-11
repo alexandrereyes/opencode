@@ -71,12 +71,17 @@ for (const width of [1000, 1440]) {
         })
         .toBe(true)
 
-      await expect
-        .poll(async () => {
-          const box = await panel.locator('[data-slot="session-side-panel-actions"]').boundingBox()
-          return box ? box.y + box.height / 2 : undefined
-        })
-        .toBe(closed.y + closed.height / 2)
+      for (const control of [
+        panel.locator('[data-slot="session-side-panel-actions"]'),
+        panel.getByRole("button", { name: "Open file", exact: true }),
+      ]) {
+        await expect
+          .poll(async () => {
+            const box = await control.boundingBox()
+            return box ? box.y + box.height / 2 : undefined
+          })
+          .toBe(closed.y + closed.height / 2)
+      }
 
       await toggle.press("Enter")
       await expect(toggle).toHaveAttribute("aria-expanded", "false")

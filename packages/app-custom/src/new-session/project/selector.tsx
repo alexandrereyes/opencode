@@ -394,12 +394,12 @@ export function PromptProjectSelector(props: {
               <Show when={props.controller.search().trim()}>
                 <button
                   type="button"
-                  class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover"
+                  class="flex size-5 items-center justify-center rounded-sm bg-transparent text-v2-icon-icon-faint transition-colors hover:text-v2-icon-icon-base focus-visible:text-v2-icon-icon-base active:text-v2-icon-icon-base"
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => props.controller.clearSearch()}
                   aria-label={props.controller.labels.clear()}
                 >
-                  <Icon name="close-small" size="small" />
+                  <Icon name="circle-xmark" />
                 </button>
               </Show>
             </div>

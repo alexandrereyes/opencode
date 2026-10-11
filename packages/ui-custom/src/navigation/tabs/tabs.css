@@ -563,6 +563,12 @@
       }
     }
 
+    /* The pill's padding sets the file icon's inset; the trigger clips anything pulled past its edge. */
+    &[data-value^="file://"]
+    {
+      padding-inline-start: 8px;
+    }
+
     &:has([data-selected]) {
       background-color: var(--v2-background-bg-layer-02);
       box-shadow: none;
@@ -582,11 +588,6 @@
 
     &[data-selected]:not([data-value="open-file"]) {
       color: var(--v2-text-text-base);
-    }
-
-    .tab-fileicon-color,
-    .tab-fileicon-mono {
-      margin-inline-start: -2px;
     }
 
     .italic {
@@ -616,27 +617,15 @@
   flex: 1 1 0;
   min-width: 0;
   width: auto;
+  height: var(--tabs-bar-height);
+  padding-inline-end: 0;
   border-bottom: none;
 }
 
+/* The end gap lives inside the sticky "+" box. Sticky offsets respect the strip's padding, so padding there
+   would leave a gap after the "+" where scrolled tabs show through. */
 :root body #review-panel [data-component="tabs"] .session-review-v2-tabs-bar [data-slot="tabs-list"] > .sticky {
-  padding-inline-end: 0;
-
-  [data-component="icon-button-v2"] {
-    position: relative;
-
-    &::after {
-      content: "";
-      position: absolute;
-      inset-inline-start: 100%;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 20px;
-      height: 28px;
-      background-color: var(--v2-background-bg-base);
-      pointer-events: none;
-    }
-  }
+  padding-inline-end: 12px;
 }
 
 :root
@@ -693,10 +682,6 @@
 
   &:dir(rtl)::after {
     background: linear-gradient(270deg, var(--v2-background-bg-base), transparent);
-  }
-
-  [data-component="icon-button-v2"]::after {
-    display: none;
   }
 }
 

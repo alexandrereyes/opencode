@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { chromium, expect, test, type Page } from "@playwright/test"
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
 import { once } from "node:events"
@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { build } from "vite"
 import { serviceWorker } from "../../vite.pwa"
+import { channel } from "../../playwright.channel"
 
 type Site = {
   url: string
@@ -411,6 +412,43 @@ test("the production build precaches every deployable file", async ({ page, cont
     expect(response?.fromServiceWorker()).toBe(true)
     expect(await response?.text()).toBe(await readFile(new URL("index.html", directory), "utf8"))
   } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  }
+})
+
+test("the production build installs as an app behind an authenticating proxy", async () => {
+  const directory = new URL("../../dist/", import.meta.url)
+  const server = createServer(async (request, response) => {
+    // Model a reverse proxy that rejects every request without the signed-in user's cookie.
+    if (!request.headers.cookie?.includes("session=signed-in")) return void response.writeHead(401).end()
+    const path = new URL(request.url ?? "/", "http://localhost").pathname
+    const file = extname(path) ? path : "/index.html"
+    const bytes = await readFile(new URL(`.${file}`, directory)).catch(() => undefined)
+    if (!bytes) return void response.writeHead(404).end("Not found")
+    if (file.endsWith(".webmanifest")) response.setHeader("content-type", "application/manifest+json")
+    if (file.endsWith(".png")) response.setHeader("content-type", "image/png")
+    // Check the real HTML without starting the app or its service worker.
+    if (file === "/index.html")
+      response.writeHead(200, { "content-type": "text/html", "content-security-policy": "script-src 'none'" })
+    response.end(bytes)
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("Expected a TCP address")
+  const url = `http://127.0.0.1:${address.port}`
+  // Chrome Headless Shell has no install checks and reports no errors for any page, and an incognito context always
+  // reports one, so check in a persistent profile of a full Chrome build.
+  const context = await chromium.launchPersistentContext("", { channel: channel ?? "chromium" })
+  try {
+    await context.addCookies([{ name: "session", value: "signed-in", url }])
+    const page = await context.newPage()
+    await page.goto(url)
+    const session = await context.newCDPSession(page)
+    expect((await session.send("Page.getInstallabilityErrors")).installabilityErrors).toEqual([])
+  } finally {
+    await context.close()
     server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   }
