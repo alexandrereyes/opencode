@@ -80,6 +80,58 @@ test("reverts directly to the selected user message", async ({ page }) => {
   expect(staged).toEqual([{ sessionID, messageID: "msg_second" }])
 })
 
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844],
+]) {
+  test(`restores file context and staged attachments as composer chips at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height })
+    const withContext = [
+      ...messages.slice(0, 2),
+      {
+        id: "msg_second",
+        type: "user",
+        text: "Second prompt\nAttached file: `/uploads/log.txt`",
+        metadata: {
+          displayText: "Second prompt",
+          comments: [],
+          attachments: [{ name: "log.txt", mime: "text/plain", path: "/uploads/log.txt" }],
+        },
+        files: [
+          {
+            data: "eQ==",
+            mime: "text/plain",
+            name: "notes.md",
+            source: { type: "uri", uri: "file:///C:/OpenCode/SessionMessageRevert/docs/notes.md?start=3&end=4" },
+          },
+        ],
+        time: { created: 4 },
+      },
+    ] satisfies SessionMessageInfo[]
+    await mockOpenCodeServer(page, { ...fixture, sessions: [session], pageMessages: () => ({ items: withContext }) })
+    await page.goto(`/server/${base64Encode(server)}/session/${sessionID}`)
+    await expectSessionTitle(page, "Session message revert")
+
+    const message = page.locator('[data-message-id="msg_second"]')
+    await message.hover()
+    await message.getByRole("button", { name: "Revert message" }).click()
+
+    const composer = page.locator('[data-component="composer"]')
+    await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveText("Second prompt")
+    // The context file returns as a removable chip, not as an attachment holding a snapshot of its bytes.
+    const chip = composer.locator('[data-slot="composer-context-file"]')
+    await expect(chip).toHaveCount(1)
+    await expect(chip).toContainText("notes.md")
+    await expect(chip).toContainText(":3-4")
+    await expect(composer.locator('div[data-attachment-id="msg_second:path:0"]')).toContainText("log.txt")
+    await expect(composer.locator('[data-attachment-id^="msg_second:file:"]')).toHaveCount(0)
+    await composer.screenshot({ path: testInfo.outputPath("restored-context.png") })
+    await chip.hover()
+    await chip.getByRole("button", { name: "Remove attachment" }).click()
+    await expect(chip).toHaveCount(0)
+  })
+}
+
 test("hides revert actions in a child session", async ({ page }) => {
   await mockOpenCodeServer(page, {
     ...fixture,

@@ -435,7 +435,7 @@ async function sendCommand(
 ) {
   const request = await buildSubmissionRequest(session, value, destination)
   // Like queued prompts, queued commands must not apply the composer's selection to active work.
-  if (value.delivery === "steer") await applySelection(session, value.selection, track)
+  await settleSelection(session, value, track)
   await session.api.command({
     sessionID: session.id,
     name: command.command,
@@ -462,6 +462,7 @@ async function applySelection(
   session: ComposerSession,
   selection: ComposerSelection,
   track?: ModelSelection["trackSessionCommit"],
+  beforeModel?: () => Promise<void>,
 ) {
   const cancel = track?.(session.id, selection)
   try {
@@ -469,6 +470,7 @@ async function applySelection(
     if (current?.agent !== selection.agent) {
       await session.api.switchAgent({ sessionID: session.id, agent: selection.agent })
     }
+    await beforeModel?.()
     // The server deduplicates unchanged selections; cached SSE state may still be behind an earlier switch.
     await session.api.switchModel({
       sessionID: session.id,
@@ -480,6 +482,25 @@ async function applySelection(
   }
 }
 
+// Switching agent or model reconfigures the session immediately, and with it
+// the remainder of a running turn. A steer targets that turn, so its
+// selection applies now; a queued follow-up must not reconfigure the turn it
+// waits behind, so it runs with the session selection at delivery time (the
+// intended selection stays recorded in its metadata).
+// Like the TUI, a staged revert settles after the agent switch and before the model switch and admission. The
+// server would otherwise commit it on admission and delete every row from its boundary on, the model switch too.
+async function settleSelection(
+  session: ComposerSession,
+  value: ComposerSubmission,
+  track: ModelSelection["trackSessionCommit"] | undefined,
+) {
+  const settle = async () => {
+    if (session.current()?.revert) await session.api.revert.commit({ sessionID: session.id })
+  }
+  if (value.delivery === "steer") return applySelection(session, value.selection, track, settle)
+  await settle()
+}
+
 async function sendPrompt(
   session: ComposerSession,
   value: ComposerSubmission,
@@ -488,14 +509,7 @@ async function sendPrompt(
   onAdmit: () => void,
 ) {
   const request = await buildSubmissionRequest(session, value, destination)
-  // Switching agent or model reconfigures the session immediately, and with it
-  // the remainder of a running turn. A steer targets that turn, so its
-  // selection applies now; a queued follow-up must not reconfigure the turn it
-  // waits behind, so it runs with the session selection at delivery time (the
-  // intended selection stays recorded in its metadata).
-  if (value.delivery === "steer") {
-    await applySelection(session, value.selection, track)
-  }
+  await settleSelection(session, value, track)
 
   const admission = {
     id: value.id,

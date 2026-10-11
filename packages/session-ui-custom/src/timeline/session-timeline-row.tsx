@@ -23,7 +23,11 @@ import {
   SessionUserMessage,
   currentContentDefaultOpen,
 } from "../message/current-message"
-import { AssistantReasoningContent, SessionCompactionMessage } from "../message/message-content"
+import {
+  AssistantReasoningContent,
+  SessionCompactionMessage,
+  SessionCompactionQueued,
+} from "../message/message-content"
 import type { ContextGroupPart } from "../tools/tool-renderer"
 import { SessionRetry } from "../components/session-retry"
 import { SessionError } from "../components/session-error"
@@ -664,6 +668,22 @@ export function createSessionTimelineRowRenderer(input: {
               <div class="py-2">
                 <TimelineSeparator label={i18n.t("ui.message.interrupted")} />
               </div>
+            </div>
+          </div>
+        </Frame>
+      )
+    }
+    if (row()._tag === "CompactionQueued") {
+      const current = () => {
+        const value = row()
+        if (value._tag !== "CompactionQueued") throw new Error("Expected a queued-compaction timeline row")
+        return value
+      }
+      return (
+        <Frame row={current()}>
+          <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
+            <div data-slot="session-turn-compaction">
+              <SessionCompactionQueued />
             </div>
           </div>
         </Frame>

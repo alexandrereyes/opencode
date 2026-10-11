@@ -253,6 +253,18 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
         )
         clearRetry()
       },
+      /** Replaces every item, as restoring a sent prompt replaces the whole draft. */
+      replace(items: FileContextItem[]) {
+        setStore(
+          "context",
+          "items",
+          [...new Map(items.map((item) => [contextItemKey(item), item] as const)).entries()].map(([key, item]) => ({
+            ...item,
+            key,
+          })),
+        )
+        clearRetry()
+      },
       replaceComments(items: FileContextItem[]) {
         setStore("context", "items", (current) => [
           ...current.filter((item) => !isCommentItem(item)),

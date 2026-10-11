@@ -151,6 +151,55 @@ describe("session revert requests", () => {
     await request
   })
 
+  test("restores context files, comments and staged attachments instead of inline file snapshots", async () => {
+    const message: SessionMessageUser = {
+      id: "message-b",
+      type: "user",
+      text: "check this\nAttached file: `/uploads/log.txt`",
+      metadata: {
+        displayText: "check this",
+        comments: [
+          {
+            path: "src/app.ts",
+            comment: "why?",
+            selection: { startLine: 2, startChar: 0, endLine: 3, endChar: 0 },
+            origin: "review",
+          },
+        ],
+        attachments: [{ name: "log.txt", mime: "text/plain", path: "/uploads/log.txt" }],
+      },
+      files: [
+        // The comment's own file is regenerated from the comment.
+        { data: "eA==", mime: "text/plain", source: { type: "uri", uri: "file:///repo/src/app.ts?start=2&end=3" } },
+        { data: "eQ==", mime: "text/plain", name: "notes.md", source: { type: "uri", uri: "file:///repo/notes.md" } },
+      ],
+      time: { created: 0 },
+    }
+    const fixture = setupRevert([user("message-a"), message])
+    fixture.composer.context.add({ type: "file", path: "stale.ts" })
+    const staging = fixture.nextStage()
+    const request = fixture.actions.to("message-b")
+
+    expect(fixture.composer.current()).toEqual([
+      { type: "text", content: "check this", start: 0, end: 10 },
+      { type: "path", id: "message-b:path:0", filename: "log.txt", mime: "text/plain", path: "/uploads/log.txt" },
+    ])
+    expect(fixture.composer.context.items().map(({ key: _, ...item }) => item)).toEqual([
+      {
+        type: "file",
+        path: "src/app.ts",
+        selection: { startLine: 2, startChar: 0, endLine: 3, endChar: 0 },
+        comment: "why?",
+        preview: undefined,
+        commentOrigin: "review",
+      },
+      { type: "file", path: "notes.md", selection: undefined },
+    ])
+    await staging
+    fixture.gates[0]?.resolve()
+    await request
+  })
+
   test("ends a queued edit before projecting the optimistic prompt", async () => {
     const fixture = setupRevert()
     let editing = true

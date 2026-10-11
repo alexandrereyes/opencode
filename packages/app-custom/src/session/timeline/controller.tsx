@@ -83,13 +83,17 @@ export function createTimelineController(input: {
     admittedFirst = result[0]?.id
     return result
   })
-  const pendingUserMessageIDs = createMemo(() => {
+  const pendingInputIDs = createMemo(() => {
     const id = input.session.identity.sessionID()
     return new Set(
       (id ? data.session.pending.list(id) : []).flatMap((item) =>
-        item.type === "user" && item.delivery === "steer" ? [item.id] : [],
+        (item.type === "user" && item.delivery === "steer") || item.type === "synthetic" ? [item.id] : [],
       ),
     )
+  })
+  const queuedCompactionIDs = createMemo(() => {
+    const id = input.session.identity.sessionID()
+    return (id ? data.session.pending.list(id) : []).flatMap((item) => (item.type === "compaction" ? [item.id] : []))
   })
   const titleValue = createMemo(() => input.session.data.info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()) ?? language.t("session.tab.session"))
@@ -142,7 +146,8 @@ export function createTimelineController(input: {
     shellToolDefaultOpen: shellToolPartsExpanded,
     editToolDefaultOpen: editToolPartsExpanded,
     timelineDetail,
-    pendingUserMessageIDs,
+    pendingInputIDs,
+    queuedCompactionIDs,
   })
   const [pending, setPending] = createStore({ rename: false })
 

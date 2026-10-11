@@ -65,7 +65,7 @@ describe("visibleTimelineMessages", () => {
         shellToolDefaultOpen: () => false,
         editToolDefaultOpen: () => false,
         timelineDetail: () => timelinePresets[2].value,
-        pendingUserMessageIDs: () => new Set([steer.id]),
+        pendingInputIDs: () => new Set([steer.id]),
       })
       expect(projection.activeMessageID()).toBe("msg_1")
       expect(projection.rows().map((row) => [row._tag, row.userMessageID])).toEqual([
@@ -94,6 +94,31 @@ describe("visibleTimelineMessages", () => {
       expect(projection.rowByKey().size).toBe(projection.rows().length)
       dispose()
     })
+  })
+
+  test("keeps an undelivered synthetic input below active work like a steer", () => {
+    const notice = {
+      id: "msg_6",
+      type: "synthetic",
+      text: "reminder",
+      description: "Reminder",
+      time: { created: 4 },
+    } satisfies SessionMessageInfo
+    const source = [...messages.slice(0, 2), notice, work] satisfies SessionMessageInfo[]
+    const pending = {
+      id: notice.id,
+      sessionID: "ses_1",
+      time: { created: 4 },
+      type: "synthetic",
+      delivery: "steer",
+      payload: { text: "reminder", description: "Reminder" },
+    } satisfies SessionInboxInfo
+    expect(visibleTimelineMessages(source, [pending]).map((message) => message.id)).toEqual([
+      "msg_1",
+      "msg_2",
+      "msg_5",
+      "msg_6",
+    ])
   })
 
   test("moves a queued input after existing work when changed to steer", () => {

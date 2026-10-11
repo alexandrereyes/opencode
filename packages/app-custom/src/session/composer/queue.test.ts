@@ -3,7 +3,15 @@ import type { SessionInboxInfo } from "@opencode/client/promise"
 import { Session } from "@opencode/schema/session"
 import { EditorState } from "@codemirror/state"
 import { Skill } from "@opencode/schema/skill"
-import { editedPromptInput, queuedPrompt, queuedPromptAttachments, queuedPromptRows, queuedPromptUndo } from "./queue"
+import {
+  editedPromptInput,
+  queuedPrompt,
+  queuedPromptAttachments,
+  queuedPromptRows,
+  queuedPromptUndo,
+  rewriteQueue,
+  steerQueuedEdit,
+} from "./queue"
 import type { ImageAttachmentPart, Prompt, SessionPart } from "@/composer/state"
 import type { AttachmentDestination, DeliveredAttachment } from "@/composer/attachments/deliver"
 import type { ChatQuote } from "@/composer/schema"
@@ -732,5 +740,110 @@ describe("queuedPromptUndo", () => {
 
     expect(queuedPromptUndo(withComment, "/repo")).toBeUndefined()
     expect(queuedPromptUndo(hidden, "/repo")).toBeUndefined()
+  })
+})
+
+// An in-memory inbox with the server's admission order; `fail` rejects one admission by its text.
+function memoryInbox(items: SessionInboxInfo[], fail?: string) {
+  const state = { items: [...items], calls: [] as string[] }
+  const inbox: Parameters<typeof rewriteQueue>[0] = {
+    list: async () => state.items.map((item) => ({ ...item })),
+    cancel: async (input: { inboxID: string }) => {
+      state.calls.push(`cancel:${input.inboxID}`)
+      state.items = state.items.filter((item) => item.id !== input.inboxID)
+    },
+    prompt: async (input) => {
+      const id = input.id ?? "msg_unnamed"
+      state.calls.push(`prompt:${input.text}`)
+      // The server can admit a prompt whose response then fails.
+      state.items.push({
+        id,
+        sessionID: input.sessionID,
+        time: { created: state.items.length + 10 },
+        type: "user",
+        delivery: input.delivery ?? "steer",
+        payload: { text: input.text },
+      })
+      if (input.text === fail) throw new Error("admission failed")
+      return state.items.at(-1)!
+    },
+  }
+  return { state, inbox }
+}
+
+const three = (["a", "b", "c"] as const).map(
+  (text, index): SessionInboxInfo => ({
+    id: `msg_${text}`,
+    sessionID: "ses_1",
+    time: { created: index + 1 },
+    type: "user",
+    delivery: "queue",
+    payload: { text },
+  }),
+)
+
+describe("rewriteQueue", () => {
+  test("reorders by re-admitting only the changed suffix", async () => {
+    const memory = memoryInbox(three)
+    await rewriteQueue(memory.inbox, "ses_1", ["msg_a", "msg_c", "msg_b"])
+    expect(memory.state.items.map((item) => (item.type === "user" ? item.payload.text : ""))).toEqual(["a", "c", "b"])
+    expect(memory.state.calls).toEqual(["prompt:c", "prompt:b", "cancel:msg_b", "cancel:msg_c"])
+  })
+
+  test("withdraws the replacements already admitted when a reorder fails", async () => {
+    const memory = memoryInbox(three, "b")
+    await expect(rewriteQueue(memory.inbox, "ses_1", ["msg_a", "msg_c", "msg_b"])).rejects.toThrow("admission failed")
+    expect(memory.state.items.map((item) => item.id)).toEqual(["msg_a", "msg_b", "msg_c"])
+  })
+
+  test("puts an edited prompt at the original's position", async () => {
+    const memory = memoryInbox(three)
+    await rewriteQueue(memory.inbox, "ses_1", ["msg_a", "msg_b", "msg_c"], {
+      original: "msg_b",
+      admission: { id: "msg_edited", sessionID: "ses_1", text: "edited", delivery: "queue", resume: false },
+    })
+    expect(memory.state.items.map((item) => item.id)).toEqual(["msg_a", "msg_edited", expect.stringMatching(/^msg_/)])
+    expect(memory.state.items.map((item) => (item.type === "user" ? item.payload.text : ""))).toEqual([
+      "a",
+      "edited",
+      "c",
+    ])
+  })
+
+  test("refuses a queued edit whose original was delivered meanwhile", async () => {
+    const memory = memoryInbox(three.filter((item) => item.id !== "msg_b"))
+    await expect(
+      rewriteQueue(memory.inbox, "ses_1", ["msg_a", "msg_b", "msg_c"], {
+        original: "msg_b",
+        admission: { id: "msg_edited", sessionID: "ses_1", text: "edited", delivery: "queue", resume: false },
+      }),
+    ).rejects.toThrow("Queued prompts changed")
+    expect(memory.state.calls).toEqual([])
+  })
+})
+
+describe("steerQueuedEdit", () => {
+  test("steers the edit and withdraws the queued original", async () => {
+    const memory = memoryInbox(three)
+    await steerQueuedEdit(memory.inbox, "ses_1", "msg_b", {
+      id: "msg_edited",
+      sessionID: "ses_1",
+      text: "edited",
+      delivery: "steer",
+    })
+    expect(memory.state.calls).toEqual(["prompt:edited", "cancel:msg_b"])
+  })
+
+  test("refuses to send an edit twice after its original was delivered", async () => {
+    const memory = memoryInbox(three.filter((item) => item.id !== "msg_b"))
+    await expect(
+      steerQueuedEdit(memory.inbox, "ses_1", "msg_b", {
+        id: "msg_edited",
+        sessionID: "ses_1",
+        text: "edited",
+        delivery: "steer",
+      }),
+    ).rejects.toThrow("delivered before the edit")
+    expect(memory.state.calls).toEqual([])
   })
 })

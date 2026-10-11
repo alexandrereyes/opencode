@@ -6,7 +6,7 @@ import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useLanguage } from "@/runtime/i18n/language"
-import { extractPromptComments, extractPromptFromMessage } from "@/composer/prompt"
+import { extractPromptContext, extractPromptFromMessage } from "@/composer/prompt"
 import { restoreChatQuotes } from "@/composer/chat-quote"
 import { showToast } from "@/shell/notifications/toast"
 
@@ -88,16 +88,8 @@ export function createSessionRevertActions(input: RevertInput, environment: Reve
         directory: environment.directory(),
       }),
     )
-    target.context.replaceComments(
-      extractPromptComments(message).map((comment) => ({
-        type: "file",
-        path: comment.path,
-        selection: comment.selection,
-        comment: comment.comment,
-        preview: comment.preview,
-        commentOrigin: comment.origin,
-      })),
-    )
+    // The restored prompt replaces the draft, so chips from an earlier draft do not ride along.
+    target.context.replace(extractPromptContext(message, { directory: environment.directory() }))
   }
 
   const stage = async (sessionID: string, message: SessionMessageUser, report: (progress: RevertProgress) => void) => {

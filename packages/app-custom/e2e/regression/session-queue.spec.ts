@@ -24,7 +24,8 @@ function createQueueMock(seed: (string | InboxRow["payload"])[], messages: Sessi
   }))
   const events: OpenCodeEvent[] = []
   const prompts: Record<string, unknown>[] = []
-  const changes: { inboxID: string; action: "cancel" | "steer" }[] = []
+  const changes: { inboxID: string; action: "cancel" | "steer" | "queue" }[] = []
+  const compactions: SessionInboxInfo[] = []
   const log: string[] = []
   let sequence = 0
   const emit = <Type extends OpenCodeEvent["type"]>(
@@ -42,6 +43,7 @@ function createQueueMock(seed: (string | InboxRow["payload"])[], messages: Sessi
   }
   return {
     rows,
+    compactions,
     prompts,
     changes,
     log,
@@ -70,7 +72,7 @@ function createQueueMock(seed: (string | InboxRow["payload"])[], messages: Sessi
         item: { type: "user", payload: row.payload, delivery: row.delivery },
       })
     },
-    onInboxChange: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" }) => {
+    onInboxChange: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" | "queue" }) => {
       changes.push({ inboxID: input.inboxID, action: input.action })
       log.push(`${input.action}:${input.inboxID}`)
       const index = rows.findIndex((row) => row.id === input.inboxID)
@@ -81,17 +83,22 @@ function createQueueMock(seed: (string | InboxRow["payload"])[], messages: Sessi
         emit("session.inbox.cancelled", { sessionID: input.sessionID, inboxID: input.inboxID })
         return
       }
-      rows[index] = { ...row, delivery: "steer" }
+      rows[index] = { ...row, delivery: input.action }
       emit("session.inbox.delivery.changed", {
         sessionID: input.sessionID,
         inboxID: input.inboxID,
-        delivery: "steer",
+        delivery: input.action,
       })
     },
   }
 }
 
-async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>, followUpBehavior?: "queue" | "steer") {
+async function openSession(
+  page: Page,
+  mock: ReturnType<typeof createQueueMock>,
+  followUpBehavior?: "queue" | "steer",
+  revert?: string,
+) {
   await mockOpenCodeServer(page, {
     directory,
     project: {
@@ -123,11 +130,12 @@ async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>,
         version: "dev",
         model: { id: "queue-model", providerID: "opencode" },
         time: { created: 1700000000000, updated: 1700000000000 },
+        ...(revert ? { revert: { messageID: revert } } : {}),
       },
     ],
     pageMessages: () => ({ items: mock.messages }),
     sessionStatus: () => ({ [sessionID]: { type: "running" } }),
-    inbox: () => mock.rows.map((row) => ({ ...row, payload: { ...row.payload } })),
+    inbox: () => [...mock.rows.map((row) => ({ ...row, payload: { ...row.payload } })), ...mock.compactions],
     onPrompt: mock.onPrompt,
     onInboxChange: mock.onInboxChange,
     events: mock.events,
@@ -136,11 +144,11 @@ async function openSession(page: Page, mock: ReturnType<typeof createQueueMock>,
   await page.route("**/api/session/*/inbox/*", async (route) => {
     if (route.request().method() !== "PATCH") return route.fallback()
     const payload = route.request().postDataJSON()
-    if (payload?.delivery !== "steer") return route.fallback()
+    if (payload?.delivery !== "steer" && payload?.delivery !== "queue") return route.fallback()
     mock.onInboxChange({
       sessionID,
       inboxID: new URL(route.request().url()).pathname.split("/").at(-1) ?? "",
-      action: "steer",
+      action: payload.delivery,
     })
     await route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*" } })
   })
@@ -272,15 +280,223 @@ test("editing restores the existing draft and replaces only the original queue p
     "third queued prompt",
   ])
   await expect(view.input).toHaveText("my in-progress draft")
+  // One rewrite from the edited position: the replacement, then the prompts after it.
   expect(mock.prompts.map((prompt) => prompt.text)).toEqual([
-    "tighten the error copy and add a retry hint",
     "tighten the error copy and add a retry hint",
     "third queued prompt",
   ])
   expect(mock.prompts[0]?.files).toEqual([])
   expect(mock.prompts.every((prompt) => prompt.delivery === "queue" && prompt.resume === false)).toBe(true)
-  expect(mock.changes.map((change) => change.action)).toEqual(["cancel", "cancel", "cancel"])
+  expect(mock.changes).toEqual([
+    { inboxID: "inb_seed_2", action: "cancel" },
+    { inboxID: "inb_seed_3", action: "cancel" },
+  ])
   expect(mock.log[0]).toBe("prompt:queue")
+})
+
+for (const change of ["reorder", "edit"] as const) {
+  test(`a ${change} that cannot re-admit a prompt leaves the queue unchanged`, async ({ page }) => {
+    const order = ["first queued prompt", "second queued prompt", "third queued prompt"]
+    const mock = createQueueMock(order)
+    const admit = mock.onPrompt
+    // The last prompt's re-admission fails after the server admitted it, so its response is lost.
+    mock.onPrompt = (input) => {
+      admit(input)
+      if (input.body.text === order[2]) throw new Error("Connection lost after admission")
+    }
+    const view = await openSession(page, mock)
+    await expect(view.rows).toHaveCount(3)
+
+    if (change === "reorder") {
+      const first = view.rows.filter({ hasText: order[0] })
+      const second = view.rows.filter({ hasText: order[1] })
+      await first.getByRole("button", { name: "Reorder queued prompt" }).hover()
+      await page.mouse.down()
+      const target = await second.boundingBox()
+      if (!target) throw new Error("The target queue row is not visible")
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 })
+      await page.mouse.up()
+    }
+    if (change === "edit") {
+      await view.rows.getByText(order[1], { exact: true }).click()
+      await expect(view.input).toHaveText(order[1])
+      await expect(view.input).toBeFocused()
+      await view.input.press("End")
+      await view.input.pressSequentially(", edited")
+      await view.input.press("Enter")
+    }
+
+    // The replacements admitted before the failure are withdrawn; the originals stay in place.
+    await expect.poll(() => mock.log.includes(`cancel:${String(mock.prompts.at(-1)?.id)}`)).toBe(true)
+    await expect.poll(() => mock.changes.length).toBe(mock.prompts.length)
+    expect(mock.changes.every((entry) => entry.action === "cancel" && !entry.inboxID.startsWith("inb_seed_"))).toBe(
+      true,
+    )
+    await expect(view.rows.locator('[data-action="session-queue-edit"]')).toHaveText(order)
+    expect(mock.rows.map((row) => row.payload.text)).toEqual(order)
+    // A failed edit keeps its draft in the composer so nothing typed is lost.
+    if (change === "edit") await expect(view.input).toHaveText("second queued prompt, edited")
+  })
+}
+
+for (const delivery of ["queue", "steer"] as const) {
+  test(`editing a prompt the server delivered meanwhile keeps the edit draft (${delivery})`, async ({ page }) => {
+    const mock = createQueueMock(["first queued prompt", "second queued prompt"])
+    const view = await openSession(page, mock, "queue")
+    await view.rows.getByText("second queued prompt", { exact: true }).click()
+    await expect(view.input).toHaveText("second queued prompt")
+    await expect(view.input).toBeFocused()
+    await view.input.press("End")
+    await view.input.pressSequentially(", edited")
+    // The server delivers the original before the edit lands; this client has not heard yet.
+    mock.rows.splice(1, 1)
+    await view.input.press(delivery === "queue" ? "Enter" : "ControlOrMeta+Enter")
+
+    await expect(page.getByText("Request failed")).toBeVisible()
+    await expect(view.input).toHaveText("second queued prompt, edited")
+    expect(mock.prompts).toEqual([])
+    expect(mock.changes).toEqual([])
+  })
+}
+
+for (const change of ["reorder", "edit"] as const) {
+  test(`a staged revert refuses a queue ${change}, whose admission would commit it`, async ({ page }) => {
+    const order = ["first queued prompt", "second queued prompt"]
+    const mock = createQueueMock(order, [
+      { id: "msg_queue_delivered", type: "user", text: "First prompt", time: { created: 1 } },
+    ])
+    const view = await openSession(page, mock, undefined, "msg_queue_delivered")
+    await expect(view.rows).toHaveCount(2)
+
+    if (change === "reorder") {
+      await view.rows.filter({ hasText: order[0] }).getByRole("button", { name: "Reorder queued prompt" }).hover()
+      await page.mouse.down()
+      const target = await view.rows.filter({ hasText: order[1] }).boundingBox()
+      if (!target) throw new Error("The target queue row is not visible")
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 })
+      await page.mouse.up()
+    }
+    if (change === "edit") await view.rows.getByText(order[1], { exact: true }).click()
+
+    await expect(page.getByText("Redo the revert before you reorder or edit queued prompts")).toBeVisible()
+    await expect(view.rows.locator('[data-action="session-queue-edit"]')).toHaveText(order)
+    await expect(view.input).toHaveText("")
+    expect(mock.prompts).toEqual([])
+    expect(mock.changes).toEqual([])
+  })
+}
+
+test("a prompt commits a staged revert after the agent switch and before the model switch", async ({ page }) => {
+  const mock = createQueueMock(
+    [],
+    [{ id: "msg_queue_delivered", type: "user", text: "First prompt", time: { created: 1 } }],
+  )
+  const requests: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    if (request.method() === "GET" || !path.startsWith(`/api/session/${sessionID}/`)) return
+    requests.push(path.slice(`/api/session/${sessionID}/`.length))
+  })
+  const view = await openSession(page, mock, "steer", "msg_queue_delivered")
+  await view.input.fill("start over from here")
+  await view.input.press("Enter")
+
+  await expect.poll(() => mock.prompts.map((prompt) => prompt.text)).toEqual(["start over from here"])
+  expect(requests.filter((path) => path !== "agent")).toEqual(["revert/commit", "model", "prompt"])
+})
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844],
+]) {
+  for (const [action, status] of [
+    ["Move to queue", "steering"],
+    ["Delete", "steering"],
+    ["Move to queue", "starting"],
+    ["Delete", "starting"],
+  ] as const) {
+    test(`${action} on a ${status} pending steer replaces Revert at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height })
+      // A steer waits behind work only once the running execution delivered input; before that it is starting.
+      const delivered: SessionMessageInfo[] =
+        status === "steering"
+          ? [{ id: "msg_queue_delivered", type: "user", text: "First prompt", time: { created: 1 } }]
+          : []
+      const mock = createQueueMock(["U2: Also check the retry path."], delivered)
+      const inboxID = mock.rows[0].id
+      mock.rows[0].delivery = "steer"
+      const view = await openSession(page, mock)
+      const pending = page.locator(
+        `[data-timeline-virtual-content] [data-timeline-row="UserMessage"][data-message-id="${inboxID}"]`,
+      )
+
+      await expect(pending).toContainText("U2: Also check the retry path.")
+      const message = pending.locator('[data-component="user-message"]')
+      if (status === "steering") {
+        await expect(message).toHaveAttribute("data-pending", "true")
+        await expect(message.locator('[data-slot="user-message-meta"]')).toContainText("Pending")
+      }
+      if (status === "starting") {
+        await expect(message).not.toHaveAttribute("data-pending")
+        await expect(message).not.toContainText("Pending")
+      }
+      await pending.hover()
+      await expect(pending.getByRole("button", { name: "Revert message" })).toHaveCount(0)
+      await expect(pending.getByRole("button", { name: "Fork to new session" })).toHaveCount(0)
+      await expect(pending.getByRole("button", { name: action })).toBeVisible()
+      await pending.screenshot({ path: testInfo.outputPath(`pending-${status}.png`) })
+      await pending.getByRole("button", { name: action }).click()
+
+      await expect(pending).toHaveCount(0)
+      expect(mock.changes).toEqual([{ inboxID, action: action === "Delete" ? "cancel" : "queue" }])
+      // Neither action returns the prompt to the composer; a moved steer waits in the queue.
+      await expect(view.input).toHaveText("")
+      await expect(view.rows).toHaveCount(action === "Delete" ? 0 : 1)
+      if (action === "Move to queue") await expect(view.rows).toContainText("U2: Also check the retry path.")
+    })
+  }
+}
+
+test("the side question composer hides the queue panel until it closes", async ({ page }) => {
+  const mock = createQueueMock(["first queued prompt"])
+  const view = await openSession(page, mock)
+  await expect(view.rows).toHaveCount(1)
+
+  await view.input.click()
+  await page.keyboard.type("/btw")
+  await expect(page.locator('[data-suggestion-id="session.btw"]')).toHaveAttribute("data-active", "")
+  await page.keyboard.press("Enter")
+  const side = page.getByRole("region", { name: "Ask a side question", exact: true })
+  await expect(side).toBeVisible()
+  await expect(view.rows).toHaveCount(0)
+
+  await page.keyboard.press("Escape")
+  await expect(side).toHaveCount(0)
+  await expect(view.rows).toHaveCount(1)
+})
+
+test("a queued compaction shows after the active turn and ahead of pending steers", async ({ page }) => {
+  const mock = createQueueMock(
+    ["U2: Also check the retry path."],
+    [{ id: "msg_queue_delivered", type: "user", text: "First prompt", time: { created: 1 } }],
+  )
+  mock.rows[0].delivery = "steer"
+  mock.compactions.push({
+    id: "msg_queue_compaction",
+    sessionID,
+    time: { created: 1700000000005 },
+    type: "compaction",
+    payload: {},
+    delivery: "steer",
+  })
+  await openSession(page, mock)
+  const transcript = page.locator("[data-timeline-virtual-content]")
+  const queued = transcript.locator('[data-timeline-row="CompactionQueued"]')
+
+  await expect(queued).toHaveText("Session compaction queued")
+  await expect(
+    transcript.locator('[data-timeline-row="UserMessage"], [data-timeline-row="CompactionQueued"]'),
+  ).toHaveText([/First prompt/, "Session compaction queued", /U2: Also check the retry path\./])
 })
 
 for (const [width, height] of [

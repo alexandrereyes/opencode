@@ -149,6 +149,11 @@ function session(input: {
         }),
       shell: input.shell ?? (async () => undefined),
       command: input.command ?? (async () => undefined),
+      revert: {
+        commit: async () => {
+          input.calls.push("revert-commit")
+        },
+      },
     },
     data: {
       location: { command: { list: () => [] } },
@@ -738,6 +743,80 @@ describe("Composer submission", () => {
       model: { providerID: "provider-1", modelID: "model-1", variant: "balanced" },
     })
     expect(state.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
+  })
+
+  // A prompt commits a staged revert, which would delete the model switch made after its boundary.
+  for (const row of [
+    { delivery: "steer" as const, calls: ["switch-agent", "revert-commit", "switch-model", "prompt"] },
+    { delivery: "queue" as const, calls: ["revert-commit", "prompt"] },
+  ]) {
+    test(`commits a staged revert before the model switch and a ${row.delivery} admission`, async () => {
+      const state = createMemoryComposerState({ prompt: "ship it" }).capture()
+      const calls: string[] = []
+      const admitted = Promise.withResolvers<void>()
+      const target = session({
+        calls,
+        current: () => ({
+          agent: "plan",
+          model: { id: "old", providerID: "old" },
+          revert: { messageID: "msg_reverted" },
+        }),
+        prompt: async () => admitted.resolve(),
+      })
+      const adapter: ActiveComposerAdapter = {
+        kind: "active-session",
+        state,
+        ready: () => true,
+        controls,
+        working: () => true,
+        session: () => target,
+        interrupt: async () => undefined,
+        submitted() {},
+        setEditor() {},
+      }
+
+      await submitInput(adapter, undefined, "normal", undefined, undefined, {
+        delivery: () => row.delivery,
+      }).submit(new Event("submit"))
+      await admitted.promise
+
+      expect(calls).toEqual(row.calls)
+    })
+  }
+
+  test("commits a staged revert before the model switch of a steered command", async () => {
+    const state = createMemoryComposerState({ prompt: "/review now" }).capture()
+    const calls: string[] = []
+    const sent = Promise.withResolvers<void>()
+    const target = session({
+      calls,
+      current: () => ({
+        agent: "plan",
+        model: { id: "old", providerID: "old" },
+        revert: { messageID: "msg_reverted" },
+      }),
+      prompt: async () => undefined,
+      command: async () => {
+        calls.push("command")
+        sent.resolve()
+      },
+    })
+    const adapter: ActiveComposerAdapter = {
+      kind: "active-session",
+      state,
+      ready: () => true,
+      controls,
+      working: () => false,
+      session: () => target,
+      interrupt: async () => undefined,
+      submitted() {},
+      setEditor() {},
+    }
+
+    await submitInput(adapter, undefined, "normal", () => [{ name: "review" }]).submit(new Event("submit"))
+    await sent.promise
+
+    expect(calls).toEqual(["switch-agent", "revert-commit", "switch-model", "command"])
   })
 
   test("starts and promotes a New Session once before admitting its first prompt", async () => {

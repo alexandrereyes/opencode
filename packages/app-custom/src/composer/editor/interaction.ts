@@ -417,6 +417,10 @@ export function createComposerEditor(input: {
     comments() {
       return draft.state.context.items.filter((item) => !!item.comment?.trim())
     },
+    // Files attached without a mention, such as one restored from a reverted or forked prompt.
+    files() {
+      return draft.state.context.items.filter((item) => !item.comment?.trim())
+    },
     attachments(): ComposerAttachment[] {
       return draft.state.prompt.filter(isAttachment)
     },

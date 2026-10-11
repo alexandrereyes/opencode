@@ -1,11 +1,21 @@
-import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SkillPart } from "@/composer/state"
+import type {
+  AgentPart,
+  FileAttachmentPart,
+  FileContextItem,
+  ImageAttachmentPart,
+  PathAttachmentPart,
+  Prompt,
+  SkillPart,
+} from "@/composer/state"
 import { createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import type { SessionMessageUser } from "@opencode/client/promise"
 import { readPromptPresentation } from "./comment-note"
 import { restoreChatQuotes } from "./chat-quote"
+import { buildPromptRequest } from "./request"
 import { Skill } from "@opencode/schema/skill"
 import { Schema } from "effect"
-import { AppPart, SessionPart } from "./schema"
+import { AppPart, contextItemKey, SessionPart } from "./schema"
+import { createPathHelpers, decodeFilePath, stripFileProtocol, stripQueryAndHash } from "@/workspaces/files/path"
 
 export type PromptInline =
   | {
@@ -89,6 +99,8 @@ export function extractPromptFromMessage(
       })
       continue
     }
+    // A file reference returns as a context chip through extractPromptContext.
+    if (file.source.type === "uri" && file.source.uri.startsWith("file:")) continue
     const dataUrl =
       file.source.type === "uri" && file.source.uri.startsWith("data:")
         ? file.source.uri
@@ -127,11 +139,70 @@ export function extractPromptFromMessage(
       name: Skill.Name.make(attached.name),
     })
   }
-  return buildPrompt(text, inline, images)
+  // Staged attachments reached the model as path references; they return as path parts.
+  const paths = (readPromptPresentation(message.metadata)?.attachments ?? []).map(
+    (file, index): PathAttachmentPart => ({
+      type: "path",
+      id: `${message.id}:path:${index}`,
+      filename: file.name,
+      mime: file.mime,
+      path: file.path,
+      mention:
+        file.mention && text.slice(file.mention.start, file.mention.end) === file.mention.text
+          ? file.mention
+          : undefined,
+    }),
+  )
+  return [...buildPrompt(text, inline, images), ...paths]
 }
 
 export function extractPromptComments(message: SessionMessageUser) {
   return readPromptPresentation(message.metadata)?.comments ?? []
+}
+
+/**
+ * The composer context a sent prompt restores: its comments, and the files it attached without a mention. Like the
+ * TUI, an unmentioned file keeps its reference rather than becoming an attachment; comment files are regenerated
+ * from the comments.
+ */
+export function extractPromptContext(message: SessionMessageUser, opts?: { directory?: string }): FileContextItem[] {
+  const directory = opts?.directory ?? ""
+  const comments = extractPromptComments(message).map(
+    (comment): FileContextItem => ({
+      type: "file",
+      path: comment.path,
+      selection: comment.selection,
+      comment: comment.comment,
+      preview: comment.preview,
+      commentOrigin: comment.origin,
+    }),
+  )
+  const regenerated = new Set(
+    buildPromptRequest({
+      prompt: [],
+      context: comments.map((item) => ({ ...item, key: contextItemKey(item) })),
+      attachments: [],
+      text: "",
+      sessionDirectory: directory,
+    }).files.map((file) => file.uri),
+  )
+  const files = (message.files ?? []).flatMap((file): FileContextItem[] => {
+    if (file.mention || file.source.type !== "uri" || !file.source.uri.startsWith("file:")) return []
+    if (regenerated.has(file.source.uri)) return []
+    const absolute = decodeFilePath(stripQueryAndHash(stripFileProtocol(file.source.uri))).replace(
+      /^\/([A-Za-z]:)/,
+      "$1",
+    )
+    return [
+      {
+        type: "file",
+        // The workspace root itself has no relative path, so it keeps its absolute one.
+        path: (directory && createPathHelpers(() => directory).normalize(file.source.uri)) || absolute,
+        selection: selectionFromFileUrl(file.source.uri),
+      },
+    ]
+  })
+  return [...comments, ...files]
 }
 
 export function buildPrompt(text: string, inline: PromptInline[], images: ImageAttachmentPart[]): Prompt {

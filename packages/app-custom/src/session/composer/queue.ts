@@ -98,17 +98,16 @@ export function createSessionQueue(input: {
         input.destination(),
         change.quotes,
       )
-      // Admit before cancelling so a failed replacement never discards the original.
-      const admitted = await data.session.prompt({
-        ...replacement,
-        id: change.replacement,
-        delivery: change.delivery,
-        ...(change.delivery === "queue" ? { resume: false } : {}),
-      })
-      await server.api.session.inbox.cancel({ sessionID: input.sessionID, inboxID: change.original })
+      // Admit before cancelling so a failed replacement never discards the original. A queued edit
+      // rebuilds its position in one rewrite, which leaves the queue unchanged if any admission fails.
+      const admission = { ...replacement, id: change.replacement, delivery: change.delivery }
+      if (change.delivery === "queue") {
+        await rewrite(change.inboxIDs, { original: change.original, admission: { ...admission, resume: false } })
+        cancelEdit()
+        return
+      }
+      await steerQueuedEdit(inbox, input.sessionID, change.original, admission)
       cancelEdit()
-      if (change.delivery === "queue")
-        await rewrite(change.inboxIDs.map((id) => (id === change.original ? admitted.id : id)))
     },
     onError: notify,
     onSettled: () => data.session.pending.sync(input.sessionID).catch(() => undefined),
@@ -134,38 +133,13 @@ export function createSessionQueue(input: {
   })
   onCleanup(() => cancelEdit())
 
-  const rewrite = async (inboxIDs: string[]) => {
-    const pending = await server.api.session.inbox.list({ sessionID: input.sessionID })
-    if (pending.some((item) => item.delivery === "queue" && item.type !== "user"))
-      throw new Error("Queued control items block reordering")
-    const current = pending.filter((item): item is QueuedPrompt => item.type === "user" && item.delivery === "queue")
-    const ordered = inboxIDs.flatMap((id) => current.filter((item) => item.id === id))
-    if (ordered.length !== current.length) throw new Error("Queued prompts changed before reordering")
-    const changed = ordered.findIndex((item, index) => item.id !== current[index]?.id)
-    if (changed < 0) return
-
-    // Existing inbox APIs cannot reorder rows, so replace only the changed suffix.
-    for (const item of ordered.slice(changed)) {
-      await data.session.prompt({
-        sessionID: input.sessionID,
-        text: item.payload.text,
-        files: item.payload.files?.map((file) => ({
-          uri: file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`,
-          name: file.name,
-          description: file.description,
-          mention: file.mention,
-        })),
-        agents: item.payload.agents,
-        skills: item.payload.skills,
-        metadata: item.payload.metadata,
-        delivery: "queue",
-        resume: false,
-      })
-    }
-    for (const item of current.slice(changed)) {
-      await server.api.session.inbox.cancel({ sessionID: input.sessionID, inboxID: item.id })
-    }
+  const inbox: QueueInbox = {
+    list: (value) => server.api.session.inbox.list(value),
+    cancel: (value) => server.api.session.inbox.cancel(value),
+    prompt: (value) => data.session.prompt(value),
   }
+  const rewrite = (inboxIDs: string[], replace?: QueueReplacement) =>
+    rewriteQueue(inbox, input.sessionID, inboxIDs, replace)
   const steer = (id: string) => {
     if (state.editing?.id === id) cancelEdit()
     return server.api.session.inbox
@@ -192,13 +166,19 @@ export function createSessionQueue(input: {
     }
     mutation.mutate({ type: "undo", item, ...restored })
   }
+  // Re-admitting a queued prompt commits a staged revert, which drops every prompt queued after its boundary.
+  const refuseReverted = () => {
+    if (!data.session.get(input.sessionID)?.revert) return false
+    showToast({ title: language.t("session.queue.reverted") })
+    return true
+  }
   const reorder = (inboxIDs: string[]) => {
-    if (mutation.isPending) return Promise.resolve()
+    if (mutation.isPending || refuseReverted()) return Promise.resolve()
     return mutation.mutateAsync({ type: "reorder", inboxIDs }).catch(() => undefined)
   }
 
   const edit = (id: string) => {
-    if (mutation.isPending || input.draft.revert.pending()) return false
+    if (mutation.isPending || input.draft.revert.pending() || refuseReverted()) return false
     if (state.editing?.id === id) return true
     const item = queued().find((entry) => entry.id === id)
     if (!item) return false
@@ -235,7 +215,7 @@ export function createSessionQueue(input: {
   }
   const confirmEdit = (delivery: ComposerDelivery) => {
     const editing = state.editing
-    if (!editing || mutation.isPending || input.draft.revert.pending()) return
+    if (!editing || mutation.isPending || input.draft.revert.pending() || refuseReverted()) return
     const prompt = clonePrompt(input.draft.current())
     const text = prompt.map((part) => ("content" in part ? part.content : "")).join("")
     const quotes = input.draft.quotes.all().map((quote) => ({ ...quote }))
@@ -294,6 +274,82 @@ export function createSessionQueue(input: {
 }
 
 export type SessionQueue = ReturnType<typeof createSessionQueue>
+
+type QueueInbox = {
+  list: (input: { sessionID: string }) => Promise<SessionInboxInfo[]>
+  cancel: (input: { sessionID: string; inboxID: string }) => Promise<unknown>
+  prompt: (input: QueueAdmission) => Promise<unknown>
+}
+type QueueAdmission = Parameters<ReturnType<typeof useData>["session"]["prompt"]>[0]
+type QueueReplacement = { original: string; admission: QueueAdmission }
+
+// `replace` substitutes an edited prompt for the original at its position in the same rewrite.
+export async function rewriteQueue(
+  inbox: QueueInbox,
+  sessionID: string,
+  inboxIDs: string[],
+  replace?: QueueReplacement,
+) {
+  const pending = await inbox.list({ sessionID })
+  if (pending.some((item) => item.delivery === "queue" && item.type !== "user"))
+    throw new Error("Queued control items block reordering")
+  const current = pending.filter((item): item is QueuedPrompt => item.type === "user" && item.delivery === "queue")
+  const ordered = inboxIDs.flatMap((id) => current.filter((item) => item.id === id))
+  // An edited prompt delivered meanwhile is no longer queued; fail so the edit draft stays.
+  if (ordered.length !== current.length || (replace && !current.some((item) => item.id === replace.original)))
+    throw new Error("Queued prompts changed before reordering")
+  const changed = ordered.findIndex((item, index) => item.id !== current[index]?.id || item.id === replace?.original)
+  if (changed < 0) return
+
+  // Existing inbox APIs cannot reorder rows, so replace only the changed suffix. A replacement
+  // can fail (its file may be gone), so withdraw the ones already sent to keep the queue intact.
+  // Each ID is recorded before sending: the server can admit a prompt whose response then fails.
+  const replacements: string[] = []
+  for (const item of ordered.slice(changed)) {
+    const admission =
+      item.id === replace?.original
+        ? replace.admission
+        : {
+            id: SessionMessage.ID.create(),
+            sessionID,
+            text: item.payload.text,
+            files: item.payload.files?.map((file) => ({
+              uri: file.source.type === "uri" ? file.source.uri : `data:${file.mime};base64,${file.data}`,
+              name: file.name,
+              description: file.description,
+              mention: file.mention,
+            })),
+            agents: item.payload.agents,
+            skills: item.payload.skills,
+            metadata: item.payload.metadata,
+            delivery: "queue" as const,
+            resume: false,
+          }
+    const id = admission.id ?? SessionMessage.ID.create()
+    replacements.push(id)
+    await inbox.prompt({ ...admission, id }).catch(async (error) => {
+      await Promise.all(replacements.map((inboxID) => inbox.cancel({ sessionID, inboxID }).catch(() => undefined)))
+      throw error
+    })
+  }
+  for (const item of current.slice(changed)) {
+    await inbox.cancel({ sessionID, inboxID: item.id })
+  }
+}
+
+// Like a queued edit, an original the server delivered meanwhile keeps the edit draft instead of sending twice.
+export async function steerQueuedEdit(
+  inbox: QueueInbox,
+  sessionID: string,
+  original: string,
+  admission: QueueAdmission,
+) {
+  const pending = await inbox.list({ sessionID })
+  if (!pending.some((item) => item.id === original && item.type === "user" && item.delivery === "queue"))
+    throw new Error("Queued prompt was delivered before the edit")
+  await inbox.prompt(admission)
+  await inbox.cancel({ sessionID, inboxID: original })
+}
 
 // The slice of the queue the panel renders and drives.
 export type SessionQueueView = Pick<

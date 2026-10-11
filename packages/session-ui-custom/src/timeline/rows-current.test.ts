@@ -189,6 +189,38 @@ describe("current session timeline rows", () => {
     ])
   })
 
+  test("places a queued compaction after the active turn and ahead of pending steers", () => {
+    const source = [
+      { id: "msg_active", type: "user", text: "active", time: { created: 1 } },
+      { id: "msg_steer", type: "user", text: "steer", time: { created: 2 } },
+    ] satisfies SessionMessageInfo[]
+    const keys = (pending: ReadonlySet<string>) =>
+      Timeline.constructSessionMessageRows(
+        source,
+        true,
+        { type: "busy" },
+        pending,
+        false,
+        false,
+        undefined,
+        undefined,
+        ["cmp_queued"],
+      ).rows.map(TimelineRow.key)
+
+    expect(keys(new Set(["msg_steer"]))).toEqual([
+      "user-message:msg_active",
+      "compaction-queued:cmp_queued",
+      "turn-gap:msg_steer",
+      "user-message:msg_steer",
+    ])
+    expect(keys(new Set())).toEqual([
+      "user-message:msg_active",
+      "turn-gap:msg_steer",
+      "user-message:msg_steer",
+      "compaction-queued:cmp_queued",
+    ])
+  })
+
   test("suppresses thinking while a subagent is delegating or running", () => {
     const statuses = ["streaming", "running"] as const
     statuses.forEach((status) => {

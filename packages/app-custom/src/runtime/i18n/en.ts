@@ -1195,6 +1195,7 @@ export const dict = {
   "session.queue.undoUnavailable":
     "This queued prompt can't be restored without losing context. Edit it in the queue instead.",
   "session.queue.reorder": "Reorder queued prompt",
+  "session.queue.reverted": "Redo the revert before you reorder or edit queued prompts",
   "session.queue.attachments.one": "{{count}} attachment",
   "session.queue.attachments.other": "{{count}} attachments",
   "session.timeline.working": "Working",

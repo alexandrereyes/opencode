@@ -1,3 +1,4 @@
+import { getFilename } from "@opencode/util/path"
 import {
   createEffect,
   createMemo,
@@ -603,6 +604,8 @@ export function ComposerEditor(props: ComposerEditorProps) {
             onAttachmentRemove={(attachment) => props.controller.removeAttachment(attachment.id)}
             onCommentClick={(comment) => props.controller.toggleContext(comment.key)}
             onCommentRemove={(comment) => props.controller.removeContext(comment.key)}
+            files={props.controller.files()}
+            onFileRemove={(file) => props.controller.removeContext(file.key)}
           />
         </Show>
 
@@ -810,10 +813,20 @@ export function ComposerAttachments(props: {
   onAttachmentRemove?: (attachment: ComposerAttachment) => void
   onCommentClick?: (comment: ComposerComment) => void
   onCommentRemove?: (comment: ComposerComment) => void
+  // Files attached without a mention, such as one restored from a sent prompt.
+  files?: ComposerComment[]
+  onFileRemove?: (file: ComposerComment) => void
 }) {
   const i18n = useI18n()
   return (
-    <Show when={props.attachments.length > 0 || (props.comments?.length ?? 0) > 0 || (props.uploads?.length ?? 0) > 0}>
+    <Show
+      when={
+        props.attachments.length > 0 ||
+        (props.comments?.length ?? 0) > 0 ||
+        (props.uploads?.length ?? 0) > 0 ||
+        (props.files?.length ?? 0) > 0
+      }
+    >
       <div data-component="composer-attachments" data-slot="composer-attachments" class="relative">
         <div
           data-slot="composer-attachments-scroll"
@@ -839,6 +852,35 @@ export function ComposerAttachments(props: {
                 <button
                   type="button"
                   onClick={() => props.onCommentRemove?.(comment)}
+                  class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center hover-reveal group-hover:opacity-100"
+                  aria-label={props.removeLabel}
+                >
+                  <Icon name="outline-xmark" class="text-v2-icon-icon-contrast" />
+                </button>
+              </div>
+            )}
+          </For>
+          <For each={props.files ?? []}>
+            {(file) => (
+              <div class="relative group shrink-0" data-slot="composer-context-file">
+                <Tooltip value={file.path} placement="top" contentClass="break-all">
+                  <AttachmentCard title={getFilename(file.path)} surface="base">
+                    <FileIcon node={{ path: file.path, type: "file" }} />
+                    <span>
+                      {typeLabel(file.path, "text/plain", i18n.t("ui.common.file"))}
+                      <Show when={file.selection}>
+                        {(selection) =>
+                          selection().startLine === selection().endLine
+                            ? `:${selection().startLine}`
+                            : `:${selection().startLine}-${selection().endLine}`
+                        }
+                      </Show>
+                    </span>
+                  </AttachmentCard>
+                </Tooltip>
+                <button
+                  type="button"
+                  onClick={() => props.onFileRemove?.(file)}
                   class="absolute -top-1 -end-1 size-4 rounded-full bg-v2-icon-icon-muted outline-solid outline-1 outline-v2-icon-icon-contrast flex items-center justify-center hover-reveal group-hover:opacity-100"
                   aria-label={props.removeLabel}
                 >
@@ -1061,7 +1103,11 @@ export function ComposerEditorSelect(props: {
                   <Menu.RadioItem value={option.id} class="capitalize" closeOnSelect>
                     <Show when={props.optionTone?.(option)}>
                       {(tone) => (
-                        <span class="size-1.5 shrink-0 rounded-full" style={{ background: tone() }} aria-hidden="true" />
+                        <span
+                          class="size-1.5 shrink-0 rounded-full"
+                          style={{ background: tone() }}
+                          aria-hidden="true"
+                        />
                       )}
                     </Show>
                     {option.label}
@@ -1294,7 +1340,11 @@ export function ComposerEditorPopover(props: {
                   }
                 >
                   <div class="flex min-w-0 flex-1 flex-col">
-                    <bdi data-slot="composer-suggestion-title" dir="auto" class="truncate text-v2-text-text-base leading-4">
+                    <bdi
+                      data-slot="composer-suggestion-title"
+                      dir="auto"
+                      class="truncate text-v2-text-text-base leading-4"
+                    >
                       {item.label}
                     </bdi>
                     <span
@@ -1318,7 +1368,12 @@ export function ComposerEditorPopover(props: {
                 </Show>
               </div>
               <Show when={item.kind === "session"}>
-                <span data-slot="composer-suggestion-kind" class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted">{item.kindLabel}</span>
+                <span
+                  data-slot="composer-suggestion-kind"
+                  class="shrink-0 text-[12px] leading-4 text-v2-text-text-muted"
+                >
+                  {item.kindLabel}
+                </span>
               </Show>
               <Show when={item.keybind?.length}>
                 <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>

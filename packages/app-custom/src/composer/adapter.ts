@@ -77,6 +77,9 @@ export type ComposerSession = {
     shell: (input: Parameters<ServerSDK["api"]["session"]["shell"]>[0]) => Promise<unknown>
     switchAgent: (input: Parameters<ServerSDK["api"]["session"]["switchAgent"]>[0]) => Promise<unknown>
     switchModel: (input: Parameters<ServerSDK["api"]["session"]["switchModel"]>[0]) => Promise<unknown>
+    revert: {
+      commit: (input: Parameters<ServerSDK["api"]["session"]["revert"]["commit"]>[0]) => Promise<unknown>
+    }
   }
   data: {
     location: { command: Pick<Data["location"]["command"], "list"> }
@@ -85,7 +88,14 @@ export type ComposerSession = {
       setStatus: Data["session"]["setStatus"]
     }
   }
-  current: Accessor<{ agent?: string; model?: { id: string; providerID: string; variant?: string } } | undefined>
+  current: Accessor<
+    | {
+        agent?: string
+        model?: { id: string; providerID: string; variant?: string }
+        revert?: { messageID: string }
+      }
+    | undefined
+  >
   admitted: (messageID: string) => boolean
 }
 

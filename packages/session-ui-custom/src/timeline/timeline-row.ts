@@ -72,6 +72,12 @@ export namespace TimelineRow {
     userMessageID: string
   }> {}
 
+  /** A compaction the server has admitted but not started. */
+  export class CompactionQueued extends Data.TaggedClass("CompactionQueued")<{
+    userMessageID: string
+    inboxID: string
+  }> {}
+
   export type TimelineRow =
     | TurnGap
     | UserMessage
@@ -83,6 +89,7 @@ export namespace TimelineRow {
     | Thinking
     | Error
     | Retry
+    | CompactionQueued
 
   export const key = (row: TimelineRow): string => {
     switch (row._tag) {
@@ -109,6 +116,8 @@ export namespace TimelineRow {
         return `error:${row.userMessageID}`
       case "Retry":
         return `retry:${row.userMessageID}`
+      case "CompactionQueued":
+        return `compaction-queued:${row.inboxID}`
     }
     return row
   }
@@ -134,4 +143,5 @@ export type TimelineRowMap = {
   Thinking: { userMessageID: string; ref: PartRef }
   Retry: { userMessageID: string }
   Error: { userMessageID: string; text: string }
+  CompactionQueued: { userMessageID: string; inboxID: string }
 }

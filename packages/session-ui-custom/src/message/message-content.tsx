@@ -45,6 +45,7 @@ import type {
   SessionUserComment,
   SessionUserQuote,
 } from "../actions"
+import { pendingSteerPresentation } from "../actions"
 import { attached, typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
@@ -78,7 +79,7 @@ function modelVariant(model: SessionMessageAssistant["model"]) {
 
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
-    icon: "check" | "copy" | "reset" | "fork"
+    icon: "check" | "copy" | "reset" | "fork" | "arrow-down-to-line" | "outline-trash"
     label: JSX.Element
   },
 ) {
@@ -247,9 +248,13 @@ export function CurrentUserMessageDisplay(props: {
     copied: false,
     reverting: false,
     forking: false,
+    updating: false,
     expanded: false,
     truncated: false,
   })
+  const presentation = createMemo(() => pendingSteerPresentation(props.actions?.pending?.status(props.message.id)))
+  const pending = () => presentation().actions
+  const waiting = () => presentation().waiting
   const expanded = () => props.expanded ?? state.expanded
   const setExpanded = (value: boolean) => {
     setState("expanded", value)
@@ -299,7 +304,13 @@ export function CurrentUserMessageDisplay(props: {
   const timefmt = createMemo(() => new Intl.DateTimeFormat(i18n.locale(), { timeStyle: "short" }))
   const metaHead = createMemo(() => {
     const agent = props.agent
-    return [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()].filter(Boolean).join("\u00A0\u00B7\u00A0")
+    return [
+      waiting() ? i18n.t("ui.message.pending") : "",
+      agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
+      model(),
+    ]
+      .filter(Boolean)
+      .join("\u00A0\u00B7\u00A0")
   })
   const stamp = createMemo(() => timefmt().format(props.message.time.created))
   const copy = async () => {
@@ -315,6 +326,13 @@ export function CurrentUserMessageDisplay(props: {
     } finally {
       setState("reverting", false)
     }
+  }
+  const updatePending = async (action: "queue" | "remove") => {
+    const actions = props.actions?.pending
+    if (!actions || state.updating) return
+    setState("updating", true)
+    await actions[action]({ sessionID: props.sessionID, messageID: props.message.id })
+    setState("updating", false)
   }
   const fork = async () => {
     if (!props.actions?.fork || state.forking) return
@@ -373,7 +391,11 @@ export function CurrentUserMessageDisplay(props: {
   )
 
   return (
-    <div data-component="user-message" data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}>
+    <div
+      data-component="user-message"
+      data-pending={waiting() ? "true" : undefined}
+      data-timeline-part-id={hasBody() ? `${props.message.id}:text:0` : undefined}
+    >
       <div data-slot="user-message-scroll" data-scrollable>
         <Show
           when={!!props.text || comments().length > 0 || !!props.quotes?.length || (!expanded() && contextCount() > 0)}
@@ -465,7 +487,8 @@ export function CurrentUserMessageDisplay(props: {
           <Icon name="chevron-down" size="small" style={{ transform: "rotate(180deg)" }} />
         </button>
       </Show>
-      <Show when={hasBody() || contextCount() > 0}>
+      {/* Like the TUI, a pending steer of only attachments still offers its actions. */}
+      <Show when={hasBody() || contextCount() > 0 || pending()}>
         <div data-slot="user-message-copy-wrapper">
           <span data-slot="user-message-meta-wrap">
             <Show when={metaHead()}>
@@ -497,7 +520,31 @@ export function CurrentUserMessageDisplay(props: {
               {stamp()}
             </span>
           </span>
-          <Show when={props.actions?.revert}>
+          <Show when={pending()}>
+            <MessageActionButton
+              icon="arrow-down-to-line"
+              label={i18n.t("ui.message.moveToQueue")}
+              disabled={state.updating}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation()
+                void updatePending("queue")
+              }}
+              aria-label={i18n.t("ui.message.moveToQueue")}
+            />
+            <MessageActionButton
+              icon="outline-trash"
+              label={i18n.t("ui.message.deletePending")}
+              disabled={state.updating}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation()
+                void updatePending("remove")
+              }}
+              aria-label={i18n.t("ui.message.deletePending")}
+            />
+          </Show>
+          <Show when={props.actions?.revert && !pending()}>
             <MessageActionButton
               icon="reset"
               label={i18n.t("ui.message.revertMessage")}
@@ -510,7 +557,7 @@ export function CurrentUserMessageDisplay(props: {
               aria-label={i18n.t("ui.message.revertMessage")}
             />
           </Show>
-          <Show when={props.actions?.fork}>
+          <Show when={props.actions?.fork && !pending()}>
             <MessageActionButton
               icon="fork"
               label={i18n.t("ui.message.forkMessage")}
@@ -585,6 +632,18 @@ function CurrentHighlightedText(props: {
 }
 
 type HighlightSegment = { text: string; type?: "file" | "agent" | "session" }
+
+/** A compaction the server admitted but has not started, drawn as the divider a started one opens with. */
+export function SessionCompactionQueued() {
+  const i18n = useI18n()
+  return (
+    <div data-component="session-compaction-message">
+      <div class="py-2">
+        <TimelineSeparator label={i18n.t("ui.messagePart.compaction.queued")} />
+      </div>
+    </div>
+  )
+}
 
 export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
   const i18n = useI18n()

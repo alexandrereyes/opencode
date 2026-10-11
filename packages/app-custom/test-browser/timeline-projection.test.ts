@@ -47,7 +47,7 @@ for (const factory of [createTimelineProjection, createReactiveTimelineProjectio
           reasoningMode: () => "compact",
           shellToolDefaultOpen: () => false,
           editToolDefaultOpen: () => false,
-          pendingUserMessageIDs: () => new Set(),
+          pendingInputIDs: () => new Set(),
         })
         const update = (text: string) =>
           setState(
@@ -122,7 +122,7 @@ for (const factory of [createTimelineProjection, createReactiveTimelineProjectio
           reasoningMode: () => state.reasoning,
           shellToolDefaultOpen: () => state.shell,
           editToolDefaultOpen: () => state.edit,
-          pendingUserMessageIDs: () => state.pending,
+          pendingInputIDs: () => state.pending,
         })
         let previous: TimelineRow.TimelineRow[] | undefined
         const verify = () => {

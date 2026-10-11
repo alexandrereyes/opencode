@@ -1,7 +1,7 @@
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode/util/encode"
 import { useComposerState } from "@/composer/persistence"
-import { extractPromptComments, extractPromptFromMessage } from "@/composer/prompt"
+import { extractPromptContext, extractPromptFromMessage } from "@/composer/prompt"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData, useServer } from "@/runtime/server/current"
@@ -34,16 +34,7 @@ export function createSessionFork() {
         onFork?.()
         const target = prompt.capture({ dir, id: forked.id })
         target.set(restored)
-        target.context.replaceComments(
-          extractPromptComments(message).map((comment) => ({
-            type: "file",
-            path: comment.path,
-            selection: comment.selection,
-            comment: comment.comment,
-            preview: comment.preview,
-            commentOrigin: comment.origin,
-          })),
-        )
+        target.context.replace(extractPromptContext(message, { directory: location().directory }))
         navigate(sessionHref(server.key, forked.id))
       })
       .catch((err: unknown) => {
