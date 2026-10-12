@@ -546,6 +546,48 @@ story("preserves streamed math through completion and a fresh render", async ({ 
   await expect(markdown.locator(".katex-error")).toHaveCount(0)
 })
 
+story("renders dollar math while streaming and after completion, keeping prices and links intact", async ({ page }) => {
+  const session = "ses_0123456789abcdefghijklmnop"
+  await page.evaluate(async (fixture) => {
+    const { mountMarkdown } = await import(fixture)
+    await mountMarkdown({ text: "Energy is $E = mc", streaming: true })
+  }, fixture)
+  const harness = page.getByTestId("markdown-fixture")
+  const markdown = harness.locator('[data-component="markdown"]')
+  await expect(markdown).toContainText("Energy is $E = mc")
+  await expect(markdown.locator(".katex")).toHaveCount(0)
+  const text = `Energy is $E = mc^2$, it costs $5 and $10. See \`src/file.ts\`, ${session} and [repo](https://github.com/a/b).`
+  await harness.getByLabel("Markdown text").fill(text)
+  await expect(markdown.locator(".katex")).toHaveCount(1)
+  await expect(markdown.locator(".katex-mathml")).toContainText("E = mc^2")
+  await expect(markdown).toContainText("it costs $5 and $10.")
+  await harness.getByLabel("Markdown text").fill(`${text}\n\nThe area ($$\\pi r^2$$) grows.`)
+  await expect(markdown.locator(".katex-display")).toHaveCount(1)
+  await harness.getByLabel("Streaming").uncheck()
+  // Paths link only once the block completes, so this also waits for the completed render.
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveText("src/file.ts")
+  await expect(markdown.locator(".katex")).toHaveCount(2)
+  await expect(markdown.locator(".katex-error")).toHaveCount(0)
+  await expect(markdown).toContainText("it costs $5 and $10.")
+  await expect(markdown.getByRole("button", { name: session, exact: true })).toBeVisible()
+  await expect(markdown.locator('a.external-link[href="https://github.com/a/b"]')).toHaveText("repo")
+  await harness.getByRole("button", { name: "Toggle Markdown" }).click()
+  await harness.getByRole("button", { name: "Toggle Markdown" }).click()
+  await expect(markdown.locator(".katex")).toHaveCount(2)
+  await expect(markdown.locator(".katex-display")).toHaveCount(1)
+})
+
+story("renders a lone price in small completed Markdown without math", async ({ page }) => {
+  await page.evaluate(async (fixture) => {
+    const { mountMarkdown } = await import(fixture)
+    await mountMarkdown({ text: "It costs $5 per seat." })
+  }, fixture)
+  const markdown = page.getByTestId("markdown-fixture").locator('[data-component="markdown"]')
+  await expect(markdown).toHaveAttribute("data-markdown-ready", "")
+  await expect(markdown.locator("p")).toHaveText("It costs $5 per seat.")
+  await expect(markdown.locator(".katex")).toHaveCount(0)
+})
+
 for (const theme of ["light", "dark"]) {
   for (const width of [390, 1280]) {
     story(`renders class and connected subgraph diagrams in ${theme} at ${width}px`, async ({ mount, page }) => {

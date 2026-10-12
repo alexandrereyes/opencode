@@ -25,6 +25,14 @@ test("links complete IDs in prose and inline code without changing fenced code o
   expect(root.textContent).toBe(`Open ${first}, then ${second}. See ${first}.${first}`)
 })
 
+test("leaves IDs inside rendered math as text", () => {
+  const root = document.createElement("div")
+  root.innerHTML = `<p>See ${first} and <span class="katex"><annotation encoding="application/x-tex">\\text{${second}}</annotation><span>${second}</span></span>.</p>`
+  expect(sessionLinkCandidates(root)).toEqual([first])
+  expect(markSessionLinks(root, all)).toEqual([first])
+  expect(root.querySelector(".katex button")).toBeNull()
+})
+
 test("links only the IDs the host confirmed", () => {
   const root = document.createElement("div")
   root.innerHTML = `<p>${first} and ${second}, <code>${second}</code></p>`

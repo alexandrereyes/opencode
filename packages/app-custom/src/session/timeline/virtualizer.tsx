@@ -932,6 +932,15 @@ export function createTimelineVirtualizer(input: Input) {
           (next === undefined ? end : (virtualizer.measurementsCache[next]?.start ?? end)) - item().start,
         )
       }
+      // Sticky headers in a response stop below its pinned user message instead of sliding under it.
+      const stickyTop = () => {
+        if (user()) return undefined
+        const owner = userIndexes().findLast((index) => index < item().index)
+        // Reading total size subscribes to the virtualizer's measurement updates.
+        virtualizer.getTotalSize()
+        const size = owner === undefined ? 0 : (virtualizer.measurementsCache[owner]?.size ?? 0)
+        return `calc(${input.showHeader() ? "48px" : "0px"} + ${size}px)`
+      }
       const [ready, setReady] = createSignal(initialItem.size <= fallbackItemSize || !props.deferred(initialRow))
       let contentMeasureFrame: number | undefined
 
@@ -954,7 +963,9 @@ export function createTimelineVirtualizer(input: Input) {
             height: `${containingHeight()}px`,
             overflow: user() ? "visible" : "clip",
             "pointer-events": user() ? "none" : undefined,
-            "z-index": user() ? 20 : undefined,
+            // Above every sticky header in the response rows (up to 21), below the session title (30).
+            "z-index": user() ? 25 : undefined,
+            "--sticky-accordion-top": stickyTop(),
             "overflow-clip-margin": row()._tag === "TurnGap" ? undefined : "0.5px",
           }}
         >

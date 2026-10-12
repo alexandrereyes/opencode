@@ -19,6 +19,7 @@ import {
   SessionAssistantContent,
   SessionContextToolGroup,
   SessionFileToolGroup,
+  SessionReadToolGroup,
   SessionShellMessage,
   SessionUserMessage,
   currentContentDefaultOpen,
@@ -210,6 +211,26 @@ export function createSessionTimelineRowRenderer(input: {
             onSizeChange={onSizeChange}
           />
         </div>
+      )
+    }
+
+    if (row().group.type === "read") {
+      const tools = createMemo(() => {
+        const group = row().group
+        if (group.type !== "read") return []
+        const contents = indexGroupContents(group.refs)
+        return group.refs.flatMap((ref) => {
+          const content = contents.get(ref.messageID)?.get(ref.partID)
+          return content?.type === "tool" ? [content] : []
+        })
+      })
+      return (
+        <SessionReadToolGroup
+          tools={tools()}
+          open={input.disclosure.value(row().group.key)}
+          onOpenChange={(open) => input.disclosure.set(row().group.key, open)}
+          onSizeChange={onSizeChange}
+        />
       )
     }
 

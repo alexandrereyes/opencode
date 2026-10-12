@@ -28,6 +28,11 @@ test("keeps rows stuck below the session title out of its fade", async ({ page }
   const scroller = page.locator('[data-slot="session-timeline-scroll"] .scroll-view__viewport')
   await expect(page.locator('[data-component="apply-patch-tool"]')).toBeVisible()
   await expect(title.getByRole("heading", { level: 1 })).toBeVisible()
+  // The patch tool paints before its rows are measured; until then the list cannot scroll and the followed
+  // timeline settles at the end once the diffs land, so wait until the offset below is reachable.
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight))
+    .toBeGreaterThan(1200)
 
   await scroller.evaluate((element) => (element.scrollTop = 600))
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(600)

@@ -72,7 +72,8 @@ function sessionTextNodes(root: HTMLElement) {
   const nodes: Text[] = []
   while (walker.nextNode()) {
     const node = walker.currentNode as Text
-    if (node.parentElement?.closest("a, button, code, pre")) continue
+    // Rendered math keeps its TeX source in MathML; a button inside it would break the formula.
+    if (node.parentElement?.closest("a, button, code, pre, .katex")) continue
     if (node.data.includes("ses_")) nodes.push(node)
   }
   return nodes
