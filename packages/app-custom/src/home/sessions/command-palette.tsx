@@ -38,6 +38,7 @@ export function HomeCommandPalette(props: {
     get: (sessionID, signal) => server.sdk.api.session.get({ sessionID }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
+    recentCategory: () => language.t("palette.group.recentSessions"),
     chatRoot: () => chats.state.root,
     chatLabel: () => language.t("session.new.chats"),
     isChat: (session) =>

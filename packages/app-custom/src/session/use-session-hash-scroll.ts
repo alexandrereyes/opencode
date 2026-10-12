@@ -29,7 +29,7 @@ export const useSessionHashScroll = (input: {
   let pendingKey = ""
   let clearing = false
 
-  const location = useLocation()
+  const location = useLocation<{ reveal?: string }>()
   const navigate = useNavigate()
 
   const frames = new Set<number>()
@@ -106,6 +106,8 @@ export const useSessionHashScroll = (input: {
   const applyHash = (behavior: ScrollBehavior) => {
     const hash = location.hash.slice(1)
     if (!hash) {
+      // A route that opens the session on a tool call leaves the scroll to the timeline, which reveals the call.
+      if (location.state?.reveal) return
       input.follow.toBottom()
       const el = input.scroller()
       if (el) input.scheduleScrollState(el)

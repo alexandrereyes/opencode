@@ -35,6 +35,7 @@ import { createTimelineSearchController } from "./timeline/search-controller"
 import { TimelineSearchBar } from "./timeline/search-bar"
 import { ActiveSessionComposerRegion, createActiveSessionRegion } from "./composer/region"
 import { SessionIdentityHeader } from "./session-identity-header"
+import { SessionRunningMenu } from "./header/session-running-menu"
 import { SessionReviewToggle } from "./header/session-header-actions"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createSessionBrowser } from "./browser/model"
@@ -231,6 +232,20 @@ function SessionScreenContent(props: { session: SessionModel }) {
         <SessionMobileViewTabs
           current={mobileView()}
           onDetailsOpenChange={review.details.setOpen}
+          // The phone hides the session header, so its running work sits in the session navigation.
+          running={
+            <SessionRunningMenu
+              compact
+              sessionID={session.identity.params.id}
+              owner={composer.requests.background.running.sessionID()}
+              blocking={composer.requests.background.running.blocking()}
+              tasks={composer.requests.background.running.tasks()}
+              onOpen={() => {
+                review.mobile.setTab("session")
+                session.layout.view().terminal.close()
+              }}
+            />
+          }
           details={
             !session.data.isChild() && detailsProject()
               ? (close) => (
@@ -316,6 +331,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
         setRevealMessage={timeline.view.setRevealMessage}
         setScrollToEnd={timeline.view.setScrollToEnd}
         setScrollToOffset={timeline.view.setScrollToOffset}
+        reveal={timeline.view.reveal}
         search={
           <Show when={active()}>
             <TimelineSearchBar controller={timelineSearch} />
@@ -363,7 +379,15 @@ function SessionScreenContent(props: { session: SessionModel }) {
           </Match>
           <Match when={session.identity.params.id}>
             <Show when={isDesktop() && !messagesReady()}>
-              <SessionIdentityHeader sessionID={session.identity.params.id ?? ""} session={session.data.info()} />
+              <SessionIdentityHeader sessionID={session.identity.params.id ?? ""} session={session.data.info()}>
+                <SessionRunningMenu
+                  sessionID={session.identity.params.id}
+                  owner={composer.requests.background.running.sessionID()}
+                  blocking={composer.requests.background.running.blocking()}
+                  tasks={composer.requests.background.running.tasks()}
+                  title={session.data.isChild() ? session.data.info()?.title : undefined}
+                />
+              </SessionIdentityHeader>
             </Show>
             <Show when={messagesReady() && session.identity.params.id}>{timelineView()}</Show>
           </Match>

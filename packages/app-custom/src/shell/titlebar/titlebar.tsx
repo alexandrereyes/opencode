@@ -31,6 +31,7 @@ import { MobileDrawer, MobileDrawerContent, MobileDrawerLabel, MobileDrawerTrigg
 import { SidebarSubscriptions } from "./sidebar-subscriptions"
 import { sessionTabTitle } from "./tab-title"
 import { MobileTabProvider } from "./mobile-tab-actions"
+import { RecentlyClosedTabsButton, RecentlyClosedTabsMenu } from "./recently-closed-tabs-menu"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
@@ -519,7 +520,10 @@ export function Titlebar(props: {
                 category: language.t("command.category.view"),
                 keybind: windows() ? "alt+home" : "mod+b",
                 hidden: true,
-                onSelect: toggleHome,
+                onSelect: () => {
+                  if (layout.route().type !== "home") layout.home.searchFocus.request()
+                  toggleHome()
+                },
               },
             ])
 
@@ -812,18 +816,21 @@ export function Titlebar(props: {
                               />
                             </MobileTabProvider>
                           </div>
-                          <button
-                            type="button"
-                            data-action="mobile-tabs-new-session"
-                            class="flex h-7 w-full shrink-0 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
-                            onClick={() => {
-                              openNewTab()
-                              setMobileTabs("open", false)
-                            }}
-                          >
-                            <Icon name="plus" />
-                            {language.t("command.session.new")}
-                          </button>
+                          <div class="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              data-action="mobile-tabs-new-session"
+                              class="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-base hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:bg-v2-background-bg-layer-02"
+                              onClick={() => {
+                                openNewTab()
+                                setMobileTabs("open", false)
+                              }}
+                            >
+                              <Icon name="plus" />
+                              {language.t("command.session.new")}
+                            </button>
+                            <RecentlyClosedTabsButton onReopen={() => setMobileTabs("open", false)} />
+                          </div>
                           </Show>
                           <SidebarSubscriptions mobile currentTab={currentTab()} onOpenChange={(open) => setMobileTabs("proxy", open)} />
                           <Show when={!mobileTabs.proxy}>
@@ -888,25 +895,15 @@ export function Titlebar(props: {
                           }}
                           onReorder={(keys) => tabsStoreActions.reorder(keys)}
                         />
-                        <Tooltip
-                          placement="bottom"
-                          value={
+                        <RecentlyClosedTabsMenu
+                          onNewTab={openNewTab}
+                          tooltip={
                             <>
                               {language.t("command.session.new")}
                               <Keybind keys={newTabTooltipKeybind(command)} variant="neutral" />
                             </>
                           }
-                        >
-                          <IconButton
-                            type="button"
-                            variant="ghost-muted"
-                            size="large"
-                            class="shrink-0"
-                            icon={<Icon name="plus" />}
-                            onClick={openNewTab}
-                            aria-label={language.t("command.session.new")}
-                          />
-                        </Tooltip>
+                        />
                       </>
                     }
                   >
@@ -936,22 +933,11 @@ export function Titlebar(props: {
                               }
                             >
                               {homeButton(true)}
-                              <button
-                                type="button"
-                                data-action="vertical-tabs-new-session"
-                                class="group flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:bg-v2-background-bg-layer-02 hover:text-v2-text-text-base"
-                                onClick={openNewTab}
-                                aria-label={language.t("command.session.new")}
-                              >
-                                <Icon name="edit" class="shrink-0" />
-                                <span class="min-w-0 truncate">{language.t("command.session.new")}</span>
-                                <span
-                                  class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
-                                  aria-hidden="true"
-                                >
-                                  <bdi dir="ltr">{command.keybind("tab.new")}</bdi>
-                                </span>
-                              </button>
+                              <RecentlyClosedTabsMenu
+                                vertical
+                                onNewTab={openNewTab}
+                                keybind={command.keybind("tab.new")}
+                              />
                             </SessionSidebar>
                             <div data-slot="vertical-tabs-footer" class="mt-2 flex w-full shrink-0 flex-col gap-2">
                               <TitlebarRightMount vertical />

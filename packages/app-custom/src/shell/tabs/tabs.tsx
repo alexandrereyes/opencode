@@ -356,20 +356,26 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       closeTab(index: number) {
         const tab = store[index]
         if (!tab) return
-        if (tab.type === "session") updateClosed((stack) => pushClosedTab(stack, tab, index))
+        if (tab.type === "session") {
+          // removeTab drops the tab's info, so copy it before a deferred stack update runs.
+          const value = info[tabKey(tab)]
+          const tabInfo = value ? { ...value } : undefined
+          updateClosed((stack) => pushClosedTab(stack, tab, index, tabInfo))
+        }
         removeTab(index)
       },
-      reopenClosedTab() {
+      // Without a target, reopens the most recently closed tab at its old index; with one, that session's tab.
+      reopenClosedTab(target?: SessionTab, options?: { append?: boolean }) {
         if (!closedReady()) {
-          void closedReady.promise?.then(() => actions.reopenClosedTab())
+          void closedReady.promise?.then(() => actions.reopenClosedTab(target, options))
           return
         }
-        const result = takeClosedTab(closed, store)
+        const result = takeClosedTab(closed, store, target)
         if (result.stack.length === closed.length) return
         setClosed(() => result.stack)
         const entry = result.entry
         if (!entry) return
-        const index = Math.min(entry.index, store.length)
+        const index = options?.append ? store.length : Math.min(entry.index, store.length)
         void startTransition(() => {
           setStore(
             produce((tabs) => {
@@ -377,6 +383,8 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
               tabs.splice(index, 0, entry.tab)
             }),
           )
+          // Restore the title and avatar directory with the tab, so the tab and menus label it before it loads.
+          if (entry.info) setInfo(tabKey(entry.tab), { ...entry.info })
           navigateTab(entry.tab)
         })
       },
@@ -449,11 +457,22 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         for (const key of removed) memory.remove(key)
         for (const key of removed) removeInfo(key)
       },
-      rememberSessionInfo(tab: SessionTab, session: SessionInfo) {
+      // `prompted` sticks once the session has a user message; the closed-tabs menu lists only those sessions.
+      rememberSessionInfo(tab: SessionTab, session: SessionInfo, prompted: boolean) {
         const key = tabKey(tab)
-        const next = { title: session.title, directory: session.location.directory }
         const current = info[key]
-        if (current && current.title === next.title && current.directory === next.directory) return
+        const next = {
+          title: session.title,
+          directory: session.location.directory,
+          prompted: current?.prompted === true || prompted,
+        }
+        if (
+          current &&
+          current.title === next.title &&
+          current.directory === next.directory &&
+          current.prompted === next.prompted
+        )
+          return
         console.debug("[tabs] update persisted session info", { key, sessionID: session.id, current, next })
         setInfo(key, next)
       },
@@ -536,6 +555,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
     }
 
-    return { ...actions, store, info, ready, infoReady, recentReady, panesReady }
+    return { ...actions, store, info, closed, ready, infoReady, recentReady, closedReady, panesReady }
   },
 })

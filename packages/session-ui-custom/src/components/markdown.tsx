@@ -9,7 +9,9 @@ import {
   onCleanup,
   type Setter,
   splitProps,
+  untrack,
 } from "solid-js"
+import { createStore } from "solid-js/store"
 import { isServer, render } from "solid-js/web"
 import { Icon } from "@opencode/ui-custom/icon"
 import { IconButton } from "@opencode/ui-custom/icon-button"
@@ -40,11 +42,13 @@ import { createMarkdownRenderer } from "./markdown-solid"
 import {
   useMarkdown,
   type MarkdownLocalFileExists,
+  type MarkdownSessionExists,
   type OpenMarkdownLocalFile,
   type ReadMarkdownImage,
 } from "../context/markdown"
 import { createMarkdownImages } from "./markdown-image"
 import { createImagePreview } from "./image-preview"
+import { markSessionLinks, sessionLinkCandidates, setupSessionLinks } from "./markdown-session-links"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -67,6 +71,8 @@ type RenderResult = {
 }
 
 const renderedCodeTokens = new WeakMap<HTMLDivElement, RenderedCodeState>()
+// The session IDs a rendered block mentions, and the ones it rendered as links.
+const blockSessions = new WeakMap<HTMLDivElement, { candidates: string[]; linked: string }>()
 const renderedMarkdown = new WeakMap<
   HTMLDivElement,
   { renderer: ReturnType<typeof createMarkdownRenderer>; raw: string }
@@ -570,6 +576,32 @@ export function Markdown(
 
   let copyCleanup: (() => void) | undefined
   let linkCleanup: (() => void) | undefined
+  let sessionLinkCleanup: (() => void) | undefined
+  // Whether each mentioned session ID exists on the host; `false` also marks a check in flight.
+  const [sessionLinks, setSessionLinks] = createStore<Record<string, boolean>>({})
+  const sessions = (): SessionLinks | undefined => {
+    const exists = markdown?.sessionExists
+    if (!exists || !markdown?.openSession) return
+    return {
+      linked: (id) => sessionLinks[id] === true,
+      check: (ids) => untrack(() => ids.forEach((id) => checkSession(exists, id))),
+    }
+  }
+  const checkSession = (exists: MarkdownSessionExists, id: string) => {
+    if (id in sessionLinks) return
+    const result = exists(id)
+    if (typeof result === "boolean") {
+      setSessionLinks(id, result)
+      return
+    }
+    setSessionLinks(id, false)
+    void result.then(
+      (value) => {
+        if (value && !lifetime.signal.aborted) setSessionLinks(id, true)
+      },
+      () => undefined,
+    )
+  }
   let readImage: ReadMarkdownImage | undefined
   let images: ReturnType<typeof createMarkdownImages> | undefined
 
@@ -605,7 +637,8 @@ export function Markdown(
     })
     activeCodeKeys.clear()
     nextCodeKeys.forEach((key) => activeCodeKeys.add(key))
-    content.forEach((block, index) => updateBlock(container, index, block, labels, markdown?.localFileExists))
+    const links = sessions()
+    content.forEach((block, index) => updateBlock(container, index, block, labels, markdown?.localFileExists, links))
     while (container.children.length > content.length) {
       const child = container.lastElementChild
       if (!child) break
@@ -629,6 +662,7 @@ export function Markdown(
         copied: i18n.t("ui.message.copied"),
       }))
     if (!linkCleanup) linkCleanup = setupLocalLinks(container, () => markdown?.openLocalFile)
+    if (!sessionLinkCleanup) sessionLinkCleanup = setupSessionLinks(container, () => markdown?.openSession)
     container.toggleAttribute("data-local-links", !!markdown?.openLocalFile)
     if (result?.ready && result.text === local.text) container.dataset.markdownReady = ""
   })
@@ -638,6 +672,7 @@ export function Markdown(
     images?.dispose()
     if (copyCleanup) copyCleanup()
     linkCleanup?.()
+    sessionLinkCleanup?.()
     const container = root()
     if (container) disposeRenderedMarkdown(container)
     if (streamed) disposeMarkdownProjection(owner)
@@ -694,12 +729,18 @@ function disposeCode(key: string) {
   disposeStreamingCode(key)
 }
 
+type SessionLinks = {
+  linked: (id: string) => boolean
+  check: (ids: string[]) => void
+}
+
 function updateBlock(
   container: HTMLDivElement,
   index: number,
   block: RenderedBlock,
   labels: CopyLabels,
   localFileExists?: MarkdownLocalFileExists,
+  sessions?: SessionLinks,
 ) {
   const current = container.children[index]
   if (block.mode === "code") {
@@ -710,11 +751,17 @@ function updateBlock(
     current instanceof HTMLDivElement && current.dataset.markdownKey === block.key && !renderedCodeTokens.has(current)
       ? current
       : undefined
-  if (existing?.dataset.markdownHash === block.hash) {
-    // A block that finishes streaming keeps its DOM and the user's selection; only its file paths get checked now.
+  const mentioned = existing ? blockSessions.get(existing) : undefined
+  // A confirmed session ID renders the unchanged block again, now with its link.
+  const relink =
+    !!mentioned && (sessions ? mentioned.candidates.filter(sessions.linked).join(" ") : "") !== mentioned.linked
+  if (existing?.dataset.markdownHash === block.hash && !relink) {
+    // A block that finishes streaming keeps its DOM and the user's selection; only its file paths and session IDs
+    // get checked now.
     if (existing.dataset.markdownMode === "live" && block.mode !== "live") {
       existing.dataset.markdownMode = block.mode
       markInlineCode(existing, existing, false, localFileExists)
+      sessions?.check(mentioned?.candidates ?? [])
     }
     return
   }
@@ -725,6 +772,18 @@ function updateBlock(
   next.dataset.markdownHash = block.hash
   next.dataset.markdownMode = block.mode
   next.style.display = "contents"
+  // A completed block that was rendered live switches to static markup to show session links: its live renderer
+  // reconciles only the word-split markup it was created with.
+  if (renderedMarkdown.has(next) && block.mode !== "live" && sessions && block.html.includes("ses_")) {
+    const scratch = document.createElement("div")
+    scratch.innerHTML = block.html
+    const candidates = sessionLinkCandidates(scratch)
+    sessions.check(candidates)
+    if (candidates.some(sessions.linked)) {
+      disposeRenderedMarkdown(next)
+      next.replaceChildren()
+    }
+  }
   const rendered = renderedMarkdown.get(next)
   // Keep live renderers in control of their DOM, including after completion.
   const source = rendered || block.mode === "live" ? document.createElement("div") : next
@@ -732,6 +791,14 @@ function updateBlock(
   source.innerHTML = block.html
   markInlineCode(source, next, block.mode === "live", localFileExists)
   markCodeLinks(source)
+  if (sessions) {
+    // A streaming block may end inside an ID that is still being written, so only completed blocks are checked.
+    const candidates = sessionLinkCandidates(source)
+    if (block.mode !== "live") sessions.check(candidates)
+    markSessionLinks(source, sessions.linked)
+    blockSessions.set(next, { candidates, linked: candidates.filter(sessions.linked).join(" ") })
+  }
+  if (!sessions) blockSessions.delete(next)
 
   if (rendered) {
     rendered.renderer.update(source.innerHTML, block.mode === "live", rendered.raw !== block.raw)

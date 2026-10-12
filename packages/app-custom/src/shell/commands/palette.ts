@@ -158,6 +158,7 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     get: (sessionID, signal) => serverSDK.api.session.get({ sessionID }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
+    recentCategory: () => language.t("palette.group.recentSessions"),
     chatRoot: () => knownChatRoot(serverSDK),
     chatLabel: () => language.t("session.new.chats"),
     isChat: (session) => !!findSessionTab(appTabs.store, ServerConnection.key(serverSDK.server), session.id)?.chat,
@@ -241,6 +242,7 @@ export function createServerSessionEntries(props: {
   get: (sessionID: string, signal: AbortSignal) => Promise<SessionInfo>
   untitled: () => string
   category: () => string
+  recentCategory: () => string
   chatRoot?: () => string | undefined
   chatLabel?: () => string
   isChat?: (session: SessionInfo) => boolean
@@ -251,15 +253,12 @@ export function createServerSessionEntries(props: {
 
   return async (text: string): Promise<CommandPaletteEntry[]> => {
     const search = text.trim()
-    if (!search) {
-      abort?.abort()
-      return []
-    }
     abort?.abort()
     const current = new AbortController()
     abort = current
+    // Typed searches wait for a pause; an empty query lists recent sessions right away.
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 100)
+      const timer = setTimeout(resolve, search ? 100 : 0)
       current.signal.addEventListener(
         "abort",
         () => {
@@ -272,7 +271,8 @@ export function createServerSessionEntries(props: {
     if (current.signal.aborted) return []
     const opened = props.opened()
     const stored = props.stored().map((project) => ({ ...project, expanded: false }))
-    return Promise.all([
+    const category = search ? props.category() : props.recentCategory()
+    const entries = await Promise.all([
       props.load(search, current.signal).then(
         (result) => result.data,
         () => [],
@@ -300,7 +300,7 @@ export function createServerSessionEntries(props: {
               : project
                 ? displayName(project)
                 : getFilename(session.location.directory),
-            category: props.category(),
+            category,
             directory: session.location.directory,
             sessionID: session.id,
             server: props.server,
@@ -310,5 +310,6 @@ export function createServerSessionEntries(props: {
           }
         }),
     )
+    return search ? entries : entries.slice(0, ENTRY_LIMIT)
   }
 }

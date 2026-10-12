@@ -7,7 +7,7 @@ import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { Tooltip } from "@opencode/ui-custom/tooltip"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useNavigate } from "@solidjs/router"
-import { createMemo, createResource, For, Show, type ParentProps } from "solid-js"
+import { children, createMemo, createResource, For, Show, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useServer } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -22,6 +22,7 @@ import { sessionHref } from "@/shell/routes/session"
 import { showToast } from "@/shell/notifications/toast"
 import { chatRoot, isChatDirectory, resolvedChatIdentity } from "@/runtime/chats"
 import { sessionTitle } from "./title"
+import { SessionWorkingIndicator } from "./header/session-working-indicator"
 import "./session-identity-header.css"
 
 export function SessionTitleHeader(props: ParentProps) {
@@ -249,9 +250,8 @@ export function SessionAncestorTrail(props: {
   trailing: boolean
 }) {
   const server = useServer()
-  const tabs = useTabs()
-  const navigate = useNavigate()
   const language = useLanguage()
+  const open = useOpenSessionRoute()
   const ancestors = createMemo(() => {
     const path: { id: string; title: string; direct: boolean }[] = []
     const seen = new Set([props.sessionID])
@@ -270,16 +270,6 @@ export function SessionAncestorTrail(props: {
     }
     return path
   })
-  const open = (id: string) => {
-    const tab = tabs.store.find(
-      (item) =>
-        item.type === "session" &&
-        item.server === server.key &&
-        (item.sessionId === props.sessionID || item.routeSessionId === props.sessionID),
-    )
-    if (tab?.type === "session") tabs.rememberSessionRoute(tab, id, server.ctx.data.session.get(id)?.parentID)
-    navigate(sessionHref(server.key, id))
-  }
 
   return (
     <div class="flex min-w-0 max-w-full items-center">
@@ -297,7 +287,7 @@ export function SessionAncestorTrail(props: {
                 title={ancestor.title}
                 dir="auto"
                 class="max-w-[min(200px,40vw)] shrink-0 truncate pl-2 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:text-v2-text-text-muted"
-                onClick={() => open(ancestor.id)}
+                onClick={() => open(props.sessionID, ancestor.id)}
               >
                 {ancestor.title}
               </button>
@@ -327,7 +317,26 @@ export function SessionAncestorTrail(props: {
   )
 }
 
-export function SessionIdentityHeader(props: { sessionID: string; session?: SessionInfo }) {
+// Opens a related session in the tab showing `from`, and records its parent so the tab's route stays consistent.
+// `reveal` names a tool call or shell the opened timeline scrolls to and expands.
+export function useOpenSessionRoute() {
+  const server = useServer()
+  const tabs = useTabs()
+  const navigate = useNavigate()
+  return (from: string, id: string, reveal?: string) => {
+    const tab = tabs.store.find(
+      (item) =>
+        item.type === "session" &&
+        item.server === server.key &&
+        (item.sessionId === from || item.routeSessionId === from),
+    )
+    if (tab?.type === "session") tabs.rememberSessionRoute(tab, id, server.ctx.data.session.get(id)?.parentID)
+    navigate(sessionHref(server.key, id), reveal ? { state: { reveal } } : undefined)
+  }
+}
+
+// A subagent's header puts its title inside `children` (the running-work menu); a top-level header appends them.
+export function SessionIdentityHeader(props: ParentProps<{ sessionID: string; session?: SessionInfo }>) {
   const server = useServer()
   const [chatRootValue] = createResource(
     () => (server.ctx.sdk.connection.status() === "connected" ? server.ctx.sdk.connection.epoch() + 1 : undefined),
@@ -387,6 +396,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
     import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && settings.general.showProjectIcon() && !!directory()
   const workspaceSession = createMemo(() => !!pending() || isWorkspaceDirectory(project(), directory() ?? ""))
   const chat = createMemo(() => isChatDirectory(directory() ?? "", chatRootValue()))
+  const slot = children(() => props.children)
 
   return (
     <Show when={title() || parentTitle() || showProjectIcon()}>
@@ -411,7 +421,11 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
                   />
                 )}
               </Show>
-              <Show when={title()}>
+              <Show when={parentID() && slot()}>{slot()}</Show>
+              <Show when={!parentID() || !slot()}>
+                <SessionWorkingIndicator sessionID={props.sessionID} />
+              </Show>
+              <Show when={(!parentID() || !slot()) && title()}>
                 {(value) => (
                   <h1
                     data-slot={parentID() ? "session-title-child" : undefined}
@@ -423,6 +437,7 @@ export function SessionIdentityHeader(props: { sessionID: string; session?: Sess
                   </h1>
                 )}
               </Show>
+              <Show when={!parentID()}>{slot()}</Show>
             </div>
           </div>
         </div>

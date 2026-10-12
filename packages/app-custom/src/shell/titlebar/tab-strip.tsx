@@ -158,11 +158,23 @@ function SessionTabEntry(props: {
     onCleanup(() => window.clearTimeout(timer))
   })
 
+  // Memoized so streaming messages do not rerun the effects below.
+  const prompted = createMemo(() => {
+    const value = session()
+    return !!value && !!props.serverCtx?.data.session.message.list(value.id).some((message) => message.type === "user")
+  })
+
   createEffect(() => {
     if (!props.open) return
     const value = session()
     if (!value) return
-    tabs.rememberSessionInfo(props.tab, value)
+    tabs.rememberSessionInfo(props.tab, value, prompted())
+  })
+
+  createEffect(() => {
+    if (!props.open) return
+    const value = session()
+    if (!value) return
     const current = sdk()
     if (!current) return
     createTabComposerState(tabs, props.tab, current.scope, {

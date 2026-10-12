@@ -21,16 +21,26 @@ export function createSessionRequestModel() {
   const settings = useSettings()
   const families = useServer().ctx.families
   families.watch(() => params.id)
+  // Inside a subagent, running work is the parent's, so the header lists its siblings.
+  const owner = createMemo(() => {
+    const id = params.id
+    if (!id) return
+    return data.session.get(id)?.parentID ?? id
+  })
   createEffect(() => {
     const id = params.id
-    if (!id || serverSDK.connection.status() !== "connected") return
-    void syncSessionBackgroundShells({
-      sessionID: id,
-      current: sdk().ref,
-      known: untrack(() => data.shell.listBySession(id).map((shell) => shell.location)),
-      message: serverSDK.api.message,
-      sync: (location) => data.shell.sync(location),
-    }).catch(() => undefined)
+    const parent = owner()
+    if (!id || !parent || serverSDK.connection.status() !== "connected") return
+    new Set([id, parent]).forEach(
+      (sessionID) =>
+        void syncSessionBackgroundShells({
+          sessionID,
+          current: sdk().ref,
+          known: untrack(() => data.shell.listBySession(sessionID).map((shell) => shell.location)),
+          message: serverSDK.api.message,
+          sync: (location) => data.shell.sync(location),
+        }).catch(() => undefined),
+    )
   })
   const formRequest = createMemo((): FormInfo | undefined => families.get(params.id)?.snapshot?.forms[0])
   const websearch = createWebSearchRequest({
@@ -71,17 +81,29 @@ export function createSessionRequestModel() {
     const id = params.id
     return !!id && !data.session.get(id)?.parentID
   }
-  const background = createSessionBackground({
-    sessionID: () => (primary() ? params.id : undefined),
+  const running = createSessionBackground({
+    sessionID: owner,
     messages: data.session.message.list,
     sessions: data.session.list,
     status: data.session.status,
-    shells: () => (params.id ? data.shell.listBySession(params.id) : []),
+    shells: () => {
+      const id = owner()
+      return id ? data.shell.listBySession(id) : []
+    },
   })
   createEffect(() => {
     if (serverSDK.connection.status() !== "connected") return
-    background.unresolved().forEach((sessionID) => void data.session.sync(sessionID).catch(() => undefined))
+    running.unresolved().forEach((sessionID) => void data.session.sync(sessionID).catch(() => undefined))
   })
+  // A subagent opened directly has not loaded its parent's turn or its siblings.
+  createEffect(() => {
+    const id = owner()
+    if (!id || id === params.id || serverSDK.connection.status() !== "connected") return
+    void data.session.sync(id, { children: true }).catch(() => undefined)
+  })
+  // Moving to the background and the summary's background list stay with the primary session's own work.
+  const blocking = createMemo(() => (primary() ? running.blocking() : []))
+  const tasks = createMemo(() => (primary() ? running.tasks() : []))
   const moveToBackground = async () => {
     if (!primary()) return
     const sessionID = params.id
@@ -132,8 +154,9 @@ export function createSessionRequestModel() {
     permissionRequest,
     permissionResponding,
     background: {
-      blocking: background.blocking,
-      tasks: background.tasks,
+      blocking,
+      tasks,
+      running: { sessionID: owner, blocking: running.blocking, tasks: running.tasks },
       move: moveToBackground,
     },
     decide,

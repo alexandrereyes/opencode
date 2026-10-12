@@ -32,6 +32,7 @@ export function SessionMobileViewTabs(props: {
   onSelect: (view: "session" | "changes" | "files" | "usage" | "terminal") => void
   details?: (close: () => void) => JSX.Element
   onDetailsOpenChange?: (open: boolean) => void
+  running?: JSX.Element
 }) {
   const language = useLanguage()
   const [store, setStore] = createStore({
@@ -78,6 +79,7 @@ export function SessionMobileViewTabs(props: {
           </For>
         </Tabs.List>
       </Tabs>
+      {props.running}
       <Menu
         appearance="standard"
         modal={false}

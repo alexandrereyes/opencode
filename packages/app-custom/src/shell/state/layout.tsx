@@ -264,6 +264,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       reviewPanelSource: "other" as ReviewPanelSource,
       sessionTabPreview: {} as Record<string, string | undefined>,
     })
+    // A one-shot request read by the next Home mount; it never needs to be reactive.
+    let homeSearchFocus = false
 
     const MAX_SESSION_KEYS = 50
     const PENDING_MESSAGE_TTL_MS = 2 * 60 * 1000
@@ -386,6 +388,17 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         selection: createMemo(() => store.home.selection),
         setSelection(selection: HomeProjectSelection) {
           setStore("home", "selection", reconcile(selection))
+        },
+        // Opening Home with its shortcut focuses session search, so typing filters immediately.
+        searchFocus: {
+          request() {
+            homeSearchFocus = true
+          },
+          take() {
+            const requested = homeSearchFocus
+            homeSearchFocus = false
+            return requested
+          },
         },
       },
       verticalTabs: {

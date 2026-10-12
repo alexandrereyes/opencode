@@ -7,7 +7,7 @@ import {
   type VirtualItem,
 } from "@tanstack/solid-virtual"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode/ui-custom/scroll-view"
-import { TimelineRow } from "@opencode/session-ui-custom/timeline/projection"
+import { Timeline, TimelineRow } from "@opencode/session-ui-custom/timeline/projection"
 import { useLanguage } from "@/runtime/i18n/language"
 import {
   batch,
@@ -53,7 +53,7 @@ const cache = new Map<
 
 type Projection = Pick<
   ReturnType<typeof createTimelineProjection>,
-  "activeMessageID" | "messageLastRowIndex" | "messageRowIndex" | "rowByKey" | "rows"
+  "activeMessageID" | "messageByID" | "messageLastRowIndex" | "messageRowIndex" | "rowByKey" | "rows"
 >
 
 type Input = {
@@ -88,6 +88,8 @@ type Input = {
   setRevealMessage?: (fn: (id: string, partID?: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
   setScrollToOffset?: (fn: (offset: number, behavior: ScrollBehavior) => void) => void
+  /** A tool call the route asks this timeline to open on; `done` clears it once revealed. */
+  reveal?: { target: () => string | undefined; done: () => void }
 }
 
 type ViewProps = {
@@ -624,7 +626,10 @@ export function createTimelineVirtualizer(input: Input) {
       // A detached view can miss its nonzero ResizeObserver delivery. Publish
       // its real viewport before restoring the offset and admitting rows.
       reportRect?.({ width: root.offsetWidth, height: root.offsetHeight })
-      if (input.pinned()) virtualizer.scrollToEnd()
+      // A route can open this timeline on a tool call, e.g. a shell picked from inside a subagent, instead of its end.
+      const target = input.reveal?.target()
+      if (target && revealPart(target)) input.reveal?.done()
+      else if (input.pinned()) virtualizer.scrollToEnd()
       reportOffset?.(root.scrollTop, false)
       settleColdBottom()
     })
@@ -653,6 +658,53 @@ export function createTimelineVirtualizer(input: Input) {
       virtualizer.scrollToEnd()
     })
   })
+
+  // Scrolls to a tool call, named by its ID or by the shell ID a backgrounded shell call reports, and expands it and
+  // the collapsed context group that hides it. Returns whether the call is in the list.
+  function revealPart(target: string) {
+    if (!active()) return false
+    const matches = (ref: { messageID: string; partID: string }) => {
+      const content = Timeline.resolveContent(input.projection.messageByID().get(ref.messageID), ref.partID)
+      return (
+        content?.type === "tool" &&
+        (content.id === target || (content.state.status !== "streaming" && content.state.metadata?.shellID === target))
+      )
+    }
+    const found = rows()
+      .flatMap((row, index) =>
+        row._tag === "AssistantPart"
+          ? (row.group.type === "part" ? [row.group.ref] : row.group.refs).flatMap((ref) =>
+              matches(ref) ? [{ group: row.group, index, partID: ref.partID }] : [],
+            )
+          : [],
+      )
+      .at(-1)
+    if (!found) return false
+    const key = found.group.key
+    setToolOpen(
+      found.group.type === "context"
+        ? { [`context:${key}`]: true, [`${key}:tool:${found.partID}`]: true }
+        : { [key]: true },
+    )
+    input.onUnpin()
+    prepareNavigation()
+    virtualizer.scrollToIndex(found.index, { align: "center" })
+    return true
+  }
+
+  // A route opened on a tool call while this timeline is already shown, e.g. from the phone's running-work menu.
+  createEffect(
+    on(
+      () => input.reveal?.target(),
+      (target) => {
+        if (!target || !active()) return
+        queueMicrotask(() => {
+          if (revealPart(target)) input.reveal?.done()
+        })
+      },
+      { defer: true },
+    ),
+  )
 
   let coldPending = coldBottomMount
   let settleQueued = false
@@ -1044,6 +1096,7 @@ export function createTimelineVirtualizer(input: Input) {
   })
 
   return {
+    revealPart,
     disclosure: {
       patchGroupKeys,
       value: (key: string) => toolOpen[key],

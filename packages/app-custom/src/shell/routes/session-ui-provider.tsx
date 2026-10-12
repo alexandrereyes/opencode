@@ -10,6 +10,9 @@ import { useData } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
 import { useTabs } from "@/shell/tabs/tabs"
 import { readLocalImage } from "@/runtime/server/image"
+import { useLanguage } from "@/runtime/i18n/language"
+import { showToast } from "@/shell/notifications/toast"
+import { isSessionNotFoundError } from "@/runtime/server/errors"
 
 export function SessionUIProvider(
   props: ParentProps<{
@@ -22,6 +25,7 @@ export function SessionUIProvider(
   const data = useData()
   const serverSDK = useServerSDK()
   const tabs = useTabs()
+  const language = useLanguage()
   const directory = () => props.directory
   const readImage = createMemo<ReadMarkdownImage>(() => {
     const dir = directory()
@@ -38,6 +42,35 @@ export function SessionUIProvider(
     if (tab?.type === "session") tabs.rememberSessionRoute(tab, sessionID, params.id)
     await data.session.sync(sessionID).catch(() => undefined)
     navigate(href(sessionID))
+  }
+  // A transcript may mention a session from another server, or one that was deleted or archived:
+  // only sessions this server can open become links. Answers are kept for the provider's lifetime.
+  const checkedSessions = new Map<string, Promise<boolean>>()
+  const sessionExists = (sessionID: string) => {
+    const cached = data.session.get(sessionID)
+    if (cached) return !cached.time.archived
+    const known = checkedSessions.get(sessionID)
+    if (known) return known
+    const request = serverSDK.api.session.get({ sessionID }).then(
+      (session) => !session.time.archived,
+      (error: unknown) => {
+        // Only a missing session is a final answer; a failed request may succeed on a later render.
+        if (!isSessionNotFoundError(error, sessionID)) checkedSessions.delete(sessionID)
+        return false
+      },
+    )
+    checkedSessions.set(sessionID, request)
+    return request
+  }
+  // Nested sessions open in their root's tab: the titlebar groups the routed session under its root.
+  const openReferencedSession = async (sessionID: string) => {
+    const session = await serverSDK.api.session.get({ sessionID }).catch(() => undefined)
+    if (!session || session.time.archived) {
+      showToast({ title: language.t("session.error.notFound") })
+      return
+    }
+    data.session.remember(session)
+    navigate(href(session.id))
   }
   const providers = useProviders(directory)
   const sessionUIData = createMemo(() => ({
@@ -66,7 +99,7 @@ export function SessionUIProvider(
       onNavigateToSession={navigateToSession}
       onSessionHref={href}
     >
-      <MarkdownProvider readImage={readImage()}>
+      <MarkdownProvider readImage={readImage()} openSession={openReferencedSession} sessionExists={sessionExists}>
         <LocalProvider>{props.children}</LocalProvider>
       </MarkdownProvider>
     </DataProvider>

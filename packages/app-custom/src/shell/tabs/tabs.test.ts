@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createTabMemory } from "./memory"
-import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed"
+import {
+  listClosedTabs,
+  nextTabAfterClose,
+  pushClosedTab,
+  removeClosedTabs,
+  takeClosedTab,
+  type ClosedTab,
+} from "./closed"
 import { findSessionTab, sessionIDHasOpenTab, tabHref, tabKey, type SessionTab, type Tab } from "./tabs"
 import { Schema } from "effect"
 import { TabStorage } from "./schema"
@@ -90,6 +97,22 @@ describe("tab migration", () => {
     ).toEqual([{ tab: sessionTab("a"), index: 1 }])
   })
 
+  test("keeps the title, directory and prompt state of closed tabs and drops an invalid record", () => {
+    const decode = Schema.decodeUnknownSync(Persistence.withInitial(TabStorage.Closed, []))
+    const stored = [
+      { tab: sessionTab("a"), index: 0, info: { title: "Alpha", directory: "/project", prompted: true } },
+      { tab: sessionTab("b"), index: 1, info: { prompted: "yes" } },
+    ]
+    expect(decode(stored)).toEqual([
+      { tab: sessionTab("a"), index: 0, info: { title: "Alpha", directory: "/project", prompted: true } },
+      { tab: sessionTab("b"), index: 1 },
+    ])
+    expect(Schema.encodeSync(TabStorage.Closed)(decode(stored))).toEqual([
+      { tab: sessionTab("a"), index: 0, info: { title: "Alpha", directory: "/project", prompted: true } },
+      { tab: sessionTab("b"), index: 1 },
+    ])
+  })
+
   test("validates auxiliary tab state", () => {
     expect(
       Schema.decodeUnknownSync(Persistence.withInitial(TabStorage.Recent, { key: undefined }))({ key: 1 }),
@@ -154,6 +177,58 @@ describe("closed tab stack", () => {
     const stack = pushClosedTab([], sessionTab("a"), 2)
 
     expect(stack).toEqual([{ tab: sessionTab("a"), index: 2 }])
+  })
+
+  test("records a copy of the tab's title, directory and prompt state", () => {
+    const info = { title: "Alpha", directory: "/project", prompted: true }
+    const stack = pushClosedTab([], sessionTab("a"), 2, info)
+    info.title = "Changed"
+
+    expect(stack).toEqual([
+      { tab: sessionTab("a"), index: 2, info: { title: "Alpha", directory: "/project", prompted: true } },
+    ])
+  })
+
+  test("keeps only the newest close record for a session", () => {
+    const stack = pushClosedTab(
+      pushClosedTab(pushClosedTab([], sessionTab("a"), 1, { title: "Old", prompted: true }), sessionTab("b"), 2),
+      sessionTab("a"),
+      3,
+      { title: "New", prompted: true },
+    )
+
+    expect(stack).toEqual([
+      { tab: sessionTab("b"), index: 2 },
+      { tab: sessionTab("a"), index: 3, info: { title: "New", prompted: true } },
+    ])
+  })
+
+  test("lists closed tabs newest first, once per session, without open tabs", () => {
+    const stack = [
+      { tab: sessionTab("a"), index: 0 },
+      { tab: sessionTab("b"), index: 1 },
+      { tab: sessionTab("c"), index: 2 },
+      { tab: sessionTab("a"), index: 3 },
+    ]
+
+    expect(listClosedTabs(stack, [sessionTab("b")]).map((entry) => [entry.tab.sessionId, entry.index])).toEqual([
+      ["a", 3],
+      ["c", 2],
+    ])
+  })
+
+  test("takes a selected closed tab without removing newer entries", () => {
+    const stack = [
+      { tab: sessionTab("a"), index: 0 },
+      { tab: sessionTab("b"), index: 1 },
+      { tab: sessionTab("c"), index: 2 },
+    ]
+    const result = takeClosedTab(stack, [], sessionTab("a"))
+
+    expect(result.entry?.tab.sessionId).toBe("a")
+    expect(result.stack.map((entry) => entry.tab.sessionId)).toEqual(["b", "c"])
+    expect(takeClosedTab(stack, [sessionTab("a")], sessionTab("a"))).toEqual({ stack })
+    expect(takeClosedTab(stack, [], sessionTab("missing"))).toEqual({ stack })
   })
 
   test("ignores draft tabs", () => {

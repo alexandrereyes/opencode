@@ -131,6 +131,29 @@
     cursor: pointer;
   }
 
+  /* Referenced sessions read as links; the button keeps keyboard activation without a navigable href. */
+  .markdown-session-link {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-interactive-base);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .markdown-session-link:hover {
+    text-decoration-color: currentColor;
+  }
+
+  .markdown-session-link:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
   /* File links read as the same kind of reference as inline file paths. */
   a[data-local-link] {
     color: var(--markdown-inline-code-path-color);

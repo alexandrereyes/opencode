@@ -421,6 +421,43 @@ story("links existing inline paths only after the stream completes", async ({ pa
   await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveAttribute("role", "link")
 })
 
+story("links existing session IDs only after the stream completes and opens them", async ({ page }) => {
+  const existing = "ses_0123456789abcdefghijklmnop"
+  const missing = "ses_abcdefghijklmnopqrstuvwxyz"
+  await page.evaluate(
+    async ({ fixture, existing, missing }) => {
+      const { mountMarkdown } = await import(fixture)
+      await mountMarkdown({ text: `Open ${existing} or \`${existing}\`, not ${missing}.`, streaming: true })
+    },
+    { fixture, existing, missing },
+  )
+  const harness = page.getByTestId("markdown-fixture")
+  const markdown = harness.locator('[data-component="markdown"]')
+  await expect(markdown).toContainText(`not ${missing}.`)
+  await expect(markdown.locator("button[data-session-id]")).toHaveCount(0)
+  await harness.getByLabel("Streaming").uncheck()
+  const links = markdown.getByRole("button", { name: existing, exact: true })
+  await expect(links).toHaveCount(2)
+  await expect(markdown.locator(`button[data-session-id="${missing}"]`)).toHaveCount(0)
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveCount(0)
+  await links.filter({ has: page.locator("code") }).press("Enter")
+  await expect(harness).toHaveAttribute("data-opened-sessions", existing)
+})
+
+story("links a session ID in completed Markdown once the host confirms it", async ({ page }) => {
+  const existing = "ses_0123456789abcdefghijklmnop"
+  await page.evaluate(
+    async ({ fixture, existing }) => {
+      const { mountMarkdown } = await import(fixture)
+      await mountMarkdown({ text: `- Session ${existing}\n- File \`src/file.ts\`` })
+    },
+    { fixture, existing },
+  )
+  const markdown = page.getByTestId("markdown-fixture").locator('[data-component="markdown"]')
+  await expect(markdown.getByRole("button", { name: existing, exact: true })).toBeVisible()
+  await expect(markdown.locator('code[data-inline-code-kind="path"]')).toHaveText("src/file.ts")
+})
+
 story("replaces completed DOM before live rendering and retains streamed code copy actions", async ({ page }) => {
   await page.evaluate(async (fixture) => {
     const { mountMarkdown } = await import(fixture)

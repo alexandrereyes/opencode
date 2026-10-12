@@ -37,6 +37,7 @@ import { useCommand } from "@/shell/commands/command"
 import { useSettings } from "@/settings/model"
 import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeader } from "@/session/header/session-header"
+import { SessionRunningMenu } from "@/session/header/session-running-menu"
 import { ChatQuoteSelection } from "@/composer/chat-quote-selection"
 import { ChatQuoteAnchors } from "@/composer/chat-quote-anchors"
 import type { ComposerState } from "@/composer/state"
@@ -55,9 +56,16 @@ type BackgroundTask = {
   agent?: string
 }
 
+type BlockingTask = { type: "shell" | "subagent"; partID: string; id?: string; label?: string }
+
 type SessionBackground = {
-  blocking: Accessor<{ type: "shell" | "subagent"; partID: string; id?: string; label?: string }[]>
+  blocking: Accessor<BlockingTask[]>
   tasks: Accessor<BackgroundTask[]>
+  running: {
+    sessionID: Accessor<string | undefined>
+    blocking: Accessor<BlockingTask[]>
+    tasks: Accessor<BackgroundTask[]>
+  }
   move: () => Promise<void>
 }
 
@@ -404,6 +412,7 @@ type MessageTimelineProps = {
   setRevealMessage?: (fn: (id: string, partID?: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
   setScrollToOffset?: (fn: (offset: number, behavior: ScrollBehavior) => void) => void
+  reveal?: { target: () => string | undefined; done: () => void }
   search?: JSX.Element
 }
 
@@ -580,8 +589,19 @@ function MessageTimelineView(
     setRevealMessage: props.setRevealMessage,
     setScrollToEnd: props.setScrollToEnd,
     setScrollToOffset: props.setScrollToOffset,
+    reveal: props.reveal,
   })
   const VirtualizedTimeline = virtualized.View
+  const runningMenu = (title?: string) => (
+    <SessionRunningMenu
+      sessionID={sessionID()}
+      owner={props.background.running.sessionID()}
+      blocking={props.background.running.blocking()}
+      tasks={props.background.running.tasks()}
+      onReveal={virtualized.revealPart}
+      title={title}
+    />
+  )
   const [title, setTitle] = createStore({
     draft: "",
     editing: false,
@@ -797,7 +817,8 @@ function MessageTimelineView(
                         />
                       )}
                     </Show>
-                    <Show when={childTitle() || title.editing}>
+                    <Show when={parentID()}>{runningMenu(childTitle())}</Show>
+                    <Show when={!parentID() && (childTitle() || title.editing)}>
                       <Show
                         when={title.editing}
                         fallback={
@@ -843,6 +864,7 @@ function MessageTimelineView(
                         />
                       </Show>
                     </Show>
+                    <Show when={!parentID()}>{runningMenu()}</Show>
                     <Show when={!parentID() && sessionID()} keyed>
                       {(id) => (
                         <Menu

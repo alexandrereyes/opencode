@@ -19,6 +19,8 @@ export { preloadMarkdown }
 
 // Inline code naming one of these is a file link; any other path stays plain code.
 const existingFiles = new Set(["src/file.ts", "new/file.ts"])
+// Session IDs the fixture host can open; any other ID stays plain text.
+const existingSessions = new Set(["ses_0123456789abcdefghijklmnop"])
 
 export async function mountMarkdown(options: {
   text: string
@@ -53,6 +55,10 @@ export async function mountMarkdown(options: {
             options.images ? readLocalImage(api, "C:/project", path, signal) : Promise.resolve(undefined)
           }
           localFileExists={(path) => Promise.resolve(existingFiles.has(path))}
+          sessionExists={(id) => Promise.resolve(existingSessions.has(id))}
+          openSession={(id) => {
+            host.dataset.openedSessions = [host.dataset.openedSessions, id].filter(Boolean).join(" ")
+          }}
         >
           <Show when={visible()}>
             <Markdown

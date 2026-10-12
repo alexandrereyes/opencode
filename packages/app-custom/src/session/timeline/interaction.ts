@@ -12,12 +12,12 @@ import { readingPositions } from "./reading-position"
 
 export function createSessionTimelineInteraction(session: SessionModel) {
   const layout = useLayout()
-  const location = useLocation()
+  const location = useLocation<{ reveal?: string }>()
   const timeline = createTimelineModel({ session })
   const historyAdmission = createHistoryAdmission()
   const entry = createMemo(
     on(session.identity.sessionKey, (key) => ({
-      explicit: !!location.hash || !!layout.pendingMessage.peek(key),
+      explicit: !!location.hash || !!location.state?.reveal || !!layout.pendingMessage.peek(key),
       pinned: readingPositions.get(key)?.pinned ?? true,
     })),
   )
@@ -65,6 +65,9 @@ export function createSessionTimelineInteraction(session: SessionModel) {
   let scroller: HTMLDivElement | undefined
   let dockHeight = 0
   let revealMessage = (_id: string, _partID?: string) => {}
+  // The history entry whose tool call was already revealed.
+  let revealed: string | undefined
+  const revealTarget = () => (revealed === location.key ? undefined : location.state?.reveal)
   let scrollToEnd = () => {}
   let scrollToOffset = (_offset: number, _behavior: ScrollBehavior) => {}
   let scrollMark = 0
@@ -258,7 +261,16 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     on(
       () => session.identity.params.id,
       (id, previous) => {
-        if (!id || !previous || id === previous || state.messageID || state.pendingMessage || location.hash) return
+        if (
+          !id ||
+          !previous ||
+          id === previous ||
+          state.messageID ||
+          state.pendingMessage ||
+          location.hash ||
+          revealTarget()
+        )
+          return
         if (pinned()) scrollToEnd()
       },
     ),
@@ -335,7 +347,17 @@ export function createSessionTimelineInteraction(session: SessionModel) {
     view: {
       pause,
       explicitNavigation: () =>
-        !!location.hash || !!state.pendingMessage || !!layout.pendingMessage.peek(session.identity.sessionKey()),
+        !!location.hash ||
+        !!revealTarget() ||
+        !!state.pendingMessage ||
+        !!layout.pendingMessage.peek(session.identity.sessionKey()),
+      // The tool call the route opened the session on, revealed once per history entry.
+      reveal: {
+        target: revealTarget,
+        done: () => {
+          revealed = location.key
+        },
+      },
       history: { ...timeline.history, settled: () => !timeline.resource.loading },
       historyAdmission,
       setRestoring: (key: string, value: boolean) => {

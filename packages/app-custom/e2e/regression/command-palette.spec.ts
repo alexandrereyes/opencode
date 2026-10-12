@@ -38,6 +38,26 @@ test("home commands do not wait for session search", async ({ page }) => {
   release.resolve()
 })
 
+for (const viewport of [
+  { name: "desktop", width: 1440, height: 900, touch: false },
+  { name: "phone", width: 390, height: 844, touch: true },
+]) {
+  test.describe(`${viewport.name} recent sessions`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height }, hasTouch: viewport.touch })
+
+    test("lists recent sessions before a query is entered", async ({ page }) => {
+      const { dialog } = await openCommandPalette(page, true)
+      const session = dialog.getByRole("option", { name: /Palette fixture session/ })
+      await expect(dialog.getByText("Recent sessions", { exact: true })).toBeVisible()
+      await expect(session).toHaveAttribute("aria-selected", "false")
+      await expect(session).toContainText("command-palette")
+      await session.click()
+      await expect(dialog).toHaveCount(0)
+      await expect(page).toHaveURL(new RegExp(`/session/${paletteSession.id}$`))
+    })
+  })
+}
+
 test("appends search results without resetting the selected command", async ({ page }) => {
   const { dialog, input } = await openCommandPalette(page)
   const files = Promise.withResolvers<void>()
