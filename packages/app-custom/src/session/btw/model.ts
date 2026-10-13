@@ -16,6 +16,13 @@ export function createComposerBtw(adapter: ComposerAdapter, mainEditor: () => HT
     states.get(server) ?? createBtwSessions((input, options) => server.api.session.generate(input, options))
   states.set(server, sessions)
   const btw = sessions(adapter.session().id)
+  const openQuote = (text: string) =>
+    btw.open(
+      `${text
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n\n`,
+    )
   createEffect(() => {
     if (adapter.active?.() === false) btw.cancel()
   })
@@ -33,19 +40,14 @@ export function createComposerBtw(adapter: ComposerAdapter, mainEditor: () => HT
         const selection = window.getSelection()
         const element = selection?.anchorNode?.parentElement
         const text = element?.closest('[data-slot="text-part-body"]') ? selection?.toString().trim() : undefined
-        btw.open(
-          text
-            ? `${text
-                .split("\n")
-                .map((line) => `> ${line}`)
-                .join("\n")}\n\n`
-            : undefined,
-        )
+        if (text) return openQuote(text)
+        btw.open()
       },
     },
   ])
   return {
     ...btw,
+    openQuote,
     // Generation always uses the session's committed model, not the composer's pending selection.
     sessionModel: () => adapter.session().current()?.model,
     // While the side question composer replaces the main one, type-to-focus targets it.

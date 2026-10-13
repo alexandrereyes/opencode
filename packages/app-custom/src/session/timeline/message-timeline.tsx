@@ -381,6 +381,7 @@ type MessageTimelineProps = {
   quotes?: ComposerState["quotes"]
   onQuote?: (quote: Omit<ChatQuote, "id" | "comment">) => void
   onAddToInput?: (text: string) => void
+  onAskSideQuestion?: (text: string) => void
   hideHeader?: boolean
   active?: boolean
   session: TimelineSessionSource
@@ -743,6 +744,7 @@ function MessageTimelineView(
             : undefined
         }
         onAddToInput={props.onAddToInput}
+        onAskSideQuestion={props.onAskSideQuestion}
       />
       <VirtualizedTimeline
         workspaceSession={workspaceSession}

@@ -305,6 +305,7 @@ function SessionScreenContent(props: { session: SessionModel }) {
         onQuote={session.data.isChild() ? undefined : (quote) => composer.active()?.composer.quotes?.add(quote)}
         quotes={active() && !session.data.isChild() ? composer.active()?.composer.quotes : undefined}
         onAddToInput={session.data.isChild() ? undefined : (text) => composer.active()?.composer.appendBlockquote(text)}
+        onAskSideQuestion={session.data.isChild() ? undefined : composer.active()?.composer.btw?.openQuote}
         scroll={timeline.scroll}
         onResumeScroll={timeline.actions.resume}
         setScrollRef={timeline.view.setScrollRef}
