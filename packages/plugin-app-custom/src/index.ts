@@ -12,6 +12,7 @@ import { registerArchive } from "./archive/index.js"
 import { registerPreferences } from "./preferences/index.js"
 import { registerChats } from "./chats/index.js"
 import { registerRequests } from "./requests/index.js"
+import { registerCodexSearch } from "./codex-search/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -23,6 +24,7 @@ export default Plugin.define({
       yield* registerNativeApps(ctx)
       yield* registerDirectories(ctx)
       yield* registerSubscriptions(ctx)
+      yield* registerCodexSearch(ctx)
       yield* registerSessionRead(ctx)
       yield* registerSnippets(ctx)
       yield* registerWorktrees(ctx)

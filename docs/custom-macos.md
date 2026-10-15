@@ -659,6 +659,39 @@ Movement messages are queried by type to discover previous Locations after a col
 Session still shows its live shells in the original Location until they exit. Fork-copied history
 does not transfer ownership, and a child reused in foreground is not duplicated in background.
 
+## Codex web search
+
+When `OPENCODE_LLM_PROXY_URL` is set on the backend (the same root URL used by the
+subscription panel), the custom plugin registers **Codex Search** with provider ID
+`codex`. It uses `POST /backend-api/codex/alpha/search` through the proxy, not a Codex
+CLI subprocess. No provider or default is added when the URL is unset.
+
+Select it through the existing web search provider picker, or add this to the
+existing `opencode.json` configuration after installing a release containing the plugin:
+
+```json
+{
+  "websearch": { "provider": "codex" }
+}
+```
+
+The registration does not override an existing provider choice or disabled web search.
+All conversation models can use it. Each search sends only its query, a fresh request
+ID, and live-web access settings; no conversation history, account credentials, or
+encrypted search output is exposed. The request model defaults to `gpt-6-astra` and
+can be changed with `OPENCODE_CODEX_SEARCH_MODEL`, independently of the conversation model.
+
+The adapter preserves the complete text/citations once and includes source URLs from
+both structured results and Codex's text-only source headers. It rejects malformed
+responses and content without usable sources instead of reporting them as empty results.
+HTTP failures retain their status and `Retry-After` for native rate-limit handling;
+the adapter does not retry or silently switch providers. Requests time out after 30
+seconds, and cancelling the tool aborts HTTP work.
+
+This is an internal Codex endpoint, not a stable public API. `open`, `click`, and
+`find` are not exposed here: retaining account-scoped references across proxy calls
+would need a separate integration. No proxy-side account-affinity or retry policy is changed.
+
 ## OpenChamber theme
 
 Settings → General → Appearance → Theme offers an **OpenChamber** theme (`packages/ui-custom/src/theme/themes/openchamber.json`)
