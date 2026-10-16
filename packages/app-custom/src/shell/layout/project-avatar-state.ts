@@ -50,13 +50,13 @@ export function useSessionTabAvatarState(
     const data = serverCtx()?.data
     if (!data) return false
     if (needsAttention()) return false
+    const running = (id: string) =>
+      data.session.status(id) === "running" || data.shell.listBySession(id).some((shell) => shell.status === "running")
     if (root?.())
       return data.session
         .list()
-        .some(
-          (session) => data.session.root(session.id) === sessionId() && data.session.status(session.id) === "running",
-        )
-    return data.session.status(sessionId()) === "running"
+        .some((session) => data.session.root(session.id) === sessionId() && running(session.id))
+    return running(sessionId())
   })
   return { unread, loading, request }
 }

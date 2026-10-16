@@ -58,7 +58,9 @@ export function createSidebarSessions(options: {
           ]
         },
         cached: (id) => ctx.data.session.get(id),
-        running: (id) => ctx.data.session.status(id) === "running",
+        running: (id) =>
+          ctx.data.session.status(id) === "running" ||
+          ctx.data.shell.listBySession(id).some((shell) => shell.status === "running"),
         rank: (id) => index.ranks[id],
         project: inventory,
         chatRoot: chat,
