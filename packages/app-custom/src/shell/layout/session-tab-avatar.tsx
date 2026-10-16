@@ -2,6 +2,7 @@ import { getProjectAvatarVariant, type LocalProject } from "@/shell/state/layout
 import type { ServerConnection } from "@/runtime/server/registry"
 import { displayName, getProjectAvatarSource } from "@/shell/layout/helpers"
 import { useSessionTabAvatarState } from "@/shell/layout/project-avatar-state"
+import { SessionActivityMarker } from "@/shell/titlebar/session-activity"
 import { ProjectAvatar } from "@opencode/ui-custom/project-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui-custom/v2/session-progress-indicator-v2"
 import { Show, type JSX } from "solid-js"
@@ -13,6 +14,7 @@ export function SessionTabAvatar(props: {
   server: ServerConnection.Key
   unread?: boolean
   icon?: JSX.Element
+  requests?: boolean
 }) {
   const state = useSessionTabAvatarState(
     () => props.server,
@@ -20,13 +22,20 @@ export function SessionTabAvatar(props: {
     () => true,
   )
   return (
-    <SessionTabAvatarView
-      project={props.project}
-      directory={props.directory}
-      unread={props.unread ?? state.unread()}
-      loading={!props.unread && state.loading()}
-      icon={props.icon}
-    />
+    <Show
+      when={props.requests && state.request()}
+      fallback={
+        <SessionTabAvatarView
+          project={props.project}
+          directory={props.directory}
+          unread={props.unread ?? state.unread()}
+          loading={!props.unread && state.loading()}
+          icon={props.icon}
+        />
+      }
+    >
+      {(request) => <SessionActivityMarker activity={request()} />}
+    </Show>
   )
 }
 

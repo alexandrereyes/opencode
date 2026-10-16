@@ -502,6 +502,7 @@ export function TabNavItem(props: {
                   sessionId={session.id}
                   server={props.server}
                   unread={props.unread}
+                  requests={!!mobileTabs}
                   icon={chat() ? <Icon name="speech-bubble" class="text-v2-icon-icon-muted" /> : undefined}
                 />
               )}

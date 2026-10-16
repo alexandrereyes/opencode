@@ -35,6 +35,7 @@ export function useSessionTabAvatarState(
     if (!data) return false
     return !!sessionFormRequest(sessions(), data.session.form.list, sessionId())
   })
+  const request = createMemo(() => (hasPermissions() ? "permission" : hasForms() ? "question" : undefined))
   const needsAttention = createMemo(() => hasPermissions() || hasForms())
   const unread = createMemo(() => {
     if (needsAttention()) return true
@@ -57,5 +58,5 @@ export function useSessionTabAvatarState(
         )
     return data.session.status(sessionId()) === "running"
   })
-  return { unread, loading }
+  return { unread, loading, request }
 }

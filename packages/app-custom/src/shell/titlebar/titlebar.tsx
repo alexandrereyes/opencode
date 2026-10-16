@@ -771,6 +771,7 @@ export function Titlebar(props: {
                                     directory={value().location.directory}
                                     sessionId={value().id}
                                     server={tab().server}
+                                    requests
                                   />
                                 )}
                               </Show>
