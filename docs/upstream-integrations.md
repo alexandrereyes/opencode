@@ -120,6 +120,18 @@ the command below using `d4a6223d0`: **46 modified upstream files, 691 added lin
   fresh tab also polls `/api/event` without credentials for the same-origin server
   it adds implicitly; the build of `6fd186d98` against the same server does the
   same, so it predates this merge.
+- Compiled artifact, built from the `merge-upstream-dev` checkout at `3da358ef9`
+  (fixture evidence, not a prepared release): the build steps of `custom:prepare`
+  ran in the checkout with its `OPENCODE_CHANNEL`, `OPENCODE_VERSION`,
+  `OPENCODE_DISABLE_AUTOUPDATE` and temporary XDG, `OPENCODE_CONFIG_DIR` and
+  `OPENCODE_CUSTOM_HOME`. The typechecks of `packages/cli`, `packages/app-custom` and
+  `packages/plugin-app-custom`, the plugin build and
+  `script/build.ts --single --skip-install --custom` pass; the 172,956,402-byte
+  binary reports `opencode v0.0.0-custom.3da358ef9…`, prints its help and passes the
+  parser smoke. `script/custom-smoke.ts` on it bundles and seals the four-file
+  release (172,243,771 bytes) and its temporary server answers health and the
+  embedded web with 200 and passes the plugin RPC save, list and invalid-input
+  checks.
 
 ## V2 integration — 2026-10-11
 
