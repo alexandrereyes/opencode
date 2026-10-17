@@ -111,6 +111,17 @@ rewritten, or dropped), and the evidence of equivalence or intended difference.
 
 ## Active entries
 
+### MCP handlers wait for plugin activation on cold locations — https://github.com/anomalyco/opencode/pull/54191
+
+- **Kind:** anticipated
+- **Reviewed upstream revision:** `569417f986e9ce702f51a0ce0478280fc6b18250` (PR head; commits `1abd19276` and `569417f98`), 2026-10-17
+- **Local change:** `fix(server): wait for plugin activation in MCP handlers`; `packages/server/src/handlers/mcp.ts` and `packages/server/test/mcp.test.ts`. The handler is unchanged from the PR: every MCP handler (`mcp.list`, `add`, `remove`, `connect`, `disconnect`, `resource.catalog`) runs `Plugin.awaitActivation` before using `Mcp.Service`, so the servers that the `opencode.config.mcp` plugin registers from config are visible on the first request to a cold Location instead of an empty list (or a 404 for connect, disconnect and remove). The test differs only in importing `effect/unstable/http` instead of `effect/http`, for the integrated Effect version. Taken early because the custom new-session flow (`applyDraftMcpStates` in `packages/app-custom/src/new-session/mcp.ts`) lists the MCP servers of a newly created worktree once: on the cold Location it received `[]` and refused the prompt with "MCP server blender is not available in this worktree.". Upstream issue: https://github.com/anomalyco/opencode/issues/54192 (see also #50710).
+- **Tests:** `bun test test/mcp.test.ts` in `packages/server`: 4 pass; all 4 fail with the base handler. Full `packages/server` suite: 77 pass, 6 fail; the same 6 fail on `fba9e940d` without the change (73 pass, 6 fail): custom worktree deletion, lazy review bases, the three OpenAI OAuth callback port cases and custom app RPCs over HTTP. `bun typecheck` in `packages/server`, oxlint and Prettier on the changed files, and `git diff --check` pass. Real check on an isolated source server (4177, temporary runtime): the first `GET /api/mcp` on two fresh directories returned every configured server with the change and `[]` without it; both matched 3 s later.
+- **Status:** active
+- **Reconcile or remove when:** upstream merges #54191, or another fix for #54192, and it reaches the upstream revision integrated into `custom`: compare `packages/server/src/handlers/mcp.ts` with the final upstream handler and keep the upstream version (upstream `dev` handlers such as `model.ts` already wait through the `awaitPlugins` helper in `packages/server/src/location.ts`, which adds a 5 s `ServiceUnavailableError` timeout), and drop the local test where upstream carries the same coverage. If upstream closes the PR without an equivalent fix, keep the local change.
+- **Installation:** none
+- **Result after upstream:** pending
+
 ### Reuse complete patch diffs instead of re-diffing — https://github.com/anomalyco/opencode/pull/54017
 
 - **Kind:** anticipated
