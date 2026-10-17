@@ -21,7 +21,7 @@ Transformar o pedido em uma feature do fork pessoal, validar e publicar seguindo
 | Fork (`origin`) | `https://github.com/alexandrereyes/opencode.git` |
 | Oficial (`upstream`) | `https://github.com/anomalyco/opencode.git` |
 | Base das features e destino de integração | `origin/custom` |
-| Linha upstream integrada | `upstream/v2` (fonte do canal `latest`; `beta` parou na 2.0.6) |
+| Linha upstream integrada | `upstream/dev` (branch padrão e fonte do canal `latest` desde a 2.0.27; `v2` parou em 2026-10-10 e `beta` na 2.0.6) |
 | Checkout de trabalho e atualização | `~/Dev/opencode2` |
 | Instalação custom | `~/.local/share/opencode-custom-v2` (`releases/`, `current`, `prepared`, `previous`) |
 | Operação da instalação | `bun run custom:{prepare,update,activate,status,rollback,prune}` no checkout de atualização |
@@ -107,7 +107,11 @@ git push -u origin <feature-curta>
 
 ### Integrar upstream em `custom`
 
-Integre de `upstream/v2`, que gera o canal oficial `latest`. Prefira o commit de origem do release publicado (`metadata.github.sha` em `https://opencode.ai/update/api/latest/cli/npm`); a tag de release só acrescenta o bump de versão. Registre baseline, pontos de integração e validação em `docs/upstream-integrations.md`.
+Integre de `upstream/dev`, branch padrão do upstream e fonte do canal oficial `latest` desde a 2.0.27. A `v2`, usada até a 2.0.26, parou em `461721082` (2026-10-10) e é ancestral de `dev`. Prefira o commit de origem do release publicado (`metadata.github.sha` em `https://opencode.ai/update/api/latest/cli/npm`); a tag de release só acrescenta o bump de versão. Registre baseline, pontos de integração e validação em `docs/upstream-integrations.md`.
+
+- O clone busca só as branches de `remote.upstream.fetch`. Confirme que `+refs/heads/dev:refs/remotes/upstream/dev` está entre elas (`git config --get-all remote.upstream.fetch`) antes de usar `upstream/dev`.
+- No fork, `origin/dev` é uma cópia parada em 2026-02-16 e `origin/v2` não existe; para upstream, use sempre `upstream/dev`.
+- A troca para `dev` chega com o próprio merge nos arquivos do upstream (`AGENTS.md`, `script/lint-changed.ts`, `script/publish.ts`, `.opencode/command/rmslop.md`, `services/update`). No conflito de `AGENTS.md`, mantenha a orientação de `custom` e troque `v2`/`origin/v2` por `dev`/`upstream/dev`.
 
 Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active` ou `reconcile`) de `docs/upstream-overrides.md` com essa revisão e atualize o registro na própria integração:
 

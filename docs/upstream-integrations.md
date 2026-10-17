@@ -4,6 +4,22 @@ Each upstream revision integrated into `custom`, newest first: its baselines,
 integration points, and validation. Upstream overrides and their reconciliation
 live in `docs/upstream-overrides.md`.
 
+## Upstream source branch
+
+Integrate from `upstream/dev`. Since 2.0.27 (2026-10-12), upstream publishes the
+`latest` channel from `dev`, its default branch. `v2`, the source through 2.0.26,
+stopped at `4617210822bdbb31e5749751afbfb4584ccedac8` (2026-10-10) and is an
+ancestor of `dev`. The local clone fetches only the branches listed in
+`remote.upstream.fetch`, so it must include
+`+refs/heads/dev:refs/remotes/upstream/dev`. In the fork, `origin/dev` is a stale
+copy from 2026-02-16 and there is no `origin/v2`.
+
+The upstream-owned files that name the default branch (`AGENTS.md`,
+`script/lint-changed.ts`, `script/publish.ts`, `.opencode/command/rmslop.md`,
+`services/update`) switch to `dev` with the first integration from `dev`. In the
+`AGENTS.md` conflict, keep the custom branch guidance and replace `v2` and
+`origin/v2` with `dev` and `upstream/dev`.
+
 ## V2 integration — 2026-10-11
 
 ### Baselines
