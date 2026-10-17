@@ -20,6 +20,107 @@ The upstream-owned files that name the default branch (`AGENTS.md`,
 `AGENTS.md` conflict, keep the custom branch guidance and replace `v2` and
 `origin/v2` with `dev` and `upstream/dev`.
 
+## V2 integration — 2026-10-17
+
+### Baselines
+
+- Custom parent: `6fd186d98`.
+- Integrated upstream: `d4a6223d017e17f1beaa91d3e6ecc6511c5132ad` (`upstream/dev`,
+  source of the published 2.0.32 `latest` release; 1,669 commits after `5e73d5cb1`).
+  `upstream/dev` had moved on to `a801306dd` when the merge started; those later
+  commits are not integrated.
+- Local integration branch: `merge-upstream-dev`.
+- Runtime: Bun 1.4.2.
+
+The upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, and
+`packages/tui` trees match the integrated upstream revision exactly. Upstream UI
+work in this range is not ported; `docs/upstream-overrides.md` records, entry by
+entry, what upstream changed in each ported area.
+
+Every blob of the target tree was already present in the `blob:none` clone, so no
+batch fetch was needed before merging.
+
+### Integration points
+
+- Effect moves from `4.0.0-rc.112` to `4.0.1` (#50231, #54198): `effect/unstable/*`
+  imports become `effect/*` (`effect/unstable/httpapi` becomes `effect/http-api`) in
+  the custom plugin, the custom source server, the app-custom mock server and the
+  custom server tests; the custom plugin uses `Config.String`, and the message page
+  cursor uses `Base64Url` and builds its value through `SchemaParser.make`, because
+  4.0.1 no longer lets a static replace a cached `schema.make`.
+- 4.0.1 drops `onExcessProperty: "preserve"`, so a migration reader would strip saved
+  fields it does not name. App-custom persistence takes upstream's
+  `Persistence.legacy` open structs for every struct level of its four migration
+  readers (layout, settings, model selection, server projects), with the README and
+  tests of #50231.
+- `AGENTS.md` keeps the custom guidance and points upstream work at `dev` and
+  `upstream/dev`; upstream's heading renames and test-skill note are taken.
+- `turbo.json` takes upstream's generic `test` task, which replaces the per-package
+  entries the custom packages had added. `script/publish.ts` takes upstream's beta
+  handling. `.github/workflows/test.yml` takes upstream's sharded e2e matrix and
+  points its app, service-worker and component legs at `packages/app-custom` and
+  `packages/session-ui-custom`; Storybook keeps the custom packages.
+- The vendored Drizzle Effect files, `packages/core/src/tool/plugin/opencode.ts` and
+  `packages/util/src/{cross-spawn-spawner.ts,effect/app-node-platform.ts,observability.ts}`
+  return to upstream: their only custom differences were import rewrites left by an
+  earlier beta merge.
+- `packages/server/src/handlers/message.ts` keeps the custom `MessagePage.Cursor`
+  with upstream's `effect/http-api` import. The Client keeps the custom
+  `session.archived` event case.
+- `packages/server/src/handlers/mcp.ts` keeps the #54191 activation wait on top of
+  upstream's import move; the handler and its test now equal the PR head.
+- Core test fixtures: the plugin layer takes upstream's `makePluginTestLayer` with
+  the custom `SessionFamily` node and an `extra` replacement list for the offline
+  variant. The custom session-read test provides the `FileAccess` and `Permission`
+  services that the upstream opencode tools plugin now requires for its worktree
+  tools (#53981).
+- SDK transport, promise and embedded tests take upstream's versions, which cover
+  the same error tags and plugin readiness the custom edits had added.
+- Client tests take upstream's API inventory and keep the custom checks that the
+  Effect service stays free of Protocol and that `vcs.branch` lists branches.
+- Regenerating the Client from source restores the custom types; the regenerated
+  Protocol OpenAPI document differs from upstream's only by the custom `slash` and
+  `created` fields, and is copied to `services/www`.
+
+Shared implementation overlap against the fixed upstream baseline, measured with
+the command below using `d4a6223d0`: **46 modified upstream files, 691 added lines,
+50 removed lines**.
+
+### Validation
+
+- `bun.lock` is regenerated with `bun install` from upstream's lockfile; frozen
+  installation, root lint and typecheck (`bun run check`), the app-custom e2e
+  typecheck, the production builds of `packages/app-custom` and
+  `packages/plugin-app-custom`, and Protocol's `check:generated` pass.
+- Baseline on `6fd186d98` and result after the merge, same environment (`LC_ALL=C`,
+  empty `AZURE_CONFIG_DIR`): Core 6,600 → 6,667 passed (23 skipped, 15 failures on
+  both); Server 82 → 94 (one failure on both); CLI 364 → 376 (nine skipped); custom
+  plugin 78 → 78; Client 224 (one failure) → 230; SDK 36 → 39; CodeMode 1,373 →
+  1,398; Plugin 9 → 9; App-custom unit 1,356 → 1,357 (one skipped) and browser
+  229 → 230 (five failures on both); Session-UI-custom 287 → 287; UI-custom
+  143 → 143. Schema 72, Util 133 and Protocol 9 also pass after the merge.
+- Failures not caused by the merge:
+  - Core GitLab OAuth (11): port 8080 is held by OrbStack (`lsof` shows it
+    listening on `127.0.0.1:8080`).
+  - Core `LocationActivity eviction` (4): `82615eb0f` keeps Locations with pending
+    questions alive; upstream did not change `location-activity.ts` or its test in
+    this range, and the four tests pass with upstream's file.
+  - Server `serves custom app RPCs from the same Location plugin over HTTP`: the
+    shell exports `OPENCODE_LLM_PROXY_URL`, so the custom subscriptions plugin calls
+    the real proxy, which the test guard blocks; it passes without the variable.
+  - App-custom browser: the five known sidebar suites.
+  - Client `exposes every standard HTTP API group`, failing on the baseline, passes
+    now that upstream lists `integration.connect.external`.
+- Real check on an isolated source server (port 4177, temporary runtime and XDG
+  directories, no inherited `OPENCODE_*`): `/api/info` reports the commit and PID and
+  rejects requests without the password; the first `GET /api/mcp` on two new
+  directories already lists the configured servers; the `custom.snippets` RPC saves,
+  lists and rejects invalid input; the custom web UI connects with the password and
+  lists sessions at 1440×900 and 390×844, and opens a session with its MCP panel. A
+  fresh tab also polls `/api/event` without credentials for the same-origin server
+  it adds implicitly; the build of `6fd186d98` against the same server does the
+  same, so it predates this merge.
+
 ## V2 integration — 2026-10-11
 
 ### Baselines
