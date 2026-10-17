@@ -1,6 +1,6 @@
 import { isArrayNonEmpty } from "effect/Array"
-import { fromWritable } from "@effect/platform-node/NodeSink"
-import { fromReadable } from "@effect/platform-node/NodeStream"
+import * as NodeSink from "@effect/platform-node/NodeSink"
+import * as NodeStream from "@effect/platform-node/NodeStream"
 import { Deferred, Effect, Exit, FileSystem, Layer, Path, PlatformError, Predicate, Sink, Stream } from "effect"
 import type { Scope } from "effect"
 import { ChildProcess } from "effect/process"
@@ -187,7 +187,7 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
         case "input": {
           let sink: Sink.Sink<void, Uint8Array, never, PlatformError.PlatformError> = Sink.drain
           if (node && "write" in node) {
-            sink = fromWritable({
+            sink = NodeSink.fromWritable({
               evaluate: () => node,
               onError: (err) => toPlatformError(`fromWritable(fd${x.fd})`, toError(err), command),
               endOnDone: true,
@@ -203,7 +203,7 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
             const tap = new PassThrough()
             node.on("error", (err) => tap.destroy(toError(err)))
             node.pipe(tap)
-            stream = fromReadable({
+            stream = NodeStream.fromReadable({
               evaluate: () => tap,
               onError: (err) => toPlatformError(`fromReadable(fd${x.fd})`, toError(err), command),
             })
@@ -229,7 +229,7 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
     Effect.suspend(() => {
       let sink: Sink.Sink<void, unknown, never, PlatformError.PlatformError> = Sink.drain
       if (Predicate.isNotNull(proc.stdin)) {
-        sink = fromWritable({
+        sink = NodeSink.fromWritable({
           evaluate: () => proc.stdin!,
           onError: (err) => toPlatformError("fromWritable(stdin)", toError(err), command),
           endOnDone: cfg.endOnDone,
@@ -253,7 +253,7 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
       const buffer = new PassThrough()
       readable.on("error", (cause) => buffer.destroy(toError(cause)))
       readable.pipe(buffer)
-      return fromReadable({
+      return NodeStream.fromReadable({
         evaluate: () => buffer,
         onError: (cause) => toPlatformError(`fromReadable(${name})`, toError(cause), command),
       }).pipe(
