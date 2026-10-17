@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { WebSearchDefinition } from "@opencode/plugin/effect/websearch"
 import { ConfigProvider, Effect, Fiber } from "effect"
-import { HttpClientError } from "effect/unstable/http"
+import { HttpClientError } from "effect/http"
 import { registerCodexSearch, search } from "../src/codex-search"
 
 async function registered(env: Record<string, string>) {

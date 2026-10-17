@@ -1,6 +1,6 @@
 import type { Plugin, WebSearch } from "@opencode/plugin/effect"
 import { Config, Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 
 const SearchResponse = Schema.Struct({
   output: Schema.String,
@@ -20,9 +20,9 @@ const SearchResponse = Schema.Struct({
 export const registerCodexSearch = Effect.fn("CodexSearch.register")(function* (ctx: {
   websearch: Pick<Plugin.Context["websearch"], "transform">
 }) {
-  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  const url = yield* Config.String("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url.trim()) return
-  const model = yield* Config.string("OPENCODE_CODEX_SEARCH_MODEL").pipe(
+  const model = yield* Config.String("OPENCODE_CODEX_SEARCH_MODEL").pipe(
     Config.withDefault("gpt-6-astra"),
     Effect.orDie,
   )

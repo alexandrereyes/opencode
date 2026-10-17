@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { ServerProcess } from "@opencode/server/process"
 import { WebUi } from "../src/services/web-ui"
 import type { AssetMap } from "../src/app-assets"
-import { HttpServer } from "effect/unstable/http"
+import { HttpServer } from "effect/http"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
 

@@ -1,6 +1,7 @@
 export * as MessagePage from "./session-message-page.js"
 
-import { Effect, Encoding, Result, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
+import { Base64Url } from "effect/encoding"
 import { statics } from "./schema.js"
 import { SessionMessage } from "./session-message.js"
 
@@ -21,10 +22,10 @@ export const Cursor = Schema.String.pipe(
   statics((schema) => {
     const make = schema.make.bind(schema)
     return {
-      make: (input: CursorInput) => make(Encoding.encodeBase64Url(encodeCursor(input))),
+      make: (input: CursorInput) => make(Base64Url.encode(encodeCursor(input))),
       parse: (input: string) =>
         Effect.suspend(() => {
-          const result = Encoding.decodeBase64UrlString(input)
+          const result = Base64Url.decodeString(input)
           return Result.isFailure(result)
             ? Effect.fail(invalidCursor)
             : decodeCursor(result.success).pipe(Effect.mapError(() => invalidCursor))

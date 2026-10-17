@@ -4,7 +4,9 @@ import { Effect, Schema } from "effect"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Agent } from "@opencode/core/agent"
 import { Bus } from "@opencode/core/bus"
+import { FileAccess } from "@opencode/core/file-access"
 import { Location } from "@opencode/core/location"
+import { Permission } from "@opencode/core/permission"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginHost } from "@opencode/core/plugin/host"
 import { PluginModule } from "@opencode/core/plugin/module"
@@ -14,6 +16,7 @@ import { SessionMessage } from "@opencode/core/session/message"
 import { Tool } from "@opencode/core/tool"
 import { OpenCodeTools } from "@opencode/core/tool/plugin/opencode"
 import { Watcher } from "@opencode/core/filesystem/watcher"
+import type { Context } from "@opencode/plugin/effect/plugin"
 import { fromPromise } from "@opencode/plugin/promise/adapter"
 import { MessagePage } from "@opencode/plugin/message"
 import { Model } from "@opencode/schema/model"
@@ -58,7 +61,12 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
         options: {},
       })
       if ("pending" in custom || "blocked" in custom) throw new Error("Custom plugin was not loaded")
-      const builtIn = { id: OpenCodeTools.Plugin.id, revision: "test", effect: OpenCodeTools.Plugin.effect }
+      const services = yield* Effect.context<FileAccess.Service | Permission.Service>()
+      const builtIn = {
+        id: OpenCodeTools.Plugin.id,
+        revision: "test",
+        effect: (ctx: Context) => OpenCodeTools.Plugin.effect(ctx).pipe(Effect.provide(services)),
+      }
       yield* plugins.activate([builtIn, custom])
 
       const tmp = yield* tmpdirScoped()

@@ -1,7 +1,7 @@
 import { Schema, SchemaGetter } from "effect"
 import { Session } from "@opencode/schema/session"
 import { Permission } from "@opencode/schema/permission"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 
 const Json = Schema.Json.pipe(
   Schema.decodeTo(Schema.Unknown, {

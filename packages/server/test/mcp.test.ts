@@ -1,7 +1,7 @@
 import { expect } from "bun:test"
 import { fileURLToPath } from "node:url"
 import { Context, Effect, Layer } from "effect"
-import { HttpEffect, HttpRouter, HttpServer } from "effect/unstable/http"
+import { HttpEffect, HttpRouter, HttpServer } from "effect/http"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { createRoutes } from "../src/routes"

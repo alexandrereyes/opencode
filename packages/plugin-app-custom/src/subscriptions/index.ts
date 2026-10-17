@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Config, Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { Subscriptions } from "./rpc.js"
 
 // Decode only quota metadata. Admin credentials and OAuth data never cross this boundary.
@@ -106,7 +106,7 @@ export const registerSubscriptions = Effect.fn("Subscriptions.register")(functio
 })
 
 export const read = Effect.fn("Subscriptions.read")(function* () {
-  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  const url = yield* Config.String("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url)
     return {
       status: "unconfigured" as const,
@@ -124,7 +124,7 @@ export const writeAutomation = Effect.fn("Subscriptions.writeAutomation")(functi
   provider: "codex" | "anthropic"
   enabled: boolean
 }) {
-  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  const url = yield* Config.String("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url) return null
   const path = input.provider === "codex" ? "/_admin/banked-resets" : "/_admin/anthropic/banked-resets"
   return yield* Effect.gen(function* () {
@@ -164,7 +164,7 @@ export const consumeReset = Effect.fn("Subscriptions.consumeReset")(function* (i
   accountId: string
 }) {
   const failed = { status: "consume_failed" as const }
-  const url = yield* Config.string("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
+  const url = yield* Config.String("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url) return failed
   const prefix = input.provider === "codex" ? "/_admin/accounts/" : "/_admin/anthropic/accounts/"
   return yield* Effect.gen(function* () {
