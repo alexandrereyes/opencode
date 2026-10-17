@@ -44,8 +44,8 @@ test("Promise event streams support cancellation", async () => {
     expect(await events.next()).toMatchObject({ value: { type: "server.connected" }, done: false })
     const pending = events.next()
     controller.abort()
+    // A caller abort ends only this subscriber; client tests pin closing the shared transport after the last one.
     expect(await pending).toEqual({ done: true, value: undefined })
-    expect(await events.next()).toEqual({ done: true, value: undefined })
     await events.return?.()
   }
 })

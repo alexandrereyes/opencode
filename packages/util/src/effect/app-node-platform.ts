@@ -3,7 +3,7 @@
 import { layer } from "@effect/platform-node/NodeFileSystem"
 import { layerPosix, layerWin32 } from "@effect/platform-node/NodePath"
 import { FileSystem, Path } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import { makeGlobalNode } from "./app-node.js"
 
 export const filesystem = makeGlobalNode({ service: FileSystem.FileSystem, layer, deps: [] })

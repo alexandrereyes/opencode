@@ -1,6 +1,6 @@
 import { Session } from "@opencode/core/session"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { Api } from "../api"
 import { InvalidCursorError } from "@opencode/protocol/errors"
 import { MessagePage } from "@opencode/schema/session-message-page"

@@ -3,6 +3,8 @@ import { AISDK } from "@opencode/core/aisdk"
 import { Command } from "@opencode/core/command"
 import { Config } from "@opencode/core/config"
 import { Credential } from "@opencode/core/credential"
+import { Database } from "@opencode/core/database/database"
+import { FileAccess } from "@opencode/core/file-access"
 import { LayerNodePlatform } from "@opencode/util/effect/app-node-platform"
 import { AppProcess } from "@opencode/util/process"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -70,56 +72,59 @@ const permissionLayer = Layer.succeed(
   }),
 )
 
-const nodes = LayerNode.group([
-  AppProcess.node,
-  FileSystem.node,
-  FSUtil.node,
-  Location.node,
-  Npm.node,
-  Credential.node,
-  Config.node,
-  Bus.node,
-  Form.node,
-  Generate.node,
-  LayerNodePlatform.httpClient,
-  Plugin.node,
-  Agent.node,
-  AISDK.node,
-  Provider.node,
-  Model.node,
-  Command.node,
-  Integration.node,
-  KV.node,
-  ManagedPolicy.node,
-  Mcp.node,
-  Session.node,
-  SessionFamily.node,
-  PersistentPty.node,
-  LocationServiceMap.node,
-  Permission.node,
-  PluginHooks.node,
-  Reference.node,
-  Rpc.node,
-  Skill.node,
-  SkillDiscovery.node,
-  Tool.node,
-  Vcs.node,
-  Watcher.node,
-  WebSearch.node,
-  Worktree.node,
-  WorktreeStrategies.node,
-])
+export const makePluginTestLayer = (permission = permissionLayer, extra: LayerNode.Replacements = []) =>
+  AppNodeBuilder.build(
+    LayerNode.group([
+      AppProcess.node,
+      FileSystem.node,
+      FSUtil.node,
+      Location.node,
+      Npm.node,
+      Credential.node,
+      Config.node,
+      Database.node,
+      FileAccess.node,
+      Bus.node,
+      Form.node,
+      Generate.node,
+      LayerNodePlatform.httpClient,
+      Plugin.node,
+      Agent.node,
+      AISDK.node,
+      Provider.node,
+      Model.node,
+      Command.node,
+      Integration.node,
+      KV.node,
+      ManagedPolicy.node,
+      Mcp.node,
+      Session.node,
+      SessionFamily.node,
+      PersistentPty.node,
+      LocationServiceMap.node,
+      Permission.node,
+      PluginHooks.node,
+      Reference.node,
+      Rpc.node,
+      Skill.node,
+      SkillDiscovery.node,
+      Tool.node,
+      Vcs.node,
+      Watcher.node,
+      WebSearch.node,
+      Worktree.node,
+      WorktreeStrategies.node,
+    ]),
+    [
+      Location.node.replace(tempLocationLayer),
+      Npm.node.replace(npmLayer),
+      Config.node.replace(configLayer),
+      Mcp.node.replace(emptyMcpLayer),
+      Generate.node.replace(generateLayer),
+      Permission.node.replace(permission),
+      ...extra,
+    ],
+  ).pipe(Layer.provideMerge(configLayer))
 
-const replacements = [
-  Location.node.replace(tempLocationLayer),
-  Npm.node.replace(npmLayer),
-  Config.node.replace(configLayer),
-  Mcp.node.replace(emptyMcpLayer),
-  Generate.node.replace(generateLayer),
-  Permission.node.replace(permissionLayer),
-] as const
-
-export const PluginTestLayer = AppNodeBuilder.build(nodes, replacements).pipe(Layer.provideMerge(configLayer))
-export const OfflinePluginTestLayer = AppNodeBuilder.build(nodes, [...replacements, offlineModels]).pipe(
-  Layer.provideMerge(configLayer),
-)
+export const PluginTestLayer = makePluginTestLayer()
+export const OfflinePluginTestLayer = makePluginTestLayer(permissionLayer, [offlineModels])

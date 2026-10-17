@@ -1,5 +1,5 @@
 /* oxlint-disable */
-import type { Effect } from "effect"
+import type * as Effect from "effect/Effect"
 import { applyEffectWrapper, type QueryEffectHKTBase } from "drizzle-orm/effect-core/query-effect"
 import { entityKind } from "drizzle-orm/entity"
 import type { RunnableQuery } from "drizzle-orm/runnable-query"

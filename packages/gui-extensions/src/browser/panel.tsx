@@ -384,6 +384,11 @@ export default function SessionBrowserPane(props: {
 
         if (tab) command({ type: "reload", tabID: tab.id })
       },
+      close: () => {
+        const tab = state()
+
+        if (tab) props.model.closeTab(props.session, tab.id)
+      },
       inspectable,
       inspect: toggleInspect,
       focusAddress,
@@ -650,9 +655,13 @@ export default function SessionBrowserPane(props: {
                   setStore({ editing: true, address: field(), typed: false, active: -1, dismissed: false })
                   event.currentTarget.select()
                 }}
-                // Leaving the field without submitting cancels the edit; a submit already ended it.
-                onBlur={() => {
+                // Leaving the field without submitting cancels the edit; a submit already ended it. Focus that leaves
+                // for the page or another window keeps the field as the document's focus, so the window's return would
+                // focus it again and start an edit under the returning click, such as one on the site button.
+                onBlur={(event) => {
                   if (store.editing) setStore({ editing: false, typed: false, active: -1, kept: undefined })
+
+                  if (!document.hasFocus()) event.currentTarget.blur()
                 }}
                 onInput={(event) => {
                   const value = event.currentTarget.value

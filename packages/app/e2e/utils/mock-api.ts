@@ -1,5 +1,5 @@
 import { Predicate, Schema, SchemaGetter } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import { Pty } from "@opencode/schema/pty"
 import { Worktree } from "@opencode/schema/worktree"
 
@@ -123,6 +123,19 @@ const Group = HttpApiGroup.make("mock")
       params: { integrationID: Schema.String, attemptID: Schema.String },
       success: Json,
       error: MockNotFound.pipe(HttpApiSchema.status(404)),
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("credentialActivate", "/api/credential/:credentialID/activate", {
+      params: { credentialID: Schema.String },
+      success: NoContent,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("credentialUpdate", "/api/credential/:credentialID", {
+      params: { credentialID: Schema.String },
+      payload: JsonPayload,
+      success: NoContent,
     }),
   )
   .add(

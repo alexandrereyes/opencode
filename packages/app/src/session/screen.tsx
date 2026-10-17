@@ -172,6 +172,9 @@ function SessionScreenContent(props: {
     if (bottomDockVisible()) setStore("bottomDockCached", true)
 
     if (!sideVisible()) setStore("sideHeightMotion", false)
+
+    // A side panel restored without its entrance animation never fires the animationend that enables height motion.
+    if (sideVisible() && !sidePresence.animate()) setStore("sideHeightMotion", true)
   })
   createEffect(() => {
     if (!isDesktop() || screen.dock.bottom()) setStore("sideDockPresent", false)
@@ -368,11 +371,10 @@ function SessionScreenContent(props: {
     <>
       <div class="flex-1 min-h-0 flex flex-col gap-2 px-[var(--shell-inline-inset,8px)] pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]">
         <div ref={screen.panel.ref} class="relative flex-1 min-h-0 flex flex-col md:flex-row gap-2">
-          {/* Keep the control outside panel animations; a side dock's 52px header includes a 1px divider. */}
+          {/* Keep the control outside panel animations. */}
           <Show when={isDesktop() && messagesReady() && session.identity.params.id}>
             <div
-              class="absolute end-3 top-0 z-30 flex items-center"
-              classList={{ "h-[51px]": sideDockVisible(), "h-12": !sideDockVisible() }}
+              class="absolute end-3 top-0 z-30 h-12 flex items-center"
               data-slot="session-review-toggle"
               onPointerDown={hideTimelineScrollbar}
               onClick={hideTimelineScrollbar}
@@ -454,10 +456,13 @@ function SessionScreenContent(props: {
                   style={{ height: sideVisible() ? screen.side.region.height() : "100%" }}
                 >
                   <Show when={store.sideRegionPresent}>
+                    {/* A closed region stays mounted at zero height while the side dock is open. Once its close
+                        animation is over, hide it, or its frame's shadow draws a flat line over the dock's top edge. */}
                     <div
                       data-slot="session-side-region-presence"
                       data-opened={sideMotion().animateRegion ? sideMotion().region : undefined}
                       class="absolute inset-0"
+                      classList={{ invisible: !screen.side.region.open() && !sideMotion().animateRegion }}
                       onAnimationEnd={(event) => {
                         if (event.currentTarget !== event.target) return
 
@@ -484,13 +489,13 @@ function SessionScreenContent(props: {
                   </Show>
                 </div>
                 <div class="absolute start-0 bottom-0 flex flex-col" style={{ width: screen.side.contentWidth() }}>
+                  {/* The gap moves with both regions, so together they always fill the column and the review's
+                      bottom corners are never covered. */}
                   <div
                     data-slot="session-side-panel-gap"
                     classList={{
-                      "relative z-0 shrink-0 overflow-visible bg-v2-background-bg-deep transition-[height] duration-[40ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none": true,
-                      "delay-0": !screen.side.gap.closing(),
-                      "delay-[200ms]": screen.side.gap.closing(),
-                      "transition-none": !regionAnimating(),
+                      "relative z-0 shrink-0 overflow-visible bg-v2-background-bg-deep transition-[height] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none": true,
+                      "transition-none": screen.size.active() || !store.sideHeightMotion || !regionAnimating(),
                     }}
                     style={{ height: screen.side.gap.height() }}
                     onPointerDown={() => screen.size.start()}
