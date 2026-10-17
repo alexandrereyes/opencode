@@ -1,6 +1,6 @@
 export * as MessagePage from "./session-message-page.js"
 
-import { Effect, Result, Schema } from "effect"
+import { Effect, Result, Schema, SchemaParser } from "effect"
 import { Base64Url } from "effect/encoding"
 import { statics } from "./schema.js"
 import { SessionMessage } from "./session-message.js"
@@ -20,7 +20,8 @@ const invalidCursor = "Invalid cursor" as const
 export const Cursor = Schema.String.pipe(
   Schema.brand("Session.MessagePage.Cursor"),
   statics((schema) => {
-    const make = schema.make.bind(schema)
+    // Read the default constructor without caching it on the schema, so `make` can be replaced.
+    const make = SchemaParser.make(schema)
     return {
       make: (input: CursorInput) => make(Base64Url.encode(encodeCursor(input))),
       parse: (input: string) =>
