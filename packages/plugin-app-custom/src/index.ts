@@ -13,6 +13,7 @@ import { registerPreferences } from "./preferences/index.js"
 import { registerChats } from "./chats/index.js"
 import { registerRequests } from "./requests/index.js"
 import { registerCodexSearch } from "./codex-search/index.js"
+import { registerTranscript } from "./transcript/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -34,5 +35,6 @@ export default Plugin.define({
       yield* registerChats(ctx)
       yield* registerRequests(ctx)
       yield* registerFamily(ctx)
+      yield* registerTranscript(ctx)
     }),
 })

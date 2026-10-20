@@ -434,6 +434,30 @@ with AXe against the real BTW improve session and sampling row positions every f
 build before the fix showed reversals of 670–2,700 px; afterward at most two shifts of up to 180 px remained,
 at the top of history when the loaded content shrinks at scroll position zero.
 
+## Lean web transcript
+
+Tool results keep their media inline: every `read` of an image stores the whole file as a base64
+`data:` URI in the assistant message, because the model replays it from history. The web client
+received and retained those payloads although no web view displays them (the `read` card loads its
+image from disk by path). A session that read 410 large PNGs reached 1.16 GB of messages, and
+opening it downloaded about 584 MB, enough for WebKit to reload the PWA for memory.
+
+The custom plugin exposes `custom.transcript/list`, the same page as
+`GET /api/session/:sessionID/message` (same cursors, limits and order) with every inline tool-result
+payload emptied to `data:<mime>;base64,`. The web transcript store reads pages through it, and the
+event source empties the same payloads from live `session.tool.success` and `session.tool.failed`
+events before any listener sees them. Stored messages, model history, export, the TUI and other
+clients still receive the originals. User attachments keep their inline data for thumbnails.
+
+Type-filtered reads use the endpoint directly. A server without the plugin, or any failed RPC
+read, falls back to the endpoint, which also reports its canonical errors (missing session,
+invalid cursor). The agent dashboard's three-message previews still use the endpoint.
+
+Measured on the isolated 4177 runtime with a synthetic 32-message session holding 90 image reads
+(325 MB stored): the endpoint served 214.6 MB for 20 messages while the RPC served 41 KB. Opening the
+session in Chrome loaded 324.6 MB in 2.9 s and reached a 722 MB JS heap through the endpoint, against
+64 KB and a 39 MB heap through the RPC.
+
 ## New session layout
 
 The new-session screen shows a compact wordmark (at most 240px wide) above the location

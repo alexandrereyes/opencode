@@ -11,6 +11,7 @@ import { createRefCountMap } from "@/runtime/server/refcount"
 import { createRequestQueue } from "@/runtime/server/request-queue"
 import { ServerScope } from "@/runtime/server/scope"
 import { useServer } from "./current"
+import { omitEventMedia } from "./transcript"
 
 type OpenCodeEventMap = { [Type in OpenCodeEvent["type"]]: Extract<OpenCodeEvent, { type: Type }> }
 
@@ -99,7 +100,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     pageLifecycle: true,
     onEvent(event) {
       countPerformanceEvent(event.type)
-      events.publish(event)
+      events.publish(omitEventMedia(event))
     },
     log: {
       info(message, data) {

@@ -28,6 +28,7 @@ import { createSessionFamilies } from "@/session/family"
 import { Persistence } from "@/runtime/persistence/schema"
 import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
 import { createDirectoryGuard, guardLocationSync } from "./directory-guard"
+import { withLeanTranscript } from "./transcript"
 import type { SessionInfo } from "@opencode/client/promise"
 import { resolveProjectForSession, resolveSessionDetailsProject } from "@/shell/layout/helpers"
 
@@ -228,7 +229,7 @@ function createServerController(
   const directories = createDirectoryGuard((directory) => sdk.api.rpc(Worktrees.Definition).available({ directory }))
   onCleanup(sdk.event.on("server.connected", () => directories.clear()))
   const source = createData({
-    api: () => sdk.api,
+    api: () => withLeanTranscript(sdk.api),
     initialMessageLimit: () => (timelinePreset(settings.general.timelineDetail())?.id === "compact" ? 40 : 20),
     event: {
       on: sdk.event.on,
