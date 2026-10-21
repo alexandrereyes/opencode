@@ -1,0 +1,49 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_eece86ac-b446-4d44-aa25-8b070d688688",
+        "time": {
+          "created": 1791719473489
+        },
+        "text": "",
+        "files": [
+          {
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6NQAAAABJRU5ErkJggg==",
+            "mime": "image/png",
+            "source": {
+              "type": "inline"
+            },
+            "name": "landing.png"
+          }
+        ],
+        "type": "user"
+      },
+      {
+        "id": "msg_2d280737-4383-4a00-8953-2c8068d0e401",
+        "time": {
+          "created": 1791719472489,
+          "completed": 1791719473489
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Prévia da nova landing"
+          }
+        ],
+        "finish": "stop"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ19lZWNlODZhYy1iNDQ2LTRkNDQtYWEyNS04YjA3MGQ2ODg2ODgiLCJvcmRlciI6ImRlc2MiLCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9",
+      "next": "eyJpZCI6Im1zZ18yZDI4MDczNy00MzgzLTRhMDAtODk1My0yYzgwNjhkMGU0MDEiLCJvcmRlciI6ImRlc2MiLCJkaXJlY3Rpb24iOiJuZXh0In0"
+    }
+  }
+}

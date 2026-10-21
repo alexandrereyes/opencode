@@ -1,0 +1,75 @@
+{
+  "id": "monokai-light",
+  "name": "Monokai",
+  "dark": false,
+  "colors": {
+    "background": "#fdf9ef",
+    "surface": "#f1ede2",
+    "surfaceRaised": "#f3efe5",
+    "highlight": "#e8e4da",
+    "border": "#e3ded4",
+    "textStrong": "#140e04",
+    "text": "#241e13",
+    "textSecondary": "#3f392f",
+    "textWeak": "#59544b",
+    "icon": "#3f392f",
+    "primary": "#bf7bff",
+    "onPrimary": "#fdf9ef",
+    "onInfo": "#ffffff",
+    "success": "#4fb54b",
+    "info": "#2d9ad7",
+    "error": "#e54b4b",
+    "warning": "#f1a948",
+    "accent": "#d9487c",
+    "filledButton": "#2f291e",
+    "onFilledButton": "#fdf9ef"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#140e04"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#140e04"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#140e04"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#140e04"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#140e04"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#140e04"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

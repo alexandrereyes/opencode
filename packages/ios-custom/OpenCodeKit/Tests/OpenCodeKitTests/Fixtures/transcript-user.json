@@ -1,0 +1,39 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_bed9f20f-5583-46fd-8700-2e3291bad143",
+        "time": {
+          "created": 1792151473489
+        },
+        "text": "Podemos revisar o plano amanhã?",
+        "type": "user"
+      },
+      {
+        "id": "msg_9e807520-264a-4f67-997f-56c52f430bac",
+        "time": {
+          "created": 1792151472489,
+          "completed": 1792151473489
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Podemos revisar o plano amanhã?"
+          }
+        ],
+        "finish": "stop"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ19iZWQ5ZjIwZi01NTgzLTQ2ZmQtODcwMC0yZTMyOTFiYWQxNDMiLCJvcmRlciI6ImRlc2MiLCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9",
+      "next": "eyJpZCI6Im1zZ185ZTgwNzUyMC0yNjRhLTRmNjctOTk3Zi01NmM1MmY0MzBiYWMiLCJvcmRlciI6ImRlc2MiLCJkaXJlY3Rpb24iOiJuZXh0In0"
+    }
+  }
+}

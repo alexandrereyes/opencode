@@ -1,0 +1,75 @@
+{
+  "id": "nord-light",
+  "name": "Nord",
+  "dark": false,
+  "colors": {
+    "background": "#eef1f5",
+    "surface": "#e3e6eb",
+    "surfaceRaised": "#e5e8ed",
+    "highlight": "#dbdfe4",
+    "border": "#d6dadf",
+    "textStrong": "#141a26",
+    "text": "#252b37",
+    "textSecondary": "#414753",
+    "textWeak": "#5e636d",
+    "icon": "#414753",
+    "primary": "#5e81ac",
+    "onPrimary": "#eef1f5",
+    "onInfo": "#ffffff",
+    "success": "#8fbcbb",
+    "info": "#81a1c1",
+    "error": "#bf616a",
+    "warning": "#d08770",
+    "accent": "#bf616a",
+    "filledButton": "#343a46",
+    "onFilledButton": "#eef1f5"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#141a26"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#141a26"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#141a26"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#141a26"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#141a26"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#141a26"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

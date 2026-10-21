@@ -1,0 +1,21 @@
+{
+  "output": [
+    {
+      "id": "per_15e4d2c9a0010ZymDpXn9A2Htk",
+      "created": 1792583478426,
+      "sessionID": "ses_ea1b2e26cffer3aVRSY1IG7Y3p",
+      "action": "shell",
+      "resources": [
+        "git push"
+      ],
+      "save": [
+        "git push *"
+      ],
+      "source": {
+        "type": "tool",
+        "messageID": "msg_15e4d1e3a001fMJkG6casuPn8A",
+        "id": "call_886d3b13ee7d4ddb94f74e9501793c9a"
+      }
+    }
+  ]
+}

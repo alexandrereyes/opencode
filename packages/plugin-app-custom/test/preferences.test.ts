@@ -41,6 +41,26 @@ test("project intents preserve close history and unknown references", () => {
   expect(closed.data.pinnedSessions).toEqual(["missing-session"])
 })
 
+test("muted sessions add idempotently and remove without changing the original profile", () => {
+  const added = applyIntent(profile, { type: "sidebar.mute", session: "quiet-session", muted: true })
+  const repeated = applyIntent(added, { type: "sidebar.mute", session: "quiet-session", muted: true })
+  const removed = applyIntent(repeated, { type: "sidebar.mute", session: "quiet-session", muted: false })
+  expect(added.data.mutedSessions).toEqual(["quiet-session"])
+  expect(repeated.data.mutedSessions).toEqual(["quiet-session"])
+  expect(removed.data.mutedSessions).toEqual([])
+  expect([added.revision, repeated.revision, removed.revision]).toEqual([5, 6, 7])
+  expect(profile.data.mutedSessions).toBeUndefined()
+  expect(added.data.mutedSessions).toEqual(["quiet-session"])
+  expect(removed.data.pinnedSessions).toEqual(profile.data.pinnedSessions)
+})
+
+test("stored profiles and import payloads without muted sessions still decode", () => {
+  const legacy = Schema.encodeSync(Preferences.Profile)(profile)
+  expect(legacy.data).not.toHaveProperty("mutedSessions")
+  expect(Schema.decodeUnknownSync(Preferences.Profile)(legacy).data.mutedSessions).toBeUndefined()
+  expect(Schema.decodeUnknownSync(Preferences.Data)(legacy.data).mutedSessions).toBeUndefined()
+})
+
 test("model and behavioral intents change only their owned preference", () => {
   const visible = applyIntent(profile, {
     type: "model.visibility",

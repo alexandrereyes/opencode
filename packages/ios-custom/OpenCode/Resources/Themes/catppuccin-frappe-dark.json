@@ -1,0 +1,75 @@
+{
+  "id": "catppuccin-frappe-dark",
+  "name": "Catppuccin Frappe",
+  "dark": true,
+  "colors": {
+    "background": "#1b1e2e",
+    "surface": "#262a3b",
+    "surfaceRaised": "#212435",
+    "highlight": "#3b3f53",
+    "border": "#3a3f53",
+    "textStrong": "#fafbfe",
+    "text": "#c8d2f9",
+    "textSecondary": "#b5bfe2",
+    "textWeak": "#939ab3",
+    "icon": "#848ca9",
+    "primary": "#8caaee",
+    "onPrimary": "#1b1e2e",
+    "onInfo": "#ffffff",
+    "success": "#a6d189",
+    "info": "#81c8be",
+    "error": "#e78284",
+    "warning": "#e5c890",
+    "accent": "#f4b8e4",
+    "filledButton": "#c3cdf1",
+    "onFilledButton": "#1b1e2e"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#525d3a",
+      "text": "#fafbfe"
+    },
+    "orange": {
+      "background": "#714f3c",
+      "text": "#fafbfe"
+    },
+    "purple": {
+      "background": "#605070",
+      "text": "#fafbfe"
+    },
+    "cyan": {
+      "background": "#415a76",
+      "text": "#fafbfe"
+    },
+    "pink": {
+      "background": "#6f4c5e",
+      "text": "#fafbfe"
+    },
+    "mint": {
+      "background": "#346256",
+      "text": "#fafbfe"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "v2-background-bg-layer-02",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-base",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

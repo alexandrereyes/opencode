@@ -34,6 +34,7 @@ export const Data = Schema.Struct({
   projects: Schema.Record(Schema.String, Schema.mutableKey(ProjectLibrary)),
   sidebarOrder: Schema.Array(Schema.String),
   pinnedSessions: Schema.Array(Schema.String),
+  mutedSessions: optional(Schema.Array(Schema.String)),
   models: Schema.Struct({
     user: Schema.Array(Model),
     variant: Schema.Record(Schema.String, Schema.mutableKey(Schema.String)),
@@ -68,6 +69,7 @@ export const Intent = Schema.Union([
   }),
   Schema.Struct({ type: Schema.Literal("sidebar.order"), order: Schema.Array(Schema.String) }),
   Schema.Struct({ type: Schema.Literal("sidebar.pin"), session: Schema.String, pinned: Schema.Boolean }),
+  Schema.Struct({ type: Schema.Literal("sidebar.mute"), session: Schema.String, muted: Schema.Boolean }),
   Schema.Struct({
     type: Schema.Literal("model.visibility"),
     providerID: Schema.String,

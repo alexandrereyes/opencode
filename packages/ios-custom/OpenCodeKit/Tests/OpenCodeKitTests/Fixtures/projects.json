@@ -1,0 +1,56 @@
+[
+  {
+    "id": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+    "canonical": "/sandbox/repos/opencode2",
+    "vcs": "git",
+    "time": {
+      "created": 1792583384734,
+      "updated": 1792583384734,
+      "active": 1792583473397
+    },
+    "sandboxes": []
+  },
+  {
+    "id": "5e5f3b7dfae9aef93ef25b2120343d9b84d3e4fa",
+    "canonical": "/sandbox",
+    "vcs": "git",
+    "time": {
+      "created": 1792583355513,
+      "updated": 1792583355513,
+      "active": 1792583473383
+    },
+    "sandboxes": []
+  },
+  {
+    "id": "4acc48746b4071d3a9458537fd353d3939b6f078",
+    "canonical": "/sandbox/repos/abacato-site",
+    "vcs": "git",
+    "time": {
+      "created": 1792583384772,
+      "updated": 1792583384772,
+      "active": 1792583473364
+    },
+    "sandboxes": []
+  },
+  {
+    "id": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+    "canonical": "/sandbox/repos/abacato-v2",
+    "vcs": "git",
+    "time": {
+      "created": 1792583384684,
+      "updated": 1792583384684,
+      "active": 1792583473323
+    },
+    "sandboxes": []
+  },
+  {
+    "id": "eb4dcd21d004b13b9fa06208d41975e756a9ecd7",
+    "canonical": "/sandbox",
+    "time": {
+      "created": 1792583356653,
+      "updated": 1792583356653,
+      "active": 1792583356654
+    },
+    "sandboxes": []
+  }
+]

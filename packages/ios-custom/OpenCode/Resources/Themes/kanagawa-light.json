@@ -1,0 +1,75 @@
+{
+  "id": "kanagawa-light",
+  "name": "Kanagawa",
+  "dark": false,
+  "colors": {
+    "background": "#f4ede3",
+    "surface": "#ebe3d9",
+    "surfaceRaised": "#ede5db",
+    "highlight": "#e5ddd3",
+    "border": "#e0d8ce",
+    "textStrong": "#34231a",
+    "text": "#46352c",
+    "textSecondary": "#8a8980",
+    "textWeak": "#aeaea7",
+    "icon": "#63534a",
+    "primary": "#2D4F67",
+    "onPrimary": "#f4ede3",
+    "onInfo": "#ffffff",
+    "success": "#6f894e",
+    "info": "#4d699b",
+    "error": "#E82424",
+    "warning": "#cc6d00",
+    "accent": "#D27E99",
+    "filledButton": "#59483f",
+    "onFilledButton": "#f4ede3"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#34231a"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#34231a"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#34231a"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#34231a"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#34231a"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#34231a"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

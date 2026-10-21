@@ -1,0 +1,282 @@
+{
+  "output": {
+    "status": "ok",
+    "accounts": [
+      {
+        "id": "01a06edb-fafe-70bc-ab0c-0e1c77a3e5c3",
+        "name": "conta@example.invalid",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-29T18:46:57.085216+00:00",
+          "latestExpiresAt": "2026-11-06T23:19:20.113744+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-21T11:52:53.1283321+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": 61199.2412375
+      },
+      {
+        "id": "01a09209-79f3-7c9a-9754-33c06ea5c9be",
+        "name": "conta@example.invalid",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-22T20:00:25.095307+00:00",
+          "latestExpiresAt": "2026-10-29T18:33:35.231892+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-21T11:52:54.1806961+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": null
+      },
+      {
+        "id": "01a06edb-fb00-7d42-a1c8-a9e85f5d66d1",
+        "name": "conta@example.invalid",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 1,
+          "earliestExpiresAt": "2026-10-29T18:57:38.173823+00:00",
+          "latestExpiresAt": "2026-10-29T18:57:38.173823+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-21T11:52:55.0398692+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": 61290.8054575
+      },
+      {
+        "id": "01a06edb-fb01-7047-b555-d836c33233af",
+        "name": "conta@example.invalid",
+        "enabled": true,
+        "plan": "promax",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 1,
+          "earliestExpiresAt": "2026-11-06T23:20:31.874195+00:00",
+          "latestExpiresAt": "2026-11-06T23:20:31.874195+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": 65,
+        "resetAt": "2026-10-27T07:31:08+00:00",
+        "observedAt": "2026-10-21T11:52:56.2044839+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": 0
+      },
+      {
+        "id": "01a09210-aa0e-74a7-970a-630ae0f4cfe9",
+        "name": "conta@example.invalid",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-22T18:37:53.443134+00:00",
+          "latestExpiresAt": "2026-10-29T18:17:59.202782+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-21T11:52:57.0620116+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": null
+      }
+    ],
+    "automation": {
+      "enabled": false
+    },
+    "anthropic": {
+      "status": "ok",
+      "accounts": [
+        {
+          "id": "01a116b7-0873-78a8-a884-2c35e30f3444",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-21T11:49:50.0279316+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "01a10148-0000-7689-a88d-0b470363ace9",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max20x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": 0,
+          "resetAt": "2026-10-22T13:59:59.688004+00:00",
+          "observedAt": "2026-10-21T11:42:50.5349728+00:00",
+          "stale": false,
+          "hasCapacity": false,
+          "credits": null
+        },
+        {
+          "id": "01a0dfcf-16da-7323-a4ad-6205946e9d92",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max20x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 7,
+          "fiveHourResetAt": "2026-10-21T14:50:00.197327+00:00",
+          "remaining": 33,
+          "resetAt": "2026-10-27T12:00:00.197348+00:00",
+          "observedAt": "2026-10-21T11:52:50.0358584+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "01a116ba-5960-7708-928b-dba15fc41d46",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-21T11:49:50.5647243+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "01a116b5-03cb-77a9-88dd-7b470a6794dc",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 5786.6883602,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 0,
+          "fiveHourResetAt": "2026-10-21T13:29:59.699763+00:00",
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-21T11:28:50.526433+00:00",
+          "stale": false,
+          "hasCapacity": false,
+          "credits": null
+        },
+        {
+          "id": "01a116ac-e5a8-797c-be5c-88064a506296",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 0,
+          "fiveHourResetAt": "2026-10-21T13:20:00.255529+00:00",
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-21T11:33:52.0952766+00:00",
+          "stale": false,
+          "hasCapacity": false,
+          "credits": null
+        },
+        {
+          "id": "01a1169a-c6a8-76de-b428-fd64d9bdf6be",
+          "name": "conta@example.invalid",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 4587.0355891,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 0,
+          "fiveHourResetAt": "2026-10-21T13:10:00.242822+00:00",
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-21T11:31:51.0892711+00:00",
+          "stale": false,
+          "hasCapacity": false,
+          "credits": null
+        }
+      ],
+      "automation": {
+        "enabled": false
+      }
+    }
+  }
+}

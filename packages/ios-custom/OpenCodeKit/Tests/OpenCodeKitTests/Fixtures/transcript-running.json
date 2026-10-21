@@ -1,0 +1,195 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_15e4d31d3001uiSCPHkALSjzjB",
+        "time": {
+          "created": 1792583479767,
+          "streamed": 1792583481329
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_005c90fe611340e2a8d63d5570afdb1d",
+            "name": "shell",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_03b39a0861f3ff41016ad8a738e44c8191a642687faa0faed5"
+            },
+            "state": {
+              "status": "running",
+              "input": {
+                "command": "bun test --timeout 86401000",
+                "timeout": 0,
+                "workdir": "/sandbox/repos/abacato-v2-worktrees/neon-mountain"
+              },
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792583480915,
+              "ran": 1792583481274
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "4da027b0215e82314ff9246ad7e6198733f65efa"
+        }
+      },
+      {
+        "id": "msg_15e4d2bf6001iFXb1YPpdNqtZF",
+        "time": {
+          "created": 1792583478265,
+          "streamed": 1792583479717,
+          "completed": 1792583479759
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_36a848f44ebd42dc8fb15b4cfe7b3cf2",
+            "name": "subagent",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_03b39a0861f3ff41016ad8a7373a1881919fe7e3742d17055d"
+            },
+            "state": {
+              "status": "completed",
+              "input": {
+                "agent": "general",
+                "description": "Avaliar integrações disponíveis",
+                "prompt": "Use imediatamente somente shell em primeiro plano com command=\"sleep 86400\", timeout=0, para manter uma demonstração de execução sem gastar modelo. Não use outras ferramentas nem rode em background.",
+                "model": "llm-proxy/gpt-6-luna#low",
+                "background": true
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The subagent is working in the background (sessionID: ses_ea1b2ce7bffeiNXHUDodNG3D2U). You will be notified automatically when it finishes.\nDO NOT sleep, poll for progress, ask the subagent for status, or duplicate this subagent's work; avoid working with the same files or topics it is using.\nWork on non-overlapping tasks, or briefly tell the user what you launched and end your response."
+                }
+              ],
+              "metadata": {
+                "sessionID": "ses_ea1b2ce7bffeiNXHUDodNG3D2U",
+                "status": "running",
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1792583479268,
+              "ran": 1792583479679,
+              "completed": 1792583479737
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "4da027b0215e82314ff9246ad7e6198733f65efa",
+          "end": "4da027b0215e82314ff9246ad7e6198733f65efa",
+          "files": []
+        },
+        "finish": "tool-calls",
+        "providerState": {
+          "responseId": "resp_03b39a0861f3ff41016ad8a73698a8819183592339fe339e48",
+          "serviceTier": "default"
+        },
+        "cost": 0.00017480000000000002,
+        "tokens": {
+          "input": 294,
+          "output": 86,
+          "reasoning": 0,
+          "cache": {
+            "read": 10240,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_15e4d259b001Wl4SXXgLRmggJt",
+        "time": {
+          "created": 1792583476639,
+          "streamed": 1792583478216,
+          "completed": 1792583478257
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_bbe7c0af65664e21becc457ee06eb344",
+            "name": "subagent",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_03b39a0861f3ff41016ad8a735b40c8191949e7f76c7c4cd9a"
+            },
+            "state": {
+              "status": "completed",
+              "input": {
+                "agent": "general",
+                "description": "Revisar licença dos projetos",
+                "prompt": "Use imediatamente somente shell em primeiro plano com command=\"sleep 86400\", timeout=0, para manter uma demonstração de execução sem gastar modelo. Não use outras ferramentas nem rode em background.",
+                "model": "llm-proxy/gpt-6-luna#low",
+                "background": true
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The subagent is working in the background (sessionID: ses_ea1b2d450ffeSZUvBJqzbIdzR6). You will be notified automatically when it finishes.\nDO NOT sleep, poll for progress, ask the subagent for status, or duplicate this subagent's work; avoid working with the same files or topics it is using.\nWork on non-overlapping tasks, or briefly tell the user what you launched and end your response."
+                }
+              ],
+              "metadata": {
+                "sessionID": "ses_ea1b2d450ffeSZUvBJqzbIdzR6",
+                "status": "running",
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1792583477730,
+              "ran": 1792583478186,
+              "completed": 1792583478235
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "4da027b0215e82314ff9246ad7e6198733f65efa",
+          "end": "4da027b0215e82314ff9246ad7e6198733f65efa",
+          "files": []
+        },
+        "finish": "tool-calls",
+        "providerState": {
+          "responseId": "resp_03b39a0861f3ff41016ad8a73516608191a372b2090533548f",
+          "serviceTier": "default"
+        },
+        "cost": 0.00017904000000000002,
+        "tokens": {
+          "input": 357,
+          "output": 87,
+          "reasoning": 0,
+          "cache": {
+            "read": 9984,
+            "write": 0
+          }
+        }
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ18xNWU0ZDMxZDMwMDF1aVNDUEhrQUxTanpqQiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18xNWU0ZDI1OWIwMDFXbDRTWFhnTFJtZ2dKdCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

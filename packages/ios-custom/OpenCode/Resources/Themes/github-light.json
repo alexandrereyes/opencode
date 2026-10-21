@@ -1,0 +1,75 @@
+{
+  "id": "github-light",
+  "name": "GitHub",
+  "dark": false,
+  "colors": {
+    "background": "#ffffff",
+    "surface": "#f2f3f3",
+    "surfaceRaised": "#f5f5f4",
+    "highlight": "#eaeaeb",
+    "border": "#e4e4e5",
+    "textStrong": "#0e1319",
+    "text": "#1e2329",
+    "textSecondary": "#57606a",
+    "textWeak": "#7b828a",
+    "icon": "#3a3f44",
+    "primary": "#0969da",
+    "onPrimary": "#ffffff",
+    "onInfo": "#ffffff",
+    "success": "#1a7f37",
+    "info": "#bc4c00",
+    "error": "#cf222e",
+    "warning": "#9a6700",
+    "accent": "#1b7c83",
+    "filledButton": "#2a2f35",
+    "onFilledButton": "#ffffff"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#0e1319"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#0e1319"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#0e1319"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#0e1319"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#0e1319"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#0e1319"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}
