@@ -1,6 +1,6 @@
 {
   "data": {
-    "id": "ses_7c368a778bf340fda49cf1a58836f450",
+    "id": "ses_375412831b964188afaa08e1ffb7230e",
     "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
     "agent": "build",
     "model": {
@@ -20,10 +20,10 @@
     },
     "outcome": "succeeded",
     "time": {
-      "created": 1792343203899,
-      "updated": 1792602405953,
-      "idle": 1792602402899,
-      "viewed": 1792602402899
+      "created": 1792346830716,
+      "updated": 1792606032237,
+      "idle": 1792606029716,
+      "viewed": 1792606029716
     },
     "title": "Conversa B — precisa de você",
     "permissions": [

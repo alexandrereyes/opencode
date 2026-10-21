@@ -1,6 +1,6 @@
 {
   "data": {
-    "id": "ses_20a394e62a4746a7839acc58146a4eb8",
+    "id": "ses_8ab40d49ba554de5bfe2e34258b64a3d",
     "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
     "agent": "build",
     "model": {
@@ -20,10 +20,10 @@
     },
     "outcome": "succeeded",
     "time": {
-      "created": 1792343203899,
-      "updated": 1792602406584,
-      "idle": 1792602402899,
-      "viewed": 1792602402899
+      "created": 1792346830716,
+      "updated": 1792606032407,
+      "idle": 1792606029716,
+      "viewed": 1792606029716
     },
     "title": "Conversa D — pergunta",
     "permissions": [

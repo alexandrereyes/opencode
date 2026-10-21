@@ -70,19 +70,9 @@ struct UserBubble: View {
         if !compact {
           ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
             if let object = file.object, object["mime"]?.string?.hasPrefix("image/") == true,
-              let encoded = object["data"]?.string, let data = Data(base64Encoded: encoded),
-              let image = UIImage(data: data)
+              let encoded = object["data"]?.string
             {
-              VStack(spacing: 5) {
-                Image(uiImage: image).resizable().scaledToFit().frame(width: 160, height: 110)
-                  .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 8))
-                  .overlay {
-                    RoundedRectangle(cornerRadius: 8).strokeBorder(
-                      theme.color(.border), lineWidth: 0.5)
-                  }
-                Label(object["name"]?.string ?? "Imagem anexada", systemImage: "photo")
-                  .font(.caption).foregroundStyle(theme.color(.textSecondary))
-              }.accessibilityLabel(object["name"]?.string ?? "Imagem anexada")
+              AttachmentPreview(encoded: encoded, name: object["name"]?.string ?? "Imagem anexada")
             }
           }
           ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
@@ -106,8 +96,12 @@ struct UserBubble: View {
           }
         }
         if !message.displayText.isEmpty {
-          Text(message.displayText).font(.system(size: 16)).multilineTextAlignment(.leading)
-            .lineLimit(compact ? 2 : nil).textSelection(.enabled)
+          if compact {
+            CompactPrompt(text: message.displayText, theme: theme)
+          } else {
+            Text(message.displayText).font(.system(size: 16)).multilineTextAlignment(.leading)
+              .textSelection(.enabled)
+          }
         }
         if compact && message.displayText.isEmpty {
           Label(
@@ -181,7 +175,7 @@ struct ConversationStep: View {
         expanded = !(expanded ?? pending)
       } label: {
         HStack(spacing: 6) {
-          Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13))
+          Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13)).lineLimit(1)
           Image(systemName: (expanded ?? pending) ? "chevron.down" : "chevron.right").font(
             .system(size: 10))
         }.foregroundStyle(theme.color(.textSecondary)).frame(
@@ -190,16 +184,24 @@ struct ConversationStep: View {
       if expanded ?? pending {
         ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
           if part.type == "reasoning" {
-            DisclosureGroup {
-              Text(part.text ?? "").font(.footnote).textSelection(.enabled)
+            let key = "reasoning:\(index)"
+            Button {
+              if !detail.insert(key).inserted { detail.remove(key) }
             } label: {
               HStack(spacing: 12) {
                 Image(systemName: "sparkles")
                 Text(
                   "Pensou\(part.time?.completed.map { " \(ConversationProjection.duration($0 - (part.time?.created ?? $0)))" } ?? "")"
                 )
+                Spacer()
+                Image(systemName: detail.contains(key) ? "chevron.down" : "chevron.right").font(
+                  .system(size: 10))
               }
-            }.font(.system(size: 14)).foregroundStyle(theme.color(.textSecondary))
+            }.buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(
+              theme.color(.textSecondary))
+            if detail.contains(key) {
+              Text(part.text ?? "").font(.footnote).textSelection(.enabled)
+            }
           } else if part.type == "tool", part.name != "todowrite" || part.status == "error" {
             if part.name == "subagent" {
               subagent(part)
@@ -222,7 +224,7 @@ struct ConversationStep: View {
     return Button {
       if let child = part.childID { openChild(child) }
     } label: {
-      TimelineView(.periodic(from: .now, by: 1)) { context in
+      TimelineView(.periodic(from: running ? .now : .distantFuture, by: 1)) { context in
         HStack(spacing: 9) {
           AgentPixels(color: theme.agentColor(agent, id: id), running: running)
           HStack(spacing: 7) {
@@ -236,8 +238,7 @@ struct ConversationStep: View {
             running && child != nil
               ? ConversationProjection.duration(
                 context.date.timeIntervalSince1970 * 1000
-                  - (store.shells.first { $0.metadata?["sessionID"]?.string == child?.id }?.time
-                    .started ?? child!.time.updated))
+                  - ConversationProjection.workStarted(child: child!, shells: store.shells))
               : part.elapsed(now: context.date.timeIntervalSince1970 * 1000) ?? ""
           )
           .font(.system(size: 11)).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
@@ -252,21 +253,18 @@ struct ConversationStep: View {
       Button {
         if !detail.insert(key).inserted { detail.remove(key) }
       } label: {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: part.running ? .now : .distantFuture, by: 1)) { context in
           HStack(alignment: .top, spacing: 10) {
             Image(
               systemName: part.failed
                 ? "exclamationmark.triangle"
-                : part.running
-                  ? "circle.dotted"
-                  : part.name == "read"
-                    ? "doc.text"
-                    : ["edit", "write", "patch"].contains(part.name) ? "pencil" : "terminal"
+                : part.icon
             )
             .frame(width: 18)
-            Text(part.summary(now: context.date.timeIntervalSince1970 * 1000)).font(
-              .system(size: 13)
-            ).multilineTextAlignment(.leading)
+            Text(
+              "\(Text(part.summary(now: context.date.timeIntervalSince1970 * 1000)))\(Text(part.exitCode.map { " · código \($0)" } ?? "").foregroundColor(theme.color(.error)))"
+            )
+            .font(.system(size: 13)).multilineTextAlignment(.leading)
             Spacer(minLength: 0)
           }
           .foregroundStyle(
@@ -285,12 +283,16 @@ struct ConversationStep: View {
             ForEach(Array(part.diffs.enumerated()), id: \.offset) { _, file in
               Text(file["file"]?.string ?? "").fontWeight(.medium)
               ForEach(
-                Array((file["patch"]?.string ?? "").components(separatedBy: "\n").enumerated()),
+                Array(
+                  ConversationPart.patchLines(file["patch"]?.string ?? "").enumerated()),
                 id: \.offset
               ) { _, line in
                 Text(line).foregroundStyle(
                   theme.color(
-                    line.hasPrefix("+") ? .diffAdd : line.hasPrefix("-") ? .diffDelete : .text))
+                    line.hasPrefix("+")
+                      ? .diffAdd
+                      : line.hasPrefix("-")
+                        ? .diffDelete : line.hasPrefix("@@") ? .textSecondary : .text))
               }
             }
           } else {
@@ -310,6 +312,7 @@ struct ConversationStep: View {
               ? outputs[key] ?? part.output
               : part.diffs.compactMap { $0["patch"]?.string }.joined(separator: "\n")
           }
+          .font(.system(size: 12))
         }
         .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading).padding(10)

@@ -148,7 +148,7 @@ import OpenCodeKit
         cursor = pageValue.cursor?.next
         hasOlder = !pageValue.data.isEmpty
       }
-      session = infoValue
+      var nextMessages = ConversationProjection.merge(messages, page: pageValue.data.reversed())
       if replaceHistory {
         let count = messages.count
         var replacement = Array(pageValue.data.reversed())
@@ -164,17 +164,14 @@ import OpenCodeKit
           next = older.cursor?.next
           if next == current { break }
         }
-        messages = replacement
+        nextMessages = replacement
         cursor = next
         hasOlder = next != nil
         replaceHistory = false
-      } else {
-        messages = ConversationProjection.merge(messages, page: pageValue.data.reversed())
       }
-      active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       let directory = infoValue.location.directory
-      if models.isEmpty { models = try await client.models(directory: directory) }
-      if agents.isEmpty { agents = try await client.agents(directory: directory) }
+      let nextModels = models.isEmpty ? try await client.models(directory: directory) : models
+      let nextAgents = agents.isEmpty ? try await client.agents(directory: directory) : agents
       async let familyValue = client.family(id)
       async let shellValue = client.shells(directory: directory)
       async let located = client.locate([directory])
@@ -187,13 +184,22 @@ import OpenCodeKit
         if page.next == after { break }
         after = page.next
       } while after != nil
+      let parentMessages =
+        if let parent = infoValue.parentID {
+          try await client.conversation(parent).data.reversed().map { $0 }
+        } else { [ConversationMessage]() }
+      // Publish the transcript and runtime work snapshot together: the first visible
+      // subagent duration/count must use the same authoritative inputs as refreshes.
+      session = infoValue
+      messages = nextMessages
+      active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
+      models = nextModels
+      agents = nextAgents
       family = snapshots.0
       children = members
       shells = snapshots.1
       branch = snapshots.2.first?.branch ?? URL(fileURLWithPath: directory).lastPathComponent
-      if let parent = infoValue.parentID {
-        ownerMessages = try await client.conversation(parent).data.reversed()
-      }
+      ownerMessages = parentMessages
       ready = true
       revision += 1
       error = nil

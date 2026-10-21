@@ -155,20 +155,41 @@ public struct ConversationPart: Codable, Sendable, Equatable {
   public var diffs: [[String: JSONValue]] { metadata["files"]?.array?.compactMap(\.object) ?? [] }
   public var category: String {
     switch name {
-    case "read": "Ler"
-    case "shell": "Shell"
-    case "edit", "write": "Editar"
-    case "patch": "Patch"
+    case "read": "Leu"
+    case "shell": "Rodou"
+    case "edit", "write", "patch": "Editou"
     case "subagent": "Agente"
-    case "glob": "Buscar arquivos"
-    case "grep": "Buscar texto"
-    case "websearch": "Pesquisar"
-    case "webfetch": "Página web"
-    case "execute": "Executar"
-    case "question": "Pergunta"
+    case "glob", "grep": "Buscou"
+    case "websearch": "Pesquisou"
+    case "webfetch": "Abriu"
+    case "execute": "execute"
+    case "question": "Perguntou"
     case "skill": "Skill"
     default: name ?? "Ferramenta"
     }
+  }
+  public var icon: String {
+    switch name {
+    case "glob", "grep": "magnifyingglass"
+    case "websearch": "globe"
+    case "webfetch": "link"
+    case "question": "questionmark.bubble"
+    case "shell": "terminal"
+    case "read": "doc.text"
+    case "edit", "write", "patch": "pencil"
+    default: "wrench.and.screwdriver"
+    }
+  }
+  public var exitCode: Int? {
+    guard name == "shell", status == "completed", let exit = metadata["exit"]?.number, exit != 0
+    else { return nil }
+    return Int(exit)
+  }
+  public var diffLines: [String] {
+    diffs.flatMap { Self.patchLines($0["patch"]?.string ?? "") }
+  }
+  public static func patchLines(_ patch: String) -> [String] {
+    patch.components(separatedBy: "\n").filter { !$0.hasPrefix("--- ") && !$0.hasPrefix("+++ ") }
   }
   public func elapsed(now: Double) -> String? {
     guard let time else { return nil }
@@ -194,16 +215,26 @@ public struct ConversationPart: Codable, Sendable, Equatable {
         ? ""
         : " +\(Int(files.reduce(0) { $0 + ($1["additions"]?.number ?? 0) })) −\(Int(files.reduce(0) { $0 + ($1["deletions"]?.number ?? 0) }))"
       return "Editou \(files.first?["file"]?.string ?? path)\(counts)\(failed)"
-    case "glob", "grep":
-      return
-        "\(category) \(input["pattern"]?.string ?? "")\(metadata["count"]?.number.map { " · \(Int($0)) resultados" } ?? "")\(failed)"
+    case "glob": return "Buscou arquivos \(input["pattern"]?.string ?? "")\(failed)"
+    case "grep": return "Buscou \"\(input["pattern"]?.string ?? "")\"\(failed)"
     case "websearch": return "Pesquisou \(input["query"]?.string ?? "")\(failed)"
-    case "webfetch": return "Leu \(input["url"]?.string ?? "página web")\(failed)"
+    case "webfetch":
+      let url = input["url"]?.string.flatMap(URL.init(string:))
+      return
+        "Abriu \(url.map { ($0.host ?? "") + $0.path } ?? input["url"]?.string ?? "página web")\(failed)"
     case "skill":
       return
         "Skill · \(metadata["name"]?.string ?? input["id"]?.string ?? input["name"]?.string ?? "skill")\(failed)"
     case "subagent": return input["description"]?.string ?? "Subagente"
-    default: return "\(category)\(failed)"
+    case "question":
+      let question = input["questions"]?.array?.first?.object
+      return
+        "Perguntou\((question?["question"]?.string ?? question?["header"]?.string).map { ": \($0)" } ?? "")\(failed)"
+    default:
+      let input = self.input.sorted { $0.key < $1.key }.map { key, value in
+        "\(key): \(value.string ?? value.formatted)"
+      }.joined(separator: ", ")
+      return "\(name ?? "Ferramenta")\(input.isEmpty ? "" : " · \(input.prefix(80))")\(failed)"
     }
   }
 }
@@ -237,8 +268,19 @@ public struct ShellOutput: Codable, Sendable {
 }
 
 public enum ConversationProjection {
+  public static func followTail(current: Bool, interacting: Bool, nearBottom: Bool) -> Bool {
+    interacting ? nearBottom : current || nearBottom
+  }
   public static func duration(_ milliseconds: Double) -> String {
     let seconds = max(0, Int(milliseconds / 1000))
+    if seconds >= 86400 {
+      let hours = seconds % 86400 / 3600
+      return "\(seconds / 86400)d\(hours == 0 ? "" : " \(hours)h")"
+    }
+    if seconds >= 3600 {
+      let minutes = seconds % 3600 / 60
+      return "\(seconds / 3600)h\(minutes == 0 ? "" : "\(minutes)m")"
+    }
     return seconds >= 60 ? "\(seconds / 60)m\(seconds % 60)s" : "\(seconds)s"
   }
   public static func context(_ messages: [ConversationMessage], models: [ModelInfo]) -> Double? {
@@ -259,8 +301,11 @@ public enum ConversationProjection {
     var names: [String] = []
     for tool in tools where !names.contains(tool.category) { names.append(tool.category) }
     let list =
-      names.count > 1
-      ? names.dropLast().joined(separator: ", ") + " e " + names.last! : names.first ?? "Raciocínio"
+      names.count > 3
+      ? names.prefix(3).joined(separator: ", ") + " e mais \(names.count - 3)"
+      : names.count > 1
+        ? names.dropLast().joined(separator: ", ") + " e " + names.last!
+        : names.first ?? "Raciocínio"
     return "Usou \(count) · \(list)"
   }
   public static func footer(_ message: ConversationMessage, models: [ModelInfo]) -> String {
@@ -347,6 +392,14 @@ public enum ConversationProjection {
       && !foregroundShells.contains(shell.id)
     { tasks.insert(shell.id) }
     return tasks.count
+  }
+  public static func workStarted(child: Session, shells: [ShellInfo]) -> Double {
+    shells.filter { $0.status == "running" && $0.metadata?["sessionID"]?.string == child.id }
+      .map(\.time.started).min() ?? child.time.updated
+  }
+  public static func ellipsis(_ text: String, count: Int) -> String {
+    String(text.prefix(count)).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?… \n\r\t"))
+      + "…"
   }
   public static func merge(
     _ existing: [ConversationMessage], page: [ConversationMessage], older: Bool = false

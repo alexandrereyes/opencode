@@ -603,7 +603,8 @@ Inline web allowlist: PNG/JPEG/GIF/WebP and PDF, at most **20 MiB**, and only wh
 input capability. Other files, unsupported media or larger blobs are uploaded/staged and referenced as
 ``Attached file: `/absolute/path` `` in model-facing text plus `metadata.attachments`, rather than forced into `files`.
 Server embedding limit is also 20 MiB. Do not confuse the upload capability with an unlimited inline prompt budget.
-The current fixture includes a real 1×1 PNG intentionally, not a missing thumbnail.
+The current fixture includes a valid 96×64 PNG with two colored shapes. The original 1×1 sample had invalid PNG
+checksums and was replaced during the wave-1 review; the native decoder rejects that malformed sample in tests.
 
 Sources: `packages/app-custom/src/composer/attachments/{deliver,destination}.ts`,
 `packages/app-custom/src/composer/request.ts`, `packages/core/src/session/prompt.ts`,
@@ -721,14 +722,14 @@ manifest and active snapshot to check before screenshots. Do not silently restar
 
 | ID                                     | Title / purpose                     | Verified state                                                                                |
 | -------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `ses_f96b09a9f3054ba8b8c860bf27b193ca` | Conversa A — trabalhando            | Foreground Bun sleep, imported reasoning/read/+48 edit, queue=1; two live children            |
-| `ses_55543d6078984804b1f54af9b716a6f1` | Comparar alternativas Linear        | Explore child; sleeping                                                                       |
-| `ses_2d0135a2314148d6b9473871cfa4bd8b` | Revisar licença dos projetos        | General child; completed                                                                      |
-| `ses_035b351585d64f309164256a2765825b` | Avaliar integrações disponíveis     | Explore child; sleeping                                                                       |
-| `ses_7c368a778bf340fda49cf1a58836f450` | Conversa B — precisa de você        | Final Markdown + follow-up; pending `git push origin neon-mountain`                           |
-| `ses_9f0bd909929e424390a9b0daab7863f1` | Conversa C — histórico e compositor | 89 messages, three pages (40/40/9), image, quote anchor, errors/retry/compaction, unread tail |
-| `ses_20a394e62a4746a7839acc58146a4eb8` | Conversa D — pergunta               | Pending license question with three options and free text                                     |
-| `ses_9e9f491424de4a6a8e3a4952c6435472` | Conversa — captura SSE              | Completed `printf OK` + text; safe admission/idempotency/view/side-question probe             |
+| `ses_1da0e2e23e224422ae503af32a04e31b` | Conversa A — trabalhando            | Foreground Bun sleep, imported reasoning/read/+48 edit, queue=1; two live children            |
+| `ses_76e015509e16427da0c7b98f7c5cd7fe` | Comparar alternativas Linear        | Explore child; sleeping                                                                       |
+| `ses_83c38d2b26d746fdadd99341aefbc6be` | Revisar licença dos projetos        | General child; completed                                                                      |
+| `ses_3a190f409abc498e8c30c13e07321e0a` | Avaliar integrações disponíveis     | Explore child; sleeping                                                                       |
+| `ses_375412831b964188afaa08e1ffb7230e` | Conversa B — precisa de você        | Final Markdown + follow-up; pending `git push origin neon-mountain`                           |
+| `ses_8a70f2ed257f40819da687a6aefbeaae` | Conversa C — histórico e compositor | 89 messages, three pages (40/40/9), image, quote anchor, errors/retry/compaction, unread tail |
+| `ses_8ab40d49ba554de5bfe2e34258b64a3d` | Conversa D — pergunta               | Pending license question with three options and free text                                     |
+| `ses_5ec9997204354097b64b51099cb1b6bd` | Conversa — captura SSE              | Completed `printf OK` + text; safe admission/idempotency/view/side-question probe             |
 
 IDs change on reset; use the manifest, not hardcoded IDs in app code. Existing screenshot reference
 `ses_ea11cf618ffe7awBL1pt5cnKA2` was not modified.

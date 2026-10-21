@@ -450,7 +450,8 @@ SESSION=$(jq -r '.sessions[] | select(.role == "working") | .id' "$SANDBOX/seed-
 PRINTS=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda1
 mkdir -p "$PRINTS"
 xcrun simctl status_bar "$DEVICE" override --time '10:58' --dataNetwork wifi \
-  --wifiMode active --wifiBars 3 --batteryState discharging --batteryLevel 100
+  --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 \
+  --batteryState charged --batteryLevel 100
 xcrun simctl terminate "$DEVICE" br.com.alexandrem.opencode
 SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD="$(cat "$SANDBOX/password")" \
   xcrun simctl launch "$DEVICE" br.com.alexandrem.opencode \
@@ -471,9 +472,12 @@ storage, ready for later token editing. Child sessions have a return-to-parent a
 capsule counts the parent's other work. Colors follow the generated web tokens, including the actual catalog's
 agent colors; the sandbox model is Luna 6 / low, not the mockup's illustrative Opus model.
 
-`ConversationStore` reads only `custom.transcript/list`, first 40 and then older 40-message pages. It preserves loaded
-history during tail merges, and re-reads loaded coverage after an external revert. Paging preserves an existing
-row's screen coordinate while the new Markdown blocks are measured. `EventHub` owns the one SSE connection shared
+`ConversationStore` reads only `custom.transcript/list`, first 40 and then older 40-message pages. A recycling plain
+`List` keeps native text views only for its current rows; off-screen rows release parsed Markdown and thumbnails,
+retaining cheap wire values and measured heights. It preserves loaded history during tail merges, and re-reads
+loaded coverage after an external revert. Paging automatically starts near the top, preserves an existing row's
+screen coordinate while the new Markdown blocks are measured, and removes its small indicator after an empty page.
+`EventHub` owns the one SSE connection shared
 with Sessões. Screens receive decoded events with local sequence numbers: text/reasoning/tool changes batch at
 32 ms; structural/terminal events and missing targets revalidate in 500 ms windows. A snapshot invalidates buffered
 deltas that may already be included in it, preventing duplicate text during reconnect. Foreground returns reload.
@@ -482,14 +486,23 @@ Response text is parsed off the main actor by swift-markdown 0.7.3 into blocks a
 selectable TextKit 2 views. Each carries its message ID, type-specific part ID and rendered-to-source UTF-16 mapping.
 Wave 4 can add its menu in `ResponseTextView`; source text remains the authority (especially for selections spanning
 Markdown delimiters). Tables are deliberately simple rows, not an interactive spreadsheet; no syntax highlighting.
-The image fixture currently has an invalid PNG zlib checksum: its original bytes are retained, and the bounded
-attachment surface and filename remain visible when ImageIO cannot paint it.
+Images are decoded through `CGImageSourceCreateThumbnailAtIndex` at the displayed pixel size, never as full-size
+bitmaps. Invalid images use a compact filename/“Imagem indisponível” placeholder. The seed image is now a valid
+96×64 PNG; tests retain the old corrupt sample to verify rejection before painting.
 
 The native pinned section header is the user bubble itself, not a duplicated overlay. It clamps to two lines only
 after reaching the top. Auto-follow stops on user scrolling; the round glass button resumes following the tail.
 Tests in `ConversationTests.swift` cover all 41 fixtures, paging, tool summaries/groups, model/context identity,
 agent counts, replayed SSE, dates/sticky/unread/viewed decisions and Markdown source mapping. Frame-health sampling
 is unavailable for iOS simulators in agent-device; do not report an inferred FPS figure.
+
+For memory checks, build with `-configuration Release`, install `Release-iphonesimulator/OpenCode.app`, and run
+`vmmap -summary <app-pid>` after Sessões settles, after opening C's tail, at the first history page, and after returning
+to the tail. The app PID is printed by `simctl launch`. Compare **physical footprint**, not just `ps` RSS, which
+includes shared framework pages. On the dedicated simulator the review measured 45.3/64.0/66.2/73.7 MiB before
+recycling and 45.8/62.1/61.6/62.9 MiB after it; another full round trip reached 63.5 MiB. No simulator FPS claim is
+made. Scope includes only the 89-message seed; the native recycling container, not a guessed per-message slope, is
+the protection for longer sessions.
 
 ### Live data and contract fixtures
 

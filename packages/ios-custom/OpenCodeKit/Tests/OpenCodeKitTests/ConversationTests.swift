@@ -66,7 +66,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   let messages = try page("transcript-working")
   let imported = try #require(messages.first { $0.tools.count == 5 })
   #expect(
-    ConversationProjection.stepLabel(imported.content ?? []) == "Usou 5 · Ler, Agente e Editar")
+    ConversationProjection.stepLabel(imported.content ?? []) == "Usou 5 · Leu, Agente e Editou")
   #expect(
     ConversationProjection.stepLabel(imported.content?.filter { $0.type == "reasoning" } ?? [])
       == "Usou 2 · Raciocínio")
@@ -82,9 +82,9 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   for tool in history { #expect(!tool.summary(now: 1_792_602_410_000).isEmpty) }
   #expect(history.first { $0.status == "error" }?.summary(now: 0).hasSuffix("falhou") == true)
   #expect(history.first { $0.name == "websearch" }?.summary(now: 0).hasPrefix("Pesquisou") == true)
-  #expect(history.first { $0.name == "webfetch" }?.summary(now: 0).hasPrefix("Leu https:") == true)
-  #expect(history.first { $0.name == "glob" }?.summary(now: 0).hasPrefix("Buscar arquivos") == true)
-  #expect(history.first { $0.name == "grep" }?.summary(now: 0).hasPrefix("Buscar texto") == true)
+  #expect(history.first { $0.name == "webfetch" }?.summary(now: 0) == "Abriu example.invalid/plane")
+  #expect(history.first { $0.name == "glob" }?.summary(now: 0) == "Buscou arquivos **/*.md")
+  #expect(history.first { $0.name == "grep" }?.summary(now: 0) == "Buscou \"Plane\"")
   let shell = try #require(history.first { $0.name == "shell" })
   #expect(shell.status == "completed")
   #expect(shell.metadata["exit"]?.number == 2)
@@ -259,7 +259,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
     from: Data(
       #"{"id":"s","type":"shell","time":{"created":0,"completed":2000},"command":"printf OK","status":"completed","output":"OK","exit":0}"#
         .utf8))
-  #expect(ConversationProjection.stepLabel(shell.tools) == "Usou 1 · Shell")
+  #expect(ConversationProjection.stepLabel(shell.tools) == "Usou 1 · Rodou")
   #expect(shell.tools.first?.summary(now: 5000) == "Rodou printf OK · 2s")
   #expect(shell.tools.first?.output == "OK")
 }
@@ -281,7 +281,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
     ]))
   #expect(part.status == "completed")
   #expect(part.failed)
-  #expect(part.summary(now: 0) == "Executar · falhou")
+  #expect(part.summary(now: 0) == "execute · falhou")
 }
 
 @Test func remainingToolSummariesRetainServerFields() {
@@ -293,7 +293,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
       "subagent", ["agent": .string("explore"), "description": .string("Conferir licença")], [:],
       "Conferir licença"
     ),
-    ("question", [:], [:], "Pergunta"),
+    ("question", [:], [:], "Perguntou"),
   ]
   for (name, input, metadata, expected) in cases {
     let part = ConversationPart(
@@ -303,4 +303,61 @@ private func page(_ name: String) throws -> [ConversationMessage] {
       ]))
     #expect(part.summary(now: 0) == expected)
   }
+}
+
+@Test func compactToolKindsDurationsAndDetails() throws {
+  let tools = try page("transcript-history").flatMap(\.tools)
+  #expect(ConversationProjection.stepLabel(tools) == "Usou 10 · Buscou, Pesquisou, Abriu e mais 5")
+  #expect(tools.first { $0.name == "question" }?.summary(now: 0).hasPrefix("Perguntou: ") == true)
+  #expect(tools.first { $0.name == "shell" }?.exitCode == 2)
+  let diff = try #require(tools.first { $0.name == "patch" })
+  #expect(diff.diffLines.contains { $0.hasPrefix("@@") })
+  #expect(!diff.diffLines.contains { $0.hasPrefix("--- ") || $0.hasPrefix("+++ ") })
+  for (milliseconds, expected) in [
+    (72_000.0, "1m12s"), (4_320_000, "1h12m"), (10_800_000, "3h"), (187_200_000, "2d 4h"),
+    (-1, "0s"),
+  ] {
+    #expect(ConversationProjection.duration(milliseconds) == expected)
+  }
+  #expect(
+    ConversationProjection.ellipsis("Hospedar no Swarm.... próximo", count: 20)
+      == "Hospedar no Swarm…")
+  let unknown = ConversationPart(
+    type: "tool", name: "future-tool",
+    state: .object(["input": .object(["query": .string("uma busca")])]))
+  #expect(unknown.summary(now: 0) == "future-tool · query: uma busca")
+  #expect(unknown.icon == "wrench.and.screwdriver")
+}
+
+@Test func runningChildUsesRuntimeStartRatherThanImportedCreation() throws {
+  let children = try conversationFixture("family-page", ConversationRPC<FamilyPage>.self).output
+    .data
+  let shells = try conversationFixture("shells", DataResponse<[ShellInfo]>.self).data
+  let child = try #require(
+    children.first { child in shells.contains { $0.metadata?["sessionID"]?.string == child.id } })
+  let start = ConversationProjection.workStarted(child: child, shells: shells)
+  #expect(start > child.time.created)
+  #expect(start == shells.first { $0.metadata?["sessionID"]?.string == child.id }?.time.started)
+}
+
+@Test func followTailSurvivesMeasurementButStopsForUserScroll() {
+  #expect(ConversationProjection.followTail(current: true, interacting: false, nearBottom: false))
+  #expect(!ConversationProjection.followTail(current: true, interacting: true, nearBottom: false))
+  #expect(!ConversationProjection.followTail(current: false, interacting: false, nearBottom: false))
+  #expect(ConversationProjection.followTail(current: false, interacting: true, nearBottom: true))
+}
+
+@Test func imageThumbnailsAreBoundedAndBadImagesFail() throws {
+  let imageMessage = try #require(page("transcript-history").first { $0.files?.isEmpty == false })
+  let encoded = try #require(imageMessage.files?.first?.object?["data"]?.string)
+  let data = try #require(Data(base64Encoded: encoded))
+  let thumbnail = try #require(AttachmentImage.thumbnail(data, maxPixelSize: 32))
+  #expect(thumbnail.width == 32)
+  #expect(thumbnail.height <= 32)
+  let bad = Data(
+    base64Encoded:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6NQAAAABJRU5ErkJggg=="
+  )!
+  #expect(AttachmentImage.thumbnail(bad, maxPixelSize: 32) == nil)
+  #expect(AttachmentImage.thumbnail(Data("invalid".utf8), maxPixelSize: 32) == nil)
 }

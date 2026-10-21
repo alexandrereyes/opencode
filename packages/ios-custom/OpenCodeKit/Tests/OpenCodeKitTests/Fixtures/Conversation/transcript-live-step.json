@@ -2,19 +2,19 @@
   "output": {
     "data": [
       {
-        "id": "msg_15f6e1cca001l2TdvejsPlK4b9",
+        "id": "msg_15fa5e312001nAjFgJIrUJv7aX",
         "time": {
-          "created": 1792602414287
+          "created": 1792606069527
         },
         "text": "Use só shell command=\"printf OK\". Depois responda só \"OK\".",
         "type": "user"
       },
       {
-        "id": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+        "id": "msg_15fa5e319001ldOz3ccl8QqfP7",
         "time": {
-          "created": 1792602414294,
-          "streamed": 1792602415803,
-          "completed": 1792602415819
+          "created": 1792606069533,
+          "streamed": 1792606071008,
+          "completed": 1792606071025
         },
         "type": "assistant",
         "agent": "build",
@@ -26,11 +26,11 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+            "id": "call_8ca77eff531b415cae0ef5e3dd32403d",
             "name": "shell",
             "executed": false,
             "providerState": {
-              "itemId": "fc_0ef31b9fdf22e9af016ad8f12f9d6481918151c0e5b6f7c749"
+              "itemId": "fc_0733f1e0b17ec1d0016ad8ff76c248819197a333155cee3e30"
             },
             "state": {
               "status": "completed",
@@ -50,39 +50,39 @@
               }
             },
             "time": {
-              "created": 1792602415651,
-              "ran": 1792602415752,
-              "completed": 1792602415761
+              "created": 1792606070789,
+              "ran": 1792606070912,
+              "completed": 1792606070922
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660",
-          "end": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98",
+          "end": "64cc74be1b0eeaef98d43e32abd405d400154a98",
           "files": []
         },
         "finish": "tool-calls",
         "providerState": {
-          "responseId": "resp_0ef31b9fdf22e9af016ad8f12edbac8191953fe13b6b7e9548",
+          "responseId": "resp_0733f1e0b17ec1d0016ad8ff75df948191a6ee362c2a74b911",
           "serviceTier": "default"
         },
-        "cost": 0.0010089,
+        "cost": 0.00012186,
         "tokens": {
-          "input": 9999,
+          "input": 143,
           "output": 18,
           "reasoning": 0,
           "cache": {
-            "read": 0,
+            "read": 9856,
             "write": 0
           }
         }
       },
       {
-        "id": "msg_15f6e22d10016M40oOxZGAhknC",
+        "id": "msg_15fa5e8f8001at0io5lwVrURsj",
         "time": {
-          "created": 1792602415830,
-          "streamed": 1792602416964,
-          "completed": 1792602416980
+          "created": 1792606071036,
+          "streamed": 1792606072208,
+          "completed": 1792606072224
         },
         "type": "assistant",
         "agent": "build",
@@ -96,19 +96,19 @@
             "type": "text",
             "text": "OK",
             "state": {
-              "itemId": "msg_0ef31b9fdf22e9af016ad8f130d87481919bd44bc822a63284",
+              "itemId": "msg_0733f1e0b17ec1d0016ad8ff7818888191845bf19bd753bb55",
               "phase": "final_answer"
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660",
-          "end": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98",
+          "end": "64cc74be1b0eeaef98d43e32abd405d400154a98",
           "files": []
         },
         "finish": "stop",
         "providerState": {
-          "responseId": "resp_0ef31b9fdf22e9af016ad8f13077b08191aaee682b6c67838e",
+          "responseId": "resp_0733f1e0b17ec1d0016ad8ff776ab88191b6099e33fa73d42c",
           "serviceTier": "default"
         },
         "cost": 0.00011826000000000001,
@@ -123,17 +123,17 @@
         }
       },
       {
-        "id": "msg_15f6e2756001xDWYxp2e54VBdU",
+        "id": "msg_15fa5eda2002rvVdCl2j4ZXFxg",
         "time": {
-          "created": 1792602416982
+          "created": 1792606072226
         },
         "type": "idle",
         "outcome": "succeeded"
       }
     ],
     "cursor": {
-      "previous": "eyJpZCI6Im1zZ18xNWY2ZTFjY2EwMDFsMlRkdmVqc1BsSzRiOSIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoicHJldmlvdXMifQ",
-      "next": "eyJpZCI6Im1zZ18xNWY2ZTI3NTYwMDF4RFdZeHAyZTU0VkJkVSIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
+      "previous": "eyJpZCI6Im1zZ18xNWZhNWUzMTIwMDFuQWpGZ0pJclVKdjdhWCIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoicHJldmlvdXMifQ",
+      "next": "eyJpZCI6Im1zZ18xNWZhNWVkYTIwMDJydlZkQ2wyajRaWEZ4ZyIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
     }
   }
 }

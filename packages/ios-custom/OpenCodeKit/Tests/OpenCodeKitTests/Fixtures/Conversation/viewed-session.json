@@ -1,28 +1,28 @@
 {
   "data": {
-    "id": "ses_9e9f491424de4a6a8e3a4952c6435472",
+    "id": "ses_5ec9997204354097b64b51099cb1b6bd",
     "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
     "model": {
       "id": "gpt-6-luna",
       "providerID": "llm-proxy",
       "variant": "low"
     },
-    "cost": 0.00112716,
+    "cost": 0.00024012000000000003,
     "tokens": {
-      "input": 10171,
+      "input": 315,
       "output": 23,
       "reasoning": 0,
       "cache": {
-        "read": 9856,
+        "read": 19712,
         "write": 0
       }
     },
     "outcome": "succeeded",
     "time": {
-      "created": 1792602414280,
-      "updated": 1792602417960,
-      "idle": 1792602416982,
-      "viewed": 1792602416982
+      "created": 1792606069520,
+      "updated": 1792606073533,
+      "idle": 1792606072226,
+      "viewed": 1792606072226
     },
     "title": "Conversa — captura SSE",
     "permissions": [

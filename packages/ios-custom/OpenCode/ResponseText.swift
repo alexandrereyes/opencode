@@ -75,6 +75,10 @@ struct SelectableResponseText: UIViewRepresentable {
     guard let width = proposal.width, width > 0 else { return nil }
     return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
   }
+  static func dismantleUIView(_ view: ResponseTextView, coordinator: ()) {
+    view.attributedText = nil
+    view.sourceBlock = nil
+  }
 }
 
 struct ResponseMarkdown: View {
@@ -83,6 +87,7 @@ struct ResponseMarkdown: View {
   let messageID: String
   let partID: String
   @State private var blocks: [MarkdownBlock] = []
+  @State private var measuredHeight: CGFloat?
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       ForEach(blocks) { block in
@@ -118,11 +123,18 @@ struct ResponseMarkdown: View {
         }
       }
     }
+    .frame(minHeight: blocks.isEmpty ? measuredHeight : nil)
+    .onGeometryChange(for: CGFloat.self) {
+      $0.size.height
+    } action: { _, height in
+      if !blocks.isEmpty { measuredHeight = height }
+    }
     .task(id: text) {
       let source = text
       let parsed = await Task.detached(priority: .userInitiated) { MarkdownBlocks.parse(source) }
         .value
       if !Task.isCancelled { blocks = parsed }
     }
+    .onDisappear { blocks = [] }
   }
 }

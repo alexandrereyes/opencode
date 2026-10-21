@@ -2,10 +2,10 @@
   "output": {
     "data": [
       {
-        "id": "msg_15f6df5880018f779jy9ttMPcN",
+        "id": "msg_15fa54cc2001IJ6M7Jp4OgfW1h",
         "time": {
-          "created": 1792602404236,
-          "streamed": 1792602406146
+          "created": 1792606031046,
+          "streamed": 1792606032444
         },
         "type": "assistant",
         "agent": "build",
@@ -17,11 +17,11 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_3a6f1a5b9f7c465a80326846ac94543e",
+            "id": "call_20e713b0763d48cbb902b1568fbac036",
             "name": "shell",
             "executed": false,
             "providerState": {
-              "itemId": "fc_00d4f76fd37a584c016ad8f125edc48191bf1abd925ebd2ed5"
+              "itemId": "fc_0d7b9c0061d707bd016ad8ff5036148191bad88679e5021ba1"
             },
             "state": {
               "status": "running",
@@ -32,30 +32,30 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602405954,
-              "ran": 1792602406079
+              "created": 1792606032238,
+              "ran": 1792606032392
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98"
         }
       },
       {
-        "id": "msg_15f6df56400182dlTqXSLszJO2",
+        "id": "msg_15fa54ca30018GqMPBMK3CQY17",
         "time": {
-          "created": 1792602404224
+          "created": 1792606031040
         },
         "text": "Use somente shell para executar exatamente \"git push origin neon-mountain\", em primeiro plano. Aguarde a permissão; não altere remotos nem contorne a permissão.",
         "description": "Demonstração de interface isolada",
         "type": "synthetic"
       },
       {
-        "id": "msg_32e303fe43364e8ba446a227e87dc0df",
+        "id": "msg_91e4a1bc77344cf4874eabddc16f1737",
         "time": {
-          "created": 1792602233899,
-          "streamed": 1792602235899,
-          "completed": 1792602238899
+          "created": 1792605860716,
+          "streamed": 1792605862716,
+          "completed": 1792605865716
         },
         "type": "assistant",
         "agent": "build",
@@ -67,7 +67,7 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_7d211025f9ce4e7baa9d4dee639cf874",
+            "id": "call_5f3e5c849dc544f8a70fd628e3a3bade",
             "name": "edit",
             "state": {
               "status": "completed",
@@ -85,14 +85,14 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602233899,
-              "ran": 1792602233899,
-              "completed": 1792602235899
+              "created": 1792605860716,
+              "ran": 1792605860716,
+              "completed": 1792605862716
             }
           },
           {
             "type": "tool",
-            "id": "call_364c68b4cdb841b6a2b1728b9194d359",
+            "id": "call_9568fd99a73d47038ffce9c89f3cd45c",
             "name": "shell",
             "state": {
               "status": "completed",
@@ -108,9 +108,9 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602236899,
-              "ran": 1792602236899,
-              "completed": 1792602238899
+              "created": 1792605863716,
+              "ran": 1792605863716,
+              "completed": 1792605865716
             }
           }
         ],
@@ -127,19 +127,19 @@
         }
       },
       {
-        "id": "msg_7e8a9097db064eef9886c5eb3cced631",
+        "id": "msg_2023cd935f6a4ca0a3b6d1edcb7b7887",
         "time": {
-          "created": 1792602223899
+          "created": 1792605850716
         },
         "text": "Depois disso, abre um PR com o resumo.",
         "type": "user"
       },
       {
-        "id": "msg_d42afd0bf8db4e6d9046f48c9ed151a1",
+        "id": "msg_58517ea3b36e45c8816199228361910a",
         "time": {
-          "created": 1792602213899,
-          "streamed": 1792602215899,
-          "completed": 1792602216899
+          "created": 1792605840716,
+          "streamed": 1792605842716,
+          "completed": 1792605843716
         },
         "type": "assistant",
         "agent": "build",
@@ -167,17 +167,17 @@
         }
       },
       {
-        "id": "msg_a267d7c6bb184f56baa35a9b6138113a",
+        "id": "msg_8488a9c3d8df43f88af08ed918c429c6",
         "time": {
-          "created": 1792602203899
+          "created": 1792605830716
         },
         "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
         "type": "user"
       }
     ],
     "cursor": {
-      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1ODgwMDE4Zjc3OWp5OXR0TVBjTiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
-      "next": "eyJpZCI6Im1zZ19hMjY3ZDdjNmJiMTg0ZjU2YmFhMzVhOWI2MTM4MTEzYSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+      "previous": "eyJpZCI6Im1zZ18xNWZhNTRjYzIwMDFJSjZNN0pwNE9nZlcxaCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ184NDg4YTljM2Q4ZGY0M2Y4OGFmMDhlZDkxOGM0MjljNiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
     }
   }
 }

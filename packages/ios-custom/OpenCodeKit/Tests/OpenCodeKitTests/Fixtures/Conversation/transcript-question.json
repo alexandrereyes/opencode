@@ -2,10 +2,10 @@
   "output": {
     "data": [
       {
-        "id": "msg_15f6df5950014F6d4lsXZhG5CZ",
+        "id": "msg_15fa54cce001EhPh3kSNhbM8Tc",
         "time": {
-          "created": 1792602404248,
-          "streamed": 1792602407050
+          "created": 1792606031058,
+          "streamed": 1792606032850
         },
         "type": "assistant",
         "agent": "build",
@@ -17,11 +17,11 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_2a9f7cb6131442eb8cc13a54d4a1fef3",
+            "id": "call_2aec8a660a844a109489e58333e950d7",
             "name": "question",
             "executed": false,
             "providerState": {
-              "itemId": "fc_0919d85b437f1865016ad8f1268f98819187036cf4ca2512ac"
+              "itemId": "fc_0f07434b415fa551016ad8ff5060a8819194ab9f22abfdde91"
             },
             "state": {
               "status": "running",
@@ -50,36 +50,36 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602406586,
-              "ran": 1792602406997
+              "created": 1792606032409,
+              "ran": 1792606032788
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98"
         }
       },
       {
-        "id": "msg_15f6df566001NBRbpkzobbe4Ge",
+        "id": "msg_15fa54ca4001Z7OaWewGkv1ab3",
         "time": {
-          "created": 1792602404243
+          "created": 1792606031052
         },
         "text": "Use somente question: cabeçalho \"Licença\", pergunta \"Qual licença você quer revisar?\", opções \"AGPL-3.0\" (Plane), \"EPL-2.0\" (Huly), \"MIT\" (Focalboard). Aguarde a resposta.",
         "description": "Demonstração de interface isolada",
         "type": "synthetic"
       },
       {
-        "id": "msg_67fe43ac753545ea836282e3a226ed39",
+        "id": "msg_119d7892d8584c018713e645ff515c0b",
         "time": {
-          "created": 1792602402899
+          "created": 1792606029716
         },
         "text": "Qual licença revisar?",
         "type": "user"
       }
     ],
     "cursor": {
-      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1OTUwMDE0RjZkNGxzWFpoRzVDWiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
-      "next": "eyJpZCI6Im1zZ182N2ZlNDNhYzc1MzU0NWVhODM2MjgyZTNhMjI2ZWQzOSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+      "previous": "eyJpZCI6Im1zZ18xNWZhNTRjY2UwMDFFaFBoM2tTTmhiTThUYyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18xMTlkNzg5MmQ4NTg0YzAxODcxM2U2NDVmZjUxNWMwYiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
     }
   }
 }

@@ -16,6 +16,109 @@ private struct ConversationScrollMetrics: Equatable {
   var offset: CGFloat = 0
   var rows: [String: CGFloat] = [:]
   var anchor: (id: String, y: CGFloat)?
+  weak var view: UIScrollView?
+  var nearBottom = true
+  func followToEnd() {
+    guard let view else { return }
+    let y = max(
+      -view.adjustedContentInset.top,
+      view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+    if abs(view.contentOffset.y - y) > 1 {
+      view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: false)
+    }
+  }
+}
+private struct ConversationScrollProbe: UIViewRepresentable {
+  let state: ConversationScrollState
+  let color: UIColor
+  func makeUIView(context: Context) -> Probe { Probe(state: state, color: color) }
+  func updateUIView(_ view: Probe, context: Context) {
+    view.color = color
+    state.view?.backgroundColor = color
+  }
+  final class Probe: UIView {
+    let state: ConversationScrollState
+    var color: UIColor
+    init(state: ConversationScrollState, color: UIColor) {
+      self.state = state
+      self.color = color
+      super.init(frame: .zero)
+      isOpaque = false
+    }
+    required init?(coder: NSCoder) { nil }
+    override func didMoveToWindow() {
+      super.didMoveToWindow()
+      var parent = superview
+      while let current = parent {
+        if let scroll = current as? UIScrollView {
+          state.view = scroll
+          scroll.backgroundColor = color
+          return
+        }
+        parent = current.superview
+      }
+    }
+  }
+}
+private struct PinnedHeaderProbe: UIViewRepresentable {
+  let update: (Bool) -> Void
+  func makeUIView(context: Context) -> Probe { Probe(update: update) }
+  func updateUIView(_ view: Probe, context: Context) {
+    view.update = update
+    view.refresh()
+  }
+  final class Probe: UIView {
+    var update: (Bool) -> Void
+    weak var scroll: UIScrollView?
+    weak var container: UICollectionReusableView?
+    var observation: NSKeyValueObservation?
+    var pinned = false
+    init(update: @escaping (Bool) -> Void) {
+      self.update = update
+      super.init(frame: .zero)
+      isOpaque = false
+    }
+    required init?(coder: NSCoder) { nil }
+    override func didMoveToWindow() {
+      super.didMoveToWindow()
+      observation = nil
+      container = nil
+      var parent = superview
+      while let current = parent {
+        if container == nil, let reusable = current as? UICollectionReusableView {
+          container = reusable
+        }
+        if let view = current as? UIScrollView {
+          scroll = view
+          observation = view.observe(\.contentOffset, options: [.initial, .new]) {
+            [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.refresh() }
+          }
+          return
+        }
+        parent = current.superview
+      }
+    }
+    override func layoutSubviews() {
+      super.layoutSubviews()
+      refresh()
+    }
+    func refresh() {
+      guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
+      let frame = container.convert(container.bounds, to: scroll)
+      // List prefetches headers above the viewport; only the header crossing its
+      // top edge is sticky, not every previously visited prompt.
+      let next =
+        scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
+        && frame.minY - scroll.bounds.minY <= 2 && frame.maxY > scroll.bounds.minY + 1
+      guard next != pinned else { return }
+      pinned = next
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        update(pinned)
+      }
+    }
+  }
 }
 
 struct ConversationView: View {
@@ -25,10 +128,9 @@ struct ConversationView: View {
   @State private var conversation: ConversationStore
   @State private var child: String?
   @State private var atBottom = true
+  @State private var userScrolling = false
   @State private var firstLoad = true
-  @State private var scrollPosition = ScrollPosition()
   @State private var scrollState = ConversationScrollState()
-  @State private var scrolled = false
   let sessions: SessionStore
   let parentOnStack: String?
 
@@ -159,30 +261,24 @@ struct ConversationView: View {
   }
   private var timeline: some View {
     ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 20, pinnedViews: [.sectionHeaders]) {
-          if conversation.hasOlder && conversation.ready {
-            Button {
-              loadOlder()
-            } label: {
-              HStack {
-                Spacer()
-                if conversation.paging {
-                  ProgressView()
-                } else {
-                  Text("Carregar mensagens anteriores")
-                }
-                Spacer()
-              }.font(.footnote)
-            }.padding(.top, 8)
-              .onAppear {
-                guard !firstLoad, !atBottom else { return }
-                loadOlder()
-              }
+      List {
+        if conversation.hasOlder && conversation.ready {
+          HStack {
+            Spacer()
+            ProgressView().controlSize(.small)
+            Spacer()
           }
-          ForEach(sections) { section in
-            Section {
-              ForEach(section.messages) { message in
+          .padding(.vertical, 6)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .listRowBackground(theme.color(.background))
+          .accessibilityLabel("Carregando mensagens anteriores")
+          .onAppear { if !firstLoad { loadOlder() } }
+        }
+        ForEach(sections) { section in
+          Section {
+            ForEach(section.messages) { message in
+              VStack(alignment: .leading, spacing: 16) {
                 if message.id
                   == ConversationProjection.unread(
                     conversation.messages, viewed: conversation.viewedBoundary)
@@ -197,66 +293,126 @@ struct ConversationView: View {
                 ConversationMessageView(
                   message: message, footer: hasFooter(message), store: conversation
                 ) { child = $0 }
-                .id(message.id)
-                .onGeometryChange(for: CGFloat.self) {
-                  $0.frame(in: .named("conversation-scroll")).minY
-                } action: { _, y in
-                  scrollState.rows[message.id] = y
-                  if let anchor = scrollState.anchor, anchor.id == message.id, abs(y - anchor.y) > 1
-                  {
-                    scrollPosition.scrollTo(y: scrollState.offset + y - anchor.y)
+              }
+              .padding(.vertical, 10)
+              .background(theme.color(.background))
+              .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              .listRowSeparator(.hidden)
+              .listRowBackground(theme.color(.background))
+              .id(message.id)
+              .background(
+                ConversationScrollProbe(state: scrollState, color: theme.uiColor(.background))
+              )
+              .onGeometryChange(for: CGFloat.self) {
+                $0.frame(in: .named("conversation-scroll")).minY
+              } action: { _, y in
+                scrollState.rows[message.id] = y
+                if let view = scrollState.view,
+                  view.isTracking || view.isDragging || view.isDecelerating
+                {
+                  scrollState.anchor = nil
+                }
+                if let anchor = scrollState.anchor, anchor.id == message.id, abs(y - anchor.y) > 1 {
+                  if let view = scrollState.view {
+                    view.setContentOffset(
+                      CGPoint(x: view.contentOffset.x, y: view.contentOffset.y + y - anchor.y),
+                      animated: false)
                   }
                 }
               }
-            } header: {
-              if let user = section.user {
-                StickyUserHeader(
-                  message: user,
-                  day: showDay(user) ? ConversationProjection.day(user.time.created) : nil,
-                  scrolled: scrolled
-                )
-                .id(user.id)
-              }
+              .onDisappear { scrollState.rows.removeValue(forKey: message.id) }
+              .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              .listRowSeparator(.hidden)
+              .listRowBackground(theme.color(.background))
+            }
+          } header: {
+            if let user = section.user {
+              StickyUserHeader(
+                message: user,
+                day: showDay(user) ? ConversationProjection.day(user.time.created) : nil
+              )
+              .listRowInsets(EdgeInsets())
+              .textCase(nil)
+              .id(user.id)
+              .listRowBackground(theme.color(.background))
             }
           }
-          theme.color(.background).opacity(0).frame(height: 1).id("bottom")
+          .listSectionSeparator(.hidden)
+          .listRowSeparator(.hidden)
+          .listRowBackground(theme.color(.background))
         }
-        .scrollTargetLayout()
-        .padding(.horizontal, 16).padding(.bottom, 12)
+        theme.color(.background).opacity(0).frame(height: 1).id("bottom")
+          .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(
+            theme.color(.background)
+          )
       }
+      .listStyle(.plain)
+      .listSectionSpacing(0)
+      .environment(\.defaultMinListRowHeight, 0)
+      .environment(\.defaultMinListHeaderHeight, 0)
+      .scrollContentBackground(.hidden)
+      .background(theme.color(.background))
+      .accessibilityIdentifier("conversation-transcript")
+      .accessibilityValue("\(conversation.messages.count) mensagens carregadas")
       .coordinateSpace(name: "conversation-scroll")
-      .scrollPosition($scrollPosition)
       .onScrollPhaseChange { _, phase in
         if phase == .tracking || phase == .interacting || phase == .decelerating {
           scrollState.anchor = nil
+          userScrolling = true
           atBottom = false
+        }
+        if phase == .idle {
+          if userScrolling { atBottom = scrollState.nearBottom }
+          userScrolling = false
         }
       }
       .defaultScrollAnchor(.bottom, for: .initialOffset)
       .onScrollGeometryChange(for: ConversationScrollMetrics.self) { geometry in
         ConversationScrollMetrics(
-          height: geometry.contentSize.height, offset: geometry.contentOffset.y,
-          viewport: geometry.containerSize.height)
+          height: geometry.contentSize.height, offset: geometry.visibleRect.minY,
+          viewport: geometry.visibleRect.height)
       } action: { old, new in
         scrollState.offset = new.offset
-        scrolled = new.offset > 1
-        if old.height != new.height && atBottom {
+        scrollState.nearBottom = new.nearBottom
+        let interacting =
+          userScrolling
+          || scrollState.view.map { $0.isTracking || $0.isDragging || $0.isDecelerating } == true
+        if interacting { scrollState.anchor = nil }
+        if new.offset < 40 && !firstLoad { loadOlder() }
+        if old.height != new.height && atBottom && !interacting {
           proxy.scrollTo("bottom", anchor: .bottom)
+          scrollState.followToEnd()
         } else {
-          atBottom = new.nearBottom
+          // Layout/measurement changes are not a user request to stop following.
+          atBottom = ConversationProjection.followTail(
+            current: atBottom, interacting: interacting, nearBottom: new.nearBottom)
         }
       }
       .onChange(of: conversation.revision) { _, _ in
         if firstLoad && conversation.ready {
+          Task { @MainActor in
+            await Task.yield()
+            guard firstLoad else { return }
+            proxy.scrollTo("bottom", anchor: .bottom)
+            scrollState.followToEnd()
+            firstLoad = false
+            if let view = scrollState.view, view.contentSize.height <= view.bounds.height {
+              loadOlder()
+            }
+          }
+        } else if atBottom && !userScrolling
+          && scrollState.view.map({ !$0.isTracking && !$0.isDragging && !$0.isDecelerating })
+            != false
+        {
           proxy.scrollTo("bottom", anchor: .bottom)
-          firstLoad = false
-        } else if atBottom {
-          proxy.scrollTo("bottom", anchor: .bottom)
+          scrollState.followToEnd()
         }
       }
       .overlay(alignment: .bottomTrailing) {
         if !atBottom {
           Button {
+            scrollState.anchor = nil
+            atBottom = true
             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
           } label: {
             Image(systemName: "arrow.down").frame(width: 42, height: 42)
@@ -269,7 +425,7 @@ struct ConversationView: View {
   }
   private var line: some View { Rectangle().fill(theme.color(.border)).frame(height: 0.5) }
   private func loadOlder() {
-    guard !conversation.paging else { return }
+    guard conversation.ready, conversation.hasOlder, !conversation.paging else { return }
     // Retain a row's actual screen coordinate, including a partially visible page, not just its ID.
     if let anchor = scrollState.rows.filter({ $0.value >= 0 }).min(by: { $0.value < $1.value }) {
       scrollState.anchor = (anchor.key, anchor.value)
@@ -307,7 +463,6 @@ private struct StickyUserHeader: View {
   @Environment(\.appTheme) private var theme
   let message: ConversationMessage
   let day: String?
-  let scrolled: Bool
   @State private var pinned = false
   var body: some View {
     VStack(spacing: 10) {
@@ -317,13 +472,17 @@ private struct StickyUserHeader: View {
       }
       UserBubble(message: message, compact: pinned)
     }
-    .padding(.vertical, 6).background(theme.color(.background))
-    .onGeometryChange(for: Bool.self) {
-      scrolled && $0.frame(in: .named("conversation-scroll")).minY <= 1
-    } action: { _, value in
-      pinned = value
+    .padding(.vertical, 6).padding(.horizontal, 16).background(theme.color(.background))
+    .background(PinnedHeaderProbe { pinned = $0 })
+    .overlay(alignment: .bottom) {
+      if pinned {
+        LinearGradient(
+          colors: [theme.color(.background), theme.color(.background).opacity(0)], startPoint: .top,
+          endPoint: .bottom
+        )
+        .frame(height: 14).offset(y: 14).allowsHitTesting(false)
+      }
     }
-    .onChange(of: scrolled) { _, value in if !value { pinned = false } }
   }
 }
 

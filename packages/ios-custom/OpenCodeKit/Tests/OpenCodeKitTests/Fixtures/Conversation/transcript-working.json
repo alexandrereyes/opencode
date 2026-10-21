@@ -2,10 +2,10 @@
   "output": {
     "data": [
       {
-        "id": "msg_15f6df559001MLxun74NzOhLZ5",
+        "id": "msg_15fa54c99001zqn8DLoSw2JrOK",
         "time": {
-          "created": 1792602404190,
-          "streamed": 1792602405461
+          "created": 1792606031005,
+          "streamed": 1792606032566
         },
         "type": "assistant",
         "agent": "build",
@@ -17,11 +17,11 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_3702d6798a1b4e5382e7d10fc335eef3",
+            "id": "call_467b4e82ec5443988fe6a72e25a1ffcb",
             "name": "shell",
             "executed": false,
             "providerState": {
-              "itemId": "fc_046140f84359d67d016ad8f125424c8191a1f3ccf849b92224"
+              "itemId": "fc_047b07272f5ed44c016ad8ff50515081918ef7761c3a8951b9"
             },
             "state": {
               "status": "running",
@@ -33,30 +33,30 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602405306,
-              "ran": 1792602405405
+              "created": 1792606032353,
+              "ran": 1792606032534
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98"
         }
       },
       {
-        "id": "msg_15f6df54f001YG5sO9SILqA1yV",
+        "id": "msg_15fa54c8e001Uq5TQ1QOZZSlvu",
         "time": {
-          "created": 1792602404182
+          "created": 1792606030998
         },
         "text": "Use somente shell, command=\"bun run wait-tests.ts\", timeout=0, background=false. O script demonstra bun test com sleep barato. Não use outras ferramentas nem finalize antes do comando.",
         "description": "Demonstração de interface isolada",
         "type": "synthetic"
       },
       {
-        "id": "msg_ecf3a73846a645da9e533100e36574bd",
+        "id": "msg_b62eeaf6fb17402a9da34d0892db6ad1",
         "time": {
-          "created": 1792602164899,
-          "streamed": 1792602166899,
-          "completed": 1792602295899
+          "created": 1792605791716,
+          "streamed": 1792605793716,
+          "completed": 1792605922716
         },
         "type": "assistant",
         "agent": "build",
@@ -70,13 +70,13 @@
             "type": "reasoning",
             "text": "Vou consultar a infraestrutura e separar licença de integrações.",
             "time": {
-              "created": 1792602164899,
-              "completed": 1792602170899
+              "created": 1792605791716,
+              "completed": 1792605797716
             }
           },
           {
             "type": "tool",
-            "id": "call_8658a7f5453542ed8c7a6fce509bc1b3",
+            "id": "call_7f08222a41b349949558f6c8426d3d44",
             "name": "read",
             "state": {
               "status": "completed",
@@ -94,22 +94,22 @@
               }
             },
             "time": {
-              "created": 1792602171899,
-              "ran": 1792602171899,
-              "completed": 1792602173899
+              "created": 1792605798716,
+              "ran": 1792605798716,
+              "completed": 1792605800716
             }
           },
           {
             "type": "reasoning",
             "text": "As três frentes são independentes.",
             "time": {
-              "created": 1792602173899,
-              "completed": 1792602175899
+              "created": 1792605800716,
+              "completed": 1792605802716
             }
           },
           {
             "type": "tool",
-            "id": "call_91573349f31e4db58614bd99bb2bcbcc",
+            "id": "call_f5cb210fc5a141139861e32dd9d6fbb6",
             "name": "subagent",
             "state": {
               "status": "completed",
@@ -127,19 +127,19 @@
                 }
               ],
               "metadata": {
-                "sessionID": "ses_55543d6078984804b1f54af9b716a6f1",
+                "sessionID": "ses_76e015509e16427da0c7b98f7c5cd7fe",
                 "status": "running"
               }
             },
             "time": {
-              "created": 1792602178899,
-              "ran": 1792602178899,
-              "completed": 1792602179899
+              "created": 1792605805716,
+              "ran": 1792605805716,
+              "completed": 1792605806716
             }
           },
           {
             "type": "tool",
-            "id": "call_539d88e44bb74020896d0ece3759348f",
+            "id": "call_9e9e7f231f4148caa10fd4d31b2c8cef",
             "name": "subagent",
             "state": {
               "status": "completed",
@@ -157,19 +157,19 @@
                 }
               ],
               "metadata": {
-                "sessionID": "ses_2d0135a2314148d6b9473871cfa4bd8b",
+                "sessionID": "ses_83c38d2b26d746fdadd99341aefbc6be",
                 "status": "completed"
               }
             },
             "time": {
-              "created": 1792602180899,
-              "ran": 1792602180899,
-              "completed": 1792602288899
+              "created": 1792605807716,
+              "ran": 1792605807716,
+              "completed": 1792605915716
             }
           },
           {
             "type": "tool",
-            "id": "call_f6d299c3f8e148229f9d43e7a9348a70",
+            "id": "call_7c4592c5c7944b0fad14b2ad5cd4c86d",
             "name": "subagent",
             "state": {
               "status": "completed",
@@ -187,19 +187,19 @@
                 }
               ],
               "metadata": {
-                "sessionID": "ses_035b351585d64f309164256a2765825b",
+                "sessionID": "ses_3a190f409abc498e8c30c13e07321e0a",
                 "status": "running"
               }
             },
             "time": {
-              "created": 1792602182899,
-              "ran": 1792602182899,
-              "completed": 1792602183899
+              "created": 1792605809716,
+              "ran": 1792605809716,
+              "completed": 1792605810716
             }
           },
           {
             "type": "tool",
-            "id": "call_21bf6479f2554c66bf3f2302a82b5302",
+            "id": "call_028dc7be12934a9e968402018518b3fb",
             "name": "edit",
             "state": {
               "status": "completed",
@@ -227,9 +227,9 @@
               }
             },
             "time": {
-              "created": 1792602293899,
-              "ran": 1792602293899,
-              "completed": 1792602295899
+              "created": 1792605920716,
+              "ran": 1792605920716,
+              "completed": 1792605922716
             }
           },
           {
@@ -250,19 +250,19 @@
         }
       },
       {
-        "id": "msg_1b86d4746d324f5c84dbb23fe50f4e0f",
+        "id": "msg_0178426e1ca8432fbc44b1248aa8e9ba",
         "time": {
-          "created": 1792602163899
+          "created": 1792605790716
         },
         "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
         "type": "user"
       },
       {
-        "id": "msg_0401b0c2057d4ed1b191770908e1e964",
+        "id": "msg_410fe46419834b1a920a28886407b824",
         "time": {
-          "created": 1792516004899,
-          "streamed": 1792516006899,
-          "completed": 1792516007899
+          "created": 1792519631716,
+          "streamed": 1792519633716,
+          "completed": 1792519634716
         },
         "type": "assistant",
         "agent": "build",
@@ -290,17 +290,17 @@
         }
       },
       {
-        "id": "msg_a571f2477e1249d0895ecab089276510",
+        "id": "msg_1dfd00db0e3c4cd09b3a7d96ffb3a0b0",
         "time": {
-          "created": 1792516003899
+          "created": 1792519630716
         },
         "text": "Quais stacks estão no Swarm?",
         "type": "user"
       }
     ],
     "cursor": {
-      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1NTkwMDFNTHh1bjc0TnpPaExaNSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
-      "next": "eyJpZCI6Im1zZ19hNTcxZjI0NzdlMTI0OWQwODk1ZWNhYjA4OTI3NjUxMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+      "previous": "eyJpZCI6Im1zZ18xNWZhNTRjOTkwMDF6cW44RExvU3cySnJPSyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18xZGZkMDBkYjBlM2M0Y2QwOWIzYTdkOTZmZmIzYTBiMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
     }
   }
 }

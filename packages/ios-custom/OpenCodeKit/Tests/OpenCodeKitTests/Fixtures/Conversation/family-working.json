@@ -4,8 +4,8 @@
     "cost": 0.06,
     "active": [
       {
-        "id": "ses_035b351585d64f309164256a2765825b",
-        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "id": "ses_3a190f409abc498e8c30c13e07321e0a",
+        "parentID": "ses_1da0e2e23e224422ae503af32a04e31b",
         "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
         "agent": "explore",
         "model": {
@@ -25,10 +25,10 @@
         },
         "outcome": "succeeded",
         "time": {
-          "created": 1792343203899,
-          "updated": 1792602405382,
-          "idle": 1792602402899,
-          "viewed": 1792602402899
+          "created": 1792346830716,
+          "updated": 1792606034620,
+          "idle": 1792606029716,
+          "viewed": 1792606029716
         },
         "title": "Avaliar integrações disponíveis",
         "location": {
@@ -43,8 +43,8 @@
         ]
       },
       {
-        "id": "ses_55543d6078984804b1f54af9b716a6f1",
-        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "id": "ses_76e015509e16427da0c7b98f7c5cd7fe",
+        "parentID": "ses_1da0e2e23e224422ae503af32a04e31b",
         "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
         "agent": "explore",
         "model": {
@@ -64,10 +64,10 @@
         },
         "outcome": "succeeded",
         "time": {
-          "created": 1792343203899,
-          "updated": 1792602405522,
-          "idle": 1792602402899,
-          "viewed": 1792602402899
+          "created": 1792346830716,
+          "updated": 1792606032535,
+          "idle": 1792606029716,
+          "viewed": 1792606029716
         },
         "title": "Comparar alternativas Linear",
         "location": {

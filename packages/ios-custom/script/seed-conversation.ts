@@ -91,7 +91,8 @@ const comparison =
 const markdown =
   "Encontrei três opções viáveis:\n\n- **Plane** · AGPL-3.0\n- **Huly** · EPL-2.0\n- **Focalboard** · MIT\n\nTodas sobem com `docker compose` e convertem para stack.\n\n```yaml\nservices:\n  plane:\n    image: makeplane/plane:stable\n    deploy:\n      replicas: 1\n```\n\nRecomendo o **Plane**: tem integração nativa com o GitHub."
 const stacks = "São 6 stacks: `core-infra`, `abacato`, `opencode`, `observability`, `whatsapp` e `llm-proxy`."
-const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6NQAAAABJRU5ErkJggg=="
+// Valid 96×64 RGB PNG: orange circle and green rectangle on a light background.
+const image = "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAyUlEQVR42u3asRGDMBBFQTVGB06pxSldugViB8QuACPEWNJw8s68CjaT/qXtvSpTQgAIECBAgAABAiRAgADFBXo9p5L+EaiQJihT6kxzlemxzI1qDvSjTqFRVKAqOiVGIYEq6pwaxQOqrpM3CgbUSCdjFAmoqc6REaBRgDrofDUCNARQN529ESBAgAABAgQIECBAgAABAuQ1D8iPIiCrhl1s2F3Msmqbd93RDch90C0uzEYAcqPoylWAAAECBAgQIEACBAgQoDv1AQkKOb0EQHvHAAAAAElFTkSuQmCC"
 await Bun.write(path.join(directory, "exemplo.png"), Buffer.from(image, "base64"))
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`
 const user = (text: string, date: number, extra = {}) => ({
@@ -261,7 +262,7 @@ await imported(
     user("Analisa esta imagem fictícia.", now - day, {
       files: [{ data: image, mime: "image/png", name: "exemplo.png", source: { type: "inline" } }],
     }),
-    assistant("A imagem de teste tem um pixel branco.", now - day + 1000),
+    assistant("A imagem de teste tem um círculo laranja e um retângulo verde.", now - day + 1000),
     assistant("Pesquisa e validação concluídas.", now - 100_000, [
       tool("glob", { pattern: "**/*.md" }, "docs/infra.md\ndocs/alternativas.md", now - 100_000),
       tool("grep", { pattern: "Plane", path: "docs" }, "docs/alternativas.md:3:Plane", now - 99000),

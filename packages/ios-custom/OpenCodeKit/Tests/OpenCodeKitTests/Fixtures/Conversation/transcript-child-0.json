@@ -2,10 +2,10 @@
   "output": {
     "data": [
       {
-        "id": "msg_15f6df56d001kzDHUFU2xLSwAe",
+        "id": "msg_15fa54cab0015HbmX4m9D2n99M",
         "time": {
-          "created": 1792602404209,
-          "streamed": 1792602405697
+          "created": 1792606031024,
+          "streamed": 1792606032657
         },
         "type": "assistant",
         "agent": "explore",
@@ -17,11 +17,11 @@
         "content": [
           {
             "type": "tool",
-            "id": "call_528d0537b265463bbdc4993081ac148c",
+            "id": "call_c3386296708c49889ec2a4c7bcaf4459",
             "name": "shell",
             "executed": false,
             "providerState": {
-              "itemId": "fc_023657797222f0bb016ad8f1257c688191b43c02ef576b11ea"
+              "itemId": "fc_0bd45ed310ee521d016ad8ff507b688191b30a3a11da207a34"
             },
             "state": {
               "status": "running",
@@ -33,36 +33,36 @@
               "metadata": {}
             },
             "time": {
-              "created": 1792602405523,
-              "ran": 1792602405626
+              "created": 1792606032536,
+              "ran": 1792606032593
             }
           }
         ],
         "snapshot": {
-          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+          "start": "64cc74be1b0eeaef98d43e32abd405d400154a98"
         }
       },
       {
-        "id": "msg_15f6df5600013Znw3Pyvt3JdkX",
+        "id": "msg_15fa54ca0001jsP3yLpd321puv",
         "time": {
-          "created": 1792602404203
+          "created": 1792606031018
         },
         "text": "Use somente shell, command=\"sleep 86400\", timeout=0, background=false. Não use outras ferramentas.",
         "description": "Demonstração de interface isolada",
         "type": "synthetic"
       },
       {
-        "id": "msg_693200a1f0954e33b93c7952fff29430",
+        "id": "msg_03aee17d8114426fb84c93149019a267",
         "time": {
-          "created": 1792602193899
+          "created": 1792605820716
         },
         "text": "Validação autorizada: execute somente shell command=\"sleep 86400\", timeout=0, background=false.",
         "type": "user"
       }
     ],
     "cursor": {
-      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1NmQwMDFrekRIVUZVMnhMU3dBZSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
-      "next": "eyJpZCI6Im1zZ182OTMyMDBhMWYwOTU0ZTMzYjkzYzc5NTJmZmYyOTQzMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+      "previous": "eyJpZCI6Im1zZ18xNWZhNTRjYWIwMDE1SGJtWDRtOUQybjk5TSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18wM2FlZTE3ZDgxMTQ0MjZmYjg0YzkzMTQ5MDE5YTI2NyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
     }
   }
 }

@@ -1,55 +1,55 @@
 {
   "version": 1,
-  "capturedAt": 1792602417988,
+  "capturedAt": 1792606073563,
   "source": "http://127.0.0.1:4177",
   "seed": {
-    "createdAt": 1792602403899,
+    "createdAt": 1792606030716,
     "directory": "/sandbox/repos/ios-conversation",
     "sessions": [
       {
-        "id": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "id": "ses_1da0e2e23e224422ae503af32a04e31b",
         "title": "Conversa A — trabalhando",
         "state": "running + queue + 2 active children",
         "role": "working"
       },
       {
-        "id": "ses_55543d6078984804b1f54af9b716a6f1",
+        "id": "ses_76e015509e16427da0c7b98f7c5cd7fe",
         "title": "Comparar alternativas Linear",
         "state": "running child",
         "role": "child-0"
       },
       {
-        "id": "ses_2d0135a2314148d6b9473871cfa4bd8b",
+        "id": "ses_83c38d2b26d746fdadd99341aefbc6be",
         "title": "Revisar licença dos projetos",
         "state": "completed child",
         "role": "child-1"
       },
       {
-        "id": "ses_035b351585d64f309164256a2765825b",
+        "id": "ses_3a190f409abc498e8c30c13e07321e0a",
         "title": "Avaliar integrações disponíveis",
         "state": "running child",
         "role": "child-2"
       },
       {
-        "id": "ses_7c368a778bf340fda49cf1a58836f450",
+        "id": "ses_375412831b964188afaa08e1ffb7230e",
         "title": "Conversa B — precisa de você",
         "state": "pending git push permission",
         "role": "permission"
       },
       {
-        "id": "ses_9f0bd909929e424390a9b0daab7863f1",
+        "id": "ses_8a70f2ed257f40819da687a6aefbeaae",
         "title": "Conversa C — histórico e compositor",
         "state": "89 messages + image + quote + errors + compaction + unread tail",
         "role": "history"
       },
       {
-        "id": "ses_20a394e62a4746a7839acc58146a4eb8",
+        "id": "ses_8ab40d49ba554de5bfe2e34258b64a3d",
         "title": "Conversa D — pergunta",
         "state": "pending question",
         "role": "question"
       },
       {
-        "id": "ses_9e9f491424de4a6a8e3a4952c6435472",
+        "id": "ses_5ec9997204354097b64b51099cb1b6bd",
         "title": "Conversa — captura SSE",
         "state": "completed SSE recording",
         "role": "event-scratch"
