@@ -60,6 +60,9 @@ const model = { providerID: "llm-proxy", id: "gpt-6-luna", variant: "low" }
 const now = Date.now()
 const day = 86_400_000
 const repos = path.join(home, "repos")
+// The Mac web app's server key shares pins and mutes with the native client.
+const preferenceServer = "http://localhost:4096"
+const sessionKey = (id: string) => JSON.stringify([preferenceServer, id])
 
 if (args.values.stop || args.values.reset) {
   const navigation = await rpc<Navigation>("custom.navigation", "list", { limit: 500 })
@@ -72,9 +75,12 @@ if (args.values.stop || args.values.reset) {
     console.log(`Interrupted ${ids.size} seeded sessions; history and preferences preserved.`)
     process.exit(0)
   }
+  const preferences = await rpc<Preferences>("custom.preferences", "get", {})
   for (const id of [...ids].reverse()) {
-    await rpc("custom.preferences", "mutate", { type: "sidebar.pin", session: id, pinned: false })
-    await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session: id, muted: false })
+    for (const session of preferences.data.pinnedSessions.filter((key) => preferenceSession(key) === id))
+      await rpc("custom.preferences", "mutate", { type: "sidebar.pin", session, pinned: false })
+    for (const session of (preferences.data.mutedSessions ?? []).filter((key) => preferenceSession(key) === id))
+      await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session, muted: false })
     await api(`/api/session/${id}`, undefined, "DELETE", true)
   }
 }
@@ -113,7 +119,7 @@ const muted = await historical(
   now - 3 * day,
   "Temas OpenChamber revisados nos dois modos.",
 )
-await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session: muted.id, muted: true })
+await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session: sessionKey(muted.id), muted: true })
 muted.state = "muted + read"
 await historical(
   "Ajustes na navegação",
@@ -147,7 +153,7 @@ const alternatives = await live(
   "running + pinned + 3 subagents",
 )
 const redesign = await live("Redesign", avocado.branches["feat/redesign-identidade"], "running")
-await rpc("custom.preferences", "mutate", { type: "sidebar.pin", session: alternatives.id, pinned: true })
+await rpc("custom.preferences", "mutate", { type: "sidebar.pin", session: sessionKey(alternatives.id), pinned: true })
 await save()
 await Promise.all([
   prompt(
@@ -214,7 +220,10 @@ const archived = await Promise.all(
 if (archived.filter((item) => item.data.time.archived).length !== 12) throw new Error("Archive verification failed")
 if (!navigation.data.find((row) => row.session.id === migration.id)?.unreadAt)
   throw new Error("Unread verification failed")
-if (!preferences.data.pinnedSessions.includes(alternatives.id) || !preferences.data.mutedSessions?.includes(muted.id))
+if (
+  !preferences.data.pinnedSessions.includes(sessionKey(alternatives.id)) ||
+  !preferences.data.mutedSessions?.includes(sessionKey(muted.id))
+)
   throw new Error("Preference verification failed")
 for (const item of sessions.filter((item) => ["read", "muted + read"].includes(item.state)))
   if (navigation.data.find((row) => row.session.id === item.id)?.unreadAt)
@@ -263,6 +272,18 @@ async function api<T = unknown>(
 
 async function rpc<T = unknown>(id: string, method: string, input: unknown) {
   return (await api<{ output: T }>(`/api/rpc/${id}/${method}`, { input })).output
+}
+
+function preferenceSession(key: string): string | undefined {
+  if (key.startsWith("ses")) return key
+  try {
+    const pair: unknown = JSON.parse(key)
+    return Array.isArray(pair) && pair.length === 2 && pair.every((item) => typeof item === "string")
+      ? pair[1]
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function save() {
