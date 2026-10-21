@@ -1,0 +1,4081 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "id": "build",
+      "name": "Build",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "description": "The default agent. Executes tools based on configured permissions.",
+      "mode": "primary",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "question",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "name": "General",
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "question",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "explore",
+      "name": "Explore",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Você é um especialista em investigações exclusivamente de leitura em código, arquivos, bancos de dados, APIs, logs, páginas web, configurações e estado de serviços. Use glob para localizar arquivos, grep para pesquisar conteúdo e read para ler arquivos conhecidos. Use shell e APIs somente para consultas que não alterem arquivos, dados ou outros recursos. Adapte a profundidade da investigação ao pedido recebido e apresente conclusões claras, com evidências e caminhos absolutos quando citar arquivos. Não crie, altere ou remova arquivos, dados ou recursos. Não delegue nem lance subagentes; execute a investigação diretamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Agente rápido para investigações exclusivamente de leitura em código, arquivos, bancos de dados, APIs, logs, páginas web, configurações e estado de serviços.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "external_directory",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "read",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "glob",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "grep",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "skill",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "question",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "external_directory",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "compaction",
+      "name": "Compaction",
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "mode": "primary",
+      "hidden": true,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "title",
+      "name": "Title",
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "mode": "primary",
+      "hidden": true,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "summary",
+      "name": "Summary",
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "mode": "primary",
+      "hidden": true,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "custom-worker",
+      "name": "custom-worker",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Implementation worker for autonomous custom updates, Astra medium",
+      "mode": "subagent",
+      "hidden": false,
+      "steps": 50,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astrahigh",
+      "name": "astrahigh",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astrahighfast",
+      "name": "astrahighfast",
+      "model": {
+        "id": "gpt-6-astra-fast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Fast com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astrahighultra",
+      "name": "astrahighultra",
+      "model": {
+        "id": "gpt-6-astra-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Ultrafast com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astralow",
+      "name": "astralow",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astralowfast",
+      "name": "astralowfast",
+      "model": {
+        "id": "gpt-6-astra-fast",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Fast com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astralowultra",
+      "name": "astralowultra",
+      "model": {
+        "id": "gpt-6-astra-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Ultrafast com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramax",
+      "name": "astramax",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramaxfast",
+      "name": "astramaxfast",
+      "model": {
+        "id": "gpt-6-astra-fast",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Fast com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramaxultra",
+      "name": "astramaxultra",
+      "model": {
+        "id": "gpt-6-astra-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Ultrafast com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramedium",
+      "name": "astramedium",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramediumfast",
+      "name": "astramediumfast",
+      "model": {
+        "id": "gpt-6-astra-fast",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Fast com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astramediumultra",
+      "name": "astramediumultra",
+      "model": {
+        "id": "gpt-6-astra-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Ultrafast com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astraxhigh",
+      "name": "astraxhigh",
+      "model": {
+        "id": "gpt-6-astra",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astraxhighfast",
+      "name": "astraxhighfast",
+      "model": {
+        "id": "gpt-6-astra-fast",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Fast com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "astraxhighultra",
+      "name": "astraxhighultra",
+      "model": {
+        "id": "gpt-6-astra-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Astra Ultrafast com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "deepseek",
+      "model": {
+        "id": "deepseek/deepseek-v4.1-flash",
+        "providerID": "vercel",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "DeepSeek V4.1 Flash via Vercel com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "fablehigh",
+      "name": "fablehigh",
+      "model": {
+        "id": "claude-fable-5-1",
+        "providerID": "anthropic",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Fable 5.1 com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "fablelow",
+      "name": "fablelow",
+      "model": {
+        "id": "claude-fable-5-1",
+        "providerID": "anthropic",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Fable 5.1 com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "fablemax",
+      "name": "fablemax",
+      "model": {
+        "id": "claude-fable-5-1",
+        "providerID": "anthropic",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Fable 5.1 com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "fablemedium",
+      "name": "fablemedium",
+      "model": {
+        "id": "claude-fable-5-1",
+        "providerID": "anthropic",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Fable 5.1 com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "fablexhigh",
+      "name": "fablexhigh",
+      "model": {
+        "id": "claude-fable-5-1",
+        "providerID": "anthropic",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Fable 5.1 com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "name": "gemini",
+      "model": {
+        "id": "google/gemini-3.8-flash",
+        "providerID": "vercel"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Gemini 3.8 Flash via Vercel com reasoning padrão do modelo.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "glm",
+      "name": "glm",
+      "model": {
+        "id": "zai/glm-5.3-flash",
+        "providerID": "vercel",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GLM 5.3 Flash via Vercel com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "grok",
+      "name": "grok",
+      "model": {
+        "id": "spacexai/grok-4.6",
+        "providerID": "vercel",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Grok 4.6 via Vercel com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "haikuhigh",
+      "name": "haikuhigh",
+      "model": {
+        "id": "claude-haiku-5-5",
+        "providerID": "anthropic",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Haiku 5.5 com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "haikulow",
+      "name": "haikulow",
+      "model": {
+        "id": "claude-haiku-5-5",
+        "providerID": "anthropic",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Haiku 5.5 com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "haikumax",
+      "name": "haikumax",
+      "model": {
+        "id": "claude-haiku-5-5",
+        "providerID": "anthropic",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Haiku 5.5 com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "haikumedium",
+      "name": "haikumedium",
+      "model": {
+        "id": "claude-haiku-5-5",
+        "providerID": "anthropic",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Haiku 5.5 com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "haikuxhigh",
+      "name": "haikuxhigh",
+      "model": {
+        "id": "claude-haiku-5-5",
+        "providerID": "anthropic",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Haiku 5.5 com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "kimi",
+      "name": "kimi",
+      "model": {
+        "id": "moonshotai/kimi-k3-fast",
+        "providerID": "vercel",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Kimi K3 Fast via Vercel com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "lunahigh",
+      "name": "lunahigh",
+      "model": {
+        "id": "gpt-6-luna-fast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Luna com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "lunamax",
+      "name": "lunamax",
+      "model": {
+        "id": "gpt-6-luna-fast",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Luna com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "lunaxhigh",
+      "name": "lunaxhigh",
+      "model": {
+        "id": "gpt-6-luna-fast",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6 Luna com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "muse",
+      "name": "muse",
+      "model": {
+        "id": "meta/muse-spark-1.3",
+        "providerID": "vercel",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Muse Spark 1.3 via Vercel com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "opushigh",
+      "name": "opushigh",
+      "model": {
+        "id": "claude-opus-5-5",
+        "providerID": "anthropic",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Opus 5.5 com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "opuslow",
+      "name": "opuslow",
+      "model": {
+        "id": "claude-opus-5-5",
+        "providerID": "anthropic",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Opus 5.5 com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "opusmax",
+      "name": "opusmax",
+      "model": {
+        "id": "claude-opus-5-5",
+        "providerID": "anthropic",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Opus 5.5 com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "opusmedium",
+      "name": "opusmedium",
+      "model": {
+        "id": "claude-opus-5-5",
+        "providerID": "anthropic",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Opus 5.5 com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "opusxhigh",
+      "name": "opusxhigh",
+      "model": {
+        "id": "claude-opus-5-5",
+        "providerID": "anthropic",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Opus 5.5 com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solhigh",
+      "name": "solhigh",
+      "model": {
+        "id": "gpt-6.1-sol-fast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solhighultra",
+      "name": "solhighultra",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol Ultrafast com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sollow",
+      "name": "sollow",
+      "model": {
+        "id": "gpt-6.1-sol-fast",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sollowultra",
+      "name": "sollowultra",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol Ultrafast com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solmax",
+      "name": "solmax",
+      "model": {
+        "id": "gpt-6.1-sol-fast",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solmaxultra",
+      "name": "solmaxultra",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol Ultrafast com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solmedium",
+      "name": "solmedium",
+      "model": {
+        "id": "gpt-6.1-sol-fast",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solmediumultra",
+      "name": "solmediumultra",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol Ultrafast com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solxhigh",
+      "name": "solxhigh",
+      "model": {
+        "id": "gpt-6.1-sol-fast",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "solxhighultra",
+      "name": "solxhighultra",
+      "model": {
+        "id": "gpt-6.1-sol-ultrafast",
+        "providerID": "llm-proxy",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Sempre que um processo for exclusivamente de leitura, priorize delegá-lo ao agente `explore`, exceto para revisar ou validar o seu próprio trabalho, o que deve ser feito diretamente, sem delegar. Um processo é somente leitura quando envolve apenas investigar, buscar, consultar, diagnosticar, levantar informações ou analisar, sem criar, alterar ou remover arquivos, dados ou outros recursos. Se o processo exigir qualquer alteração, execute-o você mesmo. Não delegue a nenhum outro agente, salvo quando o usuário solicitar explicitamente."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "GPT-6.1 Sol Ultrafast com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sonnethigh",
+      "name": "sonnethigh",
+      "model": {
+        "id": "claude-sonnet-5-5",
+        "providerID": "anthropic",
+        "variant": "high"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Sonnet 5.5 com esforço high.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sonnetlow",
+      "name": "sonnetlow",
+      "model": {
+        "id": "claude-sonnet-5-5",
+        "providerID": "anthropic",
+        "variant": "low"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Sonnet 5.5 com esforço low.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sonnetmax",
+      "name": "sonnetmax",
+      "model": {
+        "id": "claude-sonnet-5-5",
+        "providerID": "anthropic",
+        "variant": "max"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Sonnet 5.5 com esforço max.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sonnetmedium",
+      "name": "sonnetmedium",
+      "model": {
+        "id": "claude-sonnet-5-5",
+        "providerID": "anthropic",
+        "variant": "medium"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Sonnet 5.5 com esforço medium.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "sonnetxhigh",
+      "name": "sonnetxhigh",
+      "model": {
+        "id": "claude-sonnet-5-5",
+        "providerID": "anthropic",
+        "variant": "xhigh"
+      },
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {}
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Claude Sonnet 5.5 com esforço xhigh.",
+      "mode": "subagent",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "explore",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+    {
+      "id": "utra",
+      "name": "utra",
+      "request": {
+        "settings": {},
+        "headers": {},
+        "body": {
+          "systemAppend": "Se, em qualquer momento, você puder paralelizar o trabalho delegando tarefas a outro agente — seja você o agente principal ou um subagente —, deverá fazê-lo usando agentes astra medium (ou o tipo mencionado pelo usuário), caso isso possa economizar tempo ou melhorar a qualidade."
+        }
+      },
+      "system": "[REDACTED: local agent instructions]",
+      "description": "Agente orquestrador que paraleliza trabalho com subagentes.",
+      "mode": "all",
+      "hidden": false,
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "read",
+          "resource": "*.env",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "*.env.example",
+          "effect": "allow"
+        },
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "browser",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    }
+  ]
+}

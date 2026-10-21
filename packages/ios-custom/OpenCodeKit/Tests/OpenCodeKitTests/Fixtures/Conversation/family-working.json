@@ -1,0 +1,88 @@
+{
+  "output": {
+    "count": 3,
+    "cost": 0.06,
+    "active": [
+      {
+        "id": "ses_035b351585d64f309164256a2765825b",
+        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+        "agent": "explore",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "cost": 0.02,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "outcome": "succeeded",
+        "time": {
+          "created": 1792343203899,
+          "updated": 1792602405382,
+          "idle": 1792602402899,
+          "viewed": 1792602402899
+        },
+        "title": "Avaliar integrações disponíveis",
+        "location": {
+          "directory": "/sandbox/repos/ios-conversation"
+        },
+        "permissions": [
+          {
+            "action": "*",
+            "resource": "*",
+            "effect": "allow"
+          }
+        ]
+      },
+      {
+        "id": "ses_55543d6078984804b1f54af9b716a6f1",
+        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+        "agent": "explore",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "cost": 0.02,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "outcome": "succeeded",
+        "time": {
+          "created": 1792343203899,
+          "updated": 1792602405522,
+          "idle": 1792602402899,
+          "viewed": 1792602402899
+        },
+        "title": "Comparar alternativas Linear",
+        "location": {
+          "directory": "/sandbox/repos/ios-conversation"
+        },
+        "permissions": [
+          {
+            "action": "*",
+            "resource": "*",
+            "effect": "allow"
+          }
+        ]
+      }
+    ],
+    "forms": [],
+    "permissions": []
+  }
+}

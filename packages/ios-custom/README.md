@@ -478,6 +478,14 @@ subscriptions, and running/image/user transcript previews. Local paths and accou
 Re-run `swift test` after recapturing. The seed belongs to the backend development workflow; the app never starts,
 stops, resets, or seeds a backend.
 
+For the conversation waves, see [`docs/conversation-contract.md`](docs/conversation-contract.md). Create the separate
+conversation seed with `bun packages/ios-custom/script/seed-conversation.ts`, then capture its contracts with
+`bun packages/ios-custom/script/capture-conversation.ts`. Both verify sandbox ownership and reject production ports.
+The seed manifest is `<sandbox-home>/seed-conversation.json`; `--stop` interrupts only its sessions and `--reset`
+recreates only those sessions. The capture writes `Fixtures/Conversation/`, including one real short SSE execution;
+`--snapshot-only` refreshes snapshots while reusing that recording, without calling a model. The existing Sessões
+seed and its pending requests are not consumed.
+
 ### First-screen verification
 
 The first implementation was built and exercised on the dedicated iOS 27 simulator in both OpenChamber modes.

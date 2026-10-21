@@ -1,0 +1,11 @@
+{
+  "status": 400,
+  "body": {
+    "_tag": "RpcError",
+    "type": "read_failed",
+    "message": "Unable to read session family",
+    "data": {
+      "sessionID": "ses_conversation_missing"
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "ses_55543d6078984804b1f54af9b716a6f1",
+        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+        "agent": "explore",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "cost": 0.02,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "outcome": "succeeded",
+        "time": {
+          "created": 1792343203899,
+          "updated": 1792602405522,
+          "idle": 1792602402899,
+          "viewed": 1792602402899
+        },
+        "title": "Comparar alternativas Linear",
+        "location": {
+          "directory": "/sandbox/repos/ios-conversation"
+        },
+        "permissions": [
+          {
+            "action": "*",
+            "resource": "*",
+            "effect": "allow"
+          }
+        ]
+      },
+      {
+        "id": "ses_035b351585d64f309164256a2765825b",
+        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+        "agent": "explore",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "cost": 0.02,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "outcome": "succeeded",
+        "time": {
+          "created": 1792343203899,
+          "updated": 1792602405382,
+          "idle": 1792602402899,
+          "viewed": 1792602402899
+        },
+        "title": "Avaliar integrações disponíveis",
+        "location": {
+          "directory": "/sandbox/repos/ios-conversation"
+        },
+        "permissions": [
+          {
+            "action": "*",
+            "resource": "*",
+            "effect": "allow"
+          }
+        ]
+      },
+      {
+        "id": "ses_2d0135a2314148d6b9473871cfa4bd8b",
+        "parentID": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+        "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+        "agent": "general",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "cost": 0.02,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "outcome": "succeeded",
+        "time": {
+          "created": 1792343203899,
+          "updated": 1792602404016,
+          "idle": 1792602402899,
+          "viewed": 1792602402899
+        },
+        "title": "Revisar licença dos projetos",
+        "location": {
+          "directory": "/sandbox/repos/ios-conversation"
+        },
+        "permissions": [
+          {
+            "action": "*",
+            "resource": "*",
+            "effect": "allow"
+          }
+        ],
+        "context": {
+          "id": "msg_cc4d3c90e9cd40dfb03bafd5443c2c00",
+          "tokens": {
+            "input": 436700,
+            "output": 240,
+            "reasoning": 60,
+            "cache": {
+              "read": 4000,
+              "write": 0
+            }
+          },
+          "model": {
+            "id": "gpt-6-luna",
+            "providerID": "llm-proxy",
+            "variant": "low"
+          }
+        }
+      }
+    ]
+  }
+}

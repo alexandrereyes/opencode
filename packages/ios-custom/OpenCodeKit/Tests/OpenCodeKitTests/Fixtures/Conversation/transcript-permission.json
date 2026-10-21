@@ -1,0 +1,183 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_15f6df5880018f779jy9ttMPcN",
+        "time": {
+          "created": 1792602404236,
+          "streamed": 1792602406146
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_3a6f1a5b9f7c465a80326846ac94543e",
+            "name": "shell",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_00d4f76fd37a584c016ad8f125edc48191bf1abd925ebd2ed5"
+            },
+            "state": {
+              "status": "running",
+              "input": {
+                "command": "git push origin neon-mountain",
+                "timeout": 0
+              },
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792602405954,
+              "ran": 1792602406079
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+        }
+      },
+      {
+        "id": "msg_15f6df56400182dlTqXSLszJO2",
+        "time": {
+          "created": 1792602404224
+        },
+        "text": "Use somente shell para executar exatamente \"git push origin neon-mountain\", em primeiro plano. Aguarde a permissão; não altere remotos nem contorne a permissão.",
+        "description": "Demonstração de interface isolada",
+        "type": "synthetic"
+      },
+      {
+        "id": "msg_32e303fe43364e8ba446a227e87dc0df",
+        "time": {
+          "created": 1792602233899,
+          "streamed": 1792602235899,
+          "completed": 1792602238899
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_7d211025f9ce4e7baa9d4dee639cf874",
+            "name": "edit",
+            "state": {
+              "status": "completed",
+              "input": {
+                "path": "docs/alternativas.md",
+                "oldString": "Plane",
+                "newString": "**Plane**"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Resumo pronto."
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792602233899,
+              "ran": 1792602233899,
+              "completed": 1792602235899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_364c68b4cdb841b6a2b1728b9194d359",
+            "name": "shell",
+            "state": {
+              "status": "completed",
+              "input": {
+                "command": "git diff --stat"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "docs/alternativas.md | 48 +\n"
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792602236899,
+              "ran": 1792602236899,
+              "completed": 1792602238899
+            }
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 604700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_7e8a9097db064eef9886c5eb3cced631",
+        "time": {
+          "created": 1792602223899
+        },
+        "text": "Depois disso, abre um PR com o resumo.",
+        "type": "user"
+      },
+      {
+        "id": "msg_d42afd0bf8db4e6d9046f48c9ed151a1",
+        "time": {
+          "created": 1792602213899,
+          "streamed": 1792602215899,
+          "completed": 1792602216899
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Encontrei três opções viáveis:\n\n- **Plane** · AGPL-3.0\n- **Huly** · EPL-2.0\n- **Focalboard** · MIT\n\nTodas sobem com `docker compose` e convertem para stack.\n\n```yaml\nservices:\n  plane:\n    image: makeplane/plane:stable\n    deploy:\n      replicas: 1\n```\n\nRecomendo o **Plane**: tem integração nativa com o GitHub."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 604700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_a267d7c6bb184f56baa35a9b6138113a",
+        "time": {
+          "created": 1792602203899
+        },
+        "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
+        "type": "user"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1ODgwMDE4Zjc3OWp5OXR0TVBjTiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ19hMjY3ZDdjNmJiMTg0ZjU2YmFhMzVhOWI2MTM4MTEzYSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

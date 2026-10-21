@@ -1,0 +1,159 @@
+{
+  "data": [
+    {
+      "type": "compaction",
+      "id": "msg_2cd2178dc54840db8c4a34fce462523d",
+      "time": {
+        "created": 1792602323899
+      },
+      "status": "completed",
+      "reason": "manual",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "summary": "Resumo fictício das revisões anteriores.",
+      "recent": "Comparação de ferramentas."
+    },
+    {
+      "id": "msg_8e5b2a3ddca04e1d8f69fc259225372c",
+      "time": {
+        "created": 1792602333899,
+        "streamed": 1792602335899,
+        "completed": 1792602336899
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Tentativa recuperada."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0.004,
+      "tokens": {
+        "input": 436700,
+        "output": 240,
+        "reasoning": 60,
+        "cache": {
+          "read": 4000,
+          "write": 0
+        }
+      },
+      "retry": {
+        "attempt": 1,
+        "at": 1792602332899,
+        "error": {
+          "type": "RateLimitError",
+          "message": "Limite temporário demonstrativo",
+          "status": 429
+        }
+      }
+    },
+    {
+      "id": "msg_b0dcc69b82d144ed84d12ce8400537c8",
+      "time": {
+        "created": 1792602383899
+      },
+      "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
+      "type": "user"
+    },
+    {
+      "id": "msg_5897ab3de6a0489aa8916672017dcabd",
+      "time": {
+        "created": 1792602393899,
+        "streamed": 1792602395899,
+        "completed": 1792602396899
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Encontrei três opções viáveis:\n\n- **Plane** · AGPL-3.0\n- **Huly** · EPL-2.0\n- **Focalboard** · MIT\n\nTodas sobem com `docker compose` e convertem para stack.\n\n```yaml\nservices:\n  plane:\n    image: makeplane/plane:stable\n    deploy:\n      replicas: 1\n```\n\nRecomendo o **Plane**: tem integração nativa com o GitHub."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0.004,
+      "tokens": {
+        "input": 636200,
+        "output": 240,
+        "reasoning": 60,
+        "cache": {
+          "read": 4000,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_70b38c006888417ba545b9fa7f5720d3",
+      "metadata": {
+        "displayText": "Antes de subir, confere isso",
+        "comments": [],
+        "quotes": [
+          {
+            "id": "quote-conversation",
+            "messageID": "msg_5897ab3de6a0489aa8916672017dcabd",
+            "partID": "msg_5897ab3de6a0489aa8916672017dcabd:text:0",
+            "text": "tem integração nativa com o GitHub",
+            "comment": "Confere essa integração antes do PR",
+            "anchor": {
+              "start": 277,
+              "end": 311,
+              "exact": "tem integração nativa com o GitHub"
+            }
+          }
+        ]
+      },
+      "time": {
+        "created": 1792602398899
+      },
+      "text": "Comments on earlier assistant messages:\n\n1. Quoted from message msg_5897ab3de6a0489aa8916672017dcabd (part msg_5897ab3de6a0489aa8916672017dcabd:text:0):\n> tem integração nativa com o GitHub\nUser comment: Confere essa integração antes do PR",
+      "type": "user"
+    },
+    {
+      "id": "msg_90d9ad000ae049e99469ab240005d4b2",
+      "time": {
+        "created": 1792602399899,
+        "streamed": 1792602401899,
+        "completed": 1792602402899
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Vou conferir a integração antes do PR.\n\nPR fictício: #482 · `neon-mountain` → `main`."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0.004,
+      "tokens": {
+        "input": 636200,
+        "output": 240,
+        "reasoning": 60,
+        "cache": {
+          "read": 4000,
+          "write": 0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_15f6df559001MLxun74NzOhLZ5",
+        "time": {
+          "created": 1792602404190,
+          "streamed": 1792602405461
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_3702d6798a1b4e5382e7d10fc335eef3",
+            "name": "shell",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_046140f84359d67d016ad8f125424c8191a1f3ccf849b92224"
+            },
+            "state": {
+              "status": "running",
+              "input": {
+                "command": "bun run wait-tests.ts",
+                "timeout": 0,
+                "background": false
+              },
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792602405306,
+              "ran": 1792602405405
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+        }
+      },
+      {
+        "id": "msg_15f6df54f001YG5sO9SILqA1yV",
+        "time": {
+          "created": 1792602404182
+        },
+        "text": "Use somente shell, command=\"bun run wait-tests.ts\", timeout=0, background=false. O script demonstra bun test com sleep barato. Não use outras ferramentas nem finalize antes do comando.",
+        "description": "Demonstração de interface isolada",
+        "type": "synthetic"
+      },
+      {
+        "id": "msg_ecf3a73846a645da9e533100e36574bd",
+        "time": {
+          "created": 1792602164899,
+          "streamed": 1792602166899,
+          "completed": 1792602295899
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "Vou consultar a infraestrutura e separar licença de integrações.",
+            "time": {
+              "created": 1792602164899,
+              "completed": 1792602170899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_8658a7f5453542ed8c7a6fce509bc1b3",
+            "name": "read",
+            "state": {
+              "status": "completed",
+              "input": {
+                "path": "docs/infra.md"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Read file docs/infra.md, lines 1-212\n1: Infraestrutura fictícia.\n2: Infraestrutura fictícia.\n3: Infraestrutura fictícia.\n4: Infraestrutura fictícia.\n5: Infraestrutura fictícia.\n6: Infraestrutura fictícia.\n7: Infraestrutura fictícia.\n8: Infraestrutura fictícia.\n9: Infraestrutura fictícia.\n10: Infraestrutura fictícia.\n11: Infraestrutura fictícia.\n12: Infraestrutura fictícia.\n13: Infraestrutura fictícia.\n14: Infraestrutura fictícia.\n15: Infraestrutura fictícia.\n16: Infraestrutura fictícia.\n17: Infraestrutura fictícia.\n18: Infraestrutura fictícia.\n19: Infraestrutura fictícia.\n20: Infraestrutura fictícia.\n21: Infraestrutura fictícia.\n22: Infraestrutura fictícia.\n23: Infraestrutura fictícia.\n24: Infraestrutura fictícia.\n25: Infraestrutura fictícia.\n26: Infraestrutura fictícia.\n27: Infraestrutura fictícia.\n28: Infraestrutura fictícia.\n29: Infraestrutura fictícia.\n30: Infraestrutura fictícia.\n31: Infraestrutura fictícia.\n32: Infraestrutura fictícia.\n33: Infraestrutura fictícia.\n34: Infraestrutura fictícia.\n35: Infraestrutura fictícia.\n36: Infraestrutura fictícia.\n37: Infraestrutura fictícia.\n38: Infraestrutura fictícia.\n39: Infraestrutura fictícia.\n40: Infraestrutura fictícia.\n41: Infraestrutura fictícia.\n42: Infraestrutura fictícia.\n43: Infraestrutura fictícia.\n44: Infraestrutura fictícia.\n45: Infraestrutura fictícia.\n46: Infraestrutura fictícia.\n47: Infraestrutura fictícia.\n48: Infraestrutura fictícia.\n49: Infraestrutura fictícia.\n50: Infraestrutura fictícia.\n51: Infraestrutura fictícia.\n52: Infraestrutura fictícia.\n53: Infraestrutura fictícia.\n54: Infraestrutura fictícia.\n55: Infraestrutura fictícia.\n56: Infraestrutura fictícia.\n57: Infraestrutura fictícia.\n58: Infraestrutura fictícia.\n59: Infraestrutura fictícia.\n60: Infraestrutura fictícia.\n61: Infraestrutura fictícia.\n62: Infraestrutura fictícia.\n63: Infraestrutura fictícia.\n64: Infraestrutura fictícia.\n65: Infraestrutura fictícia.\n66: Infraestrutura fictícia.\n67: Infraestrutura fictícia.\n68: Infraestrutura fictícia.\n69: Infraestrutura fictícia.\n70: Infraestrutura fictícia.\n71: Infraestrutura fictícia.\n72: Infraestrutura fictícia.\n73: Infraestrutura fictícia.\n74: Infraestrutura fictícia.\n75: Infraestrutura fictícia.\n76: Infraestrutura fictícia.\n77: Infraestrutura fictícia.\n78: Infraestrutura fictícia.\n79: Infraestrutura fictícia.\n80: Infraestrutura fictícia.\n81: Infraestrutura fictícia.\n82: Infraestrutura fictícia.\n83: Infraestrutura fictícia.\n84: Infraestrutura fictícia.\n85: Infraestrutura fictícia.\n86: Infraestrutura fictícia.\n87: Infraestrutura fictícia.\n88: Infraestrutura fictícia.\n89: Infraestrutura fictícia.\n90: Infraestrutura fictícia.\n91: Infraestrutura fictícia.\n92: Infraestrutura fictícia.\n93: Infraestrutura fictícia.\n94: Infraestrutura fictícia.\n95: Infraestrutura fictícia.\n96: Infraestrutura fictícia.\n97: Infraestrutura fictícia.\n98: Infraestrutura fictícia.\n99: Infraestrutura fictícia.\n100: Infraestrutura fictícia.\n101: Infraestrutura fictícia.\n102: Infraestrutura fictícia.\n103: Infraestrutura fictícia.\n104: Infraestrutura fictícia.\n105: Infraestrutura fictícia.\n106: Infraestrutura fictícia.\n107: Infraestrutura fictícia.\n108: Infraestrutura fictícia.\n109: Infraestrutura fictícia.\n110: Infraestrutura fictícia.\n111: Infraestrutura fictícia.\n112: Infraestrutura fictícia.\n113: Infraestrutura fictícia.\n114: Infraestrutura fictícia.\n115: Infraestrutura fictícia.\n116: Infraestrutura fictícia.\n117: Infraestrutura fictícia.\n118: Infraestrutura fictícia.\n119: Infraestrutura fictícia.\n120: Infraestrutura fictícia.\n121: Infraestrutura fictícia.\n122: Infraestrutura fictícia.\n123: Infraestrutura fictícia.\n124: Infraestrutura fictícia.\n125: Infraestrutura fictícia.\n126: Infraestrutura fictícia.\n127: Infraestrutura fictícia.\n128: Infraestrutura fictícia.\n129: Infraestrutura fictícia.\n130: Infraestrutura fictícia.\n131: Infraestrutura fictícia.\n132: Infraestrutura fictícia.\n133: Infraestrutura fictícia.\n134: Infraestrutura fictícia.\n135: Infraestrutura fictícia.\n136: Infraestrutura fictícia.\n137: Infraestrutura fictícia.\n138: Infraestrutura fictícia.\n139: Infraestrutura fictícia.\n140: Infraestrutura fictícia.\n141: Infraestrutura fictícia.\n142: Infraestrutura fictícia.\n143: Infraestrutura fictícia.\n144: Infraestrutura fictícia.\n145: Infraestrutura fictícia.\n146: Infraestrutura fictícia.\n147: Infraestrutura fictícia.\n148: Infraestrutura fictícia.\n149: Infraestrutura fictícia.\n150: Infraestrutura fictícia.\n151: Infraestrutura fictícia.\n152: Infraestrutura fictícia.\n153: Infraestrutura fictícia.\n154: Infraestrutura fictícia.\n155: Infraestrutura fictícia.\n156: Infraestrutura fictícia.\n157: Infraestrutura fictícia.\n158: Infraestrutura fictícia.\n159: Infraestrutura fictícia.\n160: Infraestrutura fictícia.\n161: Infraestrutura fictícia.\n162: Infraestrutura fictícia.\n163: Infraestrutura fictícia.\n164: Infraestrutura fictícia.\n165: Infraestrutura fictícia.\n166: Infraestrutura fictícia.\n167: Infraestrutura fictícia.\n168: Infraestrutura fictícia.\n169: Infraestrutura fictícia.\n170: Infraestrutura fictícia.\n171: Infraestrutura fictícia.\n172: Infraestrutura fictícia.\n173: Infraestrutura fictícia.\n174: Infraestrutura fictícia.\n175: Infraestrutura fictícia.\n176: Infraestrutura fictícia.\n177: Infraestrutura fictícia.\n178: Infraestrutura fictícia.\n179: Infraestrutura fictícia.\n180: Infraestrutura fictícia.\n181: Infraestrutura fictícia.\n182: Infraestrutura fictícia.\n183: Infraestrutura fictícia.\n184: Infraestrutura fictícia.\n185: Infraestrutura fictícia.\n186: Infraestrutura fictícia.\n187: Infraestrutura fictícia.\n188: Infraestrutura fictícia.\n189: Infraestrutura fictícia.\n190: Infraestrutura fictícia.\n191: Infraestrutura fictícia.\n192: Infraestrutura fictícia.\n193: Infraestrutura fictícia.\n194: Infraestrutura fictícia.\n195: Infraestrutura fictícia.\n196: Infraestrutura fictícia.\n197: Infraestrutura fictícia.\n198: Infraestrutura fictícia.\n199: Infraestrutura fictícia.\n200: Infraestrutura fictícia.\n201: Infraestrutura fictícia.\n202: Infraestrutura fictícia.\n203: Infraestrutura fictícia.\n204: Infraestrutura fictícia.\n205: Infraestrutura fictícia.\n206: Infraestrutura fictícia.\n207: Infraestrutura fictícia.\n208: Infraestrutura fictícia.\n209: Infraestrutura fictícia.\n210: Infraestrutura fictícia.\n211: Infraestrutura fictícia.\n212: Infraestrutura fictícia."
+                }
+              ],
+              "metadata": {
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1792602171899,
+              "ran": 1792602171899,
+              "completed": 1792602173899
+            }
+          },
+          {
+            "type": "reasoning",
+            "text": "As três frentes são independentes.",
+            "time": {
+              "created": 1792602173899,
+              "completed": 1792602175899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_91573349f31e4db58614bd99bb2bcbcc",
+            "name": "subagent",
+            "state": {
+              "status": "completed",
+              "input": {
+                "agent": "explore",
+                "description": "Comparar alternativas Linear",
+                "prompt": "Exemplo fictício.",
+                "model": "llm-proxy/gpt-6-luna#low",
+                "background": true
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Subagente iniciado em background."
+                }
+              ],
+              "metadata": {
+                "sessionID": "ses_55543d6078984804b1f54af9b716a6f1",
+                "status": "running"
+              }
+            },
+            "time": {
+              "created": 1792602178899,
+              "ran": 1792602178899,
+              "completed": 1792602179899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_539d88e44bb74020896d0ece3759348f",
+            "name": "subagent",
+            "state": {
+              "status": "completed",
+              "input": {
+                "agent": "general",
+                "description": "Revisar licença dos projetos",
+                "prompt": "Exemplo fictício.",
+                "model": "llm-proxy/gpt-6-luna#low",
+                "background": false
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Licenças revisadas."
+                }
+              ],
+              "metadata": {
+                "sessionID": "ses_2d0135a2314148d6b9473871cfa4bd8b",
+                "status": "completed"
+              }
+            },
+            "time": {
+              "created": 1792602180899,
+              "ran": 1792602180899,
+              "completed": 1792602288899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_f6d299c3f8e148229f9d43e7a9348a70",
+            "name": "subagent",
+            "state": {
+              "status": "completed",
+              "input": {
+                "agent": "explore",
+                "description": "Avaliar integrações disponíveis",
+                "prompt": "Exemplo fictício.",
+                "model": "llm-proxy/gpt-6-luna#low",
+                "background": true
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Subagente iniciado em background."
+                }
+              ],
+              "metadata": {
+                "sessionID": "ses_035b351585d64f309164256a2765825b",
+                "status": "running"
+              }
+            },
+            "time": {
+              "created": 1792602182899,
+              "ran": 1792602182899,
+              "completed": 1792602183899
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_21bf6479f2554c66bf3f2302a82b5302",
+            "name": "edit",
+            "state": {
+              "status": "completed",
+              "input": {
+                "path": "docs/alternativas.md",
+                "oldString": "",
+                "newString": "Resumo fictício"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Arquivo atualizado."
+                }
+              ],
+              "metadata": {
+                "files": [
+                  {
+                    "file": "docs/alternativas.md",
+                    "patch": "--- /dev/null\n+++ docs/alternativas.md\n@@ -0,0 +1,48 @@\n+Resumo fictício 1\n+Resumo fictício 2\n+Resumo fictício 3\n+Resumo fictício 4\n+Resumo fictício 5\n+Resumo fictício 6\n+Resumo fictício 7\n+Resumo fictício 8\n+Resumo fictício 9\n+Resumo fictício 10\n+Resumo fictício 11\n+Resumo fictício 12\n+Resumo fictício 13\n+Resumo fictício 14\n+Resumo fictício 15\n+Resumo fictício 16\n+Resumo fictício 17\n+Resumo fictício 18\n+Resumo fictício 19\n+Resumo fictício 20\n+Resumo fictício 21\n+Resumo fictício 22\n+Resumo fictício 23\n+Resumo fictício 24\n+Resumo fictício 25\n+Resumo fictício 26\n+Resumo fictício 27\n+Resumo fictício 28\n+Resumo fictício 29\n+Resumo fictício 30\n+Resumo fictício 31\n+Resumo fictício 32\n+Resumo fictício 33\n+Resumo fictício 34\n+Resumo fictício 35\n+Resumo fictício 36\n+Resumo fictício 37\n+Resumo fictício 38\n+Resumo fictício 39\n+Resumo fictício 40\n+Resumo fictício 41\n+Resumo fictício 42\n+Resumo fictício 43\n+Resumo fictício 44\n+Resumo fictício 45\n+Resumo fictício 46\n+Resumo fictício 47\n+Resumo fictício 48\n",
+                    "status": "added",
+                    "additions": 48,
+                    "deletions": 0
+                  }
+                ]
+              }
+            },
+            "time": {
+              "created": 1792602293899,
+              "ran": 1792602293899,
+              "completed": 1792602295899
+            }
+          },
+          {
+            "type": "text",
+            "text": "Vou dividir em três frentes e delegar para subagentes."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_1b86d4746d324f5c84dbb23fe50f4e0f",
+        "time": {
+          "created": 1792602163899
+        },
+        "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
+        "type": "user"
+      },
+      {
+        "id": "msg_0401b0c2057d4ed1b191770908e1e964",
+        "time": {
+          "created": 1792516004899,
+          "streamed": 1792516006899,
+          "completed": 1792516007899
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "São 6 stacks: `core-infra`, `abacato`, `opencode`, `observability`, `whatsapp` e `llm-proxy`."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_a571f2477e1249d0895ecab089276510",
+        "time": {
+          "created": 1792516003899
+        },
+        "text": "Quais stacks estão no Swarm?",
+        "type": "user"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1NTkwMDFNTHh1bjc0TnpPaExaNSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ19hNTcxZjI0NzdlMTI0OWQwODk1ZWNhYjA4OTI3NjUxMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

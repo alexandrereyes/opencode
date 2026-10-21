@@ -1,0 +1,139 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_15f6e1cca001l2TdvejsPlK4b9",
+        "time": {
+          "created": 1792602414287
+        },
+        "text": "Use só shell command=\"printf OK\". Depois responda só \"OK\".",
+        "type": "user"
+      },
+      {
+        "id": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+        "time": {
+          "created": 1792602414294,
+          "streamed": 1792602415803,
+          "completed": 1792602415819
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+            "name": "shell",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_0ef31b9fdf22e9af016ad8f12f9d6481918151c0e5b6f7c749"
+            },
+            "state": {
+              "status": "completed",
+              "input": {
+                "command": "printf OK"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "OK"
+                }
+              ],
+              "metadata": {
+                "status": "completed",
+                "truncated": false,
+                "exit": 0
+              }
+            },
+            "time": {
+              "created": 1792602415651,
+              "ran": 1792602415752,
+              "completed": 1792602415761
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "end": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "files": []
+        },
+        "finish": "tool-calls",
+        "providerState": {
+          "responseId": "resp_0ef31b9fdf22e9af016ad8f12edbac8191953fe13b6b7e9548",
+          "serviceTier": "default"
+        },
+        "cost": 0.0010089,
+        "tokens": {
+          "input": 9999,
+          "output": 18,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_15f6e22d10016M40oOxZGAhknC",
+        "time": {
+          "created": 1792602415830,
+          "streamed": 1792602416964,
+          "completed": 1792602416980
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "OK",
+            "state": {
+              "itemId": "msg_0ef31b9fdf22e9af016ad8f130d87481919bd44bc822a63284",
+              "phase": "final_answer"
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "end": "f37f8efffcc9df627545ad76e96f088effa71660",
+          "files": []
+        },
+        "finish": "stop",
+        "providerState": {
+          "responseId": "resp_0ef31b9fdf22e9af016ad8f13077b08191aaee682b6c67838e",
+          "serviceTier": "default"
+        },
+        "cost": 0.00011826000000000001,
+        "tokens": {
+          "input": 172,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 9856,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_15f6e2756001xDWYxp2e54VBdU",
+        "time": {
+          "created": 1792602416982
+        },
+        "type": "idle",
+        "outcome": "succeeded"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ18xNWY2ZTFjY2EwMDFsMlRkdmVqc1BsSzRiOSIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoicHJldmlvdXMifQ",
+      "next": "eyJpZCI6Im1zZ18xNWY2ZTI3NTYwMDF4RFdZeHAyZTU0VkJkVSIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_15f6df56d001kzDHUFU2xLSwAe",
+        "time": {
+          "created": 1792602404209,
+          "streamed": 1792602405697
+        },
+        "type": "assistant",
+        "agent": "explore",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_528d0537b265463bbdc4993081ac148c",
+            "name": "shell",
+            "executed": false,
+            "providerState": {
+              "itemId": "fc_023657797222f0bb016ad8f1257c688191b43c02ef576b11ea"
+            },
+            "state": {
+              "status": "running",
+              "input": {
+                "command": "sleep 86400",
+                "timeout": 0,
+                "background": false
+              },
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792602405523,
+              "ran": 1792602405626
+            }
+          }
+        ],
+        "snapshot": {
+          "start": "f37f8efffcc9df627545ad76e96f088effa71660"
+        }
+      },
+      {
+        "id": "msg_15f6df5600013Znw3Pyvt3JdkX",
+        "time": {
+          "created": 1792602404203
+        },
+        "text": "Use somente shell, command=\"sleep 86400\", timeout=0, background=false. Não use outras ferramentas.",
+        "description": "Demonstração de interface isolada",
+        "type": "synthetic"
+      },
+      {
+        "id": "msg_693200a1f0954e33b93c7952fff29430",
+        "time": {
+          "created": 1792602193899
+        },
+        "text": "Validação autorizada: execute somente shell command=\"sleep 86400\", timeout=0, background=false.",
+        "type": "user"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ18xNWY2ZGY1NmQwMDFrekRIVUZVMnhMU3dBZSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ182OTMyMDBhMWYwOTU0ZTMzYjkzYzc5NTJmZmYyOTQzMCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

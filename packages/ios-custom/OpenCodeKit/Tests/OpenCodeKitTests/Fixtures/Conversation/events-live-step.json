@@ -1,0 +1,490 @@
+[
+  {
+    "id": "evt_15f6e1ca3001ovcT8PS2neKDaT",
+    "type": "server.connected",
+    "data": {}
+  },
+  {
+    "id": "evt_15f6e1cc8001s0lc7hTY7waqng",
+    "created": 1792602414280,
+    "type": "session.created",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "slug": "tidy-falcon",
+      "version": "f497f93dd0292b47f66b7c056acf6dfb8763c077",
+      "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+      "location": {
+        "directory": "/sandbox/repos/ios-conversation"
+      },
+      "subpath": "",
+      "title": "Conversa — captura SSE",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ],
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 0,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e1cca00241x8v5Z7uK8KvS",
+    "created": 1792602414282,
+    "type": "session.inbox.enqueued",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "inboxID": "msg_15f6e1cca001l2TdvejsPlK4b9",
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "item": {
+        "type": "user",
+        "payload": {
+          "text": "Use só shell command=\"printf OK\". Depois responda só \"OK\"."
+        },
+        "delivery": "steer"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 1,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e1ccb001qp4xGCPux226FL",
+    "created": 1792602414283,
+    "type": "session.execution.started",
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 2,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e1cce0014WVbFBuDVBwrzf",
+    "created": 1792602414286,
+    "metadata": {
+      "instructions": {
+        "initial": true
+      }
+    },
+    "type": "session.instructions.updated",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "delta": {
+        "core/codemode": "9d023ef4529dacb05ff1cf5555390baa890cf75994fa427dff5c12acd96683d3",
+        "core/skill-guidance": "388ed05f0d304d707e3cef7b4cd8fc9748cadda93d658bc357ced490e83d341c",
+        "core/instructions": "2e79e0c365701358ad41039f705510e03cadefde0786aae4ee70a96b66163a2e",
+        "core/date": "f73761ff5d2c6542faf7d4574dc66009e7e682b2c84096baf86d1dc505d70a5c",
+        "core/environment": "e8a254d724e2cb530d088bbaf556ac0c7bf5fec86965a008715e776692fc24ff"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 3,
+      "version": 2
+    }
+  },
+  {
+    "id": "evt_15f6e1ccf001VbZJTv66IFdqze",
+    "created": 1792602414287,
+    "type": "session.inbox.delivered",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "inboxID": "msg_15f6e1cca001l2TdvejsPlK4b9"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 4,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2222001UnEa7QPr5pxCsj",
+    "created": 1792602415650,
+    "type": "session.step.started",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "snapshot": "f37f8efffcc9df627545ad76e96f088effa71660",
+      "started": 1792602414294
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 5,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2223001fjM4zwqBznS0ho",
+    "created": 1792602415651,
+    "type": "session.tool.input.started",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+      "name": "shell"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 6,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2286001J3hUvhfu8MFeUL",
+    "created": 1792602415750,
+    "type": "session.tool.input.ended",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+      "text": "{\"command\":\"printf OK\"}"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 7,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e22880019vjd5HetB9kUSL",
+    "created": 1792602415752,
+    "type": "session.tool.called",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+      "input": {
+        "command": "printf OK"
+      },
+      "executed": false,
+      "state": {
+        "itemId": "fc_0ef31b9fdf22e9af016ad8f12f9d6481918151c0e5b6f7c749"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 8,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e228c0011HuQ0u9FEKESvy",
+    "created": 1792602415756,
+    "type": "session.tool.progress",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+      "metadata": {
+        "shellID": "sh_15f6e228a001l78YKUWT48kqwi"
+      }
+    }
+  },
+  {
+    "id": "evt_15f6e22910013w61GRz1f9Bgcr",
+    "created": 1792602415761,
+    "type": "session.tool.success",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "id": "call_a291bff160ce49e4a1911ac726b5ae65",
+      "content": [
+        {
+          "type": "text",
+          "text": "OK"
+        }
+      ],
+      "metadata": {
+        "status": "completed",
+        "truncated": false,
+        "exit": 0
+      },
+      "executed": false
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 9,
+      "version": 2
+    }
+  },
+  {
+    "id": "evt_15f6e22bb001K4yO5fjjyFFF04",
+    "created": 1792602415803,
+    "type": "session.step.streamed",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 10,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e22cb001IGuuAOiKfjNlmz",
+    "created": 1792602415819,
+    "type": "session.step.ended",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e1cd2001s2qPRHuwCMe19A",
+      "finish": "tool-calls",
+      "providerState": {
+        "responseId": "resp_0ef31b9fdf22e9af016ad8f12edbac8191953fe13b6b7e9548",
+        "serviceTier": "default"
+      },
+      "cost": 0.0010089,
+      "tokens": {
+        "input": 9999,
+        "output": 18,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "snapshot": "f37f8efffcc9df627545ad76e96f088effa71660",
+      "files": []
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 11,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e22cc001Grhs65KUY7PtkQ",
+    "created": 1792602415820,
+    "type": "session.usage.updated",
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "cost": 0.0010089,
+      "tokens": {
+        "input": 9999,
+        "output": 18,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_15f6e26ff001ehGr1HcZJs8olg",
+    "created": 1792602416895,
+    "type": "session.step.started",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC",
+      "snapshot": "f37f8efffcc9df627545ad76e96f088effa71660",
+      "started": 1792602415830
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 12,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2701001M7e1eRtib7IYZN",
+    "created": 1792602416897,
+    "type": "session.text.started",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC",
+      "ordinal": 0
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 13,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2741001f5JnWvw94V0xNx",
+    "created": 1792602416961,
+    "type": "session.text.delta",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC",
+      "ordinal": 0,
+      "delta": "OK"
+    }
+  },
+  {
+    "id": "evt_15f6e2742001NRt4nYcW52Rdfx",
+    "created": 1792602416962,
+    "type": "session.text.ended",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC",
+      "ordinal": 0,
+      "text": "OK",
+      "state": {
+        "itemId": "msg_0ef31b9fdf22e9af016ad8f130d87481919bd44bc822a63284",
+        "phase": "final_answer"
+      }
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 14,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e27440011kIVqsrT9s27rD",
+    "created": 1792602416964,
+    "type": "session.step.streamed",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 15,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e2754001223RhASqPCXFAm",
+    "created": 1792602416980,
+    "type": "session.step.ended",
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    },
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "assistantMessageID": "msg_15f6e22d10016M40oOxZGAhknC",
+      "finish": "stop",
+      "providerState": {
+        "responseId": "resp_0ef31b9fdf22e9af016ad8f13077b08191aaee682b6c67838e",
+        "serviceTier": "default"
+      },
+      "cost": 0.00011826000000000001,
+      "tokens": {
+        "input": 172,
+        "output": 5,
+        "reasoning": 0,
+        "cache": {
+          "read": 9856,
+          "write": 0
+        }
+      },
+      "snapshot": "f37f8efffcc9df627545ad76e96f088effa71660",
+      "files": []
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 16,
+      "version": 1
+    }
+  },
+  {
+    "id": "evt_15f6e27550010NkQZUX7emCCrT",
+    "created": 1792602416981,
+    "type": "session.usage.updated",
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "cost": 0.00112716,
+      "tokens": {
+        "input": 10171,
+        "output": 23,
+        "reasoning": 0,
+        "cache": {
+          "read": 9856,
+          "write": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_15f6e2756001xDWYxp2e54VBdU",
+    "created": 1792602416982,
+    "type": "session.execution.succeeded",
+    "data": {
+      "sessionID": "ses_9e9f491424de4a6a8e3a4952c6435472"
+    },
+    "durable": {
+      "aggregateID": "ses_9e9f491424de4a6a8e3a4952c6435472",
+      "seq": 17,
+      "version": 1
+    }
+  }
+]

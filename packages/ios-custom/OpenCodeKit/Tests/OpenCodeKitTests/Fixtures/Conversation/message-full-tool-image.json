@@ -1,0 +1,295 @@
+{
+  "data": {
+    "id": "msg_2e9efb90e0c349a492ccb5298b7834a6",
+    "time": {
+      "created": 1792602303899,
+      "streamed": 1792602305899,
+      "completed": 1792602311899
+    },
+    "type": "assistant",
+    "agent": "build",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "content": [
+      {
+        "type": "tool",
+        "id": "call_16504d1677b34dd184e73d529b0d3577",
+        "name": "glob",
+        "state": {
+          "status": "completed",
+          "input": {
+            "pattern": "**/*.md"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "docs/infra.md\ndocs/alternativas.md"
+            }
+          ],
+          "metadata": {}
+        },
+        "time": {
+          "created": 1792602303899,
+          "ran": 1792602303899,
+          "completed": 1792602305899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_1d3cd35c294e436988ecb5a2e48b2890",
+        "name": "grep",
+        "state": {
+          "status": "completed",
+          "input": {
+            "pattern": "Plane",
+            "path": "docs"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "docs/alternativas.md:3:Plane"
+            }
+          ],
+          "metadata": {}
+        },
+        "time": {
+          "created": 1792602304899,
+          "ran": 1792602304899,
+          "completed": 1792602306899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_df92c1322a5f4bd8b0ce5d44e3d7aebd",
+        "name": "websearch",
+        "state": {
+          "status": "completed",
+          "input": {
+            "query": "alternativas Linear open source"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Exemplo fictício: Plane, Huly, Focalboard."
+            }
+          ],
+          "metadata": {}
+        },
+        "time": {
+          "created": 1792602305899,
+          "ran": 1792602305899,
+          "completed": 1792602307899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_831b8c76b45745ce89f173bdc3d80c38",
+        "name": "webfetch",
+        "state": {
+          "status": "completed",
+          "input": {
+            "url": "https://example.invalid/plane",
+            "format": "markdown"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "# Plane\nDocumentação fictícia."
+            }
+          ],
+          "metadata": {}
+        },
+        "time": {
+          "created": 1792602306399,
+          "ran": 1792602306399,
+          "completed": 1792602308399
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_00f34d97d4e6479f8ccb70fe097a5fbf",
+        "name": "execute",
+        "state": {
+          "status": "completed",
+          "input": {
+            "code": "return { status: \"ok\" }"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"status\":\"ok\"}"
+            }
+          ],
+          "metadata": {
+            "toolCalls": []
+          }
+        },
+        "time": {
+          "created": 1792602306599,
+          "ran": 1792602306599,
+          "completed": 1792602308599
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_f0e400f44fab4d69aada372ff195b61a",
+        "name": "read",
+        "state": {
+          "status": "completed",
+          "input": {
+            "path": "exemplo.png"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Image read successfully"
+            },
+            {
+              "type": "file",
+              "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6NQAAAABJRU5ErkJggg==",
+              "mime": "image/png"
+            }
+          ],
+          "metadata": {
+            "truncated": false
+          }
+        },
+        "time": {
+          "created": 1792602306699,
+          "ran": 1792602306699,
+          "completed": 1792602308699
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_dc49b2c5520b4e69a4efa605f79573bf",
+        "name": "patch",
+        "state": {
+          "status": "completed",
+          "input": {
+            "patchText": "*** Begin Patch\n*** Update File: docs/alternativas.md\n@@\n-Plane\n+**Plane**\n*** End Patch"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Patch aplicado."
+            }
+          ],
+          "metadata": {
+            "files": [
+              {
+                "file": "docs/alternativas.md",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "patch": "--- docs/alternativas.md\n+++ docs/alternativas.md\n@@ -1 +1 @@\n-Plane\n+**Plane**\n"
+              }
+            ]
+          }
+        },
+        "time": {
+          "created": 1792602306899,
+          "ran": 1792602306899,
+          "completed": 1792602308899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_b72058143fe94668a158f9982cc5b30a",
+        "name": "shell",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "printf 'Falha demonstrativa\\n'; exit 2"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Falha demonstrativa\nExited with code 2"
+            }
+          ],
+          "metadata": {
+            "exit": 2
+          }
+        },
+        "time": {
+          "created": 1792602307899,
+          "ran": 1792602307899,
+          "completed": 1792602309899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_10ebc3db2f7447a3857c20c76d1c10de",
+        "name": "read",
+        "state": {
+          "status": "error",
+          "input": {
+            "path": "ausente.md"
+          },
+          "error": {
+            "type": "ToolError",
+            "message": "File not found: ausente.md"
+          }
+        },
+        "time": {
+          "created": 1792602308899,
+          "ran": 1792602308899,
+          "completed": 1792602310899
+        }
+      },
+      {
+        "type": "tool",
+        "id": "call_0d5b5e1773824e088b6b54e3578fc02a",
+        "name": "question",
+        "state": {
+          "status": "completed",
+          "input": {
+            "questions": [
+              {
+                "header": "Licença",
+                "question": "Qual licença revisar?",
+                "options": [
+                  {
+                    "label": "MIT",
+                    "description": "Permissiva"
+                  }
+                ]
+              }
+            ]
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "MIT"
+            }
+          ],
+          "metadata": {}
+        },
+        "time": {
+          "created": 1792602309899,
+          "ran": 1792602309899,
+          "completed": 1792602311899
+        }
+      },
+      {
+        "type": "text",
+        "text": "Pesquisa e validação concluídas."
+      }
+    ],
+    "finish": "stop",
+    "cost": 0.004,
+    "tokens": {
+      "input": 436700,
+      "output": 240,
+      "reasoning": 60,
+      "cache": {
+        "read": 4000,
+        "write": 0
+      }
+    }
+  }
+}

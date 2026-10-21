@@ -1,0 +1,40 @@
+{
+  "data": {
+    "id": "ses_f96b09a9f3054ba8b8c860bf27b193ca",
+    "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+    "agent": "build",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "cost": 0.02,
+    "tokens": {
+      "input": 436700,
+      "output": 240,
+      "reasoning": 60,
+      "cache": {
+        "read": 4000,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792343203899,
+      "updated": 1792602405305,
+      "idle": 1792602402899,
+      "viewed": 1792602402899
+    },
+    "title": "Conversa A — trabalhando",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ],
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    }
+  }
+}
