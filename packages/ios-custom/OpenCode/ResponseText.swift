@@ -83,6 +83,7 @@ struct SelectableResponseText: UIViewRepresentable {
 
 struct ResponseMarkdown: View {
   @Environment(\.appTheme) private var theme
+  @Environment(ToastCenter.self) private var toast
   let text: String
   let messageID: String
   let partID: String
@@ -100,9 +101,11 @@ struct ResponseMarkdown: View {
               Spacer()
               Button {
                 UIPasteboard.general.string = block.text
+                toast.show("Código copiado")
               } label: {
                 Image(systemName: "doc.on.doc")
               }
+              .buttonStyle(.plain)
               .accessibilityLabel("Copiar código")
             }.foregroundStyle(theme.color(.textSecondary))
             SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme)

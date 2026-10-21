@@ -190,10 +190,15 @@ struct ConversationModelPicker: View {
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
   @State private var search = ""
+  @State private var detent = PresentationDetent.large
+  @FocusState private var searchFocused: Bool
   private var selection: ModelReference? { store.selectedModel(draft) }
   private var models: [ModelInfo] {
     ConversationProjection.visibleModels(store.models, preferences: store.preferences?.data.models)
-      .filter { ConversationProjection.matchesModel($0, query: search) }
+      .filter {
+        ConversationProjection.matchesModel(
+          $0, query: search, providerName: store.providerName($0.providerID))
+      }
   }
   private var favorites: [ModelInfo] {
     let saved = store.preferences?.data.models
@@ -208,42 +213,16 @@ struct ConversationModelPicker: View {
       return first == second ? a.name < b.name : first < second
     }
   }
-  private var providers: [String] {
-    let order = store.preferences?.data.models?.providerOrder ?? []
-    return Set(models.map(\.providerID)).sorted {
-      let a = order.firstIndex(of: $0) ?? Int.max
-      let b = order.firstIndex(of: $1) ?? Int.max
-      return a == b ? $0 < $1 : a < b
-    }
+  private var providers: [ProviderInfo] {
+    ConversationProjection.modelProviders(
+      models, providers: store.providers,
+      order: store.preferences?.data.models?.providerOrder ?? [])
   }
   var body: some View {
     NavigationStack {
       List {
-        if let selected = store.models.first(where: {
-          $0.id == selection?.id && $0.providerID == selection?.providerID
-        }) {
-          Section {
-            Picker(
-              "Esforço · \(selected.name)",
-              selection: Binding(
-                get: { selection?.variant ?? "default" },
-                set: { value in
-                  guard var model = selection else { return }
-                  model.variant = value == "default" ? nil : value
-                  draft.model = model
-                })
-            ) {
-              Text("Padrão").tag("default")
-              ForEach((selected.variants ?? []).filter { $0.id != "default" }) {
-                Text($0.id).tag($0.id)
-              }
-            }.pickerStyle(.menu).listRowBackground(theme.color(.surface))
-          } footer: {
-            Text(
-              "A seleção só é aplicada ao enviar. Mensagens na fila usam a seleção ativa quando forem executadas."
-            )
-          }
-        }
+        effortSection
+        defaultSection
         if !favorites.isEmpty {
           Section("Favoritos") {
             ForEach(favorites, id: \.identity) { modelRow($0, showProvider: true) }
@@ -253,57 +232,166 @@ struct ConversationModelPicker: View {
           Section {
             Text(
               search.isEmpty
-                ? "Nenhum modelo visível. Configure os modelos na aplicação web."
+                ? "Nenhum modelo visível. Escolha quais modelos mostrar."
                 : "Nenhum modelo encontrado."
             )
             .font(.subheadline).foregroundStyle(theme.color(.textSecondary))
             .listRowBackground(theme.color(.surface))
           }
         }
-        ForEach(providers, id: \.self) { provider in
-          Section(provider) {
-            ForEach(
-              models.filter { $0.providerID == provider }.sorted { $0.name < $1.name }, id: \.id
-            ) { model in
-              modelRow(model)
-            }
-          }
+        ForEach(providers) { provider in
+          providerSection(provider)
+        }
+        Section {
+          NavigationLink {
+            ModelVisibilityView(store: store)
+          } label: {
+            Label("Gerenciar modelos", systemImage: "slider.horizontal.3")
+          }.listRowBackground(theme.color(.surface))
         }
       }
       .scrollContentBackground(.hidden).background(theme.color(.background))
+      .toastOverlay(store.toast)
       .foregroundStyle(theme.color(.text)).tint(theme.color(.primary))
       .searchable(text: $search, prompt: "Buscar modelo")
+      .searchFocused($searchFocused)
+      .onSubmit(of: .search) { searchFocused = false }
       .navigationTitle("Modelo e esforço").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } } }
-    }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }.presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.visible)
+  }
+  @ViewBuilder private var effortSection: some View {
+    if let selected = store.models.first(where: {
+      $0.id == selection?.id && $0.providerID == selection?.providerID
+    }) {
+      Section {
+        Picker(
+          "Esforço · \(selected.name)",
+          selection: Binding(
+            get: { selection?.variant ?? "default" },
+            set: { value in
+              guard var model = selection else { return }
+              model.variant = value == "default" ? nil : value
+              draft.model = model
+            })
+        ) {
+          Text("Padrão").tag("default")
+          ForEach((selected.variants ?? []).filter { $0.id != "default" }) {
+            Text($0.id).tag($0.id)
+          }
+        }.pickerStyle(.menu).listRowBackground(theme.color(.surface))
+      } footer: {
+        Text(
+          "A seleção só é aplicada ao enviar. Mensagens na fila usam a seleção ativa quando forem executadas."
+        )
+      }
+    }
+  }
+  @ViewBuilder private var defaultSection: some View {
+    if let model = store.preferences?.data.models?.default {
+      Section("Padrão para novas sessões") {
+        HStack {
+          Text(
+            store.modelLabel(
+              ModelReference(
+                id: model.modelID, providerID: model.providerID, variant: model.variant)))
+          Spacer()
+          Button("Limpar") {
+            Task {
+              await store.updateModels([.modelDefault(nil)], success: "Modelo padrão removido")
+            }
+          }
+          .accessibilityLabel("Limpar modelo padrão").disabled(store.acting.contains("models"))
+        }.font(.subheadline).listRowBackground(theme.color(.surface))
+      }
+    }
+  }
+  private func providerSection(_ provider: ProviderInfo) -> some View {
+    let items = models.filter { $0.providerID == provider.id }.sorted {
+      $0.name.localizedCompare($1.name) == .orderedAscending
+    }
+    return Section(provider.name) {
+      ForEach(items, id: \.id) { model in modelRow(model, showProvider: false) }
+    }
   }
   private func modelRow(_ model: ModelInfo, showProvider: Bool = false) -> some View {
-    Button {
-      let preference = store.preferences?.data.models
-      let saved = preference?.variant[model.identity]
-      let configured = preference?.default
-      let variant =
-        configured?.modelID == model.id && configured?.providerID == model.providerID
-        ? configured?.variant : saved
-      draft.model = ModelReference(
-        id: model.id, providerID: model.providerID,
-        variant: model.variants?.contains { $0.id == variant } == true ? variant : nil)
-    } label: {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(model.name)
-          if showProvider {
-            Text(model.providerID).font(.caption).foregroundStyle(theme.color(.textSecondary))
+    let favorite = ConversationProjection.favorite(
+      model, preferences: store.preferences?.data.models)
+    let context = model.limit.context.formatted(
+      .number.locale(Locale(identifier: "pt_BR")).notation(.compactName).precision(
+        .fractionLength(0...1)))
+    let subtitle =
+      "\(showProvider ? store.providerName(model.providerID) + " · " : "")\(context) tokens · \(model.variants?.count ?? 0) níveis"
+    return HStack(spacing: 12) {
+      Button {
+        draft.model = reference(model)
+      } label: {
+        HStack {
+          VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+              Text(model.name).foregroundStyle(theme.color(.text))
+              if isDefault(model) {
+                Label("Padrão", systemImage: "pin.fill").font(.caption2).foregroundStyle(
+                  theme.color(.info))
+              }
+            }
+            Text(subtitle)
+              .font(.caption).foregroundStyle(theme.color(.textSecondary))
           }
+          Spacer(minLength: 0)
+          if model.id == selection?.id && model.providerID == selection?.providerID {
+            Image(systemName: "checkmark")
+          }
+        }.contentShape(Rectangle())
+      }.buttonStyle(.plain).accessibilityIdentifier("choose-\(model.identity)")
+      Button {
+        Task {
+          await store.updateModels(
+            [.modelFavorite(providerID: model.providerID, modelID: model.id, favorite: !favorite)],
+            success: !favorite ? "Modelo adicionado aos favoritos" : "Modelo removido dos favoritos"
+          )
         }
-        if ConversationProjection.favorite(model, preferences: store.preferences?.data.models) {
-          Image(systemName: "star.fill").foregroundStyle(theme.color(.primary)).font(.caption)
-        }
-        Spacer()
-        if model.id == selection?.id && model.providerID == selection?.providerID {
-          Image(systemName: "checkmark")
-        }
+      } label: {
+        Image(systemName: favorite ? "star.fill" : "star")
+          .foregroundStyle(theme.color(.primary)).frame(width: 32, height: 36)
+      }.buttonStyle(.borderless).disabled(store.acting.contains("models"))
+        .accessibilityLabel("\(favorite ? "Desfavoritar" : "Favoritar") \(model.name)")
+        .accessibilityIdentifier("favorite-\(model.identity)")
+    }
+    .contextMenu { defaultAction(model) }
+    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+      defaultAction(model).tint(theme.color(.primary))
+    }
+    .listRowBackground(theme.color(.surface))
+  }
+  private func isDefault(_ model: ModelInfo) -> Bool {
+    let current = store.preferences?.data.models?.default
+    return current?.providerID == model.providerID && current?.modelID == model.id
+  }
+  private func defaultAction(_ model: ModelInfo) -> some View {
+    Button(
+      isDefault(model) ? "Limpar modelo padrão" : "Usar como padrão para novas sessões",
+      systemImage: "pin"
+    ) {
+      Task {
+        await store.updateModels(
+          [.modelDefault(isDefault(model) ? nil : reference(model))],
+          success: isDefault(model) ? "Modelo padrão removido" : "Modelo padrão definido")
       }
-    }.listRowBackground(theme.color(.surface))
+    }.disabled(store.acting.contains("models"))
+  }
+  private func reference(_ model: ModelInfo) -> ModelReference {
+    if let selection, selection.id == model.id && selection.providerID == model.providerID {
+      return selection
+    }
+    let preference = store.preferences?.data.models
+    let saved = preference?.variant[model.identity]
+    let configured = preference?.default
+    let variant =
+      configured?.modelID == model.id && configured?.providerID == model.providerID
+      ? configured?.variant : saved
+    return ModelReference(
+      id: model.id, providerID: model.providerID,
+      variant: model.variants?.contains { $0.id == variant } == true ? variant : nil)
   }
 }

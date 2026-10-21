@@ -20,6 +20,14 @@ const previous: ConversationSeed | undefined = await Bun.file(manifest)
   .catch(() => undefined)
 if (args.values.reset || args.values.stop) {
   for (const session of [...(previous?.sessions ?? [])].reverse()) {
+    // Stale-request UI checks can already have removed an owned seed session.
+    const current = await fetch(new URL(`/api/session/${session.id}`, server.url), {
+      headers: server.headers,
+      signal: AbortSignal.timeout(30_000),
+    })
+    await current.arrayBuffer()
+    if (current.status === 404) continue
+    if (!current.ok) throw new Error(`Read seed session: HTTP ${current.status}`)
     await server.api(`/api/session/${session.id}/interrupt`, {})
     if (args.values.reset) await server.api(`/api/session/${session.id}`, undefined, "DELETE")
   }

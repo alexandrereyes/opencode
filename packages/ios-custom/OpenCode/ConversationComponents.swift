@@ -235,7 +235,10 @@ struct ConversationStep: View {
             Spacer(minLength: 0)
           }
           .foregroundStyle(
-            theme.color(part.failed || waiting != nil ? .error : part.running ? .success : .text)
+            theme.color(
+              waiting != nil
+                ? (part.name == "question" ? .info : .error)
+                : part.failed ? .error : part.running ? .success : .text)
           )
           .padding(part.running ? 9 : 2)
           .background(
@@ -278,8 +281,9 @@ struct ConversationStep: View {
               part.diffs.isEmpty
               ? outputs[key] ?? part.output
               : part.diffs.compactMap { $0["patch"]?.string }.joined(separator: "\n")
+            store.toast.show(part.diffs.isEmpty ? "Saída copiada" : "Diff copiado")
           }
-          .font(.system(size: 12))
+          .font(.system(size: 12)).buttonStyle(.plain)
         }
         .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading).padding(10)

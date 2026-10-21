@@ -168,9 +168,10 @@ struct ConversationView: View {
           ).padding(10)
         }
       }
-      timeline
+      timeline.toastOverlay(conversation.toast)
     }
     .background(theme.color(.background))
+    .environment(conversation.toast)
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let parent = conversation.session?.parentID {
         VStack(spacing: 6) {
@@ -623,10 +624,11 @@ private struct ConversationMessageView: View {
               .system(size: 11))
             Button {
               UIPasteboard.general.string = store.responseText(endingAt: message.id)
+              store.toast.show("Resposta copiada")
             } label: {
               Image(systemName: "doc.on.doc").font(.system(size: 13))
             }
-            .accessibilityLabel("Copiar resposta")
+            .buttonStyle(.plain).accessibilityLabel("Copiar resposta")
           }.foregroundStyle(theme.color(.textSecondary))
         }
       } else if message.type == "shell" {

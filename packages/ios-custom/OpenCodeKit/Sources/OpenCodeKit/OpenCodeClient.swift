@@ -165,6 +165,11 @@ public struct OpenCodeClient: Sendable {
       "/api/agent", query: [URLQueryItem(name: "location[directory]", value: directory)])
     return response.data
   }
+  public func providers(directory: String) async throws -> [ProviderInfo] {
+    let response: DataResponse<[ProviderInfo]> = try await get(
+      "/api/provider", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
   public func familyPage(_ sessionID: String, after: String? = nil) async throws -> FamilyPage {
     struct Input: Encodable {
       let sessionID: String

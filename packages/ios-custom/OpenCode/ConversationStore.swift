@@ -9,6 +9,8 @@ import OpenCodeKit
   private(set) var models: [ModelInfo] = []
   private(set) var defaultModel: ModelInfo?
   private(set) var agents: [AgentInfo] = []
+  private(set) var providers: [ProviderInfo] = []
+  let toast = ToastCenter()
   private(set) var family: FamilySnapshot?
   private(set) var children: [Session] = []
   private(set) var active: Set<String> = []
@@ -66,6 +68,7 @@ import OpenCodeKit
       children: children, active: active, shells: shells)
   }
   var runningCount: Int { runningWork.count }
+  func providerName(_ id: String) -> String { providers.first { $0.id == id }?.name ?? id }
   func modelLabel(_ ref: ModelReference?) -> String {
     [
       models.first { $0.id == ref?.id && $0.providerID == ref?.providerID }?.name ?? ref?.id,
@@ -112,30 +115,50 @@ import OpenCodeKit
       draft.text = NSAttributedString()
       draft.editing = nil
       draft.submission = nil
+      toast.show(
+        submission.request.delivery == .queue ? "Mensagem adicionada à fila" : "Mensagem enviada")
       await refresh()
     } catch {
       draft.error =
         "Não foi possível concluir o envio. Seu rascunho foi mantido. \(error.localizedDescription)"
+      toast.show("Não foi possível enviar. Seu rascunho foi mantido.", kind: .error)
     }
   }
-  func act(_ key: String, operation: () async throws -> Void) async {
+  func act(_ key: String, success: String, operation: () async throws -> Void) async {
     guard acting.insert(key).inserted else { return }
     defer { acting.remove(key) }
     do {
       try await operation()
+      toast.show(success)
       await refresh()
-    } catch { self.error = "Não foi possível concluir a ação. \(error.localizedDescription)" }
+    } catch {
+      let message = "Não foi possível concluir a ação. \(error.localizedDescription)"
+      self.error = message
+      toast.show(message, kind: .error)
+    }
   }
   func promote(_ item: InboxItem) async {
-    await act(item.id) { try await client.promoteInbox(item.id, sessionID: item.sessionID) }
+    await act(item.id, success: "Mensagem marcada para enviar agora") {
+      try await client.promoteInbox(item.id, sessionID: item.sessionID)
+    }
   }
   func cancel(_ item: InboxItem) async {
-    await act(item.id) { try await client.cancelInbox(item.id, sessionID: item.sessionID) }
+    await act(item.id, success: "Mensagem removida da fila") {
+      try await client.cancelInbox(item.id, sessionID: item.sessionID)
+    }
   }
-  func stop() async { await act("stop") { try await client.interrupt(id, resume: true) } }
-  func background() async { await act("background") { try await client.background(id) } }
+  func stop() async {
+    await act("stop", success: "Execução interrompida") {
+      try await client.interrupt(id, resume: true)
+    }
+  }
+  func background() async {
+    await act("background", success: "Tarefa movida para background") {
+      try await client.background(id)
+    }
+  }
   func stop(_ work: RunningWork) async {
-    await act(work.id) {
+    await act(work.id, success: "Tarefa interrompida") {
       if let child = work.sessionID { try await client.interrupt(child) }
       if let shell = work.shellID, let directory = session?.location.directory {
         try await client.stopShell(shell, directory: directory)
@@ -143,13 +166,29 @@ import OpenCodeKit
     }
   }
   func reply(_ permission: PermissionRequest, decision: PermissionReply.Decision) async {
-    await act(permission.id) { try await client.reply(permission, decision: decision) }
+    await act(
+      permission.id, success: decision == .reject ? "Permissão negada" : "Permissão concedida"
+    ) { try await client.reply(permission, decision: decision) }
   }
   func reply(_ form: PendingForm, answer: QuestionReply) async {
-    await act(form.id) { try await client.reply(form, answer: answer) }
+    await act(form.id, success: "Resposta enviada") { try await client.reply(form, answer: answer) }
   }
   func dismiss(_ form: PendingForm) async {
-    await act(form.id) { try await client.dismiss(form) }
+    await act(form.id, success: "Pergunta descartada") { try await client.dismiss(form) }
+  }
+  func updateModels(_ intents: [PreferenceIntent], success: String) async {
+    guard acting.insert("models").inserted else { return }
+    defer { acting.remove("models") }
+    do {
+      for intent in intents {
+        let updated = try await client.mutate(intent)
+        if updated.revision >= (preferences?.revision ?? -1) { preferences = updated }
+      }
+      toast.show(success)
+    } catch {
+      toast.show(
+        "Não foi possível atualizar os modelos. \(error.localizedDescription)", kind: .error)
+    }
   }
   func responseText(endingAt id: String) -> String {
     guard let end = messages.firstIndex(where: { $0.id == id }) else { return "" }
@@ -272,6 +311,8 @@ import OpenCodeKit
       let nextModels = models.isEmpty ? try await client.models(directory: directory) : models
       let nextDefault = !ready ? try await client.defaultModel(directory: directory) : defaultModel
       let nextAgents = agents.isEmpty ? try await client.agents(directory: directory) : agents
+      let nextProviders =
+        providers.isEmpty ? try await client.providers(directory: directory) : providers
       async let familyValue = client.family(id)
       async let shellValue = client.shells(directory: directory)
       async let located = client.locate([directory])
@@ -296,13 +337,16 @@ import OpenCodeKit
       models = nextModels
       defaultModel = nextDefault
       agents = nextAgents
+      providers = nextProviders
       family = snapshots.0
       children = members
       shells = snapshots.1
       branch = snapshots.2.first?.branch ?? URL(fileURLWithPath: directory).lastPathComponent
       ownerMessages = parentMessages
       inbox = queueValue
-      preferences = preferencesValue
+      if preferencesValue.revision >= (preferences?.revision ?? -1) {
+        preferences = preferencesValue
+      }
       ready = true
       revision += 1
       error = nil

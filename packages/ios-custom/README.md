@@ -509,11 +509,16 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
   queue applies neither selection endpoint. Busy sends read `followUpBehavior`; long-pressing Send offers its
   alternate. Idle sends always steer. Queued model/agent metadata is presentation, not a per-prompt execution
   override: later delivery uses the active session selection, just like the web.
-- The model sheet shows explicit `visibility:"show"` entries only, excludes disabled models, puts favorites first,
-  groups by provider and searches name, ID and provider. Effort uses that model's actual variants. The current
-  model's effort remains available if the visible list is empty. Visibility/favorite management remains in the web
-  application; the native picker does not mutate those global preferences. The agent menu lists non-hidden primary
-  and `all` agents. A session without a selected model uses preferences/default-model discovery.
+- The model sheet shows explicit `visibility:"show"` entries only and excludes disabled models. Favorites remain in
+  stored order at the top and in their provider groups. Provider order follows saved ranks, then the PWA's popular
+  providers, then provider name; rows sort by model name. Search mirrors the PWA's Unicode letter/number normalization,
+  substring and no-spaces matching across model name, ID and **provider name**. Effort uses the model's real variants.
+  Stars mutate `model.favorite` without making hidden models visible. A row's swipe/context menu sets or clears
+  `model.default` with its variant; a badge and a separate Clear action identify the default for new sessions.
+  `Gerenciar modelos` lists every enabled model, including hidden search results. Model/provider switches send
+  `model.visibility` intents; provider switches affect **all** enabled models of that provider, not only search matches.
+  Mutations retain the newest acknowledged preference revision while SSE snapshots catch up. The agent menu lists
+  non-hidden primary and `all` agents. A session without a selected model uses preferences/default-model discovery.
 - The tray has Stop (`resume=true`), conditional Background and queued user items. Pending request cards take its
   running row's place while the session waits for you; queued items remain available. Editing submits a replacement
   ID before cancelling the original; no text PATCH or ID reuse is attempted. All inbox events revalidate the tray.
@@ -522,17 +527,25 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
   and dismiss with DELETE. Sending a normal prompt never answers a form. Generic non-question forms and field types
   other than string/multiselect are not implemented by this wave and are identified as unsupported rather than
   silently interpreted. Pending tool lines show “Aguardando permissão/resposta” without a ticking elapsed timer.
+  Questions use the info role for their icon/title/border and pending tool line; permissions retain the error role.
 - The agents sheet and header share one running-work projection. It excludes foreground shells and the viewed
   child, opens real child IDs, reveals a background shell's tool (expanding its group), and confirms individual
-  interruption. Context details use the last measured assistant and its model, with token components, cache hit,
+  interruption, with a visible stop button as well as trailing swipe/context actions. The sheet starts at medium
+  height, colors the agent name and keeps elapsed time on the row. Context details start at medium height and expand
+  to large; they use the last measured assistant and its model, with token components, cache hit,
   session/descendant/total cost, model/provider, branch and directory. No extra child transcript is fetched for usage.
 - The transcript is still a recycling `List`. An empty older-page response no longer keeps a top anchor during
   initial Markdown measurement; active tail-following does not acquire a history anchor. No off-screen parsed text,
   image or UIKit view cache was added by the action cards.
+- `ToastCenter.show(_:kind:)` and `.toastOverlay(_:)` are the shared feedback API for later waves. The glass capsule
+  sits below the conversation/sheet header, replaces the preceding toast, announces through VoiceOver and dismisses
+  after four seconds (six for errors). Copy response/code/diff, sending failures, request replies, queue operations,
+  interruption/background and model preference changes all use it. Failed drafts retain their persistent error too.
 
 The Swift Testing suite includes `ConversationActionTests.swift`: wire bodies and HTTP methods/owners, admission
 retry identity/order, queue replacement/failure, permission and form responses including dismissal, visibility and
-favorites, running-work rules, context math and pending tool labels. There are 53 tests across the package.
+favorites, running-work rules, context math and pending tool labels. The review adds the exact PWA search cases,
+provider ordering and all three model preference intent encodings. There are 57 tests across the package.
 
 Wave 2 was built without new warnings and exercised against port 4177: idle/busy and alternate submission, model and
 effort selection, a primary-agent switch to `utra` on send, queue edit/promote/remove, Background, root/child/shell
@@ -542,19 +555,21 @@ details. Prompt executions used only `llm-proxy/gpt-6-luna` / `low`. The convers
 themes lives in `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda2/`:
 `a-{dark,light}.png`, `b-{dark,light}.png`, `d-{dark,light}.png`, `models-{dark,light}.png`,
 `effort-{dark,light}.png`, `agents-{dark,light}.png` and `context-{dark,light}.png`.
-`context-info-{dark,light}.png` shows the lower cost/model/directory section. The restored preference snapshot has
-no explicitly visible models, so the final picker screenshots correctly show an empty catalog and the current
-model's effort. Model switching/search/favorites were also checked while the independent PWA reference capture
-temporarily exposed Luna 6 and Luna 6 - fast; the native app did not change those global preferences.
+`context-info-{dark,light}.png` shows the lower cost/model/directory section. Review evidence adds
+`models-search-{dark,light}.png`, `models-manage-{dark,light}.png`, and `toast-{dark,light}.png`.
+The sandbox is deliberately left with Luna 6, Luna 6 - fast, Anthropic Haiku 5.5 and Opus 5.5 visible, Luna 6 favorited,
+and Luna 6 / low the default for new sessions, all configured through the native UI. Other servers' preferences are
+unchanged. The three obsolete debug captures were deleted. Error toasts were exercised with genuinely stale B/D
+requests (only those owned seed sessions were deleted); `seed-conversation.ts --reset` now skips already absent
+manifest members so this verification remains safely repeatable.
 
 “Permitir sempre” persists a **project** permission, not a session-only choice. Before resetting its test, list
 `/api/permission/saved?projectID=<conversation-project>` and remove only the exact newly created test rule via
 `DELETE /api/permission/saved/<id>`; never clear shared rules indiscriminately. Otherwise a fresh B can finish
 without asking and the seed's readiness wait times out. The wave-2 test's own rule was removed before the final
-reset. After the server's tool-catalog rescan, one restored Explore child finished with “Não encontrei uma ferramenta
-shell disponível”; the final capsule/sheet therefore truthfully shows one active child instead of the intended two.
-The root shell, queue, B's permission and D's question remain in their restored states. This is a seed/runtime
-limitation, not a fabricated second task in the UI.
+reset. During the first wave-2 capture, one restored Explore child finished with “Não encontrei uma ferramenta shell
+disponível” after a tool-catalog rescan. The capsule always reflects actual runtime activity rather than fabricating
+the intended two tasks. The root shell, queue, B's permission and D's question are restored for final captures.
 
 For waves 3–4: add structured token serialization at the `PromptRequest` boundary and token editing in
 `ComposerTextView`; keep `NSAttributedString` as the editing source and UTF-16 offsets on the wire. Metadata and

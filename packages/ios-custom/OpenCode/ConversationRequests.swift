@@ -73,7 +73,7 @@ struct ConversationQuestionCard: View {
         form.title == "Questions" ? "Uma pergunta para você" : form.title,
         systemImage: "questionmark.bubble"
       )
-      .font(.subheadline.weight(.semibold)).foregroundStyle(theme.color(.error))
+      .font(.subheadline.weight(.semibold)).foregroundStyle(theme.color(.info))
       ForEach(form.fields.filter { QuestionReply.visible($0, values: reply.answer) }) { field in
         VStack(alignment: .leading, spacing: 10) {
           if let title = field.title { Text(title).font(.subheadline.weight(.semibold)) }
@@ -173,7 +173,8 @@ struct ConversationQuestionCard: View {
     .fixedSize(horizontal: false, vertical: true)
     .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 15))
     .overlay {
-      RoundedRectangle(cornerRadius: 15).strokeBorder(theme.color(.border), lineWidth: 0.7)
+      RoundedRectangle(cornerRadius: 15).strokeBorder(
+        theme.color(.info).opacity(0.4), lineWidth: 0.7)
     }
     .disabled(store.acting.contains(form.id))
   }
@@ -228,6 +229,7 @@ struct ConversationTray: View {
                   }.frame(maxWidth: .infinity, alignment: .leading)
                   Button {
                     draft.restore(item)
+                    store.toast.show("Mensagem pronta para editar")
                   } label: {
                     Image(systemName: "pencil")
                   }

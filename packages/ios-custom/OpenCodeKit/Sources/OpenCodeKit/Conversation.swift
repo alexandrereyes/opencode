@@ -23,6 +23,15 @@ public struct ModelInfo: Codable, Sendable {
   public struct Limit: Codable, Sendable { public let context: Double }
 }
 
+public struct ProviderInfo: Codable, Sendable, Identifiable {
+  public let id: String
+  public let name: String
+  public init(id: String, name: String) {
+    self.id = id
+    self.name = name
+  }
+}
+
 public struct AgentInfo: Codable, Sendable, Identifiable {
   public let id: String
   public let name: String

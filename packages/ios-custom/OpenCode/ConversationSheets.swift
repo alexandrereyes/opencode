@@ -11,48 +11,71 @@ struct ConversationAgentsSheet: View {
     NavigationStack {
       List {
         ForEach(store.runningWork) { work in
-          Button {
-            dismiss()
-            open(work)
-          } label: {
-            HStack(spacing: 12) {
-              let agent = store.agents.first { $0.id == work.agent }
-              if let id = work.agent {
-                AgentPixels(color: theme.agentColor(agent, id: id))
-              } else {
-                Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
-              }
-              VStack(alignment: .leading, spacing: 5) {
-                Text(
-                  work.agent.flatMap { id in store.agents.first { $0.id == id }?.name }
-                    ?? "Shell em background"
-                )
-                .font(.subheadline.weight(.medium)).foregroundStyle(theme.color(.text))
-                Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
-                  .lineLimit(3)
+          HStack(spacing: 8) {
+            Button {
+              dismiss()
+              open(work)
+            } label: {
+              HStack(spacing: 12) {
+                let agent = store.agents.first { $0.id == work.agent }
+                if let id = work.agent {
+                  AgentPixels(color: theme.agentColor(agent, id: id))
+                } else {
+                  Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
+                }
+                ViewThatFits(in: .horizontal) {
+                  HStack(spacing: 8) {
+                    Text(agent?.name ?? "Shell em background")
+                      .font(.subheadline.weight(.medium))
+                      .foregroundStyle(
+                        work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text)
+                      ).fixedSize()
+                    Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
+                      .fixedSize()
+                  }
+                  VStack(alignment: .leading, spacing: 5) {
+                    Text(
+                      work.agent.flatMap { id in store.agents.first { $0.id == id }?.name }
+                        ?? "Shell em background"
+                    )
+                    .font(.subheadline.weight(.medium)).foregroundStyle(
+                      work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+                    Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
+                      .lineLimit(2)
+                  }
+                }
+                Spacer(minLength: 3)
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                   Text(
                     ConversationProjection.duration(
                       context.date.timeIntervalSince1970 * 1000 - work.started)
                   )
                   .font(.caption2).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
+                  .fixedSize()
                 }
-              }
-              Spacer()
-              Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.color(.icon))
-            }.padding(.vertical, 5)
-          }.disabled(work.sessionID == nil && work.shellID == nil)
-            .swipeActions { Button("Parar", role: .destructive) { stopping = work } }
-            .contextMenu {
-              Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work }
-            }
-            .listRowBackground(theme.color(.surface))
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(
+                  theme.color(.icon))
+              }.padding(.vertical, 5)
+            }.buttonStyle(.plain).disabled(work.sessionID == nil && work.shellID == nil)
+            Button {
+              stopping = work
+            } label: {
+              Image(systemName: "stop.circle").font(.title3).foregroundStyle(theme.color(.error))
+                .frame(width: 32, height: 40)
+            }.buttonStyle(.borderless).accessibilityLabel("Parar \(work.title)")
+          }
+          .swipeActions { Button("Parar", role: .destructive) { stopping = work } }
+          .contextMenu {
+            Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work }
+          }
+          .listRowBackground(theme.color(.surface))
         }
         if store.runningWork.isEmpty {
           Text("Nenhuma tarefa em execução.").foregroundStyle(theme.color(.textSecondary))
         }
       }
       .scrollContentBackground(.hidden).background(theme.color(.background))
+      .toastOverlay(store.toast)
       .navigationTitle("Agentes e tarefas").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } } }
       .confirmationDialog(
@@ -67,7 +90,7 @@ struct ConversationAgentsSheet: View {
       } message: {
         Text(stopping?.title ?? "")
       }
-    }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible).tint(
+    }.presentationDetents([.medium]).presentationDragIndicator(.visible).tint(
       theme.color(.primary))
   }
 }
@@ -77,6 +100,7 @@ struct ConversationContextSheet: View {
   @Environment(\.dismiss) private var dismiss
   let store: ConversationStore
   private var details: ContextDetails { store.details }
+  @State private var detent = PresentationDetent.medium
   var body: some View {
     NavigationStack {
       List {
@@ -128,7 +152,8 @@ struct ConversationContextSheet: View {
       )
       .navigationTitle("Contexto da conversa").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } } }
-    }.presentationDetents([.large]).presentationDragIndicator(.visible).tint(theme.color(.primary))
+    }.presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.visible)
+      .tint(theme.color(.primary))
   }
   private func row(_ title: String, _ value: String) -> some View {
     HStack {

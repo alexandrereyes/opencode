@@ -72,13 +72,37 @@ public enum PreferenceIntent: Encodable, Sendable {
   case open(directory: String)
   case close(directory: String)
   case move(directory: String, toIndex: Int)
+  case modelFavorite(providerID: String, modelID: String, favorite: Bool)
+  case modelVisibility(providerID: String, modelID: String, visible: Bool)
+  case modelDefault(ModelReference?)
 
   private enum CodingKeys: String, CodingKey {
-    case type, session, pinned, muted, server, directory, toIndex
+    case type, session, pinned, muted, server, directory, toIndex, providerID, modelID, favorite,
+      visibility, model
   }
   public func encode(to encoder: any Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
     switch self {
+    case .modelFavorite(let providerID, let modelID, let favorite):
+      try values.encode("model.favorite", forKey: .type)
+      try values.encode(providerID, forKey: .providerID)
+      try values.encode(modelID, forKey: .modelID)
+      try values.encode(favorite, forKey: .favorite)
+    case .modelVisibility(let providerID, let modelID, let visible):
+      try values.encode("model.visibility", forKey: .type)
+      try values.encode(providerID, forKey: .providerID)
+      try values.encode(modelID, forKey: .modelID)
+      try values.encode(visible ? "show" : "hide", forKey: .visibility)
+    case .modelDefault(let model):
+      try values.encode("model.default", forKey: .type)
+      if let model {
+        try values.encode(
+          Preferences.Models.Key(
+            providerID: model.providerID, modelID: model.id,
+            variant: model.variant), forKey: .model)
+      } else {
+        try values.encodeNil(forKey: .model)
+      }
     case .pin(let session, let pinned):
       try values.encode("sidebar.pin", forKey: .type)
       try values.encode(session, forKey: .session)

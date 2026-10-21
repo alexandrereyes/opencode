@@ -11,6 +11,88 @@ private func actionFixture<T: Decodable>(_ name: String, _ type: T.Type) throws 
 }
 private let actionModel = ModelReference(id: "gpt-6-luna", providerID: "llm-proxy", variant: "low")
 
+@Test func modelPreferenceIntentsMatchThePluginContract() throws {
+  func encoded(_ intent: PreferenceIntent) throws -> JSONValue {
+    try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(intent))
+  }
+  for favorite in [true, false] {
+    #expect(
+      try encoded(
+        .modelFavorite(providerID: "llm-proxy", modelID: "gpt-6-luna", favorite: favorite))
+        == .object([
+          "type": .string("model.favorite"), "providerID": .string("llm-proxy"),
+          "modelID": .string("gpt-6-luna"), "favorite": .bool(favorite),
+        ]))
+  }
+  for visible in [true, false] {
+    #expect(
+      try encoded(.modelVisibility(providerID: "anthropic", modelID: "opus", visible: visible))
+        == .object([
+          "type": .string("model.visibility"), "providerID": .string("anthropic"),
+          "modelID": .string("opus"), "visibility": .string(visible ? "show" : "hide"),
+        ]))
+  }
+  #expect(
+    try encoded(.modelDefault(actionModel))
+      == .object([
+        "type": .string("model.default"),
+        "model": .object([
+          "providerID": .string("llm-proxy"),
+          "modelID": .string("gpt-6-luna"), "variant": .string("low"),
+        ]),
+      ]))
+  #expect(
+    try encoded(.modelDefault(nil)) == .object(["type": .string("model.default"), "model": .null]))
+  let noVariant = try encoded(.modelDefault(ModelReference(id: "x", providerID: "y")))
+  #expect(noVariant.object?["model"]?.object?["variant"] == nil)
+}
+
+@Test func modelSearchMatchesThePWACases() {
+  for query in ["gpt 5", "gpt-5", "gpt5"] {
+    #expect(ConversationProjection.matchesModelSearch(query, values: ["GPT-5.5"]))
+  }
+  #expect(
+    ConversationProjection.matchesModelSearch("open ai", values: ["GPT-5.5", "gpt-5.5", "OpenAI"]))
+  #expect(
+    !ConversationProjection.matchesModelSearch("claude", values: ["GPT-5.5", "gpt-5.5", "OpenAI"]))
+  #expect(
+    ConversationProjection.matchesModelSearch(
+      "gpt-6-luna-fast", values: ["Luna 6 - fast", "gpt-6-luna-fast", "Open AI"]))
+  #expect(ConversationProjection.matchesModelSearch("luna6fast", values: ["Luna 6 - fast"]))
+  #expect(ConversationProjection.normalizeModelSearch("  ÓPUS___５ — 中文  ") == "ópus ５ 中文")
+  #expect(ConversationProjection.normalizeModelSearch("a\u{301}b") == "a b")
+  #expect(ConversationProjection.matchesModelSearch("...", values: ["anything"]))
+}
+
+@Test func providerOrderUsesSavedRanksThenPopularityThenProviderNames() throws {
+  let ids = ["zebra", "openai", "opencode", "anthropic", "alpha", "llm-proxy"]
+  let data = ids.map {
+    "{\"id\":\"model\",\"providerID\":\"\($0)\",\"name\":\"Model\",\"limit\":{\"context\":1}}"
+  }.joined(separator: ",")
+  let models = try JSONDecoder().decode([ModelInfo].self, from: Data("[\(data)]".utf8))
+  let providers = ids.map {
+    ProviderInfo(id: $0, name: $0 == "zebra" ? "A provider" : $0 == "alpha" ? "Z provider" : $0)
+  }
+  #expect(
+    ConversationProjection.modelProviders(models, providers: providers, order: []).map(\.id) == [
+      "opencode", "anthropic", "openai", "zebra", "llm-proxy", "alpha",
+    ])
+  #expect(
+    ConversationProjection.modelProviders(
+      models, providers: providers, order: ["alpha", "llm-proxy"]
+    ).map(\.id) == ["alpha", "llm-proxy", "opencode", "anthropic", "openai", "zebra"])
+}
+
+@Test func explicitFavoritesOverrideLegacyFlagsWithoutChangingVisibility() throws {
+  let model = try #require(actionFixture("models", DataResponse<[ModelInfo]>.self).data.first)
+  let json = """
+    {"user":[{"providerID":"\(model.providerID)","modelID":"\(model.id)","visibility":"hide","favorite":true}],"variant":{},"favorites":[]}
+    """
+  let preferences = try JSONDecoder().decode(Preferences.Models.self, from: Data(json.utf8))
+  #expect(!ConversationProjection.favorite(model, preferences: preferences))
+  #expect(ConversationProjection.visibleModels([model], preferences: preferences).isEmpty)
+}
+
 private actor RequestRecorder {
   var requests: [URLRequest] = []
   func record(_ request: URLRequest) throws -> (Data, URLResponse) {

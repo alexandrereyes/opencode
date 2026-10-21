@@ -120,24 +120,51 @@ extension ConversationProjection {
     }
   }
   public static func favorite(_ model: ModelInfo, preferences: Preferences.Models?) -> Bool {
-    preferences?.favorites?.contains { $0.providerID == model.providerID && $0.modelID == model.id }
-      == true
-      || preferences?.user.contains {
-        $0.providerID == model.providerID && $0.modelID == model.id && $0.favorite == true
-      } == true
-  }
-  public static func matchesModel(_ model: ModelInfo, query: String) -> Bool {
-    func normalized(_ text: String) -> String {
-      text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
-        .filter { !$0.isEmpty }.joined(separator: " ")
+    if let favorites = preferences?.favorites {
+      return favorites.contains { $0.providerID == model.providerID && $0.modelID == model.id }
     }
-    let query = normalized(query)
+    return preferences?.user.contains {
+      $0.providerID == model.providerID && $0.modelID == model.id && $0.favorite == true
+    } == true
+  }
+  public static func normalizeModelSearch(_ text: String) -> String {
+    text.lowercased().replacingOccurrences(
+      of: "[^\\p{L}\\p{N}]+", with: " ", options: .regularExpression
+    )
+    .trimmingCharacters(in: .whitespaces)
+  }
+  public static func matchesModel(_ model: ModelInfo, query: String, providerName: String? = nil)
+    -> Bool
+  {
+    matchesModelSearch(query, values: [model.name, model.id, providerName ?? model.providerID])
+  }
+  public static func matchesModelSearch(_ query: String, values: [String]) -> Bool {
+    let query = normalizeModelSearch(query)
     if query.isEmpty { return true }
-    return [model.name, model.id, model.providerID].contains {
-      let text = normalized($0)
+    return values.contains {
+      let text = normalizeModelSearch($0)
       return text.contains(query)
         || text.replacingOccurrences(of: " ", with: "").contains(
           query.replacingOccurrences(of: " ", with: ""))
+    }
+  }
+  public static func modelProviders(
+    _ models: [ModelInfo], providers: [ProviderInfo], order: [String]
+  ) -> [ProviderInfo] {
+    let popular = [
+      "opencode-go", "opencode", "anthropic", "github-copilot", "openai", "google", "openrouter",
+      "vercel",
+    ]
+    return Set(models.map(\.providerID)).map { id in
+      providers.first { $0.id == id } ?? ProviderInfo(id: id, name: id)
+    }.sorted { a, b in
+      let first = order.firstIndex(of: a.id) ?? Int.max
+      let second = order.firstIndex(of: b.id) ?? Int.max
+      if first != second { return first < second }
+      let firstPopular = popular.firstIndex(of: a.id) ?? Int.max
+      let secondPopular = popular.firstIndex(of: b.id) ?? Int.max
+      if firstPopular != secondPopular { return firstPopular < secondPopular }
+      return a.name.localizedCompare(b.name) == .orderedAscending
     }
   }
 }
