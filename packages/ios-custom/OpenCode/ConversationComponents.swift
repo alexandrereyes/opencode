@@ -94,12 +94,17 @@ struct UserBubble: View {
               }.joined(separator: "\n")
             ).font(.subheadline)
           }
+          ForEach(Array((message.metadata?["attachments"]?.array ?? []).enumerated()), id: \.offset)
+          { _, attachment in
+            Label(attachment.object?["name"]?.string ?? "Arquivo anexado", systemImage: "doc")
+              .font(.caption).foregroundStyle(theme.color(.textSecondary))
+          }
         }
         if !message.displayText.isEmpty {
           if compact {
             CompactPrompt(text: message.displayText, theme: theme)
           } else {
-            Text(message.displayText).font(.system(size: 16)).multilineTextAlignment(.leading)
+            Text(promptText).font(.system(size: 16)).multilineTextAlignment(.leading)
               .textSelection(.enabled)
           }
         }
@@ -116,6 +121,24 @@ struct UserBubble: View {
       .padding(.horizontal, 13).padding(.vertical, 10)
       .background(theme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
     }
+  }
+  private var promptText: AttributedString {
+    var text = AttributedString(message.displayText)
+    guard let value = message.metadata?["composerTokens"],
+      let data = try? JSONEncoder().encode(value),
+      let spans = try? JSONDecoder().decode([ComposerSpan].self, from: data)
+    else { return text }
+    let document = ComposerDocument(text: message.displayText, tokens: spans)
+    for span in document.validTokens {
+      if let range = Range(span.range, in: message.displayText),
+        let lower = AttributedString.Index(range.lowerBound, within: text),
+        let upper = AttributedString.Index(range.upperBound, within: text)
+      {
+        text[lower..<upper].foregroundColor = theme.color(span.token.kind.role)
+        text[lower..<upper].backgroundColor = theme.color(span.token.kind.role).opacity(0.12)
+      }
+    }
+    return text
   }
 }
 

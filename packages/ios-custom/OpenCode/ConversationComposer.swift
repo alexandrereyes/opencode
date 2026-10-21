@@ -1,184 +1,42 @@
 import OpenCodeKit
 import SwiftUI
 
-/// TextKit storage preserves attributed ranges and selection for wave 3's inline tokens.
-struct ComposerTextView: UIViewRepresentable {
-  @Binding var text: NSAttributedString
-  let theme: AppTheme
-  var enabled: Bool
-
-  func makeCoordinator() -> Coordinator { Coordinator(self) }
-  func makeUIView(context: Context) -> UITextView {
-    let view = UITextView(usingTextLayoutManager: true)
-    view.backgroundColor = theme.uiColor(.surface).withAlphaComponent(0)
-    view.textContainerInset = .zero
-    view.textContainer.lineFragmentPadding = 0
-    view.font = .preferredFont(forTextStyle: .body)
-    view.adjustsFontForContentSizeCategory = true
-    view.delegate = context.coordinator
-    view.accessibilityLabel = "Mensagem"
-    view.accessibilityIdentifier = "conversation-composer"
-    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    let toolbar = UIToolbar()
-    toolbar.items = [
-      .flexibleSpace(),
-      UIBarButtonItem(
-        title: "Concluir", style: .prominent,
-        target: context.coordinator, action: #selector(Coordinator.dismissKeyboard)),
-    ]
-    toolbar.sizeToFit()
-    view.inputAccessoryView = toolbar
-    context.coordinator.view = view
-    return view
-  }
-  func updateUIView(_ view: UITextView, context: Context) {
-    context.coordinator.parent = self
-    view.isEditable = enabled
-    view.tintColor = theme.uiColor(.primary)
-    let value = NSMutableAttributedString(attributedString: text)
-    if value.length > 0 {
-      value.enumerateAttributes(in: NSRange(location: 0, length: value.length)) {
-        attributes, range, _ in
-        if attributes[.font] == nil {
-          value.addAttribute(.font, value: UIFont.preferredFont(forTextStyle: .body), range: range)
-        }
-        if attributes[.foregroundColor] == nil {
-          value.addAttribute(.foregroundColor, value: theme.uiColor(.text), range: range)
-        }
-      }
-    }
-    if !view.attributedText.isEqual(to: value) {
-      let selection = view.selectedRange
-      view.attributedText = value
-      view.selectedRange = NSRange(location: min(selection.location, value.length), length: 0)
-    }
-    view.typingAttributes = [
-      .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: theme.uiColor(.text),
-    ]
-  }
-  func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-    guard let width = proposal.width else { return nil }
-    let line = UIFont.preferredFont(forTextStyle: .body).lineHeight
-    let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-    uiView.isScrollEnabled = fitting.height > line * 6 + 2
-    return CGSize(width: width, height: max(line + 2, min(line * 6 + 2, fitting.height)))
-  }
-  final class Coordinator: NSObject, UITextViewDelegate {
-    var parent: ComposerTextView
-    weak var view: UITextView?
-    init(_ parent: ComposerTextView) { self.parent = parent }
-    func textViewDidChange(_ textView: UITextView) { parent.text = textView.attributedText }
-    @objc func dismissKeyboard() { view?.resignFirstResponder() }
-  }
-}
-
 struct ConversationComposer: View {
   @Environment(\.appTheme) private var theme
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
-  @State private var models = false
-  private var hasText: Bool {
-    !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-  }
+  @State private var expanded = false
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if draft.editing != nil {
-        HStack {
-          Label("Editando mensagem da fila", systemImage: "pencil").font(.caption)
-          Spacer()
-          Button("Cancelar edição", systemImage: "xmark") {
-            draft.editing = nil
-            draft.submission = nil
-          }.labelStyle(.iconOnly)
-        }.foregroundStyle(theme.color(.textSecondary))
-      }
-      if let error = draft.error {
-        Text(error).font(.caption).foregroundStyle(theme.color(.error)).accessibilityIdentifier(
-          "send-error")
-      }
-      VStack(alignment: .leading, spacing: 12) {
-        ComposerTextView(text: $draft.text, theme: theme, enabled: !draft.sending)
-          .overlay(alignment: .topLeading) {
-            if draft.text.length == 0 {
-              Text("Mensagem").font(.body).foregroundStyle(theme.color(.textSecondary))
-                .allowsHitTesting(false)
-            }
-          }
-        HStack(spacing: 10) {
-          Menu {
-            Button("Imagens e arquivos", systemImage: "photo") {}.disabled(true)
-            Button("Comandos", systemImage: "slash.circle") {}.disabled(true)
-            Button("Contexto", systemImage: "at") {}.disabled(true)
-          } label: {
-            Image(systemName: "plus").font(.system(size: 18)).frame(width: 31, height: 31)
-              .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1) }
-          }.accessibilityLabel("Adicionar").accessibilityHint("Opções disponíveis em breve")
-          Button {
-            models = true
-          } label: {
-            Text(store.modelLabel(store.selectedModel(draft))).font(.system(size: 12)).lineLimit(1)
-          }.accessibilityLabel("Modelo e esforço").accessibilityIdentifier("model-picker")
-            .accessibilityValue(store.modelLabel(store.selectedModel(draft)))
-          Spacer(minLength: 2)
-          Menu {
-            ForEach(store.agents.filter { $0.hidden != true && $0.mode != "subagent" }) { agent in
-              Button {
-                draft.agent = agent.id
-                if let model = agent.model { draft.model = model }
-              } label: {
-                if agent.id == (draft.agent ?? store.session?.agent) {
-                  Label(agent.name, systemImage: "checkmark")
-                } else {
-                  Text(agent.name)
-                }
-              }
-            }
-          } label: {
-            Text(draft.agent ?? store.session?.agent ?? "build").font(.system(size: 12)).lineLimit(
-              1)
-          }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
-          Button {
-            Task { await store.send(draft) }
-          } label: {
-            Group {
-              if draft.sending {
-                ProgressView().tint(theme.color(.onPrimary))
-              } else {
-                Image(systemName: hasText ? "arrow.up" : "mic.fill").font(
-                  .system(size: 19, weight: .medium))
-              }
-            }.foregroundStyle(theme.color(.onPrimary)).frame(width: 36, height: 36)
-              .background(theme.color(.primary), in: Circle())
-          }
-          .disabled(!hasText || draft.sending || !store.ready || store.selectedModel(draft) == nil)
-          .buttonStyle(ComposerSendStyle())
-          .accessibilityLabel(hasText ? "Enviar mensagem" : "Microfone")
-          .accessibilityHint(hasText ? "" : "Em breve")
-          .contextMenu {
-            if hasText && store.executing {
-              Button(
-                store.preferences?.data.settings.followUpBehavior == .queue
-                  ? "Enviar agora" : "Adicionar à fila"
-              ) {
-                Task { await store.send(draft, alternate: true) }
-              }
-            }
-          }
-        }.foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain)
-          .disabled(draft.sending)
-      }
-      .padding(14).background(
-        theme.color(.surface).opacity(0.6), in: RoundedRectangle(cornerRadius: 22)
-      )
-      .overlay {
-        RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
+    VStack(spacing: 0) {
+      if !expanded {
+        ComposerEditor(store: store, draft: draft, expanded: false) { expanded = true }
       }
     }
-    .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft) }
+    .fullScreenCover(isPresented: $expanded, onDismiss: { draft.focused = true }) {
+      NavigationStack {
+        ComposerEditor(store: store, draft: draft, expanded: true) { expanded = false }
+          .padding(12).background(theme.color(.background))
+          .navigationTitle("Mensagem").navigationBarTitleDisplayMode(.inline)
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+              Button("Recolher", systemImage: "arrow.down.right.and.arrow.up.left") {
+                expanded = false
+              }
+            }
+          }.toastOverlay(store.toast).onAppear { draft.focused = true }
+      }.tint(theme.color(.primary))
+    }
+    .task { await draft.load() }
+    .onChange(of: draft.persistenceError) { _, error in
+      if let error {
+        store.toast.show(error, kind: .error)
+        draft.persistenceError = nil
+      }
+    }
   }
 }
 
-private struct ComposerSendStyle: ButtonStyle {
+struct ComposerSendStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
   }
@@ -331,7 +189,7 @@ struct ConversationModelPicker: View {
             HStack(spacing: 6) {
               Text(model.name).foregroundStyle(theme.color(.text))
               if isDefault(model) {
-                Label("Padrão", systemImage: "pin.fill").font(.caption2).foregroundStyle(
+                Text("Padrão").font(.caption2).foregroundStyle(
                   theme.color(.info))
               }
             }

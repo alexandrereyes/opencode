@@ -24,7 +24,7 @@ final class SessionStore {
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
-  @ObservationIgnored let drafts = ConversationDrafts()
+  @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored private var order = RecentOrder()
   @ObservationIgnored private var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -41,7 +41,12 @@ final class SessionStore {
   init(configuration: ServerConfiguration = .launch()) {
     let client = OpenCodeClient(configuration: configuration)
     self.client = client
+    drafts = ConversationDrafts(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
+    Task {
+      await DraftPersistence.pruneMissingSessions(
+        server: configuration.url.absoluteString, client: client)
+    }
   }
 
   var rows: [SessionRow] {

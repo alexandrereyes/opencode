@@ -169,6 +169,10 @@ struct ConversationView: View {
         }
       }
       timeline.toastOverlay(conversation.toast)
+        .simultaneousGesture(
+          TapGesture().onEnded {
+            sessions.drafts.draft(conversation.id).dismissSuggestions()
+          })
     }
     .background(theme.color(.background))
     .environment(conversation.toast)
@@ -214,6 +218,9 @@ struct ConversationView: View {
     .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation) }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
     .task(id: conversation.revision) { await conversation.presented() }
+    .onChange(of: scenePhase) { _, phase in
+      if phase != .active { Task { await sessions.drafts.draft(conversation.id).persist() } }
+    }
   }
   private var header: some View {
     HStack(spacing: 9) {

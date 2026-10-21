@@ -7,6 +7,7 @@ struct ConversationAgentsSheet: View {
   let store: ConversationStore
   let open: (RunningWork) -> Void
   @State private var stopping: RunningWork?
+  @State private var rowHeights: [String: CGFloat] = [:]
   var body: some View {
     NavigationStack {
       List {
@@ -64,6 +65,11 @@ struct ConversationAgentsSheet: View {
                 .frame(width: 32, height: 40)
             }.buttonStyle(.borderless).accessibilityLabel("Parar \(work.title)")
           }
+          .onGeometryChange(for: CGFloat.self) {
+            $0.size.height
+          } action: { height in
+            rowHeights[work.id] = height
+          }
           .swipeActions { Button("Parar", role: .destructive) { stopping = work } }
           .contextMenu {
             Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work }
@@ -90,7 +96,11 @@ struct ConversationAgentsSheet: View {
       } message: {
         Text(stopping?.title ?? "")
       }
-    }.presentationDetents([.medium]).presentationDragIndicator(.visible).tint(
+    }.presentationDetents([
+      .height(
+        min(
+          580, max(180, store.runningWork.reduce(0) { $0 + (rowHeights[$1.id] ?? 48) + 16 } + 112)))
+    ]).presentationDragIndicator(.visible).tint(
       theme.color(.primary))
   }
 }

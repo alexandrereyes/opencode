@@ -33,6 +33,18 @@ public struct PromptRequest: Codable, Sendable, Equatable {
   public let files: [JSONValue]?
   public let agents: [JSONValue]?
   public let skills: [JSONValue]?
+  init(
+    id: String, text: String, delivery: PromptDelivery, metadata: [String: JSONValue],
+    files: [JSONValue], agents: [JSONValue], skills: [JSONValue]
+  ) {
+    self.id = id
+    self.text = text
+    self.delivery = delivery
+    self.metadata = metadata
+    self.files = files.isEmpty ? nil : files
+    self.agents = agents.isEmpty ? nil : agents
+    self.skills = skills.isEmpty ? nil : skills
+  }
   public init(
     id: String = "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""), text: String,
     delivery: PromptDelivery, agent: String, model: ModelReference,

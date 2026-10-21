@@ -28,7 +28,11 @@ public struct ServerConfiguration: Sendable {
   }
 }
 
-public struct ServerInfo: Codable, Sendable { public let version: String }
+public struct ServerInfo: Codable, Sendable {
+  public let version: String
+  public let paths: Paths?
+  public struct Paths: Codable, Sendable { public let tmp: String }
+}
 public struct Empty: Codable, Sendable { public init() {} }
 
 public struct OpenCodeClient: Sendable {
@@ -215,10 +219,14 @@ public struct OpenCodeClient: Sendable {
   private struct RPCInput<Value: Encodable>: Encodable { let input: Value }
   private struct RPCOutput<Value: Decodable>: Decodable { let output: Value }
 
-  public func rpc<Input: Encodable, Output: Decodable>(_ id: String, _ method: String, input: Input)
+  public func rpc<Input: Encodable, Output: Decodable>(
+    _ id: String, _ method: String, input: Input, directory: String? = nil
+  )
     async throws -> Output
   {
-    var request = request("/api/rpc/\(id)/\(method)")
+    var request = request(
+      "/api/rpc/\(id)/\(method)",
+      query: directory.map { [URLQueryItem(name: "location[directory]", value: $0)] } ?? [])
     request.httpMethod = "POST"
     request.httpBody = try JSONEncoder().encode(RPCInput(input: input))
     let data = try await data(request)
@@ -243,7 +251,7 @@ public struct OpenCodeClient: Sendable {
     request.httpBody = body
     _ = try await data(request)
   }
-  private func data(_ request: URLRequest) async throws -> Data {
+  func data(_ request: URLRequest) async throws -> Data {
     let (data, response) =
       if let transport {
         try await transport(request)
@@ -259,7 +267,7 @@ public struct OpenCodeClient: Sendable {
       throw ClientError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
     }
   }
-  private func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
+  func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
     var url = URLComponents(
       url: configuration.url.appending(path: path), resolvingAgainstBaseURL: false)!
     if !query.isEmpty { url.queryItems = query }

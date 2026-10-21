@@ -18,9 +18,13 @@ public struct ModelInfo: Codable, Sendable {
   public let enabled: Bool?
   public let variants: [Variant]?
   public let limit: Limit
+  public let capabilities: Capabilities?
   public var identity: String { "\(providerID)/\(id)" }
   public struct Variant: Codable, Sendable, Identifiable { public let id: String }
   public struct Limit: Codable, Sendable { public let context: Double }
+  public struct Capabilities: Codable, Sendable {
+    public let input: [String]
+  }
 }
 
 public struct ProviderInfo: Codable, Sendable, Identifiable {

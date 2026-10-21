@@ -41,6 +41,7 @@ import OpenCodeKit
   @ObservationIgnored private var acknowledging = false
   @ObservationIgnored private var replaceHistory = false
   @ObservationIgnored private var snapshotSequence = 0
+  @ObservationIgnored private var composerCatalog: ComposerSources?
 
   init(id: String, client: OpenCodeClient, hub: EventHub) {
     self.id = id
@@ -88,33 +89,67 @@ import OpenCodeKit
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
     guard !draft.sending,
-      !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      !draft.importing,
+      !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        || !draft.attachments.isEmpty,
       let model = selectedModel(draft), session?.parentID == nil
     else { return }
     let agent = draft.agent ?? session?.agent ?? "build"
     let delivery = PromptDelivery.choose(
       busy: executing,
       preference: preferences?.data.settings.followUpBehavior ?? .steer, alternate: alternate)
-    let text = draft.text.string.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(
-      of: "\r", with: "\n")
-    if draft.submission?.request.text != text || draft.submission?.model != model
-      || draft.submission?.agent != agent
-    {
-      draft.submission = PromptSubmission(
-        request: PromptRequest(
-          text: text, delivery: delivery,
-          agent: agent, model: model, restoring: draft.editing?.payload),
-        sessionID: id, agent: agent, model: model, replacing: draft.editing?.id)
-    }
-    guard let submission = draft.submission else { return }
     draft.sending = true
     draft.error = nil
     defer { draft.sending = false }
     do {
-      try await submission.send(using: client)
-      draft.text = NSAttributedString()
-      draft.editing = nil
-      draft.submission = nil
+      if draft.submissionDocument?.document != draft.document
+        || draft.submissionDocument?.attachments != draft.attachments
+        || draft.submission?.model != model
+        || draft.submission?.agent != agent || draft.submission == nil
+      {
+        var attachments: [DeliveredAttachment] = []
+        for attachment in draft.attachments {
+          if let path = attachment.remotePath {
+            attachments.append(.init(attachment: attachment, path: path, inline: nil))
+            continue
+          }
+          toast.show("Enviando anexo \(attachments.count + 1) de \(draft.attachments.count)…")
+          let bytes = try await draft.persistence.bytes(attachment)
+          attachments.append(
+            try await client.deliver(
+              attachment, bytes: bytes,
+              directory: session?.location.directory ?? "",
+              input: models.first { $0.id == model.id && $0.providerID == model.providerID }?
+                .capabilities?.input ?? []))
+        }
+        draft.submission = PromptSubmission(
+          request: PromptRequest(
+            document: draft.document,
+            delivery: delivery, agent: agent, model: model, attachments: attachments,
+            metadata: draft.editing?.payload.metadata ?? [:]),
+          sessionID: id, agent: agent, model: model, replacing: draft.replacing)
+        draft.submissionDocument = draft.snapshot
+      }
+      guard let submission = draft.submission else { return }
+      switch ComposerDispatch.resolve(draft.document) {
+      case .prompt:
+        try await submission.send(using: client)
+      case .command(let name, _):
+        // Command callbacks have no idempotency key. Never automatically retry them.
+        if delivery == .steer {
+          try await client.selectAgent(agent, sessionID: id)
+          try await client.selectModel(model, sessionID: id)
+        }
+        try await client.command(name, request: submission.request, sessionID: id)
+        if let replacing = submission.replacing {
+          try await client.cancelInbox(replacing, sessionID: id)
+        }
+      case .local(let name):
+        guard name == "compact" else { return }
+        try await client.compact(id, id: submission.request.id)
+      }
+      await draft.clear()
+      draft.focused = false
       toast.show(
         submission.request.delivery == .queue ? "Mensagem adicionada à fila" : "Mensagem enviada")
       await refresh()
@@ -123,6 +158,37 @@ import OpenCodeKit
         "Não foi possível concluir o envio. Seu rascunho foi mantido. \(error.localizedDescription)"
       toast.show("Não foi possível enviar. Seu rascunho foi mantido.", kind: .error)
     }
+  }
+  func suggestions(_ trigger: ComposerTrigger) async throws -> [ComposerSuggestion] {
+    guard let session else { return [] }
+    if composerCatalog == nil {
+      composerCatalog = try await client.composerSources(directory: session.location.directory)
+    }
+    async let files =
+      trigger.character == "@"
+      ? client.composerFiles(trigger.query, directory: session.location.directory) : []
+    async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
+    return try await composerCatalog?.suggestions(
+      trigger, agents: agents, files: files, sessions: sessions,
+      current: id, server: client.configuration.url.absoluteString,
+      directory: session.location.directory, project: session.projectID) ?? []
+  }
+  func importAttachment(_ bytes: Data, name: String, mime: String, draft: ConversationDraft) async {
+    do {
+      let (data, name, mime) = try await Task.detached(priority: .userInitiated) {
+        try AttachmentEncoding.prepare(bytes, name: name, mime: mime)
+      }.value
+      guard
+        draft.attachments.reduce(0, { $0 + $1.size }) + data.count <= AttachmentEncoding.draftLimit
+      else {
+        throw AttachmentError.tooLarge
+      }
+      let attachment = DraftAttachment(
+        name: URL(fileURLWithPath: name).lastPathComponent, mime: mime, size: data.count)
+      try await draft.persistence.store(data, attachment: attachment)
+      draft.attachments.append(attachment)
+      await draft.persist()
+    } catch { toast.show(error.localizedDescription, kind: .error) }
   }
   func act(_ key: String, success: String, operation: () async throws -> Void) async {
     guard acting.insert(key).inserted else { return }

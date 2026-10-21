@@ -468,7 +468,7 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1 and 2 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
+Waves 1–3 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
 permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
 generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
 mockup's illustrative Opus model.
@@ -499,11 +499,10 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
 
 ### Conversation actions (wave 2)
 
-- `ConversationDraft` keeps one in-memory attributed draft per session in `SessionStore.drafts`, including the
-  pending queue edit and local model/agent choices. Going back and reopening preserves it; terminating the app does
-  not. `ComposerTextView` is a TextKit 2 `UITextView`, growing to six lines before scrolling. It preserves attributed
-  ranges, exposes native selection and an explicit keyboard Done action. Empty input shows a disabled microphone
-  with the accessibility hint “Em breve”; the `+` menu is visible but its three actions await wave 3.
+- `ConversationDraft` keeps one attributed draft per session in `SessionStore.drafts`, including the pending queue
+  edit and local model/agent choices. Wave 3 adds protected on-disk persistence, tokens, attachments and the `+` menu
+  (details below). `ComposerTextView` is a TextKit 2 `UITextView`, growing to six lines before scrolling, with native
+  selection and an explicit keyboard Done action. Empty input shows a disabled microphone with “Em breve”.
 - `PromptRequest` and `PromptSubmission` own serialization and sending. New sends have a unique `msg_` ID,
   `metadata.displayText` and `comments:[]`. Admission gets one automatic transport/5xx retry with the exact same ID;
   a failed attempt keeps the text and request for a manual retry. Steer applies agent, then model, then prompt;
@@ -531,8 +530,8 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
   Questions use the info role for their icon/title/border and pending tool line; permissions retain the error role.
 - The agents sheet and header share one running-work projection. It excludes foreground shells and the viewed
   child, opens real child IDs, reveals a background shell's tool (expanding its group), and confirms individual
-  interruption, with a visible stop button as well as trailing swipe/context actions. The sheet starts at medium
-  height, colors the agent name and keeps elapsed time on the row. Context details start at medium height and expand
+  interruption, with a visible stop button as well as trailing swipe/context actions. Wave 3 sizes the sheet from
+  its measured rows. It colors the agent name and keeps elapsed time on the row. Context details start at medium height and expand
   to large; they use the last measured assistant and its model, with token components, cache hit,
   session/descendant/total cost, model/provider, branch and directory. No extra child transcript is fetched for usage.
 - The transcript is still a recycling `List`. An empty older-page response no longer keeps a top anchor during
@@ -572,12 +571,63 @@ reset. During the first wave-2 capture, one restored Explore child finished with
 disponível” after a tool-catalog rescan. The capsule always reflects actual runtime activity rather than fabricating
 the intended two tasks. The root shell, queue, B's permission and D's question are restored for final captures.
 
-For waves 3–4: add structured token serialization at the `PromptRequest` boundary and token editing in
-`ComposerTextView`; keep `NSAttributedString` as the editing source and UTF-16 offsets on the wire. Metadata and
-materialized queue payloads already have typed containers, but advanced attachment/context edits need deliberate
-re-serialization rather than treating materialized payloads as fresh attachment requests. Quotes/comments still
-belong at this same boundary; response selection hooks remain in `ResponseTextView` from wave 1. Do not replace the
-recycling timeline or add another event connection.
+### Advanced composer (wave 3)
+
+- `ComposerDocument` / `ComposerSpan` model the plain display text plus typed token ranges in UTF-16. The TextKit 2
+  editor retains encoded token attributes, snaps the caret out of tokens and deletes an intersected token as a unit.
+  Raw trigger text remains plain text. `ComposerTrigger` recognizes word boundaries; `/` is only active at offset 0.
+  Space, Escape and a tap in the transcript dismiss suggestions.
+- `ComposerSources` merges files, recent root sessions, mentionable agents and visible references for `@`; supported
+  local commands plus backend commands and noncolliding slash skills for `/`; skills for `$`; project-over-global
+  case-insensitive snippets (including aliases) for `#`. File/session searches debounce 180 ms and cancel stale reads.
+  The glass panel highlights the first result, groups by source and has explicit empty/error states. Catalog
+  descriptions retain their server-provided language; native labels are pt-BR. Apps and MCP resources are omitted.
+- `PromptRequest(document:…)` normalizes newlines, expands snippets and adjusts later mention offsets, adds session
+  reference instructions and `metadata.sessions`, and sends URI-only files, agents and skills. `displayText` remains
+  the typed text, `comments:[]` is retained, and additive `metadata.composerTokens` restores native token styling in
+  drafts/queued edits/sent bubbles. Directory references use file URIs. Backend command tokens dispatch to `/command`
+  with argument-relative mentions, without an automatic retry (that endpoint has no idempotency key). Slash skills
+  remain prompts. `/model` and `/agent` open local pickers; `/compact` admits manual compaction. Unsupported client
+  commands and shell mode are not advertised. Ordinary prompt admission retains the wave-2 exact-ID retry, including
+  when only the cursor moved after a failed send.
+- `+` → **Imagens e arquivos** opens the system multi-photo or document picker. Images are decoded off the main actor;
+  HEIC/HEIF becomes JPEG and oversized supported images are scaled to a maximum side of 2048 px. Every blob is staged
+  as raw bytes under the server's `paths.tmp/uploads/<uuid>/<name>`. PNG/JPEG/GIF/WebP/PDF additionally travel inline
+  only up to 20 MiB and when the selected model advertises the matching input. Other files remain path references
+  with `Attached file: …` and `metadata.attachments`. Chips show a bounded thumbnail or file icon, filename and remove
+  action; preparation/upload progress and failures use the shared toast. No camera, paste or drag/drop was added.
+- The keyboard expand button, `+` menu and upward swipe open the same composer UI full screen, with the same draft,
+  attachments and selection controls. Recollection preserves cursor and tokens. An explicit editor owner prevents
+  the outgoing sheet and incoming compact editor from competing for first responder during the transition.
+- `DraftPersistence` stores JSON and separate attachment files under Application Support, keyed by the server URL
+  hash and session ID, using atomic writes and iOS file protection. Writes debounce 250 ms and flush on leaving or
+  backgrounding. Model/effort/agent, cursor and pending queue replacement ID are retained. Attachments are capped at
+  25 MiB total per draft; missing/oversized restored bytes are dropped with a toast. Removing/sending cleans bytes;
+  launch cleanup deletes a session's draft only after an authoritative HTTP 404 (not a missing navigation row).
+  Materialized inline files restored from the queue become local bytes again, never invalid prompt-input objects.
+- The model picker uses only the “Padrão” badge (no extra pin icon), and the running-agents sheet follows its content.
+
+`ComposerTests.swift` adds trigger, catalog filtering/precedence, UTF-16/emoji/accent/newline serialization, snippet
+offset shifts, command/skill dispatch, session instructions, inline/staged attachment rules, real image downscaling,
+raw upload/command HTTP bodies, materialized queue restoration and protected-draft round-trip/cleanup tests. The package has 72 tests.
+
+Verification uses only the dedicated **OpenCode Sessoes** simulator and port 4177. A separate session in the fake
+conversation repository sends the file, agent, session, skill, snippet and attachment probes, runs
+`conversation-review` and `/compact`, and remains available for inspection. The Photos probe is a generated 600×400
+PNG added with `simctl addmedia`; the text file is selected through the real document picker. The conversation seed
+is reset with `seed-conversation.ts --reset` before final captures; no Sessões request is consumed. Evidence for both
+themes is in `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda3/`:
+`context-*`, `commands-*`, `skills-*`, `snippets-*`, `menu-*`, `attachments-*`, `fullscreen-*`, `restored-*`, `sent-*`.
+`agents-fit-light.png` and `default-badge-light.png` cover the two wave-2 review fixes. The final C draft is left
+unsent with a context token and both attachments for review; the separate verification session is idle.
+Native keyboard/toolbars and system picker presentation deliberately replace the mockup's illustrative keyboard.
+Token backgrounds use attributed text highlights rather than a separately drawn rounded chip view.
+
+For waves 4–5: extend `PromptRequest(document:…)` with quotes/file comments after the main text and attachment
+references. `DraftSnapshot` is the persistence boundary for their local draft state. Preserve the UTF-16 source
+mapping in `ResponseTextView`, the recycling timeline and the single shared SSE hub. Side questions must use
+`/generate`, not `/command`; add `/btw` to suggestions only once its local handler exists. Session actions and notices
+still belong to wave 5. A failed backend command cannot be retried exactly-once; do not imply otherwise in its UI.
 
 For memory checks, build with `-configuration Release`, install `Release-iphonesimulator/OpenCode.app`, and run
 `vmmap -summary <app-pid>` after Sessões settles, after opening C's tail, at the first history page, and after returning
