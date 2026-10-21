@@ -352,26 +352,36 @@ The measured macOS arm64 fixture was **184,056,606 bytes (175.53 MiB)**, includi
 201.64 KB plugin. Builds from a dirty development checkout are fixture evidence only;
 production preparation always archives the committed SHA.
 
-The source entrypoint remains available for development:
+For a reusable isolated instance from the current worktree, run from the repository root:
 
 ```sh
-bun install --frozen-lockfile
-bun --cwd packages/app-custom run build
-bun --cwd packages/plugin-app-custom run build
-
-export OPENCODE_CUSTOM_HOME=/path/to/isolated/runtime
-export OPENCODE_CUSTOM_COMMIT="$(git rev-parse HEAD)"
-mkdir -p "$OPENCODE_CUSTOM_HOME/data/opencode" "$OPENCODE_CUSTOM_HOME/config/opencode"
-umask 077
-openssl rand -base64 48 > "$OPENCODE_CUSTOM_HOME/password"
-bun packages/cli/script/custom-server.ts
+bun packages/cli/script/custom-sandbox.ts up
+bun packages/cli/script/custom-sandbox.ts status
+bun packages/cli/script/custom-sandbox.ts down
 ```
 
-This password initialization is only for a **new isolated development runtime**.
-Direct source invocation defaults to port 4177. Do not point development at production
-persistence. Closing stdin shuts down source smoke invocations. This development
-entrypoint is not used by the compact production release, but it uses the same shared
-release config generator so its plugin, update policy, and native Safari MCP match production.
+The default is `http://127.0.0.1:4177`, tmux session `custom-sandbox-4177`, and
+`<os.tmpdir()>/opencode/custom-sandbox-4177` (canonicalized on macOS). Override with
+`--port` and `--home`; ports 4096 and 4178 are always refused. Dependencies must already
+be installed. `up` builds the plugin and custom web assets with service-worker registration
+disabled, starts `custom-server.ts`, and waits for authenticated `/api/info`. An already
+healthy owned sandbox is left untouched; use `down` then `up` to rebuild changed source.
+
+The script discovers configuration/database paths through the installed `manual.json`,
+loads `environment.sh` privately, copies configuration without backups or service credentials,
+and redirects config, database, data, state and cache to the sandbox. Its first startup runs
+the real migrations; while that sandbox is stopped, a read-only SQLite attachment copies
+**only `credential`**, in one transaction. No production history is copied. Existing sandbox
+credentials are not overwritten on subsequent startups. The home is private (0700), and
+configuration, environment and password files are 0600. The script prints the password
+**path**, never its contents. It stops only the tmux session carrying its ownership token.
+
+Copying files is not proof of working integrations: verify the custom RPCs, models and quota
+response against the sandbox before handing it over. Logs and `environment.json` can contain
+private information and must remain outside Git. Never reuse production persistence or stop
+the production backend/proxy. The underlying `custom-server.ts` remains available for smoke
+supervisors; `OPENCODE_CUSTOM_LAUNCHD=1` keeps it running without stdin. It uses the same
+release config generator as production, but is not a production release.
 
 ## Agent dashboard
 
