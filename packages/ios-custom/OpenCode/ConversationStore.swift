@@ -28,6 +28,7 @@ import OpenCodeKit
   private(set) var acting: Set<String> = []
   var error: String?
   var revealedToolID: String?
+  var sideQuestion: SideQuestionLaunch?
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let hub: EventHub
   @ObservationIgnored private var cursor: String?
@@ -88,10 +89,18 @@ import OpenCodeKit
       part, permissions: family?.permissions ?? [], forms: family?.forms ?? [])
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
+    if let question = SideQuestionRequest.slashQuestion(draft.document) {
+      sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
+      draft.text = NSAttributedString()
+      draft.selection = NSRange(location: 0, length: 0)
+      draft.focused = false
+      await draft.persist()
+      return
+    }
     guard !draft.sending,
       !draft.importing,
       !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        || !draft.attachments.isEmpty,
+        || !draft.attachments.isEmpty || !draft.quotes.isEmpty,
       let model = selectedModel(draft), session?.parentID == nil
     else { return }
     let agent = draft.agent ?? session?.agent ?? "build"
@@ -104,6 +113,7 @@ import OpenCodeKit
     do {
       if draft.submissionDocument?.document != draft.document
         || draft.submissionDocument?.attachments != draft.attachments
+        || draft.submissionDocument?.quotes != draft.quotes
         || draft.submission?.model != model
         || draft.submission?.agent != agent || draft.submission == nil
       {
@@ -126,6 +136,7 @@ import OpenCodeKit
           request: PromptRequest(
             document: draft.document,
             delivery: delivery, agent: agent, model: model, attachments: attachments,
+            quotes: draft.quotes,
             metadata: draft.editing?.payload.metadata ?? [:]),
           sessionID: id, agent: agent, model: model, replacing: draft.replacing)
         draft.submissionDocument = draft.snapshot
@@ -158,6 +169,9 @@ import OpenCodeKit
         "Não foi possível concluir o envio. Seu rascunho foi mantido. \(error.localizedDescription)"
       toast.show("Não foi possível enviar. Seu rascunho foi mantido.", kind: .error)
     }
+  }
+  func askSideQuestion(_ request: SideQuestionRequest) async throws -> String {
+    try await client.sideQuestion(request, sessionID: id)
   }
   func suggestions(_ trigger: ComposerTrigger) async throws -> [ComposerSuggestion] {
     guard let session else { return [] }

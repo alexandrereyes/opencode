@@ -1,13 +1,25 @@
 import OpenCodeKit
 import SwiftUI
 
-/// Non-editable TextKit 2 text. Wave 4 can override editMenu(for:suggestedActions:)
-/// and use selectionSourceRange without changing the transcript or its stable part IDs.
+struct ResponseSelectionActions {
+  let comment: (ChatQuote) -> Void
+  let sideQuestion: (String) -> Void
+}
+extension EnvironmentValues {
+  @Entry var responseSelection: ResponseSelectionActions? = nil
+}
+
 final class ResponseTextView: UITextView {
   var messageID = ""
   var partID = ""
   var sourceBlock: MarkdownBlock?
+  var source = ""
+  var selectionActions: ResponseSelectionActions?
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
+  func clearSelection() {
+    selectedRange = NSRange(location: 0, length: 0)
+    resignFirstResponder()
+  }
 }
 
 struct SelectableResponseText: UIViewRepresentable {
@@ -15,12 +27,19 @@ struct SelectableResponseText: UIViewRepresentable {
   let messageID: String
   let partID: String
   let theme: AppTheme
+  var source = ""
+  var actions: ResponseSelectionActions? = nil
+
+  func makeCoordinator() -> Coordinator { Coordinator() }
 
   func makeUIView(context: Context) -> ResponseTextView {
-    let view = ResponseTextView(usingTextLayoutManager: true)
+    // The ObjC textViewUsingTextLayoutManager factory bypasses Swift subclass defaults.
+    // The designated initializer uses TextKit 2 by default on our deployment target.
+    let view = ResponseTextView(frame: .zero, textContainer: nil)
     view.isEditable = false
     view.isSelectable = true
     view.isScrollEnabled = false
+    view.delegate = context.coordinator
     view.backgroundColor = theme.uiColor(.background).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
@@ -28,9 +47,14 @@ struct SelectableResponseText: UIViewRepresentable {
     return view
   }
   func updateUIView(_ view: ResponseTextView, context: Context) {
+    if view.messageID != messageID || view.partID != partID || view.sourceBlock != block {
+      view.clearSelection()
+    }
     view.messageID = messageID
     view.partID = partID
     view.sourceBlock = block
+    view.source = source
+    view.selectionActions = actions
     view.tintColor = theme.uiColor(.primary)
     let text = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
@@ -75,15 +99,47 @@ struct SelectableResponseText: UIViewRepresentable {
     guard let width = proposal.width, width > 0 else { return nil }
     return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
   }
-  static func dismantleUIView(_ view: ResponseTextView, coordinator: ()) {
+  static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
+    view.clearSelection()
     view.attributedText = nil
     view.sourceBlock = nil
+    view.source = ""
+    view.selectionActions = nil
+    view.delegate = nil
+  }
+  final class Coordinator: NSObject, UITextViewDelegate {
+    func textView(
+      _ textView: UITextView, editMenuForTextIn range: NSRange,
+      suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+      guard let view = textView as? ResponseTextView, let actions = view.selectionActions,
+        let block = view.sourceBlock,
+        let quote = ChatQuote.selection(
+          source: view.source, block: block, range: range,
+          messageID: view.messageID, partID: view.partID)
+      else { return UIMenu(children: suggestedActions) }
+      let custom = UIMenu(
+        options: .displayInline,
+        children: [
+          UIAction(title: "Comentar") { [weak view] _ in
+            view?.clearSelection()
+            actions.comment(quote)
+          },
+          UIAction(title: "Pergunta paralela") { [weak view] _ in
+            view?.clearSelection()
+            actions.sideQuestion(quote.text)
+          },
+        ])
+      return UIMenu(
+        children: Array(suggestedActions.prefix(1)) + [custom] + suggestedActions.dropFirst())
+    }
   }
 }
 
 struct ResponseMarkdown: View {
   @Environment(\.appTheme) private var theme
   @Environment(ToastCenter.self) private var toast
+  @Environment(\.responseSelection) private var selectionActions
   let text: String
   let messageID: String
   let partID: String
@@ -117,7 +173,9 @@ struct ResponseMarkdown: View {
         default:
           HStack(alignment: .top, spacing: 10) {
             if block.kind == .quote { Rectangle().fill(theme.color(.border)).frame(width: 3) }
-            SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme)
+            SelectableResponseText(
+              block: block, messageID: messageID, partID: partID, theme: theme,
+              source: text, actions: selectionActions)
           }
           .padding(.leading, CGFloat(max(0, block.depth - 1)) * 15)
           .padding(block.kind == .table ? 8 : 0)

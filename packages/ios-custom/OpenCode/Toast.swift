@@ -8,11 +8,12 @@ import SwiftUI
     let id = UUID()
     let text: String
     let kind: Kind
+    let retry: (() -> Void)?
   }
   private(set) var message: Message?
 
-  func show(_ text: String, kind: Kind = .success) {
-    message = Message(text: text, kind: kind)
+  func show(_ text: String, kind: Kind = .success, retry: (() -> Void)? = nil) {
+    message = Message(text: text, kind: kind, retry: retry)
     AccessibilityNotification.Announcement(text).post()
   }
   func dismiss(_ id: UUID) {
@@ -26,19 +27,28 @@ private struct ToastOverlay: ViewModifier {
   func body(content: Content) -> some View {
     content.overlay(alignment: .top) {
       if let message = center.message {
-        Label {
-          Text(message.text).foregroundStyle(theme.color(.textStrong)).lineLimit(3)
-        } icon: {
-          Image(
-            systemName: message.kind == .error
-              ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
-          )
-          .foregroundStyle(theme.color(message.kind == .error ? .error : .success))
+        HStack(spacing: 12) {
+          Label {
+            Text(message.text).foregroundStyle(theme.color(.textStrong)).lineLimit(3)
+          } icon: {
+            Image(
+              systemName: message.kind == .error
+                ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
+            )
+            .foregroundStyle(theme.color(message.kind == .error ? .error : .success))
+          }
+          if let retry = message.retry {
+            Button("Tentar novamente") {
+              center.dismiss(message.id)
+              retry()
+            }
+            .foregroundStyle(theme.color(.primary))
+          }
         }
         .font(.subheadline).padding(.horizontal, 18).padding(.vertical, 12)
         .glassEffect(.regular, in: .capsule).padding(12)
         .accessibilityElement(children: .combine).accessibilityIdentifier("action-toast")
-        .allowsHitTesting(false)
+        .allowsHitTesting(message.retry != nil)
       }
     }
     .task(id: center.message?.id) {

@@ -4,9 +4,11 @@ extension PromptRequest {
   public init(
     id: String = "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""),
     document: ComposerDocument, delivery: PromptDelivery, agent: String, model: ModelReference,
-    attachments: [DeliveredAttachment] = [], metadata extra: [String: JSONValue] = [:]
+    attachments: [DeliveredAttachment] = [], quotes: [ChatQuote] = [],
+    metadata extra: [String: JSONValue] = [:]
   ) {
     let display = document.normalized
+    let quotes = quotes.map { $0.delivered(attachments) }
     var expanded = display.expanded
     // Backend commands have their own envelope; offsets refer to their argument text.
     if case .command = ComposerDispatch.resolve(display), let command = expanded.tokens.first {
@@ -65,7 +67,7 @@ extension PromptRequest {
       }
     }
     var staged: [JSONValue] = []
-    for item in attachments {
+    for item in attachments where item.attachment.quoteID == nil {
       suffix.append("Attached file: `\(item.path)`")
       if let inline = item.inline {
         files.append(.object(["uri": .string(inline), "name": .string(item.attachment.name)]))
@@ -77,9 +79,53 @@ extension PromptRequest {
           ]))
       }
     }
+    for quote in quotes {
+      let request = PromptRequest(
+        document: quote.document, delivery: delivery, agent: agent, model: model)
+      files += (request.files ?? []).map { value in
+        var object = value.object ?? [:]
+        object.removeValue(forKey: "mention")
+        return .object(object)
+      }
+      agents += (request.agents ?? []).map { value in
+        var object = value.object ?? [:]
+        object.removeValue(forKey: "mention")
+        return .object(object)
+      }
+      skills += (request.skills ?? []).map { value in
+        var object = value.object ?? [:]
+        object.removeValue(forKey: "mention")
+        return .object(object)
+      }
+      if let contexts = request.metadata["sessions"]?.array {
+        sessions += contexts
+        if request.text.hasPrefix(quote.document.expanded.text + "\n") {
+          suffix.append(String(request.text.dropFirst(quote.document.expanded.text.count + 1)))
+        }
+      }
+    }
+    // Web restoration associates trailing inline files with quote image IDs, in quote/part order.
+    for quote in quotes {
+      for id in quote.inlineIDs {
+        guard
+          let item = attachments.first(where: {
+            $0.attachment.quoteID == quote.id && $0.attachment.id == id
+          }),
+          let inline = item.inline
+        else { continue }
+        files.append(.object(["uri": .string(inline), "name": .string(item.attachment.name)]))
+      }
+    }
+    if !quotes.isEmpty { suffix.append(ChatQuote.format(quotes)) }
     var metadata = extra
     metadata.removeValue(forKey: "sessions")
     metadata.removeValue(forKey: "attachments")
+    metadata.removeValue(forKey: "quotes")
+    if !quotes.isEmpty, let data = try? JSONEncoder().encode(quotes),
+      let value = try? JSONDecoder().decode(JSONValue.self, from: data)
+    {
+      metadata["quotes"] = value
+    }
     metadata["displayText"] = .string(display.text)
     metadata["comments"] = metadata["comments"] ?? .array([])
     metadata["agent"] = .string(agent)

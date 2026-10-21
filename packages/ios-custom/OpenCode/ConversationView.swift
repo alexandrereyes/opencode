@@ -177,6 +177,21 @@ struct ConversationView: View {
     }
     .background(theme.color(.background))
     .environment(conversation.toast)
+    .environment(
+      \.responseSelection,
+      conversation.session?.parentID == nil
+        ? ResponseSelectionActions(
+          comment: { quote in
+            guard conversation.session?.parentID == nil else { return }
+            let draft = sessions.drafts.draft(conversation.id)
+            draft.focused = false
+            draft.commenting = quote
+          },
+          sideQuestion: { text in
+            sessions.drafts.draft(conversation.id).focused = false
+            conversation.sideQuestion = SideQuestionLaunch(text: SideQuestionRequest.quote(text))
+          }) : nil
+    )
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let parent = conversation.session?.parentID {
         VStack(spacing: 6) {

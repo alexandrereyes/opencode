@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 struct ComposerEditor: View {
   @Environment(\.appTheme) private var theme
-  let store: ConversationStore
+  @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
   let expand: () -> Void
@@ -19,7 +19,7 @@ struct ComposerEditor: View {
   private var showExpand: Bool { !expanded && (longText || !draft.attachments.isEmpty) }
   private var hasContent: Bool {
     !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      || !draft.attachments.isEmpty
+      || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -33,6 +33,14 @@ struct ComposerEditor: View {
             draft.selection = NSRange(location: trigger.range.location, length: 0)
             draft.text = value
             draft.focused = false
+            if item.token.id == "btw" {
+              let question = draft.document.expanded.text.trimmingCharacters(
+                in: .whitespacesAndNewlines)
+              store.sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
+              draft.text = NSAttributedString()
+              draft.selection = NSRange(location: 0, length: 0)
+              return
+            }
             models = item.token.id == "model"
             agents = item.token.id == "agent"
             return
@@ -56,8 +64,11 @@ struct ComposerEditor: View {
         Text(error).font(.caption).foregroundStyle(theme.color(.error)).accessibilityIdentifier(
           "send-error")
       }
+      if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
       VStack(alignment: .leading, spacing: 12) {
-        if !draft.attachments.isEmpty { attachmentRow.padding(.trailing, showExpand ? 26 : 0) }
+        if draft.attachments.contains(where: { $0.quoteID == nil }) {
+          attachmentRow.padding(.trailing, showExpand ? 26 : 0)
+        }
         if draft.importing {
           ProgressView("Preparando anexos…").font(.caption).tint(theme.color(.primary))
         }
@@ -104,6 +115,10 @@ struct ComposerEditor: View {
     }
     .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft) }
     .sheet(isPresented: $agents) { agentSheet }
+    .sheet(item: $draft.commenting) { quote in
+      QuoteCommentEditor(quote: quote, store: store, draft: draft)
+    }
+    .sheet(item: $store.sideQuestion) { launch in SideQuestionSheet(store: store, launch: launch) }
     .photosPicker(
       isPresented: $photos, selection: $selectedPhotos, maxSelectionCount: 10, matching: .images
     )
@@ -229,7 +244,7 @@ struct ComposerEditor: View {
   private var attachmentRow: some View {
     ScrollView(.horizontal) {
       HStack(spacing: 8) {
-        ForEach(draft.attachments) { attachment in
+        ForEach(draft.attachments.filter { $0.quoteID == nil }) { attachment in
           DraftAttachmentChip(attachment: attachment, url: draft.persistence.file(attachment)) {
             draft.remove(attachment)
           }.disabled(draft.sending || draft.importing)

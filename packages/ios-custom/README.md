@@ -468,7 +468,7 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1–3 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
+Waves 1–4 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
 permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
 generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
 mockup's illustrative Opus model.
@@ -485,8 +485,8 @@ deltas that may already be included in it, preventing duplicate text during reco
 
 Response text is parsed off the main actor by swift-markdown 0.7.3 into blocks and displayed by non-editable,
 selectable TextKit 2 views. Each carries its message ID, type-specific part ID and rendered-to-source UTF-16 mapping.
-Wave 4 can add its menu in `ResponseTextView`; source text remains the authority (especially for selections spanning
-Markdown delimiters). Tables are deliberately simple rows, not an interactive spreadsheet; no syntax highlighting.
+`ResponseTextView` adds the native comment/side-question edit menu; source text remains the authority (especially for
+selections spanning Markdown delimiters). Tables are deliberately simple rows, not an interactive spreadsheet; no syntax highlighting.
 Images are decoded through `CGImageSourceCreateThumbnailAtIndex` at the displayed pixel size, never as full-size
 bitmaps. Invalid images use a compact filename/“Imagem indisponível” placeholder. The seed image is now a valid
 96×64 PNG; tests retain the old corrupt sample to verify rejection before painting.
@@ -631,11 +631,60 @@ unsent during review; the separate verification session is idle. The composer re
 Native keyboards and system picker presentation deliberately replace the mockup's illustrative keyboard.
 Token backgrounds use attributed text highlights rather than a separately drawn rounded chip view.
 
-For waves 4–5: extend `PromptRequest(document:…)` with quotes/file comments after the main text and attachment
-references. `DraftSnapshot` is the persistence boundary for their local draft state. Preserve the UTF-16 source
-mapping in `ResponseTextView`, the recycling timeline and the single shared SSE hub. Side questions must use
-`/generate`, not `/command`; add `/btw` to suggestions only once its local handler exists. Session actions and notices
-still belong to wave 5. A failed backend command cannot be retried exactly-once; do not imply otherwise in its UI.
+### Selection (wave 4)
+
+- Assistant text blocks use `UITextViewDelegate.textView(_:editMenuForTextIn:suggestedActions:)` to retain the system
+  edit menu and add **Comentar** and **Pergunta paralela** after Copy. Code, tools and user bubbles do not get these
+  actions. UIKit derives the translucent selection from the theme's primary tint. A `ChatQuote` maps the rendered
+  range through `MarkdownBlock` to exact source UTF-16 offsets, with the stable message/part IDs and the exact source
+  substring. Identity/content changes and dismantling clear selection, source and callbacks; no off-screen text cache
+  or additional SSE stream was added. Selection is bounded to one rendered Markdown block, as in the wave-1 renderer.
+  Both TextKit subclasses use the designated initializer: UIKit's `textViewUsingTextLayoutManager` factory bypasses
+  Swift subclass property defaults. The designated initializer retains the platform's TextKit 2 default.
+- **Comentar** presents a native sheet with a read-only passage, token-capable comment editor, Concluir and Remover.
+  `Citações · N` is collapsed by default above the composer card and expands to edit/remove individual quotes.
+  Quotes survive relaunch through `DraftSnapshot` (old wave-3 snapshots decode with an empty quote array), restore
+  from queued messages, count as sendable content on their own, and clear only after successful submission.
+  Comments support the existing `@`, `$` and `#` suggestions; there is no separate binary-attachment picker in a comment.
+- `PromptRequest(document:…quotes:)` emits the web's `metadata.quotes` and `commentPrompt` ComposerPart shapes, keeps
+  `displayText`/`comments:[]`, and appends `Comments on earlier assistant messages:` after the main text/context.
+  Comment file/agent/skill tokens travel without `mention` ranges; main offsets remain untouched. Snippets expand
+  only in the model-facing comment. Restored web quote attachments retain their quote ownership in the protected
+  draft; inline files follow main files in quote/part order and staged files stay referenced inside their quote.
+  The sent bubbles reuse the existing quote presentation with aligned side bars.
+- **Pergunta paralela** is a medium/large glass sheet. Selection prefills the blockquote; `/btw` suggestions open the
+  same sheet, and submitting `/btw <question>` sends the first local question immediately. It shows the committed
+  session model, not an unsubmitted composer selection. Answers use the response Markdown renderer, with copy.
+  `SideQuestionRequest` carries exactly the web instruction prefix and at most five completed local Q&As, capped at
+  1,000/3,000 UTF-16 units (without splitting a surrogate). `POST /generate` is JSON, never a durable prompt or SSE.
+  Parar cancels only its URLSession task and restores the question; closing discards the thread. Failure has both a
+  retryable shared toast and a local retry button.
+- A native `UIContextMenuInteraction` overlay handles **Copiar** and **Copiar citação** even in List's sticky section
+  headers, where SwiftUI's `contextMenu` does not install an interaction. Copiar uses only `displayText`; the quote
+  action copies blockquoted passages and comments. Both confirm through the shared toast.
+
+`SelectionTests.swift` covers plain/emphasis/code/link/list/accent/emoji source mapping, generated markers, quote
+wire metadata and exact appended block, comment mentions without shifted main offsets, quote-only messages, snippet
+comments, inline quote file order/staged delivery, protected-draft round trips and backwards compatibility,
+`/btw` prefix/history/truncation/HTTP, and user copy. The package has **85 tests**, all passing. The simulator build
+introduces no warnings.
+
+Live checks used only the dedicated simulator and sandbox 4177. The separate session
+`ses_e9f6a2ed3ffeA7XsEWNVj4NTVK` (Onda 4 — seleção e perguntas) contains the two-quote/text and quote-only sends,
+both confirmed through `custom.transcript/list` with exact metadata/appendices and rendered bubbles. All calls used
+Luna 6 / low. A B draft with one quote/comment and main text survived termination/relaunch and remains unsent locally.
+The B and verification-session transcripts were compared before/after side questions and stayed identical (6 and
+11 messages respectively); the stop check restored its unsent question with no answer. Clipboard contents were read
+back for both user-copy actions. No seed prompt, inbox or request was changed, so no seed reset was needed; B's
+permission and D's question remain pending. Screenshots in both themes:
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda4/`, files
+`selection-*`, `comment-*`, `quotes-collapsed-*`, `quotes-expanded-*`, `sent-*`, `side-empty-*`, `side-loading-*`,
+`side-answer-*`, `btw-suggestion-*`, `user-menu-*`; `side-stopped-dark.png` adds cancellation evidence.
+
+For wave 5: preserve the quote array in `DraftSnapshot` and the exact-ID failed-send comparison, the rendered/source
+mapping, recycling timeline and shared SSE hub. Session actions/search/task lists/notices remain wave-5 work. File
+review comments are still separate from chat quotes and are not exposed by this screen. A failed backend command
+cannot be retried exactly-once; do not imply otherwise in its UI. The microphone remains visual only.
 
 For memory checks, build with `-configuration Release`, install `Release-iphonesimulator/OpenCode.app`, and run
 `vmmap -summary <app-pid>` after Sessões settles, after opening C's tail, at the first history page, and after returning

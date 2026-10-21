@@ -8,14 +8,18 @@ public struct DraftAttachment: Codable, Sendable, Equatable, Identifiable {
   public let mime: String
   public let size: Int
   public let remotePath: String?
+  public let quoteID: String?
   public init(
-    id: String = UUID().uuidString, name: String, mime: String, size: Int, remotePath: String? = nil
+    id: String = UUID().uuidString, name: String, mime: String, size: Int,
+    remotePath: String? = nil,
+    quoteID: String? = nil
   ) {
     self.id = id
     self.name = name
     self.mime = mime
     self.size = size
     self.remotePath = remotePath
+    self.quoteID = quoteID
   }
 }
 public struct DeliveredAttachment: Sendable {

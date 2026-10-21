@@ -61,6 +61,7 @@ extension AppTheme {
 
 struct UserBubble: View {
   @Environment(\.appTheme) private var theme
+  @Environment(ToastCenter.self) private var toast
   let message: ConversationMessage
   var compact = false
   var body: some View {
@@ -82,7 +83,9 @@ struct UserBubble: View {
                 theme.color(.textSecondary))
               Text(quote.object?["text"]?.string ?? "").font(.subheadline)
               Text(quote.object?["comment"]?.string ?? "").font(.subheadline).fontWeight(.medium)
-            }.padding(.leading, 10).overlay(alignment: .leading) {
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 10).overlay(
+              alignment: .leading
+            ) {
               Rectangle().fill(theme.color(.primary)).frame(width: 2)
             }
           }
@@ -105,7 +108,6 @@ struct UserBubble: View {
             CompactPrompt(text: message.displayText, theme: theme)
           } else {
             Text(promptText).font(.system(size: 16)).multilineTextAlignment(.leading)
-              .textSelection(.enabled)
           }
         }
         if compact && message.displayText.isEmpty {
@@ -120,6 +122,7 @@ struct UserBubble: View {
       .foregroundStyle(theme.color(.userBubbleText))
       .padding(.horizontal, 13).padding(.vertical, 10)
       .background(theme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
+      .overlay { UserMessageCopyMenu(message: message, toast: toast) }
     }
   }
   private var promptText: AttributedString {

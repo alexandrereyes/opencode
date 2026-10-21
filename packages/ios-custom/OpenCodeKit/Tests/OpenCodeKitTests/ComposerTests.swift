@@ -54,11 +54,11 @@ private func detected(_ text: String) -> ComposerTrigger? {
     """, [ComposerReference].self)
   let slash = try #require(detected("/"))
   let suggestions = source.suggestions(slash)
-  #expect(suggestions.map(\.token.id) == ["review", "compact", "model", "agent", "check"])
+  #expect(suggestions.map(\.token.id) == ["review", "compact", "btw", "model", "agent", "check"])
   #expect(suggestions.filter { $0.title == "/review" }.count == 1)
   #expect(
     !suggestions.contains {
-      ["undo", "redo", "fork", "terminal", "export", "new", "btw"].contains($0.token.id)
+      ["undo", "redo", "fork", "terminal", "export", "new"].contains($0.token.id)
     })
   #expect(source.suggestions(try #require(detected("$agil"))).map(\.token.id) == ["check"])
   #expect(source.suggestions(try #require(detected("@bib"))).map(\.token.id) == ["effect"])

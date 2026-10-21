@@ -8,9 +8,11 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
   public var agent: String?
   public var cursor: Int
   public var replacing: String?
+  public var quotes: [ChatQuote]
   public init(
     document: ComposerDocument = .init(), attachments: [DraftAttachment] = [],
-    model: ModelReference? = nil, agent: String? = nil, cursor: Int = 0, replacing: String? = nil
+    model: ModelReference? = nil, agent: String? = nil, cursor: Int = 0, replacing: String? = nil,
+    quotes: [ChatQuote] = []
   ) {
     self.document = document
     self.attachments = attachments
@@ -18,6 +20,20 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     self.agent = agent
     self.cursor = cursor
     self.replacing = replacing
+    self.quotes = quotes
+  }
+  private enum CodingKeys: CodingKey {
+    case document, attachments, model, agent, cursor, replacing, quotes
+  }
+  public init(from decoder: any Decoder) throws {
+    let value = try decoder.container(keyedBy: CodingKeys.self)
+    document = try value.decode(ComposerDocument.self, forKey: .document)
+    attachments = try value.decode([DraftAttachment].self, forKey: .attachments)
+    model = try value.decodeIfPresent(ModelReference.self, forKey: .model)
+    agent = try value.decodeIfPresent(String.self, forKey: .agent)
+    cursor = try value.decode(Int.self, forKey: .cursor)
+    replacing = try value.decodeIfPresent(String.self, forKey: .replacing)
+    quotes = try value.decodeIfPresent([ChatQuote].self, forKey: .quotes) ?? []
   }
 }
 

@@ -145,6 +145,7 @@ public struct ComposerSources: Sendable {
     case "/":
       let local = [
         ("compact", "Resume a conversa para liberar contexto"),
+        ("btw", "Pergunta paralela, sem salvar na conversa"),
         ("model", "Escolher modelo e esforço"),
         ("agent", "Escolher agente"),
       ]

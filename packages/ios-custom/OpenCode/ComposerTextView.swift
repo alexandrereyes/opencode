@@ -6,16 +6,17 @@ struct ComposerTextView: UIViewRepresentable {
   let theme: AppTheme
   var expanded: Bool
   let owner: UUID
+  var label = "Mensagem"
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
-    let view = ComposerInputView(usingTextLayoutManager: true)
+    let view = ComposerInputView(frame: .zero, textContainer: nil)
     view.backgroundColor = theme.uiColor(.surface).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
     view.font = .preferredFont(forTextStyle: .body)
     view.adjustsFontForContentSizeCategory = true
     view.delegate = context.coordinator
-    view.accessibilityLabel = "Mensagem"
+    view.accessibilityLabel = label
     view.accessibilityIdentifier = "conversation-composer"
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.escape = { draft.dismissSuggestions() }
