@@ -302,7 +302,121 @@ packages/ios-custom/
   APNs sandbox.
 - The physical test devices are shared with other agents. Reserve one through the device lease before installing or
   driving the app, and release it when you are done.
-- Build, test, install, and TestFlight upload commands will be documented here when the Xcode project is created.
+- The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
+  `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
+  require editing the project. TestFlight upload automation is not implemented yet.
+
+### Generate themes, build, and test
+
+Run from the repository root:
+
+```sh
+bun packages/ios-custom/script/generate-themes.ts
+xcodebuild -list -project packages/ios-custom/OpenCode.xcodeproj
+xcodebuild -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCode \
+  -destination 'platform=iOS Simulator,name=OpenCode Sessoes' \
+  -derivedDataPath /private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-sessoes-derived build
+```
+
+Run the Swift Testing suite from the package directory (no simulator required):
+
+```sh
+cd packages/ios-custom/OpenCodeKit
+swift test
+```
+
+The theme script imports both custom web resolvers and generates all bundled light/dark variants under
+`OpenCode/Resources/Themes`. Each file records its role-to-source-token mapping. Primary/status/accent colors use
+the theme's semantic palette seeds through resolver overrides; surfaces, text, borders, icons, and filled buttons
+use the resolved web tokens. Avatar hues come from the web's avatar tokens, with equal OKLCH lightness/chroma within
+each mode so one repository never appears faded compared with another. There are no hard-coded colors in views.
+
+### Dedicated simulator and isolated server
+
+Create the simulator **once**; reuse it on subsequent runs. Do not use a physical device or an existing project's
+simulator for this workflow.
+
+```sh
+xcrun simctl create "OpenCode Sessoes" "iPhone 17 Pro" com.apple.CoreSimulator.SimRuntime.iOS-27-0
+```
+
+Look up the dedicated simulator by name. Boot it if it is not already running, then install and launch:
+
+```sh
+DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"] == "OpenCode Sessoes"))')
+DERIVED=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-sessoes-derived
+SANDBOX=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/custom-sandbox-4177
+xcrun simctl boot "$DEVICE"
+xcrun simctl bootstatus "$DEVICE" -b
+xcrun simctl install "$DEVICE" "$DERIVED/Build/Products/Debug-iphonesimulator/OpenCode.app"
+SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD="$(cat "$SANDBOX/password")" \
+  xcrun simctl launch "$DEVICE" br.com.alexandrem.opencode \
+  -OpenCodeServerURL http://127.0.0.1:4177 -OpenCodeTheme openchamber-dark
+```
+
+To change themes, terminate **only this simulator app**, then repeat the launch with `openchamber-light`:
+
+```sh
+xcrun simctl terminate "$DEVICE" br.com.alexandrem.opencode
+SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD="$(cat "$SANDBOX/password")" \
+  xcrun simctl launch "$DEVICE" br.com.alexandrem.opencode \
+  -OpenCodeServerURL http://127.0.0.1:4177 -OpenCodeTheme openchamber-light
+xcrun simctl io "$DEVICE" screenshot /path/to/light.png
+```
+
+`-OpenCodeServerPassword <password>` is also accepted, as are the `OpenCodeServerURL` / `OpenCodeServerPassword`
+environment variables (uppercase `OPENCODE_SERVER_URL` / `OPENCODE_SERVER_PASSWORD` aliases are supported).
+The default URL remains `http://opencode2-mac.alexandrem.com.br`. The launch theme wins over the local
+`UserDefaults` key `OpenCodeTheme`; absent both, OpenChamber dark is used. Loopback HTTP was verified in the iOS 27
+simulator without an ATS exception; only the private Cloudflare hostname has an exception.
+
+### Live data and contract fixtures
+
+`SessionStore` is main-actor `@Observable` state. `OpenCodeKit` owns Codable wire models, HTTP/Basic authentication,
+SSE framing, root-family rollup, attention, recent ordering, preview extraction, and pt-BR timestamps. The UI owns
+only presentation and client-side filters.
+
+- Navigation is paginated at 500. Pins/mutes match a session ID across all stored server keys, including legacy bare
+  IDs. New entries use the Mac web app's `JSON.stringify(["http://localhost:4096", sessionID])` key; removing a pin or
+  mute removes every matching entry. Repository selection remains under `projects["local"]`.
+- Requests use the global `custom.requests/permissions` snapshot and `/api/form` only for directories with pending
+  questions. This avoids loading every Location. `custom.session-family/snapshot` is mirrored in the client but is
+  not required by this screen.
+- Branches are loaded in one `custom.worktrees/locate` call, without booting each repository's Location.
+- `custom.navigation` excludes archives by contract. The archived list pages root metadata from `/api/session` and
+  retains only archived sessions; it never loads their transcripts.
+- Previews use only `custom.transcript/list` (three messages, at most four concurrent reads), never the native message
+  endpoint. Streaming text/tool events debounce preview refreshes; structural events invalidate the snapshots.
+- Each SSE connection and foreground return reloads the snapshots. URLSession's 45-second no-data timeout includes
+  heartbeat bytes; reconnects back off from one to fifteen seconds. SSE is framed from bytes because Foundation's
+  `AsyncBytes.lines` drops the empty lines that delimit events. Full event-triggered reloads are coalesced into
+  trailing 1.5-second windows; changes during a reload schedule another window. Preview refreshes retain their
+  separate 250 ms debounce. Quota reads are limited to once per minute when refreshing. There is no offline editing
+  or push notification handling yet.
+- Theme roles are typed as `ThemeRole`; every role and avatar is validated when loading a generated theme. An
+  incomplete or invalid theme falls back to bundled OpenChamber dark.
+
+Capture sanitized fixtures from the running isolated server without logging its password:
+
+```sh
+OPENCODE_SERVER_PASSWORD_FILE="$SANDBOX/password" \
+  bun packages/ios-custom/script/capture-contracts.ts http://127.0.0.1:4177
+```
+
+The fixtures cover navigation, preferences, projects, active sessions, permissions, forms, archived metadata,
+subscriptions, and running/image/user transcript previews. Local paths and account addresses are scrubbed.
+Re-run `swift test` after recapturing. The seed belongs to the backend development workflow; the app never starts,
+stops, resets, or seeds a backend.
+
+### First-screen verification
+
+The first implementation was built and exercised on the dedicated iOS 27 simulator in both OpenChamber modes.
+Pin/unpin, mute/unmute, status/repository filtering, repository reordering, and mark-all-read were checked against
+the live sandbox. Repository removal/addition and external preference changes over SSE were also verified. The
+permission/question seed is not consumed by these checks. Native menus, swipe actions,
+confirmation dialogs, archived navigation, and the provisional session screen are retained rather than drawing
+mock replacements. New session, voice, selection, settings, the master-session accessory, and the other tabs remain
+visual-only as specified.
 
 ## Open decisions
 

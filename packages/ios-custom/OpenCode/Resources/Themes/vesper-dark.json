@@ -1,0 +1,75 @@
+{
+  "id": "vesper-dark",
+  "name": "Vesper",
+  "dark": true,
+  "colors": {
+    "background": "#080808",
+    "surface": "#181818",
+    "surfaceRaised": "#0f0f0f",
+    "highlight": "#323232",
+    "border": "#353535",
+    "textStrong": "#ffffff",
+    "text": "#ffffff",
+    "textSecondary": "#dbdbdb",
+    "textWeak": "#bebebe",
+    "icon": "#9d9d9d",
+    "primary": "#FFC799",
+    "onPrimary": "#080808",
+    "onInfo": "#ffffff",
+    "success": "#99FFE4",
+    "info": "#FFC799",
+    "error": "#FF8080",
+    "warning": "#FFC799",
+    "accent": "#FF8080",
+    "filledButton": "#fafafa",
+    "onFilledButton": "#080808"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#525d3a",
+      "text": "#ffffff"
+    },
+    "orange": {
+      "background": "#714f3c",
+      "text": "#ffffff"
+    },
+    "purple": {
+      "background": "#605070",
+      "text": "#ffffff"
+    },
+    "cyan": {
+      "background": "#415a76",
+      "text": "#ffffff"
+    },
+    "pink": {
+      "background": "#6f4c5e",
+      "text": "#ffffff"
+    },
+    "mint": {
+      "background": "#346256",
+      "text": "#ffffff"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "v2-background-bg-layer-02",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-base",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "id": "osaka-jade-dark",
+  "name": "Osaka Jade",
+  "dark": true,
+  "colors": {
+    "background": "#06100c",
+    "surface": "#121c15",
+    "surfaceRaised": "#0a1611",
+    "highlight": "#223128",
+    "border": "#283126",
+    "textStrong": "#fafaf5",
+    "text": "#cace9e",
+    "textSecondary": "#53685B",
+    "textWeak": "#37453c",
+    "icon": "#718064",
+    "primary": "#2DD5B7",
+    "onPrimary": "#06100c",
+    "onInfo": "#ffffff",
+    "success": "#549e6a",
+    "info": "#2DD5B7",
+    "error": "#FF5345",
+    "warning": "#E5C736",
+    "accent": "#549e6a",
+    "filledButton": "#bdc195",
+    "onFilledButton": "#06100c"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#525d3a",
+      "text": "#fafaf5"
+    },
+    "orange": {
+      "background": "#714f3c",
+      "text": "#fafaf5"
+    },
+    "purple": {
+      "background": "#605070",
+      "text": "#fafaf5"
+    },
+    "cyan": {
+      "background": "#415a76",
+      "text": "#fafaf5"
+    },
+    "pink": {
+      "background": "#6f4c5e",
+      "text": "#fafaf5"
+    },
+    "mint": {
+      "background": "#346256",
+      "text": "#fafaf5"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "v2-background-bg-layer-02",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-base",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

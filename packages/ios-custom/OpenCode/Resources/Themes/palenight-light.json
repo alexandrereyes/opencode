@@ -1,0 +1,75 @@
+{
+  "id": "palenight-light",
+  "name": "Palenight",
+  "dark": false,
+  "colors": {
+    "background": "#fafafa",
+    "surface": "#eeeeef",
+    "surfaceRaised": "#f1f0ef",
+    "highlight": "#e6e6e8",
+    "border": "#e0e1e3",
+    "textStrong": "#121526",
+    "text": "#222637",
+    "textSecondary": "#8796b0",
+    "textWeak": "#afbbd0",
+    "icon": "#3e4253",
+    "primary": "#4976eb",
+    "onPrimary": "#fafafa",
+    "onInfo": "#ffffff",
+    "success": "#91b859",
+    "info": "#f4511e",
+    "error": "#e53935",
+    "warning": "#ffb300",
+    "accent": "#00acc1",
+    "filledButton": "#313244",
+    "onFilledButton": "#fafafa"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#121526"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#121526"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#121526"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#121526"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#121526"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#121526"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

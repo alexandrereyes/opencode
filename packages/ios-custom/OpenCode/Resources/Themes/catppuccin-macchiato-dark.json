@@ -1,0 +1,75 @@
+{
+  "id": "catppuccin-macchiato-dark",
+  "name": "Catppuccin Macchiato",
+  "dark": true,
+  "colors": {
+    "background": "#131526",
+    "surface": "#1f2133",
+    "surfaceRaised": "#191b2d",
+    "highlight": "#34374c",
+    "border": "#35384c",
+    "textStrong": "#fafbfe",
+    "text": "#cbd4f8",
+    "textSecondary": "#b8c0e0",
+    "textWeak": "#959bb2",
+    "icon": "#8389a6",
+    "primary": "#8aadf4",
+    "onPrimary": "#131526",
+    "onInfo": "#ffffff",
+    "success": "#a6da95",
+    "info": "#8bd5ca",
+    "error": "#ed8796",
+    "warning": "#eed49f",
+    "accent": "#f5bde6",
+    "filledButton": "#c7d0f1",
+    "onFilledButton": "#131526"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#525d3a",
+      "text": "#fafbfe"
+    },
+    "orange": {
+      "background": "#714f3c",
+      "text": "#fafbfe"
+    },
+    "purple": {
+      "background": "#605070",
+      "text": "#fafbfe"
+    },
+    "cyan": {
+      "background": "#415a76",
+      "text": "#fafbfe"
+    },
+    "pink": {
+      "background": "#6f4c5e",
+      "text": "#fafbfe"
+    },
+    "mint": {
+      "background": "#346256",
+      "text": "#fafbfe"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "v2-background-bg-layer-02",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-base",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "id": "everforest-dark",
+  "name": "Everforest",
+  "dark": true,
+  "colors": {
+    "background": "#181f25",
+    "surface": "#242a2e",
+    "surfaceRaised": "#1c252b",
+    "highlight": "#314144",
+    "border": "#3a3e3d",
+    "textStrong": "#fbfaf7",
+    "text": "#daccaf",
+    "textSecondary": "#7a8478",
+    "textWeak": "#596058",
+    "icon": "#7c8c7a",
+    "primary": "#a7c080",
+    "onPrimary": "#181f25",
+    "onInfo": "#ffffff",
+    "success": "#a7c080",
+    "info": "#83c092",
+    "error": "#e67e80",
+    "warning": "#e69875",
+    "accent": "#d699b6",
+    "filledButton": "#cfc3a7",
+    "onFilledButton": "#181f25"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#525d3a",
+      "text": "#fbfaf7"
+    },
+    "orange": {
+      "background": "#714f3c",
+      "text": "#fbfaf7"
+    },
+    "purple": {
+      "background": "#605070",
+      "text": "#fbfaf7"
+    },
+    "cyan": {
+      "background": "#415a76",
+      "text": "#fbfaf7"
+    },
+    "pink": {
+      "background": "#6f4c5e",
+      "text": "#fbfaf7"
+    },
+    "mint": {
+      "background": "#346256",
+      "text": "#fbfaf7"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "v2-background-bg-layer-02",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-base",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

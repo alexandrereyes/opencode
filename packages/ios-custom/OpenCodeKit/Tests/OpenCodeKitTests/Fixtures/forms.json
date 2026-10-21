@@ -1,0 +1,46 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/abacato-v2-worktrees/cosmic-moon"
+  },
+  "data": [
+    {
+      "id": "frm_15e4d26af001D1mFR8m6Bnd7Sh",
+      "sessionID": "ses_ea1b2e296ffe1nHTfLJwT1MD1l",
+      "title": "Questions",
+      "metadata": {
+        "kind": "question",
+        "tool": {
+          "messageID": "msg_15e4d1e27001Brk8XEgemMU44w",
+          "id": "call_0edef6ca1c5e47c589f525f9050ce6a1"
+        }
+      },
+      "created": 1792583476911,
+      "fields": [
+        {
+          "key": "q0",
+          "title": "Google Play",
+          "description": "Qual opção você prefere?",
+          "type": "string",
+          "options": [
+            {
+              "value": "Teste interno",
+              "label": "Teste interno",
+              "description": "publicar para testadores"
+            },
+            {
+              "value": "Teste fechado",
+              "label": "Teste fechado",
+              "description": "grupo restrito"
+            },
+            {
+              "value": "Produção",
+              "label": "Produção",
+              "description": "publicação pública"
+            }
+          ],
+          "custom": true
+        }
+      ]
+    }
+  ]
+}

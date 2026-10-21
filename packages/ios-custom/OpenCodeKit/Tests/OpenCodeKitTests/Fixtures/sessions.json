@@ -1,0 +1,705 @@
+{
+  "data": [
+    {
+      "id": "ses_ea1b2e243ffe5c1CfApic7bCxm",
+      "projectID": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0.00141134,
+      "tokens": {
+        "input": 10801,
+        "output": 258,
+        "reasoning": 0,
+        "cache": {
+          "read": 20224,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792583474661,
+        "updated": 1792583480914
+      },
+      "title": "Alternativas Linear open source",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ],
+      "location": {
+        "directory": "/sandbox/repos/abacato-v2-worktrees/neon-mountain"
+      }
+    },
+    {
+      "id": "ses_ea1b2e26cffer3aVRSY1IG7Y3p",
+      "projectID": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792583474618,
+        "updated": 1792583477968
+      },
+      "title": "App Store Connect",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "git push*",
+          "effect": "ask"
+        }
+      ],
+      "location": {
+        "directory": "/sandbox/repos/abacato-v2-worktrees/calm-mountain"
+      }
+    },
+    {
+      "id": "ses_ea1b2e296ffe1nHTfLJwT1MD1l",
+      "projectID": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792583474577,
+        "updated": 1792583476605
+      },
+      "title": "Google Play",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ],
+      "location": {
+        "directory": "/sandbox/repos/abacato-v2-worktrees/cosmic-moon"
+      }
+    },
+    {
+      "id": "ses_ea1b2e219ffe6XoQ74IZTg5qeT",
+      "projectID": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+      "agent": "build",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1792583474706,
+        "updated": 1792583475941
+      },
+      "title": "Redesign",
+      "permissions": [
+        {
+          "action": "*",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ],
+      "location": {
+        "directory": "/sandbox/repos/abacato-v2-worktrees/feat/redesign-identidade"
+      }
+    },
+    {
+      "id": "ses_ios_21a3d86a7f7d4351a319a2db6b0a0381",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1789905013489,
+        "updated": 1792583474533,
+        "idle": 1789905073489,
+        "viewed": 1789905073489,
+        "archived": 1792583474536
+      },
+      "title": "Arquivada 12",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_89c47a03be7c454484d66be267cb3cd4",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1789991413489,
+        "updated": 1792583474488,
+        "idle": 1789991473489,
+        "viewed": 1789991473489,
+        "archived": 1792583474490
+      },
+      "title": "Arquivada 11",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_ae52d4e9eb194cc2ace12d720836790c",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790077813489,
+        "updated": 1792583474457,
+        "idle": 1790077873489,
+        "viewed": 1790077873489,
+        "archived": 1792583474460
+      },
+      "title": "Arquivada 10",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_ccc35e68828e4c0da6027876c90ca580",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790164213489,
+        "updated": 1792583474416,
+        "idle": 1790164273489,
+        "viewed": 1790164273489,
+        "archived": 1792583474419
+      },
+      "title": "Arquivada 09",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_1a4a205e0bd44ded8a8a243d975ad896",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790250613489,
+        "updated": 1792583474386,
+        "idle": 1790250673489,
+        "viewed": 1790250673489,
+        "archived": 1792583474388
+      },
+      "title": "Arquivada 08",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_61d3e26144d64fca9812182dc6cf7756",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790337013489,
+        "updated": 1792583474345,
+        "idle": 1790337073489,
+        "viewed": 1790337073489,
+        "archived": 1792583474347
+      },
+      "title": "Arquivada 07",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_8a37afa6ef324258b94d29df20fa69a3",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790423413489,
+        "updated": 1792583474312,
+        "idle": 1790423473489,
+        "viewed": 1790423473489,
+        "archived": 1792583474315
+      },
+      "title": "Arquivada 06",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_0fce30a01d0740858b24e52a01962234",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790509813489,
+        "updated": 1792583474272,
+        "idle": 1790509873489,
+        "viewed": 1790509873489,
+        "archived": 1792583474275
+      },
+      "title": "Arquivada 05",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_168fefa4d73a486eafeb0ea5af5efdc7",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790596213489,
+        "updated": 1792583474243,
+        "idle": 1790596273489,
+        "viewed": 1790596273489,
+        "archived": 1792583474245
+      },
+      "title": "Arquivada 04",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_adcd0e39d0164c79b8a0a717666771c9",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790682613489,
+        "updated": 1792583474201,
+        "idle": 1790682673489,
+        "viewed": 1790682673489,
+        "archived": 1792583474204
+      },
+      "title": "Arquivada 03",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_a69cf2f859fb4b41a74dd1405afb9c85",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790769013489,
+        "updated": 1792583474164,
+        "idle": 1790769073489,
+        "viewed": 1790769073489,
+        "archived": 1792583474170
+      },
+      "title": "Arquivada 02",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_dec16793807d4f70abe6dd46844421b7",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1790855413489,
+        "updated": 1792583474118,
+        "idle": 1790855473489,
+        "viewed": 1790855473489,
+        "archived": 1792583474121
+      },
+      "title": "Arquivada 01",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_8f645cbc79d44d9db02d586ac1c9e1d0",
+      "projectID": "b887b100db86ae19c5e370efc5172cfacd06a64c",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1792497013489,
+        "updated": 1792583474077,
+        "idle": 1792497073489,
+        "viewed": 1792410673489
+      },
+      "title": "Pendências na migração do v1 para o v2",
+      "location": {
+        "directory": "/sandbox/repos/abacato-v2-worktrees/gentle-wolf"
+      }
+    },
+    {
+      "id": "ses_ios_9dec2cc75ad44814abd71e930bd72391",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1792410613489,
+        "updated": 1792583474023,
+        "idle": 1792410673489,
+        "viewed": 1792410673489
+      },
+      "title": "Ajustes na navegação",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_a2512dc0581247f6ac5f707b625da0ee",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1792324213489,
+        "updated": 1792583473966,
+        "idle": 1792324273489,
+        "viewed": 1792324273489
+      },
+      "title": "UI opencode com imagem",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/custom"
+      }
+    },
+    {
+      "id": "ses_ios_84556ef6ae7246e28d42487722f70ebc",
+      "projectID": "85da54af6034664de0c3eb787bc804d585e0c7cb",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1792151413489,
+        "updated": 1792583473854,
+        "idle": 1792151473489,
+        "viewed": 1792151473489
+      },
+      "title": "Revisar próximos passos",
+      "location": {
+        "directory": "/sandbox/repos/opencode2-worktrees/quiet-nebula"
+      }
+    },
+    {
+      "id": "ses_ios_33036ff7ece94d278f7b286675d2a44a",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1791719413489,
+        "updated": 1792583473757,
+        "idle": 1791719473489,
+        "viewed": 1791719473489
+      },
+      "title": "Landing nova",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    },
+    {
+      "id": "ses_ios_949999872c9e49e5a65b4791036c329f",
+      "projectID": "4acc48746b4071d3a9458537fd353d3939b6f078",
+      "model": {
+        "id": "gpt-6-luna",
+        "providerID": "llm-proxy",
+        "variant": "low"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "outcome": "succeeded",
+      "time": {
+        "created": 1791287413489,
+        "updated": 1792583473699,
+        "idle": 1791287473489,
+        "viewed": 1791287473489
+      },
+      "title": "Documentação atualizada",
+      "location": {
+        "directory": "/sandbox/repos/abacato-site"
+      }
+    }
+  ],
+  "cursor": {
+    "previous": "eyJwYXJlbnRJRCI6Im51bGwiLCJhbmNob3IiOnsiaWQiOiJzZXNfZWExYjJlMjQzZmZlNWMxQ2ZBcGljN2JDeG0iLCJ0aW1lIjoxNzkyNTgzNDgwOTE0LCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9fQ",
+    "next": "eyJwYXJlbnRJRCI6Im51bGwiLCJhbmNob3IiOnsiaWQiOiJzZXNfaW9zXzk0OTk5OTg3MmM5ZTQ5ZTVhNjViNDc5MTAzNmMzMjlmIiwidGltZSI6MTc5MjU4MzQ3MzY5OSwiZGlyZWN0aW9uIjoibmV4dCJ9fQ"
+  }
+}

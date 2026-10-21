@@ -1,0 +1,75 @@
+{
+  "id": "rosepine-light",
+  "name": "Rose Pine",
+  "dark": false,
+  "colors": {
+    "background": "#fbf5ef",
+    "surface": "#f2ebe8",
+    "surfaceRaised": "#f5ede7",
+    "highlight": "#ebe5e3",
+    "border": "#e7e1e0",
+    "textStrong": "#332d53",
+    "text": "#454066",
+    "textSecondary": "#9893a5",
+    "textWeak": "#bdb9c7",
+    "icon": "#635f83",
+    "primary": "#31748f",
+    "onPrimary": "#fbf5ef",
+    "onInfo": "#ffffff",
+    "success": "#286983",
+    "info": "#56949f",
+    "error": "#b4637a",
+    "warning": "#ea9d34",
+    "accent": "#d7827e",
+    "filledButton": "#5f567c",
+    "onFilledButton": "#fbf5ef"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#332d53"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#332d53"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#332d53"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#332d53"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#332d53"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#332d53"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}

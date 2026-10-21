@@ -1,0 +1,75 @@
+{
+  "id": "nightowl-light",
+  "name": "Night Owl",
+  "dark": false,
+  "colors": {
+    "background": "#f1f1f1",
+    "surface": "#e7e7e8",
+    "surfaceRaised": "#e9e9e8",
+    "highlight": "#e0e0e2",
+    "border": "#dbdbdd",
+    "textStrong": "#232234",
+    "text": "#343346",
+    "textSecondary": "#515063",
+    "textWeak": "#6d6d7c",
+    "icon": "#515063",
+    "primary": "#4876d6",
+    "onPrimary": "#f1f1f1",
+    "onInfo": "#ffffff",
+    "success": "#2aa298",
+    "info": "#4876d6",
+    "error": "#de3d3b",
+    "warning": "#c96765",
+    "accent": "#aa0982",
+    "filledButton": "#474457",
+    "onFilledButton": "#f1f1f1"
+  },
+  "avatars": {
+    "lime": {
+      "background": "#b9c7a1",
+      "text": "#232234"
+    },
+    "orange": {
+      "background": "#e1b6a5",
+      "text": "#232234"
+    },
+    "purple": {
+      "background": "#c9b8de",
+      "text": "#232234"
+    },
+    "cyan": {
+      "background": "#9acada",
+      "text": "#232234"
+    },
+    "pink": {
+      "background": "#ddb3c7",
+      "text": "#232234"
+    },
+    "mint": {
+      "background": "#9acdc3",
+      "text": "#232234"
+    }
+  },
+  "roles": {
+    "background": "background-base",
+    "surface": "surface-base",
+    "surfaceRaised": "background-weak",
+    "highlight": "surface-base-hover",
+    "border": "border-weak-base",
+    "textStrong": "text-strong",
+    "text": "text-base",
+    "textSecondary": "text-weak",
+    "textWeak": "text-weaker",
+    "icon": "icon-base",
+    "primary": "ios-primary",
+    "onPrimary": "background-base",
+    "onInfo": "text-on-info-strong",
+    "success": "ios-success",
+    "info": "ios-info",
+    "error": "ios-error",
+    "warning": "ios-warning",
+    "accent": "ios-accent",
+    "filledButton": "button-primary-base",
+    "onFilledButton": "background-base"
+  }
+}
