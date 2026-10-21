@@ -10,8 +10,8 @@ later.
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
 
-> **Status:** first screen in progress. The first deliverable is the "Sessões" screen (see
-> [First screen: Sessões](#first-screen-sessões)), together with the Xcode project and a minimal `OpenCodeKit`.
+> **Status:** the "Sessões" screen is done (see [First screen: Sessões](#first-screen-sessões)). The conversation
+> screen is being built in waves (see [Second screen: Conversa](#second-screen-conversa)).
 
 ## Ownership
 
@@ -72,6 +72,74 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   stable choice from the project ID when the project has none, through the theme's avatar tokens.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
   "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and a large title with toolbar buttons.
+
+## Second screen: Conversa
+
+The conversation of one session, opened from "Sessões" (row tap and "Responder"). It replaces the provisional session
+screen. The layout was approved through mockups; the mockups and the full layout briefing live outside the repository,
+in `.agent-artifacts/tela-conversa/` of the working tree that produced them (`BRIEFING.md`, `r2-*`, `r4-*`, `r5-*`,
+`r6-*`). The custom web app is the behavior reference (`packages/app-custom/src/session`, `src/composer`, and
+`packages/session-ui-custom`), and it is not changed by this work. The backend contract for every element is recorded
+in [`docs/conversation-contract.md`](docs/conversation-contract.md).
+
+### Layout decisions
+
+- **Header:** back; repository avatar whose ring is the **context window** (static arc of the used fraction, neutral
+  color, warning color above 80%; tapping opens the usage details); title; a status line below it, like WhatsApp's
+  "digitando…" (`neon-mountain · trabalhando…`, `aguardando você`); on the right, a glass capsule with the running
+  agents counter (animated 5×5 pixel grid and the number of active subagents and background tasks; tapping lists them
+  and opens a child session; hidden when nothing runs) and a separate `…` button.
+- **Messages:** the user's messages are bubbles on the right with the time inside. The agent's text uses the full
+  width, without a bubble, and is rendered as Markdown (lists, inline code, fenced code blocks with a copy button; no
+  syntax highlighting yet).
+- **Steps:** each step is a group, `Usou 6 · Ler, Shell, Editar e Agente`. Inside it, in order: `Pensou 6s` (with its
+  sparkle icon), tool lines (`Leu docs/infra.md · 212 linhas`, `Rodou docker stack ls · 2s`, `Editou … +48 −0`, the
+  running one highlighted with its elapsed time), and subagents as discreet cards (agent icon and name in the agent's
+  color, description, time, `›`). The agent icon is the web app's: an animated pixel grid while running and the static
+  subagent icon when done. The running step is expanded; finished steps are collapsed into one line.
+- **Response footer:** only when the response finishes, a discreet line with model, effort, date, and copy
+  (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`).
+- **Sticky message:** the last user message sticks below the header, truncated to two lines, while its response
+  scrolls underneath, as in the web app. There is no other pinned banner.
+- **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
+  free answer) cards inside the conversation.
+- **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
+  the queued messages (`Enviar agora`, edit, `×`).
+- **Composer (V2):** one rounded card with the text at full width and, inside it below the text, a row with a small
+  outlined `+` (attachments), `Opus 5.5 · xhigh`, a flexible space, the agent (`build`), and a round button: send when
+  there is text, microphone when the field is empty (WhatsApp style).
+- **Triggers:** `@` context (files, sessions, agents), `/` commands, `$` skills, and `#` snippets open a suggestion
+  panel above the composer; the chosen item becomes a colored token in the field.
+- **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
+paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
+  The side question (`/btw`) opens in a sheet that is not saved to the conversation.
+- **Other:** plain background, day chips (`Hoje`, `Ontem`), the `Novas mensagens` divider, and a scroll-to-bottom
+  button. The tab bar and the "Sessão mestra" accessory are hidden inside the conversation.
+- **Token colors** come from the theme, never from fixed values: dedicated semantic roles for context mentions,
+  agent mentions, commands, skills, and snippets, generated by `script/generate-themes.ts` from the same web tokens the
+  web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
+  `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
+  `accent` palette colors.
+
+### Waves
+
+Each wave is implemented by a fresh agent, ends with a warning-free build, passing tests, and real simulator
+screenshots against the sandbox in both themes, and is reviewed before the next one starts. The waves are committed
+on one feature branch and integrated into `custom` together at the end.
+
+| Wave                     | Scope                                                                                                                                                                                                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0. Contract and fixtures | Map the endpoints, events, and RPCs of every element into `docs/conversation-contract.md`; seed reproducible conversation states in the sandbox; capture sanitized JSON fixtures.                                                                                           |
+| 1. Reading               | Open from "Sessões"; header with context ring, status line, and agents capsule; bubbles, Markdown, code blocks, step groups, tools, subagents, footer; sticky message, day chips, `Novas mensagens`, scroll-to-bottom; older pages; live updates; marks the session viewed. |
+| 2. Acting                | Composer V2 with send and model/effort/agent selection; running tray with stop and background; queue with `Enviar agora`, edit, and remove; permission and question cards; agents list and child sessions; context usage details.                                           |
+| 3. Advanced composer     | `@ / $ #` triggers with the suggestion panel and tokens; commands; snippets; attachments through `+`.                                                                                                                                                                       |
+| 4. Selection             | Native edit menu on responses; comments with quotes sent with the message; side question sheet.                                                                                                                                                                             |
+
+Out of scope for this screen for now: the microphone (visual only), "Alterações" and "Arquivos" in the `…` menu,
+syntax highlighting, and balloon actions such as fork and revert.
+
+Wave 1 must already render text in a way that supports a custom selection menu (wave 4), and the composer must be
+able to hold attributed tokens (wave 3), so later waves do not rewrite earlier ones.
 
 ## Language
 
@@ -268,6 +336,8 @@ reuse the same delivery channel.
 
 - Swift 6 with strict concurrency, SwiftUI, Observation (`@Observable`), and `async`/`await`.
 - Networking with `URLSession`, including SSE (`bytes(for:)`), with no third-party networking dependencies.
+- The only package dependency is Apple's `swift-markdown` (GitHub-flavored Markdown parsing for responses).
+  Rendering stays in the app; adding any other dependency needs an explicit decision.
 - Separate the client layer (models, HTTP, SSE, pairing, credentials) from the UI so it can be tested without the
   simulator and reused by extensions (notifications, widgets, Live Activities, share sheet).
 - The server is the source of truth. The app keeps only cache and local preferences, and does not duplicate rules the
