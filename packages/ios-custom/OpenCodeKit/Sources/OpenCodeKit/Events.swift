@@ -2,7 +2,34 @@ import Foundation
 
 public enum ServerEvent: Sendable {
   case connected
-  case update(type: String, sessionID: String?)
+  case update(ConversationEvent)
+}
+
+public struct ConversationEvent: Codable, Sendable {
+  public let type: String
+  public let created: Double?
+  public let data: Payload
+  public struct Payload: Codable, Sendable {
+    public let sessionID: String?
+    public let assistantMessageID: String?
+    public let id: String?
+    public let ordinal: Int?
+    public let delta: JSONValue?
+    public let text: String?
+    public let name: String?
+    public let agent: String?
+    public let model: ModelReference?
+    public let started: Double?
+    public let finish: String?
+    public let tokens: TokenUsage?
+    public let input: JSONValue?
+    public let metadata: JSONValue?
+    public let state: JSONValue?
+    public let content: JSONValue?
+    public let error: JSONValue?
+    public let form: JSONValue?
+    public var owner: String? { sessionID ?? form?.object?["sessionID"]?.string }
+  }
 }
 
 public struct EventParser: Sendable {
@@ -27,15 +54,11 @@ public struct EventParser: Sendable {
     }
     guard line.isEmpty, !payload.isEmpty else { return nil }
     defer { payload.removeAll(keepingCapacity: true) }
-    struct Envelope: Decodable {
-      let type: String
-      let data: [String: JSONValue]?
-    }
     guard
       let event = try? JSONDecoder().decode(
-        Envelope.self, from: Data(payload.joined(separator: "\n").utf8))
+        ConversationEvent.self, from: Data(payload.joined(separator: "\n").utf8))
     else { return nil }
     if event.type == "server.connected" { return nil }
-    return .update(type: event.type, sessionID: event.data?["sessionID"]?.string)
+    return .update(event)
   }
 }

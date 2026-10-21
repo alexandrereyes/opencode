@@ -20,8 +20,10 @@ final class SessionStore {
   var error: String?
   var filter = SessionFilter.all
   var selectedProject: String?
+  var conversationOpen = false
 
   @ObservationIgnored let client: OpenCodeClient
+  @ObservationIgnored let hub: EventHub
   @ObservationIgnored private var order = RecentOrder()
   @ObservationIgnored private var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -36,7 +38,9 @@ final class SessionStore {
   @ObservationIgnored private var quotaUpdated = Date.distantPast
 
   init(configuration: ServerConfiguration = .launch()) {
-    client = OpenCodeClient(configuration: configuration)
+    let client = OpenCodeClient(configuration: configuration)
+    self.client = client
+    hub = EventHub(client: client)
   }
 
   var rows: [SessionRow] {
@@ -77,40 +81,35 @@ final class SessionStore {
   }
 
   func run() async {
-    var delay: UInt64 = 1
+    let events = hub.events()
+    let connection = Task { await hub.run() }
+    defer { connection.cancel() }
     await reload()
-    while !Task.isCancelled {
-      do {
-        for try await event in client.events() {
-          switch event {
-          case .connected:
-            connected = true
-            delay = 1
-            scheduleReload()
-          case .update(let type, let id):
-            if type.hasPrefix("session.") || type.hasPrefix("permission.")
-              || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
-              || type.hasPrefix("worktree.")
-            {
-              if let id, type.hasPrefix("session.execution.") {
-                order.observe(id, running: type == "session.execution.started")
-              }
-              if type.hasPrefix("session.text.") || type.hasPrefix("session.tool.")
-                || type.hasPrefix("session.step.")
-              {
-                schedulePreviews()
-                continue
-              }
-              scheduleReload()
-            }
+    for await frame in events {
+      if Task.isCancelled { break }
+      switch frame.event {
+      case .connected:
+        connected = true
+        scheduleReload()
+      case .update(let event):
+        let type = event.type
+        let id = event.data.owner
+        if type.hasPrefix("session.") || type.hasPrefix("permission.")
+          || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
+          || type.hasPrefix("worktree.")
+        {
+          if let id, type.hasPrefix("session.execution.") {
+            order.observe(id, running: type == "session.execution.started")
           }
+          if type.hasPrefix("session.text.") || type.hasPrefix("session.tool.")
+            || type.hasPrefix("session.step.")
+          {
+            schedulePreviews()
+            continue
+          }
+          scheduleReload()
         }
-      } catch {
-        if Task.isCancelled { break }
       }
-      connected = false
-      do { try await Task.sleep(for: .seconds(delay)) } catch { break }
-      delay = min(delay * 2, 15)
     }
     connected = false
     scheduled?.cancel()

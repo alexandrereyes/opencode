@@ -8,6 +8,8 @@ public struct Session: Codable, Sendable, Identifiable, Hashable {
   public let location: Location
   public let time: Time
   public let outcome: Outcome?
+  public let agent: String?
+  public let model: ModelReference?
 
   public struct Location: Codable, Sendable, Hashable {
     public let directory: String

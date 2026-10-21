@@ -10,6 +10,7 @@ struct SessionsView: View {
   @State private var showProjects = false
   @State private var showArchived = false
   @State private var moreSession: SessionRow?
+  @State private var appliedLaunch = false
 
   private struct ProjectAction: Identifiable {
     let directory: String
@@ -178,7 +179,18 @@ struct SessionsView: View {
         }
       }
       .navigationDestination(item: $selectedSession) { session in
-        SessionPlaceholder(session: session, store: store)
+        ConversationView(id: session.id, sessions: store)
+      }
+      .onChange(of: selectedSession) { _, value in store.conversationOpen = value != nil }
+      .task {
+        guard !appliedLaunch else { return }
+        appliedLaunch = true
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-OpenCodeOpenSession"),
+          arguments.indices.contains(index + 1)
+        {
+          selectedSession = try? await store.client.session(arguments[index + 1])
+        }
       }
       .sheet(isPresented: $showProjects) { projectPicker }
       .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store) }

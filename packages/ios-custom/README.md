@@ -58,7 +58,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **"Precisa de você" card:** sessions with a pending question or permission, which leave the main list while pending.
   "Permitir" and "Negar" answer the permission; "Responder" opens the session.
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
-  a session (a provisional screen for now), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
+  a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
 - **Visual only for now:** new session, voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
   tabs.
@@ -440,6 +440,57 @@ The default URL remains `http://opencode2-mac.alexandrem.com.br`. The launch the
 `UserDefaults` key `OpenCodeTheme`; absent both, OpenChamber dark is used. Loopback HTTP was verified in the iOS 27
 simulator without an ATS exception; only the private Cloudflare hostname has an exception.
 
+### Conversation reader verification
+
+Append `-OpenCodeOpenSession <sessionID>` to the simulator launch to open a conversation directly. It is applied once
+per app launch; Back returns to Sessões normally. Resolve current IDs from the seed manifest, not this README:
+
+```sh
+SESSION=$(jq -r '.sessions[] | select(.role == "working") | .id' "$SANDBOX/seed-conversation.json")
+PRINTS=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda1
+mkdir -p "$PRINTS"
+xcrun simctl status_bar "$DEVICE" override --time '10:58' --dataNetwork wifi \
+  --wifiMode active --wifiBars 3 --batteryState discharging --batteryLevel 100
+xcrun simctl terminate "$DEVICE" br.com.alexandrem.opencode
+SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD="$(cat "$SANDBOX/password")" \
+  xcrun simctl launch "$DEVICE" br.com.alexandrem.opencode \
+  -OpenCodeServerURL http://127.0.0.1:4177 -OpenCodeTheme openchamber-dark \
+  -OpenCodeOpenSession "$SESSION"
+# Wait for the transcript, then scroll or expand the desired tool before capturing.
+xcrun simctl io "$DEVICE" screenshot "$PRINTS/a-dark.png"
+```
+
+Repeat with `openchamber-light`; manifest roles `permission`, `history`, and `child-0` cover the other screens. For
+history, capture the initial quote, scroll up to the image/unread boundary, expand the tools and the diff/error,
+then scroll to the beginning to exercise all three pages. An already-viewed session correctly has no new-message
+divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
+recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
+
+Wave 1 has no permission/question cards or working composer/tray. The disabled composer uses native attributed-text
+storage, ready for later token editing. Child sessions have a return-to-parent action and no composer. Their
+capsule counts the parent's other work. Colors follow the generated web tokens, including the actual catalog's
+agent colors; the sandbox model is Luna 6 / low, not the mockup's illustrative Opus model.
+
+`ConversationStore` reads only `custom.transcript/list`, first 40 and then older 40-message pages. It preserves loaded
+history during tail merges, and re-reads loaded coverage after an external revert. Paging preserves an existing
+row's screen coordinate while the new Markdown blocks are measured. `EventHub` owns the one SSE connection shared
+with Sessões. Screens receive decoded events with local sequence numbers: text/reasoning/tool changes batch at
+32 ms; structural/terminal events and missing targets revalidate in 500 ms windows. A snapshot invalidates buffered
+deltas that may already be included in it, preventing duplicate text during reconnect. Foreground returns reload.
+
+Response text is parsed off the main actor by swift-markdown 0.7.3 into blocks and displayed by non-editable,
+selectable TextKit 2 views. Each carries its message ID, type-specific part ID and rendered-to-source UTF-16 mapping.
+Wave 4 can add its menu in `ResponseTextView`; source text remains the authority (especially for selections spanning
+Markdown delimiters). Tables are deliberately simple rows, not an interactive spreadsheet; no syntax highlighting.
+The image fixture currently has an invalid PNG zlib checksum: its original bytes are retained, and the bounded
+attachment surface and filename remain visible when ImageIO cannot paint it.
+
+The native pinned section header is the user bubble itself, not a duplicated overlay. It clamps to two lines only
+after reaching the top. Auto-follow stops on user scrolling; the round glass button resumes following the tail.
+Tests in `ConversationTests.swift` cover all 41 fixtures, paging, tool summaries/groups, model/context identity,
+agent counts, replayed SSE, dates/sticky/unread/viewed decisions and Markdown source mapping. Frame-health sampling
+is unavailable for iOS simulators in agent-device; do not report an inferred FPS figure.
+
 ### Live data and contract fixtures
 
 `SessionStore` is main-actor `@Observable` state. `OpenCodeKit` owns Codable wire models, HTTP/Basic authentication,
@@ -492,7 +543,7 @@ The first implementation was built and exercised on the dedicated iOS 27 simulat
 Pin/unpin, mute/unmute, status/repository filtering, repository reordering, and mark-all-read were checked against
 the live sandbox. Repository removal/addition and external preference changes over SSE were also verified. The
 permission/question seed is not consumed by these checks. Native menus, swipe actions,
-confirmation dialogs, archived navigation, and the provisional session screen are retained rather than drawing
+confirmation dialogs, archived navigation, and the native conversation reader are retained rather than drawing
 mock replacements. New session, voice, selection, settings, the master-session accessory, and the other tabs remain
 visual-only as specified.
 

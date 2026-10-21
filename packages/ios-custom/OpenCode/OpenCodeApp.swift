@@ -57,7 +57,7 @@ private struct AppTabs: View {
         }
       }
     }
-    .tabViewBottomAccessory {
+    .tabViewBottomAccessory(isEnabled: !store.conversationOpen) {
       HStack(spacing: 8) {
         Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(
           theme.color(.accent))

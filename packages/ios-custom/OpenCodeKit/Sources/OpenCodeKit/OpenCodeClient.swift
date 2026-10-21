@@ -124,6 +124,59 @@ public struct OpenCodeClient: Sendable {
       "custom.transcript", "list", input: Input(sessionID: sessionID))
     return SessionPreview(messages: page.data)
   }
+  public func conversation(_ sessionID: String, cursor: String? = nil) async throws
+    -> ConversationPage
+  {
+    struct Input: Encodable {
+      let sessionID: String
+      let limit = 40
+      let order: String?
+      let cursor: String?
+    }
+    return try await rpc(
+      "custom.transcript", "list",
+      input: Input(sessionID: sessionID, order: cursor == nil ? "desc" : nil, cursor: cursor))
+  }
+  public func session(_ id: String) async throws -> Session {
+    let response: DataResponse<Session> = try await get("/api/session/\(id)")
+    return response.data
+  }
+  public func models(directory: String) async throws -> [ModelInfo] {
+    let response: DataResponse<[ModelInfo]> = try await get(
+      "/api/model", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func agents(directory: String) async throws -> [AgentInfo] {
+    let response: DataResponse<[AgentInfo]> = try await get(
+      "/api/agent", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func familyPage(_ sessionID: String, after: String? = nil) async throws -> FamilyPage {
+    struct Input: Encodable {
+      let sessionID: String
+      let limit = 100
+      let after: String?
+    }
+    return try await rpc(
+      "custom.session-family", "page", input: Input(sessionID: sessionID, after: after))
+  }
+  public func shells(directory: String) async throws -> [ShellInfo] {
+    let response: DataResponse<[ShellInfo]> = try await get(
+      "/api/shell", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func shellOutput(_ id: String, directory: String, cursor: Int = 0) async throws
+    -> ShellOutput
+  {
+    let response: DataResponse<ShellOutput> = try await get(
+      "/api/shell/\(id)/output",
+      query: [
+        URLQueryItem(name: "location[directory]", value: directory),
+        URLQueryItem(name: "cursor", value: String(cursor)),
+        URLQueryItem(name: "limit", value: "65536"),
+      ])
+    return response.data
+  }
   public func archive(_ sessionID: String) async throws {
     struct Input: Encodable { let sessionID: String }
     let _: Empty = try await rpc("custom.archive", "archive", input: Input(sessionID: sessionID))

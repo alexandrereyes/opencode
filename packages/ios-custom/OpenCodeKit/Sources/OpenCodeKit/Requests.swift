@@ -77,6 +77,14 @@ public enum JSONValue: Codable, Sendable, Equatable {
     }
   }
   public var string: String? { if case .string(let text) = self { text } else { nil } }
+  public var number: Double? { if case .number(let value) = self { value } else { nil } }
+  public var array: [JSONValue]? { if case .array(let value) = self { value } else { nil } }
+  public var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
+  public var formatted: String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+  }
   public var object: [String: JSONValue]? {
     if case .object(let values) = self { values } else { nil }
   }
