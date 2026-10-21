@@ -119,45 +119,6 @@ struct UserBubble: View {
   }
 }
 
-struct ConversationComposer: View {
-  @Environment(\.appTheme) private var theme
-  let model: String
-  let agent: String
-  // AttributedString is the native storage for wave 3's inline mention tokens.
-  @State private var text = AttributedString()
-  var body: some View {
-    VStack(alignment: .leading, spacing: 15) {
-      TextEditor(text: $text)
-        .font(.system(size: 17)).disabled(true).frame(height: 26)
-        .scrollContentBackground(.hidden)
-        .overlay(alignment: .leading) {
-          if text.characters.isEmpty {
-            Text("Mensagem").font(.system(size: 17)).foregroundStyle(theme.color(.textSecondary))
-          }
-        }
-      HStack(spacing: 12) {
-        Image(systemName: "plus").font(.system(size: 18)).frame(width: 31, height: 31)
-          .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1) }
-        Text(model).font(.system(size: 12)).lineLimit(1)
-        Spacer(minLength: 4)
-        Text(agent).font(.system(size: 12)).lineLimit(1)
-        Image(systemName: "mic.fill").font(.system(size: 19)).foregroundStyle(
-          theme.color(.onPrimary)
-        )
-        .frame(width: 36, height: 36).background(theme.color(.primary), in: Circle())
-      }.foregroundStyle(theme.color(.textSecondary))
-    }
-    .padding(14).background(
-      theme.color(.surface).opacity(0.6), in: RoundedRectangle(cornerRadius: 22)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
-    }
-    .accessibilityElement(children: .combine).accessibilityHint(
-      "Envio disponível em uma próxima versão")
-  }
-}
-
 struct ConversationStep: View {
   @Environment(\.appTheme) private var theme
   let parts: [ConversationPart]
@@ -169,19 +130,21 @@ struct ConversationStep: View {
   private var pending: Bool {
     parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
   }
+  private var revealed: Bool { parts.contains { $0.id != nil && $0.id == store.revealedToolID } }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Button {
-        expanded = !(expanded ?? pending)
+        expanded = !(expanded ?? (pending || revealed))
       } label: {
         HStack(spacing: 6) {
           Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13)).lineLimit(1)
-          Image(systemName: (expanded ?? pending) ? "chevron.down" : "chevron.right").font(
-            .system(size: 10))
+          Image(systemName: (expanded ?? (pending || revealed)) ? "chevron.down" : "chevron.right")
+            .font(
+              .system(size: 10))
         }.foregroundStyle(theme.color(.textSecondary)).frame(
           maxWidth: .infinity, alignment: .leading)
       }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
-      if expanded ?? pending {
+      if expanded ?? (pending || revealed) {
         ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
           if part.type == "reasoning" {
             let key = "reasoning:\(index)"
@@ -214,6 +177,8 @@ struct ConversationStep: View {
           }
         }
       }
+    }.onChange(of: store.revealedToolID) { _, id in
+      if parts.contains(where: { $0.id == id }) { expanded = true }
     }
   }
   private func subagent(_ part: ConversationPart) -> some View {
@@ -249,11 +214,13 @@ struct ConversationStep: View {
     }.buttonStyle(.plain).disabled(part.childID == nil)
   }
   private func tool(_ part: ConversationPart, key: String) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    let waiting = store.pendingTool(part)
+    return VStack(alignment: .leading, spacing: 8) {
       Button {
         if !detail.insert(key).inserted { detail.remove(key) }
       } label: {
-        TimelineView(.periodic(from: part.running ? .now : .distantFuture, by: 1)) { context in
+        TimelineView(.periodic(from: part.running && waiting == nil ? .now : .distantFuture, by: 1))
+        { context in
           HStack(alignment: .top, spacing: 10) {
             Image(
               systemName: part.failed
@@ -262,13 +229,13 @@ struct ConversationStep: View {
             )
             .frame(width: 18)
             Text(
-              "\(Text(part.summary(now: context.date.timeIntervalSince1970 * 1000)))\(Text(part.exitCode.map { " · código \($0)" } ?? "").foregroundColor(theme.color(.error)))"
+              "\(Text(waiting ?? part.summary(now: context.date.timeIntervalSince1970 * 1000)))\(Text(part.exitCode.map { " · código \($0)" } ?? "").foregroundColor(theme.color(.error)))"
             )
             .font(.system(size: 13)).multilineTextAlignment(.leading)
             Spacer(minLength: 0)
           }
           .foregroundStyle(
-            theme.color(part.failed ? .error : part.running ? .success : .text)
+            theme.color(part.failed || waiting != nil ? .error : part.running ? .success : .text)
           )
           .padding(part.running ? 9 : 2)
           .background(
@@ -319,6 +286,7 @@ struct ConversationStep: View {
         .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 8))
       }
     }
+    .id(part.id ?? key)
     .task(id: "\(detail.contains(key)):\(part.status ?? "")") {
       guard detail.contains(key), part.name == "shell" else { return }
       repeat {

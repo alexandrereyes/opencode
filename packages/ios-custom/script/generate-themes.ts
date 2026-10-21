@@ -11,6 +11,7 @@ const roles = {
   surfaceRaised: "background-weak",
   highlight: "surface-base-hover",
   border: "border-weak-base",
+  controlBorder: "border-strong-base",
   textStrong: "text-strong",
   text: "text-base",
   textSecondary: "text-weak",

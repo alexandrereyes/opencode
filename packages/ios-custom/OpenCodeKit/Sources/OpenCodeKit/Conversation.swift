@@ -4,13 +4,22 @@ public struct ModelReference: Codable, Sendable, Hashable {
   public var id: String
   public var providerID: String
   public var variant: String?
+  public init(id: String, providerID: String, variant: String? = nil) {
+    self.id = id
+    self.providerID = providerID
+    self.variant = variant
+  }
 }
 
 public struct ModelInfo: Codable, Sendable {
   public let id: String
   public let providerID: String
   public let name: String
+  public let enabled: Bool?
+  public let variants: [Variant]?
   public let limit: Limit
+  public var identity: String { "\(providerID)/\(id)" }
+  public struct Variant: Codable, Sendable, Identifiable { public let id: String }
   public struct Limit: Codable, Sendable { public let context: Double }
 }
 
@@ -20,14 +29,15 @@ public struct AgentInfo: Codable, Sendable, Identifiable {
   public let color: String?
   public let mode: String
   public let hidden: Bool?
+  public let model: ModelReference?
 }
 
-public struct TokenUsage: Codable, Sendable, Equatable {
+public struct TokenUsage: Codable, Sendable, Hashable {
   public var input: Double
   public var output: Double
   public var reasoning: Double
   public var cache: Cache
-  public struct Cache: Codable, Sendable, Equatable {
+  public struct Cache: Codable, Sendable, Hashable {
     public var read: Double
     public var write: Double
   }
@@ -358,40 +368,10 @@ public enum ConversationProjection {
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
     active: Set<String>, shells: [ShellInfo]
   ) -> Int {
-    let tools = messages.flatMap(\.tools)
-    var tasks = Set(
-      children.filter { $0.parentID == ownerID && $0.id != viewedID && active.contains($0.id) }.map(
-        \.id))
-    for tool in tools where tool.name == "subagent" && tool.running {
-      if let child = tool.childID {
-        if child != viewedID { tasks.insert(child) }
-      } else {
-        tasks.insert(tool.id ?? "starting")
-      }
-    }
-    var foregroundShells = Set(
-      tools.filter { $0.name == "shell" && $0.running }.compactMap {
-        $0.metadata["shellID"]?.string
-      })
-    // A reconnect can see empty running metadata before the next progress event supplies shellID.
-    for tool in tools where tool.name == "shell" && tool.running && tool.metadata["shellID"] == nil
-    {
-      let candidates = shells.filter {
-        $0.metadata?["sessionID"]?.string == ownerID && $0.command == tool.input["command"]?.string
-          && !foregroundShells.contains($0.id)
-      }
-      if let shell = candidates.min(by: {
-        abs($0.time.started - (tool.time?.ran ?? tool.time?.created ?? 0))
-          < abs($1.time.started - (tool.time?.ran ?? tool.time?.created ?? 0))
-      }) {
-        foregroundShells.insert(shell.id)
-      }
-    }
-    for shell in shells
-    where shell.status == "running" && shell.metadata?["sessionID"]?.string == ownerID
-      && !foregroundShells.contains(shell.id)
-    { tasks.insert(shell.id) }
-    return tasks.count
+    runningWork(
+      ownerID: ownerID, viewedID: viewedID, messages: messages, children: children,
+      active: active, shells: shells
+    ).count
   }
   public static func workStarted(child: Session, shells: [ShellInfo]) -> Double {
     shells.filter { $0.status == "running" && $0.metadata?["sessionID"]?.string == child.id }

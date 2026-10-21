@@ -24,6 +24,7 @@ final class SessionStore {
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
+  @ObservationIgnored let drafts = ConversationDrafts()
   @ObservationIgnored private var order = RecentOrder()
   @ObservationIgnored private var chatRoot: String?
   @ObservationIgnored private var reloadPending = false

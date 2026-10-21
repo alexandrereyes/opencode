@@ -131,12 +131,17 @@ struct ConversationView: View {
   @State private var userScrolling = false
   @State private var firstLoad = true
   @State private var scrollState = ConversationScrollState()
+  @State private var agentsOpen = false
+  @State private var contextOpen = false
+  @State private var requestedTool: String?
+  @State private var childTool: String?
   let sessions: SessionStore
   let parentOnStack: String?
 
-  init(id: String, sessions: SessionStore, parentOnStack: String? = nil) {
+  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil) {
     self.sessions = sessions
     self.parentOnStack = parentOnStack
+    _requestedTool = State(initialValue: toolID)
     _conversation = State(
       initialValue: ConversationStore(id: id, client: sessions.client, hub: sessions.hub))
   }
@@ -176,17 +181,36 @@ struct ConversationView: View {
         }.foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
           .background(theme.color(.background))
       } else {
-        ConversationComposer(
-          model: conversation.modelLabel, agent: conversation.session?.agent ?? "build"
-        )
+        VStack(spacing: 8) {
+          ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
+          ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
+        }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6).background(
           theme.color(.background))
       }
     }
     .toolbar(.hidden, for: .navigationBar, .tabBar)
     .navigationDestination(item: $child) { id in
-      ConversationView(id: id, sessions: sessions, parentOnStack: conversation.id)
+      ConversationView(
+        id: id, sessions: sessions, parentOnStack: conversation.id, toolID: childTool)
     }
+    .sheet(isPresented: $agentsOpen) {
+      ConversationAgentsSheet(store: conversation) { work in
+        if let id = work.sessionID {
+          childTool = nil
+          child = id
+        } else if let tool = work.toolID {
+          if let parent = conversation.session?.parentID {
+            childTool = tool
+            child = parent
+          } else {
+            conversation.revealedToolID = tool
+            requestedTool = tool
+          }
+        }
+      }
+    }
+    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation) }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
     .task(id: conversation.revision) { await conversation.presented() }
   }
@@ -203,27 +227,32 @@ struct ConversationView: View {
       if let session = conversation.session {
         let project = sessions.projects.first { $0.id == session.projectID }
         let colors = theme.avatar(SessionList.avatarColor(project, fallback: session.projectID))
-        ZStack {
-          Circle().stroke(theme.color(.contextTrack), lineWidth: 2.5)
-          if let fraction = conversation.context {
-            Circle().trim(from: 0, to: min(1, max(0, fraction)))
-              .stroke(
-                theme.color(fraction > 0.8 ? .contextWarning : .contextFill),
-                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-              )
-              .rotationEffect(.degrees(-90))
-          }
-          Circle().fill(colors.background).padding(4)
-          Text(
-            SessionList.monogram(
-              project?.displayName
-                ?? URL(fileURLWithPath: session.location.directory).lastPathComponent)
-          )
-          .font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
-        }.frame(width: 38, height: 38)
-          .accessibilityLabel(
-            conversation.context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
-              ?? "Contexto desconhecido")
+        Button {
+          contextOpen = true
+        } label: {
+          ZStack {
+            Circle().stroke(theme.color(.contextTrack), lineWidth: 2.5)
+            if let fraction = conversation.context {
+              Circle().trim(from: 0, to: min(1, max(0, fraction)))
+                .stroke(
+                  theme.color(fraction > 0.8 ? .contextWarning : .contextFill),
+                  style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            }
+            Circle().fill(colors.background).padding(4)
+            Text(
+              SessionList.monogram(
+                project?.displayName
+                  ?? URL(fileURLWithPath: session.location.directory).lastPathComponent)
+            )
+            .font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+          }.frame(width: 38, height: 38)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+          conversation.context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
+            ?? "Contexto desconhecido")
       }
       VStack(alignment: .leading, spacing: 4) {
         Text(conversation.session?.displayTitle ?? "Conversa").font(
@@ -236,6 +265,7 @@ struct ConversationView: View {
       }.frame(maxWidth: .infinity, alignment: .leading)
       if conversation.runningCount > 0 {
         Button {
+          agentsOpen = true
         } label: {
           HStack(spacing: 6) {
             AgentPixels(color: theme.color(.success), size: 16)
@@ -341,7 +371,23 @@ struct ConversationView: View {
           .listRowSeparator(.hidden)
           .listRowBackground(theme.color(.background))
         }
-        theme.color(.background).opacity(0).frame(height: 1).id("bottom")
+        ForEach(conversation.family?.permissions ?? []) { request in
+          ConversationPermissionCard(request: request, store: conversation)
+            .padding(.vertical, 10)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
+            .id(request.id)
+        }
+        ForEach(
+          (conversation.family?.forms ?? []).filter { $0.metadata?["kind"]?.string == "question" }
+        ) { form in
+          ConversationQuestionCard(form: form, store: conversation)
+            .padding(.vertical, 10)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
+            .id(form.id)
+        }
+        theme.color(.background).opacity(0).frame(height: 12).id("bottom")
           .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(
             theme.color(.background)
           )
@@ -379,7 +425,7 @@ struct ConversationView: View {
           || scrollState.view.map { $0.isTracking || $0.isDragging || $0.isDecelerating } == true
         if interacting { scrollState.anchor = nil }
         if new.offset < 40 && !firstLoad { loadOlder() }
-        if old.height != new.height && atBottom && !interacting {
+        if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting {
           proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
         } else {
@@ -389,6 +435,16 @@ struct ConversationView: View {
         }
       }
       .onChange(of: conversation.revision) { _, _ in
+        if let tool = requestedTool,
+          let message = conversation.messages.first(where: { $0.tools.contains { $0.id == tool } })
+        {
+          conversation.revealedToolID = tool
+          atBottom = false
+          firstLoad = false
+          proxy.scrollTo(message.id, anchor: .center)
+          requestedTool = nil
+          return
+        }
         if firstLoad && conversation.ready {
           Task { @MainActor in
             await Task.yield()
@@ -406,6 +462,24 @@ struct ConversationView: View {
         {
           proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
+        }
+      }
+      .onChange(of: requestedTool) { _, tool in
+        guard let tool else { return }
+        Task { @MainActor in
+          while !conversation.messages.contains(where: { $0.tools.contains { $0.id == tool } })
+            && conversation.hasOlder
+          {
+            await conversation.older()
+            if conversation.error != nil { break }
+          }
+          if let message = conversation.messages.first(where: {
+            $0.tools.contains { $0.id == tool }
+          }) {
+            atBottom = false
+            proxy.scrollTo(message.id, anchor: .center)
+          }
+          requestedTool = nil
         }
       }
       .overlay(alignment: .bottomTrailing) {
@@ -427,10 +501,18 @@ struct ConversationView: View {
   private func loadOlder() {
     guard conversation.ready, conversation.hasOlder, !conversation.paging else { return }
     // Retain a row's actual screen coordinate, including a partially visible page, not just its ID.
-    if let anchor = scrollState.rows.filter({ $0.value >= 0 }).min(by: { $0.value < $1.value }) {
+    if !atBottom,
+      let anchor = scrollState.rows.filter({ $0.value >= 0 }).min(by: { $0.value < $1.value })
+    {
       scrollState.anchor = (anchor.key, anchor.value)
     }
-    Task { await conversation.older() }
+    Task {
+      let count = conversation.messages.count
+      await conversation.older()
+      // An empty history page has no prepended geometry to preserve. In particular,
+      // do not pin the top while the initial Markdown is still acquiring its height.
+      if conversation.messages.count == count { scrollState.anchor = nil }
+    }
   }
   private func showDay(_ message: ConversationMessage) -> Bool {
     guard let index = conversation.messages.firstIndex(where: { $0.id == message.id }), index > 0

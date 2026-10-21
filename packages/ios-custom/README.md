@@ -467,10 +467,10 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Wave 1 has no permission/question cards or working composer/tray. The disabled composer uses native attributed-text
-storage, ready for later token editing. Child sessions have a return-to-parent action and no composer. Their
-capsule counts the parent's other work. Colors follow the generated web tokens, including the actual catalog's
-agent colors; the sandbox model is Luna 6 / low, not the mockup's illustrative Opus model.
+Waves 1 and 2 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
+permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
+generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
+mockup's illustrative Opus model.
 
 `ConversationStore` reads only `custom.transcript/list`, first 40 and then older 40-message pages. A recycling plain
 `List` keeps native text views only for its current rows; off-screen rows release parsed Markdown and thumbnails,
@@ -495,6 +495,73 @@ after reaching the top. Auto-follow stops on user scrolling; the round glass but
 Tests in `ConversationTests.swift` cover all 41 fixtures, paging, tool summaries/groups, model/context identity,
 agent counts, replayed SSE, dates/sticky/unread/viewed decisions and Markdown source mapping. Frame-health sampling
 is unavailable for iOS simulators in agent-device; do not report an inferred FPS figure.
+
+### Conversation actions (wave 2)
+
+- `ConversationDraft` keeps one in-memory attributed draft per session in `SessionStore.drafts`, including the
+  pending queue edit and local model/agent choices. Going back and reopening preserves it; terminating the app does
+  not. `ComposerTextView` is a TextKit 2 `UITextView`, growing to six lines before scrolling. It preserves attributed
+  ranges, exposes native selection and an explicit keyboard Done action. Empty input shows a disabled microphone
+  with the accessibility hint “Em breve”; the `+` menu is visible but its three actions await wave 3.
+- `PromptRequest` and `PromptSubmission` own serialization and sending. New sends have a unique `msg_` ID,
+  `metadata.displayText` and `comments:[]`. Admission gets one automatic transport/5xx retry with the exact same ID;
+  a failed attempt keeps the text and request for a manual retry. Steer applies agent, then model, then prompt;
+  queue applies neither selection endpoint. Busy sends read `followUpBehavior`; long-pressing Send offers its
+  alternate. Idle sends always steer. Queued model/agent metadata is presentation, not a per-prompt execution
+  override: later delivery uses the active session selection, just like the web.
+- The model sheet shows explicit `visibility:"show"` entries only, excludes disabled models, puts favorites first,
+  groups by provider and searches name, ID and provider. Effort uses that model's actual variants. The current
+  model's effort remains available if the visible list is empty. Visibility/favorite management remains in the web
+  application; the native picker does not mutate those global preferences. The agent menu lists non-hidden primary
+  and `all` agents. A session without a selected model uses preferences/default-model discovery.
+- The tray has Stop (`resume=true`), conditional Background and queued user items. Pending request cards take its
+  running row's place while the session waits for you; queued items remain available. Editing submits a replacement
+  ID before cancelling the original; no text PATCH or ID reuse is attempted. All inbox events revalidate the tray.
+- Permission decisions are once, reject, and explicit always (the small `…` or long press), sent to the request's
+  actual owner. Question cards use option values, support multiselect and custom text, omit hidden/inactive fields,
+  and dismiss with DELETE. Sending a normal prompt never answers a form. Generic non-question forms and field types
+  other than string/multiselect are not implemented by this wave and are identified as unsupported rather than
+  silently interpreted. Pending tool lines show “Aguardando permissão/resposta” without a ticking elapsed timer.
+- The agents sheet and header share one running-work projection. It excludes foreground shells and the viewed
+  child, opens real child IDs, reveals a background shell's tool (expanding its group), and confirms individual
+  interruption. Context details use the last measured assistant and its model, with token components, cache hit,
+  session/descendant/total cost, model/provider, branch and directory. No extra child transcript is fetched for usage.
+- The transcript is still a recycling `List`. An empty older-page response no longer keeps a top anchor during
+  initial Markdown measurement; active tail-following does not acquire a history anchor. No off-screen parsed text,
+  image or UIKit view cache was added by the action cards.
+
+The Swift Testing suite includes `ConversationActionTests.swift`: wire bodies and HTTP methods/owners, admission
+retry identity/order, queue replacement/failure, permission and form responses including dismissal, visibility and
+favorites, running-work rules, context math and pending tool labels. There are 53 tests across the package.
+
+Wave 2 was built without new warnings and exercised against port 4177: idle/busy and alternate submission, model and
+effort selection, a primary-agent switch to `utra` on send, queue edit/promote/remove, Background, root/child/shell
+interruption, once/reject/always permission decisions, question answer/dismissal, child navigation and context
+details. Prompt executions used only `llm-proxy/gpt-6-luna` / `low`. The conversation seed was recreated with
+`seed-conversation.ts --reset` after the action checks; no Sessões request was consumed. Simulator evidence for both
+themes lives in `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda2/`:
+`a-{dark,light}.png`, `b-{dark,light}.png`, `d-{dark,light}.png`, `models-{dark,light}.png`,
+`effort-{dark,light}.png`, `agents-{dark,light}.png` and `context-{dark,light}.png`.
+`context-info-{dark,light}.png` shows the lower cost/model/directory section. The restored preference snapshot has
+no explicitly visible models, so the final picker screenshots correctly show an empty catalog and the current
+model's effort. Model switching/search/favorites were also checked while the independent PWA reference capture
+temporarily exposed Luna 6 and Luna 6 - fast; the native app did not change those global preferences.
+
+“Permitir sempre” persists a **project** permission, not a session-only choice. Before resetting its test, list
+`/api/permission/saved?projectID=<conversation-project>` and remove only the exact newly created test rule via
+`DELETE /api/permission/saved/<id>`; never clear shared rules indiscriminately. Otherwise a fresh B can finish
+without asking and the seed's readiness wait times out. The wave-2 test's own rule was removed before the final
+reset. After the server's tool-catalog rescan, one restored Explore child finished with “Não encontrei uma ferramenta
+shell disponível”; the final capsule/sheet therefore truthfully shows one active child instead of the intended two.
+The root shell, queue, B's permission and D's question remain in their restored states. This is a seed/runtime
+limitation, not a fabricated second task in the UI.
+
+For waves 3–4: add structured token serialization at the `PromptRequest` boundary and token editing in
+`ComposerTextView`; keep `NSAttributedString` as the editing source and UTF-16 offsets on the wire. Metadata and
+materialized queue payloads already have typed containers, but advanced attachment/context edits need deliberate
+re-serialization rather than treating materialized payloads as fresh attachment requests. Quotes/comments still
+belong at this same boundary; response selection hooks remain in `ResponseTextView` from wave 1. Do not replace the
+recycling timeline or add another event connection.
 
 For memory checks, build with `-configuration Release`, install `Release-iphonesimulator/OpenCode.app`, and run
 `vmmap -summary <app-pid>` after Sessões settles, after opening C's tail, at the first history page, and after returning

@@ -34,6 +34,7 @@ public struct Empty: Codable, Sendable { public init() {} }
 public struct OpenCodeClient: Sendable {
   public let configuration: ServerConfiguration
   private let session: URLSession
+  private var transport: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
 
   public init(configuration: ServerConfiguration) {
     self.configuration = configuration
@@ -41,6 +42,13 @@ public struct OpenCodeClient: Sendable {
     config.timeoutIntervalForRequest = 45
     config.timeoutIntervalForResource = 60 * 60
     session = URLSession(configuration: config)
+  }
+  init(
+    configuration: ServerConfiguration,
+    transport: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse)
+  ) {
+    self.init(configuration: configuration)
+    self.transport = transport
   }
 
   public func info() async throws -> ServerInfo { try await get("/api/info") }
@@ -146,6 +154,12 @@ public struct OpenCodeClient: Sendable {
       "/api/model", query: [URLQueryItem(name: "location[directory]", value: directory)])
     return response.data
   }
+  public func defaultModel(directory: String) async throws -> ModelInfo? {
+    struct Response: Decodable { let data: ModelInfo? }
+    let response: Response = try await get(
+      "/api/model/default", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
   public func agents(directory: String) async throws -> [AgentInfo] {
     let response: DataResponse<[AgentInfo]> = try await get(
       "/api/agent", query: [URLQueryItem(name: "location[directory]", value: directory)])
@@ -205,19 +219,32 @@ public struct OpenCodeClient: Sendable {
     let data = try await data(request)
     return try JSONDecoder().decode(RPCOutput<Output>.self, from: data).output
   }
-  private func get<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
+  func get<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
     -> Output
   {
     try JSONDecoder().decode(Output.self, from: await data(request(path, query: query)))
   }
-  private func post<Input: Encodable>(_ path: String, input: Input) async throws {
+  func post<Input: Encodable>(_ path: String, input: Input) async throws {
     var request = request(path)
     request.httpMethod = "POST"
     request.httpBody = try JSONEncoder().encode(input)
     _ = try await data(request)
   }
+  func perform(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil)
+    async throws
+  {
+    var request = request(path, query: query)
+    request.httpMethod = method
+    request.httpBody = body
+    _ = try await data(request)
+  }
   private func data(_ request: URLRequest) async throws -> Data {
-    let (data, response) = try await session.data(for: request)
+    let (data, response) =
+      if let transport {
+        try await transport(request)
+      } else {
+        try await session.data(for: request)
+      }
     try validate(response)
     return data
   }

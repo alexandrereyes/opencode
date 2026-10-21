@@ -33,6 +33,7 @@ public struct Preferences: Codable, Sendable {
     public let pinnedSessions: [String]
     public let mutedSessions: [String]?
     public let settings: Settings
+    public let models: Models?
   }
   public struct Library: Codable, Sendable {
     public let projects: [Selection]
@@ -43,6 +44,25 @@ public struct Preferences: Codable, Sendable {
   }
   public struct Settings: Codable, Sendable {
     public let autoApprove: Bool
+    public let followUpBehavior: PromptDelivery?
+  }
+  public struct Models: Codable, Sendable {
+    public let user: [User]
+    public let variant: [String: String]
+    public let favorites: [Key]?
+    public let providerOrder: [String]?
+    public let `default`: Key?
+    public struct Key: Codable, Sendable {
+      public let providerID: String
+      public let modelID: String
+      public let variant: String?
+    }
+    public struct User: Codable, Sendable {
+      public let providerID: String
+      public let modelID: String
+      public let visibility: String
+      public let favorite: Bool?
+    }
   }
 }
 
