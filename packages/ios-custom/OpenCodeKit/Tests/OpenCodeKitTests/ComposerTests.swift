@@ -108,6 +108,74 @@ private func detected(_ text: String) -> ComposerTrigger? {
   #expect(source.suggestions(try #require(detected("#rv"))).first?.token.id == "global")
 }
 
+@Test func skillRankingPrefersNameAndIDBeforeDescription() throws {
+  var source = ComposerSources()
+  source.skills = try decodeComposer(
+    """
+    [{"id":"import-memory","name":"import-memory","description":"Import a conversation"},
+     {"id":"handoff","name":"handoff","description":"Compact the current conversation"},
+     {"id":"other","name":"my-conversation-tools"},
+     {"id":"conversation-id","name":"Different display name"},
+     {"id":"check","name":"conversation-check","description":"Confere a conversa"}]
+    """, [ComposerSkill].self)
+  #expect(
+    source.suggestions(try #require(detected("$CONVERSATION"))).map(\.token.id)
+      == ["conversation-id", "check", "other", "import-memory", "handoff"])
+}
+
+@Test func slashRankingPlacesMatchingSkillBeforeCommandDescription() throws {
+  var source = ComposerSources()
+  source.commands = try decodeComposer(
+    """
+    [{"name":"describe","description":"Review the conversation"},
+     {"name":"pre-review","description":"Revisa"},{"name":"review-code"}]
+    """, [ComposerCommand].self)
+  source.skills = try decodeComposer(
+    """
+    [{"id":"review-skill","name":"review-skill","slash":true}]
+    """, [ComposerSkill].self)
+  let items = source.suggestions(try #require(detected("/review")))
+  #expect(items.map(\.token.id) == ["review-code", "review-skill", "pre-review", "describe"])
+  #expect(items.map(\.section) == ["Comandos", "Skills", "Comandos", "Comandos"])
+}
+
+@Test func contextRankingCombinesNamesIDsAndFileBasenames() throws {
+  var source = ComposerSources()
+  source.references = try decodeComposer(
+    """
+    [{"name":"library","path":"/ref","description":"Infração e infraestrutura"}]
+    """, [ComposerReference].self)
+  let files = try decodeComposer(
+    """
+    [{"path":"docs/my-infra.md","type":"file"},{"path":"docs/infra.md","type":"file"}]
+    """, [ComposerFile].self)
+  let agents = try decodeComposer(
+    """
+    [{"id":"infra-agent","name":"Named differently","mode":"subagent"}]
+    """, [AgentInfo].self)
+  #expect(
+    source.suggestions(try #require(detected("@ÍNFRA")), agents: agents, files: files).map(
+      \.token.id)
+      == ["docs/infra.md", "infra-agent", "docs/my-infra.md", "library"])
+}
+
+@Test func snippetRankingIncludesAliasPrefixesAndSubstrings() throws {
+  var source = ComposerSources()
+  source.snippets = try decodeComposer(
+    """
+    [{"id":"description","name":"a-description","description":"Revisar tudo","aliases":[],"content":"a"},
+     {"id":"substring","name":"b-substring","description":"","aliases":["pre-revisar"],"content":"b"},
+     {"id":"prefix","name":"z-prefix","description":"","aliases":["revisar"],"content":"c"},
+     {"id":"revisar-id","name":"z-other","description":"","aliases":[],"content":"d"}]
+    """, [ComposerSnippet].self)
+  #expect(
+    source.suggestions(try #require(detected("#revis"))).map(\.token.id)
+      == ["revisar-id", "prefix", "substring", "description"])
+  #expect(
+    source.suggestions(try #require(detected("#"))).map(\.token.id)
+      == ["description", "substring", "revisar-id", "prefix"])
+}
+
 @Test func tokenSerializationUsesUTF16AndKeepsTypedDisplayText() throws {
   let prefix = "😀 Ação "
   let file = ComposerToken(kind: .file, id: "f", text: "@açúcar.md", value: "/repo/açúcar.md")

@@ -34,15 +34,18 @@ public struct ComposerSuggestion: Sendable, Identifiable {
   public let subtitle: String
   public let icon: String
   public let token: ComposerToken
+  public let aliases: [String]
   public var id: String { "\(token.kind.rawValue):\(token.id)" }
   public init(
-    section: String, title: String, subtitle: String = "", icon: String, token: ComposerToken
+    section: String, title: String, subtitle: String = "", icon: String, token: ComposerToken,
+    aliases: [String] = []
   ) {
     self.section = section
     self.title = title
     self.subtitle = subtitle
     self.icon = icon
     self.token = token
+    self.aliases = aliases
   }
 }
 public struct ComposerSources: Sendable {
@@ -51,23 +54,43 @@ public struct ComposerSources: Sendable {
   public var references: [ComposerReference] = []
   public var snippets: [ComposerSnippet] = []
   public init() {}
-  public static func matches(_ query: String, _ values: String...) -> Bool {
-    let query = query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-    return query.isEmpty
-      || values.contains {
-        $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).contains(
-          query)
-      }
-  }
   public func suggestions(
     _ trigger: ComposerTrigger, agents: [AgentInfo] = [],
     files: [ComposerFile] = [], sessions: [Session] = [], current: String = "", server: String = "",
     directory: String = "", project: String? = nil
   ) -> [ComposerSuggestion] {
-    let query = trigger.query
-    switch trigger.character {
+    let query = normalize(trigger.query)
+    let items = candidates(
+      trigger.character, agents: agents, files: files, sessions: sessions,
+      current: current, server: server, directory: directory, project: project
+    )
+    let ranked = items.enumerated().compactMap { index, item in
+      rank(item, query: query).map { (item: item, rank: $0, index: index) }
+    }
+    return ranked.sorted { $0.rank == $1.rank ? $0.index < $1.index : $0.rank < $1.rank }.map(
+      \.item)
+  }
+  private func rank(_ item: ComposerSuggestion, query: String) -> Int? {
+    if query.isEmpty { return 0 }
+    let basename =
+      item.token.kind == .file ? [item.title.components(separatedBy: "/").last ?? ""] : []
+    let names = ([item.token.id, String(item.token.text.dropFirst())] + item.aliases + basename).map
+    { normalize($0) }
+    if names.contains(where: { $0.hasPrefix(query) }) { return 0 }
+    if names.contains(where: { $0.contains(query) }) { return 1 }
+    if normalize(item.subtitle).contains(query) { return 2 }
+    return nil
+  }
+  private func normalize(_ value: String) -> String {
+    value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+  }
+  private func candidates(
+    _ character: String, agents: [AgentInfo], files: [ComposerFile], sessions: [Session],
+    current: String, server: String, directory: String, project: String?
+  ) -> [ComposerSuggestion] {
+    switch character {
     case "@":
-      return files.filter { Self.matches(query, $0.path) }.map {
+      return files.map {
         .init(
           section: "Arquivos", title: $0.path, icon: $0.type == "directory" ? "folder" : "doc",
           token: .init(
@@ -75,7 +98,7 @@ public struct ComposerSources: Sendable {
             value: (directory.hasSuffix("/") ? directory : directory + "/") + $0.path))
       }
         + sessions.filter {
-          $0.id != current && $0.parentID == nil && Self.matches(query, $0.title ?? "", $0.id)
+          $0.id != current && $0.parentID == nil
         }.map {
           let title = $0.title ?? $0.id
           return .init(
@@ -89,7 +112,7 @@ public struct ComposerSources: Sendable {
                 ]))
         }
         + agents.filter {
-          $0.hidden != true && $0.mode != "primary" && Self.matches(query, $0.name, $0.id)
+          $0.hidden != true && $0.mode != "primary"
         }.map {
           .init(
             section: "Agentes", title: $0.name, icon: "agent",
@@ -97,14 +120,14 @@ public struct ComposerSources: Sendable {
               .init(kind: .agent, id: $0.id, text: "@\($0.name)"))
         }
         + references.filter {
-          $0.hidden != true && Self.matches(query, $0.name, $0.description ?? "")
+          $0.hidden != true
         }.map {
           .init(
             section: "Referências", title: $0.name, subtitle: $0.description ?? "", icon: "folder",
             token: .init(kind: .reference, id: $0.name, text: "@\($0.name)", value: $0.path))
         }
     case "$":
-      return skills.filter { Self.matches(query, $0.name, $0.description ?? "") }.map {
+      return skills.map {
         skill($0, prefix: "$")
       }
     case "#":
@@ -113,13 +136,11 @@ public struct ComposerSources: Sendable {
         let key = snippet.name.lowercased()
         if merged[key] == nil || snippet.project != nil { merged[key] = snippet }
       }
-      return merged.values.filter {
-        Self.matches(query, $0.name, $0.description, $0.aliases.joined(separator: " "))
-      }
-      .sorted { $0.name < $1.name }.map {
+      return merged.values.sorted { $0.name < $1.name }.map {
         .init(
           section: "Snippets", title: "#\($0.name)", subtitle: $0.description, icon: "number",
-          token: .init(kind: .snippet, id: $0.id, text: "#\($0.name)", value: $0.content))
+          token: .init(kind: .snippet, id: $0.id, text: "#\($0.name)", value: $0.content),
+          aliases: $0.aliases)
       }
     case "/":
       let local = [
@@ -130,21 +151,19 @@ public struct ComposerSources: Sendable {
       let names = Set(commands.map(\.name) + local.map(\.0))
       return commands.filter { item in
         !local.contains { $0.0 == item.name }
-          && Self.matches(query, item.name, item.description ?? "")
       }.map {
         .init(
           section: "Comandos", title: "/\($0.name)", subtitle: $0.description ?? "",
           icon: "slash.circle",
           token: .init(kind: .command, id: $0.name, text: "/\($0.name)", value: "backend"))
       }
-        + local.filter { item in Self.matches(query, item.0, item.1) }.map {
+        + local.map {
           .init(
             section: "Comandos", title: "/\($0.0)", subtitle: $0.1, icon: "slash.circle",
             token: .init(kind: .command, id: $0.0, text: "/\($0.0)", value: "client"))
         }
         + skills.filter {
           $0.slash == true && !names.contains($0.name)
-            && Self.matches(query, $0.name, $0.description ?? "")
         }
         .map { skill($0, prefix: "/") }
     default: return []

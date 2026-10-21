@@ -172,6 +172,7 @@ struct ConversationView: View {
         .simultaneousGesture(
           TapGesture().onEnded {
             sessions.drafts.draft(conversation.id).dismissSuggestions()
+            sessions.drafts.draft(conversation.id).focused = false
           })
     }
     .background(theme.color(.background))
@@ -401,6 +402,7 @@ struct ConversationView: View {
           )
       }
       .listStyle(.plain)
+      .scrollDismissesKeyboard(.interactively)
       .listSectionSpacing(0)
       .environment(\.defaultMinListRowHeight, 0)
       .environment(\.defaultMinListHeaderHeight, 0)

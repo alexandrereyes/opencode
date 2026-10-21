@@ -502,7 +502,8 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
 - `ConversationDraft` keeps one attributed draft per session in `SessionStore.drafts`, including the pending queue
   edit and local model/agent choices. Wave 3 adds protected on-disk persistence, tokens, attachments and the `+` menu
   (details below). `ComposerTextView` is a TextKit 2 `UITextView`, growing to six lines before scrolling, with native
-  selection and an explicit keyboard Done action. Empty input shows a disabled microphone with “Em breve”.
+  selection. Dragging or tapping the transcript dismisses the keyboard; no accessory row consumes conversation
+  space. Empty input shows a disabled microphone with “Em breve”.
 - `PromptRequest` and `PromptSubmission` own serialization and sending. New sends have a unique `msg_` ID,
   `metadata.displayText` and `comments:[]`. Admission gets one automatic transport/5xx retry with the exact same ID;
   a failed attempt keeps the text and request for a manual retry. Steer applies agent, then model, then prompt;
@@ -576,12 +577,17 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
 - `ComposerDocument` / `ComposerSpan` model the plain display text plus typed token ranges in UTF-16. The TextKit 2
   editor retains encoded token attributes, snaps the caret out of tokens and deletes an intersected token as a unit.
   Raw trigger text remains plain text. `ComposerTrigger` recognizes word boundaries; `/` is only active at offset 0.
-  Space, Escape and a tap in the transcript dismiss suggestions.
+  Space, Escape and a tap in the transcript dismiss suggestions. Trigger queries disable autocorrection,
+  autocapitalization and predictive suggestions; prose restores the keyboard defaults. Unselected correction
+  ranges cannot replace a token.
 - `ComposerSources` merges files, recent root sessions, mentionable agents and visible references for `@`; supported
   local commands plus backend commands and noncolliding slash skills for `/`; skills for `$`; project-over-global
   case-insensitive snippets (including aliases) for `#`. File/session searches debounce 180 ms and cancel stale reads.
   The glass panel highlights the first result, groups by source and has explicit empty/error states. Catalog
   descriptions retain their server-provided language; native labels are pt-BR. Apps and MCP resources are omitted.
+  Across sources, name/ID/alias prefixes rank before name substrings, then description-only matches. File basenames
+  participate in name ranking. Equal-ranked items retain their catalog order, and section headings never move
+  description matches ahead of name matches.
 - `PromptRequest(document:…)` normalizes newlines, expands snippets and adjusts later mention offsets, adds session
   reference instructions and `metadata.sessions`, and sends URI-only files, agents and skills. `displayText` remains
   the typed text, `comments:[]` is retained, and additive `metadata.composerTokens` restores native token styling in
@@ -596,9 +602,10 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
   only up to 20 MiB and when the selected model advertises the matching input. Other files remain path references
   with `Attached file: …` and `metadata.attachments`. Chips show a bounded thumbnail or file icon, filename and remove
   action; preparation/upload progress and failures use the shared toast. No camera, paste or drag/drop was added.
-- The keyboard expand button, `+` menu and upward swipe open the same composer UI full screen, with the same draft,
+- The small, muted in-card expand button (over three lines or with attachments), `+` menu and upward swipe open the same composer UI full screen, with the same draft,
   attachments and selection controls. Recollection preserves cursor and tokens. An explicit editor owner prevents
   the outgoing sheet and incoming compact editor from competing for first responder during the transition.
+  The full-screen editor has one collapse control in its header; neither editor has a keyboard accessory row.
 - `DraftPersistence` stores JSON and separate attachment files under Application Support, keyed by the server URL
   hash and session ID, using atomic writes and iOS file protection. Writes debounce 250 ms and flush on leaving or
   backgrounding. Model/effort/agent, cursor and pending queue replacement ID are retained. Attachments are capped at
@@ -609,7 +616,7 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
 
 `ComposerTests.swift` adds trigger, catalog filtering/precedence, UTF-16/emoji/accent/newline serialization, snippet
 offset shifts, command/skill dispatch, session instructions, inline/staged attachment rules, real image downscaling,
-raw upload/command HTTP bodies, materialized queue restoration and protected-draft round-trip/cleanup tests. The package has 72 tests.
+raw upload/command HTTP bodies, materialized queue restoration, suggestion ranking and protected-draft round-trip/cleanup tests. The package has 76 tests.
 
 Verification uses only the dedicated **OpenCode Sessoes** simulator and port 4177. A separate session in the fake
 conversation repository sends the file, agent, session, skill, snippet and attachment probes, runs
@@ -618,9 +625,10 @@ PNG added with `simctl addmedia`; the text file is selected through the real doc
 is reset with `seed-conversation.ts --reset` before final captures; no Sessões request is consumed. Evidence for both
 themes is in `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda3/`:
 `context-*`, `commands-*`, `skills-*`, `snippets-*`, `menu-*`, `attachments-*`, `fullscreen-*`, `restored-*`, `sent-*`.
-`agents-fit-light.png` and `default-badge-light.png` cover the two wave-2 review fixes. The final C draft is left
-unsent with a context token and both attachments for review; the separate verification session is idle.
-Native keyboard/toolbars and system picker presentation deliberately replace the mockup's illustrative keyboard.
+`agents-fit-light.png` and `default-badge-light.png` cover the two wave-2 review fixes. The C draft is kept local and
+unsent during review; the separate verification session is idle. The composer review adds `long-draft-*` and
+`keyboard-*` and refreshes all four trigger panels and `fullscreen-*` without a keyboard accessory row.
+Native keyboards and system picker presentation deliberately replace the mockup's illustrative keyboard.
 Token backgrounds use attributed text highlights rather than a separately drawn rounded chip view.
 
 For waves 4–5: extend `PromptRequest(document:…)` with quotes/file comments after the main text and attachment

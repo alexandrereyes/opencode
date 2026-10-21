@@ -15,6 +15,8 @@ struct ComposerEditor: View {
   @State private var files = false
   @State private var selectedPhotos: [PhotosPickerItem] = []
   @State private var editorID = UUID()
+  @State private var longText = false
+  private var showExpand: Bool { !expanded && (longText || !draft.attachments.isEmpty) }
   private var hasContent: Bool {
     !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       || !draft.attachments.isEmpty
@@ -55,12 +57,12 @@ struct ComposerEditor: View {
           "send-error")
       }
       VStack(alignment: .leading, spacing: 12) {
-        if !draft.attachments.isEmpty { attachmentRow }
+        if !draft.attachments.isEmpty { attachmentRow.padding(.trailing, showExpand ? 26 : 0) }
         if draft.importing {
           ProgressView("Preparando anexos…").font(.caption).tint(theme.color(.primary))
         }
         ComposerTextView(
-          draft: draft, theme: theme, expanded: expanded, owner: editorID, expand: expand
+          draft: draft, theme: theme, expanded: expanded, owner: editorID
         )
         .overlay(alignment: .topLeading) {
           if draft.text.length == 0 {
@@ -68,18 +70,12 @@ struct ComposerEditor: View {
               .allowsHitTesting(false)
           }
         }
-        .overlay(alignment: .topTrailing) {
-          if !expanded
-            && (draft.text.string.count > 140 || draft.text.string.filter { $0 == "\n" }.count >= 3)
-          {
-            Button(
-              "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right",
-              action: expand
-            )
-            .labelStyle(.iconOnly).font(.caption).padding(4).background(
-              theme.color(.surface), in: Circle())
-          }
+        .onGeometryChange(for: Bool.self) {
+          $0.size.height > UIFont.preferredFont(forTextStyle: .body).lineHeight * 3 + 2
+        } action: {
+          longText = $0
         }
+        .padding(.trailing, showExpand && draft.attachments.isEmpty ? 26 : 0)
         controls
       }
       .padding(14).background(
@@ -87,6 +83,17 @@ struct ComposerEditor: View {
       )
       .overlay {
         RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
+      }
+      .overlay(alignment: .topTrailing) {
+        if showExpand {
+          Button(
+            "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
+          )
+          .labelStyle(.iconOnly).font(.system(size: 12)).foregroundStyle(
+            theme.color(.textSecondary)
+          )
+          .frame(width: 28, height: 28).padding(7).buttonStyle(.plain)
+        }
       }
       .simultaneousGesture(
         DragGesture(minimumDistance: 60).onEnded { value in
@@ -163,11 +170,11 @@ struct ComposerEditor: View {
         }
         Button("Comandos", systemImage: "slash.circle") { draft.insertTrigger("/") }
         Button("Contexto", systemImage: "at") { draft.insertTrigger("@") }
-        Button(
-          expanded ? "Recolher compositor" : "Expandir compositor",
-          systemImage: expanded
-            ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-          action: expand)
+        if !expanded {
+          Button(
+            "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
+          )
+        }
       } label: {
         Image(systemName: "plus").font(.system(size: 18)).frame(width: 31, height: 31)
           .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1) }

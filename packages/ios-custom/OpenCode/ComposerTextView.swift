@@ -6,7 +6,6 @@ struct ComposerTextView: UIViewRepresentable {
   let theme: AppTheme
   var expanded: Bool
   let owner: UUID
-  let expand: () -> Void
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
     let view = ComposerInputView(usingTextLayoutManager: true)
@@ -20,25 +19,6 @@ struct ComposerTextView: UIViewRepresentable {
     view.accessibilityIdentifier = "conversation-composer"
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.escape = { draft.dismissSuggestions() }
-    let toolbar = UIToolbar()
-    toolbar.items = [
-      UIBarButtonItem(
-        image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"), style: .plain,
-        target: context.coordinator, action: #selector(Coordinator.expand)),
-      .flexibleSpace(),
-      UIBarButtonItem(
-        title: "Concluir", style: .prominent,
-        target: context.coordinator, action: #selector(Coordinator.dismissKeyboard)),
-    ]
-    toolbar.items?.first?.accessibilityLabel = "Expandir compositor"
-    toolbar.sizeToFit()
-    // iOS's floating toolbar leaves its backdrop transparent; keep transcript text
-    // from painting between the keyboard and composer.
-    let accessory = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: toolbar.bounds.height))
-    toolbar.frame = accessory.bounds
-    toolbar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    accessory.addSubview(toolbar)
-    view.inputAccessoryView = accessory
     return view
   }
   func updateUIView(_ view: ComposerInputView, context: Context) {
@@ -50,19 +30,17 @@ struct ComposerTextView: UIViewRepresentable {
     let focused = draft.focused && draft.editorOwner == owner
     view.requestFocus = focused
     view.tintColor = theme.uiColor(.primary)
-    view.inputAccessoryView?.backgroundColor = theme.uiColor(.background)
-    if let toolbar = view.inputAccessoryView?.subviews.first as? UIToolbar {
-      let appearance = UIToolbarAppearance()
-      appearance.configureWithOpaqueBackground()
-      appearance.backgroundColor = theme.uiColor(.background)
-      toolbar.standardAppearance = appearance
-      toolbar.scrollEdgeAppearance = appearance
-      toolbar.tintColor = theme.uiColor(.primary)
-      toolbar.items?.first?.image = UIImage(
-        systemName: expanded
-          ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-      toolbar.items?.first?.accessibilityLabel =
-        expanded ? "Recolher compositor" : "Expandir compositor"
+    let querying = draft.trigger != nil
+    if view.querying != querying {
+      view.querying = querying
+      view.autocorrectionType = querying ? .no : .default
+      view.autocapitalizationType = querying ? .none : .sentences
+      view.spellCheckingType = querying ? .no : .default
+      view.inlinePredictionType = querying ? .no : .default
+      view.smartQuotesType = querying ? .no : .default
+      view.smartDashesType = querying ? .no : .default
+      view.smartInsertDeleteType = querying ? .no : .default
+      if view.isFirstResponder { view.reloadInputViews() }
     }
     let value = NSMutableAttributedString(attributedString: draft.document.attributed)
     if value.length > 0 {
@@ -125,7 +103,7 @@ struct ComposerTextView: UIViewRepresentable {
       guard !updating, parent.draft.editorOwner == parent.owner else { return }
       let selection = textView.selectedRange
       if selection.length == 0,
-        let span = parent.draft.document.validTokens.first(where: {
+        let span = ComposerDocument(attributed: textView.attributedText).validTokens.first(where: {
           selection.location > $0.start && selection.location < $0.end
         })
       {
@@ -140,11 +118,15 @@ struct ComposerTextView: UIViewRepresentable {
     func textView(
       _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
     ) -> Bool {
-      let overlaps = parent.draft.document.validTokens.filter {
+      // UIKit may notify selection changes before publishing the changed text.
+      let overlaps = ComposerDocument(attributed: textView.attributedText).validTokens.filter {
         NSIntersectionRange(range, $0.range).length > 0
           || (range.length == 0 && range.location > $0.start && range.location < $0.end)
       }
       guard !overlaps.isEmpty else { return true }
+      // Corrections replace a nonselected range; only deliberate selection or
+      // deletion may replace an atomic token after prose correction is restored.
+      if !text.isEmpty && textView.selectedRange.length == 0 { return false }
       let start = min(range.location, overlaps.map(\.start).min() ?? range.location)
       let end = max(NSMaxRange(range), overlaps.map(\.end).max() ?? NSMaxRange(range))
       let value = NSMutableAttributedString(attributedString: textView.attributedText)
@@ -154,14 +136,13 @@ struct ComposerTextView: UIViewRepresentable {
       parent.draft.text = value
       return false
     }
-    @objc func dismissKeyboard() { parent.draft.focused = false }
-    @objc func expand() { parent.expand() }
   }
 }
 
 final class ComposerInputView: UITextView {
   var escape: (() -> Void)?
   var requestFocus = false
+  var querying = false
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil && requestFocus { becomeFirstResponder() }
