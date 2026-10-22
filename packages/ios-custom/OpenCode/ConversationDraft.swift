@@ -242,6 +242,12 @@ extension ComposerTokenKind {
   private var values: [String: ConversationDraft] = [:]
   private let server: String
   init(server: String) { self.server = server }
+  func flush() async {
+    for draft in values.values {
+      draft.focused = false
+      await draft.persist()
+    }
+  }
   func draft(_ id: String) -> ConversationDraft {
     if let draft = values[id] { return draft }
     let draft = ConversationDraft(server: server, id: id)

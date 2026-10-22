@@ -28,6 +28,17 @@ public struct ServerConfiguration: Sendable {
       url: URL(string: value("OpenCodeServerURL") ?? defaultURL.absoluteString)!,
       password: value("OpenCodeServerPassword"))
   }
+
+  public static func override(
+    arguments: [String] = ProcessInfo.processInfo.arguments,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> Self? {
+    guard arguments.contains("-OpenCodeServerURL") || environment["OpenCodeServerURL"] != nil
+      || environment["OPENCODE_SERVER_URL"] != nil || arguments.contains("-OpenCodeServerPassword")
+      || environment["OpenCodeServerPassword"] != nil || environment["OPENCODE_SERVER_PASSWORD"] != nil
+    else { return nil }
+    return launch(arguments: arguments, environment: environment)
+  }
 }
 
 public struct ServerInfo: Codable, Sendable {

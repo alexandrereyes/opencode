@@ -16,6 +16,7 @@
     <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
     <key>UILaunchScreen</key><dict><key>UIColorName</key><string>LaunchBackground</string></dict>
     <key>NSLocalNetworkUsageDescription</key><string>O OpenCode acessa o servidor do seu Mac pela rede privada.</string>
+    <key>NSCameraUsageDescription</key><string>O OpenCode usa a câmera para ler o QR code de pareamento do seu servidor.</string>
     <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
     <key>NSAppTransportSecurity</key><dict><key>NSExceptionDomains</key><dict>
         <key>opencode2-mac.alexandrem.com.br</key><dict>

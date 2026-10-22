@@ -185,13 +185,13 @@ struct SessionsView: View {
       }
       .toastOverlay(store.toast)
       .task {
-        guard !appliedLaunch else { return }
+        guard !appliedLaunch, store.acceptsLaunchSession else { return }
         appliedLaunch = true
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-OpenCodeOpenSession"),
           arguments.indices.contains(index + 1)
         {
-          if let session = try? await store.client.session(arguments[index + 1]) {
+          if let session = try? await store.client.session(arguments[index + 1]), !Task.isCancelled {
             store.conversationPath.append(.init(id: session.id))
           }
         }

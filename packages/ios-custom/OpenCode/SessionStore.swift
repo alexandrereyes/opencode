@@ -4,6 +4,7 @@ import OpenCodeKit
 
 @MainActor @Observable
 final class SessionStore {
+  let acceptsLaunchSession: Bool
   private(set) var entries: [NavigationEntry] = []
   private(set) var projects: [Project] = []
   private(set) var preferences: Preferences?
@@ -16,6 +17,7 @@ final class SessionStore {
   private(set) var active: Set<String> = []
   private(set) var loading = false
   private(set) var connected = false
+  private(set) var serverVersion: String?
   private(set) var busy: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
@@ -51,15 +53,19 @@ final class SessionStore {
   @ObservationIgnored private var previewRefresh: Task<Void, Never>?
   @ObservationIgnored private var quotaRefresh: Task<Void, Never>?
   @ObservationIgnored private var quotaUpdated = Date.distantPast
+  @ObservationIgnored private var runningTask: Task<Void, Never>?
+  @ObservationIgnored private var runID = UUID()
+  @ObservationIgnored private var pruning: Task<Void, Never>?
 
-  init(configuration: ServerConfiguration = .launch()) {
+  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true) {
+    self.acceptsLaunchSession = acceptsLaunchSession
     let client = OpenCodeClient(configuration: configuration)
     self.client = client
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
-    Task {
+    pruning = Task {
       await DraftPersistence.pruneMissingSessions(
         server: configuration.url.absoluteString, client: client)
     }
@@ -103,6 +109,29 @@ final class SessionStore {
   }
 
   func run() async {
+    if let runningTask { await runningTask.value }
+    guard !Task.isCancelled else { return }
+    let id = UUID()
+    runID = id
+    let task = Task { await consumeEvents() }
+    runningTask = task
+    await withTaskCancellationHandler {
+      await task.value
+    } onCancel: { task.cancel() }
+    if runID == id { runningTask = nil }
+  }
+
+  func stop() async {
+    runningTask?.cancel()
+    await runningTask?.value
+    pruning?.cancel()
+    await pruning?.value
+    await drafts.flush()
+    try? reading.flush()
+    conversationPath = []
+  }
+
+  private func consumeEvents() async {
     let events = hub.events()
     let connection = Task { await hub.run() }
     defer {
@@ -145,6 +174,8 @@ final class SessionStore {
         }
       }
     }
+    connection.cancel()
+    await connection.value
     connected = false
     scheduled?.cancel()
     scheduled = nil
@@ -164,7 +195,7 @@ final class SessionStore {
     lastReloadStarted = .now
     defer { loading = false }
     do {
-      _ = try await client.info()
+      serverVersion = try await client.info().version
       notice = nil
       async let navigation = client.navigation()
       async let prefs = client.preferences()

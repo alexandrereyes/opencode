@@ -10,7 +10,7 @@ later.
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
 
-> **Status:** "Sessões" and the conversation screen are implemented. All conversation waves (0–7) are complete
+> **Status:** "Sessões", the conversation screen and "Você" (settings) are implemented. All conversation waves (0–7) are complete
 > (see [Second screen: Conversa](#second-screen-conversa)); the remaining exclusions are listed below.
 
 ## Ownership
@@ -61,7 +61,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
 - **Visual only for now:** new session, voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
-  tabs.
+  tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
 - **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
@@ -157,8 +157,85 @@ the project's development language; there is no English source copy.
 No view uses a fixed color: every color comes from semantic tokens of a registered theme. Themes are generated, not
 written by hand: a Bun script in this package runs the custom web app's own resolver
 (`packages/ui-custom/src/theme`) over the OpenCode theme JSON files and writes the resolved tokens, which the app
-bundles. Adding a theme means running the script. The first themes are OpenChamber dark and light. The theme is
-selected through a local preference and a launch argument; a selector in Settings comes later.
+bundles. Adding a theme means running the script. Você → Aparência lists the 38 generated families with previews,
+one row per family. OpenChamber with **Sistema** is the default. **Sistema**, **Claro** and **Escuro** select the
+variant independently of the family; Sistema follows device changes live. Family and appearance persist locally.
+`-OpenCodeTheme <variant>` takes precedence for the whole launch, including over settings changes. The old
+`OpenCodeTheme` preference migrates its family; new preferences are `OpenCodeThemeFamily` and `OpenCodeAppearance`.
+
+## Third screen: Você (wave 8)
+
+Native grouped lists expose Aparência, Servidor and Sobre, retaining the AR tab icon and quota ring.
+Theme changes update the shared SwiftUI environment without replacing the session runtime: existing conversation,
+drafts, sheets, avatars, tab icon and UIKit text views receive the new theme. A small UIKit bridge refreshes already
+mounted navigation/tab bars as well as their appearance proxies. No theme colors are copied into views.
+
+- **Servers:** a built-in, nonremovable server plus named saved entries. Add/edit uses a URL and optional masked
+  password. **Testar conexão** performs only authenticated `GET /api/info`, with a five-second timeout and explicit
+  success/failure before Save becomes available. A failed test may still be saved (for an offline server). URLs may
+  not contain credentials, queries or fragments. Remove requires confirmation and deletes only the local credential,
+  not backend sessions. Removing an active entry returns to the built-in entry.
+- **Credentials:** `ServerStore` persists only IDs, names, URLs and the selected ID in UserDefaults. `ServerCredentials`
+  uses generic-password Keychain items, nonsynchronizing and
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; passwords/tokens never enter preferences, app logs or URLs.
+  Tests inject an in-memory Keychain backend. The system may independently offer Password AutoFill's save prompt;
+  sandbox automation always chooses **Agora Não**, never saving test credentials there.
+- **Switching:** `AppRuntime` awaits the old session store's stop, cancels/awaits its shared SSE task and draft-pruning
+  task, flushes drafts/reading metadata, then replaces the entire server-bound view identity. The new `SessionStore`
+  has its own hub, conversation path, catalog and alerts. Drafts, reading positions and alert dedupe retain their
+  existing URL-scoped keys, so two entries for the same URL intentionally share that server's local state.
+  The initial `-OpenCodeOpenSession` is not replayed on a replacement server runtime.
+- **Pairing:** camera scanning uses VisionKit's native QR scanner and a pt-BR camera permission description. Manual
+  paste is also available, including on the simulator or after camera denial. Both `{"code","urls"}` JSON and
+  `<url>/auth/connect/<code>` links use the same parser. Redemption issues parallel unauthenticated JSON GETs,
+  retains the first successful token, and mirrors the web's preference for URL 0: wait at most one extra second for
+  its answer, then validate the winning token there with `/api/info`. A 401 proves an expired/spent code; unreachable
+  addresses do not. A redeemed token remains available to save even if the subsequent health check fails.
+- **About:** version/build, `OpenCodeCommit` (or desenvolvimento), current server version and the GitHub README link.
+- **Child messages:** presentation and copy strip only the exact backend prefix
+  `You are a subagent spawned by another session.\n`, and only in child user messages. Wire history remains untouched;
+  changed wording, leading whitespace, CRLF or a missing newline is deliberately displayed in full.
+
+### Sandbox safety and verification
+
+Every launch/relaunch **must** supply `-OpenCodeServerURL http://127.0.0.1:4177` plus the sandbox password in the
+environment, as shown below. This replaces the built-in entry **in memory**, selects it at each launch ahead of any
+saved selection, and uses a separate registry keyed by the override URL. With a loopback launch override, add, edit,
+select, test and pairing reject non-loopback destinations before any request. Production is never saved, selected or
+tested by the runners. The one default-URL constant and the private-host ATS exception are unchanged.
+
+After `xcodebuild … build-for-testing`, run:
+
+```sh
+python3 packages/ios-custom/script/test-settings.py
+OPENCODE_TEST_THEME=openchamber-light python3 packages/ios-custom/script/test-settings.py \
+  OpenCodeUITests/SettingsTests/testManualServersTestSwitchEditRemoveAndPairing \
+  OpenCodeUITests/SettingsTests/testChildPreambleHiddenAndCopyUsesAuthoredText
+```
+
+The runner creates/deletes only its own imported root/child histories (no model call), requests a fresh pairing code
+with `POST /api/pair`, and redeems it through the real app. Dark uses QR JSON; light uses the printed-link shape.
+The simulator cannot scan a camera image: a **DEBUG-only**, explicit sandbox launch environment enables the
+**Usar código de teste do sandbox** button. It injects the payload into the same parsing/redemption path; no token is
+fabricated. The same debug environment prefills the launch password in the manual form, avoiding secret `typeText`
+actions in XCTest recordings. Neither hook is compiled into Release. Configured xctestrun files are private and
+removed after the run. The runner never resets seeds, answers seeded requests or operates production services.
+UI checks cover live theme/appearance changes across settings/Sessões/Conversa, offline-server isolation/reconnect,
+manual health results, pairing plus a real token-backed SSE connection, edit/remove and the exact child prefix.
+After the live-theme test leaves OpenChamber/Sistema selected, run
+`python3 packages/ios-custom/script/verify-system-appearance.py` to change the dedicated simulator from light → dark →
+light **in one app process**, compare the real background pixels with generated tokens and capture both modes.
+It launches with the explicit sandbox URL/password and no theme override, terminates only that app afterwards and
+restores the simulator's previous appearance.
+Screenshots with the clean 10:58 status bar and verification JSON live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda8-prints/`.
+`SettingsTests.swift` in OpenCodeKit covers the 38-family registry, variant/launch precedence, URL/pair parsing,
+parallel redemption/preferred-first health, server CRUD/selection/credential failures and preamble exactness.
+
+Wave-8 verification: **123 Swift Testing tests**, warning-free simulator build and test build, all three new UI
+cases plus light-mode server/child repeats pass. Existing regressions also pass: four app-hosted tests, six reading
+continuity cases (one additional unread case correctly skips after viewed acknowledgement), four session/reading
+cases and six subagent/alert cases. The sandbox seed's permission and question remain pending; no seed reset was run.
 
 ## Platform and distribution
 
@@ -501,7 +578,8 @@ generation prompt is also recorded in `script/icon-source.prompt.txt`; local con
   Apple's result before retrying or distributing. Do not submit to the App Store or create an external testing group.
 
 Release keeps the explicit server/theme/session launch overrides for sandbox verification; without supplied
-arguments or environment values the server uses the single `ServerConfiguration.defaultURL` constant, and no session
+arguments or environment values the server restores the saved active entry, falling back to the single
+`ServerConfiguration.defaultURL` constant, and no session
 is opened automatically.
 The scheme's sandbox arguments belong only to `TestAction`; neither they nor the UI-test targets enter an archive.
 The private-host ATS exception is unchanged and does not allow arbitrary HTTP hosts.
@@ -568,7 +646,7 @@ xcrun simctl io "$DEVICE" screenshot /path/to/light.png
 `-OpenCodeServerPassword <password>` is also accepted, as are the `OpenCodeServerURL` / `OpenCodeServerPassword`
 environment variables (uppercase `OPENCODE_SERVER_URL` / `OPENCODE_SERVER_PASSWORD` aliases are supported).
 The default URL remains `http://opencode2-mac.alexandrem.com.br`. The launch theme wins over the local
-`UserDefaults` key `OpenCodeTheme`; absent both, OpenChamber dark is used. Loopback HTTP was verified in the iOS 27
+saved family/appearance preferences; absent both, OpenChamber follows the system appearance. Loopback HTTP was verified in the iOS 27
 simulator without an ATS exception; only the private Cloudflare hostname has an exception.
 
 ### Conversation reader verification
@@ -1122,7 +1200,7 @@ the live sandbox. Repository removal/addition and external preference changes ov
 permission/question seed is not consumed by these checks. Native menus, swipe actions,
 confirmation dialogs, archived navigation, and the native conversation reader are retained rather than drawing
 mock replacements. New session, voice, selection, settings, the master-session accessory, and the other tabs remain
-visual-only as specified.
+visual-only as specified, except settings in Você (implemented in wave 8).
 
 ## Open decisions
 

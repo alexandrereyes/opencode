@@ -1,4 +1,5 @@
 import OpenCodeKit
+import Observation
 import SwiftUI
 
 struct AppTheme: Sendable {
@@ -6,13 +7,15 @@ struct AppTheme: Sendable {
   var id: String { definition.id }
   var dark: Bool { definition.dark }
 
-  static let selected: AppTheme = {
-    let arguments = ProcessInfo.processInfo.arguments
-    let argument = arguments.firstIndex(of: "-OpenCodeTheme").flatMap {
-      arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+  static let selected = load("openchamber-dark")
+
+  static let families: [ThemeFamily] = {
+    let url = Bundle.main.url(forResource: "registry", withExtension: "json", subdirectory: "Themes")
+      ?? Bundle.main.url(forResource: "registry", withExtension: "json")
+    guard let url, let data = try? Data(contentsOf: url), let families = try? ThemeFamily.registry(data) else {
+      preconditionFailure("O registro de temas não foi incluído no build.")
     }
-    return load(
-      argument ?? UserDefaults.standard.string(forKey: "OpenCodeTheme") ?? "openchamber-dark")
+    return families
   }()
 
   static func load(_ id: String) -> AppTheme {
@@ -40,6 +43,64 @@ struct AppTheme: Sendable {
       return Color(definition.overriding(.agentExplicit, with: color).color(.agentExplicit))
     }
     return self.color(agentRole(agent, id: id))
+  }
+}
+
+@MainActor @Observable final class AppearanceSettings {
+  var family: String { didSet { UserDefaults.standard.set(family, forKey: "OpenCodeThemeFamily") } }
+  var appearance: ThemeAppearance { didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "OpenCodeAppearance") } }
+  let override: String?
+  init() {
+    let defaults = UserDefaults.standard
+    let legacy = defaults.string(forKey: "OpenCodeTheme")
+    let family = defaults.string(forKey: "OpenCodeThemeFamily")
+      ?? legacy.map { String($0.replacingOccurrences(of: "-dark", with: "").replacingOccurrences(of: "-light", with: "")) }
+    let selection = ThemeSelection(family: family, appearance: defaults.string(forKey: "OpenCodeAppearance"),
+                                   arguments: ProcessInfo.processInfo.arguments)
+    self.family = AppTheme.families.contains { $0.id == selection.family } ? selection.family : "openchamber"
+    appearance = selection.appearance
+    override = selection.override
+  }
+  func theme(systemDark: Bool) -> AppTheme {
+    AppTheme.load(ThemeSelection(family: family, appearance: appearance.rawValue,
+                                arguments: override.map { ["-OpenCodeTheme", $0] } ?? []).resolve(systemDark: systemDark))
+  }
+  var colorScheme: ColorScheme? {
+    if let override { return AppTheme.load(override).dark ? .dark : .light }
+    switch appearance {
+    case .system: return nil
+    case .light: return .light
+    case .dark: return .dark
+    }
+  }
+}
+
+/// Appearance proxies only affect new bars. Update already-mounted UIKit bars as well.
+struct ThemeChrome: UIViewRepresentable {
+  let theme: AppTheme
+  func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
+  func updateUIView(_ view: UIView, context: Context) {
+    let navigation = UINavigationBarAppearance()
+    navigation.configureWithDefaultBackground()
+    navigation.titleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
+    navigation.largeTitleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
+    UINavigationBar.appearance().standardAppearance = navigation
+    UINavigationBar.appearance().scrollEdgeAppearance = navigation
+    UITabBar.appearance().unselectedItemTintColor = theme.uiColor(.icon)
+    UITabBarItem.appearance().badgeColor = theme.uiColor(.error)
+    func update(_ node: UIView) {
+      if let bar = node as? UINavigationBar {
+        bar.standardAppearance = navigation
+        bar.scrollEdgeAppearance = navigation
+        bar.tintColor = theme.uiColor(.primary)
+      }
+      if let bar = node as? UITabBar {
+        bar.unselectedItemTintColor = theme.uiColor(.icon)
+        bar.tintColor = theme.uiColor(.primary)
+      }
+      node.subviews.forEach(update)
+    }
+    if let window = view.window { update(window) }
   }
 }
 

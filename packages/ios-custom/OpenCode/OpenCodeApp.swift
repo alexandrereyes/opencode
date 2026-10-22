@@ -1,32 +1,68 @@
 import AppIntents
+import Observation
 import OpenCodeKit
 import SwiftUI
 
 @main
 struct OpenCodeApp: App {
-  @State private var store = SessionStore()
-  private let theme = AppTheme.selected
-
-  init() {
-    let theme = AppTheme.selected
-    let navigation = UINavigationBarAppearance()
-    navigation.configureWithDefaultBackground()
-    navigation.titleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
-    navigation.largeTitleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
-    UINavigationBar.appearance().standardAppearance = navigation
-    UINavigationBar.appearance().scrollEdgeAppearance = navigation
-    UITabBar.appearance().unselectedItemTintColor = theme.uiColor(.icon)
-    UITabBarItem.appearance().badgeColor = theme.uiColor(.error)
-  }
-
   var body: some Scene {
     WindowGroup {
-      AppTabs(store: store)
-        .environment(\.appTheme, theme)
-        .environment(\.locale, Locale(identifier: "pt_BR"))
-        .preferredColorScheme(theme.dark ? .dark : .light)
-        .tint(theme.color(.primary))
+      AppRoot()
     }
+  }
+}
+
+@MainActor @Observable final class AppRuntime {
+  let servers = ServerStore(launchOverride: .override())
+  let appearance = AppearanceSettings()
+  var store: SessionStore?
+  var identity = UUID()
+  var appliedRevision = -1
+  var switching = false
+  var error: String?
+  func rebuild() async {
+    switching = true
+    defer { switching = false }
+    let previous = store
+    await previous?.stop()
+    guard !Task.isCancelled else { return }
+    do {
+      let replacement = SessionStore(configuration: try servers.configuration(), acceptsLaunchSession: previous == nil)
+      if previous != nil { replacement.selectedTab = 4 }
+      store = replacement
+      appliedRevision = servers.revision
+      identity = UUID()
+      error = nil
+    } catch {
+      store = nil
+      self.error = error.localizedDescription
+    }
+  }
+}
+
+private struct AppRoot: View {
+  @Environment(\.colorScheme) private var systemScheme
+  @State private var runtime = AppRuntime()
+  var body: some View {
+    let theme = runtime.appearance.theme(systemDark: systemScheme == .dark)
+    Group {
+      if let store = runtime.store, runtime.appliedRevision == runtime.servers.revision {
+        AppTabs(store: store, runtime: runtime).id(runtime.identity)
+          .allowsHitTesting(!runtime.switching)
+      } else if let error = runtime.error {
+        ContentUnavailableView {
+          Label("Credenciais indisponíveis", systemImage: "key")
+        } description: { Text(error) } actions: {
+          Button("Tentar novamente") { Task { await runtime.rebuild() } }.disabled(runtime.switching)
+        }
+      } else { ProgressView("Conectando…") }
+    }
+    .environment(\.appTheme, theme)
+    .environment(\.locale, Locale(identifier: "pt_BR"))
+    .preferredColorScheme(runtime.appearance.colorScheme)
+    .tint(theme.color(.primary))
+    .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
+    .task(id: runtime.servers.revision) { await runtime.rebuild() }
   }
 }
 
@@ -34,6 +70,7 @@ private struct AppTabs: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
   @Bindable var store: SessionStore
+  let runtime: AppRuntime
 
   var body: some View {
     TabView(selection: $store.selectedTab) {
@@ -47,7 +84,7 @@ private struct AppTabs: View {
         SessionsView(store: store)
       }
       Tab(value: 4) {
-        placeholder("Você", icon: "person.crop.circle")
+        SettingsView(runtime: runtime, store: store)
       } label: {
         Label {
           Text("Você")
