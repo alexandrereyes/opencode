@@ -62,6 +62,7 @@ extension AppTheme {
 struct UserBubble: View {
   @Environment(\.appTheme) private var theme
   @Environment(ToastCenter.self) private var toast
+  @Environment(\.conversationSearch) private var highlights
   let message: ConversationMessage
   var compact = false
   var body: some View {
@@ -104,10 +105,10 @@ struct UserBubble: View {
           }
         }
         if !message.displayText.isEmpty {
-          if compact {
+          if compact && !highlights.matches.contains(where: { $0.messageID == message.id }) {
             CompactPrompt(text: message.displayText, theme: theme)
           } else {
-            Text(promptText).font(.system(size: 16)).multilineTextAlignment(.leading)
+            Text(promptText).font(.system(size: 16)).multilineTextAlignment(.leading).lineLimit(compact ? 2 : nil)
           }
         }
         if compact && message.displayText.isEmpty {
@@ -127,18 +128,30 @@ struct UserBubble: View {
   }
   private var promptText: AttributedString {
     var text = AttributedString(message.displayText)
-    guard let value = message.metadata?["composerTokens"],
+    if let value = message.metadata?["composerTokens"],
       let data = try? JSONEncoder().encode(value),
       let spans = try? JSONDecoder().decode([ComposerSpan].self, from: data)
-    else { return text }
-    let document = ComposerDocument(text: message.displayText, tokens: spans)
-    for span in document.validTokens {
-      if let range = Range(span.range, in: message.displayText),
-        let lower = AttributedString.Index(range.lowerBound, within: text),
-        let upper = AttributedString.Index(range.upperBound, within: text)
-      {
-        text[lower..<upper].foregroundColor = theme.color(span.token.kind.role)
-        text[lower..<upper].backgroundColor = theme.color(span.token.kind.role).opacity(0.12)
+    {
+      let document = ComposerDocument(text: message.displayText, tokens: spans)
+      for span in document.validTokens {
+        if let range = Range(span.range, in: message.displayText),
+          let lower = AttributedString.Index(range.lowerBound, within: text),
+          let upper = AttributedString.Index(range.upperBound, within: text)
+        {
+          text[lower..<upper].foregroundColor = theme.color(span.token.kind.role)
+          text[lower..<upper].backgroundColor = theme.color(span.token.kind.role).opacity(0.12)
+        }
+      }
+    }
+    let displayRange = ((message.text ?? "") as NSString).range(of: message.displayText)
+    if displayRange.location != NSNotFound {
+      for match in highlights.matches where match.messageID == message.id {
+        let intersection = NSIntersectionRange(displayRange, match.range)
+        guard intersection.length > 0,
+          let range = Range(NSRange(location: intersection.location - displayRange.location, length: intersection.length), in: message.displayText),
+          let lower = AttributedString.Index(range.lowerBound, within: text),
+          let upper = AttributedString.Index(range.upperBound, within: text) else { continue }
+        text[lower..<upper].backgroundColor = theme.color(.primary).opacity(match.id == highlights.current ? 0.3 : 0.1)
       }
     }
     return text
@@ -198,7 +211,7 @@ struct ConversationStep: View {
             if detail(key) {
               Text(part.text ?? "").font(.footnote).textSelection(.enabled)
             }
-          } else if part.type == "tool", part.name != "todowrite" || part.status == "error" {
+          } else if part.type == "tool", !part.suppressed {
             if part.name == "subagent" {
               subagent(part)
             } else {

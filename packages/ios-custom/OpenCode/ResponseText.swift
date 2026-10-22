@@ -20,6 +20,29 @@ final class ResponseTextView: UITextView {
   var source = ""
   var selectionActions: ResponseSelectionActions?
   var selectionChanged: (() -> Void)?
+  var searchMatch: ConversationMatch?
+  var searchRange: NSRange?
+  var searchAlign: ((ConversationMatch, Double) -> Void)?
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard let match = searchMatch, let range = searchRange, let align = searchAlign,
+      let start = position(from: beginningOfDocument, offset: range.location),
+      let end = position(from: start, offset: range.length),
+      let textRange = textRange(from: start, to: end) else { return }
+    var parent = superview
+    while let view = parent {
+      if view is UICollectionReusableView {
+        let offset = convert(firstRect(for: textRange), to: view).minY
+        guard offset.isFinite else { return }
+        Task { @MainActor [weak self] in
+          guard self?.searchMatch?.id == match.id else { return }
+          align(match, Double(offset))
+        }
+        return
+      }
+      parent = view.superview
+    }
+  }
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
@@ -35,6 +58,7 @@ struct SelectableResponseText: UIViewRepresentable {
   var source = ""
   var actions: ResponseSelectionActions? = nil
   var selectionChanged: (() -> Void)? = nil
+  var highlights = ConversationSearchHighlight()
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -64,6 +88,9 @@ struct SelectableResponseText: UIViewRepresentable {
     view.selectionActions = actions
     view.selectionChanged = selectionChanged
     view.tintColor = theme.uiColor(.primary)
+    view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
+    view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first }
+    view.searchAlign = highlights.align
     let text = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
     let codeBlock: Bool = { if case .code = block.kind { true } else { false } }()
@@ -96,6 +123,12 @@ struct SelectableResponseText: UIViewRepresentable {
       }
       text.append(NSAttributedString(string: run.text, attributes: attributes))
     }
+    for match in highlights.matches where match.partID == partID {
+      for range in ConversationSearch.renderedRanges(match.range, block: block) {
+        text.addAttribute(.backgroundColor, value: theme.uiColor(.primary).withAlphaComponent(
+          match.id == highlights.current ? 0.3 : 0.1), range: range)
+      }
+    }
     if view.attributedText != text { view.attributedText = text }
     view.linkTextAttributes = [
       .foregroundColor: theme.uiColor(.primary), .underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -114,6 +147,9 @@ struct SelectableResponseText: UIViewRepresentable {
     view.source = ""
     view.selectionActions = nil
     view.selectionChanged = nil
+    view.searchMatch = nil
+    view.searchRange = nil
+    view.searchAlign = nil
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate {
@@ -154,11 +190,14 @@ struct ResponseMarkdown: View {
   @Environment(ToastCenter.self) private var toast
   @Environment(\.responseSelection) private var selectionActions
   @Environment(\.responseSelectionChanged) private var selectionChanged
+  @Environment(\.conversationSearch) private var highlights
   let text: String
   let messageID: String
   let partID: String
   @State private var blocks: [MarkdownBlock] = []
   @State private var measuredHeight: CGFloat?
+  @State private var mounted = false
+  @State private var parsing: Task<Void, Never>?
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       ForEach(blocks) { block in
@@ -180,7 +219,7 @@ struct ResponseMarkdown: View {
             }.foregroundStyle(theme.color(.textSecondary))
             SelectableResponseText(
               block: block, messageID: messageID, partID: partID, theme: theme,
-              selectionChanged: selectionChanged?.selected)
+              selectionChanged: selectionChanged?.selected, highlights: highlights)
           }
           .padding(12).background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
           .overlay {
@@ -191,7 +230,8 @@ struct ResponseMarkdown: View {
             if block.kind == .quote { Rectangle().fill(theme.color(.border)).frame(width: 3) }
             SelectableResponseText(
               block: block, messageID: messageID, partID: partID, theme: theme,
-              source: text, actions: selectionActions, selectionChanged: selectionChanged?.selected)
+              source: text, actions: selectionActions, selectionChanged: selectionChanged?.selected,
+              highlights: highlights)
           }
           .padding(.leading, CGFloat(max(0, block.depth - 1)) * 15)
           .padding(block.kind == .table ? 8 : 0)
@@ -206,12 +246,26 @@ struct ResponseMarkdown: View {
     } action: { _, height in
       if !blocks.isEmpty { measuredHeight = height }
     }
-    .task(id: text) {
-      let source = text
-      let parsed = await Task.detached(priority: .userInitiated) { MarkdownBlocks.parse(source) }
-        .value
-      if !Task.isCancelled { blocks = parsed }
+    .onAppear {
+      mounted = true
+      parse()
     }
-    .onDisappear { blocks = [] }
+    .onChange(of: text) { _, _ in if mounted { parse() } }
+    .onDisappear {
+      mounted = false
+      parsing?.cancel()
+      blocks = []
+    }
+  }
+  private func parse() {
+    parsing?.cancel()
+    let source = text
+    // A recycled List row can disappear and reappear with identical text. Explicitly
+    // restart parsing on appearance after releasing its blocks, not only on text ID.
+    parsing = Task { @MainActor in
+      let parsed = await Task.detached(priority: .userInitiated) { MarkdownBlocks.parse(source) }.value
+      guard !Task.isCancelled, mounted else { return }
+      blocks = parsed
+    }
   }
 }

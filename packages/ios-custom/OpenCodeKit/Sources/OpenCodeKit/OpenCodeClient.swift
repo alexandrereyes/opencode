@@ -29,9 +29,17 @@ public struct ServerConfiguration: Sendable {
 }
 
 public struct ServerInfo: Codable, Sendable {
-  public let version: String
+  public let version: String?
   public let paths: Paths?
   public struct Paths: Codable, Sendable { public let tmp: String }
+  private enum CodingKeys: String, CodingKey { case version, paths }
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    // Legacy health responses can have no string version; classify that separately
+    // from transport failures rather than losing it as an ordinary decoding error.
+    version = try? values.decode(String.self, forKey: .version)
+    paths = try? values.decode(Paths.self, forKey: .paths)
+  }
 }
 public struct Empty: Codable, Sendable { public init() {} }
 
@@ -55,7 +63,11 @@ public struct OpenCodeClient: Sendable {
     self.transport = transport
   }
 
-  public func info() async throws -> ServerInfo { try await get("/api/info") }
+  public func info() async throws -> ServerInfo {
+    let info: ServerInfo = try await get("/api/info")
+    guard let version = info.version, !version.isEmpty else { throw ClientError.incompatibleServer }
+    return info
+  }
   public func projects() async throws -> [Project] { try await get("/api/project") }
   public func archivedSessions() async throws -> [Session] {
     struct Page: Decodable {
@@ -258,6 +270,13 @@ public struct OpenCodeClient: Sendable {
       } else {
         try await session.data(for: request)
       }
+    if let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode),
+      let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+      value.object?["_tag"]?.string == "LocationNotFoundError",
+      let directory = value.object?["location"]?.object?["directory"]?.string
+    {
+      throw ClientError.locationNotFound(directory)
+    }
     try validate(response)
     return data
   }
@@ -308,8 +327,12 @@ public struct OpenCodeClient: Sendable {
 
 public enum ClientError: Error, LocalizedError {
   case http(Int)
+  case incompatibleServer
+  case locationNotFound(String)
   public var errorDescription: String? {
     switch self {
+    case .incompatibleServer: "Este servidor não é compatível com o OpenCode V2."
+    case .locationNotFound: "O diretório desta sessão não existe mais."
     case .http(401): "A senha do servidor não foi aceita."
     case .http(let code): "O servidor respondeu com o código \(code)."
     }

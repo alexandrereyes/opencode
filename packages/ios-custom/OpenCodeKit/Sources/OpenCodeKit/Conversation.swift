@@ -156,6 +156,7 @@ public struct ConversationPart: Codable, Sendable, Equatable {
     self.time = time
   }
   public var status: String? { state?.object?["status"]?.string }
+  public var suppressed: Bool { type == "tool" && name == "todowrite" }
   public var input: [String: JSONValue] { state?.object?["input"]?.object ?? [:] }
   public var metadata: [String: JSONValue] { state?.object?["metadata"]?.object ?? [:] }
   public var childID: String? { metadata["sessionID"]?.string }
@@ -317,7 +318,7 @@ public enum ConversationProjection {
   }
   public static func stepLabel(_ parts: [ConversationPart]) -> String {
     let tools = parts.filter {
-      $0.type == "tool" && ($0.name != "todowrite" || $0.status == "error")
+      $0.type == "tool" && !$0.suppressed
     }
     let count = tools.isEmpty ? parts.filter { $0.type == "reasoning" }.count : tools.count
     if count == 0 { return "Atividade" }

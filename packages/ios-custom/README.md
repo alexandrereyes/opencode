@@ -135,7 +135,7 @@ search navigates to messages and reuses wave 6's position restoration).
 | 2. Acting                | Composer V2 with send and model/effort/agent selection; running tray with stop and background; queue with `Enviar agora`, edit, and remove; permission and question cards; agents list from the header capsule; context usage details. Model picker as in the web app (search over name, ID, and provider; favorites; default model; model and provider visibility); reusable toasts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 3. Advanced composer     | `@ / $ #` triggers with the suggestion panel and tokens; commands; snippets; attachments through `+`. Full-screen composer; drafts (with tokens and attachments) kept across app launches.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 4. Selection             | Native edit menu on responses; comments with quotes sent with the message; side question sheet. Copy a user message from its long-press menu.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 5. Session and reading   | Rename and archive from the `…` menu; session details sheet (project, worktree, branch, +/−, MCP/plugin/skill/LSP status); search in the conversation (loaded messages, then older pages on demand; there is no server-side search); agent task lists (`todowrite`) as a step line that expands into a checklist; incompatible-server and missing-directory notices. Native components, approved from real screenshots without mockups.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 5. Session and reading   | Rename and archive from the `…` menu; session details sheet (project, worktree, branch, +/−, MCP/plugin/skill/LSP configuration); search in the conversation (loaded messages, then older pages on demand; there is no server-side search); incompatible-server and missing-directory notices. V2 removed `todowrite`: its historical parts remain suppressed. Native components, approved from real screenshots without mockups. |
 | 6. Reading continuity    | Final-answer divider with the web rule (`finish stop`, completed, no error or retry, after activity, prefers `final_answer`, possibly several per exchange). Reading position per server and session (follow the tail, or message ID plus offset), kept in memory and across launches, restored with cancellable paging and a fallback to the tail. Selecting text pauses following the tail. Expanded tools remembered per session (IDs only). "Ir às novas mensagens" when unread messages are above. Shift+Return sends and Return alone inserts a newline, on hardware keyboards (`UIKeyCommand`) and on the software keyboard through the private `UIKeyboardImpl` state (`isShifted` without `isAutoShifted` or `isShiftLocked`), isolated in one file and falling back to a newline; remove it if TestFlight processing rejects the build (`ITMS-90338`). Edge-swipe back keeps working. |
 | 7. Subagents and alerts  | Composer in child sessions, keeping the child's agent and with no notice; replies sent after the child delivered its result stay in the child (automatic delivery to the parent would need backend work and is out). In-app banner, tappable, when another session finishes, fails, or needs you, respecting mutes, ignoring child completions, deduplicated. Light haptics on explicit actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
@@ -472,7 +472,7 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1–4 and 6 are complete. Wave 6's physical-keyboard path still has the manual device check described below;
+Waves 1–6 are complete. Wave 6's physical-keyboard path still has the manual device check described below;
 its command registration, dispatch and blocked states are covered by app-hosted tests.
 Child sessions have a return-to-parent action and no ordinary composer, but their
 permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
@@ -694,8 +694,8 @@ permission and D's question remain pending. Screenshots in both themes:
 `selection-*`, `comment-*`, `quotes-collapsed-*`, `quotes-expanded-*`, `sent-*`, `side-empty-*`, `side-loading-*`,
 `side-answer-*`, `btw-suggestion-*`, `user-menu-*`; `side-stopped-dark.png` adds cancellation evidence.
 
-For wave 5: preserve the quote array in `DraftSnapshot` and the exact-ID failed-send comparison, the rendered/source
-mapping, recycling timeline and shared SSE hub. Session actions/search/task lists/notices remain wave-5 work. File
+For wave 7: preserve the quote array in `DraftSnapshot` and the exact-ID failed-send comparison, the rendered/source
+mapping, recycling timeline and shared SSE hub. File
 review comments are still separate from chat quotes and are not exposed by this screen. A failed backend command
 cannot be retried exactly-once; do not imply otherwise in its UI. The microphone remains visual only.
 
@@ -706,6 +706,66 @@ includes shared framework pages. On the dedicated simulator the review measured 
 recycling and 45.8/62.1/61.6/62.9 MiB after it; another full round trip reached 63.5 MiB. No simulator FPS claim is
 made. Scope includes only the 89-message seed; the native recycling container, not a guessed per-message slope, is
 the protection for longer sessions.
+
+### Session and reading (wave 5)
+
+**Status: complete, awaiting screenshot review.** The native `…` menu offers search, rename, session details and,
+only on roots, archive. Rename uses a native text-field alert, trims empty/unchanged values, optimistically updates
+the header and rolls back on failure with the shared toast. `PATCH /api/session/{id}` emits the existing events that
+refresh Sessões. Archive reuses `custom.archive/archive` and the Sessões confirmation, then returns with a toast;
+the backend owns interruption and cascading to descendants. Neither action retries automatically.
+
+- The medium/large details sheet joins the existing project catalog and `custom.worktrees/locate` checkout root.
+  It reads `/api/vcs`, `/api/vcs/diff?mode=working`, `/api/mcp`, `/api/plugin`, `/api/skill` and `/api/config` with the
+  session's Location. The +/− is **current working-copy changes**, as on the web, not a sum of historical tool edits.
+  Built-in plugins are omitted. Independent read failures say **Indisponível**, never “none”. LSP shows merged
+  configuration only, explicitly identifying runtime connection status as unavailable. Usage links to wave 2.
+- `ConversationSearch` searches raw user text and assistant text parts in loaded sequence/part/occurrence order,
+  excluding reasoning and tools. Literal non-overlapping matching folds case and accents and retains original
+  UTF-16 ranges, including emoji. Source ranges map onto visible Markdown runs for translucent primary highlights;
+  Markdown punctuation remains part of the searched source, like the web. A `UISearchTextField` replaces the header,
+  with Cancelar, a `3 de 12` counter and previous/next controls above the keyboard. Older search explicitly loads at
+  most three pages per attempt, stops at the first page with new matches and can be cancelled. Navigation wraps the
+  loaded matches. There is no server-side full-transcript search or off-screen parsed-text cache.
+- Search reuses `revealMessage(_:offset:persist:)` with `persist: false`. A visible TextKit occurrence refines the
+  message-relative offset after materialization. Explicit navigation still wins over restoration and tail-following;
+  closing preserves the current screen position but leaves the saved bookmark unchanged until a real user scroll.
+  Normal transcript/runtime publication stays atomic so restoration cannot lose concurrently prepended pages.
+  Markdown parsing restarts explicitly when a recycled row reappears with unchanged text after releasing its blocks;
+  the regression suite caught a blank-row case when returning from historical reading to the tail.
+- V2 **removed `todowrite`**, with no replacement. No task-list feature or model probe was added. All its historical
+  parts, including failures, are suppressed in rendering, step counts/kinds and final-answer activity projection.
+- Missing/non-string `/api/info.version` produces the incompatible-server notice and retry, including on Sessões
+  when a legacy server cannot open a conversation. No app/server semver equality is assumed. A missing directory is
+  established only by `custom.worktrees/available == false` (queried in the default Location) or a matching typed
+  `LocationNotFoundError`. Arbitrary 404s/network errors are not misclassified. History remains readable and the
+  composer is replaced by an explanation; retry rechecks availability. Choosing/moving directories remains out of scope.
+
+`SessionReadingTests.swift` in OpenCodeKit covers matching, source highlights, order/counter, the older-page budget,
+rename/rollback, removed tools, HTTP methods/Location scoping, independent service errors, LSP precedence and notice
+classification. The package has **106 passing Swift tests**. The warning-free simulator build and four app-hosted
+tests pass. The existing seven UI cases pass with the expected already-viewed unread skip; the four new Wave-5 UI
+cases pass in both themes, including the Sessões rename event, root/child details, two-page older search, an unchanged
+saved tail bookmark after closing search, archive and a real removed test directory. UIKit's Unicode `typeText` can
+hide the Simulator keyboard: the rename test restores it before resolving the alert button's shifted frame.
+
+Run `python3 packages/ios-custom/script/test-session-reading.py` after `xcodebuild … build-for-testing`; set
+`OPENCODE_TEST_THEME=openchamber-light` for light. It uses only the dedicated Simulator and explicit sandbox-4177
+arguments, imports its own disposable sessions, archives only its own root, renames/removes only its own empty
+directory, and never calls a model or answers a seeded request. No conversation seed reset was needed: transcripts,
+inboxes and pending requests were unchanged. Ordinary viewed acknowledgement is intentionally not rolled backwards.
+
+Evidence: `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda5/`:
+`menu-*`, `rename-*`, `renamed-list-*`, `archive-confirmation-*`, `archived-toast-*`, `details-*`,
+`search-results-*`, `search-older-offer-*`, `search-older-result-*`, `search-closed-position-*`,
+`missing-directory-*` and `verification-openchamber-{dark,light}.json`. Both themes use the 10:58 status bar.
+`incompatible-component-{dark,light}.png` are app-hosted renders of the **real notice component**, driven by a
+version-less info response in a test transport; they are not claimed as live incompatible-server screenshots.
+The actual sandbox remains V2-compatible and was never modified/restarted to manufacture that condition.
+
+For wave 7: retain the non-persisting search request, the Location notice's send guard, atomic initial publication,
+recycled Markdown lifetime and the single shared SSE hub. Enabling the child composer must not enable archive on
+children or bypass a server/directory notice. Reuse `SessionStore.toast` for feedback after returning to Sessões.
 
 ### Reading continuity (wave 6)
 

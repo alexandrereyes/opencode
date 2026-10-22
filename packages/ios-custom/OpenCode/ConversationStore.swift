@@ -17,6 +17,7 @@ import OpenCodeKit
   private(set) var shells: [ShellInfo] = []
   private(set) var ownerMessages: [ConversationMessage] = []
   private(set) var branch = ""
+  private(set) var located: LocatedDirectory?
   private(set) var loading = false
   private(set) var paging = false
   private(set) var hasOlder = true
@@ -27,6 +28,8 @@ import OpenCodeKit
   private(set) var preferences: Preferences?
   private(set) var acting: Set<String> = []
   var error: String?
+  private(set) var notice: ConversationNotice?
+  @ObservationIgnored private var renaming: SessionRename?
   var revealedToolID: String?
   var sideQuestion: SideQuestionLaunch?
   var readingRequest: ConversationReadingRequest?
@@ -60,8 +63,36 @@ import OpenCodeKit
     expansionValues = expansions?.values(id) ?? [:]
   }
   /// Explicit navigation takes priority over the saved reading position (search/reveal, wave 5).
-  func revealMessage(_ id: String, offset: Double = 0) {
-    readingRequest = ConversationReadingRequest(messageID: id, offset: offset)
+  func revealMessage(_ id: String, offset: Double = 0, persist: Bool = true) {
+    readingRequest = ConversationReadingRequest(messageID: id, offset: offset, persist: persist)
+  }
+  func rename(_ title: String) async {
+    guard renaming == nil, let change = SessionRename(title, current: session?.title) else { return }
+    renaming = change
+    session?.title = change.title
+    defer { renaming = nil }
+    do {
+      try await client.rename(id, title: change.title)
+      toast.show("Sessão renomeada")
+    } catch {
+      session?.title = change.rollback(current: session?.title)
+      toast.show("Não foi possível renomear a sessão.", kind: .error)
+    }
+  }
+  func archive() async -> Bool {
+    guard session?.parentID == nil, acting.insert("archive").inserted else { return false }
+    defer { acting.remove("archive") }
+    do {
+      try await client.archive(id)
+      return true
+    } catch {
+      toast.show("Não foi possível arquivar a sessão.", kind: .error)
+      return false
+    }
+  }
+  func services() async -> SessionServices {
+    guard let directory = session?.location.directory else { return SessionServices() }
+    return await client.sessionServices(directory: directory)
   }
   var context: Double? { ConversationProjection.context(messages, models: models) }
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
@@ -103,6 +134,7 @@ import OpenCodeKit
       part, permissions: family?.permissions ?? [], forms: family?.forms ?? [])
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
+    guard notice == nil else { return }
     if let question = SideQuestionRequest.slashQuestion(draft.document) {
       sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
       draft.text = NSAttributedString()
@@ -365,7 +397,9 @@ import OpenCodeKit
       loading = false
       snapshotSequence = hub.sequence
     }
+    var history: (Session, [ConversationMessage])?
     do {
+      _ = try await client.info()
       async let info = client.session(id)
       async let page = client.conversation(id)
       async let running = client.active()
@@ -378,7 +412,7 @@ import OpenCodeKit
       if !ready {
         viewedBoundary = infoValue.time.viewed
         cursor = pageValue.cursor?.next
-        hasOlder = !pageValue.data.isEmpty
+        hasOlder = !pageValue.data.isEmpty && cursor != nil
       }
       var nextMessages = ConversationProjection.merge(messages, page: pageValue.data.reversed())
       if replaceHistory {
@@ -402,8 +436,23 @@ import OpenCodeKit
         replaceHistory = false
       }
       let directory = infoValue.location.directory
+      history = (infoValue, nextMessages)
+      if (try? await client.directoryAvailable(directory)) == false {
+        // Only the missing-Location path publishes history without runtime catalogs.
+        // Normal publication must stay atomic: restoration can prepend older pages
+        // as soon as ready changes, which a second initial snapshot would discard.
+        session = infoValue
+        if let renaming { session?.title = renaming.title }
+        messages = nextMessages
+        ready = true
+        revision += 1
+        notice = .missingDirectory(directory)
+        error = nil
+        return
+      }
+      notice = nil
       let nextModels = models.isEmpty ? try await client.models(directory: directory) : models
-      let nextDefault = !ready ? try await client.defaultModel(directory: directory) : defaultModel
+      let nextDefault = defaultModel == nil ? try await client.defaultModel(directory: directory) : defaultModel
       let nextAgents = agents.isEmpty ? try await client.agents(directory: directory) : agents
       let nextProviders =
         providers.isEmpty ? try await client.providers(directory: directory) : providers
@@ -426,6 +475,7 @@ import OpenCodeKit
       // Publish the transcript and runtime work snapshot together: the first visible
       // subagent duration/count must use the same authoritative inputs as refreshes.
       session = infoValue
+      if let renaming { session?.title = renaming.title }
       messages = nextMessages
       active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       models = nextModels
@@ -436,6 +486,7 @@ import OpenCodeKit
       children = members
       shells = snapshots.1
       branch = snapshots.2.first?.branch ?? URL(fileURLWithPath: directory).lastPathComponent
+      self.located = snapshots.2.first
       ownerMessages = parentMessages
       inbox = queueValue
       if preferencesValue.revision >= (preferences?.revision ?? -1) {
@@ -446,7 +497,18 @@ import OpenCodeKit
       error = nil
     } catch {
       if !Task.isCancelled {
-        self.error = "Não foi possível atualizar a conversa. \(error.localizedDescription)"
+        if let notice = ConversationNotice.classify(error, directory: history?.0.location.directory ?? session?.location.directory) {
+          if case .missingDirectory = notice, let history {
+            session = history.0
+            messages = history.1
+            ready = true
+            revision += 1
+          }
+          self.notice = notice
+          self.error = nil
+        } else {
+          self.error = "Não foi possível atualizar a conversa. \(error.localizedDescription)"
+        }
       }
     }
   }
@@ -459,7 +521,8 @@ import OpenCodeKit
       try Task.checkCancellation()
       messages = ConversationProjection.merge(messages, page: page.data.reversed(), older: true)
       self.cursor = page.cursor?.next
-      hasOlder = !page.data.isEmpty && self.cursor != cursor
+      hasOlder = !page.data.isEmpty && self.cursor != nil && self.cursor != cursor
+      revision += 1
     } catch {
       if !Task.isCancelled {
         self.error = "Não foi possível carregar o histórico. \(error.localizedDescription)"

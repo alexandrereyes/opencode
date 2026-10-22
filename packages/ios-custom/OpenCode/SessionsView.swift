@@ -32,7 +32,10 @@ struct SessionsView: View {
         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         .listRowSeparator(.hidden)
         .listRowBackground(theme.color(.background))
-        if let error = store.error {
+        if let notice = store.notice {
+          ConversationNoticeView(notice: notice) { Task { await store.reload() } }
+            .listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+        } else if let error = store.error {
           HStack(alignment: .top) {
             Image(systemName: "wifi.exclamationmark")
             Text(error).font(.footnote)
@@ -182,6 +185,7 @@ struct SessionsView: View {
         ConversationView(id: session.id, sessions: store)
       }
       .onChange(of: selectedSession) { _, value in store.conversationOpen = value != nil }
+      .toastOverlay(store.toast)
       .task {
         guard !appliedLaunch else { return }
         appliedLaunch = true

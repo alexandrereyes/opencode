@@ -92,7 +92,7 @@ private let tool = ConversationPart(type: "tool", id: "tool", name: "read")
             type: "tool", id: "todo", name: "todowrite",
             state: .object(["status": .string("error")])), text(),
         ])
-    ]) == ["a:text:0"])
+    ]).isEmpty)
   var idle = ConversationMessage(id: "idle", type: "idle", time: MessageTime(created: 2))
   idle.outcome = "succeeded"
   #expect(

@@ -4,7 +4,7 @@ public struct Session: Codable, Sendable, Identifiable, Hashable {
   public let id: String
   public let parentID: String?
   public let projectID: String
-  public let title: String?
+  public var title: String?
   public let location: Location
   public let time: Time
   public let outcome: Outcome?

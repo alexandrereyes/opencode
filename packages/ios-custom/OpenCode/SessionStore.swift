@@ -18,9 +18,11 @@ final class SessionStore {
   private(set) var connected = false
   private(set) var busy: Set<String> = []
   var error: String?
+  private(set) var notice: ConversationNotice?
   var filter = SessionFilter.all
   var selectedProject: String?
   var conversationOpen = false
+  let toast = ToastCenter()
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
@@ -140,6 +142,7 @@ final class SessionStore {
     defer { loading = false }
     do {
       _ = try await client.info()
+      notice = nil
       async let navigation = client.navigation()
       async let prefs = client.preferences()
       async let inventory = client.projects()
@@ -173,6 +176,7 @@ final class SessionStore {
       for id in visible { enqueuePreview(id) }
     } catch {
       if !Task.isCancelled {
+        notice = ConversationNotice.classify(error, directory: nil)
         self.error = "Não foi possível atualizar as sessões. \(error.localizedDescription)"
       }
       return

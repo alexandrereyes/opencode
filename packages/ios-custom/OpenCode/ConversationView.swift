@@ -148,6 +148,11 @@ struct ConversationView: View {
   @State private var scrollState = ConversationScrollState()
   @State private var agentsOpen = false
   @State private var contextOpen = false
+  @State private var detailsOpen = false
+  @State private var renameOpen = false
+  @State private var renameTitle = ""
+  @State private var archiveOpen = false
+  @State private var search = ConversationSearchState()
   @State private var requestedTool: String?
   @State private var childTool: String?
   @State private var savedPosition: ReadingPosition?
@@ -190,6 +195,9 @@ struct ConversationView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      if let notice = conversation.notice {
+        ConversationNoticeView(notice: notice) { Task { await conversation.refresh() } }
+      }
       if let error = conversation.error {
         Button {
           Task { await conversation.refresh() }
@@ -209,6 +217,9 @@ struct ConversationView: View {
     }
     .background(theme.color(.background))
     .environment(conversation.toast)
+    .environment(\.conversationSearch, ConversationSearchHighlight(matches: search.matches, current: search.current?.id, align: {
+      search.align($0, offset: $1, store: conversation)
+    }))
     .environment(
       \.responseSelectionChanged,
       ResponseSelectionObserver(selected: {
@@ -260,6 +271,36 @@ struct ConversationView: View {
       }
     }
     .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation) }
+    .sheet(isPresented: $detailsOpen) {
+      SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }) {
+        contextOpen = true
+      }
+    }
+    .background(ConversationRenameAlert(isPresented: $renameOpen, title: renameTitle, theme: theme) { title in
+      Task { await conversation.rename(title) }
+    }.frame(width: 0, height: 0))
+    .confirmationDialog("Arquivar sessão?", isPresented: $archiveOpen, titleVisibility: .visible) {
+      Button("Arquivar", role: .destructive) {
+        Task {
+          if await conversation.archive() {
+            sessions.toast.show("Sessão arquivada")
+            leavePosition()
+            dismiss()
+            await sessions.reload()
+          }
+        }
+      }
+      Button("Cancelar", role: .cancel) {}
+    } message: {
+      Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
+    }
+    .onChange(of: search.query) { _, _ in
+      search.cancelPaging()
+      search.update(conversation, reset: true)
+    }
+    .onChange(of: conversation.revision) { _, _ in
+      if search.open { search.update(conversation) }
+    }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
     .task(id: conversation.revision) { await conversation.presented() }
     .onAppear {
@@ -267,6 +308,7 @@ struct ConversationView: View {
       scrollState.correctAnchor()
     }
     .onDisappear {
+      search.cancelPaging()
       leavePosition()
       restorationTask?.cancel()
       if restoring { firstLoad = true }
@@ -283,7 +325,12 @@ struct ConversationView: View {
   }
   private var bottomArea: some View {
     Group {
-      if let parent = conversation.session?.parentID {
+      if search.open {
+        ConversationSearchBar(search: search, store: conversation)
+      } else if conversation.notice != nil {
+        Text("Envio indisponível até resolver o aviso acima.").font(.footnote)
+          .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
+      } else if let parent = conversation.session?.parentID {
         VStack(spacing: 6) {
           Text("Não é possível enviar mensagens diretamente a subagentes.").font(.footnote)
           Button("Voltar à sessão principal") {
@@ -307,6 +354,20 @@ struct ConversationView: View {
     }
   }
   private var header: some View {
+    Group {
+      if search.open {
+        HStack(spacing: 12) {
+          ConversationSearchField(text: $search.query, theme: theme) {
+            search.move(1, store: conversation)
+          }.frame(height: 44)
+          Button("Cancelar") {
+            search.close()
+          }
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+      } else { normalHeader }
+    }.background(theme.color(.background))
+  }
+  private var normalHeader: some View {
     HStack(spacing: 9) {
       Button {
         leavePosition()
@@ -371,8 +432,22 @@ struct ConversationView: View {
             ? "1 agente em execução" : "\(conversation.runningCount) agentes em execução")
       }
       Menu {
-        Button("Alterações", systemImage: "square.and.pencil") {}.disabled(true)
-        Button("Arquivos", systemImage: "folder") {}.disabled(true)
+        Button("Buscar na conversa", systemImage: "magnifyingglass") {
+          sessions.drafts.draft(conversation.id).focused = false
+          capturePosition()
+          search.open = true
+        }
+        Button("Renomear", systemImage: "pencil") {
+          renameTitle = conversation.session?.title ?? ""
+          renameOpen = true
+        }.disabled(conversation.session == nil)
+        Button("Detalhes da sessão", systemImage: "info.circle") { detailsOpen = true }
+          .disabled(conversation.session == nil)
+        if conversation.session?.parentID == nil {
+          Divider()
+          Button("Arquivar", systemImage: "archivebox", role: .destructive) { archiveOpen = true }
+            .disabled(conversation.session == nil || conversation.acting.contains("archive"))
+        }
       } label: {
         Image(systemName: "ellipsis").font(.system(size: 19)).frame(width: 36, height: 36)
           .glassEffect(.regular.interactive(), in: .circle)
@@ -405,7 +480,7 @@ struct ConversationView: View {
             conversation.paging || restoring
               ? "Carregando mensagens anteriores" : "Mensagens anteriores"
           )
-          .onAppear { if !firstLoad && !restoring && !resumeOffered { loadOlder() } }
+          .onAppear { if !search.open && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
         }
         ForEach(sections) { section in
           Section {
@@ -547,7 +622,7 @@ struct ConversationView: View {
           scrollState.cancelAnchor()
         }
         updateUnread()
-        if new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
+        if !search.open && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
           && !restoring
         {
@@ -582,7 +657,7 @@ struct ConversationView: View {
         firstLoad = false
         restore(
           ReadingPosition(.message(id: request.messageID, offset: request.offset)), proxy: proxy,
-          explicit: true)
+          explicit: true, persist: request.persist)
       }
       .task(id: "\(conversation.ready):\(requestedTool ?? "")") {
         guard conversation.ready, let tool = requestedTool else { return }
@@ -727,11 +802,11 @@ struct ConversationView: View {
         conversation.messages[..<index].contains { $0.id == unread }
       } ?? false
   }
-  private func restore(_ position: ReadingPosition?, proxy: ScrollViewProxy, explicit: Bool = false)
+  private func restore(_ position: ReadingPosition?, proxy: ScrollViewProxy, explicit: Bool = false, persist: Bool = true)
   {
     cancelRestoration()
     captureRequested = false
-    if explicit {
+    if explicit && persist {
       savedPosition = position
       if let position {
         sessions.reading.set(position, sessionID: conversation.id)
@@ -900,7 +975,7 @@ private struct ConversationMessageView: View {
     var activity: [ConversationPart] = []
     var activityID = ""
     for (index, part) in (message.content ?? []).enumerated() {
-      if part.type == "tool", part.name == "todowrite", part.status != "error" { continue }
+      if part.suppressed { continue }
       if part.type == "text" {
         if !activity.isEmpty {
           result.append(Chunk(id: "step:\(activityID)", parts: activity, text: nil))

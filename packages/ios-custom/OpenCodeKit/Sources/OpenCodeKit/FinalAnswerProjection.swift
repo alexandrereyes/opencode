@@ -43,8 +43,8 @@ extension ConversationProjection {
         message.finish == "stop" && message.time.completed != nil
         && message.error == nil && message.retry == nil
       for (ordinal, part) in (message.content ?? []).enumerated() {
-        // Hidden successful todo parts (and empty text) are not projected activity.
-        if part.type == "tool", part.name == "todowrite", part.status != "error" { continue }
+        // Removed V1 tools are not projected activity, including their failures.
+        if part.suppressed { continue }
         if part.type == "text", part.text?.isEmpty != false { continue }
         guard part.type == "text", eligible, let id = message.partID(at: ordinal) else {
           delimiter()
