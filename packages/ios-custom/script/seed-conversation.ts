@@ -100,7 +100,8 @@ const markdown =
   "Encontrei três opções viáveis:\n\n- **Plane** · AGPL-3.0\n- **Huly** · EPL-2.0\n- **Focalboard** · MIT\n\nTodas sobem com `docker compose` e convertem para stack.\n\n```yaml\nservices:\n  plane:\n    image: makeplane/plane:stable\n    deploy:\n      replicas: 1\n```\n\nRecomendo o **Plane**: tem integração nativa com o GitHub."
 const stacks = "São 6 stacks: `core-infra`, `abacato`, `opencode`, `observability`, `whatsapp` e `llm-proxy`."
 // Valid 96×64 RGB PNG: orange circle and green rectangle on a light background.
-const image = "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAyUlEQVR42u3asRGDMBBFQTVGB06pxSldugViB8QuACPEWNJw8s68CjaT/qXtvSpTQgAIECBAgAABAiRAgADFBXo9p5L+EaiQJihT6kxzlemxzI1qDvSjTqFRVKAqOiVGIYEq6pwaxQOqrpM3CgbUSCdjFAmoqc6REaBRgDrofDUCNARQN529ESBAgAABAgQIECBAgAABAuQ1D8iPIiCrhl1s2F3Msmqbd93RDch90C0uzEYAcqPoylWAAAECBAgQIEACBAgQoDv1AQkKOb0EQHvHAAAAAElFTkSuQmCC"
+const image =
+  "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAyUlEQVR42u3asRGDMBBFQTVGB06pxSldugViB8QuACPEWNJw8s68CjaT/qXtvSpTQgAIECBAgAABAiRAgADFBXo9p5L+EaiQJihT6kxzlemxzI1qDvSjTqFRVKAqOiVGIYEq6pwaxQOqrpM3CgbUSCdjFAmoqc6REaBRgDrofDUCNARQN529ESBAgAABAgQIECBAgAABAuQ1D8iPIiCrhl1s2F3Msmqbd93RDch90C0uzEYAcqPoylWAAAECBAgQIEACBAgQoDv1AQkKOb0EQHvHAAAAAElFTkSuQmCC"
 await Bun.write(path.join(directory, "exemplo.png"), Buffer.from(image, "base64"))
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`
 const user = (text: string, date: number, extra = {}) => ({
@@ -222,7 +223,19 @@ await imported(
   "permission",
   [
     user(comparison, now - 200_000),
-    assistant(markdown, now - 190_000, [], { tokens: permissionTokens }),
+    assistant(
+      markdown,
+      now - 190_000,
+      [
+        tool(
+          "read",
+          { path: "docs/alternativas.md" },
+          "Read file docs/alternativas.md, lines 1-3\n1: # Alternativas\n2: Plane, Huly e Focalboard.\n3: Exemplo fictício.",
+          now - 189_000,
+        ),
+      ],
+      { tokens: permissionTokens },
+    ),
     user("Depois disso, abre um PR com o resumo.", now - 180_000),
     assistant(
       "",

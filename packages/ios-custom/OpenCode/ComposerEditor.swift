@@ -21,6 +21,14 @@ struct ComposerEditor: View {
     !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
+  private var canSubmit: Bool {
+    hasContent && !draft.sending && !draft.importing && store.ready
+      && store.selectedModel(draft) != nil
+  }
+  private func submit() {
+    guard canSubmit else { return }
+    Task { await store.send(draft) }
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if let trigger = draft.trigger {
@@ -73,7 +81,8 @@ struct ComposerEditor: View {
           ProgressView("Preparando anexos…").font(.caption).tint(theme.color(.primary))
         }
         ComposerTextView(
-          draft: draft, theme: theme, expanded: expanded, owner: editorID
+          draft: draft, theme: theme, expanded: expanded, owner: editorID,
+          submit: submit, canSubmit: canSubmit
         )
         .overlay(alignment: .topLeading) {
           if draft.text.length == 0 {
@@ -208,7 +217,7 @@ struct ComposerEditor: View {
         Text(draft.agent ?? store.session?.agent ?? "build").font(.system(size: 12)).lineLimit(1)
       }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
       Button {
-        Task { await store.send(draft) }
+        submit()
       } label: {
         Group {
           if draft.sending {
@@ -220,10 +229,7 @@ struct ComposerEditor: View {
         }.foregroundStyle(theme.color(.onPrimary)).frame(width: 36, height: 36)
           .background(theme.color(.primary), in: Circle())
       }
-      .disabled(
-        !hasContent || draft.sending || draft.importing || !store.ready
-          || store.selectedModel(draft) == nil
-      )
+      .disabled(!canSubmit)
       .buttonStyle(ComposerSendStyle()).accessibilityLabel(
         hasContent ? "Enviar mensagem" : "Microfone"
       )

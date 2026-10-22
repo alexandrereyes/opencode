@@ -146,8 +146,12 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   `${message.id}:reasoning:${ordinal}`, with ordinals counted **within that content type**. Use these for quotes.
 - Failed tools remain visible even if a display category is hidden. `todowrite` is normally hidden. The web's
   `idle` marker is not itself rendered as a row. Compaction and selection/location notices split groups.
-- A final-answer separator is inferred from a completed, error-free, retry-free `finish:"stop"` message with text;
-  prefer text `state.phase:"final_answer"`, otherwise the final eligible text. It is not a server message.
+- Final-answer separators are projected over each whole user group, including history: completed, error-free,
+  retry-free `finish:"stop"` text rows form sequences delimited by rendered activity. Prefer the first
+  `state.phase:"final_answer"`, otherwise the first text of the last eligible message in that sequence. Commentary
+  after an explicit final answer starts another sequence. Draw only after earlier activity, never before the
+  exchange's first content. Several separators can belong to one exchange; hidden activity contributes no boundary.
+  They are not server messages and do not change text/quote part IDs.
 - Sticky prompt is the **same** latest user bubble positioned under the header and clamped to two lines, not a second
   message. Preserve identity and selection anchors while scrolling.
 - `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Capture the

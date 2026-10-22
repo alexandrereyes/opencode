@@ -5,8 +5,12 @@ struct ResponseSelectionActions {
   let comment: (ChatQuote) -> Void
   let sideQuestion: (String) -> Void
 }
+struct ResponseSelectionObserver {
+  let selected: () -> Void
+}
 extension EnvironmentValues {
   @Entry var responseSelection: ResponseSelectionActions? = nil
+  @Entry var responseSelectionChanged: ResponseSelectionObserver? = nil
 }
 
 final class ResponseTextView: UITextView {
@@ -15,6 +19,7 @@ final class ResponseTextView: UITextView {
   var sourceBlock: MarkdownBlock?
   var source = ""
   var selectionActions: ResponseSelectionActions?
+  var selectionChanged: (() -> Void)?
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
@@ -29,6 +34,7 @@ struct SelectableResponseText: UIViewRepresentable {
   let theme: AppTheme
   var source = ""
   var actions: ResponseSelectionActions? = nil
+  var selectionChanged: (() -> Void)? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -55,6 +61,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.sourceBlock = block
     view.source = source
     view.selectionActions = actions
+    view.selectionChanged = selectionChanged
     view.tintColor = theme.uiColor(.primary)
     let text = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
@@ -105,9 +112,14 @@ struct SelectableResponseText: UIViewRepresentable {
     view.sourceBlock = nil
     view.source = ""
     view.selectionActions = nil
+    view.selectionChanged = nil
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate {
+    func textViewDidChangeSelection(_ textView: UITextView) {
+      guard textView.selectedRange.length > 0 else { return }
+      (textView as? ResponseTextView)?.selectionChanged?()
+    }
     func textView(
       _ textView: UITextView, editMenuForTextIn range: NSRange,
       suggestedActions: [UIMenuElement]
@@ -140,6 +152,7 @@ struct ResponseMarkdown: View {
   @Environment(\.appTheme) private var theme
   @Environment(ToastCenter.self) private var toast
   @Environment(\.responseSelection) private var selectionActions
+  @Environment(\.responseSelectionChanged) private var selectionChanged
   let text: String
   let messageID: String
   let partID: String
@@ -164,7 +177,9 @@ struct ResponseMarkdown: View {
               .buttonStyle(.plain)
               .accessibilityLabel("Copiar código")
             }.foregroundStyle(theme.color(.textSecondary))
-            SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme)
+            SelectableResponseText(
+              block: block, messageID: messageID, partID: partID, theme: theme,
+              selectionChanged: selectionChanged?.selected)
           }
           .padding(12).background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
           .overlay {
@@ -175,7 +190,7 @@ struct ResponseMarkdown: View {
             if block.kind == .quote { Rectangle().fill(theme.color(.border)).frame(width: 3) }
             SelectableResponseText(
               block: block, messageID: messageID, partID: partID, theme: theme,
-              source: text, actions: selectionActions)
+              source: text, actions: selectionActions, selectionChanged: selectionChanged?.selected)
           }
           .padding(.leading, CGFloat(max(0, block.depth - 1)) * 15)
           .padding(block.kind == .table ? 8 : 0)

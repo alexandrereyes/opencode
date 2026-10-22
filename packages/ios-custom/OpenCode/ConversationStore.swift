@@ -29,6 +29,11 @@ import OpenCodeKit
   var error: String?
   var revealedToolID: String?
   var sideQuestion: SideQuestionLaunch?
+  var readingRequest: ConversationReadingRequest?
+  var expansionValues: [String: Bool] = [:] {
+    didSet { expansionMemory?.set(expansionValues, sessionID: id) }
+  }
+  @ObservationIgnored private let expansionMemory: ConversationExpansionMemory?
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let hub: EventHub
   @ObservationIgnored private var cursor: String?
@@ -44,10 +49,19 @@ import OpenCodeKit
   @ObservationIgnored private var snapshotSequence = 0
   @ObservationIgnored private var composerCatalog: ComposerSources?
 
-  init(id: String, client: OpenCodeClient, hub: EventHub) {
+  init(
+    id: String, client: OpenCodeClient, hub: EventHub,
+    expansions: ConversationExpansionMemory? = nil
+  ) {
     self.id = id
     self.client = client
     self.hub = hub
+    expansionMemory = expansions
+    expansionValues = expansions?.values(id) ?? [:]
+  }
+  /// Explicit navigation takes priority over the saved reading position (search/reveal, wave 5).
+  func revealMessage(_ id: String, offset: Double = 0) {
+    readingRequest = ConversationReadingRequest(messageID: id, offset: offset)
   }
   var context: Double? { ConversationProjection.context(messages, models: models) }
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
@@ -446,7 +460,11 @@ import OpenCodeKit
       messages = ConversationProjection.merge(messages, page: page.data.reversed(), older: true)
       self.cursor = page.cursor?.next
       hasOlder = !page.data.isEmpty && self.cursor != cursor
-    } catch { self.error = "Não foi possível carregar o histórico. \(error.localizedDescription)" }
+    } catch {
+      if !Task.isCancelled {
+        self.error = "Não foi possível carregar o histórico. \(error.localizedDescription)"
+      }
+    }
   }
   /// Called after the updated transcript has reached the view, never at request start.
   func presented() async {

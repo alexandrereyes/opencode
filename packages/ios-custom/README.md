@@ -359,7 +359,7 @@ packages/ios-custom/
   OpenCode.xcodeproj/
   OpenCode/              # app target: entry point, navigation, feature screens
   OpenCodeKit/           # local Swift package with no UI: API, models, SSE, pairing, Keychain
-  OpenCodeTests/
+  OpenCodeUITests/       # sandbox-only native interaction/continuity tests
 ```
 
 ## Development
@@ -471,7 +471,9 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1–4 are implemented. Child sessions have a return-to-parent action and no ordinary composer, but their
+Waves 1–4 are complete. Wave 6 is in progress: exact reading-offset restoration and hardware-keyboard verification
+still have the blockers described below.
+Child sessions have a return-to-parent action and no ordinary composer, but their
 permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
 generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
 mockup's illustrative Opus model.
@@ -696,6 +698,89 @@ includes shared framework pages. On the dedicated simulator the review measured 
 recycling and 45.8/62.1/61.6/62.9 MiB after it; another full round trip reached 63.5 MiB. No simulator FPS claim is
 made. Scope includes only the 89-message seed; the native recycling container, not a guessed per-message slope, is
 the protection for longer sessions.
+
+### Reading continuity (wave 6)
+
+**Status: not ready for acceptance.** The implementation is in place; the 94 Swift tests and simulator build pass
+without new compiler warnings. Repeated deep-history UI checks still find point-offset drift after navigation and
+cold relaunch (latest check: about 16 points, above the five-point tolerance). Earlier passing captures are evidence of individual runs, not proof
+that this is resolved. The failing regression remains enabled in `testHistoryNavigationAndRelaunch`; investigate
+`ConversationScrollState`'s native row/header geometry and offset correction before starting wave 5. Hardware
+Shift+Return is implemented but **not verified**: XCUITest did not deliver even an unmodified hardware Return in this
+environment. Its test has an explicit plain-Return preflight and skips rather than claiming success when that fails.
+The shared Simulator keyboard settings were not changed. Actual software-keyboard taps verify the private path.
+
+- `ConversationProjection.finalAnswerDividers(_:)` is a pure projection across each user group. It considers only
+  rendered activity, completed error/retry-free `stop` assistants, explicit `final_answer` phases and the legacy
+  first-text-of-last-message fallback. Each eligible sequence can have its own divider, including in history.
+  The 1-point full-width line uses `borderStrong` from `v2-border-border-strong`, has 12 points below it and is hidden
+  from accessibility. Text/part IDs, selection and quote source mapping are unchanged.
+- `SessionStore.reading` owns a separate `ReadingPositionStore`: the same URL hash as drafts, then session ID (no
+  directory or credentials). Up to 200 LRU entries contain only follow-tail intent or a message ID/point offset and
+  update time. Protected JSON in `Application Support/OpenCode/Reading` uses atomic writes. Scroll-idle capture
+  debounces 250 ms; leaving, opening a child and backgrounding flush immediately. A weak map of **mounted** UIKit row
+  probes measures partially visible responses and natural user bubbles below the actual sticky header.
+- Saved anchors suppress the initial tail jump and live following. Restoration loads at most five older pages per
+  attempt, offers **Retomar leitura** beyond that budget, materializes the message and corrects its offset using real
+  Markdown/image geometry. User interaction cancels it; a missing message after exhausting history falls back to the
+  tail. Layout changes retain the anchor and clamp the offset to the measured message height. New messages do not
+  steal a non-following position. The app's existing portrait-only orientation policy is unchanged.
+- **Wave 5 API:** `ConversationStore.revealMessage(messageID, offset: 0)` requests explicit navigation through the
+  same cancellable path, taking priority over saved position and tail. Search may page its own results before calling
+  it. A new request has a fresh token even for the same message. Tool reveal also pauses following and expands the
+  actual group. Do not overwrite the reading store or the viewed watermark to navigate.
+- The entire composer/quotes/tray/queue region is a real sibling below the recycling List, not a bottom overlay.
+  Its measured layout always reduces the transcript viewport, including while the keyboard is shown. A non-empty
+  response selection pauses following until **Ir para o fim** is tapped. **Novas mensagens ↑** is an explicit jump
+  when the captured unread boundary is above the viewport; it does not change viewed acknowledgement semantics.
+- Step/detail expansion is stored as IDs and explicit booleans in a separate 16-session memory LRU. Outputs, parsed
+  Markdown, images and views are never cached there. The native edge-pop recognizer is enabled for the hidden-bar
+  conversation, with root/transition guards and its previous delegate restored on departure.
+- Return inserts a newline; **Shift+Return sends** through the button's exact predicate/action in both main composer
+  sizes. Hardware uses a priority `UIKeyCommand`; software consults the keyboard **before mutation**. Suggestions and
+  marked text take precedence. The side-question editor has its own submit action; comment editors have no submit
+  shortcut. `SoftwareKeyboardShift.swift` alone resolves private `UIKeyboardImpl` state at runtime, checks selectors
+  and calls BOOL getters with their proper signature. Automatic Shift, Caps Lock and unavailable state all fall back
+  to a newline. **Private API warning:** internal TestFlight still processes the binary and may reject this with
+  `ITMS-90338`; remove that file/software path and retain hardware Shift+Return if that happens. Third-party keyboards
+  and future UIKit versions have no guaranteed private-state contract.
+
+Swift Testing adds divider sequences/eligibility/history/visibility, partial-row capture, restoration decisions,
+protected serialization/server separation/LRU, expansion memory and all Shift-state/editor-state combinations
+(`ReadingContinuityTests.swift`). Run `swift test` from `OpenCodeKit` (94 tests). The `OpenCodeUITests` target drives
+the actual software keyboard keys, hardware key command, navigation and expanded quote layout. After
+`xcodebuild … build-for-testing`, run `python3 packages/ios-custom/script/test-reading.py [testMethod …]`. It only uses
+the dedicated simulator and port 4177, creates/deletes isolated Luna 6 / low keyboard sessions, reads the sandbox password without
+printing it and removes its protected temporary xctestrun configuration. Never launch the app without explicit
+`-OpenCodeServerURL http://127.0.0.1:4177`, including in automation relaunches.
+
+Run `testUnreadJump` immediately after `seed-conversation.ts --reset`; later opens correctly have no unread boundary
+after viewed acknowledgement, so that case skips rather than moving the watermark backwards. The B seed now includes
+one imported read before its existing Markdown answer: the former simple reply correctly had no final divider and
+could not exercise the requested after-tools screenshot. No web/backend implementation or Sessões request changes
+are needed. Wave 7 should keep child navigation on this same reading/expansion store and reuse the optional editor
+submit action instead of adding a second keyboard handler.
+
+Verified on **OpenCode Sessoes / iOS 27.0** with the clean 10:58 status bar, against sandbox 4177 only:
+
+| Input on the real software keyboard | Result |
+| --- | --- |
+| Return after prose | Newline; no send |
+| Return with automatic sentence capitalization | Newline; no send |
+| Caps Lock, then Return | Newline; no send |
+| Manual Shift, then Return | One send; no newline |
+| XCUITest hardware Return preflight | Not delivered; hardware Shift+Return remains unverified |
+
+Live evidence is under
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda6/final/`:
+`b-final-divider-*`, `c-final-divider-*`, `c-before-navigation`, `c-after-navigation`, `c-after-relaunch`,
+`c-restored-light`, `c-restored-large-type`, `c-unread-*`, `b-expanded-quotes-*`, `expanded-before-child-*`,
+`expanded-after-child-*`, `expanded-reopened-*`, and `keyboard-*`. The history test compares the same partially
+visible passage within five points after Sessões → B → C and cold relaunch. Both root and child edge swipes are
+exercised. The conversation seed was reset before final captures; B's permission and D's question remain pending,
+and keyboard-test sessions are deleted by the runner. The B quote remains an unsent local draft.
+The long-history test is intentionally strict about the point offset, not merely finding the same message; any
+remaining failure there must be treated as a continuity defect rather than accepted from a similar screenshot.
 
 ### Live data and contract fixtures
 

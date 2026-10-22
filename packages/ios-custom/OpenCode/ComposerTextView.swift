@@ -7,6 +7,8 @@ struct ComposerTextView: UIViewRepresentable {
   var expanded: Bool
   let owner: UUID
   var label = "Mensagem"
+  var submit: (() -> Void)? = nil
+  var canSubmit = false
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
     let view = ComposerInputView(frame: .zero, textContainer: nil)
@@ -30,6 +32,8 @@ struct ComposerTextView: UIViewRepresentable {
     // A cover and its presenter coexist during dismissal; only one may own the keyboard.
     let focused = draft.focused && draft.editorOwner == owner
     view.requestFocus = focused
+    view.submit = submit
+    view.canSubmit = canSubmit && draft.trigger == nil && draft.editorOwner == owner
     view.tintColor = theme.uiColor(.primary)
     let querying = draft.trigger != nil
     if view.querying != querying {
@@ -119,6 +123,9 @@ struct ComposerTextView: UIViewRepresentable {
     func textView(
       _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
     ) -> Bool {
+      if text == "\n", let view = textView as? ComposerInputView {
+        if view.submittedHardwareReturn || view.submitSoftwareReturn() { return false }
+      }
       // UIKit may notify selection changes before publishing the changed text.
       let overlaps = ComposerDocument(attributed: textView.attributedText).validTokens.filter {
         NSIntersectionRange(range, $0.range).length > 0
@@ -142,17 +149,68 @@ struct ComposerTextView: UIViewRepresentable {
 
 final class ComposerInputView: UITextView {
   var escape: (() -> Void)?
+  var submit: (() -> Void)?
+  var canSubmit = false
+  private var hardwareSubmitted = false
+  var submittedHardwareReturn: Bool { hardwareSubmitted }
+  private lazy var submitCommand: UIKeyCommand = {
+    let command = UIKeyCommand(
+      input: "\r", modifierFlags: .shift, action: #selector(submitReturn(_:)))
+    command.wantsPriorityOverSystemBehavior = true
+    command.allowsAutomaticLocalization = false
+    return command
+  }()
   var requestFocus = false
   var querying = false
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil && requestFocus { becomeFirstResponder() }
   }
+  @discardableResult override func resignFirstResponder() -> Bool {
+    hardwareSubmitted = false
+    return super.resignFirstResponder()
+  }
   override var keyCommands: [UIKeyCommand]? {
-    (super.keyCommands ?? []) + [
+    let commands = [
       UIKeyCommand(
         input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(dismissSuggestions))
     ]
+    return (submit != nil ? [submitCommand] : [])
+      + commands + (super.keyCommands ?? [])
+  }
+  override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(submitReturn(_:)) {
+      return isFirstResponder && canSubmit && markedTextRange == nil && submit != nil
+    }
+    return super.canPerformAction(action, withSender: sender)
+  }
+  override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    hardwareSubmitted = false
+    super.pressesEnded(presses, with: event)
+  }
+  override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    hardwareSubmitted = false
+    super.pressesCancelled(presses, with: event)
+  }
+  @objc private func submitReturn(_ command: UIKeyCommand) {
+    guard !hardwareSubmitted, isFirstResponder, markedTextRange == nil, canSubmit,
+      let submit
+    else { return }
+    hardwareSubmitted = true
+    submit()
+  }
+  func submitSoftwareReturn() -> Bool {
+    guard !hardwareSubmitted, isFirstResponder, let submit else { return false }
+    let shift = SoftwareKeyboardShift.state()
+    guard
+      ComposerReturn.shouldSubmit(
+        shifted: shift?.shifted == true, autoShifted: shift?.automatic == true,
+        shiftLocked: shift?.locked == true, available: shift != nil,
+        markedText: markedTextRange != nil, suggestionsOpen: querying,
+        canSubmit: canSubmit)
+    else { return false }
+    submit()
+    return true
   }
   @objc private func dismissSuggestions() { escape?() }
 }

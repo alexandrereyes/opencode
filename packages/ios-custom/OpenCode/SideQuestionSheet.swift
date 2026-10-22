@@ -67,7 +67,7 @@ struct SideQuestionSheet: View {
   let store: ConversationStore
   let launch: SideQuestionLaunch
   @State private var state: SideQuestionState
-  @FocusState private var focused: Bool
+  @State private var focused = false
   init(store: ConversationStore, launch: SideQuestionLaunch) {
     self.store = store
     self.launch = launch
@@ -132,7 +132,9 @@ struct SideQuestionSheet: View {
       }
       .toastOverlay(state.toast)
     }
-    .environment(state.toast).environment(\.responseSelection, nil)
+    .environment(state.toast).environment(\.responseSelection, nil).environment(
+      \.responseSelectionChanged, nil
+    )
     .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     .presentationBackground(.regularMaterial).tint(theme.color(.primary))
     .task { if launch.submit { state.ask(store: store) } }
@@ -140,16 +142,22 @@ struct SideQuestionSheet: View {
   }
   private var composer: some View {
     VStack(alignment: .leading, spacing: 12) {
-      TextField("Pergunte em paralelo…", text: $state.text, axis: .vertical)
-        .lineLimit(1...6).focused($focused).accessibilityIdentifier("side-question-composer")
-        .foregroundStyle(theme.color(.text))
+      SideQuestionInput(
+        text: $state.text, focused: $focused, theme: theme,
+        canSubmit: canSubmit, submit: submit
+      )
+      .overlay(alignment: .topLeading) {
+        if state.text.isEmpty {
+          Text("Pergunte em paralelo…").foregroundStyle(theme.color(.textSecondary))
+            .allowsHitTesting(false)
+        }
+      }
       HStack {
         Text(store.modelLabel(store.session?.model)).font(.system(size: 12))
           .foregroundStyle(theme.color(.textSecondary))
         Spacer()
         Button {
-          focused = false
-          state.ask(store: store)
+          submit()
         } label: {
           Image(
             systemName: state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -157,11 +165,9 @@ struct SideQuestionSheet: View {
           )
           .font(.system(size: 19, weight: .medium)).foregroundStyle(theme.color(.onPrimary))
           .frame(width: 36, height: 36).background(theme.color(.primary), in: Circle())
-        }.disabled(
-          state.pending != nil || state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        )
-        .accessibilityLabel(state.text.isEmpty ? "Microfone" : "Enviar pergunta paralela")
-        .accessibilityHint(state.text.isEmpty ? "Em breve" : "")
+        }.disabled(!canSubmit)
+          .accessibilityLabel(state.text.isEmpty ? "Microfone" : "Enviar pergunta paralela")
+          .accessibilityHint(state.text.isEmpty ? "Em breve" : "")
       }
     }.padding(14).background(
       theme.color(.surface).opacity(0.6), in: RoundedRectangle(cornerRadius: 22)
@@ -169,6 +175,15 @@ struct SideQuestionSheet: View {
     .overlay {
       RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
     }
+  }
+  private var canSubmit: Bool {
+    state.pending == nil && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && store.ready && store.session?.model != nil
+  }
+  private func submit() {
+    guard canSubmit else { return }
+    focused = false
+    state.ask(store: store)
   }
 }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ThemeRole: Int, CaseIterable, Sendable {
-  case background, surface, surfaceRaised, highlight, border, controlBorder
+  case background, surface, surfaceRaised, highlight, border, borderStrong, controlBorder
   case textStrong, text, textSecondary, textWeak, icon
   case primary, onPrimary, onInfo, success, info, error, warning, accent
   case filledButton, onFilledButton

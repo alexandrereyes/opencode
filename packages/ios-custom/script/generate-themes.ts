@@ -5,12 +5,21 @@ import type { DesktopTheme, HexColor } from "../../ui-custom/src/theme/types"
 import { join } from "node:path"
 
 const root = join(import.meta.dir, "../OpenCode/Resources/Themes")
+// Alpha primitives live in CSS rather than the web resolver's returned ramp map.
+const alphaTokens = Object.fromEntries(
+  [
+    ...(await Bun.file(join(import.meta.dir, "../../ui-custom/src/styles/tokens/colors.css")).text()).matchAll(
+      /--(v2-alpha-[\w-]+):\s*(#[\da-f]{8});/gi,
+    ),
+  ].map((match) => [match[1]!, match[2]!]),
+)
 const roles = {
   background: "background-base",
   surface: "surface-base",
   surfaceRaised: "background-weak",
   highlight: "surface-base-hover",
   border: "border-weak-base",
+  borderStrong: "v2-border-border-strong",
   controlBorder: "border-strong-base",
   textStrong: "text-strong",
   text: "text-base",
@@ -79,6 +88,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     const variant = theme[mode]
     const palette = variant.palette ?? variant.seeds!
     const tokens = {
+      ...alphaTokens,
       ...resolveThemeVariant(
         {
           ...variant,
@@ -107,7 +117,9 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
       userBubble: tokens[roles.userBubble] ? roles.userBubble : "v2-background-bg-accent",
       userBubbleText: tokens[roles.userBubbleText] ? roles.userBubbleText : "text-base",
       inlineCode: tokens[roles.inlineCode] ? roles.inlineCode : "syntax-string",
-      inlineCodeBackground: tokens[roles.inlineCodeBackground] ? roles.inlineCodeBackground : "v2-background-bg-layer-02",
+      inlineCodeBackground: tokens[roles.inlineCodeBackground]
+        ? roles.inlineCodeBackground
+        : "v2-background-bg-layer-02",
       highlight: mode === "dark" ? "v2-background-bg-layer-02" : roles.highlight,
       onInfo: mode === "light" ? "text-on-info-strong" : roles.onInfo,
     }

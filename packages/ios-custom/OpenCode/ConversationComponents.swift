@@ -148,11 +148,18 @@ struct UserBubble: View {
 struct ConversationStep: View {
   @Environment(\.appTheme) private var theme
   let parts: [ConversationPart]
+  let id: String
   let store: ConversationStore
   let openChild: (String) -> Void
-  @State private var expanded: Bool?
-  @State private var detail: Set<String> = []
   @State private var outputs: [String: String] = [:]
+  private var expanded: Bool { store.expansionValues[id] ?? (pending || revealed) }
+  private func detail(_ key: String) -> Bool {
+    store.expansionValues["\(id):detail:\(key)"] == true
+  }
+  private func toggleDetail(_ key: String) {
+    store.expansionValues["\(id):detail:\(key)"] = !detail(key)
+    if !detail(key) { outputs.removeValue(forKey: key) }
+  }
   private var pending: Bool {
     parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
   }
@@ -160,22 +167,22 @@ struct ConversationStep: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Button {
-        expanded = !(expanded ?? (pending || revealed))
+        store.expansionValues[id] = !expanded
       } label: {
         HStack(spacing: 6) {
           Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13)).lineLimit(1)
-          Image(systemName: (expanded ?? (pending || revealed)) ? "chevron.down" : "chevron.right")
+          Image(systemName: expanded ? "chevron.down" : "chevron.right")
             .font(
               .system(size: 10))
         }.foregroundStyle(theme.color(.textSecondary)).frame(
           maxWidth: .infinity, alignment: .leading)
       }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
-      if expanded ?? (pending || revealed) {
+      if expanded {
         ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
           if part.type == "reasoning" {
             let key = "reasoning:\(index)"
             Button {
-              if !detail.insert(key).inserted { detail.remove(key) }
+              toggleDetail(key)
             } label: {
               HStack(spacing: 12) {
                 Image(systemName: "sparkles")
@@ -183,12 +190,12 @@ struct ConversationStep: View {
                   "Pensou\(part.time?.completed.map { " \(ConversationProjection.duration($0 - (part.time?.created ?? $0)))" } ?? "")"
                 )
                 Spacer()
-                Image(systemName: detail.contains(key) ? "chevron.down" : "chevron.right").font(
+                Image(systemName: detail(key) ? "chevron.down" : "chevron.right").font(
                   .system(size: 10))
               }
             }.buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(
               theme.color(.textSecondary))
-            if detail.contains(key) {
+            if detail(key) {
               Text(part.text ?? "").font(.footnote).textSelection(.enabled)
             }
           } else if part.type == "tool", part.name != "todowrite" || part.status == "error" {
@@ -203,9 +210,15 @@ struct ConversationStep: View {
           }
         }
       }
-    }.onChange(of: store.revealedToolID) { _, id in
-      if parts.contains(where: { $0.id == id }) { expanded = true }
+    }.onChange(of: store.revealedToolID, initial: true) { _, id in
+      guard let id else { return }
+      if parts.contains(where: { $0.id == id }) {
+        store.expansionValues[self.id] = true
+        store.revealedToolID = nil
+      }
     }
+    .onChange(of: expanded) { _, open in if !open { outputs.removeAll() } }
+    .onDisappear { outputs.removeAll() }
   }
   private func subagent(_ part: ConversationPart) -> some View {
     let id = part.input["agent"]?.string ?? "subagent"
@@ -243,7 +256,7 @@ struct ConversationStep: View {
     let waiting = store.pendingTool(part)
     return VStack(alignment: .leading, spacing: 8) {
       Button {
-        if !detail.insert(key).inserted { detail.remove(key) }
+        toggleDetail(key)
       } label: {
         TimelineView(.periodic(from: part.running && waiting == nil ? .now : .distantFuture, by: 1))
         { context in
@@ -272,7 +285,7 @@ struct ConversationStep: View {
             in: RoundedRectangle(cornerRadius: 8))
         }
       }.buttonStyle(.plain)
-      if detail.contains(key) {
+      if detail(key) {
         VStack(alignment: .leading, spacing: 8) {
           if let error = part.errorText { Text(error).foregroundStyle(theme.color(.error)) }
           if !part.diffs.isEmpty {
@@ -317,8 +330,8 @@ struct ConversationStep: View {
       }
     }
     .id(part.id ?? key)
-    .task(id: "\(detail.contains(key)):\(part.status ?? "")") {
-      guard detail.contains(key), part.name == "shell" else { return }
+    .task(id: "\(detail(key)):\(part.status ?? "")") {
+      guard detail(key), part.name == "shell" else { return }
       repeat {
         if let output = try? await store.shellOutput(part), !Task.isCancelled {
           outputs[key] = output
