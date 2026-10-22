@@ -5,10 +5,18 @@ struct SettingsView: View {
   @Environment(\.appTheme) private var theme
   let runtime: AppRuntime
   let store: SessionStore
+  @State private var proxyProvider: SubscriptionProvider?
   var body: some View {
     @Bindable var appearance = runtime.appearance
     NavigationStack {
       List {
+        Section("LLM proxy") {
+          ForEach(store.quota.providers) { provider in
+            Button { proxyProvider = provider } label: {
+              SubscriptionCompactRow(store: store.quota, provider: provider)
+            }.buttonStyle(.plain).accessibilityIdentifier("proxy-settings-" + provider.rawValue)
+          }
+        }.listRowBackground(theme.color(.surface))
         Section("Aparência") {
           NavigationLink {
             ThemePicker(settings: appearance)
@@ -51,6 +59,10 @@ struct SettingsView: View {
       }
       .settingsList(theme)
       .navigationTitle("Você")
+      .refreshable { await store.quota.refresh() }
+      .sheet(item: $proxyProvider) { provider in
+        SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
+      }
     }
   }
 }

@@ -10,6 +10,7 @@ struct SessionsView: View {
   @State private var showArchived = false
   @State private var moreSession: SessionRow?
   @State private var appliedLaunch = false
+  @State private var proxyProvider: SubscriptionProvider?
 
   private struct ProjectAction: Identifiable {
     let directory: String
@@ -76,7 +77,7 @@ struct SessionsView: View {
           } label: {
             SessionRowView(
               row: row, preview: store.previews[row.id] ?? SessionPreview(),
-              branch: store.branch(row.session))
+              directory: store.directoryLabel(row.session))
           }
           .buttonStyle(.plain)
           .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 18))
@@ -147,7 +148,11 @@ struct SessionsView: View {
       .background(theme.color(.background))
       .scrollEdgeEffectStyle(.soft, for: .top)
       .scrollEdgeEffectStyle(.hard, for: .bottom)
-      .refreshable { await store.reload() }
+      .refreshable {
+        async let sessions: Void = store.reload()
+        await store.quota.refresh()
+        await sessions
+      }
       .navigationTitle("Sessões")
       .navigationBarTitleDisplayMode(.large)
       .toolbar {
@@ -158,7 +163,10 @@ struct SessionsView: View {
               Task { await store.markAllRead() }
             }
             .disabled(store.busy.contains("read-all"))
-            Button("Atualizar", systemImage: "arrow.clockwise") { Task { await store.reload() } }
+            Button("Atualizar", systemImage: "arrow.clockwise") {
+              Task { await store.quota.refresh() }
+              Task { await store.reload() }
+            }
             Button("Configurações", systemImage: "gearshape") {}.disabled(true)
           } label: {
             Image(systemName: "ellipsis").foregroundStyle(theme.color(.textStrong))
@@ -206,6 +214,9 @@ struct SessionsView: View {
       }
       .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).sessionAlertOverlay() }
       .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store).sessionAlertOverlay() }
+      .sheet(item: $proxyProvider) { provider in
+        SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
+      }
       .confirmationDialog(
         "Arquivar sessão?",
         isPresented: Binding(
@@ -256,14 +267,18 @@ struct SessionsView: View {
         Button("Cancelar", role: .cancel) { moreSession = nil }
       }
     }
+    .sessionRowTimeline(active: store.selectedTab == 3 && !store.conversationOpen && !showArchived)
   }
 
   private var usage: some View {
     HStack(spacing: 20) {
-      UsageMeter(
-        summary: store.subscriptions?.summary(anthropic: false), name: "Codex")
-      UsageMeter(
-        summary: store.subscriptions?.summary(anthropic: true), name: "Claude")
+      ForEach(store.quota.providers) { provider in
+        Button { proxyProvider = provider } label: {
+          UsageMeter(summary: store.quota.summary(provider),
+                     name: store.quota.selected(provider).map { provider.title + " · " + $0.name } ?? provider.title)
+        }.buttonStyle(.plain).accessibilityIdentifier("proxy-strip-" + provider.rawValue)
+          .accessibilityHint("Ver contas, limites e renovações do LLM proxy")
+      }
     }
   }
 
@@ -338,30 +353,34 @@ struct SessionsView: View {
         if index > 0 {
           Rectangle().fill(theme.color(.border)).frame(height: 0.5).padding(.vertical, 9)
         }
-        HStack(spacing: 10) {
-          SessionAvatar(row: row, size: 42)
-          VStack(alignment: .leading, spacing: 3) {
-            Button {
-              store.conversationPath.append(.init(id: row.id))
-            } label: {
-              Text(row.session.displayTitle).font(
-                .system(size: 15, weight: row.unread ? .semibold : .regular)
+        VStack(alignment: .trailing, spacing: 8) {
+          HStack(spacing: 10) {
+            SessionAvatar(row: row, size: 42)
+            VStack(alignment: .leading, spacing: 3) {
+              Button {
+                store.conversationPath.append(.init(id: row.id))
+              } label: {
+                HStack(alignment: .firstTextBaseline) {
+                  Text(row.session.displayTitle).font(
+                    .system(size: 15, weight: row.unread ? .semibold : .regular)
+                  )
+                  .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
+                  Spacer(minLength: 0)
+                  SessionRowTime(at: row.interactionAt, unread: row.unread)
+                }
+              }.buttonStyle(.plain)
+              SessionDirectoryLine(label: store.directoryLabel(row.session))
+              Text(
+                row.state == .permission
+                  ? store.permission(row)?.preview ?? "Permissão pendente" : store.question(row)
               )
-              .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
-            }.buttonStyle(.plain)
-            Text(store.branch(row.session)).font(.system(size: 12)).foregroundStyle(
-              theme.color(.textSecondary)
-            ).lineLimit(1)
-            Text(
-              row.state == .permission
-                ? store.permission(row)?.preview ?? "Permissão pendente" : store.question(row)
-            )
-            .font(.system(size: 12.5)).foregroundStyle(
-              theme.color(row.state == .permission ? .error : .info)
-            )
-            .lineLimit(1)
+              .font(.system(size: 12.5)).foregroundStyle(
+                theme.color(row.state == .permission ? .error : .info)
+              )
+              .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
           if row.state == .permission {
             HStack(spacing: 5) {
               Button("Negar") { Task { await store.reply(row, allow: false) } }
@@ -449,7 +468,7 @@ private struct UsageMeter: View {
         Circle().fill(theme.color(summary?.ready == true ? .success : .warning)).frame(
           width: 7, height: 7)
         Text(summary?.label(name) ?? "\(name) — · —").font(.system(size: 12.5)).foregroundStyle(
-          theme.color(.text))
+          theme.color(.text)).lineLimit(1).truncationMode(.middle)
       }
       GeometryReader { geometry in
         Capsule().fill(theme.color(.highlight))

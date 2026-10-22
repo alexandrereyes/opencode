@@ -3,9 +3,10 @@ import SwiftUI
 
 struct SessionRowView: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.sessionRowDate) private var now
   let row: SessionRow
   let preview: SessionPreview
-  let branch: String
+  let directory: SessionDirectoryLabel?
 
   var body: some View {
     HStack(spacing: 12) {
@@ -17,14 +18,12 @@ struct SessionRowView: View {
             .foregroundStyle(theme.color(.textStrong))
             .lineLimit(1)
           Spacer(minLength: 0)
-          Text(SessionList.timestamp(row.entry.messageAt ?? row.session.time.updated))
-            .font(.system(size: 11.5))
-            .foregroundStyle(theme.color(row.unread ? .primary : .textSecondary))
-            .fixedSize()
+          SessionRowTime(at: row.interactionAt, unread: row.unread)
         }
+        SessionDirectoryLine(label: directory)
         HStack(spacing: 7) {
           Text(
-            "\(Text("\(branch): ").foregroundColor(theme.color(.textSecondary)))\(preview.image && row.state != .running ? Text("\(Image(systemName: "photo")) ").foregroundColor(theme.color(.icon)) : Text(""))\(Text(row.state == .running ? "trabalhando · \(preview.activity ?? "pensando")" : preview.text).foregroundColor(theme.color(row.state == .running ? .success : .textSecondary)))"
+            "\(preview.image && row.state != .running ? Text("\(Image(systemName: "photo")) ").foregroundColor(theme.color(.icon)) : Text(""))\(Text(row.state == .running ? "trabalhando · \(preview.activity ?? "pensando")" : preview.text).foregroundColor(theme.color(row.state == .running ? .success : .textSecondary)))"
           )
           .font(.system(size: 13))
           .lineLimit(1)
@@ -48,7 +47,7 @@ struct SessionRowView: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(branch), \(row.state == .running ? "trabalhando" : preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(directory.map { ", " + $0.accessibilityLabel } ?? ""), \(row.state == .running ? "trabalhando" : preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
     )
   }
 }

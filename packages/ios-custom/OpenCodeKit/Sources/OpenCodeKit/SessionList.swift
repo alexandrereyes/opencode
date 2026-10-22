@@ -17,6 +17,7 @@ public struct SessionRow: Sendable, Identifiable {
   public let rank: Double
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
+  public var interactionAt: Double { entry.messageAt ?? session.time.created }
   public var projectName: String {
     project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent
   }
@@ -118,30 +119,6 @@ public enum SessionList {
       ($0 ^ UInt64($1)) &* 1_099_511_628_211
     }
     return colors[Int(hash % UInt64(colors.count))]
-  }
-
-  public static func timestamp(
-    _ milliseconds: Double, now: Date = .now, calendar: Calendar = .current
-  ) -> String {
-    let date = Date(timeIntervalSince1970: milliseconds / 1000)
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "pt_BR")
-    formatter.calendar = calendar
-    formatter.timeZone = calendar.timeZone
-    if calendar.isDate(date, inSameDayAs: now) {
-      formatter.dateFormat = "HH:mm"
-    } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-      calendar.isDate(date, inSameDayAs: yesterday)
-    {
-      return "Ontem"
-    } else if let week = calendar.date(
-      byAdding: .day, value: -7, to: calendar.startOfDay(for: now)), date >= week, date < now
-    {
-      formatter.dateFormat = "EEEE"
-    } else {
-      formatter.dateFormat = "dd/MM/yyyy"
-    }
-    return formatter.string(from: date)
   }
 }
 

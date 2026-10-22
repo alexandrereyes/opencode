@@ -17,6 +17,7 @@ let package = Package(
         .process("Fixtures/navigation.json"), .process("Fixtures/permissions.json"),
         .process("Fixtures/preferences.json"), .process("Fixtures/projects.json"),
         .process("Fixtures/sessions.json"), .process("Fixtures/subscriptions.json"),
+        .process("Fixtures/subscriptions-pools.json"),
         .process("Fixtures/transcript-image.json"), .process("Fixtures/transcript-running.json"),
         .process("Fixtures/transcript-user.json"), .process("Fixtures/unknown-message.json"),
       ]),

@@ -8,12 +8,12 @@ final class SessionStore {
   private(set) var entries: [NavigationEntry] = []
   private(set) var projects: [Project] = []
   private(set) var preferences: Preferences?
-  private(set) var subscriptions: Subscriptions?
+  let quota: SubscriptionStore
   private(set) var previews: [String: SessionPreview] = [:]
   private(set) var permissions: [PermissionRequest] = []
   private(set) var forms: [PendingForm] = []
   private(set) var archived: [Session] = []
-  private(set) var locations: [String: LocatedDirectory] = [:]
+  private(set) var directoryMetadata = SessionDirectoryCache()
   private(set) var active: Set<String> = []
   private(set) var loading = false
   private(set) var connected = false
@@ -52,8 +52,6 @@ final class SessionStore {
   @ObservationIgnored private var previewing: Set<String> = []
   @ObservationIgnored private var previewDirty: Set<String> = []
   @ObservationIgnored private var previewRefresh: Task<Void, Never>?
-  @ObservationIgnored private var quotaRefresh: Task<Void, Never>?
-  @ObservationIgnored private var quotaUpdated = Date.distantPast
   @ObservationIgnored private var runningTask: Task<Void, Never>?
   @ObservationIgnored private var runID = UUID()
   @ObservationIgnored private var pruning: Task<Void, Never>?
@@ -62,6 +60,8 @@ final class SessionStore {
     self.acceptsLaunchSession = acceptsLaunchSession
     let client = OpenCodeClient(configuration: configuration)
     self.client = client
+    quota = SubscriptionStore(server: configuration.url.absoluteString,
+                              client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
@@ -97,10 +97,8 @@ final class SessionStore {
       }.map { (selected.worktree, $0) }
     }
   }
-  func branch(_ session: Session) -> String {
-    let location = locations[session.location.directory]
-    if let branch = location?.branch, branch != "HEAD" { return branch }
-    return URL(fileURLWithPath: location?.worktree ?? session.location.directory).lastPathComponent
+  func directoryLabel(_ session: Session) -> SessionDirectoryLabel? {
+    directoryMetadata.label(directory: session.location.directory, chatRoot: chatRoot)
   }
   func permission(_ row: SessionRow) -> PermissionRequest? {
     permissions.first { row.memberIDs.contains($0.sessionID) }
@@ -126,6 +124,7 @@ final class SessionStore {
   func stop() async {
     runningTask?.cancel()
     await runningTask?.value
+    await quota.stop()
     pruning?.cancel()
     await pruning?.value
     await drafts.flush()
@@ -134,8 +133,10 @@ final class SessionStore {
   }
 
   private func consumeEvents() async {
+    quota.start()
     let events = hub.events()
     let connection = Task { await hub.run() }
+    var didConnect = false
     defer {
       connection.cancel()
       alerts.disconnect()
@@ -152,6 +153,8 @@ final class SessionStore {
         connected = true
         alerts.connect(at: frame.receivedAt)
         scheduleReload()
+        if didConnect { quota.reconnect() }
+        didConnect = true
       case .disconnected:
         connected = false
         alerts.disconnect()
@@ -184,8 +187,7 @@ final class SessionStore {
     reloadPending = false
     previewRefresh?.cancel()
     previewRefresh = nil
-    quotaRefresh?.cancel()
-    quotaRefresh = nil
+    await quota.stop()
   }
 
   func reload() async {
@@ -215,7 +217,6 @@ final class SessionStore {
       permissions = snapshot.4
       archived = snapshot.5.sorted { ($0.time.archived ?? 0) > ($1.time.archived ?? 0) }
       order.snapshot(entries, active: active)
-      refreshSubscriptions()
       chatRoot = await chats
       error = nil
       let pendingDirectories = Set(
@@ -225,10 +226,10 @@ final class SessionStore {
         pendingForms.append(contentsOf: try await client.forms(directory: directory))
       }
       forms = pendingForms
-      let directories = Array(Set(entries.map { $0.session.location.directory }))
-      if let located = try? await client.locate(directories) {
-        locations = Dictionary(uniqueKeysWithValues: located.map { ($0.directory, $0) })
-      }
+      let metadata = await directoryMetadata.refreshed(
+        (entries.map(\.session) + archived).map { $0.location.directory }, using: client)
+      try Task.checkCancellation()
+      directoryMetadata = metadata
       for id in visible { enqueuePreview(id) }
     } catch {
       if !Task.isCancelled {
@@ -267,17 +268,6 @@ final class SessionStore {
       do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
       previewRefresh = nil
       for id in visible { enqueuePreview(id) }
-    }
-  }
-
-  private func refreshSubscriptions() {
-    guard quotaRefresh == nil, Date.now.timeIntervalSince(quotaUpdated) >= 60 else { return }
-    quotaRefresh = Task {
-      defer { quotaRefresh = nil }
-      if let value = try? await client.subscriptions(), !Task.isCancelled {
-        subscriptions = value
-        quotaUpdated = .now
-      }
     }
   }
 

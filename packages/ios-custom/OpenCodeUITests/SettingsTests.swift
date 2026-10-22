@@ -31,6 +31,7 @@ import XCTest
       app.navigationBars.buttons.firstMatch.tap()
     }
     XCTAssertTrue(app.buttons["settings-themes"].waitForExistence(timeout: 10))
+    reveal(app.buttons["settings-themes"], app: app)
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
     for _ in 0..<30 {
@@ -43,6 +44,7 @@ import XCTest
     XCTAssertTrue(element.exists && element.isHittable)
   }
   private func chooseTheme(_ id: String, app: XCUIApplication) {
+    reveal(app.buttons["settings-themes"], app: app)
     app.buttons["settings-themes"].tap()
     let row = app.buttons["theme-" + id]
     reveal(row, app: app)
@@ -66,6 +68,7 @@ import XCTest
       reveal(app.buttons["theme-" + family], app: app)
       shot("theme-picker-" + name)
       app.navigationBars.buttons.firstMatch.tap()
+      reveal(app.buttons["settings-about"], app: app)
       app.buttons["settings-about"].tap()
       XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'desenvolvimento' OR value CONTAINS 'desenvolvimento'")).firstMatch.waitForExistence(timeout: 5))
       shot("about-" + name)
@@ -90,6 +93,7 @@ import XCTest
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
     app.buttons["Voltar"].tap()
     settings(app)
+    reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
     cleanPreviousTestServers(app)
     reveal(app.buttons["server-add"], app: app)
@@ -104,6 +108,7 @@ import XCTest
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch.exists)
     shot("sessions-offline-clean-" + mode)
     settings(app)
+    reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
     selectServer(manualName, app: app)
     XCTAssertTrue(app.staticTexts["Conectado"].waitForExistence(timeout: 15))
@@ -111,6 +116,7 @@ import XCTest
     app.tabBars.buttons["Sessões"].tap()
     XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch.waitForExistence(timeout: 20))
     settings(app)
+    reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
     let pairing = app.buttons["server-pair"]
     reveal(pairing, app: app)
@@ -180,9 +186,15 @@ import XCTest
     shot("server-add-" + (success ? "success-" : "failure-") + mode)
     app.buttons["server-save"].tap()
     XCTAssertTrue(app.navigationBars["Adicionar servidor"].waitForNonExistence(timeout: 5))
-    // iOS 27's Password AutoFill save sheet is absent from the app's AX tree.
-    // Its dismiss control has a stable location on the dedicated 402×874 simulator.
-    if success { app.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.64)).tap() }
+    // AutoFill arrives after the app sheet dismisses and is outside its AX tree.
+    // Wait for it to block the visible back button before tapping "Agora Não".
+    if success {
+      let blocked = expectation(for: NSPredicate(format: "hittable == false"),
+                                evaluatedWith: app.navigationBars["Servidores"].buttons.firstMatch)
+      if XCTWaiter.wait(for: [blocked], timeout: 5) == .completed {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.64)).tap()
+      }
+    }
     XCTAssertTrue(app.buttons["server-add"].waitForExistence(timeout: 10))
   }
   private func selectServer(_ title: String, app: XCUIApplication) {
@@ -190,6 +202,7 @@ import XCTest
     reveal(row, app: app)
     row.tap()
     XCTAssertTrue(app.buttons["settings-servers"].waitForExistence(timeout: 15))
+    reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
   }
   func testChildPreambleHiddenAndCopyUsesAuthoredText() throws {
