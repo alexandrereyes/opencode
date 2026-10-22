@@ -1,6 +1,8 @@
 import Foundation
 
 public struct ServerConfiguration: Sendable {
+  public static let defaultURL = URL(string: "http://opencode2-mac.alexandrem.com.br")!
+
   public let url: URL
   public let password: String?
 
@@ -23,7 +25,7 @@ public struct ServerConfiguration: Sendable {
       return arguments[index + 1]
     }
     return Self(
-      url: URL(string: value("OpenCodeServerURL") ?? "http://opencode2-mac.alexandrem.com.br")!,
+      url: URL(string: value("OpenCodeServerURL") ?? defaultURL.absoluteString)!,
       password: value("OpenCodeServerPassword"))
   }
 }

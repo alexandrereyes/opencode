@@ -175,9 +175,10 @@ selected through a local preference and a launch argument; a selector in Setting
 - **Upload:** a local script in this package, with no CI and nothing outside the Mac:
   1. `xcodebuild archive` for `generic/platform=iOS`;
   2. `xcodebuild -exportArchive` with an `ExportOptions.plist` containing `method = app-store-connect` and
-     `destination = upload`, plus `-allowProvisioningUpdates` and an App Store Connect API key passed through
-     `-authenticationKeyPath`, `-authenticationKeyID`, and `-authenticationKeyIssuerID`. The key stays outside the
-     repository, in `~/.appstoreconnect/private_keys/`.
+      `destination = upload`, plus `-allowProvisioningUpdates`. Use the existing Xcode account, or an App Store
+      Connect API key passed through `-authenticationKeyPath`, `-authenticationKeyID`, and
+      `-authenticationKeyIssuerID`. The key stays outside the repository, in `~/.appstoreconnect/private_keys/`.
+      `testFlightInternalTestingOnly = YES` prevents external TestFlight and App Store distribution.
 - **Versions:** the build number (`CURRENT_PROJECT_VERSION`) is the UTC timestamp of the upload, so it always
   increases, and Info.plist carries the short commit SHA to identify the build. `ITSAppUsesNonExemptEncryption = NO`
   skips the export-compliance question on every build, since the app uses only the system's encryption.
@@ -382,7 +383,128 @@ packages/ios-custom/
   driving the app, and release it when you are done.
 - The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
   `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
-  require editing the project. TestFlight upload automation is not implemented yet.
+  require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
+
+### Private TestFlight uploads
+
+#### One-time setup
+
+1. **Signing identity:** use the Apple ID already signed into Xcode for team `ERRYZ68LX5`. If its session has expired,
+   Alexandre must renew it manually in **Xcode → Settings → Accounts**. The script never asks for an Apple ID
+   password or a two-factor code. Automatic signing (`-allowProvisioningUpdates`) can register the bundle ID and
+   create the necessary certificates and profiles; no physical device is needed.
+2. **Optional API key instead of the Xcode account:** in App Store Connect **Users and Access → Integrations →
+   App Store Connect API**, create a team key named `opencode-ios-testflight` with the **App Manager** role (not Admin),
+   and download its `.p8` once. Put it at
+   `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, outside the repository, with mode `600`. Keep the Key ID and
+   Issuer ID private too. Export `ASC_KEY_ID` and `ASC_ISSUER_ID` in the shell, with optional `ASC_KEY_PATH` for a
+   nonstandard absolute key path, or create this private file with mode `600`:
+
+   ```text
+   # ~/.appstoreconnect/opencode.env — literal, unquoted KEY=value entries; no shell expansion
+   ASC_KEY_ID=YOUR_KEY_ID
+   ASC_ISSUER_ID=YOUR_ISSUER_UUID
+   ```
+
+   Use mode `700` for `~/.appstoreconnect/private_keys/` and `600` for both the key and config. If API access must be
+   requested or terms accepted, leave that to Alexandre. Environment values take precedence. `ASC_CONFIG_FILE` can
+   select another config **outside the repository**.
+   `--auth auto` (the default) uses a configured key, otherwise the Xcode account. A partially configured or unreadable
+   key is an error, not a silent fallback. `--auth api-key` requires the key; `--auth xcode` explicitly ignores it.
+3. **App record:** in App Store Connect **Apps → + → New App**, create an iOS app named `OpenCode Agente` (or
+   `OpenCode Agente AR` if taken), primary language **Portuguese (Brazil)**, bundle ID and SKU both
+   `br.com.alexandrem.opencode`, with access limited to Alexandre. If the bundle ID is not listed, first register it
+   in the Developer portal or run a signed `--dry-run` so automatic signing registers it, then create the record.
+   The device display name remains `OpenCode`. Do not submit an App Store version.
+4. **Internal distribution:** in the app's **TestFlight → Internal Testing**, create a private group for Alexandre,
+   enable **automatic distribution**, and add only his App Store Connect user as a tester. Builds are internal-only;
+   no external group or Beta App Review is involved. Apple's processing, binary validation, encryption questions and
+   current developer agreements still apply. Stop for Alexandre if any login, 2FA or agreement acceptance is required.
+5. The future App Group is `group.br.com.alexandrem.opencode`; it is reserved in the design, not enabled as an
+   entitlement until an extension actually needs it.
+
+#### Commands (from the repository root)
+
+```sh
+# No credentials: validate the Release device archive and its resources; never uploads.
+packages/ios-custom/script/testflight.sh --unsigned-check
+
+# With the Xcode account or API key: signed archive and local IPA, never uploads.
+packages/ios-custom/script/testflight.sh --dry-run
+
+# Archive and upload to INTERNAL TestFlight only.
+packages/ios-custom/script/testflight.sh
+
+# Explicit authentication choices, if needed:
+packages/ios-custom/script/testflight.sh --auth xcode
+packages/ios-custom/script/testflight.sh --auth api-key
+```
+
+The script refuses uncommitted changes in `packages/ios-custom`, including untracked files and changes introduced
+by asset regeneration. Commit before distributing; use `--allow-dirty` deliberately for a local rehearsal. It prints
+the short commit and builds the current working tree (with `--allow-dirty`, the SHA identifies its base only).
+It regenerates themes and the icon, archives for `generic/platform=iOS` in Release, then exports with
+`method = app-store-connect`, automatic signing, symbol upload, and `manageAppVersionAndBuildNumber = NO`.
+
+`MARKETING_VERSION` is `0.1.0`; each invocation sets `CURRENT_PROJECT_VERSION` to UTC `yyyyMMddHHmm` and injects the
+short Git SHA into `OpenCodeCommit`. Ordinary Xcode builds use build `1` and an empty commit key. Wait until the next
+UTC minute before re-uploading the same marketing version: two uploads within one minute have the same build number.
+The script does not query App Store Connect or silently renumber a build.
+
+Each run gets a unique directory under
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-archives/`, containing `OpenCode.xcarchive`,
+private local logs, and, for signed runs, `ExportOptions.plist` and `export/`. DerivedData is shared at
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-sessoes-derived`; do not run two Xcode builds
+against it simultaneously. Auth arguments and Xcode logs are not echoed, even on failure; redact credential
+identifiers before sharing the logs. A successful upload still needs TestFlight processing; check App Store Connect.
+
+#### Icon and launch assets
+
+The original agent/AI icon source is committed at `script/icon-source.png`. Regenerate its 1024×1024 opaque PNG and
+the themed `LaunchBackground` color set with:
+
+```sh
+swift packages/ios-custom/script/generate-icon.swift
+sips -g pixelWidth -g pixelHeight -g hasAlpha packages/ios-custom/OpenCode/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+```
+
+The script resizes the source, flattens any transparency onto the generated OpenChamber dark background, and writes
+only changed assets. No dependencies, fonts, pre-rounded corners or drawn shadows are used. Only the default icon is
+supplied; iOS handles its Home Screen appearance. Theme regeneration runs first during distribution. The chosen
+generation prompt is also recorded in `script/icon-source.prompt.txt`; local concepts and small-size previews live in
+`.agent-artifacts/testflight/icone/` (not versioned).
+
+#### Troubleshooting
+
+- **Signing/authentication:** inspect the private `Archive.log` or `Export.log`. Renew an expired Xcode session
+  manually, or configure a valid team API key with access to Certificates, Identifiers & Profiles. Do not put any
+  password, key or profile in this repository. Missing app records must be created with the exact bundle ID above.
+- **Missing icon / ITMS-90704:** regenerate the icon, confirm `hasAlpha: no`, and verify that the archive app's
+  Info.plist has `CFBundleIcons → CFBundlePrimaryIcon → CFBundleIconName = AppIcon`. The target build setting must
+  remain `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. Commit the generated PNG and catalog JSON.
+- **Private API / ITMS-90338:** `OpenCode/SoftwareKeyboardShift.swift` intentionally discovers `UIKeyboardImpl` and
+  its `activeInstance`, `isShifted`, `isAutoShifted`, and `isShiftLocked` getters at runtime. The Release binary can
+  expose these strings even without a linked private class symbol. Internal TestFlight does not bypass this scan.
+  If processing rejects it, delete that file **and replace the body of `ComposerInputView.submitSoftwareReturn()`
+  in `OpenCode/ComposerTextView.swift` with `return false`**. Leave the `UIKeyCommand`/`submitReturn(_:)` hardware
+  Shift+Return implementation untouched: it still sends, while software Return inserts a newline (the send button
+  still works). Rebuild and upload with a new build number; do not merely rename or obscure the selectors.
+  With Xcode 27.1's current optimized Release build, `strings -a` finds none of those complete literals, and `nm -u`
+  has no `UIKeyboardImpl` class import (it does import `NSClassFromString` and `NSSelectorFromString`). The dSYM still
+  identifies `SoftwareKeyboardShift.state()`, and disassembly shows the names constructed as inline Swift small
+  strings via ARM64 `mov`/`movk` immediates. This is compiler behavior, not an intentional hiding technique and not
+  evidence that Apple's processing will accept it; the private API risk remains.
+- **Export compliance:** `ITSAppUsesNonExemptEncryption = NO` is already embedded because the app uses only system
+  encryption. If processing still shows **Missing Compliance**, inspect the uploaded build's plist and answer the
+  encryption section consistently in App Store Connect; revisit the declaration if encryption behavior changes.
+- **Duplicate build:** wait for the next UTC minute and run again. **Processing** is not an upload failure; wait for
+  Apple's result before retrying or distributing. Do not submit to the App Store or create an external testing group.
+
+Release keeps the explicit server/theme/session launch overrides for sandbox verification; without supplied
+arguments or environment values the server uses the single `ServerConfiguration.defaultURL` constant, and no session
+is opened automatically.
+The scheme's sandbox arguments belong only to `TestAction`; neither they nor the UI-test targets enter an archive.
+The private-host ATS exception is unchanged and does not allow arbitrary HTTP hosts.
 
 ### Generate themes, build, and test
 
@@ -390,6 +512,7 @@ Run from the repository root:
 
 ```sh
 bun packages/ios-custom/script/generate-themes.ts
+swift packages/ios-custom/script/generate-icon.swift
 xcodebuild -list -project packages/ios-custom/OpenCode.xcodeproj
 xcodebuild -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCode \
   -destination 'platform=iOS Simulator,name=OpenCode Sessoes' \
