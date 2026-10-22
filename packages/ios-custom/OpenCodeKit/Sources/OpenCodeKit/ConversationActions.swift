@@ -83,19 +83,21 @@ public struct PromptSubmission: Sendable {
   public let agent: String
   public let model: ModelReference
   public let replacing: String?
+  public let keepsAgent: Bool
   public init(
     request: PromptRequest, sessionID: String, agent: String, model: ModelReference,
-    replacing: String? = nil
+    replacing: String? = nil, keepsAgent: Bool = false
   ) {
     self.request = request
     self.sessionID = sessionID
     self.agent = agent
     self.model = model
     self.replacing = replacing
+    self.keepsAgent = keepsAgent
   }
   public func send(using actions: some ConversationActions) async throws {
     if request.delivery == .steer {
-      try await actions.selectAgent(agent, sessionID: sessionID)
+      if !keepsAgent { try await actions.selectAgent(agent, sessionID: sessionID) }
       try await actions.selectModel(model, sessionID: sessionID)
     }
     do { try await actions.prompt(request, sessionID: sessionID) } catch {

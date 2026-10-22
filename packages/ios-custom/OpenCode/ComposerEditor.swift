@@ -50,7 +50,7 @@ struct ComposerEditor: View {
               return
             }
             models = item.token.id == "model"
-            agents = item.token.id == "agent"
+             agents = item.token.id == "agent" && !store.isChild
             return
           }
           draft.insert(item.token, replacing: trigger.range)
@@ -122,12 +122,13 @@ struct ComposerEditor: View {
           }
         })
     }
-    .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft) }
-    .sheet(isPresented: $agents) { agentSheet }
+    .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft).sessionAlertOverlay() }
+    .sheet(isPresented: $agents) { agentSheet.sessionAlertOverlay() }
     .sheet(item: $draft.commenting) { quote in
       QuoteCommentEditor(quote: quote, store: store, draft: draft)
+        .sessionAlertOverlay()
     }
-    .sheet(item: $store.sideQuestion) { launch in SideQuestionSheet(store: store, launch: launch) }
+    .sheet(item: $store.sideQuestion) { launch in SideQuestionSheet(store: store, launch: launch).sessionAlertOverlay() }
     .photosPicker(
       isPresented: $photos, selection: $selectedPhotos, maxSelectionCount: 10, matching: .images
     )
@@ -210,12 +211,18 @@ struct ComposerEditor: View {
         Text(store.modelLabel(store.selectedModel(draft))).font(.system(size: 12)).lineLimit(1)
       }.accessibilityLabel("Modelo e esforço").accessibilityIdentifier("model-picker")
       Spacer(minLength: 2)
-      Button {
-        draft.focused = false
-        agents = true
-      } label: {
-        Text(draft.agent ?? store.session?.agent ?? "build").font(.system(size: 12)).lineLimit(1)
-      }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
+      if store.isChild {
+        Text(store.childAgentName).font(.system(size: 12)).lineLimit(1)
+          .accessibilityLabel("Agente: \(store.childAgentName)")
+          .accessibilityIdentifier("child-agent")
+      } else {
+        Button {
+          draft.focused = false
+          agents = true
+        } label: {
+          Text(store.selectedAgent(draft)).font(.system(size: 12)).lineLimit(1)
+        }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
+      }
       Button {
         submit()
       } label: {

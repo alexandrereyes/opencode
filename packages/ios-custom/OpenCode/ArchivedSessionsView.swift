@@ -9,8 +9,9 @@ struct ArchivedSessionsView: View {
   var body: some View {
     NavigationStack {
       List(store.archived) { session in
-        NavigationLink {
-          ConversationView(id: session.id, sessions: store)
+        Button {
+          dismiss()
+          store.conversationPath.append(.init(id: session.id))
         } label: {
           VStack(alignment: .leading, spacing: 4) {
             Text(session.displayTitle).foregroundStyle(theme.color(.textStrong))

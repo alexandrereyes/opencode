@@ -48,6 +48,7 @@ import XCTest
     let renamed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 5 — renomeada'")).firstMatch
     XCTAssertTrue(renamed.waitForExistence(timeout: 15))
     screenshot("renamed-list")
+    app.revealSessionRow(renamed)
     renamed.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
     app.buttons["Mais opções"].tap()

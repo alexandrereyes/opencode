@@ -165,9 +165,9 @@ public struct OpenCodeClient: Sendable {
     let response: DataResponse<Session> = try await get("/api/session/\(id)")
     return response.data
   }
-  public func models(directory: String) async throws -> [ModelInfo] {
+  public func models(directory: String? = nil) async throws -> [ModelInfo] {
     let response: DataResponse<[ModelInfo]> = try await get(
-      "/api/model", query: [URLQueryItem(name: "location[directory]", value: directory)])
+      "/api/model", query: directory.map { [URLQueryItem(name: "location[directory]", value: $0)] } ?? [])
     return response.data
   }
   public func defaultModel(directory: String) async throws -> ModelInfo? {

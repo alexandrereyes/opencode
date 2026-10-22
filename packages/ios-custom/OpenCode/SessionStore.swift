@@ -21,8 +21,18 @@ final class SessionStore {
   private(set) var notice: ConversationNotice?
   var filter = SessionFilter.all
   var selectedProject: String?
-  var conversationOpen = false
+  struct ConversationRoute: Hashable {
+    let id: String
+    var parent: String? = nil
+    var tool: String? = nil
+  }
+  var conversationPath: [ConversationRoute] = []
+  var selectedTab = 3
+  var conversationOpen: Bool { !conversationPath.isEmpty }
+  var currentSessionID: String? { selectedTab == 3 ? conversationPath.last?.id : nil }
   let toast = ToastCenter()
+  let alerts: SessionAlertCenter
+  let catalog = ModelCatalogCache()
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
@@ -48,6 +58,7 @@ final class SessionStore {
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
+    alerts = SessionAlertCenter(server: configuration.url.absoluteString)
     Task {
       await DraftPersistence.pruneMissingSessions(
         server: configuration.url.absoluteString, client: client)
@@ -94,15 +105,27 @@ final class SessionStore {
   func run() async {
     let events = hub.events()
     let connection = Task { await hub.run() }
-    defer { connection.cancel() }
+    defer {
+      connection.cancel()
+      alerts.disconnect()
+    }
+    let catalogLoad = Task {
+      if let models = try? await client.models(), !Task.isCancelled { catalog.remember(models) }
+    }
+    defer { catalogLoad.cancel() }
     await reload()
     for await frame in events {
       if Task.isCancelled { break }
       switch frame.event {
       case .connected:
         connected = true
+        alerts.connect(at: frame.receivedAt)
         scheduleReload()
+      case .disconnected:
+        connected = false
+        alerts.disconnect()
       case .update(let event):
+        await alerts.receive(event, store: self)
         let type = event.type
         let id = event.data.owner
         if type.hasPrefix("session.") || type.hasPrefix("permission.")
@@ -254,7 +277,7 @@ final class SessionStore {
   }
 
   func pin(_ row: SessionRow) async {
-    await perform(row.id) {
+    await perform(row.id, feedback: .light) {
       let keys =
         row.pinned
         ? SessionPreferenceKey.matching(row.id, in: preferences?.data.pinnedSessions ?? [])
@@ -265,7 +288,7 @@ final class SessionStore {
     }
   }
   func mute(_ row: SessionRow) async {
-    await perform(row.id) {
+    await perform(row.id, feedback: .light) {
       let keys =
         row.muted
         ? SessionPreferenceKey.matching(row.id, in: preferences?.data.mutedSessions ?? [])
@@ -298,18 +321,23 @@ final class SessionStore {
     }
   }
   func archive(_ row: SessionRow) async {
-    await perform(row.id) { try await client.archive(row.id) }
+    await perform(row.id, feedback: .light) { try await client.archive(row.id) }
   }
   func reply(_ row: SessionRow, allow: Bool) async {
     guard let permission = permission(row) else { return }
-    await perform(row.id) { try await client.reply(permission, allow: allow) }
+    await perform(row.id, feedback: allow ? .success : .warning) {
+      try await client.reply(permission, allow: allow)
+    }
   }
-  private func perform(_ id: String, action: () async throws -> Void) async {
+  private func perform(
+    _ id: String, feedback: Haptics.Kind? = nil, action: () async throws -> Void
+  ) async {
     guard !busy.contains(id) else { return }
     busy.insert(id)
     defer { busy.remove(id) }
     do {
       try await action()
+      if let feedback { Haptics.play(feedback) }
       await reload()
     } catch { self.error = "Não foi possível concluir a ação. \(error.localizedDescription)" }
   }

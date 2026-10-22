@@ -28,13 +28,7 @@ import XCTest
   }
   private func openFromSessions(_ app: XCUIApplication, title: String) {
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-    let list = app.collectionViews.firstMatch
-    if !row.isHittable { list.swipeDown(velocity: .fast) }
-    for _ in 0..<10 {
-      if row.isHittable { break }
-      list.swipeUp(velocity: .slow)
-    }
-    XCTAssertTrue(row.isHittable)
+    app.revealSessionRow(row)
     row.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 15))
     waitForReading(app)

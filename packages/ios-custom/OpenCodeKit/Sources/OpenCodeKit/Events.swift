@@ -2,6 +2,7 @@ import Foundation
 
 public enum ServerEvent: Sendable {
   case connected
+  case disconnected
   case update(ConversationEvent)
 }
 

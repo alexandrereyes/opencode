@@ -1,7 +1,7 @@
 # Conversation contract (native iOS)
 
 Verified against this worktree's code and the isolated `http://127.0.0.1:4177` server on 2026-10-21. This is the
-implementation contract for waves 1–4, not a proposal for new APIs. The approved layout is described in the README,
+implementation contract for waves 1–7, not a proposal for new APIs. The approved layout is described in the README,
 “Second screen: Conversa”; the web implementation is the behavioral reference. No Swift or web UI changes are needed
 to use this contract.
 
@@ -255,9 +255,24 @@ The separate `GET /api/experimental/session/{sid}/log?after=<seq>&follow=true` i
 Event source: `packages/schema/src/{session-event,event,event-manifest,permission,form}.ts`,
 `packages/server/src/{event-feed,handlers/event}.ts`. Real captured sequence: `events-live-step.json`.
 
+### Native foreground alerts — wave 7
+
+The single app-wide hub listener announces only live root `session.execution.succeeded`/`.failed`,
+`permission.asked`, and `form.created` with `form.metadata.kind:"question"`. Requests in descendants resolve to their
+root for navigation, title and mute policy; the currently open owner/root is silent. Root or owner mute suppresses
+the banner without changing the request/attention snapshot. Auto-approved permissions are silent. Child terminal
+events, tool failures, retries and user interruption do not create a failure banner.
+
+Claims use server + actual event owner + event kind + terminal `created` watermark/request ID and are bounded to the
+latest 500, persisted locally. Refresh snapshots never create alerts. Each connection starts a new live-time boundary;
+signals older than it are discarded, and an in-flight metadata lookup cannot cross a disconnection/generation change.
+There is no bulk replay, system notification, push registration or background-delivery promise.
+
 ## 3. Assistant footer — wave 1
 
-- Display name: look up the assistant's **`model.providerID` and `model.id` pair** in `/api/model`; fall back to ID.
+- Display name: look up the assistant's **`model.providerID` and `model.id` pair** in `/api/model`, then catalogs already
+  loaded for this server and the server-default Location catalog. Missing directories do not prevent that fallback.
+  Fall back to the raw ID only when none knows the pair.
 - Effort: assistant's `model.variant`. The web suppresses `"default"`; missing variant is not a reason to invent one.
 - Finished gate: don't show a final response footer while the corresponding response group is working. The web
   attaches it to the last nonempty text part of the last assistant with text, not every tool step.
@@ -331,8 +346,12 @@ The web's running capsule derives:
 
 When viewing a child, the menu's owner is its parent; it shows siblings and the parent's background shells. The phone
 count excludes the **viewed child**. A child opens through the same session GET/transcript calls, by `sessionID`, and
-shows a return-to-parent action. It is read-only as far as ordinary prompting is concerned: **no composer**. Permission
-and question responses still use their actual owner. Clicking a shell instead reveals its tool in the owner's
+shows a return-to-parent action. Wave 7 deliberately allows ordinary prompting in children, with the same composer,
+queue and delivery semantics driven by the child's own execution. The child's agent is read-only: neither prompt
+nor command submission calls the agent-selection endpoint; model/effort selection remains available. No extra notice
+is shown. A continuation after the original subagent Job delivered stays in the child and does not rewrite or redeliver
+the parent's historical tool result. Background and archive remain root-only. Permission and question responses still
+use their actual owner. Clicking a shell instead reveals its tool in the owner's
 timeline; it does not open a fabricated child session. To stop one child use `/api/session/{childID}/interrupt`;
 to stop a standalone shell use `DELETE /api/shell/{id}?location[directory]=…`.
 

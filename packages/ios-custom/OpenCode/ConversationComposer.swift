@@ -3,16 +3,20 @@ import SwiftUI
 
 struct ConversationComposer: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.sessionAlerts) private var alerts
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
   @State private var expanded = false
+  @State private var expandedNavigationID: UUID?
   var body: some View {
     VStack(spacing: 0) {
       if !expanded {
         ComposerEditor(store: store, draft: draft, expanded: false) { expanded = true }
       }
     }
-    .fullScreenCover(isPresented: $expanded, onDismiss: { draft.focused = true }) {
+    .fullScreenCover(isPresented: $expanded, onDismiss: {
+      if alerts?.center.navigationID == expandedNavigationID { draft.focused = true }
+    }) {
       NavigationStack {
         ComposerEditor(store: store, draft: draft, expanded: true) { expanded = false }
           .padding(12).background(theme.color(.background))
@@ -24,7 +28,8 @@ struct ConversationComposer: View {
               }
             }
           }.toastOverlay(store.toast).onAppear { draft.focused = true }
-      }.tint(theme.color(.primary))
+      }.tint(theme.color(.primary)).sessionAlertOverlay()
+        .onAppear { expandedNavigationID = alerts?.center.navigationID }
     }
     .task { await draft.load() }
     .onChange(of: draft.persistenceError) { _, error in

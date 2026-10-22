@@ -22,6 +22,7 @@ struct SideQuestionLaunch: Identifiable {
       retry.flatMap { id in entries.first { $0.id == id } }
       ?? SideQuestionEntry(question: text.trimmingCharacters(in: .whitespacesAndNewlines))
     guard !entry.question.isEmpty else { return }
+    Haptics.play(.light)
     if retry == nil {
       entries.append(entry)
       text = ""
@@ -96,6 +97,7 @@ struct SideQuestionSheet: View {
                       text: entry.answer, messageID: entry.id.uuidString, partID: "answer")
                     Button("Copiar resposta", systemImage: "doc.on.doc") {
                       UIPasteboard.general.string = entry.answer
+                      Haptics.play(.selection)
                       state.toast.show("Resposta copiada")
                     }.font(.caption).foregroundStyle(theme.color(.textSecondary))
                   }

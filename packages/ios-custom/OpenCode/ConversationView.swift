@@ -140,7 +140,6 @@ struct ConversationView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.scenePhase) private var scenePhase
   @State private var conversation: ConversationStore
-  @State private var child: String?
   @State private var atBottom = true
   @State private var selectionPaused = false
   @State private var userScrolling = false
@@ -154,7 +153,6 @@ struct ConversationView: View {
   @State private var archiveOpen = false
   @State private var search = ConversationSearchState()
   @State private var requestedTool: String?
-  @State private var childTool: String?
   @State private var savedPosition: ReadingPosition?
   @State private var restoring = false
   @State private var resumeOffered = false
@@ -179,7 +177,7 @@ struct ConversationView: View {
     _conversation = State(
       initialValue: ConversationStore(
         id: id, client: sessions.client, hub: sessions.hub,
-        expansions: sessions.expansions))
+        expansions: sessions.expansions, catalog: sessions.catalog))
   }
   private var sections: [ConversationSection] {
     var result = [ConversationSection(id: "leading", user: nil, messages: [])]
@@ -235,46 +233,39 @@ struct ConversationView: View {
     )
     .environment(
       \.responseSelection,
-      conversation.session?.parentID == nil
-        ? ResponseSelectionActions(
-          comment: { quote in
-            guard conversation.session?.parentID == nil else { return }
-            let draft = sessions.drafts.draft(conversation.id)
-            draft.focused = false
-            draft.commenting = quote
-          },
-          sideQuestion: { text in
-            sessions.drafts.draft(conversation.id).focused = false
-            conversation.sideQuestion = SideQuestionLaunch(text: SideQuestionRequest.quote(text))
-          }) : nil
+      ResponseSelectionActions(
+        comment: { quote in
+          let draft = sessions.drafts.draft(conversation.id)
+          draft.focused = false
+          draft.commenting = quote
+        },
+        sideQuestion: { text in
+          sessions.drafts.draft(conversation.id).focused = false
+          conversation.sideQuestion = SideQuestionLaunch(text: SideQuestionRequest.quote(text))
+        })
     )
     .background(ConversationBackGesture(capture: leavePosition, appeared: { screenVisible = true }))
     .toolbar(.hidden, for: .navigationBar, .tabBar)
-    .navigationDestination(item: $child) { id in
-      ConversationView(
-        id: id, sessions: sessions, parentOnStack: conversation.id, toolID: childTool)
-    }
     .sheet(isPresented: $agentsOpen) {
       ConversationAgentsSheet(store: conversation) { work in
         if let id = work.sessionID {
           openChild(id)
         } else if let tool = work.toolID {
           if let parent = conversation.session?.parentID {
-            childTool = tool
             leavePosition()
-            child = parent
+            sessions.conversationPath.append(.init(id: parent, parent: conversation.id, tool: tool))
           } else {
             conversation.revealedToolID = tool
             requestedTool = tool
           }
         }
-      }
+      }.sessionAlertOverlay()
     }
-    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation) }
+    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation).sessionAlertOverlay() }
     .sheet(isPresented: $detailsOpen) {
       SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }) {
         contextOpen = true
-      }
+      }.sessionAlertOverlay()
     }
     .background(ConversationRenameAlert(isPresented: $renameOpen, title: renameTitle, theme: theme) { title in
       Task { await conversation.rename(title) }
@@ -330,21 +321,16 @@ struct ConversationView: View {
       } else if conversation.notice != nil {
         Text("Envio indisponível até resolver o aviso acima.").font(.footnote)
           .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
-      } else if let parent = conversation.session?.parentID {
-        VStack(spacing: 6) {
-          Text("Não é possível enviar mensagens diretamente a subagentes.").font(.footnote)
-          Button("Voltar à sessão principal") {
-            if parentOnStack == parent {
-              leavePosition()
-              dismiss()
-            } else {
-              openChild(parent)
-            }
-          }.font(.footnote.weight(.medium))
-        }.foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
-          .background(theme.color(.background))
       } else {
         VStack(spacing: 8) {
+          if let parent = conversation.session?.parentID {
+            Button("Voltar à sessão principal") {
+              if parentOnStack == parent {
+                leavePosition()
+                dismiss()
+              } else { openChild(parent) }
+            }.font(.caption).foregroundStyle(theme.color(.textSecondary))
+          }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
           ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
         }
@@ -724,8 +710,7 @@ struct ConversationView: View {
   private var line: some View { Rectangle().fill(theme.color(.border)).frame(height: 0.5) }
   private func openChild(_ id: String) {
     leavePosition()
-    childTool = nil
-    child = id
+    sessions.conversationPath.append(.init(id: id, parent: conversation.id))
   }
   private func leavePosition() {
     // Capture before NavigationStack changes safe areas; its later disappearance
@@ -1021,10 +1006,11 @@ private struct ConversationMessageView: View {
         }
         if footer {
           HStack(spacing: 10) {
-            Text(ConversationProjection.footer(message, models: store.models)).font(
+            Text(ConversationProjection.footer(message, models: store.displayModels)).font(
               .system(size: 11))
             Button {
               UIPasteboard.general.string = store.responseText(endingAt: message.id)
+              Haptics.play(.selection)
               store.toast.show("Resposta copiada")
             } label: {
               Image(systemName: "doc.on.doc").font(.system(size: 13))

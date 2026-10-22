@@ -39,6 +39,7 @@ import OpenCodeKit
   @ObservationIgnored private let expansionMemory: ConversationExpansionMemory?
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let hub: EventHub
+  private let catalog: ModelCatalogCache?
   @ObservationIgnored private var cursor: String?
   @ObservationIgnored private var refreshing = false
   @ObservationIgnored private var dirty = false
@@ -54,11 +55,12 @@ import OpenCodeKit
 
   init(
     id: String, client: OpenCodeClient, hub: EventHub,
-    expansions: ConversationExpansionMemory? = nil
+    expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil
   ) {
     self.id = id
     self.client = client
     self.hub = hub
+    self.catalog = catalog
     expansionMemory = expansions
     expansionValues = expansions?.values(id) ?? [:]
   }
@@ -84,6 +86,7 @@ import OpenCodeKit
     defer { acting.remove("archive") }
     do {
       try await client.archive(id)
+      Haptics.play(.light)
       return true
     } catch {
       toast.show("Não foi possível arquivar a sessão.", kind: .error)
@@ -94,7 +97,16 @@ import OpenCodeKit
     guard let directory = session?.location.directory else { return SessionServices() }
     return await client.sessionServices(directory: directory)
   }
-  var context: Double? { ConversationProjection.context(messages, models: models) }
+  var displayModels: [ModelInfo] { ModelCatalog.merging(models, fallback: catalog?.models ?? []) }
+  var isChild: Bool { session?.parentID != nil }
+  func selectedAgent(_ draft: ConversationDraft) -> String {
+    if isChild { return session?.agent ?? "" }
+    return draft.agent ?? session?.agent ?? "build"
+  }
+  var childAgentName: String {
+    agents.first { $0.id == session?.agent }?.name ?? session?.agent ?? "Subagente"
+  }
+  var context: Double? { ConversationProjection.context(messages, models: displayModels) }
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
   var working: Bool { active.contains(id) || family?.active.isEmpty == false }
   var executing: Bool { active.contains(id) }
@@ -106,7 +118,7 @@ import OpenCodeKit
       }
   }
   var details: ContextDetails {
-    ContextDetails(messages: messages, models: models, session: session, family: family)
+    ContextDetails(messages: messages, models: displayModels, session: session, family: family)
   }
   var runningWork: [RunningWork] {
     ConversationProjection.runningWork(
@@ -118,7 +130,7 @@ import OpenCodeKit
   func providerName(_ id: String) -> String { providers.first { $0.id == id }?.name ?? id }
   func modelLabel(_ ref: ModelReference?) -> String {
     [
-      models.first { $0.id == ref?.id && $0.providerID == ref?.providerID }?.name ?? ref?.id,
+      displayModels.first { $0.id == ref?.id && $0.providerID == ref?.providerID }?.name ?? ref?.id,
       ref?.variant == "default" ? nil : ref?.variant,
     ].compactMap { $0 }.joined(separator: " · ")
   }
@@ -147,9 +159,9 @@ import OpenCodeKit
       !draft.importing,
       !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         || !draft.attachments.isEmpty || !draft.quotes.isEmpty,
-      let model = selectedModel(draft), session?.parentID == nil
+      let model = selectedModel(draft), session != nil
     else { return }
-    let agent = draft.agent ?? session?.agent ?? "build"
+    let agent = selectedAgent(draft)
     let delivery = PromptDelivery.choose(
       busy: executing,
       preference: preferences?.data.settings.followUpBehavior ?? .steer, alternate: alternate)
@@ -184,7 +196,7 @@ import OpenCodeKit
             delivery: delivery, agent: agent, model: model, attachments: attachments,
             quotes: draft.quotes,
             metadata: draft.editing?.payload.metadata ?? [:]),
-          sessionID: id, agent: agent, model: model, replacing: draft.replacing)
+          sessionID: id, agent: agent, model: model, replacing: draft.replacing, keepsAgent: isChild)
         draft.submissionDocument = draft.snapshot
       }
       guard let submission = draft.submission else { return }
@@ -194,7 +206,7 @@ import OpenCodeKit
       case .command(let name, _):
         // Command callbacks have no idempotency key. Never automatically retry them.
         if delivery == .steer {
-          try await client.selectAgent(agent, sessionID: id)
+          if !isChild { try await client.selectAgent(agent, sessionID: id) }
           try await client.selectModel(model, sessionID: id)
         }
         try await client.command(name, request: submission.request, sessionID: id)
@@ -206,6 +218,7 @@ import OpenCodeKit
         try await client.compact(id, id: submission.request.id)
       }
       await draft.clear()
+      Haptics.play(.light)
       draft.focused = false
       toast.show(
         submission.request.delivery == .queue ? "Mensagem adicionada à fila" : "Mensagem enviada")
@@ -228,10 +241,14 @@ import OpenCodeKit
       trigger.character == "@"
       ? client.composerFiles(trigger.query, directory: session.location.directory) : []
     async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
-    return try await composerCatalog?.suggestions(
+    let suggestions = try await composerCatalog?.suggestions(
       trigger, agents: agents, files: files, sessions: sessions,
       current: id, server: client.configuration.url.absoluteString,
       directory: session.location.directory, project: session.projectID) ?? []
+    guard isChild else { return suggestions }
+    return suggestions.filter {
+      !($0.token.kind == .command && $0.token.value == "client" && $0.token.id == "agent")
+    }
   }
   func importAttachment(_ bytes: Data, name: String, mime: String, draft: ConversationDraft) async {
     do {
@@ -250,11 +267,15 @@ import OpenCodeKit
       await draft.persist()
     } catch { toast.show(error.localizedDescription, kind: .error) }
   }
-  func act(_ key: String, success: String, operation: () async throws -> Void) async {
+  func act(
+    _ key: String, success: String, feedback: Haptics.Kind? = nil,
+    operation: () async throws -> Void
+  ) async {
     guard acting.insert(key).inserted else { return }
     defer { acting.remove(key) }
     do {
       try await operation()
+      if let feedback { Haptics.play(feedback) }
       toast.show(success)
       await refresh()
     } catch {
@@ -293,14 +314,19 @@ import OpenCodeKit
   }
   func reply(_ permission: PermissionRequest, decision: PermissionReply.Decision) async {
     await act(
-      permission.id, success: decision == .reject ? "Permissão negada" : "Permissão concedida"
+      permission.id, success: decision == .reject ? "Permissão negada" : "Permissão concedida",
+      feedback: decision == .reject ? .warning : .success
     ) { try await client.reply(permission, decision: decision) }
   }
   func reply(_ form: PendingForm, answer: QuestionReply) async {
-    await act(form.id, success: "Resposta enviada") { try await client.reply(form, answer: answer) }
+    await act(form.id, success: "Resposta enviada", feedback: .success) {
+      try await client.reply(form, answer: answer)
+    }
   }
   func dismiss(_ form: PendingForm) async {
-    await act(form.id, success: "Pergunta descartada") { try await client.dismiss(form) }
+    await act(form.id, success: "Pergunta descartada", feedback: .warning) {
+      try await client.dismiss(form)
+    }
   }
   func updateModels(_ intents: [PreferenceIntent], success: String) async {
     guard acting.insert("models").inserted else { return }
@@ -330,6 +356,7 @@ import OpenCodeKit
       if Task.isCancelled { break }
       switch frame.event {
       case .connected: scheduleRefresh()
+      case .disconnected: break
       case .update(let event):
         let ids = Set([id, session?.parentID].compactMap { $0 } + children.map(\.id))
         guard event.data.owner.map(ids.contains) == true || event.type.hasPrefix("rpc.") else {
@@ -479,6 +506,7 @@ import OpenCodeKit
       messages = nextMessages
       active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       models = nextModels
+      catalog?.remember(nextModels)
       defaultModel = nextDefault
       agents = nextAgents
       providers = nextProviders

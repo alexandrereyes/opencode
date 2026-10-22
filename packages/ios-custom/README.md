@@ -10,8 +10,8 @@ later.
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
 
-> **Status:** the "Sessões" screen is done (see [First screen: Sessões](#first-screen-sessões)). The conversation
-> screen is being built in waves (see [Second screen: Conversa](#second-screen-conversa)).
+> **Status:** "Sessões" and the conversation screen are implemented. All conversation waves (0–7) are complete
+> (see [Second screen: Conversa](#second-screen-conversa)); the remaining exclusions are listed below.
 
 ## Ownership
 
@@ -64,8 +64,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   tabs.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
-- **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`), so that future notifications
-  can respect it. For now, a muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
+- **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
+  A muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
   its unread dot in a neutral color. It still appears in "Precisa de você".
 - **Avatar:** two-letter monogram of the repository (the first letters of the first two words, or the first two
   letters of a single word: `abacato-v2` → `AV`, `opencode2` → `OP`). The color comes from `project.icon.color`, or a
@@ -122,6 +122,8 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   `accent` palette colors.
 
 ### Waves
+
+**All waves below are complete.** Wave 7's native banners are foreground-only, not system notifications or APNs.
 
 Each wave is implemented by a fresh agent, ends with a warning-free build, passing tests, and real simulator
 screenshots against the sandbox in both themes, and is reviewed before the next one starts. The waves are committed
@@ -319,7 +321,8 @@ If manual maintenance becomes costly, the next step is to emit Swift from the sa
 
 ## Notifications
 
-Not part of the MVP. When they arrive, push notifications will come from the OpenCode backend, through a new area in
+System/push notifications are not part of the MVP. Wave 7's in-app banners need no notification permission and work
+only while the app receives live events. When push arrives, it will come from the OpenCode backend, through a new area in
 `packages/plugin-app-custom` that follows the same pattern as the existing areas (an `index.ts` that registers the
 behavior and an `rpc.ts` with the contract):
 
@@ -472,10 +475,10 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1–6 are complete. Wave 6's physical-keyboard path still has the manual device check described below;
+Waves 1–7 are complete. Wave 6's physical-keyboard path still has the manual device check described below;
 its command registration, dispatch and blocked states are covered by app-hosted tests.
-Child sessions have a return-to-parent action and no ordinary composer, but their
-permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
+Child sessions have the normal composer, with their own agent shown read-only, and a return-to-parent action.
+Their permission/question cards remain actionable and their capsule counts the parent's other work. Colors follow the
 generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
 mockup's illustrative Opus model.
 
@@ -709,7 +712,7 @@ the protection for longer sessions.
 
 ### Session and reading (wave 5)
 
-**Status: complete, awaiting screenshot review.** The native `…` menu offers search, rename, session details and,
+**Status: complete.** The native `…` menu offers search, rename, session details and,
 only on roots, archive. Rename uses a native text-field alert, trims empty/unchanged values, optimistically updates
 the header and rolls back on failure with the shared toast. `PATCH /api/session/{id}` emits the existing events that
 refresh Sessões. Archive reuses `custom.archive/archive` and the Sessões confirmation, then returns with a toast;
@@ -867,6 +870,80 @@ and keyboard-test sessions are deleted by the runner. The B quote remains an uns
 The side-by-side comparisons show the original, fifth visit and cold relaunch. Stale unthemed duplicates and the old
 boxed-header captures were removed from `final/`. The conversation seed's transcript/requests were not changed by
 this iteration; only separate disposable verification sessions received the tiny Luna 6 / low prompts.
+
+### Subagents and alerts (wave 7)
+
+**Status: complete.** Children use the same attributed composer, draft, quotes, side questions, tray, queue and
+idempotent admission pipeline as roots. Delivery uses only the child's own execution state. The agent name comes
+from its catalog and is read-only: the primary picker and `/agent` suggestion are absent, and neither ordinary nor
+command sends call `/agent`. Model/effort selection still works. Background and archive remain root-only, and the
+missing-directory/incompatible-server send guards remain in force. There is no read-only or first-send notice.
+After the original subagent Job delivered, later replies stay in the child; the app never rewrites the parent's tool
+result or secretly wakes the parent.
+
+- `SessionStore`'s existing single `EventHub` listener feeds `SessionAlertCenter`. Only live root execution success,
+  root execution failure, `permission.asked` and question `form.created` signals can produce a banner. Child terminal
+  events, individual tool failures, retries and intentional interruption are not session-failure alerts. Requests
+  resolve their actual owner and ancestors to the root; the open owner/root is suppressed. Current server preferences
+  are read before delivery: muting either root or owner suppresses the banner, and auto-approved permissions are not
+  announced. Muting does not remove requests from **Precisa de você**.
+- `SessionAlertPolicy` claims server + actual owner + kind + watermark (terminal event timestamp or request ID), even
+  when a signal is suppressed. The last 500 claims are persisted in server-scoped local preferences. Reconnection
+  establishes a fresh live-time boundary; old signals and all reconciliation snapshots are silent. In-flight lookups
+  cannot deliver after disconnection or into a new connection generation. No missed-event backfill is attempted.
+- One replaceable glass banner shows the repository monogram, session title and **Concluída**, **Falhou** or
+  **Precisa de você**. It dismisses after six seconds, has a close action and announces once to VoiceOver. A shared
+  typed conversation path makes tapping push the target from Sessões, another conversation or another tab, without
+  discarding the underlying reader. App-owned sheets also present the banner; only the top presentation draws it,
+  and tapping closes the modal chain before exposing the destination. The central timer/listener is not duplicated
+  by these presentation overlays. System dialogs and file/photo pickers retain control of their own UI.
+- `Haptics` uses UIKit's system-respecting semantic generators: light on successful send/archive/pin/mute, success on
+  permission allow/question answer, warning on denial/dismissal, selection on explicit copies, soft on banner arrival.
+  Side-question submissions also give light feedback. Streaming and ordinary snapshot changes never trigger it.
+- `ModelCatalogCache` is shared per server. Session catalogs win over cached/default-Location definitions, matched by
+  provider **and** model ID. The footer remains **Luna 6 · low** when the session directory has disappeared, even on a
+  cold launch; unknown pairs alone fall back to their ID. This does not enable sending from an unavailable Location.
+
+`OpenCodeKit/Tests/OpenCodeKitTests/SubagentAlertTests.swift` covers terminal/request rules, current owner/root,
+descendants, mute/auto-approve, suppression claims, reconnect/backfill/deduplication, server separation, child prompt
+encoding/delivery without an agent switch and catalog fallback/default-Location HTTP scoping. Run `swift test` from
+`OpenCodeKit`. After `xcodebuild … build-for-testing`, run:
+
+```sh
+python3 packages/ios-custom/script/test-subagents-alerts.py
+OPENCODE_TEST_THEME=openchamber-light python3 packages/ios-custom/script/test-subagents-alerts.py
+```
+
+The sandbox-only runner creates its own Luna 6 / low parent and genuine General child in the fake conversation repo,
+checks a native child send and exact preservation of the parent's completed subagent part, exercises all banner kinds
+over conversations/Sessões plus navigation from another tab and a sheet, mute, background/foreground and the missing
+directory footer. The current session stays silent even while its full-screen composer covers the transcript.
+Failure is a deliberately nonexistent agent on an owned imported session, before any model call;
+a failed shell or a user interrupt would not honestly exercise `execution.failed`. The runner never answers a seed
+request. It interrupts its own executions, waits for their asynchronous removal from `/active`, and records final
+outcomes and IDs. The owned missing-Location history never executes and cannot use the Location-scoped interrupt.
+
+Final verification: **113 Swift Testing tests**, the warning-free simulator build/test build, **four app-hosted
+tests**, **six Wave-7 UI cases in each theme**, and the four existing session/reading UI cases in each theme pass.
+The existing continuity suite passes six cases with the expected already-viewed unread skip; five reopenings plus
+cold relaunch again measure **0-point drift**. Its shared `SessionRowVisibility` helper now requires the whole row
+to be above the floating tab bar/accessory: AX had reported an off-screen prefetched row as hittable behind that bar
+once the sandbox contained many verification sessions. No assertion was removed and no seed request was consumed.
+
+Both-theme screenshots and per-run verification JSON are under
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda7/`:
+`child-sent-*`, `banner-{success,failure,permission}-conversation-*`,
+`banner-{success,failure,permission2,question}-sessions-*`, `banner-other-tab-*`, `banner-over-sheet-*`,
+`banner-opened-from-sheet-*`, `banner-opened-question-*`, `reconnected-without-replay-*` and
+`missing-directory-model-name-*`. All use the dedicated simulator, explicit sandbox URL/password and 10:58 status bar.
+`verification-openchamber-{dark,light}.json` records the final runs' IDs and outcomes; `owned-sessions-final.json`
+includes all 54 owned sessions from preparatory and final runs, with none active and no leftover owned mute keys.
+The conversation seed's permission and question are still pending; no seed reset was needed.
+
+Still out of scope: automatic redelivery of later child replies to the parent (requires a backend observation
+contract), system notifications/APNs/background delivery, microphone, Changes/Files views, syntax highlighting,
+fork/revert and offline editing. The earlier software-keyboard private-API/TestFlight caveat and physical-keyboard
+manual check remain unchanged.
 
 ### Live data and contract fixtures
 

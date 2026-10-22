@@ -25,11 +25,13 @@ struct UserMessageCopyMenu: UIViewRepresentable {
       return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
         let copy = UIAction(title: "Copiar", image: UIImage(systemName: "doc.on.doc")) { _ in
           UIPasteboard.general.string = message.copyText
+          Haptics.play(.selection)
           toast.show("Mensagem copiada")
         }
         let quote = UIAction(title: "Copiar citação", image: UIImage(systemName: "quote.opening")) {
           _ in
           UIPasteboard.general.string = message.copyQuotes
+          Haptics.play(.selection)
           toast.show("Citação copiada")
         }
         return UIMenu(children: message.quotes.isEmpty ? [copy] : [copy, quote])

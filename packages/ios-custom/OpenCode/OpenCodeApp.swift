@@ -33,11 +33,10 @@ struct OpenCodeApp: App {
 private struct AppTabs: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
-  @State private var selection = 3
-  let store: SessionStore
+  @Bindable var store: SessionStore
 
   var body: some View {
-    TabView(selection: $selection) {
+    TabView(selection: $store.selectedTab) {
       Tab("Painel", systemImage: "square.grid.2x2", value: 0) {
         placeholder("Painel", icon: "square.grid.2x2")
       }
@@ -74,6 +73,13 @@ private struct AppTabs: View {
       .accessibilityHint("Em construção")
     }
     .background(theme.color(.background))
+    .sessionAlertOverlay(modal: false)
+    .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in
+      if let current = store.currentSessionID { store.drafts.draft(current).focused = false }
+      store.alerts.openingSession()
+      store.selectedTab = 3
+      store.conversationPath.append(.init(id: id))
+    }))
     .task(id: scenePhase) {
       if scenePhase == .active { await store.run() }
     }

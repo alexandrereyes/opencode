@@ -4,7 +4,6 @@ import SwiftUI
 struct SessionsView: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
-  @State private var selectedSession: Session?
   @State private var archiveCandidate: SessionRow?
   @State private var projectAction: ProjectAction?
   @State private var showProjects = false
@@ -20,7 +19,7 @@ struct SessionsView: View {
   }
 
   var body: some View {
-    NavigationStack {
+    NavigationStack(path: $store.conversationPath) {
       List {
         VStack(spacing: 13) {
           usage
@@ -73,7 +72,7 @@ struct SessionsView: View {
 
         ForEach(store.recent) { row in
           Button {
-            selectedSession = row.session
+            store.conversationPath.append(.init(id: row.id))
           } label: {
             SessionRowView(
               row: row, preview: store.previews[row.id] ?? SessionPreview(),
@@ -181,10 +180,9 @@ struct SessionsView: View {
           .accessibilityLabel("Nova sessão").accessibilityHint("Em construção")
         }
       }
-      .navigationDestination(item: $selectedSession) { session in
-        ConversationView(id: session.id, sessions: store)
+      .navigationDestination(for: SessionStore.ConversationRoute.self) { route in
+        ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)
       }
-      .onChange(of: selectedSession) { _, value in store.conversationOpen = value != nil }
       .toastOverlay(store.toast)
       .task {
         guard !appliedLaunch else { return }
@@ -193,11 +191,13 @@ struct SessionsView: View {
         if let index = arguments.firstIndex(of: "-OpenCodeOpenSession"),
           arguments.indices.contains(index + 1)
         {
-          selectedSession = try? await store.client.session(arguments[index + 1])
+          if let session = try? await store.client.session(arguments[index + 1]) {
+            store.conversationPath.append(.init(id: session.id))
+          }
         }
       }
-      .sheet(isPresented: $showProjects) { projectPicker }
-      .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store) }
+      .sheet(isPresented: $showProjects) { projectPicker.sessionAlertOverlay() }
+      .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store).sessionAlertOverlay() }
       .confirmationDialog(
         "Arquivar sessão?",
         isPresented: Binding(
@@ -334,7 +334,7 @@ struct SessionsView: View {
           SessionAvatar(row: row, size: 42)
           VStack(alignment: .leading, spacing: 3) {
             Button {
-              selectedSession = row.session
+              store.conversationPath.append(.init(id: row.id))
             } label: {
               Text(row.session.displayTitle).font(
                 .system(size: 15, weight: row.unread ? .semibold : .regular)
@@ -369,7 +369,7 @@ struct SessionsView: View {
             }
             .disabled(store.busy.contains(row.id) || store.permission(row) == nil)
           } else {
-            Button("Responder") { selectedSession = row.session }
+            Button("Responder") { store.conversationPath.append(.init(id: row.id)) }
               .buttonStyle(.borderedProminent).tint(theme.color(.info))
               .foregroundStyle(theme.color(.onInfo))
           }
@@ -415,7 +415,7 @@ struct SessionsView: View {
   }
 
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {
-    Button("Abrir sessão", systemImage: "bubble.left") { selectedSession = row.session }
+    Button("Abrir sessão", systemImage: "bubble.left") { store.conversationPath.append(.init(id: row.id)) }
     Button(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin") {
       Task { await store.pin(row) }
     }

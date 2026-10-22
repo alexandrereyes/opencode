@@ -14,6 +14,10 @@ extension EnvironmentValues {
 }
 
 final class ResponseTextView: UITextView {
+  override func copy(_ sender: Any?) {
+    super.copy(sender)
+    Haptics.play(.selection)
+  }
   var messageID = ""
   var partID = ""
   var sourceBlock: MarkdownBlock?
@@ -210,6 +214,7 @@ struct ResponseMarkdown: View {
               Spacer()
               Button {
                 UIPasteboard.general.string = block.text
+                Haptics.play(.selection)
                 toast.show("Código copiado")
               } label: {
                 Image(systemName: "doc.on.doc")

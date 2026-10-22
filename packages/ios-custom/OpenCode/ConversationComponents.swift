@@ -333,6 +333,7 @@ struct ConversationStep: View {
               part.diffs.isEmpty
               ? outputs[key] ?? part.output
               : part.diffs.compactMap { $0["patch"]?.string }.joined(separator: "\n")
+            Haptics.play(.selection)
             store.toast.show(part.diffs.isEmpty ? "Saída copiada" : "Diff copiado")
           }
           .font(.system(size: 12)).buttonStyle(.plain)
