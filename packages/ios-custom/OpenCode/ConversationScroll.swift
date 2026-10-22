@@ -14,7 +14,7 @@ import SwiftUI
     Set(activeHeaders.map(\.id))
   }
   var anchor: (id: String, y: CGFloat)?
-  var readingAnchor: (id: String, offset: Double)?
+  var readingAnchor: (id: String, offset: Double, viewportTop: Double?)?
   private var correctionPending = false
   var frames: [String: CGRect] {
     guard let view else { return [:] }
@@ -23,10 +23,23 @@ import SwiftUI
         guard let key = key as? NSString, let probe = probes.object(forKey: key),
           probe.window != nil
         else { return nil }
-        return (
-          key as String,
-          probe.convert(probe.bounds, to: view).offsetBy(dx: 0, dy: -view.bounds.minY)
-        )
+        // A SwiftUI background representable can be zero-sized or inset inside its
+        // hosting content. The recycled native cell owns the actual message bounds,
+        // including a partially visible footer and the row's vertical padding.
+        var parent = probe.superview
+        while let current = parent {
+          if let cell = current as? UICollectionReusableView {
+            guard cell.bounds.height > 0 else { return nil }
+            return (
+              key as String,
+              cell.convert(cell.bounds, to: view)
+                .offsetBy(dx: 0, dy: -view.bounds.minY)
+            )
+          }
+          if current === view { return nil }
+          parent = current.superview
+        }
+        return nil
       })
   }
   private var activeHeaders: [(id: String, view: UICollectionReusableView)] {
@@ -93,7 +106,7 @@ import SwiftUI
     let correction: CGFloat
     if let readingAnchor, let frame = frames[readingAnchor.id] {
       correction =
-        frame.minY - usableTop
+        frame.minY - (readingAnchor.viewportTop ?? usableTop)
         + ReadingCapture.clampedOffset(readingAnchor.offset, height: frame.height)
     } else if let anchor, let frame = frames[anchor.id] {
       correction = frame.minY - anchor.y
@@ -125,10 +138,6 @@ struct ConversationRowProbe: UIViewRepresentable {
   let id: String
   let color: UIColor
   func makeUIView(context: Context) -> Probe { Probe(state: state, id: id) }
-  func sizeThatFits(_ proposal: ProposedViewSize, uiView: Probe, context: Context) -> CGSize? {
-    guard let width = proposal.width, let height = proposal.height else { return nil }
-    return CGSize(width: width, height: height)
-  }
   func updateUIView(_ view: Probe, context: Context) {
     // List can recycle this UIKit instance for a different message without another makeUIView.
     if view.id != id || view.state !== state {

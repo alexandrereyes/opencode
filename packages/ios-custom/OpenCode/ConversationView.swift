@@ -14,35 +14,48 @@ private struct ConversationScrollMetrics: Equatable {
 private struct PinnedHeaderProbe: UIViewRepresentable {
   let id: String
   let state: ConversationScrollState
+  let color: UIColor
   let update: (Bool) -> Void
-  func makeUIView(context: Context) -> Probe { Probe(id: id, state: state, update: update) }
+  func makeUIView(context: Context) -> Probe {
+    Probe(id: id, state: state, color: color, update: update)
+  }
   func updateUIView(_ view: Probe, context: Context) {
     let changed = view.id != id
     view.id = id
     view.state = state
+    view.color = color
     view.update = update
     view.attach()
     view.refresh(force: changed)
   }
+  static func dismantleUIView(_ view: Probe, coordinator: ()) { view.fade.removeFromSuperlayer() }
   final class Probe: UIView {
     var update: (Bool) -> Void
     var id: String
     var state: ConversationScrollState
+    var color: UIColor
     weak var scroll: UIScrollView?
     weak var container: UICollectionReusableView?
     var observation: NSKeyValueObservation?
     var pinned = false
-    init(id: String, state: ConversationScrollState, update: @escaping (Bool) -> Void) {
+    let fade = CAGradientLayer()
+    init(
+      id: String, state: ConversationScrollState, color: UIColor, update: @escaping (Bool) -> Void
+    ) {
       self.id = id
       self.state = state
+      self.color = color
       self.update = update
       super.init(frame: .zero)
       isOpaque = false
+      fade.startPoint = CGPoint(x: 0.5, y: 0)
+      fade.endPoint = CGPoint(x: 0.5, y: 1)
     }
     required init?(coder: NSCoder) { nil }
     override func didMoveToWindow() {
       super.didMoveToWindow()
       observation = nil
+      if window == nil { fade.removeFromSuperlayer() }
       attach()
       refresh(force: true)
     }
@@ -77,6 +90,17 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
     }
     func refresh(force: Bool = false) {
       guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
+      container.backgroundColor = color
+      if let cell = container as? UICollectionViewListCell,
+        cell.backgroundConfiguration?.backgroundColor != color
+          || cell.backgroundConfiguration?.visualEffect != nil
+      {
+        var background = UIBackgroundConfiguration.clear()
+        background.backgroundColor = color
+        background.backgroundInsets = .zero
+        cell.automaticallyUpdatesBackgroundConfiguration = false
+        cell.backgroundConfiguration = background
+      }
       state.registerHeader(self, container: container, id: id)
       let frame = container.convert(container.bounds, to: scroll)
       // List prefetches headers above the viewport; only the header crossing its
@@ -84,6 +108,23 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       let next =
         scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
         && frame.minY - scroll.bounds.minY <= 2 && frame.maxY > scroll.bounds.minY + 1
+      // The SwiftUI content is inset inside the native header. Its overlay starts
+      // beneath opaque native padding, truncating most of the gradient. Draw from
+      // the actual full-width header edge instead, without changing row geometry.
+      if fade.superlayer !== container.layer {
+        fade.removeFromSuperlayer()
+        container.layer.addSublayer(fade)
+      }
+      container.clipsToBounds = false
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      fade.frame = CGRect(x: 0, y: container.bounds.maxY, width: container.bounds.width, height: 14)
+      fade.colors = [
+        color.resolvedColor(with: container.traitCollection).cgColor,
+        color.withAlphaComponent(0).resolvedColor(with: container.traitCollection).cgColor,
+      ]
+      fade.isHidden = !next
+      CATransaction.commit()
       guard force || next != pinned else { return }
       pinned = next
       Task { @MainActor [weak self] in
@@ -114,6 +155,7 @@ struct ConversationView: View {
   @State private var resumeOffered = false
   @State private var restorationTask: Task<Void, Never>?
   @State private var captureTask: Task<Void, Never>?
+  @State private var captureRequested = false
   @State private var unreadAbove = false
   @State private var stickyHeight: CGFloat = 0
   @State private var screenVisible = true
@@ -170,9 +212,13 @@ struct ConversationView: View {
     .environment(
       \.responseSelectionChanged,
       ResponseSelectionObserver(selected: {
+        let followed = atBottom
+        let bookmark = scrollState.readingAnchor
         cancelRestoration()
+        scrollState.readingAnchor = bookmark
         selectionPaused = true
         atBottom = false
+        captureRequested = captureRequested || followed
         scheduleCapture()
       })
     )
@@ -472,7 +518,8 @@ struct ConversationView: View {
         }
       }
       .onScrollPhaseChange { _, phase in
-        if phase == .tracking || phase == .interacting || phase == .decelerating {
+        // Tracking also includes taps on the overlaid controls, not just scrolling.
+        if phase == .interacting || phase == .decelerating {
           cancelRestoration()
           userScrolling = true
           atBottom = false
@@ -493,7 +540,12 @@ struct ConversationView: View {
         let interacting =
           userScrolling
           || scrollState.view.map { $0.isTracking || $0.isDragging || $0.isDecelerating } == true
-        if interacting { scrollState.cancelAnchor() }
+        if scrollState.view.map({ $0.isDragging || $0.isDecelerating }) == true
+          && abs(new.offset - old.offset) > 1
+        {
+          captureRequested = true
+          scrollState.cancelAnchor()
+        }
         updateUnread()
         if new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
@@ -560,8 +612,14 @@ struct ConversationView: View {
           Button {
             cancelRestoration()
             selectionPaused = false
+            userScrolling = false
             atBottom = true
-            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            captureRequested = true
+            proxy.scrollTo("bottom", anchor: .bottom)
+            Task { @MainActor in
+              await Task.yield()
+              scrollState.followToEnd()
+            }
             scheduleCapture()
           } label: {
             Image(systemName: "arrow.down").frame(width: 42, height: 42)
@@ -618,14 +676,28 @@ struct ConversationView: View {
     }
   }
   private func capturePosition() {
-    guard screenVisible, conversation.ready, !firstLoad, !restoring, !resumeOffered,
+    guard screenVisible, conversation.ready, !firstLoad, !restoring, !resumeOffered else { return }
+    // Restoring and layout are not new reading intent, including navigation's
+    // safe-area changes. Never persist a drifted copy of a restored bookmark.
+    if !captureRequested {
+      if savedPosition == nil && atBottom {
+        let position = ReadingPosition(.followTail)
+        savedPosition = position
+        sessions.reading.set(position, sessionID: conversation.id)
+        try? sessions.reading.flush()
+      }
+      return
+    }
+    guard
       let target = scrollState.capture(followTail: atBottom)
     else { return }
-    let position = ReadingPosition(target)
+    let position = ReadingPosition(
+      target, viewportTop: atBottom ? nil : Double(scrollState.usableTop))
     savedPosition = position
     sessions.reading.set(position, sessionID: conversation.id)
+    captureRequested = false
     if case .message(let id, let offset) = target {
-      scrollState.readingAnchor = (id, offset)
+      scrollState.readingAnchor = (id, offset, position.viewportTop)
     }
     do { try sessions.reading.flush() } catch {
       conversation.toast.show("Não foi possível guardar a posição de leitura.", kind: .error)
@@ -658,7 +730,14 @@ struct ConversationView: View {
   private func restore(_ position: ReadingPosition?, proxy: ScrollViewProxy, explicit: Bool = false)
   {
     cancelRestoration()
-    if explicit { savedPosition = position }
+    captureRequested = false
+    if explicit {
+      savedPosition = position
+      if let position {
+        sessions.reading.set(position, sessionID: conversation.id)
+        try? sessions.reading.flush()
+      }
+    }
     restoring = true
     atBottom = false
     restorationTask = Task { @MainActor in
@@ -696,7 +775,12 @@ struct ConversationView: View {
           guard !Task.isCancelled else { return }
           scrollState.followToEnd()
           restoring = false
-          scheduleCapture()
+          if position?.target != .followTail {
+            let tail = ReadingPosition(.followTail)
+            savedPosition = tail
+            sessions.reading.set(tail, sessionID: conversation.id)
+            try? sessions.reading.flush()
+          }
           updateUnread()
           return
         case .anchor(let id, let offset):
@@ -704,7 +788,7 @@ struct ConversationView: View {
           guard !Task.isCancelled else { return }
           proxy.scrollTo(id, anchor: .top)
           scrollState.anchor = nil
-          scrollState.readingAnchor = (id, offset)
+          scrollState.readingAnchor = (id, offset, position?.viewportTop)
           // Materialize the recycled row, then correct using real TextKit/image geometry.
           // The anchor remains active for late measurements, rotation and Dynamic Type.
           for _ in 0..<12 {
@@ -714,7 +798,6 @@ struct ConversationView: View {
           }
           guard !Task.isCancelled else { return }
           restoring = false
-          scheduleCapture()
           updateUnread()
           return
         }
@@ -785,22 +868,18 @@ private struct StickyUserHeader: View {
       }
       UserBubble(message: message, compact: pinned)
     }
-    .padding(.vertical, 6).padding(.horizontal, 16).background(theme.color(.background))
+    .padding(.vertical, 6).padding(.horizontal, 16)
+    .background {
+      // Native List headers inset their SwiftUI content. Paint beyond those margins,
+      // otherwise the pinned backdrop cuts a rectangular hole in the response below.
+      theme.color(.background).padding(.horizontal, -32)
+    }
     .background(
-      PinnedHeaderProbe(id: message.id, state: scrollState) {
+      PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background)) {
         pinned = $0
         pinnedChanged($0)
       }
     )
-    .overlay(alignment: .bottom) {
-      if pinned {
-        LinearGradient(
-          colors: [theme.color(.background), theme.color(.background).opacity(0)], startPoint: .top,
-          endPoint: .bottom
-        )
-        .frame(height: 14).offset(y: 14).allowsHitTesting(false)
-      }
-    }
   }
 }
 

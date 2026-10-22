@@ -94,7 +94,8 @@ struct QuoteCommentEditor: View {
             }
           }
           ComposerTextView(
-            draft: editor, theme: theme, expanded: false, owner: owner, label: "Comentário"
+            draft: editor, theme: theme, expanded: false, owner: owner, label: "Comentário",
+            identifier: "comment-composer"
           )
           .overlay(alignment: .topLeading) {
             if editor.text.length == 0 {

@@ -57,6 +57,7 @@ struct SelectableResponseText: UIViewRepresentable {
       view.clearSelection()
     }
     view.messageID = messageID
+    view.accessibilityIdentifier = "response-\(messageID)-\(partID)"
     view.partID = partID
     view.sourceBlock = block
     view.source = source

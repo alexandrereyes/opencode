@@ -123,7 +123,8 @@ private let tool = ConversationPart(type: "tool", id: "tool", name: "read")
   #expect(
     ReadingCapture.target(followTail: false, frames: [], usableTop: 0, viewportBottom: 700) == nil)
   #expect(ReadingCapture.clampedOffset(800, height: 300) == 299)
-  #expect(ReadingCapture.clampedOffset(-500, height: 300) == -32)
+  #expect(ReadingCapture.clampedOffset(-500, height: 300) == -500)
+  #expect(ReadingCapture.clampedOffset(-48, height: 90) == -48)
 }
 
 @Test func readingRestoreBudgetMissingAndFollow() {
@@ -157,7 +158,8 @@ private let tool = ConversationPart(type: "tool", id: "tool", name: "read")
       ).directory
       .deletingLastPathComponent().lastPathComponent)
   let position = ReadingPosition(
-    .message(id: "message", offset: 123.5), updatedAt: Date(timeIntervalSince1970: 100))
+    .message(id: "message", offset: 123.5), updatedAt: Date(timeIntervalSince1970: 100),
+    viewportTop: 92)
   store.set(position, sessionID: "A")
   store.set(.init(.followTail), sessionID: "B")
   #expect(store.position("A") == position)
@@ -166,6 +168,12 @@ private let tool = ConversationPart(type: "tool", id: "tool", name: "read")
   try store.flush()
   let restored = ReadingPositionStore(server: "http://localhost:4177", root: root, capacity: 2)
   #expect(restored.position("A") == position)
+  let legacy = try JSONDecoder().decode(
+    ReadingPosition.self,
+    from: Data(
+      #"{"target":{"message":{"id":"message","offset":123.5}},"updatedAt":0}"#.utf8))
+  #expect(legacy.target == position.target)
+  #expect(legacy.viewportTop == nil)
   #expect(restored.position("C")?.target == .followTail)
   #expect(ReadingPositionStore(server: "http://other", root: root).position("A") == nil)
   let json = try String(contentsOf: store.file, encoding: .utf8)

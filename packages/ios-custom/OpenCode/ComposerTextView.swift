@@ -7,6 +7,7 @@ struct ComposerTextView: UIViewRepresentable {
   var expanded: Bool
   let owner: UUID
   var label = "Mensagem"
+  var identifier = "conversation-composer"
   var submit: (() -> Void)? = nil
   var canSubmit = false
   func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -19,7 +20,7 @@ struct ComposerTextView: UIViewRepresentable {
     view.adjustsFontForContentSizeCategory = true
     view.delegate = context.coordinator
     view.accessibilityLabel = label
-    view.accessibilityIdentifier = "conversation-composer"
+    view.accessibilityIdentifier = identifier
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.escape = { draft.dismissSuggestions() }
     return view
@@ -180,7 +181,8 @@ final class ComposerInputView: UITextView {
   }
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
     if action == #selector(submitReturn(_:)) {
-      return isFirstResponder && canSubmit && markedTextRange == nil && submit != nil
+      return isFirstResponder && isEditable && canSubmit && !querying && markedTextRange == nil
+        && submit != nil
     }
     return super.canPerformAction(action, withSender: sender)
   }
@@ -193,7 +195,8 @@ final class ComposerInputView: UITextView {
     super.pressesCancelled(presses, with: event)
   }
   @objc private func submitReturn(_ command: UIKeyCommand) {
-    guard !hardwareSubmitted, isFirstResponder, markedTextRange == nil, canSubmit,
+    guard !hardwareSubmitted, isFirstResponder, isEditable, !querying, markedTextRange == nil,
+      canSubmit,
       let submit
     else { return }
     hardwareSubmitted = true

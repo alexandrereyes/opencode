@@ -8,9 +8,13 @@ public struct ReadingPosition: Codable, Sendable, Equatable {
   }
   public var target: Target
   public var updatedAt: Date
-  public init(_ target: Target, updatedAt: Date = .now) {
+  /// The sticky header is an occlusion, not a stable coordinate origin. Keep its
+  /// captured edge so pinning changes cannot move the same bookmark on reopening.
+  public var viewportTop: Double?
+  public init(_ target: Target, updatedAt: Date = .now, viewportTop: Double? = nil) {
     self.target = target
     self.updatedAt = updatedAt
+    self.viewportTop = viewportTop
   }
 }
 
@@ -54,7 +58,9 @@ public enum ReadingCapture {
     return .message(id: frame.id, offset: usableTop - frame.top)
   }
   public static func clampedOffset(_ offset: Double, height: Double) -> Double {
-    min(max(0, height - 1), max(-32, offset))
+    // A negative offset records a real gap before the next visible message.
+    // Clamping that gap changes the saved reading position on every restoration.
+    min(max(0, height - 1), offset)
   }
 }
 

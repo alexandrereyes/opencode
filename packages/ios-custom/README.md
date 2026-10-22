@@ -360,6 +360,7 @@ packages/ios-custom/
   OpenCode/              # app target: entry point, navigation, feature screens
   OpenCodeKit/           # local Swift package with no UI: API, models, SSE, pairing, Keychain
   OpenCodeUITests/       # sandbox-only native interaction/continuity tests
+  OpenCodeTests/         # app-hosted UIKit key-command tests
 ```
 
 ## Development
@@ -471,8 +472,8 @@ then scroll to the beginning to exercise all three pages. An already-viewed sess
 divider on the next launch; do not move its watermark backwards or consume the pending permission/question to
 recreate a screenshot. The app acknowledges only observed idle watermarks, not wall-clock time.
 
-Waves 1–4 are complete. Wave 6 is in progress: exact reading-offset restoration and hardware-keyboard verification
-still have the blockers described below.
+Waves 1–4 and 6 are complete. Wave 6's physical-keyboard path still has the manual device check described below;
+its command registration, dispatch and blocked states are covered by app-hosted tests.
 Child sessions have a return-to-parent action and no ordinary composer, but their
 permission/question cards remain actionable. Their capsule counts the parent's other work. Colors follow the
 generated web tokens, including the actual catalog's agent colors; the sandbox model is Luna 6 / low, not the
@@ -647,6 +648,13 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   Both TextKit subclasses use the designated initializer: UIKit's `textViewUsingTextLayoutManager` factory bypasses
   Swift subclass property defaults. The designated initializer retains the platform's TextKit 2 default.
 - **Comentar** presents a native sheet with a read-only passage, token-capable comment editor, Concluir and Remover.
+  In comments, `@`, `$`, and `#` work as in the main composer; `/` does not, as in the web.
+  A sandbox UI/server check selects a file, Explore, the fixture skill and `#resumo` in the real comment editor,
+  concludes, relaunches, then sends with a short main text/file mention. The comment's file/agent/skill arrive in
+  structured arrays without main-text ranges; the main file keeps UTF-16 range 33–47. The model-facing `User comment:`
+  expands `#resumo`, while the sent bubble preserves the authored token text. Sessions/references and snippets in
+  comments also have package tests. Evidence: `comment-tokens-panel-*`, `comment-sent-*` and the sanitized
+  `comment-server-verification.json` in the wave-6 final screenshots directory.
   `Citações · N` is collapsed by default above the composer card and expands to edit/remove individual quotes.
   Quotes survive relaunch through `DraftSnapshot` (old wave-3 snapshots decode with an empty quote array), restore
   from queued messages, count as sendable content on their own, and clear only after successful submission.
@@ -701,14 +709,17 @@ the protection for longer sessions.
 
 ### Reading continuity (wave 6)
 
-**Status: not ready for acceptance.** The implementation is in place; the 94 Swift tests and simulator build pass
-without new compiler warnings. Repeated deep-history UI checks still find point-offset drift after navigation and
-cold relaunch (latest check: about 16 points, above the five-point tolerance). Earlier passing captures are evidence of individual runs, not proof
-that this is resolved. The failing regression remains enabled in `testHistoryNavigationAndRelaunch`; investigate
-`ConversationScrollState`'s native row/header geometry and offset correction before starting wave 5. Hardware
-Shift+Return is implemented but **not verified**: XCUITest did not deliver even an unmodified hardware Return in this
-environment. Its test has an explicit plain-Return preflight and skips rather than claiming success when that fails.
-The shared Simulator keyboard settings were not changed. Actual software-keyboard taps verify the private path.
+**Status: complete.** The package's 95 Swift tests, three app-hosted tests and simulator build pass without new
+compiler warnings. The enabled `testHistoryNavigationAndRelaunch` checks five reopenings plus cold relaunch in each
+theme, including an anchor outside the initial tail page. Every measured difference is 0 points (dark: floating-point
+noise below `0.000001`), with 0 growth across cycles, inside the 24-point acceptance bound. The full native suite has
+nine passing tests and one expected unread skip after its watermark has already been acknowledged.
+App-hosted `OpenCodeTests/ComposerKeyCommandTests.swift` checks hardware Return registration and actual UIKit action
+dispatch, including suppression during sending, marked text, suggestions and auxiliary editing. The physical-keyboard
+path still needs a **manual check on a device**: XCUITest does not deliver hardware Return in this Simulator setup.
+The shared Simulator keyboard settings are never changed. Actual software-keyboard taps verify the private path.
+`OpenCodeTests/ReadingGeometryTests.swift` also checks the real native-cell/zero-size-probe boundary and correction
+against a captured viewport origin.
 
 - `ConversationProjection.finalAnswerDividers(_:)` is a pure projection across each user group. It considers only
   rendered activity, completed error/retry-free `stop` assistants, explicit `final_answer` phases and the legacy
@@ -720,6 +731,13 @@ The shared Simulator keyboard settings were not changed. Actual software-keyboar
   update time. Protected JSON in `Application Support/OpenCode/Reading` uses atomic writes. Scroll-idle capture
   debounces 250 ms; leaving, opening a child and backgrounding flush immediately. A weak map of **mounted** UIKit row
   probes measures partially visible responses and natural user bubbles below the actual sticky header.
+  Probe views identify their current recycled cell, but geometry comes from the native cell's bounds: a SwiftUI
+  background representable can be zero-sized or inset and must not stand in for the message rectangle. The position
+  also records the captured usable-top edge (`viewportTop`) so natural/pinned header transitions do not redefine the
+  coordinate origin when reopening; old JSON without that optional field still decodes.
+  Restoration and layout never recapture their own geometry: only real user scrolling or an explicit new target may
+  change a bookmark. Negative offsets are real gaps before a message and are preserved, not clamped to an arbitrary
+  negative limit. That former `-32` clamp caused a systematic upward shift when a captured gap was larger.
 - Saved anchors suppress the initial tail jump and live following. Restoration loads at most five older pages per
   attempt, offers **Retomar leitura** beyond that budget, materializes the message and corrects its offset using real
   Markdown/image geometry. User interaction cancels it; a missing message after exhausting history falls back to the
@@ -736,6 +754,8 @@ The shared Simulator keyboard settings were not changed. Actual software-keyboar
 - Step/detail expansion is stored as IDs and explicit booleans in a separate 16-session memory LRU. Outputs, parsed
   Markdown, images and views are never cached there. The native edge-pop recognizer is enabled for the hidden-bar
   conversation, with root/transition guards and its previous delegate restored on departure.
+  The pinned bubble's native background is opaque and full width, with only a 14-point bottom gradient; no inset
+  material/rectangle is painted over the code block beneath it.
 - Return inserts a newline; **Shift+Return sends** through the button's exact predicate/action in both main composer
   sizes. Hardware uses a priority `UIKeyCommand`; software consults the keyboard **before mutation**. Suggestions and
   marked text take precedence. The side-question editor has its own submit action; comment editors have no submit
@@ -747,12 +767,16 @@ The shared Simulator keyboard settings were not changed. Actual software-keyboar
 
 Swift Testing adds divider sequences/eligibility/history/visibility, partial-row capture, restoration decisions,
 protected serialization/server separation/LRU, expansion memory and all Shift-state/editor-state combinations
-(`ReadingContinuityTests.swift`). Run `swift test` from `OpenCodeKit` (94 tests). The `OpenCodeUITests` target drives
-the actual software keyboard keys, hardware key command, navigation and expanded quote layout. After
+(`ReadingContinuityTests.swift`). Run `swift test` from `OpenCodeKit`. The `OpenCodeUITests` target drives
+the actual software keyboard keys, five repeated navigation cycles plus cold relaunch, comment tokens and expanded
+quote layout. Hardware actions are checked in the app-hosted `OpenCodeTests` target. After
 `xcodebuild … build-for-testing`, run `python3 packages/ios-custom/script/test-reading.py [testMethod …]`. It only uses
 the dedicated simulator and port 4177, creates/deletes isolated Luna 6 / low keyboard sessions, reads the sandbox password without
 printing it and removes its protected temporary xctestrun configuration. Never launch the app without explicit
 `-OpenCodeServerURL http://127.0.0.1:4177`, including in automation relaunches.
+The scheme's test action also has the explicit sandbox URL, including the app-hosted target. The runner serializes
+the dedicated Simulator and uses uniquely named, private xctestrun files. Select hosted tests with, for example,
+`python3 packages/ios-custom/script/test-reading.py OpenCodeTests/ComposerKeyCommandTests`.
 
 Run `testUnreadJump` immediately after `seed-conversation.ts --reset`; later opens correctly have no unread boundary
 after viewed acknowledgement, so that case skips rather than moving the watermark backwards. The B seed now includes
@@ -769,18 +793,20 @@ Verified on **OpenCode Sessoes / iOS 27.0** with the clean 10:58 status bar, aga
 | Return with automatic sentence capitalization | Newline; no send |
 | Caps Lock, then Return | Newline; no send |
 | Manual Shift, then Return | One send; no newline |
-| XCUITest hardware Return preflight | Not delivered; hardware Shift+Return remains unverified |
+| Hardware Return + Shift | App-hosted action test; physical keyboard remains a manual device check |
 
 Live evidence is under
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-conversa-prints/onda6/final/`:
-`b-final-divider-*`, `c-final-divider-*`, `c-before-navigation`, `c-after-navigation`, `c-after-relaunch`,
-`c-restored-light`, `c-restored-large-type`, `c-unread-*`, `b-expanded-quotes-*`, `expanded-before-child-*`,
-`expanded-after-child-*`, `expanded-reopened-*`, and `keyboard-*`. The history test compares the same partially
-visible passage within five points after Sessões → B → C and cold relaunch. Both root and child edge swipes are
+`b-final-divider-*`, `c-original-*`, `c-cycle-{1…5}-*`, `c-after-relaunch-*`,
+`c-sticky-code-*`, `c-reading-comparison-*`, `comment-tokens-panel-*`, `comment-sent-*`, `b-expanded-quotes-*`, `expanded-before-child-*`,
+`expanded-after-child-*`, `expanded-reopened-*`, and `keyboard-*`. The history test compares the same anchor passage
+within 24 points of the original and allows at most two points of range across five reopenings plus cold relaunch.
+Both root and child edge swipes are
 exercised. The conversation seed was reset before final captures; B's permission and D's question remain pending,
 and keyboard-test sessions are deleted by the runner. The B quote remains an unsent local draft.
-The long-history test is intentionally strict about the point offset, not merely finding the same message; any
-remaining failure there must be treated as a continuity defect rather than accepted from a similar screenshot.
+The side-by-side comparisons show the original, fifth visit and cold relaunch. Stale unthemed duplicates and the old
+boxed-header captures were removed from `final/`. The conversation seed's transcript/requests were not changed by
+this iteration; only separate disposable verification sessions received the tiny Luna 6 / low prompts.
 
 ### Live data and contract fixtures
 

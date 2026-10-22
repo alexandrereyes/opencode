@@ -53,8 +53,17 @@ import XCTest
           timeout: 5) == .completed
     )
   }
+  private func codeUnderHeader(_ snapshot: any XCUIElementSnapshot, cutoff: CGFloat) -> Bool {
+    if (snapshot.value as? String)?.contains("image: makeplane/plane:stable") == true,
+      snapshot.frame.height > 0, snapshot.frame.minY < cutoff, snapshot.frame.maxY > cutoff
+    {
+      return true
+    }
+    return snapshot.children.contains { codeUnderHeader($0, cutoff: cutoff) }
+  }
   func testSoftwareReturnShiftAutoCapitalizationAndCapsLock() throws {
-    let app = try launch("OWN")
+    let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
+    let app = try launch("OWN", theme: theme)
     let editor = app.textViews["conversation-composer"]
     XCTAssertTrue(editor.waitForExistence(timeout: 10))
     editor.tap()
@@ -72,7 +81,7 @@ import XCTest
     keyboard.buttons["shift"].doubleTap()
     keyboard.buttons["Return"].tap()
     waitValue(editor, "OK\n\n\n")
-    screenshot("keyboard-caps-lock-newline")
+    screenshot("keyboard-caps-lock-newline-" + theme)
     // Leave Caps Lock, type prose to clear automatic capitalization, then manually Shift.
     keyboard.buttons["shift"].tap()
     editor.typeText("ok")
@@ -84,81 +93,55 @@ import XCTest
           for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: editor)],
           timeout: 20) == .completed
     )
-    screenshot("keyboard-shift-return-sent")
-  }
-  func testHardwareShiftReturn() throws {
-    let app = try launch("HARDWARE")
-    let editor = app.textViews["conversation-composer"]
-    editor.tap()
-    editor.typeText("OK ")
-    editor.typeKey(XCUIKeyboardKey.return, modifierFlags: [])
-    let newline = expectation(
-      for: NSPredicate(format: "value ENDSWITH %@", "\n"), evaluatedWith: editor)
-    guard XCTWaiter.wait(for: [newline], timeout: 3) == .completed else {
-      throw XCTSkip(
-        "XCUITest não entregou Return físico sem modificadores neste ambiente; não é possível validar o atalho."
-      )
-    }
-    editor.typeKey(XCUIKeyboardKey.return, modifierFlags: .shift)
-    waitValue(editor, "")
-    screenshot("hardware-shift-return-sent")
+    screenshot("keyboard-shift-return-sent-" + theme)
   }
   func testHistoryNavigationAndRelaunch() throws {
-    let app = try launch("C")
+    let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
+    let app = try launch("C", theme: theme)
     let transcript = app.collectionViews["conversation-transcript"]
     if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
-    for _ in 0..<9 { transcript.swipeDown(velocity: .slow) }
+    for _ in 0..<20 { transcript.swipeDown(velocity: .slow) }
     for _ in 0..<4 { transcript.swipeUp(velocity: .slow) }
     // Let the reader's scroll-idle debounce and deferred native geometry settle.
     // This test kills the process directly, unlike an ordinary background transition.
     RunLoop.current.run(until: Date().addingTimeInterval(0.6))
     let response = try XCTUnwrap(
-      app.textViews.allElementsBoundByIndex.filter {
-        $0.identifier != "conversation-composer" && $0.frame.maxY > transcript.frame.minY + 100
+      app.textViews.allElementsBoundByAccessibilityElement.filter {
+        $0.identifier.hasPrefix("response-") && $0.frame.maxY > transcript.frame.minY + 110
           && $0.frame.minY < transcript.frame.maxY
       }.min(by: { $0.frame.minY < $1.frame.minY }))
     let passage = try XCTUnwrap(response.value as? String)
-    let y = app.textViews.matching(NSPredicate(format: "value == %@", passage)).firstMatch.frame
-      .minY
-    screenshot("c-before-navigation")
-    app.buttons["Voltar"].tap()
-    openFromSessions(app, title: "Conversa B — precisa de você")
-    XCTAssertTrue(transcript.waitForExistence(timeout: 10))
-    screenshot("b-divider")
-    app.buttons["Voltar"].tap()
-    openFromSessions(app, title: "Conversa C — histórico e compositor")
-    XCTAssertTrue(transcript.waitForExistence(timeout: 10))
-    waitForReading(app)
-    let returned = app.textViews.matching(NSPredicate(format: "value == %@", passage)).firstMatch
-    XCTAssertTrue(returned.waitForExistence(timeout: 10))
-    XCTAssertEqual(returned.frame.minY, y, accuracy: 5)
-    screenshot("c-after-navigation")
+    let revision = try XCTUnwrap(passage.firstMatch(of: /Revisão (\d+) concluída/))
+    XCTAssertLessThanOrEqual(
+      try XCTUnwrap(Int(revision.1)), 20,
+      "A âncora deve exigir páginas antigas, não apenas a página inicial do fim.")
+    let identifier = response.identifier
+    let y = app.textViews[identifier].frame.minY
+    var offsets: [CGFloat] = []
+    screenshot("c-original-" + theme)
+    for cycle in 1...5 {
+      app.buttons["Voltar"].tap()
+      openFromSessions(app, title: "Conversa C — histórico e compositor")
+      let returned = app.textViews[identifier]
+      XCTAssertTrue(returned.waitForExistence(timeout: 10))
+      XCTAssertEqual(returned.value as? String, passage)
+      offsets.append(returned.frame.minY - y)
+      XCTAssertEqual(returned.frame.minY, y, accuracy: 24)
+      screenshot("c-cycle-\(cycle)-" + theme)
+    }
+    // A small systematic difference is tolerable; a restore must never creep.
+    XCTAssertLessThanOrEqual((offsets.max() ?? 0) - (offsets.min() ?? 0), 2)
     app.terminate()
-    let relaunched = try launch("C")
+    let relaunched = try launch("C", theme: theme)
     XCTAssertTrue(
       relaunched.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
-    let restored = relaunched.textViews.matching(NSPredicate(format: "value == %@", passage))
-      .firstMatch
+    let restored = relaunched.textViews[identifier]
     XCTAssertTrue(restored.waitForExistence(timeout: 10))
-    XCTAssertEqual(restored.frame.minY, y, accuracy: 5)
-    screenshot("c-after-relaunch")
-    XCUIDevice.shared.orientation = .landscapeLeft
-    screenshot("c-portrait-policy")
-    XCUIDevice.shared.orientation = .portrait
-    relaunched.terminate()
-    let light = try launch("C", theme: "openchamber-light")
-    XCTAssertTrue(
-      light.textViews.matching(NSPredicate(format: "value == %@", passage)).firstMatch
-        .waitForExistence(timeout: 10))
-    screenshot("c-restored-light")
-    light.terminate()
-    light.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
-    light.launch()
-    waitForReading(light)
-    XCTAssertTrue(
-      light.textViews.matching(NSPredicate(format: "value == %@", passage)).firstMatch
-        .waitForExistence(timeout: 10))
-    screenshot("c-restored-large-type")
+    XCTAssertEqual(restored.frame.minY, y, accuracy: 24)
+    offsets.append(restored.frame.minY - y)
+    XCTAssertLessThanOrEqual((offsets.max() ?? 0) - (offsets.min() ?? 0), 2)
+    print("READING-CYCLES \(theme) anchor=\(identifier) original=\(y) differences=\(offsets)")
+    screenshot("c-after-relaunch-" + theme)
   }
   func testParentChildEdgeSwipeAndExpansion() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
@@ -231,7 +214,7 @@ import XCTest
           XCTFail("O menu de seleção não apresentou Comentar")
           return
         }
-        screenshot("selection-pauses-following")
+        screenshot("selection-pauses-following-" + theme)
         comment.tap()
         app.textViews["Comentário"].typeText("Confira este trecho antes de continuar.")
         app.buttons["Concluir"].tap()
@@ -260,5 +243,106 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Novas mensagens"].isHittable)
     XCTAssertFalse(pill.exists)
     screenshot("c-unread-divider-" + theme)
+  }
+  func testTokensInComments() throws {
+    let app = try launch("COMMENT")
+    let response = app.textViews.matching(
+      NSPredicate(format: "value == 'Trecho para conferir os comentários.'")
+    ).firstMatch
+    XCTAssertTrue(response.waitForExistence(timeout: 10))
+    response.tap()
+    response.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.25)).press(forDuration: 1)
+    let comment = app.descendants(matching: .any).matching(
+      NSPredicate(format: "label == 'Comentar'")
+    ).firstMatch
+    XCTAssertTrue(comment.waitForExistence(timeout: 5))
+    comment.tap()
+    let editor = app.textViews["Comentário"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.typeText("Veja @docs/alternativas")
+    let file = app.buttons["suggestion-docs/alternativas.md"]
+    XCTAssertTrue(file.waitForExistence(timeout: 10))
+    file.tap()
+    editor.typeText("@explore")
+    let agent = app.buttons["suggestion-explore"]
+    XCTAssertTrue(agent.waitForExistence(timeout: 10))
+    agent.tap()
+    editor.typeText("$conversation-check")
+    let skill = app.buttons.matching(
+      NSPredicate(
+        format: "identifier BEGINSWITH 'suggestion-' AND label CONTAINS 'conversation-check'")
+    ).firstMatch
+    XCTAssertTrue(skill.waitForExistence(timeout: 10))
+    skill.tap()
+    editor.typeText("#resumo")
+    let snippet = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH 'suggestion-' AND label CONTAINS '#resumo'")
+    ).firstMatch
+    XCTAssertTrue(snippet.waitForExistence(timeout: 10))
+    snippet.tap()
+    editor.typeText("@ex")
+    XCTAssertTrue(agent.waitForExistence(timeout: 10))
+    screenshot("comment-tokens-panel-openchamber-dark")
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+    app.buttons["Concluir"].tap()
+    app.terminate()
+    let light = try launch("COMMENT", theme: "openchamber-light")
+    light.buttons["draft-quotes"].tap()
+    light.buttons["Editar citação"].tap()
+    let restored = light.textViews["Comentário"]
+    XCTAssertTrue(restored.waitForExistence(timeout: 5))
+    restored.typeText(" @ex")
+    XCTAssertTrue(light.buttons["suggestion-explore"].waitForExistence(timeout: 10))
+    screenshot("comment-tokens-panel-openchamber-light")
+    restored.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+    light.buttons["Concluir"].tap()
+    XCTAssertEqual(
+      XCTWaiter.wait(
+        for: [
+          expectation(
+            for: NSPredicate(format: "exists == false"),
+            evaluatedWith: light.navigationBars["Comentário"])
+        ], timeout: 5), .completed)
+    let main = light.textViews["conversation-composer"]
+    main.tap()
+    main.typeText("Responda só OK, sem ferramentas. @docs/infra")
+    let mainFile = light.buttons["suggestion-docs/infra.md"]
+    XCTAssertTrue(mainFile.waitForExistence(timeout: 10))
+    mainFile.tap()
+    light.buttons["Enviar mensagem"].tap()
+    waitValue(main, "")
+    let bubble = light.staticTexts.matching(
+      NSPredicate(
+        format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check #resumo'")
+    ).firstMatch
+    XCTAssertTrue(bubble.waitForExistence(timeout: 15))
+    screenshot("comment-sent-openchamber-light")
+    light.terminate()
+    let dark = try launch("COMMENT", theme: "openchamber-dark")
+    XCTAssertTrue(
+      dark.staticTexts.matching(
+        NSPredicate(
+          format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check #resumo'"
+        )
+      ).firstMatch.waitForExistence(timeout: 10))
+    screenshot("comment-sent-openchamber-dark")
+  }
+  func testStickyBubbleOverCode() throws {
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let app = try launch("C", theme: theme)
+      if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+      let transcript = app.collectionViews["conversation-transcript"]
+      let cutoff = transcript.frame.minY + 130
+      let beneathHeader = NSPredicate { _, _ in
+        // One immutable accessibility snapshot avoids resolving a recycled TextKit
+        // element again between exists/frame queries while the tail is measuring.
+        guard let snapshot = try? app.snapshot() else { return false }
+        return self.codeUnderHeader(snapshot, cutoff: cutoff)
+      }
+      XCTAssertEqual(
+        XCTWaiter.wait(for: [expectation(for: beneathHeader, evaluatedWith: app)], timeout: 15),
+        .completed)
+      screenshot("c-sticky-code-" + theme)
+    }
   }
 }

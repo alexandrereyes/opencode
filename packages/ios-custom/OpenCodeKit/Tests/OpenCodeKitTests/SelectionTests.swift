@@ -95,6 +95,46 @@ private let selectionModel = ModelReference(
       == "Comments on earlier assistant messages:\n\n1. Quoted from message m (part p):\n> T")
 }
 
+@Test func commentSessionsReferencesAndSnippetExpansionKeepMainOffsets() throws {
+  let main = ComposerToken(kind: .file, id: "main", text: "@main.md", value: "/repo/main.md")
+  let reference = ComposerToken(kind: .reference, id: "docs", text: "@docs", value: "/shared/docs")
+  let snippet = ComposerToken(kind: .snippet, id: "review", text: "#r", value: "Confira ação 😀")
+  let session = ComposerToken(
+    kind: .session, id: "ses_other", text: "@Anterior",
+    detail: [
+      "id": .string("ses_other"), "title": .string("Anterior"), "directory": .string("/other"),
+    ])
+  let comment = "\(snippet.text) \(reference.text) \(session.text)"
+  var quote = ChatQuote(messageID: "old", partID: "old:text:0", text: "Trecho")
+  quote.document = .init(
+    text: comment,
+    tokens: [snippet, reference, session].map { token in
+      let range = (comment as NSString).range(of: token.text)
+      return .init(start: range.location, end: NSMaxRange(range), token: token)
+    })
+  let request = PromptRequest(
+    document: .init(
+      text: "😀 \(main.text)",
+      tokens: [
+        .init(start: 3, end: 11, token: main)
+      ]), delivery: .steer, agent: "build", model: selectionModel, quotes: [quote])
+  #expect(request.metadata["displayText"] == .string("😀 @main.md"))
+  #expect(request.files?.first?.object?["mention"]?.object?["start"] == .number(3))
+  #expect(request.files?.first?.object?["mention"]?.object?["end"] == .number(11))
+  #expect(request.files?.last?.object?["uri"] == .string("file:///shared/docs"))
+  #expect(request.files?.last?.object?["mention"] == nil)
+  #expect(request.text.contains("Referenced OpenCode session:"))
+  #expect(request.text.contains("\"sessionID\":\"ses_other\""))
+  #expect(request.text.hasSuffix("User comment: Confira ação 😀 @docs @Anterior"))
+  #expect(
+    request.metadata["sessions"]?.array?.first?.object?["session"]?.object?["id"]
+      == .string("ses_other"))
+  let restored = try #require(ChatQuote.read(request.metadata["quotes"]).first)
+  #expect(restored.comment == comment)
+  #expect(restored.document.validTokens.map(\.token.kind) == [.snippet, .file, .session])
+  #expect(restored.document.expanded.text == "Confira ação 😀 @docs @Anterior")
+}
+
 @Test func quotesPersistAndOldDraftsStillDecode() async throws {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("selection-\(UUID())")
   defer { try? FileManager.default.removeItem(at: root) }
