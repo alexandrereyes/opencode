@@ -60,6 +60,9 @@ public struct OpenCodeClient: Sendable {
   public let configuration: ServerConfiguration
   private let session: URLSession
   private var transport: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
+  #if DEBUG
+  var usesNativeTranscript = ProcessInfo.processInfo.arguments.contains("-OpenCodeNativeTranscript")
+  #endif
 
   public init(configuration: ServerConfiguration) {
     self.configuration = configuration
@@ -109,7 +112,16 @@ public struct OpenCodeClient: Sendable {
     try await rpc("custom.preferences", "get", input: Empty())
   }
   public func mutate(_ intent: PreferenceIntent) async throws -> Preferences {
-    try await rpc("custom.preferences", "mutate", input: intent)
+    do {
+      return try await rpc("custom.preferences", "mutate", input: intent)
+    } catch ClientError.rpc("rpc.invalid_input") {
+      // Muting was added after the original preferences contract. An absent
+      // mutedSessions field alone is not a capability signal: it is optional today too.
+      if case .mute = intent {
+        throw ClientError.operation("Este servidor ainda não permite silenciar sessões. Atualize o servidor para usar este recurso.")
+      }
+      throw ClientError.rpc("rpc.invalid_input")
+    }
   }
   public func subscriptions() async throws -> Subscriptions {
     try await rpc("custom.subscriptions", "list", input: Empty())
@@ -152,27 +164,47 @@ public struct OpenCodeClient: Sendable {
     return try await rpc("custom.session-family", "snapshot", input: Input(sessionID: sessionID))
   }
   public func preview(_ sessionID: String) async throws -> SessionPreview {
-    struct Input: Encodable {
-      let sessionID: String
-      let limit = 3
-      let order = "desc"
-    }
-    let page: TranscriptPage = try await rpc(
-      "custom.transcript", "list", input: Input(sessionID: sessionID))
+    let page: TranscriptPage = try await transcript(sessionID, limit: 3)
     return SessionPreview(messages: page.data)
   }
   public func conversation(_ sessionID: String, cursor: String? = nil) async throws
     -> ConversationPage
   {
-    struct Input: Encodable {
-      let sessionID: String
-      let limit = 40
-      let order: String?
-      let cursor: String?
+    try await transcript(sessionID, limit: 40, cursor: cursor)
+  }
+  private struct TranscriptInput: Encodable {
+    let sessionID: String
+    let limit: Int
+    let order: String?
+    let cursor: String?
+  }
+  private func transcript<Output: Decodable>(_ sessionID: String, limit: Int, cursor: String? = nil)
+    async throws -> Output
+  {
+    #if DEBUG
+    if usesNativeTranscript {
+      return try await nativeTranscript(sessionID, limit: limit, cursor: cursor)
     }
-    return try await rpc(
-      "custom.transcript", "list",
-      input: Input(sessionID: sessionID, order: cursor == nil ? "desc" : nil, cursor: cursor))
+    #endif
+    do {
+      return try await rpc("custom.transcript", "list", input: TranscriptInput(
+        sessionID: sessionID, limit: limit, order: cursor == nil ? "desc" : nil, cursor: cursor))
+    } catch {
+      if error is CancellationError { throw error }
+      if let error = error as? URLError, error.code == .cancelled { throw error }
+      try Task.checkCancellation()
+      // The lean RPC is an optimization, not a requirement. Older custom releases
+      // lack it; like the web client, use the canonical endpoint on a failed read.
+      return try await nativeTranscript(sessionID, limit: limit, cursor: cursor)
+    }
+  }
+  private func nativeTranscript<Output: Decodable>(_ sessionID: String, limit: Int, cursor: String?)
+    async throws -> Output
+  {
+    try await get("/api/session/\(sessionID)/message", query: [
+      URLQueryItem(name: "limit", value: String(limit)),
+      URLQueryItem(name: cursor == nil ? "order" : "cursor", value: cursor ?? "desc"),
+    ])
   }
   public func session(_ id: String) async throws -> Session {
     let response: DataResponse<Session> = try await get("/api/session/\(id)")
@@ -294,6 +326,10 @@ public struct OpenCodeClient: Sendable {
         let directory = value.object?["location"]?.object?["directory"]?.string {
         throw ClientError.locationNotFound(directory)
       }
+      if value.object?["_tag"]?.string == "RpcError",
+        let type = value.object?["type"]?.string {
+        throw ClientError.rpc(type)
+      }
     }
     try validate(response)
     return data
@@ -345,6 +381,7 @@ public struct OpenCodeClient: Sendable {
 
 public enum ClientError: Error, LocalizedError {
   case http(Int)
+  case rpc(String)
   case incompatibleServer
   case locationNotFound(String)
   case operation(String)
@@ -353,6 +390,7 @@ public enum ClientError: Error, LocalizedError {
     case .incompatibleServer: "Este servidor não é compatível com o OpenCode V2."
     case .locationNotFound: "O diretório desta sessão não existe mais."
     case .operation(let message): message
+    case .rpc: "O servidor não conseguiu concluir esta operação."
     case .http(401): "A senha do servidor não foi aceita."
     case .http(let code): "O servidor respondeu com o código \(code)."
     }

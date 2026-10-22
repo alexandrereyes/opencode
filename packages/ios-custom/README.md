@@ -494,6 +494,26 @@ discriminator, it describes the event payload only as an opaque JSON string, and
 If manual maintenance becomes costly, the next step is to emit Swift from the same Effect contract that
 `packages/httpapi-codegen` already reflects, which would also cover the RPCs.
 
+### Older custom servers
+
+The lean `custom.transcript/list` RPC is optional. Conversation tails, older pages and Sessões previews fall back to
+`GET /api/session/{id}/message` on a failed RPC read, retaining the same page size, order and opaque cursor. Cancellation
+never starts a fallback, and a failed native read remains an error. Newer servers still use the lean RPC, avoiding inline
+tool media. This supports the installed `custom.1de0005…` release, which predates that RPC; see the
+[compatibility audit](docs/conversation-contract.md#production-compatibility-audit-2026-10-22).
+
+That release also lacks the `sidebar.mute` preference intent. Its rejection gets an explicit pt-BR server-update notice;
+no local-only mute or successful mutation is fabricated. Missing `mutedSessions` still decodes normally and is not treated
+as a capability flag, since it is optional even in the newer contract.
+
+Debug simulator builds accept `-OpenCodeNativeTranscript` to skip the optional RPC and exercise the **same native
+reader used by fallback**, including Sessões previews and older pages. The switch and its state are excluded from
+Release compilation. Always keep the explicit sandbox URL/password when using it. After `build-for-testing`, run
+`python3 packages/ios-custom/script/test-transcript-compatibility.py` to compare both paths on existing seeded tools,
+reasoning, child history, image attachment, compaction, older-page search and pending permission/question cards. The runner
+does not answer requests, send prompts, reset seeds or change service lifecycle; it exports dark screenshots to a unique
+`$TMPDIR/opencode/ios-native-transcript-*` directory and deletes its credential-bearing xctestrun file.
+
 ## Notifications
 
 System/push notifications are not part of the MVP. Wave 7's in-app banners need no notification permission and work

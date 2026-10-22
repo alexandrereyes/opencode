@@ -21,6 +21,79 @@ model,agent,form,permission,shell}.ts`. HTTP: `packages/protocol/src/groups/*.ts
 - Examples replace local paths with `/sandbox`, and use shortened IDs where identity is unimportant. Fixtures retain
   full IDs so links can be tested. Do not decode pagination cursors to discover identity or ordering.
 
+### Production compatibility audit (2026-10-22)
+
+TestFlight `0.1.0 (202610221635)`, commit `020b6d1df7`, assumed a newer custom plugin than the installed backend.
+Authenticated `GET /api/info` through local service discovery and the phone's
+`http://opencode2-mac.alexandrem.com.br` path both identified the same process/version:
+`0.0.0-custom.1de0005da68932f4ab7856e464978ad06f99d652` (PID 44906 at investigation time).
+The installed `current` release symlink also pointed to that commit. No service was changed.
+
+The backend log at `2026-10-22T16:44:00.968Z` (13:44 -03), and repeatedly throughout that minute, records
+`POST /api/rpc/custom.transcript/list` returning 400. Opening a conversation sends
+`{"input":{"sessionID":"<selected session>","limit":40,"order":"desc"}}`; Sessões previews use limit 3.
+There is no `transcript` module or registration at the installed commit: it was added by `f9092affa7`.
+The old `Rpc.call` rejects a missing registration with `rpc.unavailable`; its unchanged HTTP handler encodes HTTP 400:
+
+```json
+{"_tag":"RpcError","type":"rpc.unavailable","message":"RPC is unavailable: custom.transcript"}
+```
+
+This body is established from the installed revision's implementation, **not a captured production response**:
+production logging retains the method/path/status but not the request or response body, and the diagnosis deliberately
+did not replay a POST. The exact selected session ID is not in those logs. Backend receipt/rejection and the absent
+registration explain the failure independently of nginx; the proxy's access log is disabled. Direct/public health
+responses match, but a public-path POST comparison was not performed.
+
+The client now mirrors the web's `withLeanTranscript`: failed lean reads use the native message endpoint with the same
+limit and either `order=desc` or the unchanged opaque `cursor` (never both). This covers the initial tail, history,
+restoration/search paging, parent transcript and Sessões previews. Native responses can include full inline tool media;
+both Swift decoders accept them. Cancellation is propagated, and native failures are never replaced with empty history.
+
+Audit coverage against `1de0005…` → `020b6d1df7`:
+
+| Surface | Contract comparison / action |
+| --- | --- |
+| HTTP API, message/event/Session/model/agent/request schemas | `packages/protocol/openapi.json` and the entire `packages/schema` tree are identical. Session info, native messages, inbox, active, models/default, agents/providers, shells/output, forms/permissions/replies, prompt/model/agent selection, queue, interrupt/background, rename/view, command/compact/side-question and file APIs use that same contract. Location query encoding is unchanged. |
+| Custom conversation reads | Family snapshot/page, worktree availability/locate and preferences (other than mute) have unchanged schemas and implementations. Only the optional lean transcript RPC needed a fallback. |
+| Sessões | Navigation, project inventory, archive, requests, chats, subscriptions and pin/project intents are unchanged. Previews now share the native fallback. Optional `mutedSessions` decodes when absent; old `sidebar.mute` rejection is translated to an explicit update-required notice, not local-only success. Absence alone cannot prove lack of support because the new field is optional too. |
+| Nova sessão | Worktree list/create, VCS/branch search, config/MCP/status/connect/disconnect, Session creation, prompt/command, snippets and composer catalogs are unchanged. Existing/new destination and MCP semantics require no compatibility branch. |
+| Você | Info/health, pairing redemption/auth and SSE contracts are unchanged. Theme/server registry/Keychain actions are local. |
+
+The remaining backend-update requirement is **muting**, not opening or reading conversations. Swift transport tests cover
+old/new transcript responses, request limits/cursor/order, full media, canonical failures, cancellation, old preferences
+and the unsupported mute intent. No production mutation, simulator-to-production launch or backend update is required.
+
+Verification: `swift test` passes all **147 tests**; simulator `build-for-testing` has no warnings. All four
+`SessionReadingTests` pass in one final run, plus the live-theme/settings case and the Nova sessão selector/keyboard
+case. A prior search run hit XCTest's animation-idle timeout; an isolated repeat and the final full reading run both
+passed without changing UI code. Manual sandbox launch also opened the seeded history conversation without an error
+banner; screenshot: `$TMPDIR/opencode/ios-compat-conversation-live.png`. Logs use the `ios-compat-*` prefix there.
+Only this verification's disposable imported histories were removed; sandbox seeds and service lifecycle were untouched.
+
+Follow-up native-reader proof: a throwaway Swift executable outside the repository loaded `OpenCodeKit` as a local package
+and decoded five real production Session tails plus an older cursor page, acquired exclusively with `opencode api get`.
+Both `ConversationPage` and `TranscriptPage` decoded **6/6 pages, 215 messages**, with **0 failures**. The real data included
+215 tools, 128 reasoning parts, 16 subagent calls, one user attachment, 12 tool-result files and one compaction; one sampled
+Session was a child. The harness exercised the app's tool summaries/output/diffs, part identity, Markdown parsing (278
+blocks), day/footer/unread/sticky/final-answer/running-work/context projections, search and page merge. It printed only
+aggregate counts/status, never private content. All raw acquisition files were then deleted from the private temp folder.
+No production-data decoding change was needed.
+
+All seven seeded sandbox histories were also compared page-by-page between native GET and RPC: **112 messages across
+16 pages including empty terminal pages**, identical after the RPC's documented inline-tool-media omission and
+null-versus-omitted empty cursor normalization. Both cursor encodings already decode to nil; a regression test covers them.
+DEBUG builds now expose `-OpenCodeNativeTranscript`, which bypasses the RPC into the actual fallback reader. The flag is
+compiled out of Release, and its absence from the built Release executable was verified.
+
+Final follow-up checks: **149 Swift tests**, warning-free Debug `build-for-testing` and Release simulator build, all three
+`TranscriptCompatibilityTests` (each exercising both transports), and all four existing `SessionReadingTests` pass.
+Dark screenshot pairs are in `$TMPDIR/opencode/ios-native-transcript-098ecd72/`, named `rpc-*.png` and `native-*.png`:
+history-tail, attachment, compaction, older-page, tools-reasoning-subagents, subagent-cards, child, permission and question.
+Visual review confirms matching content/presentation; captures may have different scroll offsets and animation timing.
+The native older-page case begins with the first revision absent, taps **Buscar em mensagens mais antigas**, then finds and
+renders **Revisão 1 concluída** through the returned native cursor. No seeded requests were answered and no prompts sent.
+
 ## 1. Transcript, parts and visual groups — wave 1
 
 ### Loading the tail and history
