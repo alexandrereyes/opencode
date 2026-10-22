@@ -29,7 +29,13 @@ final class SessionStore {
     var tool: String? = nil
     var newSession = false
   }
-  var conversationPath: [ConversationRoute] = []
+  var conversationPath: [ConversationRoute] = [] {
+    didSet {
+      #if DEBUG
+      if let id = conversationPath.last?.id, id != oldValue.last?.id { ConversationOpeningMetrics.begin(id) }
+      #endif
+    }
+  }
   var selectedTab = 3
   var conversationOpen: Bool { !conversationPath.isEmpty }
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? conversationPath.last?.id : nil }
@@ -58,7 +64,12 @@ final class SessionStore {
 
   init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true) {
     self.acceptsLaunchSession = acceptsLaunchSession
+    #if DEBUG
+    let client = ScrollFixtures.mode == nil
+      ? OpenCodeClient(configuration: configuration) : .scrollFixture(configuration: configuration)
+    #else
     let client = OpenCodeClient(configuration: configuration)
+    #endif
     self.client = client
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
@@ -67,6 +78,23 @@ final class SessionStore {
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
+    #if DEBUG
+    if ScrollFixtures.mode != nil {
+      let fixture = ScrollFixtures.snapshot
+      entries = fixture.entries
+      projects = fixture.projects
+      preferences = fixture.preferences
+      active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
+      previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
+        var preview = SessionPreview()
+        preview.text = "Resultado sintético com ferramentas, Markdown e código de exemplo."
+        preview.activity = "lendo arquivo de exemplo"
+        return (entry.session.id, preview)
+      })
+      order.snapshot(entries, active: active)
+      return
+    }
+    #endif
     pruning = Task {
       await DraftPersistence.pruneMissingSessions(
         server: configuration.url.absoluteString, client: client)
@@ -81,7 +109,13 @@ final class SessionStore {
       chatRoot: chatRoot)
   }
   var filtered: [SessionRow] {
-    rows.filter {
+    #if DEBUG
+    if client.configuration.url.host == "127.0.0.1", ConversationOpeningMetrics.enabled,
+      let id = ProcessInfo.processInfo.environment["OPENCODE_OPENING_SESSION"] {
+      return rows.filter { $0.id == id }
+    }
+    #endif
+    return rows.filter {
       filter.includes($0) && (selectedProject == nil || $0.project?.id == selectedProject)
     }
   }
@@ -109,6 +143,20 @@ final class SessionStore {
   }
 
   func run() async {
+    #if DEBUG
+    if ScrollFixtures.mode != nil {
+      guard ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureUpdates") else { return }
+      var tick = 0
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+        let id = entries[(tick % 3) * 17].session.id
+        previews[id]?.text = "Resultado sintético atualizado · \(tick)"
+        previews[id]?.activity = "lendo arquivo de exemplo · \(tick)"
+        tick += 1
+      }
+      return
+    }
+    #endif
     if let runningTask { await runningTask.value }
     guard !Task.isCancelled else { return }
     let id = UUID()
@@ -272,6 +320,9 @@ final class SessionStore {
   }
 
   func show(_ session: Session) {
+    #if DEBUG
+    if ScrollFixtures.mode != nil { return }
+    #endif
     visible.insert(session.id)
     enqueuePreview(session.id)
   }

@@ -110,11 +110,17 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
 - **Messages:** the user's messages are bubbles on the right with the time inside. The agent's text uses the full
   width, without a bubble, and is rendered as Markdown (lists, inline code, fenced code blocks with a copy button; no
   syntax highlighting yet).
-- **Steps:** each step is a group, `Usou 6 · Ler, Shell, Editar e Agente`. Inside it, in order: `Pensou 6s` (with its
-  sparkle icon), tool lines (`Leu docs/infra.md · 212 linhas`, `Rodou docker stack ls · 2s`, `Editou … +48 −0`, the
-  running one highlighted with its elapsed time), and subagents as discreet cards (agent icon and name in the agent's
-  color, description, time, `›`). The agent icon is the web app's: an animated pixel grid while running and the static
-  subagent icon when done. The running step is expanded; finished steps are collapsed into one line.
+- **Activity groups:** consecutive tools and nonempty reasoning share one `Usou N` disclosure **across backend steps**,
+  up to visible text, a user message, notice, error/retry or a standalone card. Summaries count tools (reasoning only
+  when there are no tools) and deduplicate localized tool titles in first-use order, without truncating categories.
+  Subagent/task cards, edit/write/patch tools (even before their diffs arrive) and question/permission interactions stay
+  outside the disclosure; removed `todowrite` and empty parts do not count or split it. Expanded content reuses the
+  native reasoning/tool details, retaining wire order, failed tools and the running tool's live elapsed time. Newly
+  running groups start open; completing/appending tools never overwrites the stored disclosure choice. Stable
+  member-based IDs and message anchors preserve expansion and reading during streaming and history prepend
+  (`ConversationActivity` in OpenCodeKit).
+  Compared with the PWA's configurable compact preset, this fixed native presentation keeps cards/diffs separate,
+  individual read details, and the approved Portuguese `Usou`/`Pensou` rather than untranslated English fallbacks.
 - **Response footer:** only when the response finishes, a discreet line with model, effort, date, and copy
   (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`).
 - **Sticky message:** the last user message sticks below the header, truncated to two lines, while its response
@@ -162,8 +168,40 @@ search navigates to messages and reuses wave 6's position restoration).
 Out of scope for this screen for now: the microphone (visual only), "Alterações" and "Arquivos" in the `…` menu,
 syntax highlighting, and balloon actions such as fork and revert.
 
+Grouping verification uses **OpenCode Grupos** (iPhone 18 Pro / iOS 27) and `ios-grupos-derived`. After
+`build-for-testing`, run `python3 packages/ios-custom/script/test-groups.py`, then repeat with
+`OPENCODE_TEST_THEME=openchamber-light`. It supplies explicit sandbox credentials, imports/deletes only its own
+synthetic multi-step histories (no model calls), and includes the existing session-reading regressions. Native
+collapsed/expanded/running captures and headless PWA comparisons are in `$TMPDIR/opencode/ios-grupos-prints/`.
+
 Wave 1 must already render text in a way that supports a custom selection menu (wave 4), and the composer must be
 able to hold attributed tokens (wave 3), so later waves do not rewrite earlier ones.
+
+### Conversation images
+
+Markdown images and HTML `<img>` tags, user attachments, and expanded tool images share the authenticated native
+loader. Relative paths resolve against the Session directory; absolute paths, `file://` and `~` resolve on the server,
+never on the phone. Like the PWA, each resolved file uses `GET /api/fs/read/<filename>` scoped to its parent through
+`location[directory]`, so existing files outside the repository need no new backend route. The same route exists in
+installed `1de0005…`. Empty inline tool images from the lean RPC reload the read path or the canonical full message.
+
+ImageIO downsamples off the main actor. A server/credential/directory-scoped cache holds at most 32 MiB of decoded
+images and 128 MiB on disk (24-hour disk freshness); individual images are limited to 32 MiB. Tap opens a full-screen
+viewer. Failures show **Imagem indisponível no iPhone**, the path/URL without query credentials, and retry.
+HTTPS and base64 image data URLs retain their sources. Only loopback URLs naming the native file route are moved
+to the configured server; arbitrary localhost services cannot be proxied. `seaweedfs-svc` loads directly, with a
+host-specific HTTP ATS exception: the phone still needs its own authorized WARP DNS/route to port 8333, and signed
+URLs may expire. Other unapproved HTTP hosts and image formats unsupported by ImageIO fail explicitly.
+
+Verification uses only **OpenCode Imagens** and `ios-imagens-derived`; after `build-for-testing`, run
+`python3 packages/ios-custom/script/test-images.py` and repeat with `OPENCODE_TEST_THEME=openchamber-light`.
+The runner imports/deletes only its own fake-repository histories and image files, makes no model call, supplies the
+explicit sandbox URL/password on every launch, and saves evidence in `$TMPDIR/opencode/ios-imagens-prints/`.
+Internal-host reachability is a network dependency, not claimed by the synthetic unreachable-host failure case.
+Final image checks pass in both themes (three UI cases plus all thirteen app-hosted tests), with a warning-free build and
+194 Swift tests green. The four existing `SessionReadingTests` also pass together in light mode; the dark child
+Details case repeatedly missed its native menu tap and was left unchanged. The GET-only Temas audit separately
+decoded/resolved all six Markdown references and all 20 stored PNGs, then deleted its raw page.
 
 ## Language
 
@@ -411,6 +449,53 @@ cases also pass; the unread-jump check correctly skips after its viewed watermar
 reveal links displaced by the new section and wait for the delayed AutoFill overlay before cancelling it. Use the
 normal simulator signing configuration when running Keychain/server regressions, not `CODE_SIGNING_ALLOWED=NO`.
 
+## Offline scrolling fixtures and performance checks
+
+Debug builds accept `-OpenCodeScrollFixture conversation` or `-OpenCodeScrollFixture sessions`, optionally
+`-OpenCodeFixturePosition top|middle|tail`, `-OpenCodeTheme openchamber-light|openchamber-dark` and
+`-OpenCodeFixtureUpdates` (four local preview updates per second). This bypasses server setup, SSE and pruning;
+the fixture client's HTTP transport rejects every request. Never combine this mode with a live-server test.
+The bundled JSON has 300 messages/525 parts and 300 rows. Only sizes, Markdown structure and tool kinds came
+from three read-only, 100-message pages; every displayed string/identifier/path is synthetic. The raw pages were deleted.
+`script/generate-scroll-fixture.py` documents safe regeneration from temporary GET response files.
+Release builds exclude the fixture JSON and compile out its launch mode/client/driver.
+
+Use **OpenCode Fluidez** (`C960B2FA-F2AB-4E39-BF82-50050DF20A27`) and DerivedData
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-fluidez-derived`:
+
+```sh
+xcodebuild build-for-testing -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCode \
+  -destination 'platform=iOS Simulator,id=C960B2FA-F2AB-4E39-BF82-50050DF20A27' \
+  -derivedDataPath /private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-fluidez-derived
+python3 packages/ios-custom/script/test-scrolling.py --label current
+python3 packages/ios-custom/script/profile-scrolling.py --label current-conversation --template 'Time Profiler'
+```
+
+XCTest measures real swipes/deceleration (five iterations), CPU and, on physical iOS, Apple's hitch-time ratio.
+`--device iphone14` requires a separately acquired `aparelhos-fisicos` lease and a device `build-for-testing`;
+all device execution goes through `device-lease exec`. Simulator SwiftUI/Animation Hitches templates are unsupported
+by this Xcode runtime; Time Profiler/Hangs work there, and both additional templates work on the iPhone 14.
+The optional `-OpenCodeFixtureAutoScroll` driver records frame intervals and main-thread CPU over 12 seconds;
+its `stallRatio60Hz` is a display-link diagnostic, **not** Apple's hitch metric. Traces, screenshots, exported XCTest
+metrics and per-run HEAD/source-hash manifests go to the temporary `ios-fluidez-prints/` directory above.
+Use `profile-scrolling.py --frames` for the same driver without Instruments, or `--mode sessions --updates --frames`.
+
+October 22, 2026 measurements (Debug, HEAD `e6988007d3`, concurrent working-tree snapshots recorded in the manifests):
+
+| Conversation, iPhone 14 | Before | After |
+| --- | ---: | ---: |
+| XCTest frame rate | 27.36 fps | 58.87 fps |
+| XCTest hitch-time ratio | 452.08 ms/s | 0 ms/s |
+| XCTest process CPU / four-swipe batch | 11.88 s | 4.59 s |
+| 12-second driver: main-thread CPU | 12.15 s | 5.00 s |
+| Driver p50 / p95 frame interval | 137.61 / 382.33 ms | 16.69 / 16.69 ms |
+
+Simulator driver stages: baseline p95 **453 ms**, per-text-view measurement cache **398 ms**, isolated viewport
+observation/size-only row geometry **60.5 ms**, bounded Markdown reuse/compact-header measurement **37.7 ms**.
+These are directional stage comparisons, not isolated A/B tests: the other agents' concurrent source changes are
+recorded too. Static Sessões stays near **59.5 fps** (preview updates: **58.7 fps**); its device hitch ratio varies
+between iterations, so this does not establish a fix for every live-server Sessões hitch.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with
@@ -467,9 +552,9 @@ iPhone (WARP, org alexandrerm, master@alexandrem.com.br)
   the route has buffering disabled, a one-hour read timeout, and WebSocket upgrades enabled. A WebSocket for events
   would require a new backend endpoint and bring no gain, so WebSocket is used only where the server already offers
   it (PTY, when terminals come into scope).
-- **App Transport Security:** allow plain HTTP only for `opencode2-mac.alexandrem.com.br`, through
-  `NSExceptionDomains` with `NSExceptionAllowsInsecureHTTPLoads`. Do not use `NSAllowsArbitraryLoads`. Traffic is
-  already encrypted by the WARP tunnel.
+- **App Transport Security:** allow plain HTTP only for `opencode2-mac.alexandrem.com.br` and the private image-storage
+  host `seaweedfs-svc`, through `NSExceptionDomains` with `NSExceptionAllowsInsecureHTTPLoads`. Do not use
+  `NSAllowsArbitraryLoads`. Traffic is already encrypted by the WARP tunnel; storage has its own DNS/route policy.
 - **Origin:** nginx rejects requests whose `Origin` is not on its list. `URLSession` sends no `Origin`, so do not
   add one.
 - **Availability:** the route depends on the Mac being on and awake and on the OrbStack containers being healthy.
@@ -570,6 +655,21 @@ The OpenAPI generator (`swift-openapi-generator`) was ruled out. The document ha
 discriminator, it describes the event payload only as an opaque JSON string, and it does not include the plugin RPCs.
 If manual maintenance becomes costly, the next step is to emit Swift from the same Effect contract that
 `packages/httpapi-codegen` already reflects, which would also cover the RPCs.
+
+### Opening a conversation
+
+Health, Session metadata, execution activity and the unchanged 40-message tail load concurrently. The tail is published
+before directory availability, catalogs and family reads; independent catalogs also load concurrently. Sending, viewed
+acknowledgement and saved-position restoration wait for the stable runtime projection. Late runtime results never
+overwrite history paged in meanwhile.
+This applies equally to lean and native transport: there is no missing-RPC capability memory, special fallback policy,
+smaller first page or new transcript cache.
+
+For sandbox-only timing, build for **OpenCode Abertura** (`3CD95181-75A3-4225-B919-6B1C4DCFA77E`) with DerivedData
+`$TMPDIR/opencode/ios-abertura-derived`, then run `python3 packages/ios-custom/script/test-session-opening.py after`.
+The runner always supplies the explicit sandbox URL/password. DEBUG-only probes time route commitment → first transcript
+frame; loopback-only delay/old-server emulation compares normal RPC, 400-ms/req RPC and 400-ms/req missing-RPC fallback.
+It reads existing histories without prompts, seed changes or service operations. Detailed measurements are in the contract.
 
 ### Older custom servers
 

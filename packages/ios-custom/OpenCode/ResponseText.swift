@@ -14,6 +14,17 @@ extension EnvironmentValues {
 }
 
 final class ResponseTextView: UITextView {
+  private(set) var measuredSizes: [CGFloat: CGSize] = [:]
+  override var attributedText: NSAttributedString! {
+    didSet { measuredSizes.removeAll(keepingCapacity: true) }
+  }
+  func fittingSize(width: CGFloat) -> CGSize {
+    if let size = measuredSizes[width] { return size }
+    let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    if measuredSizes.count >= 8 { measuredSizes.removeAll(keepingCapacity: true) }
+    measuredSizes[width] = size
+    return size
+  }
   override func copy(_ sender: Any?) {
     super.copy(sender)
     Haptics.play(.selection)
@@ -95,6 +106,12 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
     view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first }
     view.searchAlign = highlights.align
+    let matches = highlights.matches.filter { $0.partID == partID }
+    let rendering = Rendering(
+      block: block, theme: theme.id, matches: matches,
+      current: matches.contains { $0.id == highlights.current } ? highlights.current : nil)
+    guard context.coordinator.rendering != rendering else { return }
+    context.coordinator.rendering = rendering
     let text = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
     let codeBlock: Bool = { if case .code = block.kind { true } else { false } }()
@@ -127,7 +144,7 @@ struct SelectableResponseText: UIViewRepresentable {
       }
       text.append(NSAttributedString(string: run.text, attributes: attributes))
     }
-    for match in highlights.matches where match.partID == partID {
+    for match in matches {
       for range in ConversationSearch.renderedRanges(match.range, block: block) {
         text.addAttribute(.backgroundColor, value: theme.uiColor(.primary).withAlphaComponent(
           match.id == highlights.current ? 0.3 : 0.1), range: range)
@@ -142,9 +159,10 @@ struct SelectableResponseText: UIViewRepresentable {
     -> CGSize?
   {
     guard let width = proposal.width, width > 0 else { return nil }
-    return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    return uiView.fittingSize(width: width)
   }
   static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
+    coordinator.rendering = nil
     view.clearSelection()
     view.attributedText = nil
     view.sourceBlock = nil
@@ -157,6 +175,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate {
+    var rendering: Rendering?
     func textViewDidChangeSelection(_ textView: UITextView) {
       guard textView.selectedRange.length > 0 else { return }
       (textView as? ResponseTextView)?.selectionChanged?()
@@ -187,6 +206,12 @@ struct SelectableResponseText: UIViewRepresentable {
         children: Array(suggestedActions.prefix(1)) + [custom] + suggestedActions.dropFirst())
     }
   }
+  struct Rendering: Equatable {
+    let block: MarkdownBlock
+    let theme: String
+    let matches: [ConversationMatch]
+    let current: String?
+  }
 }
 
 struct ResponseMarkdown: View {
@@ -202,10 +227,17 @@ struct ResponseMarkdown: View {
   @State private var measuredHeight: CGFloat?
   @State private var mounted = false
   @State private var parsing: Task<Void, Never>?
+  init(text: String, messageID: String, partID: String) {
+    self.text = text
+    self.messageID = messageID
+    self.partID = partID
+    _blocks = State(initialValue: ResponseMarkdownCache.shared.cached(text) ?? [])
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       ForEach(blocks) { block in
         switch block.kind {
+        case .image(let source): FeedImageView(source: source, name: block.text)
         case .rule: Divider().overlay(theme.color(.border))
         case .code:
           VStack(alignment: .leading, spacing: 8) {
@@ -265,10 +297,13 @@ struct ResponseMarkdown: View {
   private func parse() {
     parsing?.cancel()
     let source = text
-    // A recycled List row can disappear and reappear with identical text. Explicitly
-    // restart parsing on appearance after releasing its blocks, not only on text ID.
+    // Recycling must not insert an empty row and then reflow it after another parse.
+    if let cached = ResponseMarkdownCache.shared.cached(source) {
+      blocks = cached
+      return
+    }
     parsing = Task { @MainActor in
-      let parsed = await Task.detached(priority: .userInitiated) { MarkdownBlocks.parse(source) }.value
+      let parsed = await ResponseMarkdownCache.shared.parse(source)
       guard !Task.isCancelled, mounted else { return }
       blocks = parsed
     }

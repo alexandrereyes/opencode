@@ -28,6 +28,12 @@ import XCTest
   }
   private func openFromSessions(_ app: XCUIApplication, title: String) {
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+    // Other sandbox suites import recent histories concurrently; old seeds can be
+    // several screens below the freshly imported sessions.
+    for _ in 0..<20 {
+      if row.exists { break }
+      app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+    }
     app.revealSessionRow(row)
     row.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 15))
@@ -142,14 +148,9 @@ import XCTest
       let app = try launch("A", theme: theme)
       let transcript = app.collectionViews["conversation-transcript"]
       for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
-      let step = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Usou 5'")).firstMatch
+      let step = app.buttons["Usou 1 · Ler"]
       XCTAssertTrue(step.waitForExistence(timeout: 10))
-      let child = app.buttons.matching(
-        NSPredicate(format: "label CONTAINS 'Comparar alternativas'")
-      )
-      .firstMatch
-      if child.exists { step.tap() }
-      step.tap()
+      if step.value as? String != "Expandido" { step.tap() }
       let read = app.buttons.matching(NSPredicate(format: "label CONTAINS '212 linhas'")).firstMatch
       XCTAssertTrue(read.waitForExistence(timeout: 5))
       read.tap()

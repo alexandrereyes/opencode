@@ -66,7 +66,12 @@ import SwiftUI
     headers.setObject(container, forKey: probe)
     headerIDs.setObject(id as NSString, forKey: probe)
   }
-  func register(_ probe: UIView, id: String) { probes.setObject(probe, forKey: id as NSString) }
+  func register(_ probe: UIView, id: String) {
+    probes.setObject(probe, forKey: id as NSString)
+    #if DEBUG
+    if ScrollFixtures.mode != nil { ScrollFixtures.scrollState = self }
+    #endif
+  }
   func unregister(_ probe: UIView, id: String) {
     if probes.object(forKey: id as NSString) === probe {
       probes.removeObject(forKey: id as NSString)

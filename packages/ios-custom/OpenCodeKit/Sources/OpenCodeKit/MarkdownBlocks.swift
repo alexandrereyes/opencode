@@ -7,6 +7,7 @@ public struct MarkdownRun: Sendable, Equatable {
   public var emphasis = false
   public var code = false
   public var link: String?
+  public var image: String? = nil
   /// One source UTF-16 offset per displayed UTF-16 unit; nil denotes generated list markers.
   public var offsets: [Int?]
 }
@@ -16,6 +17,7 @@ public struct MarkdownBlock: Sendable, Identifiable, Equatable {
     case paragraph
     case heading(Int)
     case code(String?)
+    case image(String)
     case quote, table, rule
   }
   public let id: Int
@@ -80,6 +82,18 @@ public enum MarkdownBlocks {
     func inline(
       _ node: any Markup, strong: Bool = false, emphasis: Bool = false, link: String? = nil
     ) -> [MarkdownRun] {
+      if let image = node as? Markdown.Image, let destination = image.source {
+        var value = run(image.plainText, node: node)
+        value.image = destination
+        return [value]
+      }
+      if let html = node as? InlineHTML {
+        return HTMLImages.parse(html.rawHTML).map { image in
+          var value = run(image.name, node: node)
+          value.image = image.source
+          return value
+        }
+      }
       if let text = node as? Markdown.Text {
         return [run(text.string, node: node, strong: strong, emphasis: emphasis, link: link)]
       }
@@ -101,9 +115,30 @@ public enum MarkdownBlocks {
           ? []
           : [MarkdownRun(text: prefix, offsets: Array(repeating: nil, count: prefix.utf16.count))])
         + inline(node)
-      blocks.append(MarkdownBlock(id: blocks.count, kind: kind, depth: depth, runs: runs))
+      appendRuns(runs, kind: kind, depth: depth)
+    }
+    func appendRuns(_ runs: [MarkdownRun], kind: MarkdownBlock.Kind, depth: Int) {
+      var text: [MarkdownRun] = []
+      for value in runs {
+        guard let image = value.image else { text.append(value); continue }
+        if !text.isEmpty {
+          blocks.append(MarkdownBlock(id: blocks.count, kind: kind, depth: depth, runs: text))
+          text = []
+        }
+        blocks.append(MarkdownBlock(id: blocks.count, kind: .image(image), depth: depth, runs: [value]))
+      }
+      if !text.isEmpty || runs.isEmpty {
+        blocks.append(MarkdownBlock(id: blocks.count, kind: kind, depth: depth, runs: text))
+      }
     }
     func walk(_ node: any Markup, depth: Int = 0, quoted: Bool = false, prefix: String = "") {
+      if let html = node as? HTMLBlock {
+        for image in HTMLImages.parse(html.rawHTML) {
+          blocks.append(MarkdownBlock(id: blocks.count, kind: .image(image.source), depth: depth,
+            runs: [run(image.name, node: node)]))
+        }
+        return
+      }
       if let code = node as? CodeBlock {
         blocks.append(
           MarkdownBlock(
@@ -134,7 +169,7 @@ public enum MarkdownBlocks {
               ? [] : [MarkdownRun(text: "  │  ", offsets: Array(repeating: nil, count: 5))])
               + inline(cell)
           }
-          blocks.append(MarkdownBlock(id: blocks.count, kind: .table, depth: depth, runs: runs))
+          appendRuns(runs, kind: .table, depth: depth)
         }
         return
       }

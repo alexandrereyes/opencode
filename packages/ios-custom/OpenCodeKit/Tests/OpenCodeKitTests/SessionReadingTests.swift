@@ -59,7 +59,7 @@ import Testing
   for status in ["completed", "running", "error"] {
     let todo = ConversationPart(type: "tool", name: "todowrite", state: .object(["status": .string(status)]))
     #expect(todo.suppressed)
-    #expect(ConversationProjection.stepLabel([todo, ConversationPart(type: "tool", name: "read")]) == "Usou 1 · Leu")
+    #expect(ConversationProjection.stepLabel([todo, ConversationPart(type: "tool", name: "read")]) == "Usou 1 · Ler")
   }
 }
 

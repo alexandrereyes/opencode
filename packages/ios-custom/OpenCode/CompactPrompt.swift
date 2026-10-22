@@ -5,8 +5,8 @@ struct CompactPrompt: UIViewRepresentable {
   let text: String
   let theme: AppTheme
 
-  func makeUIView(context: Context) -> UILabel {
-    let label = UILabel()
+  func makeUIView(context: Context) -> CompactPromptLabel {
+    let label = CompactPromptLabel()
     // The suffix is ours; UILabel must not append a second, native ellipsis.
     label.numberOfLines = 0
     label.lineBreakMode = .byWordWrapping
@@ -14,13 +14,22 @@ struct CompactPrompt: UIViewRepresentable {
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }
-  func updateUIView(_ label: UILabel, context: Context) {
+  func updateUIView(_ label: CompactPromptLabel, context: Context) {
     label.textColor = theme.uiColor(.userBubbleText)
     label.accessibilityLabel = text
+    if label.source != text {
+      label.source = text
+      label.normalized = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+      label.measurements.removeAll(keepingCapacity: true)
+    }
   }
-  func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+  func sizeThatFits(_ proposal: ProposedViewSize, uiView: CompactPromptLabel, context: Context) -> CGSize? {
     guard let width = proposal.width, width > 0 else { return nil }
-    let normalized = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    if let measured = uiView.measurements[width] {
+      if uiView.text != measured.text { uiView.text = measured.text }
+      return measured.size
+    }
+    let normalized = uiView.normalized
     func fits(_ value: String) -> Bool {
       uiView.text = value
       return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
@@ -43,6 +52,15 @@ struct CompactPrompt: UIViewRepresentable {
       uiView.text = ConversationProjection.ellipsis(normalized, count: lower)
     }
     let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-    return CGSize(width: truncated ? width : size.width, height: size.height)
+    let result = CGSize(width: truncated ? width : size.width, height: size.height)
+    if uiView.measurements.count >= 8 { uiView.measurements.removeAll(keepingCapacity: true) }
+    uiView.measurements[width] = (uiView.text ?? "", result)
+    return result
   }
+}
+
+final class CompactPromptLabel: UILabel {
+  var source = ""
+  var normalized = ""
+  var measurements: [CGFloat: (text: String, size: CGSize)] = [:]
 }

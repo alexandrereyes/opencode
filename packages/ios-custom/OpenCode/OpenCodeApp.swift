@@ -7,7 +7,11 @@ import SwiftUI
 struct OpenCodeApp: App {
   var body: some Scene {
     WindowGroup {
+      #if DEBUG
+      if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
+      #else
       AppRoot()
+      #endif
     }
   }
 }

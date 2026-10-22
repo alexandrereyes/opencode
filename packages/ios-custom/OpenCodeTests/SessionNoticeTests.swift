@@ -7,8 +7,8 @@ import XCTest
 @MainActor final class SessionNoticeTests: XCTestCase {
   func testIncompatibleNoticeFromInfoWithoutVersion() async throws {
     let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)) { request in
-      XCTAssertEqual(request.url?.path, "/api/info")
-      return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+      return (Data("{}".utf8), HTTPURLResponse(url: request.url!,
+        statusCode: request.url?.path == "/api/info" ? 200 : 404, httpVersion: nil, headerFields: nil)!)
     }
     let store = ConversationStore(id: "ses_notice_test", client: client, hub: EventHub(client: client))
     await store.refresh()

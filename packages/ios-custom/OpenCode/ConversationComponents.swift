@@ -71,10 +71,8 @@ struct UserBubble: View {
       VStack(alignment: .trailing, spacing: 8) {
         if !compact {
           ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
-            if let object = file.object, object["mime"]?.string?.hasPrefix("image/") == true,
-              let encoded = object["data"]?.string
-            {
-              AttachmentPreview(encoded: encoded, name: object["name"]?.string ?? "Imagem anexada")
+            if let image = FeedImage.attachment(file) {
+              FeedImageView(source: image.source, name: image.name, compact: true)
             }
           }
           ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
@@ -164,58 +162,67 @@ struct ConversationStep: View {
   let id: String
   let store: ConversationStore
   let openChild: (String) -> Void
+  var references: [ConversationActivityPart] = []
+  var grouped = true
+  var busy = false
   @State private var outputs: [String: String] = [:]
-  private var expanded: Bool { store.expansionValues[id] ?? (pending || revealed) }
+  private var expanded: Bool { !grouped || (store.expansionValues[id] ?? (pending || revealed)) }
   private func detail(_ key: String) -> Bool {
-    store.expansionValues["\(id):detail:\(key)"] == true
+    store.expansionValues["activity:detail:\(key)"] == true
   }
   private func toggleDetail(_ key: String) {
-    store.expansionValues["\(id):detail:\(key)"] = !detail(key)
+    store.expansionValues["activity:detail:\(key)"] = !detail(key)
     if !detail(key) { outputs.removeValue(forKey: key) }
   }
   private var pending: Bool {
-    parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
+    busy || parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
   }
   private var revealed: Bool { parts.contains { $0.id != nil && $0.id == store.revealedToolID } }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Button {
-        store.expansionValues[id] = !expanded
-      } label: {
-        HStack(spacing: 6) {
-          Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13)).lineLimit(1)
-          Image(systemName: expanded ? "chevron.down" : "chevron.right")
-            .font(
-              .system(size: 10))
-        }.foregroundStyle(theme.color(.textSecondary)).frame(
-          maxWidth: .infinity, alignment: .leading)
-      }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
+      if grouped {
+        Button {
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) { store.expansionValues[id] = !expanded }
+        } label: {
+          HStack(spacing: 6) {
+            if pending { ProgressView().controlSize(.mini) }
+            Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13))
+            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.system(size: 10))
+          }.foregroundStyle(theme.color(.textSecondary)).frame(
+            maxWidth: .infinity, alignment: .leading)
+        }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
+        .accessibilityValue(expanded ? "Expandido" : "Recolhido")
+        .accessibilityIdentifier("tool-group-\(id)")
+      }
       if expanded {
-        ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+        ForEach(entries) { entry in
+          let part = entry.part
           if part.type == "reasoning" {
-            let key = "reasoning:\(index)"
+            let key = entry.id
             Button {
               toggleDetail(key)
             } label: {
               HStack(spacing: 12) {
                 Image(systemName: "sparkles")
-                Text(
-                  "Pensou\(part.time?.completed.map { " \(ConversationProjection.duration($0 - (part.time?.created ?? $0)))" } ?? "")"
-                )
+                Text(entry.reasoningLabel)
                 Spacer()
                 Image(systemName: detail(key) ? "chevron.down" : "chevron.right").font(
                   .system(size: 10))
               }
             }.buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(
               theme.color(.textSecondary))
+              .accessibilityLabel(entry.reasoningLabel)
+              .accessibilityIdentifier("reasoning-\(entry.id)")
             if detail(key) {
-              Text(part.text ?? "").font(.footnote).textSelection(.enabled)
+              ResponseMarkdown(text: part.text ?? "", messageID: entry.messageID, partID: entry.id)
             }
           } else if part.type == "tool", !part.suppressed {
-            if part.name == "subagent" {
+            if part.name == "subagent" || part.name == "task" {
               subagent(part)
             } else {
-              tool(part, key: part.id ?? "\(index)")
+              tool(part, key: entry.id)
             }
           } else if part.type != "tool" {
             Text("Conteúdo da sessão · \(part.type.description)").font(.footnote).foregroundStyle(
@@ -223,6 +230,12 @@ struct ConversationStep: View {
           }
         }
       }
+    }.onAppear {
+      // Remember the initial choice, including automatic expansion of running work.
+      // Finishing a tool must not collapse a group the person is reading.
+      if grouped && (pending || revealed) && store.expansionValues[id] == nil { store.expansionValues[id] = true }
+    }.onChange(of: pending) { _, running in
+      if grouped && running && store.expansionValues[id] == nil { store.expansionValues[id] = true }
     }.onChange(of: store.revealedToolID, initial: true) { _, id in
       guard let id else { return }
       if parts.contains(where: { $0.id == id }) {
@@ -232,6 +245,12 @@ struct ConversationStep: View {
     }
     .onChange(of: expanded) { _, open in if !open { outputs.removeAll() } }
     .onDisappear { outputs.removeAll() }
+  }
+  private var entries: [ConversationActivityPart] {
+    if !references.isEmpty { return references }
+    return parts.enumerated().map { index, part in
+      ConversationActivityPart(id: part.id ?? "\(id):\(index)", messageID: id, part: part)
+    }
   }
   private func subagent(_ part: ConversationPart) -> some View {
     let id = part.input["agent"]?.string ?? "subagent"
@@ -301,6 +320,8 @@ struct ConversationStep: View {
       if detail(key) {
         VStack(alignment: .leading, spacing: 8) {
           if let error = part.errorText { Text(error).foregroundStyle(theme.color(.error)) }
+          ToolOutputImages(part: part, messageID: references.first { $0.part.id == part.id }?.messageID
+            ?? store.messages.first { $0.content?.contains { $0.id == part.id } == true }?.id)
           if !part.diffs.isEmpty {
             ForEach(Array(part.diffs.enumerated()), id: \.offset) { _, file in
               Text(file["file"]?.string ?? "").fontWeight(.medium)
