@@ -255,6 +255,9 @@ visible; with the keyboard hidden, the introduction is centered in the available
   Location; the folder name is the fallback. The root uses its current branch (VCS, then the branches RPC), never the
   `main` sentinel as a guessed branch. Search appears only with ten or more existing worktrees. Non-Git projects keep
   their principal directory and explain that worktrees are unavailable.
+  Projeto and Diretório wait for the composer's real keyboard dismissal before presentation. Closing a selector,
+  including a swipe without changes, restores composer focus; the base-branch sheet instead owns its search keyboard
+  while presented. The shared editor suppresses background focus restoration until the selector has closed.
 - **Defaults:** the native client uses the web's **last-used** destination rule, separately per server URL/project:
   `local` means root, `workspace` means **Nova worktree** on the next implicit selection. It remembers the category,
   not the last existing path/base branch. An explicit restored draft retains its destination. The pure resolver also
@@ -310,8 +313,11 @@ Git refs or adding a production test hook. Root/existing/new sends use Luna 6/lo
 Screenshots and JSON evidence go to
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda9-prints/`.
 The checkout path is opaque: the runner verifies its Git common directory belongs to the fake repository, rather
-than assuming the sandbox's configured strategy creates folders beneath the sandbox home. It retains the one
-verification checkout for review; remove it afterwards with `DELETE /api/worktree` and `{projectID,directory,force:false}`.
+than assuming the sandbox's configured strategy creates folders beneath the sandbox home. **No verification checkout
+is retained:** immediately after each send case, verify the fake repository identity, base revision and MCP state,
+then call `DELETE /api/worktree` with `{projectID,directory,force:true}`. Failure cleanup uses the same API. The runner
+compares the fake repositories' Git worktree registrations and the `~/Worktrees` folder inventory before/after; it
+never removes a real repository's folder. New-worktree mockup screenshots are captured before send.
 No seeds or pending seed requests are changed, and no production server or physical device is used.
 
 Wave-9 verification: **141 Swift Testing tests**, warning-free simulator build/test build, all three new UI cases in
@@ -320,6 +326,13 @@ subagent/alert cases pass. The additional unread case skips because its existing
 backwards. One first-pass native Details-menu tap missed; the complete session/reading rerun passed without product
 or existing-test changes. `execution-ledger.json` in the screenshot directory records the real new Sessions,
 worktree identity/base/MCP verification and cleanup; the original permission and question still remain pending.
+
+Wave-9 review adds `test04SelectorKeyboardDismissalAndComposerRestoration`: open each selector from a focused composer,
+assert Projeto/Diretório have no keyboard, swipe-dismiss without changing anything, choose items, and prove restored
+composer focus by typing without retapping it. Base search owns its keyboard and cannot change the underlying draft.
+Both themes capture only the fake repository's five existing worktrees; no verification checkout is kept. Focus
+restoration avoids overlapping an interactive sheet-dismissal animation, and selector presentation waits on the
+public UIKit keyboard layout guide/did-hide notification rather than a fixed delay.
 
 ## Platform and distribution
 

@@ -7,6 +7,8 @@ struct NewSessionView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var store: NewSessionStore
   @State private var sheet: Selector?
+  @State private var presentingSelector = false
+  @State private var presentation: Task<Void, Never>?
   private enum Selector: String, Identifiable {
     case project, directory, base, add
     var id: String { rawValue }
@@ -80,7 +82,10 @@ struct NewSessionView: View {
     .task { await store.open() }
     .task(id: store.loadKey) { await store.reloadSelection() }
     .onDisappear {
+      presentation?.cancel()
+      presentingSelector = false
       store.draft.focused = false
+      store.draft.focusSuppressed = false
       Task { await store.draft.persist() }
     }
     .onChange(of: scenePhase) { _, phase in
@@ -88,9 +93,25 @@ struct NewSessionView: View {
     }
     .onChange(of: store.draft.focused) { _, focused in
       // The expanded composer may restore focus after a selector starts presenting.
-      if focused && sheet != nil { store.draft.focused = false }
+      if focused && (sheet != nil || presentingSelector) { store.draft.focused = false }
     }
-    .sheet(item: $sheet) { selector in
+    .sheet(
+      item: $sheet,
+      onDismiss: {
+        guard sheet == nil, !presentingSelector else { return }
+        presentation = Task {
+          // Let SwiftUI finish the sheet's dismissal transaction before starting a keyboard animation.
+          await Task.yield()
+          guard !Task.isCancelled, sheet == nil, !presentingSelector,
+            store.sessions.conversationPath.last?.newSession == true
+          else { return }
+          store.draft.focusSuppressed = false
+          store.draft.focused = true
+          // Do not overlap keyboard restoration with the interactive sheet's finishing animation.
+          UIView.performWithoutAnimation { store.draft.input?.becomeFirstResponder() }
+        }
+      }
+    ) { selector in
       Group {
         switch selector {
         case .project:
@@ -106,11 +127,18 @@ struct NewSessionView: View {
     }
   }
   private func show(_ selector: Selector) {
+    guard !presentingSelector else { return }
+    presentation?.cancel()
+    presentingSelector = true
+    store.draft.focusSuppressed = true
     store.draft.focused = false
-    // Resign before UIKit begins the sheet transition, not on the next SwiftUI update.
-    UIApplication.shared.sendAction(
-      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    sheet = selector
+    presentation = Task {
+      // Presenting during the hide animation can make UIKit retain the composer's keyboard.
+      await store.draft.input?.dismissKeyboard()
+      guard !Task.isCancelled else { return }
+      sheet = selector
+      presentingSelector = false
+    }
   }
   private func selectors(_ project: Project) -> some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -143,7 +171,7 @@ struct NewSessionView: View {
         }
       }
     }.font(.system(size: 14)).foregroundStyle(theme.color(.text)).buttonStyle(.plain)
-      .padding(.horizontal, 6).disabled(store.draft.sending || store.loading)
+      .padding(.horizontal, 6).disabled(store.draft.sending || store.loading || presentingSelector)
   }
   private var directorySelector: some View {
     Button {

@@ -31,7 +31,8 @@ struct ComposerTextView: UIViewRepresentable {
     defer { context.coordinator.updating = false }
     view.isEditable = !draft.sending
     // A cover and its presenter coexist during dismissal; only one may own the keyboard.
-    let focused = draft.focused && draft.editorOwner == owner
+    if draft.editorOwner == owner { draft.input = view }
+    let focused = draft.focused && !draft.focusSuppressed && draft.editorOwner == owner
     view.requestFocus = focused
     view.submit = submit
     view.canSubmit = canSubmit && draft.trigger == nil && draft.editorOwner == owner
@@ -149,6 +150,31 @@ struct ComposerTextView: UIViewRepresentable {
 }
 
 final class ComposerInputView: UITextView {
+  private var keyboardDismissal: CheckedContinuation<Void, Never>?
+  private var keyboardObserver: (any NSObjectProtocol)?
+  func dismissKeyboard() async {
+    guard let window else { return }
+    window.layoutIfNeeded()
+    guard window.keyboardLayoutGuide.layoutFrame.height > window.safeAreaInsets.bottom + 1 else {
+      resignFirstResponder()
+      return
+    }
+    await withCheckedContinuation { continuation in
+      keyboardDismissal = continuation
+      keyboardObserver = NotificationCenter.default.addObserver(
+        forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor [weak self] in self?.finishKeyboardDismissal() }
+      }
+      resignFirstResponder()
+    }
+  }
+  private func finishKeyboardDismissal() {
+    if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }
+    keyboardObserver = nil
+    keyboardDismissal?.resume()
+    keyboardDismissal = nil
+  }
   var escape: (() -> Void)?
   var submit: (() -> Void)?
   var canSubmit = false
@@ -165,7 +191,13 @@ final class ComposerInputView: UITextView {
   var querying = false
   override func didMoveToWindow() {
     super.didMoveToWindow()
-    if window != nil && requestFocus { becomeFirstResponder() }
+    guard let window else {
+      finishKeyboardDismissal()
+      return
+    }
+    // Install the public guide before focus changes so dismissal can inspect real visibility.
+    _ = window.keyboardLayoutGuide
+    if requestFocus { becomeFirstResponder() }
   }
   @discardableResult override func resignFirstResponder() -> Bool {
     hardwareSubmitted = false

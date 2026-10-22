@@ -53,6 +53,8 @@ extension ComposerTokenKind {
   var commenting: ChatQuote?
   var selection = NSRange(location: 0, length: 0)
   var focused = false
+  var focusSuppressed = false
+  @ObservationIgnored weak var input: ComposerInputView?
   var editorOwner: UUID?
   var dismissedTrigger: ComposerTrigger?
   var editing: InboxItem?

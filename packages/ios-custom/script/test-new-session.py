@@ -14,6 +14,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -45,6 +46,46 @@ ledger_path = evidence / "worktrees-created.json"
 ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else []
 before = {s["id"] for s in api("/api/session?limit=500")["data"]}
 worktrees_before = {w["directory"] for w in api("/api/worktree?projectID=" + project["id"])}
+real_worktrees = Path.home() / "Worktrees"
+folders_before = {str(p) for p in real_worktrees.iterdir() if p.is_dir()}
+fake_roots = [p for p in (home / "repos").iterdir() if (p / ".git").exists()]
+
+def fake_checkouts():
+    return {line.removeprefix("worktree ") for root in fake_roots
+        for line in subprocess.check_output(["git", "-C", str(root), "worktree", "list", "--porcelain"], text=True).splitlines()
+        if line.startswith("worktree ")}
+
+def cleanup_worktrees():
+    inventory = api("/api/worktree?projectID=" + project["id"])
+    for item in inventory:
+        if item["directory"] in worktrees_before:
+            continue
+        directory = item["directory"]
+        assert directory in fake_checkouts(), "Refuse an unregistered checkout"
+        common = subprocess.check_output(["git", "-C", directory, "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip()
+        assert Path(common).resolve() == (Path(project["canonical"]) / ".git").resolve(), "Refuse a real repository's checkout"
+        verification = {"directory": directory, "kept": False}
+        try:
+            owned = {s["id"] for s in api("/api/session?limit=500")["data"]
+                if s["id"] not in before and s["location"]["directory"] == directory}
+            deadline = time.monotonic() + 60
+            while owned.intersection(api("/api/session/active")["data"]):
+                if time.monotonic() >= deadline:
+                    for session in owned:
+                        api("/api/session/" + session + "/interrupt", method="POST")
+                    raise RuntimeError("Verification execution did not settle")
+                time.sleep(0.25)
+            verification["revision"] = subprocess.check_output(["git", "-C", directory, "rev-parse", "HEAD"], text=True).strip()
+            verification["baseRevision"] = subprocess.check_output(["git", "-C", project["canonical"], "rev-parse", "feat/redesign-identidade"], text=True).strip()
+            verification["matchesBase"] = verification["revision"] == verification["baseRevision"]
+            q = urllib.parse.urlencode({"location[directory]": directory})
+            verification["mcp"] = [{"name": s["name"], "status": s["status"]["status"]} for s in api("/api/mcp?" + q)["data"]]
+        finally:
+            api("/api/worktree", {"projectID": project["id"], "directory": directory, "force": True}, method="DELETE")
+            assert not Path(directory).exists() and directory not in fake_checkouts()
+            ledger.append({"directory": directory, "projectID": project["id"], "removed": True})
+            report["worktrees"].append(verification)
+            ledger_path.write_text(json.dumps(ledger, indent=2))
 devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
 device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == "OpenCode Sessoes")
 def draft_path():
@@ -66,6 +107,7 @@ def run_case(case):
         "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result), "-only-testing:OpenCodeUITests/NewSessionTests/" + case]
     status = subprocess.call(command)
     report["runs"].append({"case": case, "status": status, "result": str(result)})
+    cleanup_worktrees()
     export = evidence / ("attachments-" + case + "-" + token)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(export)], check=True)
     for test in json.loads((export / "manifest.json").read_text()):
@@ -78,9 +120,9 @@ def run_case(case):
 
 try:
     subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
-    cases = sys.argv[1:] or ["test01SelectorsPreviewAndPersistentDraft", "test02InvalidBaseKeepsDraftAndShowsToast", "test03SendRootExistingAndNewWorktree"]
+    cases = sys.argv[1:] or ["test01SelectorsPreviewAndPersistentDraft", "test02InvalidBaseKeepsDraftAndShowsToast", "test03SendRootExistingAndNewWorktree", "test04SelectorKeyboardDismissalAndComposerRestoration"]
     for case in cases:
-        if case == "test01SelectorsPreviewAndPersistentDraft":
+        if case in ["test01SelectorsPreviewAndPersistentDraft", "test04SelectorKeyboardDismissalAndComposerRestoration"]:
             subprocess.run(["xcrun", "simctl", "terminate", device, "br.com.alexandrem.opencode"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             draft_path().unlink(missing_ok=True)
         if case == "test02InvalidBaseKeepsDraftAndShowsToast":
@@ -103,33 +145,20 @@ try:
                     draft.write_text(json.dumps(value))
 finally:
     configured.unlink(missing_ok=True)
+    cleanup_worktrees()
     for session in api("/api/session?limit=500")["data"]:
         if session["id"] in before:
             continue
         if session.get("projectID") not in {p["id"] for p in projects if p["canonical"].startswith(str(home / "repos") + "/")}:
             continue
         report["sessions"].append({k: session.get(k) for k in ["id", "location", "model", "agent", "outcome"]})
-    for item in api("/api/worktree?projectID=" + project["id"]):
-        if item["directory"] in worktrees_before:
-            continue
-        directory = item["directory"]
-        common = subprocess.check_output(["git", "-C", directory, "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip()
-        assert Path(common).resolve() == (Path(project["canonical"]) / ".git").resolve(), "Refuse worktree not belonging to the fake repository"
-        revision = subprocess.check_output(["git", "-C", directory, "rev-parse", "HEAD"], text=True).strip()
-        base = subprocess.check_output(["git", "-C", project["canonical"], "rev-parse", "feat/redesign-identidade"], text=True).strip()
-        q = urllib.parse.urlencode({"location[directory]": directory})
-        states = [{"name": s["name"], "status": s["status"]["status"]} for s in api("/api/mcp?" + q)["data"]]
-        report["worktrees"].append({"directory": directory, "revision": revision, "baseRevision": base, "matchesBase": revision == base, "mcp": states, "kept": True})
-        ledger.append({"directory": directory, "projectID": project["id"], "removed": False})
-    retained = [item for item in ledger if not item["removed"]]
-    for item in retained[:-1]:
-        common = subprocess.check_output(["git", "-C", item["directory"], "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip()
-        assert item["projectID"] == project["id"] and Path(common).resolve() == (Path(project["canonical"]) / ".git").resolve()
-        api("/api/worktree", {"projectID": project["id"], "directory": item["directory"], "force": False}, method="DELETE")
-        item["removed"] = True
-        for value in report["worktrees"]:
-            if value["directory"] == item["directory"]:
-                value["kept"] = False
+    for item in ledger:
+        if not Path(item["directory"]).exists() and item["directory"] not in fake_checkouts():
+            item["removed"] = True
+    additions = {str(p) for p in real_worktrees.iterdir() if p.is_dir()} - folders_before
+    report["leftoverFakeCheckouts"] = sorted(p for p in fake_checkouts() if Path(p).parent == real_worktrees)
+    report["newFoldersStillPresent"] = sorted(additions)
+    assert not report["leftoverFakeCheckouts"]
     ledger_path.write_text(json.dumps(ledger, indent=2))
     (evidence / ("verification-" + theme + "-" + token + ".json")).write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))

@@ -60,7 +60,6 @@ import XCTest
   private func submit(_ text: String, _ app: XCUIApplication) {
     let input = app.textViews["conversation-composer"]
     XCTAssertTrue(input.waitForExistence(timeout: 5))
-    input.tap()
     input.typeText(text)
     XCTAssertTrue(app.buttons["Enviar mensagem"].isEnabled)
     app.buttons["Enviar mensagem"].tap()
@@ -87,12 +86,13 @@ import XCTest
     if app.buttons["Continuar"].exists { app.buttons["Continuar"].tap() }
     if app.buttons["new-base"].exists {
       chooseDestination("new-root", app)
-      app.textViews["conversation-composer"].tap()
     }
     keyboardSettled(app)
     XCTAssertFalse(app.tabBars.firstMatch.exists)
     shot("n1-keyboard")
     app.buttons["new-project"].tap()
+    XCTAssertTrue(app.navigationBars["Projeto"].waitForExistence(timeout: 5))
+    keyboardHidden(app)
     shot("n2-project")
     app.buttons["Adicionar projeto"].tap()
     XCTAssertTrue(app.navigationBars["Adicionar repositório"].waitForExistence(timeout: 5))
@@ -129,6 +129,7 @@ import XCTest
         ], timeout: 20), .completed)
     app.buttons["new-directory"].tap()
     XCTAssertTrue(app.navigationBars["Diretório"].waitForExistence(timeout: 5))
+    keyboardHidden(app)
     XCTAssertFalse(app.textFields["Buscar worktrees"].exists)
     shot("n3-directory")
     app.buttons["new-create"].tap()
@@ -141,13 +142,11 @@ import XCTest
     app.buttons["base-main"].tap()
     ready(app)
     let input = app.textViews["conversation-composer"]
-    input.tap()
     input.typeText("Revisa a navegação do app iOS")
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     keyboardSettled(app)
     shot("n4-new-worktree")
     app.switches["mcp-safari-devtools"].tap()
-    input.tap()
     keyboardSettled(app)
     shot("mcp-preview-off")
     app.buttons["new-base"].tap()
@@ -177,6 +176,104 @@ import XCTest
       }, object: nil)
     XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
   }
+  private func keyboardHidden(_ app: XCUIApplication) {
+    let keyboard = app.keyboards.firstMatch
+    let hidden = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        !keyboard.exists || keyboard.frame.minY >= app.frame.maxY
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 10), .completed)
+  }
+  private func composerFocused(_ app: XCUIApplication) {
+    keyboardSettled(app)
+    let input = app.textViews["conversation-composer"]
+    let before = input.value as? String ?? ""
+    app.typeText("x")
+    XCTAssertEqual(input.value as? String, before + "x")
+    app.typeText(XCUIKeyboardKey.delete.rawValue)
+    XCTAssertEqual(input.value as? String, before)
+  }
+  private func dismissSelector(_ title: String, _ app: XCUIApplication) {
+    let bar = app.navigationBars[title]
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+      forDuration: 0.1,
+      thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97)))
+    XCTAssertTrue(bar.waitForNonExistence(timeout: 5))
+    composerFocused(app)
+  }
+  func test04SelectorKeyboardDismissalAndComposerRestoration() throws {
+    let app = try launch()
+    defer { app.terminate() }
+    openNewSession(app)
+    ready(app)
+    chooseProject("abacato-v2", app)
+    chooseDestination("new-root", app)
+    composerFocused(app)
+
+    app.buttons["new-project"].tap()
+    XCTAssertTrue(app.navigationBars["Projeto"].waitForExistence(timeout: 5))
+    keyboardHidden(app)
+    shot("n2-project")
+    dismissSelector("Projeto", app)
+    app.buttons["new-project"].tap()
+    XCTAssertTrue(app.buttons["new-project-opencode2"].waitForExistence(timeout: 5))
+    keyboardHidden(app)
+    app.buttons["new-project-opencode2"].tap()
+    ready(app)
+    composerFocused(app)
+    chooseProject("abacato-v2", app)
+    composerFocused(app)
+
+    app.buttons["new-directory"].tap()
+    XCTAssertTrue(app.navigationBars["Diretório"].waitForExistence(timeout: 5))
+    keyboardHidden(app)
+    let expected = Set(
+      ["neon-mountain", "feat/redesign-identidade", "cosmic-moon", "calm-mountain", "gentle-wolf"]
+        .map { "new-worktree-" + $0 })
+    XCTAssertEqual(
+      Set(
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'new-worktree-'"))
+          .allElementsBoundByIndex.map(\.identifier)), expected)
+    XCTAssertFalse(app.staticTexts["glowing-meadow"].exists)
+    shot("n3-directory")
+    dismissSelector("Diretório", app)
+    chooseDestination("new-worktree-neon-mountain", app)
+    composerFocused(app)
+    chooseDestination("new-create", app)
+    composerFocused(app)
+
+    app.buttons["new-base"].tap()
+    XCTAssertTrue(app.navigationBars["Branch base"].waitForExistence(timeout: 5))
+    keyboardSettled(app)
+    // The base sheet deliberately owns its keyboard; typing must target search, not the composer.
+    app.typeText("main")
+    XCTAssertEqual(app.textFields["selector-search"].value as? String, "main")
+    shot("base-branches")
+    dismissSelector("Branch base", app)
+    XCTAssertEqual(app.textViews["conversation-composer"].value as? String, "")
+    app.buttons["new-base"].tap()
+    XCTAssertTrue(app.buttons["base-main"].waitForExistence(timeout: 10))
+    keyboardSettled(app)
+    app.buttons["base-main"].tap()
+    ready(app)
+    composerFocused(app)
+    app.typeText("Revisa a navegação do app iOS")
+    XCTAssertEqual(
+      app.textViews["conversation-composer"].value as? String, "Revisa a navegação do app iOS")
+    // Unicode injection temporarily hides the simulator keyboard; relaunch the real saved draft
+    // rather than retapping an already focused editor and opening its native edit menu.
+    app.buttons["Voltar"].tap()
+    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))
+    openNewSession(app)
+    ready(app)
+    XCTAssertEqual(
+      app.textViews["conversation-composer"].value as? String, "Revisa a navegação do app iOS")
+    keyboardSettled(app)
+    shot("n4-new-worktree")
+  }
   func test02InvalidBaseKeepsDraftAndShowsToast() throws {
     let app = try launch()
     defer { app.terminate() }
@@ -196,7 +293,6 @@ import XCTest
     openNewSession(app)
     ready(app)
     let input = app.textViews["conversation-composer"]
-    input.tap()
     if let value = input.value as? String, !value.isEmpty {
       input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
     }
