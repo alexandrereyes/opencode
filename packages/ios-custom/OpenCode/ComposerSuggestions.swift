@@ -52,6 +52,8 @@ struct ComposerSuggestions: View {
                   ? theme.color(.text).opacity(0.07) : theme.color(.surface).opacity(0),
                 in: RoundedRectangle(cornerRadius: 9))
           }.buttonStyle(.plain).accessibilityIdentifier("suggestion-\(item.token.id)")
+            .disabled(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id))
+            .opacity(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id) ? 0.4 : 1)
         }
       }.padding(6)
     }.frame(maxHeight: 250).fixedSize(horizontal: false, vertical: true)

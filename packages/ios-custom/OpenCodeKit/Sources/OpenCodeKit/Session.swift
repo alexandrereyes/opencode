@@ -81,6 +81,8 @@ public struct Project: Codable, Sendable, Identifiable, Hashable {
   public let name: String?
   public let icon: Icon?
   public let sandboxes: [String]
+  public let vcs: String?
+  public let worktrees: [WorktreeDirectory]?
 
   public struct Icon: Codable, Sendable, Hashable {
     public let color: String?

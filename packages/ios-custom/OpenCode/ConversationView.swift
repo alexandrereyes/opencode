@@ -511,7 +511,7 @@ struct ConversationView: View {
           } header: {
             if let user = section.user {
               StickyUserHeader(
-                message: user,
+                message: user.presented(isChild: conversation.isChild),
                 day: showDay(user) ? ConversationProjection.day(user.time.created) : nil,
                 scrollState: scrollState,
                 pinnedChanged: { _ in

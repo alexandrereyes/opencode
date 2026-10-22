@@ -136,6 +136,9 @@ struct ConversationModelPicker: View {
               guard var model = selection else { return }
               model.variant = value == "default" ? nil : value
               draft.model = model
+              if store.isNewSession {
+                Task { await store.updateModels([.modelVariant(model)], success: "Esforço salvo") }
+              }
             })
         ) {
           Text("Padrão").tag("default")

@@ -43,6 +43,7 @@ public struct AgentInfo: Codable, Sendable, Identifiable {
   public let mode: String
   public let hidden: Bool?
   public let model: ModelReference?
+  public let variant: String?
 }
 
 public struct TokenUsage: Codable, Sendable, Hashable {

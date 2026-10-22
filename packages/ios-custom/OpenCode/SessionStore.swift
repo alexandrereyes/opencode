@@ -4,6 +4,7 @@ import OpenCodeKit
 
 @MainActor @Observable
 final class SessionStore {
+  let acceptsLaunchSession: Bool
   private(set) var entries: [NavigationEntry] = []
   private(set) var projects: [Project] = []
   private(set) var preferences: Preferences?
@@ -16,6 +17,7 @@ final class SessionStore {
   private(set) var active: Set<String> = []
   private(set) var loading = false
   private(set) var connected = false
+  private(set) var serverVersion: String?
   private(set) var busy: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
@@ -25,14 +27,15 @@ final class SessionStore {
     let id: String
     var parent: String? = nil
     var tool: String? = nil
+    var newSession = false
   }
   var conversationPath: [ConversationRoute] = []
   var selectedTab = 3
   var conversationOpen: Bool { !conversationPath.isEmpty }
-  var currentSessionID: String? { selectedTab == 3 ? conversationPath.last?.id : nil }
+  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? conversationPath.last?.id : nil }
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
-  let catalog = ModelCatalogCache()
+  let catalog: ModelCatalogCache
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
@@ -40,7 +43,7 @@ final class SessionStore {
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored private var order = RecentOrder()
-  @ObservationIgnored private var chatRoot: String?
+  private(set) var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var lastReloadStarted: ContinuousClock.Instant?
@@ -51,15 +54,20 @@ final class SessionStore {
   @ObservationIgnored private var previewRefresh: Task<Void, Never>?
   @ObservationIgnored private var quotaRefresh: Task<Void, Never>?
   @ObservationIgnored private var quotaUpdated = Date.distantPast
+  @ObservationIgnored private var runningTask: Task<Void, Never>?
+  @ObservationIgnored private var runID = UUID()
+  @ObservationIgnored private var pruning: Task<Void, Never>?
 
-  init(configuration: ServerConfiguration = .launch()) {
+  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true) {
+    self.acceptsLaunchSession = acceptsLaunchSession
     let client = OpenCodeClient(configuration: configuration)
     self.client = client
+    catalog = ModelCatalogCache(server: configuration.url.absoluteString)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
-    Task {
+    pruning = Task {
       await DraftPersistence.pruneMissingSessions(
         server: configuration.url.absoluteString, client: client)
     }
@@ -103,6 +111,29 @@ final class SessionStore {
   }
 
   func run() async {
+    if let runningTask { await runningTask.value }
+    guard !Task.isCancelled else { return }
+    let id = UUID()
+    runID = id
+    let task = Task { await consumeEvents() }
+    runningTask = task
+    await withTaskCancellationHandler {
+      await task.value
+    } onCancel: { task.cancel() }
+    if runID == id { runningTask = nil }
+  }
+
+  func stop() async {
+    runningTask?.cancel()
+    await runningTask?.value
+    pruning?.cancel()
+    await pruning?.value
+    await drafts.flush()
+    try? reading.flush()
+    conversationPath = []
+  }
+
+  private func consumeEvents() async {
     let events = hub.events()
     let connection = Task { await hub.run() }
     defer {
@@ -145,6 +176,8 @@ final class SessionStore {
         }
       }
     }
+    connection.cancel()
+    await connection.value
     connected = false
     scheduled?.cancel()
     scheduled = nil
@@ -164,7 +197,7 @@ final class SessionStore {
     lastReloadStarted = .now
     defer { loading = false }
     do {
-      _ = try await client.info()
+      serverVersion = try await client.info().version
       notice = nil
       async let navigation = client.navigation()
       async let prefs = client.preferences()
@@ -311,6 +344,9 @@ final class SessionStore {
       preferences = try await client.mutate(intent)
       if removedSelection { selectedProject = nil }
     }
+  }
+  func touchProject(_ directory: String) async throws {
+    preferences = try await client.mutate(.touch(directory: directory))
   }
   func markRead(_ session: Session) async {
     await perform(session.id) { try await client.markViewed(session) }

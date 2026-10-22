@@ -4,19 +4,23 @@ import SwiftUI
 struct ConversationBackGesture: UIViewControllerRepresentable {
   let capture: () -> Void
   let appeared: () -> Void
+  var enabled = true
   func makeUIViewController(context: Context) -> Controller {
     let controller = Controller()
     controller.capture = capture
     controller.appeared = appeared
+    controller.enabled = enabled
     return controller
   }
   func updateUIViewController(_ controller: Controller, context: Context) {
     controller.capture = capture
     controller.appeared = appeared
+    controller.enabled = enabled
   }
   final class Controller: UIViewController, UIGestureRecognizerDelegate {
     var capture: (() -> Void)?
     var appeared: (() -> Void)?
+    var enabled = true
     private weak var originalDelegate: (any UIGestureRecognizerDelegate)?
     override func viewDidAppear(_ animated: Bool) {
       super.viewDidAppear(animated)
@@ -36,7 +40,7 @@ struct ConversationBackGesture: UIViewControllerRepresentable {
       }
     }
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-      guard let navigationController, navigationController.viewControllers.count > 1,
+      guard enabled, let navigationController, navigationController.viewControllers.count > 1,
         navigationController.transitionCoordinator == nil
       else { return false }
       capture?()

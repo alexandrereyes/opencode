@@ -10,7 +10,7 @@ later.
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
 
-> **Status:** "Sessões" and the conversation screen are implemented. All conversation waves (0–7) are complete
+> **Status:** "Sessões", "Nova sessão", the conversation screen and "Você" (settings) are implemented. All conversation waves (0–7) are complete
 > (see [Second screen: Conversa](#second-screen-conversa)); the remaining exclusions are listed below.
 
 ## Ownership
@@ -60,8 +60,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
-- **Visual only for now:** new session, voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
-  tabs.
+- **Visual only for now:** voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
+  tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
 - **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
@@ -157,8 +157,182 @@ the project's development language; there is no English source copy.
 No view uses a fixed color: every color comes from semantic tokens of a registered theme. Themes are generated, not
 written by hand: a Bun script in this package runs the custom web app's own resolver
 (`packages/ui-custom/src/theme`) over the OpenCode theme JSON files and writes the resolved tokens, which the app
-bundles. Adding a theme means running the script. The first themes are OpenChamber dark and light. The theme is
-selected through a local preference and a launch argument; a selector in Settings comes later.
+bundles. Adding a theme means running the script. Você → Aparência lists the 38 generated families with previews,
+one row per family. OpenChamber with **Sistema** is the default. **Sistema**, **Claro** and **Escuro** select the
+variant independently of the family; Sistema follows device changes live. Family and appearance persist locally.
+`-OpenCodeTheme <variant>` takes precedence for the whole launch, including over settings changes. The old
+`OpenCodeTheme` preference migrates its family; new preferences are `OpenCodeThemeFamily` and `OpenCodeAppearance`.
+
+## Third screen: Você (wave 8)
+
+Native grouped lists expose Aparência, Servidor and Sobre, retaining the AR tab icon and quota ring.
+Theme changes update the shared SwiftUI environment without replacing the session runtime: existing conversation,
+drafts, sheets, avatars, tab icon and UIKit text views receive the new theme. A small UIKit bridge refreshes already
+mounted navigation/tab bars as well as their appearance proxies. No theme colors are copied into views.
+
+- **Servers:** a built-in, nonremovable server plus named saved entries. Add/edit uses a URL and optional masked
+  password. **Testar conexão** performs only authenticated `GET /api/info`, with a five-second timeout and explicit
+  success/failure before Save becomes available. A failed test may still be saved (for an offline server). URLs may
+  not contain credentials, queries or fragments. Remove requires confirmation and deletes only the local credential,
+  not backend sessions. Removing an active entry returns to the built-in entry.
+- **Credentials:** `ServerStore` persists only IDs, names, URLs and the selected ID in UserDefaults. `ServerCredentials`
+  uses generic-password Keychain items, nonsynchronizing and
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; passwords/tokens never enter preferences, app logs or URLs.
+  Tests inject an in-memory Keychain backend. The system may independently offer Password AutoFill's save prompt;
+  sandbox automation always chooses **Agora Não**, never saving test credentials there.
+- **Switching:** `AppRuntime` awaits the old session store's stop, cancels/awaits its shared SSE task and draft-pruning
+  task, flushes drafts/reading metadata, then replaces the entire server-bound view identity. The new `SessionStore`
+  has its own hub, conversation path, catalog and alerts. Drafts, reading positions and alert dedupe retain their
+  existing URL-scoped keys, so two entries for the same URL intentionally share that server's local state.
+  The initial `-OpenCodeOpenSession` is not replayed on a replacement server runtime.
+- **Pairing:** camera scanning uses VisionKit's native QR scanner and a pt-BR camera permission description. Manual
+  paste is also available, including on the simulator or after camera denial. Both `{"code","urls"}` JSON and
+  `<url>/auth/connect/<code>` links use the same parser. Redemption issues parallel unauthenticated JSON GETs,
+  retains the first successful token, and mirrors the web's preference for URL 0: wait at most one extra second for
+  its answer, then validate the winning token there with `/api/info`. A 401 proves an expired/spent code; unreachable
+  addresses do not. A redeemed token remains available to save even if the subsequent health check fails.
+- **About:** version/build, `OpenCodeCommit` (or desenvolvimento), current server version and the GitHub README link.
+- **Child messages:** presentation and copy strip only the exact backend prefix
+  `You are a subagent spawned by another session.\n`, and only in child user messages. Wire history remains untouched;
+  changed wording, leading whitespace, CRLF or a missing newline is deliberately displayed in full.
+
+### Sandbox safety and verification
+
+Every launch/relaunch **must** supply `-OpenCodeServerURL http://127.0.0.1:4177` plus the sandbox password in the
+environment, as shown below. This replaces the built-in entry **in memory**, selects it at each launch ahead of any
+saved selection, and uses a separate registry keyed by the override URL. With a loopback launch override, add, edit,
+select, test and pairing reject non-loopback destinations before any request. Production is never saved, selected or
+tested by the runners. The one default-URL constant and the private-host ATS exception are unchanged.
+
+After `xcodebuild … build-for-testing`, run:
+
+```sh
+python3 packages/ios-custom/script/test-settings.py
+OPENCODE_TEST_THEME=openchamber-light python3 packages/ios-custom/script/test-settings.py \
+  OpenCodeUITests/SettingsTests/testManualServersTestSwitchEditRemoveAndPairing \
+  OpenCodeUITests/SettingsTests/testChildPreambleHiddenAndCopyUsesAuthoredText
+```
+
+The runner creates/deletes only its own imported root/child histories (no model call), requests a fresh pairing code
+with `POST /api/pair`, and redeems it through the real app. Dark uses QR JSON; light uses the printed-link shape.
+The simulator cannot scan a camera image: a **DEBUG-only**, explicit sandbox launch environment enables the
+**Usar código de teste do sandbox** button. It injects the payload into the same parsing/redemption path; no token is
+fabricated. The same debug environment prefills the launch password in the manual form, avoiding secret `typeText`
+actions in XCTest recordings. Neither hook is compiled into Release. Configured xctestrun files are private and
+removed after the run. The runner never resets seeds, answers seeded requests or operates production services.
+UI checks cover live theme/appearance changes across settings/Sessões/Conversa, offline-server isolation/reconnect,
+manual health results, pairing plus a real token-backed SSE connection, edit/remove and the exact child prefix.
+After the live-theme test leaves OpenChamber/Sistema selected, run
+`python3 packages/ios-custom/script/verify-system-appearance.py` to change the dedicated simulator from light → dark →
+light **in one app process**, compare the real background pixels with generated tokens and capture both modes.
+It launches with the explicit sandbox URL/password and no theme override, terminates only that app afterwards and
+restores the simulator's previous appearance.
+Screenshots with the clean 10:58 status bar and verification JSON live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda8-prints/`.
+`SettingsTests.swift` in OpenCodeKit covers the 38-family registry, variant/launch precedence, URL/pair parsing,
+parallel redemption/preferred-first health, server CRUD/selection/credential failures and preamble exactness.
+
+Wave-8 verification: **123 Swift Testing tests**, warning-free simulator build and test build, all three new UI
+cases plus light-mode server/child repeats pass. Existing regressions also pass: four app-hosted tests, six reading
+continuity cases (one additional unread case correctly skips after viewed acknowledgement), four session/reading
+cases and six subagent/alert cases. The sandbox seed's permission and question remain pending; no seed reset was run.
+
+## Nova sessão (wave 9)
+
+The orange **+** in Sessões pushes a local draft, not a server Session. The tab bar and "Sessão mestra" accessory are
+hidden, as in a conversation, and the existing V2 composer focuses automatically. The repository avatar uses the
+same monogram/color projection as Sessões. MCP chips wrap centrally above the repository/directory selectors. With a
+second selector and an open keyboard, the avatar/question compact slightly to keep all chips and the preview note
+visible; with the keyboard hidden, the introduction is centered in the available space.
+
+- **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
+  its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
+  project. Chats is excluded. The Projeto sheet preserves saved selection order and searches display names without
+  sorting. "Adicionar projeto" reuses Sessões' server-project picker and `project.open`; selecting/opening the draft's
+  project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state.
+- **Directory:** `GET /api/worktree?projectID=…`, known project worktrees and sandboxes are merged in that order,
+  deduplicated and stripped of the root. `custom.worktrees/branches` labels each checkout without booting every
+  Location; the folder name is the fallback. The root uses its current branch (VCS, then the branches RPC), never the
+  `main` sentinel as a guessed branch. Search appears only with ten or more existing worktrees. Non-Git projects keep
+  their principal directory and explain that worktrees are unavailable.
+  Projeto and Diretório wait for the composer's real keyboard dismissal before presentation. Closing a selector,
+  including a swipe without changes, restores composer focus; the base-branch sheet instead owns its search keyboard
+  while presented. The shared editor suppresses background focus restoration until the selector has closed.
+- **Defaults:** the native client uses the web's **last-used** destination rule, separately per server URL/project:
+  `local` means root, `workspace` means **Nova worktree** on the next implicit selection. It remembers the category,
+  not the last existing path/base branch. An explicit restored draft retains its destination. The pure resolver also
+  covers the web's `local` and `new` modes; Você does not yet expose a global destination-mode setting. This client
+  memory is not `custom.preferences` and cannot read the browser's local `settings.v3`.
+- **New worktree:** choosing it creates nothing. "a partir de …" opens a searchable base-branch sheet using the root's
+  `/api/vcs/branch`, 100-ms debounce and limit 50; the current branch is included/deduplicated. There is no branch-name
+  field in this flow: the base-branch sheet uses a large native presentation with its search focused so results stay
+  usable above the keyboard. There is no folder-location promise. Send uses only
+  `{projectID,from:<canonical>,branch:<base>}` in `POST /api/worktree`;
+  the backend's configured strategy chooses its folder and may create a detached checkout.
+- **MCPs:** `/api/mcp` plus `/api/config` are Location-scoped. Default-enabled servers come first, then names; taps
+  replace status in place, not order. Connected/disabled/failed/needs-login/pending have semantic dots, dashed disabled
+  borders and a pulsing pending state. VoiceOver exposes switches. Root/existing taps connect/disconnect immediately
+  for **all sessions of that directory**. New-worktree preview starts from configuration defaults (not the root's
+  runtime connection state); taps only save intent, with "Vale quando a worktree for criada".
+  Loading, empty and retry states are explicit. Login-required chips explain that authentication belongs in the web
+  app; iOS never starts OAuth.
+- **Model/effort/agent:** the same wave-2 pickers and wave-3 editor, suggestions, attachments and fullscreen composer
+  are reused. Initial valid model: explicit draft → saved default → agent configuration → location configuration →
+  native recent history → first available model. Explicit effort includes "Padrão"; otherwise the saved default's
+  variant wins for that model, then per-model preference, agent/configured variant, constrained to available variants.
+  Recent model identities are server-local and updated after successful conversation/new-session sends. Hidden and
+  subagent-only agents are not choices. `/compact` and `/btw` require an existing session and are disabled here;
+  known backend slash commands use the command endpoint, including when typed without choosing a suggestion.
+- **Send:** generate the Session ID on the client → resolve/create the worktree → await live MCP mutations and apply/
+  verify explicit destination intents → create Session with agent/model/Location → serialize attachments/tokens with
+  the existing wave-3 encoder and submit prompt (or backend command). Progress uses the shared send button. Success
+  replaces the draft route with the conversation, so Back goes directly to Sessões, and clears the new-session draft.
+- **Errors:** worktree/MCP failures do not create a Session. Filesystem creation is not atomic with later requests:
+  any newly created checkout is retained as the draft's selected destination after MCP/session failure, preventing
+  another checkout on retry. A failure after Session creation opens that conversation with the text/tokens/attachments
+  transferred to its draft and an error toast. Nothing silently deletes a checkout or claims filesystem rollback.
+- **Draft:** exactly one `new-session` draft per server URL, using the same protected/atomic `DraftPersistence` file
+  and attachment storage as conversations. Its snapshot includes project, destination, base branch, MCP intent maps,
+  document/token ranges, cursor, attachments, model/variant and agent. It persists while editing, on leaving and on
+  background/server switch, restores after relaunch, and is excluded from missing-Session pruning.
+
+`NewSessionView`/`NewSessionStore` own presentation and navigation; selectors live in `NewSessionSelectors.swift`.
+`OpenCodeKit/NewSession.swift` owns projections and the narrow typed HTTP contracts, and
+`NewSessionSubmission.swift` owns the fake-client-testable ordered pipeline and phase-specific failures. The existing
+`ConversationStore` exposes a draft-only Location mode for the shared composer; no provisional server Session or
+separate composer copy is created.
+
+### Sandbox verification
+
+After the simulator `build-for-testing`, run `python3 packages/ios-custom/script/test-new-session.py` and repeat with
+`OPENCODE_TEST_THEME=openchamber-light`. Every app launch/relaunch supplies the explicit sandbox URL/password. The
+runner checks entry with/without a repository filter, project/add-picker switching, root/existing/new directories,
+only safari-devtools live/preview toggles, base-branch selection, keyboard/layout, route replacement and persistent
+draft restoration. An invalid base is injected **only into the stopped simulator app's own draft**, without changing
+Git refs or adding a production test hook. Root/existing/new sends use Luna 6/low/build and tiny no-tool prompts.
+Screenshots and JSON evidence go to
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda9-prints/`.
+The checkout path is opaque: the runner verifies its Git common directory belongs to the fake repository, rather
+than assuming the sandbox's configured strategy creates folders beneath the sandbox home. **No verification checkout
+is retained:** immediately after each send case, verify the fake repository identity, base revision and MCP state,
+then call `DELETE /api/worktree` with `{projectID,directory,force:true}`. Failure cleanup uses the same API. The runner
+compares the fake repositories' Git worktree registrations and the `~/Worktrees` folder inventory before/after; it
+never removes a real repository's folder. New-worktree mockup screenshots are captured before send.
+No seeds or pending seed requests are changed, and no production server or physical device is used.
+
+Wave-9 verification: **141 Swift Testing tests**, warning-free simulator build/test build, all three new UI cases in
+both themes, and the existing four app-hosted, six reading-continuity, four session/reading, three settings and six
+subagent/alert cases pass. The additional unread case skips because its existing viewed watermark cannot be moved
+backwards. One first-pass native Details-menu tap missed; the complete session/reading rerun passed without product
+or existing-test changes. `execution-ledger.json` in the screenshot directory records the real new Sessions,
+worktree identity/base/MCP verification and cleanup; the original permission and question still remain pending.
+
+Wave-9 review adds `test04SelectorKeyboardDismissalAndComposerRestoration`: open each selector from a focused composer,
+assert Projeto/Diretório have no keyboard, swipe-dismiss without changing anything, choose items, and prove restored
+composer focus by typing without retapping it. Base search owns its keyboard and cannot change the underlying draft.
+Both themes capture only the fake repository's five existing worktrees; no verification checkout is kept. Focus
+restoration avoids overlapping an interactive sheet-dismissal animation, and selector presentation waits on the
+public UIKit keyboard layout guide/did-hide notification rather than a fixed delay.
 
 ## Platform and distribution
 
@@ -175,9 +349,10 @@ selected through a local preference and a launch argument; a selector in Setting
 - **Upload:** a local script in this package, with no CI and nothing outside the Mac:
   1. `xcodebuild archive` for `generic/platform=iOS`;
   2. `xcodebuild -exportArchive` with an `ExportOptions.plist` containing `method = app-store-connect` and
-     `destination = upload`, plus `-allowProvisioningUpdates` and an App Store Connect API key passed through
-     `-authenticationKeyPath`, `-authenticationKeyID`, and `-authenticationKeyIssuerID`. The key stays outside the
-     repository, in `~/.appstoreconnect/private_keys/`.
+      `destination = upload`, plus `-allowProvisioningUpdates`. Use the existing Xcode account, or an App Store
+      Connect API key passed through `-authenticationKeyPath`, `-authenticationKeyID`, and
+      `-authenticationKeyIssuerID`. The key stays outside the repository, in `~/.appstoreconnect/private_keys/`.
+      `testFlightInternalTestingOnly = YES` prevents external TestFlight and App Store distribution.
 - **Versions:** the build number (`CURRENT_PROJECT_VERSION`) is the UTC timestamp of the upload, so it always
   increases, and Info.plist carries the short commit SHA to identify the build. `ITSAppUsesNonExemptEncryption = NO`
   skips the export-compliance question on every build, since the app uses only the system's encryption.
@@ -382,7 +557,129 @@ packages/ios-custom/
   driving the app, and release it when you are done.
 - The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
   `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
-  require editing the project. TestFlight upload automation is not implemented yet.
+  require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
+
+### Private TestFlight uploads
+
+#### One-time setup
+
+1. **Signing identity:** use the Apple ID already signed into Xcode for team `ERRYZ68LX5`. If its session has expired,
+   Alexandre must renew it manually in **Xcode → Settings → Accounts**. The script never asks for an Apple ID
+   password or a two-factor code. Automatic signing (`-allowProvisioningUpdates`) can register the bundle ID and
+   create the necessary certificates and profiles; no physical device is needed.
+2. **Optional API key instead of the Xcode account:** in App Store Connect **Users and Access → Integrations →
+   App Store Connect API**, create a team key named `opencode-ios-testflight` with the **App Manager** role (not Admin),
+   and download its `.p8` once. Put it at
+   `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`, outside the repository, with mode `600`. Keep the Key ID and
+   Issuer ID private too. Export `ASC_KEY_ID` and `ASC_ISSUER_ID` in the shell, with optional `ASC_KEY_PATH` for a
+   nonstandard absolute key path, or create this private file with mode `600`:
+
+   ```text
+   # ~/.appstoreconnect/opencode.env — literal, unquoted KEY=value entries; no shell expansion
+   ASC_KEY_ID=YOUR_KEY_ID
+   ASC_ISSUER_ID=YOUR_ISSUER_UUID
+   ```
+
+   Use mode `700` for `~/.appstoreconnect/private_keys/` and `600` for both the key and config. If API access must be
+   requested or terms accepted, leave that to Alexandre. Environment values take precedence. `ASC_CONFIG_FILE` can
+   select another config **outside the repository**.
+   `--auth auto` (the default) uses a configured key, otherwise the Xcode account. A partially configured or unreadable
+   key is an error, not a silent fallback. `--auth api-key` requires the key; `--auth xcode` explicitly ignores it.
+3. **App record:** in App Store Connect **Apps → + → New App**, create an iOS app named `OpenCode Agente` (or
+   `OpenCode Agente AR` if taken), primary language **Portuguese (Brazil)**, bundle ID and SKU both
+   `br.com.alexandrem.opencode`, with access limited to Alexandre. If the bundle ID is not listed, first register it
+   in the Developer portal or run a signed `--dry-run` so automatic signing registers it, then create the record.
+   The device display name remains `OpenCode`. Do not submit an App Store version.
+4. **Internal distribution:** in the app's **TestFlight → Internal Testing**, create a private group for Alexandre,
+   enable **automatic distribution**, and add only his App Store Connect user as a tester. Builds are internal-only;
+   no external group or Beta App Review is involved. Apple's processing, binary validation, encryption questions and
+   current developer agreements still apply. Stop for Alexandre if any login, 2FA or agreement acceptance is required.
+5. The future App Group is `group.br.com.alexandrem.opencode`; it is reserved in the design, not enabled as an
+   entitlement until an extension actually needs it.
+
+#### Commands (from the repository root)
+
+```sh
+# No credentials: validate the Release device archive and its resources; never uploads.
+packages/ios-custom/script/testflight.sh --unsigned-check
+
+# With the Xcode account or API key: signed archive and local IPA, never uploads.
+packages/ios-custom/script/testflight.sh --dry-run
+
+# Archive and upload to INTERNAL TestFlight only.
+packages/ios-custom/script/testflight.sh
+
+# Explicit authentication choices, if needed:
+packages/ios-custom/script/testflight.sh --auth xcode
+packages/ios-custom/script/testflight.sh --auth api-key
+```
+
+The script refuses uncommitted changes in `packages/ios-custom`, including untracked files and changes introduced
+by asset regeneration. Commit before distributing; use `--allow-dirty` deliberately for a local rehearsal. It prints
+the short commit and builds the current working tree (with `--allow-dirty`, the SHA identifies its base only).
+It regenerates themes and the icon, archives for `generic/platform=iOS` in Release, then exports with
+`method = app-store-connect`, automatic signing, symbol upload, and `manageAppVersionAndBuildNumber = NO`.
+
+`MARKETING_VERSION` is `0.1.0`; each invocation sets `CURRENT_PROJECT_VERSION` to UTC `yyyyMMddHHmm` and injects the
+short Git SHA into `OpenCodeCommit`. Ordinary Xcode builds use build `1` and an empty commit key. Wait until the next
+UTC minute before re-uploading the same marketing version: two uploads within one minute have the same build number.
+The script does not query App Store Connect or silently renumber a build.
+
+Each run gets a unique directory under
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-archives/`, containing `OpenCode.xcarchive`,
+private local logs, and, for signed runs, `ExportOptions.plist` and `export/`. DerivedData is shared at
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-sessoes-derived`; do not run two Xcode builds
+against it simultaneously. Auth arguments and Xcode logs are not echoed, even on failure; redact credential
+identifiers before sharing the logs. A successful upload still needs TestFlight processing; check App Store Connect.
+
+#### Icon and launch assets
+
+The original agent/AI icon source is committed at `script/icon-source.png`. Regenerate its 1024×1024 opaque PNG and
+the themed `LaunchBackground` color set with:
+
+```sh
+swift packages/ios-custom/script/generate-icon.swift
+sips -g pixelWidth -g pixelHeight -g hasAlpha packages/ios-custom/OpenCode/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+```
+
+The script resizes the source, flattens any transparency onto the generated OpenChamber dark background, and writes
+only changed assets. No dependencies, fonts, pre-rounded corners or drawn shadows are used. Only the default icon is
+supplied; iOS handles its Home Screen appearance. Theme regeneration runs first during distribution. The chosen
+generation prompt is also recorded in `script/icon-source.prompt.txt`; local concepts and small-size previews live in
+`.agent-artifacts/testflight/icone/` (not versioned).
+
+#### Troubleshooting
+
+- **Signing/authentication:** inspect the private `Archive.log` or `Export.log`. Renew an expired Xcode session
+  manually, or configure a valid team API key with access to Certificates, Identifiers & Profiles. Do not put any
+  password, key or profile in this repository. Missing app records must be created with the exact bundle ID above.
+- **Missing icon / ITMS-90704:** regenerate the icon, confirm `hasAlpha: no`, and verify that the archive app's
+  Info.plist has `CFBundleIcons → CFBundlePrimaryIcon → CFBundleIconName = AppIcon`. The target build setting must
+  remain `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. Commit the generated PNG and catalog JSON.
+- **Private API / ITMS-90338:** `OpenCode/SoftwareKeyboardShift.swift` intentionally discovers `UIKeyboardImpl` and
+  its `activeInstance`, `isShifted`, `isAutoShifted`, and `isShiftLocked` getters at runtime. The Release binary can
+  expose these strings even without a linked private class symbol. Internal TestFlight does not bypass this scan.
+  If processing rejects it, delete that file **and replace the body of `ComposerInputView.submitSoftwareReturn()`
+  in `OpenCode/ComposerTextView.swift` with `return false`**. Leave the `UIKeyCommand`/`submitReturn(_:)` hardware
+  Shift+Return implementation untouched: it still sends, while software Return inserts a newline (the send button
+  still works). Rebuild and upload with a new build number; do not merely rename or obscure the selectors.
+  With Xcode 27.1's current optimized Release build, `strings -a` finds none of those complete literals, and `nm -u`
+  has no `UIKeyboardImpl` class import (it does import `NSClassFromString` and `NSSelectorFromString`). The dSYM still
+  identifies `SoftwareKeyboardShift.state()`, and disassembly shows the names constructed as inline Swift small
+  strings via ARM64 `mov`/`movk` immediates. This is compiler behavior, not an intentional hiding technique and not
+  evidence that Apple's processing will accept it; the private API risk remains.
+- **Export compliance:** `ITSAppUsesNonExemptEncryption = NO` is already embedded because the app uses only system
+  encryption. If processing still shows **Missing Compliance**, inspect the uploaded build's plist and answer the
+  encryption section consistently in App Store Connect; revisit the declaration if encryption behavior changes.
+- **Duplicate build:** wait for the next UTC minute and run again. **Processing** is not an upload failure; wait for
+  Apple's result before retrying or distributing. Do not submit to the App Store or create an external testing group.
+
+Release keeps the explicit server/theme/session launch overrides for sandbox verification; without supplied
+arguments or environment values the server restores the saved active entry, falling back to the single
+`ServerConfiguration.defaultURL` constant, and no session
+is opened automatically.
+The scheme's sandbox arguments belong only to `TestAction`; neither they nor the UI-test targets enter an archive.
+The private-host ATS exception is unchanged and does not allow arbitrary HTTP hosts.
 
 ### Generate themes, build, and test
 
@@ -390,6 +687,7 @@ Run from the repository root:
 
 ```sh
 bun packages/ios-custom/script/generate-themes.ts
+swift packages/ios-custom/script/generate-icon.swift
 xcodebuild -list -project packages/ios-custom/OpenCode.xcodeproj
 xcodebuild -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCode \
   -destination 'platform=iOS Simulator,name=OpenCode Sessoes' \
@@ -445,7 +743,7 @@ xcrun simctl io "$DEVICE" screenshot /path/to/light.png
 `-OpenCodeServerPassword <password>` is also accepted, as are the `OpenCodeServerURL` / `OpenCodeServerPassword`
 environment variables (uppercase `OPENCODE_SERVER_URL` / `OPENCODE_SERVER_PASSWORD` aliases are supported).
 The default URL remains `http://opencode2-mac.alexandrem.com.br`. The launch theme wins over the local
-`UserDefaults` key `OpenCodeTheme`; absent both, OpenChamber dark is used. Loopback HTTP was verified in the iOS 27
+saved family/appearance preferences; absent both, OpenChamber follows the system appearance. Loopback HTTP was verified in the iOS 27
 simulator without an ATS exception; only the private Cloudflare hostname has an exception.
 
 ### Conversation reader verification
@@ -999,7 +1297,7 @@ the live sandbox. Repository removal/addition and external preference changes ov
 permission/question seed is not consumed by these checks. Native menus, swipe actions,
 confirmation dialogs, archived navigation, and the native conversation reader are retained rather than drawing
 mock replacements. New session, voice, selection, settings, the master-session accessory, and the other tabs remain
-visual-only as specified.
+visual-only as specified, except settings in Você (implemented in wave 8).
 
 ## Open decisions
 

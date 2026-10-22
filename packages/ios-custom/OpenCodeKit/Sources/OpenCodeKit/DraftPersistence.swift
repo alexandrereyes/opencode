@@ -9,10 +9,11 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
   public var cursor: Int
   public var replacing: String?
   public var quotes: [ChatQuote]
+  public var newSession: NewSessionContext?
   public init(
     document: ComposerDocument = .init(), attachments: [DraftAttachment] = [],
     model: ModelReference? = nil, agent: String? = nil, cursor: Int = 0, replacing: String? = nil,
-    quotes: [ChatQuote] = []
+    quotes: [ChatQuote] = [], newSession: NewSessionContext? = nil
   ) {
     self.document = document
     self.attachments = attachments
@@ -21,9 +22,10 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     self.cursor = cursor
     self.replacing = replacing
     self.quotes = quotes
+    self.newSession = newSession
   }
   private enum CodingKeys: CodingKey {
-    case document, attachments, model, agent, cursor, replacing, quotes
+    case document, attachments, model, agent, cursor, replacing, quotes, newSession
   }
   public init(from decoder: any Decoder) throws {
     let value = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,6 +36,7 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     cursor = try value.decode(Int.self, forKey: .cursor)
     replacing = try value.decodeIfPresent(String.self, forKey: .replacing)
     quotes = try value.decodeIfPresent([ChatQuote].self, forKey: .quotes) ?? []
+    newSession = try value.decodeIfPresent(NewSessionContext.self, forKey: .newSession)
   }
 }
 

@@ -46,12 +46,15 @@ extension ComposerTokenKind {
 @MainActor @Observable final class ConversationDraft {
   var text = NSAttributedString() { didSet { changed() } }
   var model: ModelReference? { didSet { changed() } }
+  var newSession: NewSessionContext? { didSet { changed() } }
   var agent: String? { didSet { changed() } }
   var attachments: [DraftAttachment] = [] { didSet { changed() } }
   var quotes: [ChatQuote] = [] { didSet { changed() } }
   var commenting: ChatQuote?
   var selection = NSRange(location: 0, length: 0)
   var focused = false
+  var focusSuppressed = false
+  @ObservationIgnored weak var input: ComposerInputView?
   var editorOwner: UUID?
   var dismissedTrigger: ComposerTrigger?
   var editing: InboxItem?
@@ -72,7 +75,7 @@ extension ComposerTokenKind {
   var snapshot: DraftSnapshot {
     .init(
       document: document, attachments: attachments, model: model, agent: agent,
-      cursor: selection.location, replacing: replacing, quotes: quotes)
+      cursor: selection.location, replacing: replacing, quotes: quotes, newSession: newSession)
   }
   var trigger: ComposerTrigger? {
     guard focused, selection.length == 0 else { return nil }
@@ -91,6 +94,7 @@ extension ComposerTokenKind {
         attachments = value.attachments
         quotes = value.quotes
         model = value.model
+        newSession = value.newSession
         agent = value.agent
         replacing = value.replacing
         selection = NSRange(location: min(value.cursor, text.length), length: 0)
@@ -242,6 +246,12 @@ extension ComposerTokenKind {
   private var values: [String: ConversationDraft] = [:]
   private let server: String
   init(server: String) { self.server = server }
+  func flush() async {
+    for draft in values.values {
+      draft.focused = false
+      await draft.persist()
+    }
+  }
   func draft(_ id: String) -> ConversationDraft {
     if let draft = values[id] { return draft }
     let draft = ConversationDraft(server: server, id: id)

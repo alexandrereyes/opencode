@@ -270,14 +270,14 @@ struct ComposerEditor: View {
       List(store.agents.filter { $0.hidden != true && $0.mode != "subagent" }) { agent in
         Button {
           draft.agent = agent.id
-          if let model = agent.model { draft.model = model }
+          if !store.isNewSession, let model = agent.model { draft.model = model }
           agents = false
         } label: {
           HStack {
             AgentPixels(color: theme.agentColor(agent, id: agent.id), running: false)
             Text(agent.name)
             Spacer()
-            if agent.id == (draft.agent ?? store.session?.agent) { Image(systemName: "checkmark") }
+            if agent.id == store.selectedAgent(draft) { Image(systemName: "checkmark") }
           }
         }.listRowBackground(theme.color(.surface))
       }.scrollContentBackground(.hidden).background(theme.color(.background))
