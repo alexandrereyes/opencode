@@ -27,14 +27,15 @@ final class SessionStore {
     let id: String
     var parent: String? = nil
     var tool: String? = nil
+    var newSession = false
   }
   var conversationPath: [ConversationRoute] = []
   var selectedTab = 3
   var conversationOpen: Bool { !conversationPath.isEmpty }
-  var currentSessionID: String? { selectedTab == 3 ? conversationPath.last?.id : nil }
+  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? conversationPath.last?.id : nil }
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
-  let catalog = ModelCatalogCache()
+  let catalog: ModelCatalogCache
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored let hub: EventHub
@@ -42,7 +43,7 @@ final class SessionStore {
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored private var order = RecentOrder()
-  @ObservationIgnored private var chatRoot: String?
+  private(set) var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var lastReloadStarted: ContinuousClock.Instant?
@@ -61,6 +62,7 @@ final class SessionStore {
     self.acceptsLaunchSession = acceptsLaunchSession
     let client = OpenCodeClient(configuration: configuration)
     self.client = client
+    catalog = ModelCatalogCache(server: configuration.url.absoluteString)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
@@ -342,6 +344,9 @@ final class SessionStore {
       preferences = try await client.mutate(intent)
       if removedSelection { selectedProject = nil }
     }
+  }
+  func touchProject(_ directory: String) async throws {
+    preferences = try await client.mutate(.touch(directory: directory))
   }
   func markRead(_ session: Session) async {
     await perform(session.id) { try await client.markViewed(session) }

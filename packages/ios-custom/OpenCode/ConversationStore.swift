@@ -52,6 +52,34 @@ import OpenCodeKit
   @ObservationIgnored private var replaceHistory = false
   @ObservationIgnored private var snapshotSequence = 0
   @ObservationIgnored private var composerCatalog: ComposerSources?
+  private(set) var composerLocation: String?
+  private(set) var composerProjectID: String?
+  private var composerConfiguration: [NewSessionConfiguration] = []
+  private var recentModels: [ModelReference] = []
+  @ObservationIgnored var newSessionSubmit: ((ConversationDraft) async -> Void)?
+  var isNewSession: Bool { newSessionSubmit != nil }
+
+  func loadNewSession(directory: String, projectID: String, recent: [ModelReference]) async throws {
+    ready = false
+    composerCatalog = nil
+    composerLocation = directory
+    composerProjectID = projectID
+    async let models = client.models(directory: directory)
+    async let agents = client.agents(directory: directory)
+    async let providers = client.providers(directory: directory)
+    async let preferences = client.preferences()
+    async let configuration = client.newSessionConfiguration(directory: directory)
+    let value = try await (models, agents, providers, preferences, configuration)
+    try Task.checkCancellation()
+    self.models = value.0
+    self.agents = value.1
+    self.providers = value.2
+    self.preferences = value.3
+    composerConfiguration = value.4
+    recentModels = recent
+    catalog?.remember(value.0)
+    ready = true
+  }
 
   init(
     id: String, client: OpenCodeClient, hub: EventHub,
@@ -101,6 +129,10 @@ import OpenCodeKit
   var isChild: Bool { session?.parentID != nil }
   func selectedAgent(_ draft: ConversationDraft) -> String {
     if isChild { return session?.agent ?? "" }
+    if isNewSession {
+      return NewSessionProjection.agent(explicit: draft.agent,
+        configured: composerConfiguration.compactMap(\.info.default_agent).last, agents: agents)
+    }
     return draft.agent ?? session?.agent ?? "build"
   }
   var childAgentName: String {
@@ -135,6 +167,14 @@ import OpenCodeKit
     ].compactMap { $0 }.joined(separator: " · ")
   }
   func selectedModel(_ draft: ConversationDraft) -> ModelReference? {
+    if isNewSession {
+      let agent = agents.first { $0.id == selectedAgent(draft) }
+      var configuredAgent = agent?.model
+      if let variant = agent?.variant { configuredAgent?.variant = variant }
+      return NewSessionProjection.model(explicit: draft.model, preferences: preferences?.data.models,
+        agent: configuredAgent, configured: composerConfiguration.compactMap(\.info.model).last,
+        recent: recentModels, models: models)
+    }
     if let model = draft.model ?? session?.model { return model }
     if let model = preferences?.data.models?.default {
       return ModelReference(id: model.modelID, providerID: model.providerID, variant: model.variant)
@@ -146,6 +186,7 @@ import OpenCodeKit
       part, permissions: family?.permissions ?? [], forms: family?.forms ?? [])
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
+    if let newSessionSubmit { await newSessionSubmit(draft); return }
     guard notice == nil else { return }
     if let question = SideQuestionRequest.slashQuestion(draft.document) {
       sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
@@ -218,6 +259,7 @@ import OpenCodeKit
         try await client.compact(id, id: submission.request.id)
       }
       await draft.clear()
+      catalog?.committed(submission.model)
       Haptics.play(.light)
       draft.focused = false
       toast.show(
@@ -233,22 +275,28 @@ import OpenCodeKit
     try await client.sideQuestion(request, sessionID: id)
   }
   func suggestions(_ trigger: ComposerTrigger) async throws -> [ComposerSuggestion] {
-    guard let session else { return [] }
+    guard let directory = composerLocation ?? session?.location.directory else { return [] }
     if composerCatalog == nil {
-      composerCatalog = try await client.composerSources(directory: session.location.directory)
+      composerCatalog = try await client.composerSources(directory: directory)
     }
     async let files =
       trigger.character == "@"
-      ? client.composerFiles(trigger.query, directory: session.location.directory) : []
+      ? client.composerFiles(trigger.query, directory: directory) : []
     async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
     let suggestions = try await composerCatalog?.suggestions(
       trigger, agents: agents, files: files, sessions: sessions,
       current: id, server: client.configuration.url.absoluteString,
-      directory: session.location.directory, project: session.projectID) ?? []
+      directory: directory, project: composerProjectID ?? session?.projectID) ?? []
     guard isChild else { return suggestions }
     return suggestions.filter {
       !($0.token.kind == .command && $0.token.value == "client" && $0.token.id == "agent")
     }
+  }
+  func newSessionDocument(_ document: ComposerDocument) async throws -> ComposerDocument {
+    guard document.text.hasPrefix("/"), document.validTokens.first?.start != 0,
+      let directory = composerLocation else { return document }
+    if composerCatalog == nil { composerCatalog = try await client.composerSources(directory: directory) }
+    return composerCatalog?.newSessionDocument(document) ?? document
   }
   func importAttachment(_ bytes: Data, name: String, mime: String, draft: ConversationDraft) async {
     do {

@@ -37,6 +37,7 @@ public struct Preferences: Codable, Sendable {
   }
   public struct Library: Codable, Sendable {
     public let projects: [Selection]
+    public let lastProject: String?
   }
   public struct Selection: Codable, Sendable {
     public let worktree: String
@@ -70,19 +71,26 @@ public enum PreferenceIntent: Encodable, Sendable {
   case pin(session: String, pinned: Bool)
   case mute(session: String, muted: Bool)
   case open(directory: String)
+  case touch(directory: String)
   case close(directory: String)
   case move(directory: String, toIndex: Int)
   case modelFavorite(providerID: String, modelID: String, favorite: Bool)
   case modelVisibility(providerID: String, modelID: String, visible: Bool)
   case modelDefault(ModelReference?)
+  case modelVariant(ModelReference)
 
   private enum CodingKeys: String, CodingKey {
     case type, session, pinned, muted, server, directory, toIndex, providerID, modelID, favorite,
-      visibility, model
+      visibility, model, variant
   }
   public func encode(to encoder: any Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
     switch self {
+    case .modelVariant(let model):
+      try values.encode("model.variant", forKey: .type)
+      try values.encode(model.providerID, forKey: .providerID)
+      try values.encode(model.id, forKey: .modelID)
+      try values.encode(model.variant ?? "default", forKey: .variant)
     case .modelFavorite(let providerID, let modelID, let favorite):
       try values.encode("model.favorite", forKey: .type)
       try values.encode(providerID, forKey: .providerID)
@@ -111,11 +119,12 @@ public enum PreferenceIntent: Encodable, Sendable {
       try values.encode("sidebar.mute", forKey: .type)
       try values.encode(session, forKey: .session)
       try values.encode(muted, forKey: .muted)
-    case .open(let directory), .close(let directory), .move(let directory, _):
+    case .open(let directory), .touch(let directory), .close(let directory), .move(let directory, _):
       try values.encode("local", forKey: .server)
       try values.encode(directory, forKey: .directory)
       switch self {
       case .open: try values.encode("project.open", forKey: .type)
+      case .touch: try values.encode("project.touch", forKey: .type)
       case .close: try values.encode("project.close", forKey: .type)
       case .move(_, let index):
         try values.encode("project.move", forKey: .type)

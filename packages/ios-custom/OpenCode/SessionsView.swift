@@ -172,16 +172,24 @@ struct SessionsView: View {
           }
           .accessibilityLabel("Conversar por voz").accessibilityHint("Em construção")
           Button {
+            store.conversationPath.append(.init(id: "draft_" + UUID().uuidString, newSession: true))
           } label: {
             Image(systemName: "plus").foregroundStyle(theme.color(.onPrimary))
           }
           .buttonStyle(.glassProminent)
           .tint(theme.color(.primary))
-          .accessibilityLabel("Nova sessão").accessibilityHint("Em construção")
+          .accessibilityLabel("Nova sessão")
+          .disabled(store.preferences == nil)
         }
       }
       .navigationDestination(for: SessionStore.ConversationRoute.self) { route in
-        ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)
+        if route.newSession {
+          NewSessionView(sessions: store)
+            .id(route.id)
+        } else {
+          ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)
+            .toastOverlay(store.toast)
+        }
       }
       .toastOverlay(store.toast)
       .task {
@@ -196,7 +204,7 @@ struct SessionsView: View {
           }
         }
       }
-      .sheet(isPresented: $showProjects) { projectPicker.sessionAlertOverlay() }
+      .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).sessionAlertOverlay() }
       .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store).sessionAlertOverlay() }
       .confirmationDialog(
         "Arquivar sessão?",
@@ -383,34 +391,6 @@ struct SessionsView: View {
     .background(theme.color(.surface).opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     .overlay {
       RoundedRectangle(cornerRadius: 12).strokeBorder(theme.color(.border), lineWidth: 0.75)
-    }
-  }
-
-  private var projectPicker: some View {
-    NavigationStack {
-      List {
-        let selected = Set(store.selectedProjects.map { $0.project.id })
-        ForEach(store.projects.filter { !selected.contains($0.id) }) { project in
-          Button {
-            Task { await store.mutate(.open(directory: project.canonical)) }
-            showProjects = false
-          } label: {
-            Label(project.displayName, systemImage: "folder.badge.plus").foregroundStyle(
-              theme.color(.textStrong))
-          }.listRowBackground(theme.color(.surface))
-        }
-        if store.projects.allSatisfy({ selected.contains($0.id) }) {
-          Text("Todos os repositórios já estão nos filtros.").foregroundStyle(
-            theme.color(.textSecondary)
-          )
-          .listRowBackground(theme.color(.surface))
-        }
-      }
-      .scrollContentBackground(.hidden).background(theme.color(.background))
-      .navigationTitle("Adicionar repositório").navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) { Button("Concluir") { showProjects = false } }
-      }
     }
   }
 

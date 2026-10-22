@@ -46,6 +46,7 @@ extension ComposerTokenKind {
 @MainActor @Observable final class ConversationDraft {
   var text = NSAttributedString() { didSet { changed() } }
   var model: ModelReference? { didSet { changed() } }
+  var newSession: NewSessionContext? { didSet { changed() } }
   var agent: String? { didSet { changed() } }
   var attachments: [DraftAttachment] = [] { didSet { changed() } }
   var quotes: [ChatQuote] = [] { didSet { changed() } }
@@ -72,7 +73,7 @@ extension ComposerTokenKind {
   var snapshot: DraftSnapshot {
     .init(
       document: document, attachments: attachments, model: model, agent: agent,
-      cursor: selection.location, replacing: replacing, quotes: quotes)
+      cursor: selection.location, replacing: replacing, quotes: quotes, newSession: newSession)
   }
   var trigger: ComposerTrigger? {
     guard focused, selection.length == 0 else { return nil }
@@ -91,6 +92,7 @@ extension ComposerTokenKind {
         attachments = value.attachments
         quotes = value.quotes
         model = value.model
+        newSession = value.newSession
         agent = value.agent
         replacing = value.replacing
         selection = NSRange(location: min(value.cursor, text.length), length: 0)

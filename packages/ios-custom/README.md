@@ -10,7 +10,7 @@ later.
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
 
-> **Status:** "Sessões", the conversation screen and "Você" (settings) are implemented. All conversation waves (0–7) are complete
+> **Status:** "Sessões", "Nova sessão", the conversation screen and "Você" (settings) are implemented. All conversation waves (0–7) are complete
 > (see [Second screen: Conversa](#second-screen-conversa)); the remaining exclusions are listed below.
 
 ## Ownership
@@ -60,7 +60,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
-- **Visual only for now:** new session, voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
+- **Visual only for now:** voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
   tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
@@ -236,6 +236,90 @@ Wave-8 verification: **123 Swift Testing tests**, warning-free simulator build a
 cases plus light-mode server/child repeats pass. Existing regressions also pass: four app-hosted tests, six reading
 continuity cases (one additional unread case correctly skips after viewed acknowledgement), four session/reading
 cases and six subagent/alert cases. The sandbox seed's permission and question remain pending; no seed reset was run.
+
+## Nova sessão (wave 9)
+
+The orange **+** in Sessões pushes a local draft, not a server Session. The tab bar and "Sessão mestra" accessory are
+hidden, as in a conversation, and the existing V2 composer focuses automatically. The repository avatar uses the
+same monogram/color projection as Sessões. MCP chips wrap centrally above the repository/directory selectors. With a
+second selector and an open keyboard, the avatar/question compact slightly to keep all chips and the preview note
+visible; with the keyboard hidden, the introduction is centered in the available space.
+
+- **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
+  its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
+  project. Chats is excluded. The Projeto sheet preserves saved selection order and searches display names without
+  sorting. "Adicionar projeto" reuses Sessões' server-project picker and `project.open`; selecting/opening the draft's
+  project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state.
+- **Directory:** `GET /api/worktree?projectID=…`, known project worktrees and sandboxes are merged in that order,
+  deduplicated and stripped of the root. `custom.worktrees/branches` labels each checkout without booting every
+  Location; the folder name is the fallback. The root uses its current branch (VCS, then the branches RPC), never the
+  `main` sentinel as a guessed branch. Search appears only with ten or more existing worktrees. Non-Git projects keep
+  their principal directory and explain that worktrees are unavailable.
+- **Defaults:** the native client uses the web's **last-used** destination rule, separately per server URL/project:
+  `local` means root, `workspace` means **Nova worktree** on the next implicit selection. It remembers the category,
+  not the last existing path/base branch. An explicit restored draft retains its destination. The pure resolver also
+  covers the web's `local` and `new` modes; Você does not yet expose a global destination-mode setting. This client
+  memory is not `custom.preferences` and cannot read the browser's local `settings.v3`.
+- **New worktree:** choosing it creates nothing. "a partir de …" opens a searchable base-branch sheet using the root's
+  `/api/vcs/branch`, 100-ms debounce and limit 50; the current branch is included/deduplicated. There is no branch-name
+  field in this flow: the base-branch sheet uses a large native presentation with its search focused so results stay
+  usable above the keyboard. There is no folder-location promise. Send uses only
+  `{projectID,from:<canonical>,branch:<base>}` in `POST /api/worktree`;
+  the backend's configured strategy chooses its folder and may create a detached checkout.
+- **MCPs:** `/api/mcp` plus `/api/config` are Location-scoped. Default-enabled servers come first, then names; taps
+  replace status in place, not order. Connected/disabled/failed/needs-login/pending have semantic dots, dashed disabled
+  borders and a pulsing pending state. VoiceOver exposes switches. Root/existing taps connect/disconnect immediately
+  for **all sessions of that directory**. New-worktree preview starts from configuration defaults (not the root's
+  runtime connection state); taps only save intent, with "Vale quando a worktree for criada".
+  Loading, empty and retry states are explicit. Login-required chips explain that authentication belongs in the web
+  app; iOS never starts OAuth.
+- **Model/effort/agent:** the same wave-2 pickers and wave-3 editor, suggestions, attachments and fullscreen composer
+  are reused. Initial valid model: explicit draft → saved default → agent configuration → location configuration →
+  native recent history → first available model. Explicit effort includes "Padrão"; otherwise the saved default's
+  variant wins for that model, then per-model preference, agent/configured variant, constrained to available variants.
+  Recent model identities are server-local and updated after successful conversation/new-session sends. Hidden and
+  subagent-only agents are not choices. `/compact` and `/btw` require an existing session and are disabled here;
+  known backend slash commands use the command endpoint, including when typed without choosing a suggestion.
+- **Send:** generate the Session ID on the client → resolve/create the worktree → await live MCP mutations and apply/
+  verify explicit destination intents → create Session with agent/model/Location → serialize attachments/tokens with
+  the existing wave-3 encoder and submit prompt (or backend command). Progress uses the shared send button. Success
+  replaces the draft route with the conversation, so Back goes directly to Sessões, and clears the new-session draft.
+- **Errors:** worktree/MCP failures do not create a Session. Filesystem creation is not atomic with later requests:
+  any newly created checkout is retained as the draft's selected destination after MCP/session failure, preventing
+  another checkout on retry. A failure after Session creation opens that conversation with the text/tokens/attachments
+  transferred to its draft and an error toast. Nothing silently deletes a checkout or claims filesystem rollback.
+- **Draft:** exactly one `new-session` draft per server URL, using the same protected/atomic `DraftPersistence` file
+  and attachment storage as conversations. Its snapshot includes project, destination, base branch, MCP intent maps,
+  document/token ranges, cursor, attachments, model/variant and agent. It persists while editing, on leaving and on
+  background/server switch, restores after relaunch, and is excluded from missing-Session pruning.
+
+`NewSessionView`/`NewSessionStore` own presentation and navigation; selectors live in `NewSessionSelectors.swift`.
+`OpenCodeKit/NewSession.swift` owns projections and the narrow typed HTTP contracts, and
+`NewSessionSubmission.swift` owns the fake-client-testable ordered pipeline and phase-specific failures. The existing
+`ConversationStore` exposes a draft-only Location mode for the shared composer; no provisional server Session or
+separate composer copy is created.
+
+### Sandbox verification
+
+After the simulator `build-for-testing`, run `python3 packages/ios-custom/script/test-new-session.py` and repeat with
+`OPENCODE_TEST_THEME=openchamber-light`. Every app launch/relaunch supplies the explicit sandbox URL/password. The
+runner checks entry with/without a repository filter, project/add-picker switching, root/existing/new directories,
+only safari-devtools live/preview toggles, base-branch selection, keyboard/layout, route replacement and persistent
+draft restoration. An invalid base is injected **only into the stopped simulator app's own draft**, without changing
+Git refs or adding a production test hook. Root/existing/new sends use Luna 6/low/build and tiny no-tool prompts.
+Screenshots and JSON evidence go to
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda9-prints/`.
+The checkout path is opaque: the runner verifies its Git common directory belongs to the fake repository, rather
+than assuming the sandbox's configured strategy creates folders beneath the sandbox home. It retains the one
+verification checkout for review; remove it afterwards with `DELETE /api/worktree` and `{projectID,directory,force:false}`.
+No seeds or pending seed requests are changed, and no production server or physical device is used.
+
+Wave-9 verification: **141 Swift Testing tests**, warning-free simulator build/test build, all three new UI cases in
+both themes, and the existing four app-hosted, six reading-continuity, four session/reading, three settings and six
+subagent/alert cases pass. The additional unread case skips because its existing viewed watermark cannot be moved
+backwards. One first-pass native Details-menu tap missed; the complete session/reading rerun passed without product
+or existing-test changes. `execution-ledger.json` in the screenshot directory records the real new Sessions,
+worktree identity/base/MCP verification and cleanup; the original permission and question still remain pending.
 
 ## Platform and distribution
 

@@ -1,0 +1,314 @@
+import OpenCodeKit
+import SwiftUI
+
+struct NewSessionView: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var store: NewSessionStore
+  @State private var sheet: Selector?
+  private enum Selector: String, Identifiable {
+    case project, directory, base, add
+    var id: String { rawValue }
+  }
+  init(sessions: SessionStore) { _store = State(initialValue: NewSessionStore(sessions: sessions)) }
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 12) {
+        Button {
+          store.draft.focused = false
+          dismiss()
+        } label: {
+          Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium))
+            .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
+        }.buttonStyle(.plain).accessibilityLabel("Voltar").disabled(store.draft.sending)
+        Text("Nova sessão").font(.system(size: 20, weight: .semibold))
+        Spacer()
+      }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
+      if let project = store.project {
+        GeometryReader { geometry in
+          let compact = geometry.size.height < 275
+          ScrollView {
+            VStack(spacing: compact ? 10 : 20) {
+              VStack(spacing: compact ? 8 : 13) {
+                ProjectAvatar(project: project, size: compact ? 48 : 56)
+                Text("No que vamos trabalhar\nem \(project.displayName)?")
+                  .font(.system(size: compact ? 22 : 24)).multilineTextAlignment(.center)
+                  .foregroundStyle(theme.color(.textStrong)).fixedSize(
+                    horizontal: false, vertical: true
+                  )
+                  .frame(maxWidth: 340)
+              }
+              mcpChips
+            }.padding(.vertical, compact ? 2 : 8).padding(.horizontal, 18)
+              .frame(maxWidth: .infinity).frame(minHeight: geometry.size.height)
+          }.scrollIndicators(.hidden).scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle()).onTapGesture { store.draft.focused = false }
+        }
+        VStack(alignment: .leading, spacing: 10) {
+          selectors(project)
+          if let error = store.loadError {
+            Button {
+              store.retry()
+            } label: {
+              Label(error + " Tentar novamente", systemImage: "arrow.clockwise")
+                .font(.caption).foregroundStyle(theme.color(.error))
+            }
+          }
+          ConversationComposer(store: store.composer, draft: store.draft)
+        }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+      } else if !store.initialized {
+        ProgressView("Carregando projetos…").frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ContentUnavailableView {
+          Label("Nenhum projeto selecionado", systemImage: "folder")
+        } description: {
+          Text("Adicione um projeto para começar uma sessão.")
+        } actions: {
+          Button("Adicionar projeto") { show(.add) }.buttonStyle(.borderedProminent)
+        }
+      }
+    }
+    .background(theme.color(.background)).tint(theme.color(.primary))
+    .toolbar(.hidden, for: .navigationBar, .tabBar)
+    .background(
+      ConversationBackGesture(
+        capture: { store.draft.focused = false }, appeared: {}, enabled: !store.draft.sending)
+    )
+    .toastOverlay(store.composer.toast)
+    .environment(store.composer.toast)
+    .task { await store.open() }
+    .task(id: store.loadKey) { await store.reloadSelection() }
+    .onDisappear {
+      store.draft.focused = false
+      Task { await store.draft.persist() }
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase != .active { Task { await store.draft.persist() } }
+    }
+    .onChange(of: store.draft.focused) { _, focused in
+      // The expanded composer may restore focus after a selector starts presenting.
+      if focused && sheet != nil { store.draft.focused = false }
+    }
+    .sheet(item: $sheet) { selector in
+      Group {
+        switch selector {
+        case .project:
+          NewSessionProjectSheet(store: store) {
+            sheet = .add
+          }
+        case .directory: NewSessionDirectorySheet(store: store)
+        case .base: NewSessionBaseSheet(store: store)
+        case .add:
+          AddProjectPicker(store: store.sessions) { project in await store.selectProject(project) }
+        }
+      }.sessionAlertOverlay()
+    }
+  }
+  private func show(_ selector: Selector) {
+    store.draft.focused = false
+    // Resign before UIKit begins the sheet transition, not on the next SwiftUI update.
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    sheet = selector
+  }
+  private func selectors(_ project: Project) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 20) {
+        Button {
+          show(.project)
+        } label: {
+          HStack(spacing: 7) {
+            ProjectAvatar(project: project, size: 23)
+            Text(project.displayName).lineLimit(1)
+            chevron
+          }
+        }.accessibilityLabel("Projeto: \(project.displayName)").accessibilityIdentifier(
+          "new-project")
+        if store.destination != .create { directorySelector }
+        Spacer(minLength: 0)
+      }
+      if store.destination == .create {
+        HStack(spacing: 18) {
+          directorySelector
+          Button {
+            show(.base)
+          } label: {
+            HStack(spacing: 7) {
+              GitBranchIcon().foregroundStyle(theme.color(.icon))
+              Text("a partir de \(store.baseBranch ?? "HEAD")").lineLimit(1)
+              chevron
+            }
+          }.accessibilityIdentifier("new-base")
+        }
+      }
+    }.font(.system(size: 14)).foregroundStyle(theme.color(.text)).buttonStyle(.plain)
+      .padding(.horizontal, 6).disabled(store.draft.sending || store.loading)
+  }
+  private var directorySelector: some View {
+    Button {
+      show(.directory)
+    } label: {
+      HStack(spacing: 7) {
+        Group {
+          if store.destination == .create { Image(systemName: "plus") } else { GitBranchIcon() }
+        }.foregroundStyle(theme.color(.icon))
+        Text(store.git || store.loading ? store.directoryLabel : "Sem Git").lineLimit(1)
+        chevron
+      }
+    }.accessibilityLabel("Diretório: \(store.directoryLabel)").accessibilityIdentifier(
+      "new-directory")
+  }
+  private var chevron: some View {
+    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium)).foregroundStyle(
+      theme.color(.textSecondary))
+  }
+  private var mcpChips: some View {
+    VStack(spacing: 7) {
+      if store.mcpLoading {
+        ProgressView("Carregando MCPs…").font(.caption).tint(theme.color(.textSecondary))
+      } else if store.mcpError {
+        Button {
+          store.retry()
+        } label: {
+          Text("Não foi possível carregar MCPs · Tentar novamente").font(.caption)
+        }.foregroundStyle(theme.color(.textSecondary))
+      } else if store.chips.isEmpty {
+        Text("Nenhum MCP configurado").font(.caption).foregroundStyle(theme.color(.textSecondary))
+      } else {
+        MCPFlowLayout(spacing: 7) {
+          ForEach(store.chips) { server in
+            MCPChip(server: server, preview: store.destination == .create) { store.toggle(server) }
+          }
+        }.disabled(store.draft.sending)
+      }
+      if store.destination == .create {
+        Text("Vale quando a worktree for criada").font(.system(size: 11))
+          .foregroundStyle(theme.color(.textSecondary))
+      }
+    }
+  }
+}
+
+struct ProjectAvatar: View {
+  @Environment(\.appTheme) private var theme
+  let project: Project
+  let size: CGFloat
+  var body: some View {
+    let colors = theme.avatar(SessionList.avatarColor(project, fallback: project.id))
+    Text(SessionList.monogram(project.displayName)).font(
+      .system(size: size * 0.39, weight: .medium)
+    )
+    .foregroundStyle(colors.text).frame(width: size, height: size)
+    .background(colors.background, in: Circle()).accessibilityHidden(true)
+  }
+}
+
+struct GitBranchIcon: View {
+  var body: some View {
+    Canvas { context, size in
+      var path = Path()
+      path.move(to: CGPoint(x: 4, y: 5))
+      path.addLine(to: CGPoint(x: 4, y: 13))
+      path.move(to: CGPoint(x: 12, y: 5))
+      path.addQuadCurve(to: CGPoint(x: 4, y: 10), control: CGPoint(x: 12, y: 10))
+      for center in [CGPoint(x: 4, y: 3), CGPoint(x: 4, y: 15), CGPoint(x: 12, y: 3)] {
+        path.addEllipse(in: CGRect(x: center.x - 2, y: center.y - 2, width: 4, height: 4))
+      }
+      context.stroke(path, with: .foreground, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+    }.frame(width: 16, height: 18).accessibilityHidden(true)
+  }
+}
+
+private struct MCPChip: View {
+  @Environment(\.appTheme) private var theme
+  let server: MCPServer
+  let preview: Bool
+  let toggle: () -> Void
+  @State private var pulse = false
+  private var disabled: Bool { server.status.status == .disabled }
+  private var pending: Bool { server.status.status == .pending }
+  private var dotRole: ThemeRole {
+    switch server.status.status {
+    case .connected: .success
+    case .failed: .error
+    case .needsAuth: .warning
+    default: .textWeak
+    }
+  }
+  var body: some View {
+    Button(action: toggle) {
+      HStack(spacing: 7) {
+        Circle().fill(theme.color(dotRole)).frame(width: 7, height: 7)
+          .opacity(pending && pulse ? 0.3 : 1)
+        Text(server.name).font(.system(size: 13)).lineLimit(1).frame(maxWidth: 184)
+          .foregroundStyle(theme.color(disabled ? .textWeak : .text))
+      }.padding(.horizontal, 12).frame(height: 32)
+        .overlay {
+          Capsule().strokeBorder(
+            theme.color(.border), style: StrokeStyle(lineWidth: 0.8, dash: disabled ? [4, 3] : []))
+        }
+    }.buttonStyle(.plain).disabled(pending || server.status.status == .unknown)
+      .opacity(pending ? 0.6 : 1)
+      .accessibilityRepresentation {
+        Toggle(isOn: Binding(get: { server.enabled }, set: { _ in toggle() })) {
+          Text(server.name)
+        }.disabled(pending || server.status.status == .unknown)
+          .accessibilityHint(
+            preview
+              ? "Prévia. Vale quando a worktree for criada."
+              : "Altera o MCP para todas as sessões deste diretório."
+          )
+          .accessibilityValue(server.status.status.label)
+          .accessibilityIdentifier("mcp-" + server.name)
+      }
+      .task(id: pending) {
+        guard pending else {
+          pulse = false
+          return
+        }
+        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { pulse = true }
+      }
+  }
+}
+
+private struct MCPFlowLayout: Layout {
+  let spacing: CGFloat
+  private func rows(_ subviews: Subviews, width: CGFloat) -> [[LayoutSubview]] {
+    var rows: [[LayoutSubview]] = [[]]
+    var used: CGFloat = 0
+    for view in subviews {
+      let size = view.sizeThatFits(.unspecified)
+      if used > 0 && used + spacing + size.width > width {
+        rows.append([])
+        used = 0
+      }
+      rows[rows.count - 1].append(view)
+      used += size.width + (used > 0 ? spacing : 0)
+    }
+    return rows
+  }
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? 360
+    let heights = rows(subviews, width: width).map { row in
+      row.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+    }
+    return CGSize(
+      width: width, height: heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * spacing)
+  }
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    var y = bounds.minY
+    for row in rows(subviews, width: bounds.width) {
+      let sizes = row.map { $0.sizeThatFits(.unspecified) }
+      let width = sizes.reduce(0) { $0 + $1.width } + CGFloat(max(0, row.count - 1)) * spacing
+      var x = bounds.midX - width / 2
+      for (index, view) in row.enumerated() {
+        view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(sizes[index]))
+        x += sizes[index].width + spacing
+      }
+      y += (sizes.map(\.height).max() ?? 0) + spacing
+    }
+  }
+}

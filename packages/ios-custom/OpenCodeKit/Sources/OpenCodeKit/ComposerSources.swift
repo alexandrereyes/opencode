@@ -54,6 +54,17 @@ public struct ComposerSources: Sendable {
   public var references: [ComposerReference] = []
   public var snippets: [ComposerSnippet] = []
   public init() {}
+  public func newSessionDocument(_ document: ComposerDocument) -> ComposerDocument {
+    guard document.text.hasPrefix("/"), document.validTokens.first?.start != 0,
+      let word = document.text.split(whereSeparator: \.isWhitespace).first else { return document }
+    let name = String(word.dropFirst())
+    let local = ["compact", "btw"].contains(name)
+    guard local || commands.contains(where: { $0.name == name && !["model", "agent"].contains(name) }) else { return document }
+    return ComposerDocument(text: document.text, tokens: [
+      .init(start: 0, end: word.utf16.count,
+        token: .init(kind: .command, id: name, text: String(word), value: local ? "client" : "backend"))
+    ] + document.tokens)
+  }
   public func suggestions(
     _ trigger: ComposerTrigger, agents: [AgentInfo] = [],
     files: [ComposerFile] = [], sessions: [Session] = [], current: String = "", server: String = "",

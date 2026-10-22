@@ -1,0 +1,319 @@
+import Foundation
+
+public enum SessionDestination: Codable, Sendable, Equatable, Hashable {
+  case root, create
+  case worktree(String)
+  public var key: String {
+    switch self {
+    case .root: "main"
+    case .create: "create"
+    case .worktree(let directory): directory
+    }
+  }
+  public var category: String { self == .root ? "local" : "workspace" }
+  public func directory(root: String) -> String {
+    if case .worktree(let directory) = self { return directory }
+    return root
+  }
+  public static func implicit(setting: String = "last-used", lastUsed: String?) -> Self {
+    if setting == "local" { return .root }
+    if setting == "new" { return .create }
+    return lastUsed == "workspace" ? .create : .root
+  }
+}
+
+public struct NewSessionContext: Codable, Sendable, Equatable {
+  public var projectID: String
+  public var destination: SessionDestination
+  public var baseBranch: String?
+  public var mcp: [String: [String: Bool]]
+  public init(
+    projectID: String, destination: SessionDestination = .root, baseBranch: String? = nil,
+    mcp: [String: [String: Bool]] = [:]
+  ) {
+    self.projectID = projectID
+    self.destination = destination
+    self.baseBranch = baseBranch
+    self.mcp = mcp
+  }
+  public var intentKey: String { projectID + "\n" + destination.key }
+  public var intents: [String: Bool] { mcp[intentKey] ?? [:] }
+}
+
+public struct WorktreeDirectory: Codable, Sendable, Identifiable, Hashable {
+  public let directory: String
+  public let strategy: String?
+  public var id: String { directory }
+  public init(directory: String, strategy: String? = nil) {
+    self.directory = directory
+    self.strategy = strategy
+  }
+}
+public struct WorktreeBranch: Codable, Sendable {
+  public let directory: String
+  public let branch: String?
+  public init(directory: String, branch: String?) {
+    self.directory = directory
+    self.branch = branch
+  }
+}
+public struct WorktreeChoice: Sendable, Identifiable, Equatable {
+  public let directory: String
+  public let label: String
+  public var id: String { directory }
+}
+public struct VCSInfo: Codable, Sendable {
+  public let provider: String?
+  public let branch: Branch
+  public struct Branch: Codable, Sendable {
+    public let current: String?
+    public let `default`: String?
+  }
+  public var supportsWorktrees: Bool { provider == "git" || branch.current != nil }
+}
+
+public enum NewSessionProjection {
+  public static func projects(
+    _ inventory: [Project], preferences: Preferences?, chatRoot: String?,
+    search: String = ""
+  ) -> [Project] {
+    (preferences?.data.projects["local"]?.projects ?? []).compactMap { entry in
+      inventory.first { $0.canonical == entry.worktree || $0.sandboxes.contains(entry.worktree) }
+    }.filter {
+      $0.canonical != chatRoot
+        && (search.isEmpty || $0.displayName.localizedStandardContains(search))
+    }
+  }
+  public static func initialProject(_ projects: [Project], filtered: String?, last: String?)
+    -> Project?
+  {
+    projects.first { $0.id == filtered }
+      ?? projects.first { $0.canonical == last || $0.sandboxes.contains(last ?? "") }
+      ?? projects.first
+  }
+  public static func worktrees(
+    root: String, inventory: [WorktreeDirectory],
+    known: [WorktreeDirectory] = [], sandboxes: [String],
+    branches: [WorktreeBranch], home: String? = nil
+  ) -> [WorktreeChoice] {
+    var seen = Set([URL(fileURLWithPath: root).standardizedFileURL.path])
+    let choices = (inventory.map(\.directory) + known.map(\.directory) + sandboxes).filter {
+      seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted
+    }.map { directory in
+      WorktreeChoice(
+        directory: directory,
+        label: branches.first { $0.directory == directory }?.branch
+          ?? URL(fileURLWithPath: directory).lastPathComponent)
+    }
+    guard let home else { return choices }
+    let dev = URL(fileURLWithPath: home).appendingPathComponent("dev").path
+    return choices.filter {
+      URL(fileURLWithPath: $0.directory).deletingLastPathComponent().path == dev
+    }
+      + choices.filter {
+        URL(fileURLWithPath: $0.directory).deletingLastPathComponent().path != dev
+      }
+  }
+  public static func branches(_ values: [String], current: String?, search: String) -> [String] {
+    var seen = Set<String>()
+    let search = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    return Array(
+      ([current].compactMap { $0 } + values).filter {
+        (search.isEmpty || $0.localizedStandardContains(search)) && seen.insert($0).inserted
+      }.prefix(50))
+  }
+  public static func agent(explicit: String?, configured: String?, agents: [AgentInfo]) -> String {
+    let choices = agents.filter { $0.hidden != true && $0.mode != "subagent" }
+    return [explicit, configured, "build"].compactMap { $0 }.first { id in
+      choices.contains { $0.id == id }
+    } ?? choices.first?.id ?? "build"
+  }
+  public static func model(
+    explicit: ModelReference?, preferences: Preferences.Models?,
+    agent: ModelReference?, configured: ModelReference?,
+    recent: [ModelReference], models: [ModelInfo]
+  ) -> ModelReference? {
+    let saved = preferences?.default.map {
+      ModelReference(id: $0.modelID, providerID: $0.providerID, variant: $0.variant)
+    }
+    let fallback = models.first { $0.enabled != false }.map {
+      ModelReference(id: $0.id, providerID: $0.providerID)
+    }
+    guard
+      var selected =
+        ([explicit, saved, agent, configured] + recent.map(Optional.some) + [fallback])
+        .compactMap({ $0 }).first(where: { candidate in
+          models.contains {
+            $0.id == candidate.id && $0.providerID == candidate.providerID && $0.enabled != false
+          }
+        }),
+      let info = models.first(where: {
+        $0.id == selected.id && $0.providerID == selected.providerID
+      })
+    else { return nil }
+    let same: (ModelReference?) -> Bool = {
+      $0?.id == selected.id && $0?.providerID == selected.providerID
+    }
+    let variant =
+      same(explicit)
+      ? explicit?.variant
+      : (same(saved) ? saved?.variant ?? "default" : preferences?.variant[info.identity])
+        ?? (same(agent) ? agent?.variant : nil) ?? (same(configured) ? configured?.variant : nil)
+    selected.variant = info.variants?.contains { $0.id == variant } == true ? variant : nil
+    return selected
+  }
+}
+
+/// Decode only fields this screen owns; config documents may also contain credentials.
+public struct NewSessionConfiguration: Decodable, Sendable {
+  public let info: Info
+  private enum CodingKeys: CodingKey { case type, info }
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    guard try values.decodeIfPresent(String.self, forKey: .type) == "document" else {
+      info = Info()
+      return
+    }
+    info = try values.decodeIfPresent(Info.self, forKey: .info) ?? Info()
+  }
+  public struct Info: Decodable, Sendable {
+    public let model: ModelReference?
+    public let default_agent: String?
+    public let mcp: MCP?
+    private enum CodingKeys: CodingKey { case model, default_agent, mcp }
+    init() {
+      model = nil
+      default_agent = nil
+      mcp = nil
+    }
+    public init(from decoder: any Decoder) throws {
+      let values = try decoder.container(keyedBy: CodingKeys.self)
+      if let text = try? values.decode(String.self, forKey: .model) {
+        model = text.firstIndex(of: "/").map { slash in
+          ModelReference(
+            id: String(text[text.index(after: slash)...]), providerID: String(text[..<slash]))
+        }
+      } else {
+        struct Configured: Decodable {
+          let providerID: String
+          let model: String
+          let variant: String?
+        }
+        model = try values.decodeIfPresent(Configured.self, forKey: .model).map {
+          ModelReference(id: $0.model, providerID: $0.providerID, variant: $0.variant)
+        }
+      }
+      default_agent = try values.decodeIfPresent(String.self, forKey: .default_agent)
+      mcp = try values.decodeIfPresent(MCP.self, forKey: .mcp)
+    }
+    public struct MCP: Decodable, Sendable {
+      public let servers: [String: Server]?
+      public struct Server: Decodable, Sendable { public let disabled: Bool? }
+    }
+  }
+}
+
+public struct MCPServer: Codable, Sendable, Identifiable, Equatable {
+  public let name: String
+  public var status: Status
+  public let integrationID: String?
+  public var id: String { name }
+  public struct Status: Codable, Sendable, Equatable {
+    public var status: State
+    public let error: String?
+    public init(_ state: State, error: String? = nil) {
+      status = state
+      self.error = error
+    }
+  }
+  public enum State: String, Codable, Sendable {
+    case connected, disabled, failed
+    case needsAuth = "needs_auth"
+    case pending, unknown
+    public init(from decoder: any Decoder) throws {
+      self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+    public var label: String {
+      switch self {
+      case .connected: "Ativado"
+      case .disabled: "Desativado"
+      case .failed: "Falhou"
+      case .needsAuth: "Precisa de login"
+      case .pending: "Conectando"
+      case .unknown: "Indisponível"
+      }
+    }
+  }
+  public init(name: String, state: State, integrationID: String? = nil) {
+    self.name = name
+    status = Status(state)
+    self.integrationID = integrationID
+  }
+  public var enabled: Bool { status.status != .disabled && status.status != .unknown }
+  public func preview(_ intent: Bool?, defaultEnabled: Bool = true) -> Self {
+    var value = self
+    value.status = Status((intent ?? defaultEnabled) ? .connected : .disabled)
+    return value
+  }
+  public static func defaults(_ configuration: [NewSessionConfiguration]) -> [String: Bool] {
+    var enabled: [String: Bool] = [:]
+    for entry in configuration {
+      for (name, server) in entry.info.mcp?.servers ?? [:] {
+        enabled[name] = server.disabled != true
+      }
+    }
+    return enabled
+  }
+  public static func ordered(_ servers: [Self], configuration: [NewSessionConfiguration]) -> [Self]
+  {
+    let enabled = defaults(configuration)
+    return servers.sorted {
+      let first = enabled[$0.name] ?? true
+      let second = enabled[$1.name] ?? true
+      return first != second
+        ? first : $0.name.localizedCompare($1.name) == .orderedAscending
+    }
+  }
+  public enum Toggle: Equatable, Sendable { case intent, live, login, unavailable }
+  public func toggle(destination: SessionDestination) -> Toggle {
+    if status.status == .pending || status.status == .unknown { return .unavailable }
+    if status.status == .needsAuth { return .login }
+    return destination == .create ? .intent : .live
+  }
+}
+
+extension OpenCodeClient {
+  public func worktrees(projectID: String) async throws -> [WorktreeDirectory] {
+    try await get("/api/worktree", query: [.init(name: "projectID", value: projectID)])
+  }
+  public func worktreeBranches(directory: String) async throws -> [WorktreeBranch] {
+    try await rpc("custom.worktrees", "branches", input: Empty(), directory: directory)
+  }
+  public func vcs(directory: String) async throws -> VCSInfo {
+    let value: DataResponse<VCSInfo> = try await get(
+      "/api/vcs", query: [.init(name: "location[directory]", value: directory)])
+    return value.data
+  }
+  public func baseBranches(directory: String, search: String) async throws -> [String] {
+    let value: DataResponse<[String]> = try await get(
+      "/api/vcs/branch",
+      query: [
+        .init(name: "location[directory]", value: directory), .init(name: "search", value: search),
+        .init(name: "limit", value: "50"),
+      ])
+    return value.data
+  }
+  public func newSessionConfiguration(directory: String) async throws -> [NewSessionConfiguration] {
+    try await get("/api/config", query: [.init(name: "location[directory]", value: directory)])
+  }
+  public func mcpServers(directory: String) async throws -> [MCPServer] {
+    let value: DataResponse<[MCPServer]> = try await get(
+      "/api/mcp", query: [.init(name: "location[directory]", value: directory)])
+    return value.data
+  }
+  public func toggleMCP(_ name: String, enabled: Bool, directory: String) async throws {
+    try await perform(
+      "POST", "/api/experimental/mcp/\(name)/\(enabled ? "connect" : "disconnect")",
+      query: [.init(name: "location[directory]", value: directory)])
+  }
+}

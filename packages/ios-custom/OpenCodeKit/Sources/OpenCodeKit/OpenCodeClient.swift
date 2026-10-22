@@ -284,11 +284,16 @@ public struct OpenCodeClient: Sendable {
         try await session.data(for: request)
       }
     if let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode),
-      let value = try? JSONDecoder().decode(JSONValue.self, from: data),
-      value.object?["_tag"]?.string == "LocationNotFoundError",
-      let directory = value.object?["location"]?.object?["directory"]?.string
+      let value = try? JSONDecoder().decode(JSONValue.self, from: data)
     {
-      throw ClientError.locationNotFound(directory)
+      if value.object?["_tag"]?.string == "WorktreeError",
+        let message = value.object?["data"]?.object?["message"]?.string {
+        throw ClientError.operation(message)
+      }
+      if value.object?["_tag"]?.string == "LocationNotFoundError",
+        let directory = value.object?["location"]?.object?["directory"]?.string {
+        throw ClientError.locationNotFound(directory)
+      }
     }
     try validate(response)
     return data
@@ -342,10 +347,12 @@ public enum ClientError: Error, LocalizedError {
   case http(Int)
   case incompatibleServer
   case locationNotFound(String)
+  case operation(String)
   public var errorDescription: String? {
     switch self {
     case .incompatibleServer: "Este servidor não é compatível com o OpenCode V2."
     case .locationNotFound: "O diretório desta sessão não existe mais."
+    case .operation(let message): message
     case .http(401): "A senha do servidor não foi aceita."
     case .http(let code): "O servidor respondeu com o código \(code)."
     }
