@@ -1,0 +1,47 @@
+{
+  "id": "msg_7933ee19274443bca8395f2e4dd3fe12",
+  "text": "Confira @docs/infra.md com @explore e $conversation-check.",
+  "files": [
+    {
+      "uri": "file:///sandbox/repos/ios-conversation/docs/infra.md",
+      "name": "infra.md",
+      "mention": {
+        "start": 8,
+        "end": 22,
+        "text": "@docs/infra.md"
+      }
+    }
+  ],
+  "agents": [
+    {
+      "name": "explore",
+      "mention": {
+        "start": 27,
+        "end": 35,
+        "text": "@explore"
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "conversation-check",
+      "mention": {
+        "start": 38,
+        "end": 57,
+        "text": "$conversation-check"
+      }
+    }
+  ],
+  "metadata": {
+    "displayText": "Confira @docs/infra.md com @explore e $conversation-check.",
+    "comments": [],
+    "agent": "build",
+    "model": {
+      "providerID": "llm-proxy",
+      "modelID": "gpt-6-luna",
+      "variant": "low"
+    }
+  },
+  "delivery": "queue",
+  "resume": false
+}

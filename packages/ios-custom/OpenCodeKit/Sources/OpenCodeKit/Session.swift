@@ -4,10 +4,14 @@ public struct Session: Codable, Sendable, Identifiable, Hashable {
   public let id: String
   public let parentID: String?
   public let projectID: String
-  public let title: String?
+  public var title: String?
   public let location: Location
   public let time: Time
   public let outcome: Outcome?
+  public let agent: String?
+  public let model: ModelReference?
+  public let cost: Double?
+  public let tokens: TokenUsage?
 
   public struct Location: Codable, Sendable, Hashable {
     public let directory: String

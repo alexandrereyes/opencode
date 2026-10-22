@@ -35,6 +35,12 @@ struct AppTheme: Sendable {
     let avatar = definition.avatar(ThemeAvatar.allCases.first { $0.name == color } ?? .lime)
     return (Color(avatar.background), Color(avatar.text))
   }
+  func agentColor(_ agent: AgentInfo?, id: String) -> Color {
+    if let css = agent?.color, let color = ThemeColor(css: css) {
+      return Color(definition.overriding(.agentExplicit, with: color).color(.agentExplicit))
+    }
+    return self.color(agentRole(agent, id: id))
+  }
 }
 
 extension Color {

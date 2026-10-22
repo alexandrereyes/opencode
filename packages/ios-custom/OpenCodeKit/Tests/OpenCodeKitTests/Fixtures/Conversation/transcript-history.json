@@ -1,0 +1,1140 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_9c4dc7c1f521448eab3866de7c840a2d",
+        "time": {
+          "created": 1792606026716,
+          "streamed": 1792606028716,
+          "completed": 1792606029716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Vou conferir a integração antes do PR.\n\nPR fictício: #482 · `neon-mountain` → `main`."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 636200,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_ea25722883d048e99990180d06f38c5f",
+        "metadata": {
+          "displayText": "Antes de subir, confere isso",
+          "comments": [],
+          "quotes": [
+            {
+              "id": "quote-conversation",
+              "messageID": "msg_44433ab52f9a4668977b4b28b6553e8d",
+              "partID": "msg_44433ab52f9a4668977b4b28b6553e8d:text:0",
+              "text": "tem integração nativa com o GitHub",
+              "comment": "Confere essa integração antes do PR",
+              "anchor": {
+                "start": 277,
+                "end": 311,
+                "exact": "tem integração nativa com o GitHub"
+              }
+            }
+          ]
+        },
+        "time": {
+          "created": 1792606025716
+        },
+        "text": "Comments on earlier assistant messages:\n\n1. Quoted from message msg_44433ab52f9a4668977b4b28b6553e8d (part msg_44433ab52f9a4668977b4b28b6553e8d:text:0):\n> tem integração nativa com o GitHub\nUser comment: Confere essa integração antes do PR",
+        "type": "user"
+      },
+      {
+        "id": "msg_44433ab52f9a4668977b4b28b6553e8d",
+        "time": {
+          "created": 1792606020716,
+          "streamed": 1792606022716,
+          "completed": 1792606023716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Encontrei três opções viáveis:\n\n- **Plane** · AGPL-3.0\n- **Huly** · EPL-2.0\n- **Focalboard** · MIT\n\nTodas sobem com `docker compose` e convertem para stack.\n\n```yaml\nservices:\n  plane:\n    image: makeplane/plane:stable\n    deploy:\n      replicas: 1\n```\n\nRecomendo o **Plane**: tem integração nativa com o GitHub."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 636200,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_b0d7ac0c0f7348dab0204bf4952f7045",
+        "time": {
+          "created": 1792606010716
+        },
+        "text": "Compara alternativas open source ao Linear que dê para hospedar no Swarm. Quero custo, licença e integração com o GitHub.",
+        "type": "user"
+      },
+      {
+        "id": "msg_675102b101664b3b80f3f96ef84cb675",
+        "time": {
+          "created": 1792605960716,
+          "streamed": 1792605962716,
+          "completed": 1792605963716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Tentativa recuperada."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        },
+        "retry": {
+          "attempt": 1,
+          "at": 1792605959716,
+          "error": {
+            "type": "RateLimitError",
+            "message": "Limite temporário demonstrativo",
+            "status": 429
+          }
+        }
+      },
+      {
+        "type": "compaction",
+        "id": "msg_8fc227304bd44f3d86e7e6bc2f4e50ec",
+        "time": {
+          "created": 1792605950716
+        },
+        "status": "completed",
+        "reason": "manual",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "summary": "Resumo fictício das revisões anteriores.",
+        "recent": "Comparação de ferramentas."
+      },
+      {
+        "id": "msg_16ca01b82b544ba4bd8939875d577ec7",
+        "time": {
+          "created": 1792605930716,
+          "streamed": 1792605932716,
+          "completed": 1792605938716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_e206096c4b79466f95b58dda2ce24d3d",
+            "name": "glob",
+            "state": {
+              "status": "completed",
+              "input": {
+                "pattern": "**/*.md"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "docs/infra.md\ndocs/alternativas.md"
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792605930716,
+              "ran": 1792605930716,
+              "completed": 1792605932716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_6383b7af35a44c0ca5f832e7e7c9fcef",
+            "name": "grep",
+            "state": {
+              "status": "completed",
+              "input": {
+                "pattern": "Plane",
+                "path": "docs"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "docs/alternativas.md:3:Plane"
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792605931716,
+              "ran": 1792605931716,
+              "completed": 1792605933716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_127ef20874274e8fa8fca1e2ca9847a9",
+            "name": "websearch",
+            "state": {
+              "status": "completed",
+              "input": {
+                "query": "alternativas Linear open source"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Exemplo fictício: Plane, Huly, Focalboard."
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792605932716,
+              "ran": 1792605932716,
+              "completed": 1792605934716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_1595bc65421949cfb9d4c84115a88bfb",
+            "name": "webfetch",
+            "state": {
+              "status": "completed",
+              "input": {
+                "url": "https://example.invalid/plane",
+                "format": "markdown"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "# Plane\nDocumentação fictícia."
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792605933216,
+              "ran": 1792605933216,
+              "completed": 1792605935216
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_f64aebb97a194df58716b93fa8b019aa",
+            "name": "execute",
+            "state": {
+              "status": "completed",
+              "input": {
+                "code": "return { status: \"ok\" }"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"status\":\"ok\"}"
+                }
+              ],
+              "metadata": {
+                "toolCalls": []
+              }
+            },
+            "time": {
+              "created": 1792605933416,
+              "ran": 1792605933416,
+              "completed": 1792605935416
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_7d6e42ae97954ed38a54214f022fa2ac",
+            "name": "read",
+            "state": {
+              "status": "completed",
+              "input": {
+                "path": "exemplo.png"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Image read successfully"
+                },
+                {
+                  "type": "file",
+                  "uri": "data:image/png;base64,",
+                  "mime": "image/png"
+                }
+              ],
+              "metadata": {
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1792605933516,
+              "ran": 1792605933516,
+              "completed": 1792605935516
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_ec5348cfac814ad68dd5c85ef608bebb",
+            "name": "patch",
+            "state": {
+              "status": "completed",
+              "input": {
+                "patchText": "*** Begin Patch\n*** Update File: docs/alternativas.md\n@@\n-Plane\n+**Plane**\n*** End Patch"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Patch aplicado."
+                }
+              ],
+              "metadata": {
+                "files": [
+                  {
+                    "file": "docs/alternativas.md",
+                    "status": "modified",
+                    "additions": 1,
+                    "deletions": 1,
+                    "patch": "--- docs/alternativas.md\n+++ docs/alternativas.md\n@@ -1 +1 @@\n-Plane\n+**Plane**\n"
+                  }
+                ]
+              }
+            },
+            "time": {
+              "created": 1792605933716,
+              "ran": 1792605933716,
+              "completed": 1792605935716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_83760f508ef045e7ba938a80e1b9add0",
+            "name": "shell",
+            "state": {
+              "status": "completed",
+              "input": {
+                "command": "printf 'Falha demonstrativa\\n'; exit 2"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Falha demonstrativa\nExited with code 2"
+                }
+              ],
+              "metadata": {
+                "exit": 2
+              }
+            },
+            "time": {
+              "created": 1792605934716,
+              "ran": 1792605934716,
+              "completed": 1792605936716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_ada54c5028a5434394a671068c9df726",
+            "name": "read",
+            "state": {
+              "status": "error",
+              "input": {
+                "path": "ausente.md"
+              },
+              "error": {
+                "type": "ToolError",
+                "message": "File not found: ausente.md"
+              }
+            },
+            "time": {
+              "created": 1792605935716,
+              "ran": 1792605935716,
+              "completed": 1792605937716
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_5c7048d8ea9b46eca81cce6906b6abdb",
+            "name": "question",
+            "state": {
+              "status": "completed",
+              "input": {
+                "questions": [
+                  {
+                    "header": "Licença",
+                    "question": "Qual licença revisar?",
+                    "options": [
+                      {
+                        "label": "MIT",
+                        "description": "Permissiva"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "MIT"
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1792605936716,
+              "ran": 1792605936716,
+              "completed": 1792605938716
+            }
+          },
+          {
+            "type": "text",
+            "text": "Pesquisa e validação concluídas."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_2553f45326c5495eb2b6aba0621d4556",
+        "time": {
+          "created": 1792519631716,
+          "streamed": 1792519633716,
+          "completed": 1792519634716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "A imagem de teste tem um círculo laranja e um retângulo verde."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_eba987673972439eabadecf8aa277fbd",
+        "time": {
+          "created": 1792519630716
+        },
+        "text": "Analisa esta imagem fictícia.",
+        "files": [
+          {
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAyUlEQVR42u3asRGDMBBFQTVGB06pxSldugViB8QuACPEWNJw8s68CjaT/qXtvSpTQgAIECBAgAABAiRAgADFBXo9p5L+EaiQJihT6kxzlemxzI1qDvSjTqFRVKAqOiVGIYEq6pwaxQOqrpM3CgbUSCdjFAmoqc6REaBRgDrofDUCNARQN529ESBAgAABAgQIECBAgAABAuQ1D8iPIiCrhl1s2F3Msmqbd93RDch90C0uzEYAcqPoylWAAAECBAgQIEACBAgQoDv1AQkKOb0EQHvHAAAAAElFTkSuQmCC",
+            "mime": "image/png",
+            "source": {
+              "type": "inline"
+            },
+            "name": "exemplo.png"
+          }
+        ],
+        "type": "user"
+      },
+      {
+        "id": "msg_5e8aaba5028a4e699891739b6d9a6144",
+        "time": {
+          "created": 1792433621716,
+          "streamed": 1792433623716,
+          "completed": 1792433624716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 40 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_4de7fe8bfdc346ab8655fc1e96ebc955",
+        "time": {
+          "created": 1792433620716
+        },
+        "text": "Revisão 40: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_76fa726ac23b41799af5060d5a711850",
+        "time": {
+          "created": 1792433611716,
+          "streamed": 1792433613716,
+          "completed": 1792433614716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 39 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_c498bc8aeb844338a6aceb9de7282ba6",
+        "time": {
+          "created": 1792433610716
+        },
+        "text": "Revisão 39: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_77327fb672254961b3c64061ca361a8b",
+        "time": {
+          "created": 1792433601716,
+          "streamed": 1792433603716,
+          "completed": 1792433604716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 38 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_9bac363ddd3543fa9d992ff49c604c36",
+        "time": {
+          "created": 1792433600716
+        },
+        "text": "Revisão 38: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_d98fb41b3cc147999741af8b75fceb18",
+        "time": {
+          "created": 1792433591716,
+          "streamed": 1792433593716,
+          "completed": 1792433594716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 37 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_86bccf603bcd4eb8a4cc8be5b337fdca",
+        "time": {
+          "created": 1792433590716
+        },
+        "text": "Revisão 37: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_78bcb7a3b7f241818b5212ce1b25d516",
+        "time": {
+          "created": 1792433581716,
+          "streamed": 1792433583716,
+          "completed": 1792433584716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 36 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_375602105b3d4ac699307da6612225f2",
+        "time": {
+          "created": 1792433580716
+        },
+        "text": "Revisão 36: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_a3bcd35a75214a2daabbb8fbaef37e83",
+        "time": {
+          "created": 1792433571716,
+          "streamed": 1792433573716,
+          "completed": 1792433574716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 35 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_d312bf634ffb40b19905b7208149f758",
+        "time": {
+          "created": 1792433570716
+        },
+        "text": "Revisão 35: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_1d72962c39294b4c8c6f1fe1a1f10ad6",
+        "time": {
+          "created": 1792433561716,
+          "streamed": 1792433563716,
+          "completed": 1792433564716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 34 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_7d834f924121407994c1fcf8474fc895",
+        "time": {
+          "created": 1792433560716
+        },
+        "text": "Revisão 34: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_dd94c836b99c417ea533b3eb8ccb16dd",
+        "time": {
+          "created": 1792433551716,
+          "streamed": 1792433553716,
+          "completed": 1792433554716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 33 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_0b3b5d06d04548c2bcdabee11ed493e5",
+        "time": {
+          "created": 1792433550716
+        },
+        "text": "Revisão 33: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_01f8cd524c2549f18abe3fe436d9a45b",
+        "time": {
+          "created": 1792433541716,
+          "streamed": 1792433543716,
+          "completed": 1792433544716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 32 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_2aa1827d16404299837b8b8608ec4042",
+        "time": {
+          "created": 1792433540716
+        },
+        "text": "Revisão 32: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_85bb41072e864f5291cab2e2717e91be",
+        "time": {
+          "created": 1792433531716,
+          "streamed": 1792433533716,
+          "completed": 1792433534716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 31 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_8d2979fbf4b7406eb5120169185a3177",
+        "time": {
+          "created": 1792433530716
+        },
+        "text": "Revisão 31: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_c6b0274655b14b7c9f173db4fd132bd0",
+        "time": {
+          "created": 1792433521716,
+          "streamed": 1792433523716,
+          "completed": 1792433524716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 30 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_29a1d1da02e746318504fad063051ca3",
+        "time": {
+          "created": 1792433520716
+        },
+        "text": "Revisão 30: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_fc320873d8fb4e32bab92d0a6cd2c902",
+        "time": {
+          "created": 1792433511716,
+          "streamed": 1792433513716,
+          "completed": 1792433514716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 29 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_3d6ba601d03140b59ced1f45939e11f5",
+        "time": {
+          "created": 1792433510716
+        },
+        "text": "Revisão 29: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_f2ea1d199ae649109ff1e15771d4d3b0",
+        "time": {
+          "created": 1792433501716,
+          "streamed": 1792433503716,
+          "completed": 1792433504716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 28 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_c99813d156fd42f58d7cd3491e99c050",
+        "time": {
+          "created": 1792433500716
+        },
+        "text": "Revisão 28: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_80c88bc416bb4109a90eff9242a1bcad",
+        "time": {
+          "created": 1792433491716,
+          "streamed": 1792433493716,
+          "completed": 1792433494716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 27 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_e649161aeca84769a1d6b88d3b4f54e1",
+        "time": {
+          "created": 1792433490716
+        },
+        "text": "Revisão 27: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_365094d1c9fb47bc8360f90165c9bc63",
+        "time": {
+          "created": 1792433481716,
+          "streamed": 1792433483716,
+          "completed": 1792433484716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 26 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_e020ee38d79a4189b18a1f5d2bcec7e7",
+        "time": {
+          "created": 1792433480716
+        },
+        "text": "Revisão 26: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_37aa1572aa09481ea2bef5e6af6b03f3",
+        "time": {
+          "created": 1792433471716,
+          "streamed": 1792433473716,
+          "completed": 1792433474716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 25 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ185YzRkYzdjMWY1MjE0NDhlYWIzODY2ZGU3Yzg0MGEyZCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18zN2FhMTU3MmFhMDk0ODFlYTJiZWY1ZTZhZjZiMDNmMyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

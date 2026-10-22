@@ -1,0 +1,31 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "path": "infra/",
+      "type": "directory"
+    },
+    {
+      "path": "infra/stacks/",
+      "type": "directory"
+    },
+    {
+      "path": "infra/stacks/plane.yml",
+      "type": "file"
+    },
+    {
+      "path": "docs/infra.md",
+      "type": "file"
+    },
+    {
+      "path": ".opencode/skills/conversation-check/",
+      "type": "directory"
+    },
+    {
+      "path": ".opencode/skills/conversation-check/SKILL.md",
+      "type": "file"
+    }
+  ]
+}

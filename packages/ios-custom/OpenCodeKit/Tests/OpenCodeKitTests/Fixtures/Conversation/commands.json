@@ -1,0 +1,23 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "name": "init",
+      "description": "guided AGENTS.md setup"
+    },
+    {
+      "name": "review",
+      "description": "review changes [commit|branch|pr], defaults to uncommitted"
+    },
+    {
+      "name": "commit",
+      "description": "Analisa mudanças git, gera commit descritivo e faz push"
+    },
+    {
+      "name": "conversation-review",
+      "description": "Revisa o exemplo fictício da conversa"
+    }
+  ]
+}

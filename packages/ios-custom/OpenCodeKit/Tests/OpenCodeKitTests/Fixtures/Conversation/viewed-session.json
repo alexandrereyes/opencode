@@ -1,0 +1,39 @@
+{
+  "data": {
+    "id": "ses_5ec9997204354097b64b51099cb1b6bd",
+    "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "cost": 0.00024012000000000003,
+    "tokens": {
+      "input": 315,
+      "output": 23,
+      "reasoning": 0,
+      "cache": {
+        "read": 19712,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792606069520,
+      "updated": 1792606073533,
+      "idle": 1792606072226,
+      "viewed": 1792606072226
+    },
+    "title": "Conversa — captura SSE",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ],
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    }
+  }
+}

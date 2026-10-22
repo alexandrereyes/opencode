@@ -1,0 +1,20 @@
+{
+  "output": {
+    "items": [
+      {
+        "id": "ref-ios-revisar",
+        "name": "revisar",
+        "description": "Exemplo fictício de revisão",
+        "aliases": [],
+        "content": "Revise este trecho em uma frase, sem usar ferramentas."
+      },
+      {
+        "id": "ref-ios-resumo",
+        "name": "resumo",
+        "description": "Exemplo fictício de resumo",
+        "aliases": [],
+        "content": "Resuma este trecho em uma frase, sem usar ferramentas."
+      }
+    ]
+  }
+}

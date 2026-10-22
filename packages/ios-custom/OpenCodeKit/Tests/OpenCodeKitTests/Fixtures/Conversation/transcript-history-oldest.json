@@ -1,0 +1,178 @@
+{
+  "output": {
+    "data": [
+      {
+        "id": "msg_ba9b89a50038492694cae410798615b6",
+        "time": {
+          "created": 1792433270716
+        },
+        "text": "Revisão 5: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_e7106d91b8dd4e36b7be0e153d170fe9",
+        "time": {
+          "created": 1792433261716,
+          "streamed": 1792433263716,
+          "completed": 1792433264716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 4 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_a074dea55794498bacb6bd0edd3410c4",
+        "time": {
+          "created": 1792433260716
+        },
+        "text": "Revisão 4: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_3c4594d957564be3af99f5d993106e6f",
+        "time": {
+          "created": 1792433251716,
+          "streamed": 1792433253716,
+          "completed": 1792433254716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 3 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_17685eaf480e4b898af68022eb1c31bd",
+        "time": {
+          "created": 1792433250716
+        },
+        "text": "Revisão 3: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_a90269b4966c495ea05aa89645ce38c6",
+        "time": {
+          "created": 1792433241716,
+          "streamed": 1792433243716,
+          "completed": 1792433244716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 2 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_ea1d2c8050d6425bb2b04f0326bb750a",
+        "time": {
+          "created": 1792433240716
+        },
+        "text": "Revisão 2: o que mudou?",
+        "type": "user"
+      },
+      {
+        "id": "msg_578b20c64e464348bd58c7d7578c30cf",
+        "time": {
+          "created": 1792433231716,
+          "streamed": 1792433233716,
+          "completed": 1792433234716
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "llm-proxy",
+          "variant": "low"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Revisão 1 concluída. O exemplo permanece isolado."
+          }
+        ],
+        "finish": "stop",
+        "cost": 0.004,
+        "tokens": {
+          "input": 436700,
+          "output": 240,
+          "reasoning": 60,
+          "cache": {
+            "read": 4000,
+            "write": 0
+          }
+        }
+      },
+      {
+        "id": "msg_0e40c072f50140e594bc16b1bcf29c5a",
+        "time": {
+          "created": 1792433230716
+        },
+        "text": "Revisão 1: o que mudou?",
+        "type": "user"
+      }
+    ],
+    "cursor": {
+      "previous": "eyJpZCI6Im1zZ19iYTliODlhNTAwMzg0OTI2OTRjYWU0MTA3OTg2MTViNiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+      "next": "eyJpZCI6Im1zZ18wZTQwYzA3MmY1MDE0MGU1OTRiYzE2YjFiY2YyOWM1YSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+    }
+  }
+}

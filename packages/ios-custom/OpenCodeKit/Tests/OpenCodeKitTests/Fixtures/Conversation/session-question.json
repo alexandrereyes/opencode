@@ -1,0 +1,40 @@
+{
+  "data": {
+    "id": "ses_8ab40d49ba554de5bfe2e34258b64a3d",
+    "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+    "agent": "build",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "cost": 0.02,
+    "tokens": {
+      "input": 436700,
+      "output": 240,
+      "reasoning": 60,
+      "cache": {
+        "read": 4000,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792346830716,
+      "updated": 1792606032407,
+      "idle": 1792606029716,
+      "viewed": 1792606029716
+    },
+    "title": "Conversa D — pergunta",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ],
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    }
+  }
+}

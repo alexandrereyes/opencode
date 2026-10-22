@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "id": "per_15fa5520a001FUg1eU5GPKNEU9",
+      "created": 1792606032394,
+      "sessionID": "ses_375412831b964188afaa08e1ffb7230e",
+      "action": "shell",
+      "resources": [
+        "git push origin neon-mountain"
+      ],
+      "save": [
+        "git push *"
+      ],
+      "source": {
+        "type": "tool",
+        "messageID": "msg_15fa54cc2001IJ6M7Jp4OgfW1h",
+        "id": "call_20e713b0763d48cbb902b1568fbac036"
+      }
+    }
+  ]
+}

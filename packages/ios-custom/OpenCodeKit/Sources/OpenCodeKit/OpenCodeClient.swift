@@ -28,12 +28,25 @@ public struct ServerConfiguration: Sendable {
   }
 }
 
-public struct ServerInfo: Codable, Sendable { public let version: String }
+public struct ServerInfo: Codable, Sendable {
+  public let version: String?
+  public let paths: Paths?
+  public struct Paths: Codable, Sendable { public let tmp: String }
+  private enum CodingKeys: String, CodingKey { case version, paths }
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    // Legacy health responses can have no string version; classify that separately
+    // from transport failures rather than losing it as an ordinary decoding error.
+    version = try? values.decode(String.self, forKey: .version)
+    paths = try? values.decode(Paths.self, forKey: .paths)
+  }
+}
 public struct Empty: Codable, Sendable { public init() {} }
 
 public struct OpenCodeClient: Sendable {
   public let configuration: ServerConfiguration
   private let session: URLSession
+  private var transport: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
 
   public init(configuration: ServerConfiguration) {
     self.configuration = configuration
@@ -42,8 +55,19 @@ public struct OpenCodeClient: Sendable {
     config.timeoutIntervalForResource = 60 * 60
     session = URLSession(configuration: config)
   }
+  init(
+    configuration: ServerConfiguration,
+    transport: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse)
+  ) {
+    self.init(configuration: configuration)
+    self.transport = transport
+  }
 
-  public func info() async throws -> ServerInfo { try await get("/api/info") }
+  public func info() async throws -> ServerInfo {
+    let info: ServerInfo = try await get("/api/info")
+    guard let version = info.version, !version.isEmpty else { throw ClientError.incompatibleServer }
+    return info
+  }
   public func projects() async throws -> [Project] { try await get("/api/project") }
   public func archivedSessions() async throws -> [Session] {
     struct Page: Decodable {
@@ -124,6 +148,70 @@ public struct OpenCodeClient: Sendable {
       "custom.transcript", "list", input: Input(sessionID: sessionID))
     return SessionPreview(messages: page.data)
   }
+  public func conversation(_ sessionID: String, cursor: String? = nil) async throws
+    -> ConversationPage
+  {
+    struct Input: Encodable {
+      let sessionID: String
+      let limit = 40
+      let order: String?
+      let cursor: String?
+    }
+    return try await rpc(
+      "custom.transcript", "list",
+      input: Input(sessionID: sessionID, order: cursor == nil ? "desc" : nil, cursor: cursor))
+  }
+  public func session(_ id: String) async throws -> Session {
+    let response: DataResponse<Session> = try await get("/api/session/\(id)")
+    return response.data
+  }
+  public func models(directory: String? = nil) async throws -> [ModelInfo] {
+    let response: DataResponse<[ModelInfo]> = try await get(
+      "/api/model", query: directory.map { [URLQueryItem(name: "location[directory]", value: $0)] } ?? [])
+    return response.data
+  }
+  public func defaultModel(directory: String) async throws -> ModelInfo? {
+    struct Response: Decodable { let data: ModelInfo? }
+    let response: Response = try await get(
+      "/api/model/default", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func agents(directory: String) async throws -> [AgentInfo] {
+    let response: DataResponse<[AgentInfo]> = try await get(
+      "/api/agent", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func providers(directory: String) async throws -> [ProviderInfo] {
+    let response: DataResponse<[ProviderInfo]> = try await get(
+      "/api/provider", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func familyPage(_ sessionID: String, after: String? = nil) async throws -> FamilyPage {
+    struct Input: Encodable {
+      let sessionID: String
+      let limit = 100
+      let after: String?
+    }
+    return try await rpc(
+      "custom.session-family", "page", input: Input(sessionID: sessionID, after: after))
+  }
+  public func shells(directory: String) async throws -> [ShellInfo] {
+    let response: DataResponse<[ShellInfo]> = try await get(
+      "/api/shell", query: [URLQueryItem(name: "location[directory]", value: directory)])
+    return response.data
+  }
+  public func shellOutput(_ id: String, directory: String, cursor: Int = 0) async throws
+    -> ShellOutput
+  {
+    let response: DataResponse<ShellOutput> = try await get(
+      "/api/shell/\(id)/output",
+      query: [
+        URLQueryItem(name: "location[directory]", value: directory),
+        URLQueryItem(name: "cursor", value: String(cursor)),
+        URLQueryItem(name: "limit", value: "65536"),
+      ])
+    return response.data
+  }
   public func archive(_ sessionID: String) async throws {
     struct Input: Encodable { let sessionID: String }
     let _: Empty = try await rpc("custom.archive", "archive", input: Input(sessionID: sessionID))
@@ -143,28 +231,52 @@ public struct OpenCodeClient: Sendable {
   private struct RPCInput<Value: Encodable>: Encodable { let input: Value }
   private struct RPCOutput<Value: Decodable>: Decodable { let output: Value }
 
-  public func rpc<Input: Encodable, Output: Decodable>(_ id: String, _ method: String, input: Input)
+  public func rpc<Input: Encodable, Output: Decodable>(
+    _ id: String, _ method: String, input: Input, directory: String? = nil
+  )
     async throws -> Output
   {
-    var request = request("/api/rpc/\(id)/\(method)")
+    var request = request(
+      "/api/rpc/\(id)/\(method)",
+      query: directory.map { [URLQueryItem(name: "location[directory]", value: $0)] } ?? [])
     request.httpMethod = "POST"
     request.httpBody = try JSONEncoder().encode(RPCInput(input: input))
     let data = try await data(request)
     return try JSONDecoder().decode(RPCOutput<Output>.self, from: data).output
   }
-  private func get<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
+  func get<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
     -> Output
   {
     try JSONDecoder().decode(Output.self, from: await data(request(path, query: query)))
   }
-  private func post<Input: Encodable>(_ path: String, input: Input) async throws {
+  func post<Input: Encodable>(_ path: String, input: Input) async throws {
     var request = request(path)
     request.httpMethod = "POST"
     request.httpBody = try JSONEncoder().encode(input)
     _ = try await data(request)
   }
-  private func data(_ request: URLRequest) async throws -> Data {
-    let (data, response) = try await session.data(for: request)
+  func perform(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil)
+    async throws
+  {
+    var request = request(path, query: query)
+    request.httpMethod = method
+    request.httpBody = body
+    _ = try await data(request)
+  }
+  func data(_ request: URLRequest) async throws -> Data {
+    let (data, response) =
+      if let transport {
+        try await transport(request)
+      } else {
+        try await session.data(for: request)
+      }
+    if let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode),
+      let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+      value.object?["_tag"]?.string == "LocationNotFoundError",
+      let directory = value.object?["location"]?.object?["directory"]?.string
+    {
+      throw ClientError.locationNotFound(directory)
+    }
     try validate(response)
     return data
   }
@@ -174,7 +286,7 @@ public struct OpenCodeClient: Sendable {
       throw ClientError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
     }
   }
-  private func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
+  func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
     var url = URLComponents(
       url: configuration.url.appending(path: path), resolvingAgainstBaseURL: false)!
     if !query.isEmpty { url.queryItems = query }
@@ -215,8 +327,12 @@ public struct OpenCodeClient: Sendable {
 
 public enum ClientError: Error, LocalizedError {
   case http(Int)
+  case incompatibleServer
+  case locationNotFound(String)
   public var errorDescription: String? {
     switch self {
+    case .incompatibleServer: "Este servidor não é compatível com o OpenCode V2."
+    case .locationNotFound: "O diretório desta sessão não existe mais."
     case .http(401): "A senha do servidor não foi aceita."
     case .http(let code): "O servidor respondeu com o código \(code)."
     }

@@ -150,12 +150,12 @@ private func entry(
   #expect(parser.line(": heartbeat") == nil)
   #expect(parser.line("data: {\"type\":\"session.viewed\",") == nil)
   #expect(parser.line("data: \"data\":{\"sessionID\":\"ses_a\"}}") == nil)
-  guard case .update(let type, let session) = parser.line("") else {
+  guard case .update(let event) = parser.line("") else {
     Issue.record("Expected event")
     return
   }
-  #expect(type == "session.viewed")
-  #expect(session == "ses_a")
+  #expect(event.type == "session.viewed")
+  #expect(event.data.owner == "ses_a")
 }
 
 @Test func sseByteFramingPreservesEmptyLinesAndUTF8() {
@@ -164,11 +164,11 @@ private func entry(
     ": heartbeat\r\n\r\ndata: {\"type\":\"rpc.custom.preferences.updated\",\"data\":{\"name\":\"Sessões\"}}\r\n\r\n"
   let events = frame.utf8.compactMap { parser.consume($0) }
   #expect(events.count == 1)
-  guard case .update(let type, _) = events.first else {
+  guard case .update(let event) = events.first else {
     Issue.record("Expected a framed event")
     return
   }
-  #expect(type == "rpc.custom.preferences.updated")
+  #expect(event.type == "rpc.custom.preferences.updated")
 }
 
 @Test func preferenceIntentUsesWebSessionKey() throws {

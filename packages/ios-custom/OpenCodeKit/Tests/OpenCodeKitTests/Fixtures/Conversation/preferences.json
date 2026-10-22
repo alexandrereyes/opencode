@@ -1,0 +1,58 @@
+{
+  "output": {
+    "version": 1,
+    "revision": 94,
+    "imported": true,
+    "data": {
+      "projects": {
+        "local": {
+          "projects": [
+            {
+              "worktree": "/sandbox/repos/abacato-v2",
+              "expanded": true
+            },
+            {
+              "worktree": "/sandbox/repos/opencode2",
+              "expanded": true
+            },
+            {
+              "worktree": "/sandbox/repos/abacato-site",
+              "expanded": true
+            }
+          ],
+          "recentlyClosed": [],
+          "lastProject": "/sandbox/repos/opencode2"
+        }
+      },
+      "sidebarOrder": [
+        "[\"http://127.0.0.1:4177\",[\"directory\",\"/sandbox/repos/abacato-site\"]]",
+        "[\"http://127.0.0.1:4177\",[\"directory\",\"/sandbox/repos/abacato-v2\"]]",
+        "[\"http://127.0.0.1:4177\",[\"directory\",\"/sandbox/repos/opencode2\"]]",
+        "[\"http://127.0.0.1:4177\",[\"project\",\"4acc48746b4071d3a9458537fd353d3939b6f078\"]]",
+        "[\"http://127.0.0.1:4177\",[\"project\",\"b887b100db86ae19c5e370efc5172cfacd06a64c\"]]",
+        "[\"http://127.0.0.1:4177\",[\"project\",\"85da54af6034664de0c3eb787bc804d585e0c7cb\"]]"
+      ],
+      "pinnedSessions": [
+        "[\"http://localhost:4096\",\"ses_ea1b2e243ffe5c1CfApic7bCxm\"]"
+      ],
+      "mutedSessions": [
+        "[\"http://localhost:4096\",\"ses_ios_a2512dc0581247f6ac5f707b625da0ee\"]"
+      ],
+      "models": {
+        "user": [],
+        "variant": {}
+      },
+      "settings": {
+        "followUpBehavior": "steer",
+        "autoApprove": false,
+        "autoSave": true,
+        "tabLayout": "vertical",
+        "notifications": {
+          "agent": true,
+          "permissions": true,
+          "errors": false
+        }
+      }
+    }
+  }
+}

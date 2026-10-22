@@ -1,0 +1,15 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "id": "conversation-check",
+      "name": "conversation-check",
+      "description": "Confere o exemplo fictício da conversa",
+      "slash": true,
+      "path": "/sandbox/repos/ios-conversation/.opencode/skills/conversation-check/SKILL.md",
+      "content": "Responda apenas que o exemplo foi conferido. Não use ferramentas.\n"
+    }
+  ]
+}

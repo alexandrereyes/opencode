@@ -1,0 +1,40 @@
+{
+  "data": {
+    "id": "ses_8a70f2ed257f40819da687a6aefbeaae",
+    "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+    "agent": "build",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "cost": 0.02,
+    "tokens": {
+      "input": 436700,
+      "output": 240,
+      "reasoning": 60,
+      "cache": {
+        "read": 4000,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792346830716,
+      "updated": 1792606030943,
+      "idle": 1792606029716,
+      "viewed": 1792519630716
+    },
+    "title": "Conversa C — histórico e compositor",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ],
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    }
+  }
+}

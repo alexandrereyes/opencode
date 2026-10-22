@@ -1,0 +1,45 @@
+{
+  "data": {
+    "id": "ses_375412831b964188afaa08e1ffb7230e",
+    "projectID": "feea6334a10caf2a63a760e09922c5f6880fa00e",
+    "agent": "build",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "variant": "low"
+    },
+    "cost": 0.02,
+    "tokens": {
+      "input": 436700,
+      "output": 240,
+      "reasoning": 60,
+      "cache": {
+        "read": 4000,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792346830716,
+      "updated": 1792606032237,
+      "idle": 1792606029716,
+      "viewed": 1792606029716
+    },
+    "title": "Conversa B — precisa de você",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "shell",
+        "resource": "git push*",
+        "effect": "ask"
+      }
+    ],
+    "location": {
+      "directory": "/sandbox/repos/ios-conversation"
+    }
+  }
+}

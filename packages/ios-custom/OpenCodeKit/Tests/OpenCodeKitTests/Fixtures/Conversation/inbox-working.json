@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "msg_fb9f7ee1085645798a75275108f543dc",
+      "sessionID": "ses_1da0e2e23e224422ae503af32a04e31b",
+      "time": {
+        "created": 1792606031060
+      },
+      "type": "user",
+      "payload": {
+        "text": "Depois disso, abre um PR com o resumo"
+      },
+      "delivery": "queue"
+    }
+  ]
+}

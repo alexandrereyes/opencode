@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "id": "frm_15fa55395001nt3vzZhyYF1G6Z",
+      "sessionID": "ses_8ab40d49ba554de5bfe2e34258b64a3d",
+      "title": "Questions",
+      "metadata": {
+        "kind": "question",
+        "tool": {
+          "messageID": "msg_15fa54cce001EhPh3kSNhbM8Tc",
+          "id": "call_2aec8a660a844a109489e58333e950d7"
+        }
+      },
+      "created": 1792606032790,
+      "fields": [
+        {
+          "key": "q0",
+          "title": "Licença",
+          "description": "Qual licença você quer revisar?",
+          "type": "string",
+          "options": [
+            {
+              "value": "AGPL-3.0",
+              "label": "AGPL-3.0",
+              "description": "Plane"
+            },
+            {
+              "value": "EPL-2.0",
+              "label": "EPL-2.0",
+              "description": "Huly"
+            },
+            {
+              "value": "MIT",
+              "label": "MIT",
+              "description": "Focalboard"
+            }
+          ],
+          "custom": true
+        }
+      ]
+    }
+  ]
+}

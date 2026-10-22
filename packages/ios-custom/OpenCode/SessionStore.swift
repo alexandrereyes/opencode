@@ -18,10 +18,27 @@ final class SessionStore {
   private(set) var connected = false
   private(set) var busy: Set<String> = []
   var error: String?
+  private(set) var notice: ConversationNotice?
   var filter = SessionFilter.all
   var selectedProject: String?
+  struct ConversationRoute: Hashable {
+    let id: String
+    var parent: String? = nil
+    var tool: String? = nil
+  }
+  var conversationPath: [ConversationRoute] = []
+  var selectedTab = 3
+  var conversationOpen: Bool { !conversationPath.isEmpty }
+  var currentSessionID: String? { selectedTab == 3 ? conversationPath.last?.id : nil }
+  let toast = ToastCenter()
+  let alerts: SessionAlertCenter
+  let catalog = ModelCatalogCache()
 
   @ObservationIgnored let client: OpenCodeClient
+  @ObservationIgnored let hub: EventHub
+  @ObservationIgnored let drafts: ConversationDrafts
+  @ObservationIgnored let reading: ReadingPositionStore
+  @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored private var order = RecentOrder()
   @ObservationIgnored private var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -36,7 +53,16 @@ final class SessionStore {
   @ObservationIgnored private var quotaUpdated = Date.distantPast
 
   init(configuration: ServerConfiguration = .launch()) {
-    client = OpenCodeClient(configuration: configuration)
+    let client = OpenCodeClient(configuration: configuration)
+    self.client = client
+    drafts = ConversationDrafts(server: configuration.url.absoluteString)
+    reading = ReadingPositionStore(server: configuration.url.absoluteString)
+    hub = EventHub(client: client)
+    alerts = SessionAlertCenter(server: configuration.url.absoluteString)
+    Task {
+      await DraftPersistence.pruneMissingSessions(
+        server: configuration.url.absoluteString, client: client)
+    }
   }
 
   var rows: [SessionRow] {
@@ -77,40 +103,47 @@ final class SessionStore {
   }
 
   func run() async {
-    var delay: UInt64 = 1
+    let events = hub.events()
+    let connection = Task { await hub.run() }
+    defer {
+      connection.cancel()
+      alerts.disconnect()
+    }
+    let catalogLoad = Task {
+      if let models = try? await client.models(), !Task.isCancelled { catalog.remember(models) }
+    }
+    defer { catalogLoad.cancel() }
     await reload()
-    while !Task.isCancelled {
-      do {
-        for try await event in client.events() {
-          switch event {
-          case .connected:
-            connected = true
-            delay = 1
-            scheduleReload()
-          case .update(let type, let id):
-            if type.hasPrefix("session.") || type.hasPrefix("permission.")
-              || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
-              || type.hasPrefix("worktree.")
-            {
-              if let id, type.hasPrefix("session.execution.") {
-                order.observe(id, running: type == "session.execution.started")
-              }
-              if type.hasPrefix("session.text.") || type.hasPrefix("session.tool.")
-                || type.hasPrefix("session.step.")
-              {
-                schedulePreviews()
-                continue
-              }
-              scheduleReload()
-            }
+    for await frame in events {
+      if Task.isCancelled { break }
+      switch frame.event {
+      case .connected:
+        connected = true
+        alerts.connect(at: frame.receivedAt)
+        scheduleReload()
+      case .disconnected:
+        connected = false
+        alerts.disconnect()
+      case .update(let event):
+        await alerts.receive(event, store: self)
+        let type = event.type
+        let id = event.data.owner
+        if type.hasPrefix("session.") || type.hasPrefix("permission.")
+          || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
+          || type.hasPrefix("worktree.")
+        {
+          if let id, type.hasPrefix("session.execution.") {
+            order.observe(id, running: type == "session.execution.started")
           }
+          if type.hasPrefix("session.text.") || type.hasPrefix("session.tool.")
+            || type.hasPrefix("session.step.")
+          {
+            schedulePreviews()
+            continue
+          }
+          scheduleReload()
         }
-      } catch {
-        if Task.isCancelled { break }
       }
-      connected = false
-      do { try await Task.sleep(for: .seconds(delay)) } catch { break }
-      delay = min(delay * 2, 15)
     }
     connected = false
     scheduled?.cancel()
@@ -132,6 +165,7 @@ final class SessionStore {
     defer { loading = false }
     do {
       _ = try await client.info()
+      notice = nil
       async let navigation = client.navigation()
       async let prefs = client.preferences()
       async let inventory = client.projects()
@@ -165,6 +199,7 @@ final class SessionStore {
       for id in visible { enqueuePreview(id) }
     } catch {
       if !Task.isCancelled {
+        notice = ConversationNotice.classify(error, directory: nil)
         self.error = "Não foi possível atualizar as sessões. \(error.localizedDescription)"
       }
       return
@@ -242,7 +277,7 @@ final class SessionStore {
   }
 
   func pin(_ row: SessionRow) async {
-    await perform(row.id) {
+    await perform(row.id, feedback: .light) {
       let keys =
         row.pinned
         ? SessionPreferenceKey.matching(row.id, in: preferences?.data.pinnedSessions ?? [])
@@ -253,7 +288,7 @@ final class SessionStore {
     }
   }
   func mute(_ row: SessionRow) async {
-    await perform(row.id) {
+    await perform(row.id, feedback: .light) {
       let keys =
         row.muted
         ? SessionPreferenceKey.matching(row.id, in: preferences?.data.mutedSessions ?? [])
@@ -286,18 +321,23 @@ final class SessionStore {
     }
   }
   func archive(_ row: SessionRow) async {
-    await perform(row.id) { try await client.archive(row.id) }
+    await perform(row.id, feedback: .light) { try await client.archive(row.id) }
   }
   func reply(_ row: SessionRow, allow: Bool) async {
     guard let permission = permission(row) else { return }
-    await perform(row.id) { try await client.reply(permission, allow: allow) }
+    await perform(row.id, feedback: allow ? .success : .warning) {
+      try await client.reply(permission, allow: allow)
+    }
   }
-  private func perform(_ id: String, action: () async throws -> Void) async {
+  private func perform(
+    _ id: String, feedback: Haptics.Kind? = nil, action: () async throws -> Void
+  ) async {
     guard !busy.contains(id) else { return }
     busy.insert(id)
     defer { busy.remove(id) }
     do {
       try await action()
+      if let feedback { Haptics.play(feedback) }
       await reload()
     } catch { self.error = "Não foi possível concluir a ação. \(error.localizedDescription)" }
   }

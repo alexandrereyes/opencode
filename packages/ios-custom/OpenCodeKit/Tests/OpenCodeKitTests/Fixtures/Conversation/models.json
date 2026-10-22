@@ -1,0 +1,2653 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "id": "claude-haiku-5-5",
+      "modelID": "claude-haiku-5-5",
+      "providerID": "anthropic",
+      "family": "claude-haiku",
+      "name": "Haiku 5.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1",
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "effort": "medium"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "thinking": {
+              "type": "disabled"
+            }
+          }
+        },
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1791331200000
+      },
+      "cost": [
+        {
+          "input": 0.1,
+          "output": 0.5,
+          "cache": {
+            "read": 0.01,
+            "write": 0.2
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 100000
+          },
+          "input": 0.5,
+          "output": 2.5,
+          "cache": {
+            "read": 0.05,
+            "write": 1
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "modelID": "claude-sonnet-5-5",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Sonnet 5.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1",
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "effort": "medium"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1790553600000
+      },
+      "cost": [
+        {
+          "input": 2,
+          "output": 10,
+          "cache": {
+            "read": 0.2,
+            "write": 4
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-5-5",
+      "modelID": "claude-opus-5-5",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Opus 5.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1",
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "effort": "medium"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1790035200000
+      },
+      "cost": [
+        {
+          "input": 4,
+          "output": 20,
+          "cache": {
+            "read": 0.2,
+            "write": 8
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-5-5-fast",
+      "modelID": "claude-opus-5-5",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 5.5 Fast",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "headers": {
+        "anthropic-beta": "[REDACTED]"
+      },
+      "body": {
+        "speed": "fast"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1790035200000
+      },
+      "cost": [
+        {
+          "input": 8,
+          "output": 40,
+          "cache": {
+            "read": 0.4,
+            "write": 10
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-fable-5-1",
+      "modelID": "claude-fable-5-1",
+      "providerID": "anthropic",
+      "family": "claude-fable",
+      "name": "Fable 5.1",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1788220800000
+      },
+      "cost": [
+        {
+          "input": 10,
+          "output": 50,
+          "cache": {
+            "read": 0.25,
+            "write": 12.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-5",
+      "modelID": "claude-opus-5",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1784851200000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-5-fast",
+      "modelID": "claude-opus-5",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 5 Fast",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "headers": {
+        "anthropic-beta": "[REDACTED]"
+      },
+      "body": {
+        "speed": "fast"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1784851200000
+      },
+      "cost": [
+        {
+          "input": 10,
+          "output": 50,
+          "cache": {
+            "read": 1,
+            "write": 12.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-sonnet-5",
+      "modelID": "claude-sonnet-5",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Claude Sonnet 5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "thinking": {
+              "type": "disabled"
+            }
+          }
+        },
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1782691200000
+      },
+      "cost": [
+        {
+          "input": 2,
+          "output": 10,
+          "cache": {
+            "read": 0.2,
+            "write": 2.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-fable-5",
+      "modelID": "claude-fable-5",
+      "providerID": "anthropic",
+      "family": "claude-fable",
+      "name": "Claude Fable 5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1780790400000
+      },
+      "cost": [
+        {
+          "input": 10,
+          "output": 50,
+          "cache": {
+            "read": 1,
+            "write": 12.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-4-8",
+      "modelID": "claude-opus-4-8",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.8",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1779926400000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-4-8-fast",
+      "modelID": "claude-opus-4-8",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.8 Fast",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "headers": {
+        "anthropic-beta": "[REDACTED]"
+      },
+      "body": {
+        "speed": "fast"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1779926400000
+      },
+      "cost": [
+        {
+          "input": 10,
+          "output": 50,
+          "cache": {
+            "read": 1,
+            "write": 12.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-4-7",
+      "modelID": "claude-opus-4-7",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.7",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": false
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1776124800000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "modelID": "claude-sonnet-4-6",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Claude Sonnet 4.6",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1771286400000
+      },
+      "cost": [
+        {
+          "input": 3,
+          "output": 15,
+          "cache": {
+            "read": 0.3,
+            "write": 3.75
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-4-6",
+      "modelID": "claude-opus-4-6",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.6",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "high"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
+            "effort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 1770163200000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "modelID": "claude-opus-4-5-20251101",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "high"
+          }
+        }
+      ],
+      "time": {
+        "released": 1763942400000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "claude-opus-4-5",
+      "modelID": "claude-opus-4-5",
+      "providerID": "anthropic",
+      "family": "claude-opus",
+      "name": "Claude Opus 4.5 (latest)",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "effort": "high"
+          }
+        }
+      ],
+      "time": {
+        "released": 1763942400000
+      },
+      "cost": [
+        {
+          "input": 5,
+          "output": 25,
+          "cache": {
+            "read": 0.5,
+            "write": 6.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "modelID": "claude-haiku-4-5-20251001",
+      "providerID": "anthropic",
+      "family": "claude-haiku",
+      "name": "Claude Haiku 4.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 31999
+            }
+          }
+        }
+      ],
+      "time": {
+        "released": 1760486400000
+      },
+      "cost": [
+        {
+          "input": 1,
+          "output": 5,
+          "cache": {
+            "read": 0.1,
+            "write": 1.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "modelID": "claude-haiku-4-5",
+      "providerID": "anthropic",
+      "family": "claude-haiku",
+      "name": "Claude Haiku 4.5 (latest)",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 31999
+            }
+          }
+        }
+      ],
+      "time": {
+        "released": 1760486400000
+      },
+      "cost": [
+        {
+          "input": 1,
+          "output": 5,
+          "cache": {
+            "read": 0.1,
+            "write": 1.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "modelID": "claude-sonnet-4-5-20250929",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Claude Sonnet 4.5",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 31999
+            }
+          }
+        }
+      ],
+      "time": {
+        "released": 1759104000000
+      },
+      "cost": [
+        {
+          "input": 3,
+          "output": 15,
+          "cache": {
+            "read": 0.3,
+            "write": 3.75
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "claude-sonnet-4-5",
+      "modelID": "claude-sonnet-4-5",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Claude Sonnet 4.5 (latest)",
+      "package": "@opencode/ai/providers/anthropic",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/anthropic/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ],
+        "temperature": true
+      },
+      "variants": [
+        {
+          "id": "high",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            }
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 31999
+            }
+          }
+        }
+      ],
+      "time": {
+        "released": 1759104000000
+      },
+      "cost": [
+        {
+          "input": 3,
+          "output": 15,
+          "cache": {
+            "read": 0.3,
+            "write": 3.75
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 64000
+      }
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "modelID": "gpt-6.1-sol",
+      "providerID": "llm-proxy",
+      "name": "Sol 6.1",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 2,
+          "output": 10,
+          "cache": {
+            "read": 0.1,
+            "write": 2.5
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 4,
+          "output": 15,
+          "cache": {
+            "read": 0.2,
+            "write": 5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6.1-sol-fast",
+      "modelID": "gpt-6.1-sol",
+      "providerID": "llm-proxy",
+      "name": "Sol 6.1 - fast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "priority"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 4,
+          "output": 20,
+          "cache": {
+            "read": 0.2,
+            "write": 5
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 8,
+          "output": 30,
+          "cache": {
+            "read": 0.4,
+            "write": 10
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6.1-sol-ultrafast",
+      "modelID": "gpt-6.1-sol",
+      "providerID": "llm-proxy",
+      "name": "Sol 6.1 - ultrafast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "ultrafast"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 12,
+          "output": 60,
+          "cache": {
+            "read": 0.6,
+            "write": 15
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 24,
+          "output": 90,
+          "cache": {
+            "read": 1.2,
+            "write": 30
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6-luna",
+      "modelID": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "name": "Luna 6",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 0.1,
+          "output": 0.5,
+          "cache": {
+            "read": 0.01,
+            "write": 0.125
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 0.2,
+          "output": 0.75,
+          "cache": {
+            "read": 0.02,
+            "write": 0.25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6-luna-fast",
+      "modelID": "gpt-6-luna",
+      "providerID": "llm-proxy",
+      "name": "Luna 6 - fast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "priority"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 0.2,
+          "output": 1,
+          "cache": {
+            "read": 0.02,
+            "write": 0.25
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 0.4,
+          "output": 1.5,
+          "cache": {
+            "read": 0.04,
+            "write": 0.5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "modelID": "gpt-5.6-terra",
+      "providerID": "llm-proxy",
+      "name": "Terra 5.6",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 2,
+          "output": 12,
+          "cache": {
+            "read": 0.2,
+            "write": 2.5
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 4,
+          "output": 18,
+          "cache": {
+            "read": 0.4,
+            "write": 5
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-5.6-terra-fast",
+      "modelID": "gpt-5.6-terra",
+      "providerID": "llm-proxy",
+      "name": "Terra 5.6 - fast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "priority"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 4,
+          "output": 24,
+          "cache": {
+            "read": 0.4,
+            "write": 5
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 8,
+          "output": 36,
+          "cache": {
+            "read": 0.8,
+            "write": 10
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6-astra",
+      "modelID": "gpt-6-astra",
+      "providerID": "llm-proxy",
+      "name": "Astra 6",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ]
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 10,
+          "output": 50,
+          "cache": {
+            "read": 1,
+            "write": 12.5
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 20,
+          "output": 75,
+          "cache": {
+            "read": 2,
+            "write": 25
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6-astra-fast",
+      "modelID": "gpt-6-astra",
+      "providerID": "llm-proxy",
+      "name": "Astra 6 - fast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "priority"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 20,
+          "output": 100,
+          "cache": {
+            "read": 2,
+            "write": 25
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 40,
+          "output": 150,
+          "cache": {
+            "read": 4,
+            "write": 50
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    },
+    {
+      "id": "gpt-6-astra-ultrafast",
+      "modelID": "gpt-6-astra",
+      "providerID": "llm-proxy",
+      "name": "Astra 6 - ultrafast",
+      "package": "@opencode/ai/providers/openai/responses",
+      "settings": {
+        "apiKey": "[REDACTED]",
+        "baseURL": "http://llm-proxy-svc:8080/backend-api/codex",
+        "store": false,
+        "reasoningSummary": "auto",
+        "include": [
+          "reasoning.encrypted_content"
+        ],
+        "serviceTier": "ultrafast"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low"
+          }
+        },
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium"
+          }
+        },
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high"
+          }
+        },
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh"
+          }
+        },
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max"
+          }
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [
+        {
+          "input": 60,
+          "output": 300,
+          "cache": {
+            "read": 6,
+            "write": 75
+          }
+        },
+        {
+          "tier": {
+            "type": "context",
+            "size": 272000
+          },
+          "input": 120,
+          "output": 450,
+          "cache": {
+            "read": 12,
+            "write": 150
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1050000,
+        "input": 922000,
+        "output": 128000
+      }
+    }
+  ]
+}

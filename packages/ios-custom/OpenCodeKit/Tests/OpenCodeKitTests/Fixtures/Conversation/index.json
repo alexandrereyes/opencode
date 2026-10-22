@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "capturedAt": 1792606073563,
+  "source": "http://127.0.0.1:4177",
+  "seed": {
+    "createdAt": 1792606030716,
+    "directory": "/sandbox/repos/ios-conversation",
+    "sessions": [
+      {
+        "id": "ses_1da0e2e23e224422ae503af32a04e31b",
+        "title": "Conversa A — trabalhando",
+        "state": "running + queue + 2 active children",
+        "role": "working"
+      },
+      {
+        "id": "ses_76e015509e16427da0c7b98f7c5cd7fe",
+        "title": "Comparar alternativas Linear",
+        "state": "running child",
+        "role": "child-0"
+      },
+      {
+        "id": "ses_83c38d2b26d746fdadd99341aefbc6be",
+        "title": "Revisar licença dos projetos",
+        "state": "completed child",
+        "role": "child-1"
+      },
+      {
+        "id": "ses_3a190f409abc498e8c30c13e07321e0a",
+        "title": "Avaliar integrações disponíveis",
+        "state": "running child",
+        "role": "child-2"
+      },
+      {
+        "id": "ses_375412831b964188afaa08e1ffb7230e",
+        "title": "Conversa B — precisa de você",
+        "state": "pending git push permission",
+        "role": "permission"
+      },
+      {
+        "id": "ses_8a70f2ed257f40819da687a6aefbeaae",
+        "title": "Conversa C — histórico e compositor",
+        "state": "89 messages + image + quote + errors + compaction + unread tail",
+        "role": "history"
+      },
+      {
+        "id": "ses_8ab40d49ba554de5bfe2e34258b64a3d",
+        "title": "Conversa D — pergunta",
+        "state": "pending question",
+        "role": "question"
+      },
+      {
+        "id": "ses_5ec9997204354097b64b51099cb1b6bd",
+        "title": "Conversa — captura SSE",
+        "state": "completed SSE recording",
+        "role": "event-scratch"
+      }
+    ]
+  },
+  "files": [
+    "models.json",
+    "agents.json",
+    "commands.json",
+    "skills.json",
+    "references.json",
+    "file-search.json",
+    "shells.json",
+    "active.json",
+    "snippets.json",
+    "preferences.json",
+    "session-working.json",
+    "transcript-working.json",
+    "inbox-working.json",
+    "session-permission.json",
+    "transcript-permission.json",
+    "inbox-permission.json",
+    "session-history.json",
+    "transcript-history.json",
+    "inbox-history.json",
+    "session-question.json",
+    "transcript-question.json",
+    "inbox-question.json",
+    "session-child-0.json",
+    "transcript-child-0.json",
+    "inbox-child-0.json",
+    "transcript-history-older.json",
+    "transcript-history-oldest.json",
+    "context-history.json",
+    "permissions.json",
+    "forms.json",
+    "family-working.json",
+    "family-page.json",
+    "family-missing.json",
+    "message-full-tool-image.json",
+    "events-live-step.json",
+    "transcript-live-step.json",
+    "btw-response.json",
+    "prompt-request.json",
+    "prompt-admission.json",
+    "viewed-session.json",
+    "index.json"
+  ],
+  "note": "Native HTTP/RPC envelopes, scrubbed paths and credentials; imported history is deliberate fixture data, events-live-step is observed execution."
+}

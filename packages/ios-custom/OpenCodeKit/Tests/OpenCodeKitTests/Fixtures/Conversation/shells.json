@@ -1,0 +1,52 @@
+{
+  "location": {
+    "directory": "/sandbox/repos/ios-conversation"
+  },
+  "data": [
+    {
+      "id": "sh_15fa5529a001cotP9CLJLMtdji",
+      "status": "running",
+      "command": "bun run wait-tests.ts",
+      "cwd": "/sandbox/repos/ios-conversation",
+      "shell": "/bin/zsh",
+      "file": "/sandbox/xdg/data/opencode/shell/feea6334a10caf2a63a760e09922c5f6880fa00e/sh_15fa5529a001cotP9CLJLMtdji.out",
+      "pid": 92641,
+      "metadata": {
+        "sessionID": "ses_1da0e2e23e224422ae503af32a04e31b"
+      },
+      "time": {
+        "started": 1792606032538
+      }
+    },
+    {
+      "id": "sh_15fa552d300106NrsgeVZ7Jw1X",
+      "status": "running",
+      "command": "sleep 86400",
+      "cwd": "/sandbox/repos/ios-conversation",
+      "shell": "/bin/zsh",
+      "file": "/sandbox/xdg/data/opencode/shell/feea6334a10caf2a63a760e09922c5f6880fa00e/sh_15fa552d300106NrsgeVZ7Jw1X.out",
+      "pid": 92642,
+      "metadata": {
+        "sessionID": "ses_76e015509e16427da0c7b98f7c5cd7fe"
+      },
+      "time": {
+        "started": 1792606032595
+      }
+    },
+    {
+      "id": "sh_15fa55c2300153mLLkDREPooEw",
+      "status": "running",
+      "command": "sleep 86400",
+      "cwd": "/sandbox/repos/ios-conversation",
+      "shell": "/bin/zsh",
+      "file": "/sandbox/xdg/data/opencode/shell/feea6334a10caf2a63a760e09922c5f6880fa00e/sh_15fa55c2300153mLLkDREPooEw.out",
+      "pid": 92686,
+      "metadata": {
+        "sessionID": "ses_3a190f409abc498e8c30c13e07321e0a"
+      },
+      "time": {
+        "started": 1792606034979
+      }
+    }
+  ]
+}

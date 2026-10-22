@@ -5,12 +5,22 @@ import type { DesktopTheme, HexColor } from "../../ui-custom/src/theme/types"
 import { join } from "node:path"
 
 const root = join(import.meta.dir, "../OpenCode/Resources/Themes")
+// Alpha primitives live in CSS rather than the web resolver's returned ramp map.
+const alphaTokens = Object.fromEntries(
+  [
+    ...(await Bun.file(join(import.meta.dir, "../../ui-custom/src/styles/tokens/colors.css")).text()).matchAll(
+      /--(v2-alpha-[\w-]+):\s*(#[\da-f]{8});/gi,
+    ),
+  ].map((match) => [match[1]!, match[2]!]),
+)
 const roles = {
   background: "background-base",
   surface: "surface-base",
   surfaceRaised: "background-weak",
   highlight: "surface-base-hover",
   border: "border-weak-base",
+  borderStrong: "v2-border-border-strong",
+  controlBorder: "border-strong-base",
   textStrong: "text-strong",
   text: "text-base",
   textSecondary: "text-weak",
@@ -26,6 +36,48 @@ const roles = {
   accent: "ios-accent",
   filledButton: "button-primary-base",
   onFilledButton: "background-base",
+  userBubble: "v2-user-message-background",
+  userBubbleText: "v2-user-message-text",
+  inlineCode: "v2-inline-code-text",
+  inlineCodeBackground: "v2-inline-code-background",
+  codeSurface: "background-stronger",
+  toolSurface: "v2-background-bg-layer-02",
+  diffAdd: "icon-diff-add-base",
+  diffDelete: "icon-diff-delete-base",
+  contextTrack: "border-weak-base",
+  contextFill: "text-weak",
+  contextWarning: "ios-warning",
+  agentBuild: "v2-agent-build-solid",
+  agentExplore: "v2-agent-explore-solid",
+  agentPlan: "v2-agent-plan-solid",
+  agentReview: "v2-agent-review-solid",
+  agentWriter: "v2-agent-writer-solid",
+  agentExplicit: "v2-icon-icon-base",
+  agentPrimary: "v2-text-text-accent",
+  agentSecondary: "v2-text-text-muted",
+  agentAccent: "v2-icon-icon-accent",
+  agentError: "v2-state-fg-danger",
+  agentStateSuccess: "v2-state-fg-success",
+  agentStateWarning: "v2-state-fg-warning",
+  agentStateInfo: "v2-state-fg-info",
+  agentAsk: "icon-agent-ask-base",
+  agentLegacyBuild: "icon-agent-build-base",
+  agentDocs: "icon-agent-docs-base",
+  agentLegacyPlan: "icon-agent-plan-base",
+  agentInfo: "syntax-info",
+  agentSuccess: "syntax-success",
+  agentWarning: "syntax-warning",
+  agentProperty: "syntax-property",
+  agentConstant: "syntax-constant",
+  agentAdded: "text-diff-add-base",
+  agentDeleted: "text-diff-delete-base",
+  agentLegacyWarning: "icon-warning-base",
+  composerFile: "syntax-property",
+  composerAgent: "syntax-type",
+  composerSession: "v2-text-text-accent",
+  composerSnippet: "v2-text-text-accent",
+  composerCommand: "ios-info",
+  composerSkill: "ios-accent",
 } as const
 
 const themes = new Bun.Glob("*.json")
@@ -36,6 +88,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     const variant = theme[mode]
     const palette = variant.palette ?? variant.seeds!
     const tokens = {
+      ...alphaTokens,
       ...resolveThemeVariant(
         {
           ...variant,
@@ -61,6 +114,12 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     }
     const resolvedRoles = {
       ...roles,
+      userBubble: tokens[roles.userBubble] ? roles.userBubble : "v2-background-bg-accent",
+      userBubbleText: tokens[roles.userBubbleText] ? roles.userBubbleText : "text-base",
+      inlineCode: tokens[roles.inlineCode] ? roles.inlineCode : "syntax-string",
+      inlineCodeBackground: tokens[roles.inlineCodeBackground]
+        ? roles.inlineCodeBackground
+        : "v2-background-bg-layer-02",
       highlight: mode === "dark" ? "v2-background-bg-layer-02" : roles.highlight,
       onInfo: mode === "light" ? "text-on-info-strong" : roles.onInfo,
     }
