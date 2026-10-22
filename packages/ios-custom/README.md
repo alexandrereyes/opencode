@@ -52,6 +52,17 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Rows:** only root sessions, without archived sessions or chats. Running state, permissions, and questions of
   subagents roll up into their root session. Pinned sessions come first, then the activity order. When a session has
   several states, the priority is permission > question > running > unread.
+- **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
+  at 60 seconds, 60 minutes and 24 hours, using `messageAt ?? time.created`, never metadata updates or recent rank.
+  `shell/time.ts` and `shell/titlebar/sidebar.tsx` are the reference; `br.ts` has no compact overrides, so their `en.ts`
+  suffixes apply in pt-BR too. A shared 60-second visible-screen timeline refreshes all rows, with natural Portuguese
+  VoiceOver phrases. Below the title, `path · branch` retains the PWA/app separator: the server's home becomes `~`,
+  paths truncate in the middle and branch labels at the tail, on one line. The preview, badges and avatar remain.
+  Root checkouts show their current branch; detached worktrees use the folder-name fallback; non-Git paths have no
+  branch and chats hide the line. Attention actions sit below their row; archived rows reuse the same metadata line.
+  One deduplicated `custom.worktrees/locate` batch covers live and archived directories per existing throttled reload;
+  `custom.directories/home` is cached per server after its first successful read. Both RPC contracts and implementations
+  match installed `1de0005…`. Missing RPCs hide branch metadata/leave absolute paths, without affecting the list.
 - **Data:** the `custom.navigation` RPC (paginated by 500), `custom.preferences` (selected repositories, pinned and
   muted sessions), `custom.subscriptions` (usage strip), and `custom.transcript/list` for previews. Previews read the
   latest messages of each visible session, as `packages/app-custom/src/agent-dashboard/preview.ts` does.
@@ -72,6 +83,13 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   stable choice from the project ID when the project has none, through the theme's avatar tokens.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
   "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and a large title with toolbar buttons.
+
+Wave-10 checks use the dedicated **OpenCode Linhas** simulator and `ios-linhas-derived`: after `build-for-testing`,
+run `python3 packages/ios-custom/script/test-session-rows.py`, repeat with `OPENCODE_TEST_THEME=openchamber-light`,
+and pass `OpenCodeUITests/SessionReadingTests` for the existing four reading regressions (disposable owned imports,
+no model calls). All launches explicitly use the sandbox URL/password. Evidence, including a read-only headless PWA
+sidebar comparison and fixture-driven real-row renders for root/worktree/chat/extreme names, is in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda10-prints/`.
 
 ## Second screen: Conversa
 
@@ -333,6 +351,65 @@ composer focus by typing without retapping it. Base search owns its keyboard and
 Both themes capture only the fake repository's five existing worktrees; no verification checkout is kept. Focus
 restoration avoids overlapping an interactive sheet-dismissal animation, and selector presentation waits on the
 public UIKit keyboard layout guide/did-hide notification rather than a fixed delay.
+
+## LLM proxy (wave 11)
+
+**Você → LLM proxy**, above Aparência, and each provider in the existing Sessões usage strip open the same large
+native sheet. Codex and Claude use the approved A3 layout: provider balance, combined weekly quota, capacity and
+renewal; tier groups; account state, stacked independent 5-hour/weekly windows, paired renewal dates and
+**Mostrar no resumo**. Other tiers remain visible outside the headline balance. Real proxy display names are shown.
+The strip retains its existing styling; a selected account name truncates rather than increasing its height.
+
+- **Data and compatibility:** the full hand-written `Subscriptions` contract mirrors `custom.subscriptions/list`,
+  `setAutomation` and `consumeReset`, without Location or direct proxy-admin access. All three contracts and their
+  backend implementation match installed release `1de0005da68932f4ab7856e464978ad06f99d652`. Missing RPCs degrade to an
+  explicit unavailable/update-server message, never blocking sessions or the composer. Unknown status/plan strings
+  and added JSON fields do not break decoding; null capacity, quota, inventory and credits remain unknown, not zero.
+- **Projection:** `SubscriptionProjection` ports the PWA rules with an injected `now`. Enabled/authenticated Pro Max
+  and Pro 20x each contribute one Codex unit; Claude includes Max 20x only. Equivalents are the sum of weekly remaining
+  divided by 100; combined percent divides that sum by all members, including exhausted/cooling accounts. No lower-tier
+  weighting or partial reassuring totals. Stale, null-capacity and either unobserved elapsed renewal suppress the whole
+  weekly balance. Readiness uses authoritative capacity, not rounded percentages. Five-hour average, seven-day pace,
+  oldest observation, stable plan/readiness ordering and complete-only inventory aggregation follow the PWA separately.
+  Weekly exhaustion hides the five-hour row and both rails. Paid credits sum known values across all displayed accounts.
+- **Refresh:** one server-bound observable `SubscriptionStore` is owned by `SessionStore`, shared by both entry points
+  and the sheet. It reads initially, every 60 seconds only in foreground, immediately on foreground/SSE reconnect,
+  pull-to-refresh and the explicit refresh button. Concurrent reads join one task; opening a fresh sheet only refreshes
+  when due. Cached same-server content remains visible during refresh, but a completed failure replaces it with an
+  honest unavailable state. Runtime shutdown cancels requests/actions and invalidates their generation before the next
+  server runtime exists, so late old-server results are discarded. Observation times remain backend measurement times.
+- **Selection:** IDs only are persisted in `OpenCodeSubscriptionSelection.v1`, scoped by server URL/provider. Selecting
+  again restores the pool; a successful list removes vanished IDs. Both compact surfaces use that account while the
+  large detail header always remains the pool. No model, request routing or backend preference is changed.
+- **Actions:** automatic resets and consuming one banked reset require a native confirmation alert with Cancel. Pending
+  automation is provider-specific; pending reset is account-specific and prevents duplicates. Every action refetches;
+  failures roll back optimistic automation and distinguish `no_credit`, `busy`, `consume_failed`, `update_failed` and
+  unsupported RPCs. Consumption has a **110-second HTTP timeout** for the proxy's 90-second path and is never retried
+  automatically: an unconfirmed result may already have consumed inventory. Inventory/expiry/non-expiring counts and
+  automation state are visible even when weekly capacity is unavailable. Theme roles and VoiceOver values convey state
+  independently of color; all dates use local pt-BR 24-hour time.
+
+### Safe verification
+
+Use only **OpenCode Proxy** (`83335951-0D45-4D53-9884-55047D7F78CA`), with DerivedData
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-proxy-derived`. After `build-for-testing`, run
+`python3 packages/ios-custom/script/test-subscriptions.py`, then repeat with `OPENCODE_TEST_THEME=openchamber-light`.
+The runner supplies the explicit sandbox URL/password on every launch and writes private xctestrun files, removed
+afterwards. Live UI checks only read pools, select locally, open a confirmation and **cancel it**. Confirmed actions run
+solely against a DEBUG-only, loopback-gated `SubscriptionTestClient` that never forwards any request to the real proxy.
+Its explicit `OPENCODE_PROXY_STUB` scenarios cover pending, success and typed errors. Unit tests use injected clocks,
+clients and transport, including the sanitized real snapshot and long-reset request contract. Screenshots/results live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda11-prints/`.
+
+The native segmented control and provider glyphs come from the platform/PWA rather than AI-generated decorations;
+alerts replace iOS 27 confirmation popovers to retain an explicit Cancel action. Additional inventory/action rows make
+account cards taller than the read-only A3 illustration. No proxy mutation has been exercised live.
+
+Wave-11 verification: **169 Swift Testing tests**, warning-free simulator test build, four new UI cases plus four
+app-hosted regressions in both themes. Existing read-only continuity/details/search checks and all three settings
+cases also pass; the unread-jump check correctly skips after its viewed watermark has advanced. Settings tests now
+reveal links displaced by the new section and wait for the delayed AutoFill overlay before cancelling it. Use the
+normal simulator signing configuration when running Keychain/server regressions, not `CODE_SIGNING_ALLOWED=NO`.
 
 ## Platform and distribution
 

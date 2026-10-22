@@ -14,8 +14,8 @@ struct ArchivedSessionsView: View {
           store.conversationPath.append(.init(id: session.id))
         } label: {
           VStack(alignment: .leading, spacing: 4) {
-            Text(session.displayTitle).foregroundStyle(theme.color(.textStrong))
-            Text(store.branch(session)).font(.caption).foregroundStyle(theme.color(.textSecondary))
+            Text(session.displayTitle).foregroundStyle(theme.color(.textStrong)).lineLimit(1)
+            SessionDirectoryLine(label: store.directoryLabel(session))
           }
         }.listRowBackground(theme.color(.surface))
       }

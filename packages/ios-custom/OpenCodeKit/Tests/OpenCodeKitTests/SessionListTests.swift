@@ -206,16 +206,3 @@ private func entry(
   #expect(rows.allSatisfy { $0.pinned })
   #expect(rows.last?.muted == true)
 }
-
-@Test func timestampsUseBrazilianPortuguese() {
-  var calendar = Calendar(identifier: .gregorian)
-  calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-  let now = Date(timeIntervalSince1970: 1_792_584_000)
-  #expect(
-    SessionList.timestamp(now.timeIntervalSince1970 * 1000, now: now, calendar: calendar) == "12:00"
-  )
-  #expect(
-    SessionList.timestamp(
-      now.addingTimeInterval(-86_400).timeIntervalSince1970 * 1000, now: now, calendar: calendar)
-      == "Ontem")
-}

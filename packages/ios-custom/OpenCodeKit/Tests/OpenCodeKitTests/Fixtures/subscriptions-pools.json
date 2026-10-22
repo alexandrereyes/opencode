@@ -1,0 +1,282 @@
+{
+  "output": {
+    "status": "ok",
+    "accounts": [
+      {
+        "id": "codex-1",
+        "name": "Conta 1",
+        "enabled": true,
+        "plan": "plus",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-29T18:46:57.085216+00:00",
+          "latestExpiresAt": "2026-11-06T23:19:20.113744+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": 0,
+        "fiveHourResetAt": "2026-10-22T21:03:59+00:00",
+        "remaining": 6,
+        "resetAt": "2026-10-28T14:06:29+00:00",
+        "observedAt": "2026-10-22T16:49:48.6706984+00:00",
+        "stale": false,
+        "hasCapacity": false,
+        "credits": 54947.502038
+      },
+      {
+        "id": "codex-2",
+        "name": "Conta 2",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-22T20:00:25.095307+00:00",
+          "latestExpiresAt": "2026-10-29T18:33:35.231892+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-22T16:49:49.5246964+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": null
+      },
+      {
+        "id": "codex-3",
+        "name": "Conta 3",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 1,
+          "earliestExpiresAt": "2026-10-29T18:57:38.173823+00:00",
+          "latestExpiresAt": "2026-10-29T18:57:38.173823+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-22T16:49:50.4372563+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": 61290.8054575
+      },
+      {
+        "id": "codex-4",
+        "name": "Conta 4",
+        "enabled": true,
+        "plan": "promax",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 1,
+          "earliestExpiresAt": "2026-11-06T23:20:31.874195+00:00",
+          "latestExpiresAt": "2026-11-06T23:20:31.874195+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": 0,
+        "resetAt": "2026-10-27T07:31:08+00:00",
+        "observedAt": "2026-10-22T16:49:51.4022625+00:00",
+        "stale": false,
+        "hasCapacity": false,
+        "credits": 0
+      },
+      {
+        "id": "codex-5",
+        "name": "Conta 5",
+        "enabled": true,
+        "plan": "free",
+        "authenticated": true,
+        "cooldownSeconds": 0,
+        "bankedResets": {
+          "available": 2,
+          "earliestExpiresAt": "2026-10-22T18:37:53.443134+00:00",
+          "latestExpiresAt": "2026-10-29T18:17:59.202782+00:00",
+          "nonExpiring": 0
+        },
+        "fiveHourRemaining": null,
+        "fiveHourResetAt": null,
+        "remaining": null,
+        "resetAt": null,
+        "observedAt": "2026-10-22T16:49:52.1664149+00:00",
+        "stale": false,
+        "hasCapacity": true,
+        "credits": null
+      }
+    ],
+    "automation": {
+      "enabled": false
+    },
+    "anthropic": {
+      "status": "ok",
+      "accounts": [
+        {
+          "id": "claude-1",
+          "name": "Conta 1",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-22T16:44:48.0583064+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "claude-2",
+          "name": "Conta 2",
+          "enabled": true,
+          "plan": "max20x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 79,
+          "fiveHourResetAt": "2026-10-22T19:59:59.651869+00:00",
+          "remaining": 97,
+          "resetAt": "2026-10-29T13:59:59.651889+00:00",
+          "observedAt": "2026-10-22T16:44:48.53129+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "claude-3",
+          "name": "Conta 3",
+          "enabled": true,
+          "plan": "max20x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": 0,
+          "resetAt": "2026-10-27T11:59:59.894387+00:00",
+          "observedAt": "2026-10-22T16:44:48.7419849+00:00",
+          "stale": false,
+          "hasCapacity": false,
+          "credits": null
+        },
+        {
+          "id": "claude-4",
+          "name": "Conta 4",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-22T16:44:49.2296538+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "claude-5",
+          "name": "Conta 5",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-22T16:44:49.6738625+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "claude-6",
+          "name": "Conta 6",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-22T16:44:49.9028226+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        },
+        {
+          "id": "claude-7",
+          "name": "Conta 7",
+          "enabled": true,
+          "plan": "max5x",
+          "authenticated": true,
+          "cooldownSeconds": 0,
+          "bankedResets": {
+            "available": 0,
+            "earliestExpiresAt": null,
+            "latestExpiresAt": null,
+            "nonExpiring": 0
+          },
+          "fiveHourRemaining": 100,
+          "fiveHourResetAt": null,
+          "remaining": null,
+          "resetAt": null,
+          "observedAt": "2026-10-22T16:49:48.0630929+00:00",
+          "stale": false,
+          "hasCapacity": true,
+          "credits": null
+        }
+      ],
+      "automation": {
+        "enabled": false
+      }
+    }
+  }
+}
