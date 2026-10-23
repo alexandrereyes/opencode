@@ -21,6 +21,7 @@ public enum ThemeRole: Int, CaseIterable, Sendable {
   case syntaxKeyword, syntaxString, syntaxComment, syntaxFunction, syntaxProperty, syntaxType, syntaxConstant, syntaxNumber,
     syntaxVariable, syntaxPunctuation, syntaxOperator, syntaxAdded, syntaxRemoved
   case diagramBackground, diagramText, diagramLine, diagramAccent, diagramMuted, diagramSurface, diagramBorder
+  case quoteHighlight, quoteUnderline, quoteBadge, quoteBadgeSurface
 
   public var name: String { String(describing: self) }
 }

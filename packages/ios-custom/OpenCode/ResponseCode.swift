@@ -7,6 +7,8 @@ struct ResponseCode: View {
   @Environment(ToastCenter.self) private var toast
   @Environment(\.responseSelectionChanged) private var selection
   @Environment(\.conversationSearch) private var highlights
+  @Environment(\.responseSelection) private var actions
+  var source = ""
   @AppStorage("OpenCodeMarkdownCodeWrap") private var wrap = true
   let block: MarkdownBlock
   let messageID: String
@@ -53,7 +55,7 @@ struct ResponseCode: View {
   }
   private var content: some View {
     SelectableResponseText(block: block.codeDisplay, messageID: messageID, partID: partID, theme: theme,
-      selectionChanged: selection?.selected, highlights: highlights, gutter: true, wrap: wrap)
+      source: source, actions: actions, selectionChanged: selection?.selected, highlights: highlights, gutter: true, wrap: wrap)
   }
   private var naturalWidth: CGFloat {
     max(120, block.text.components(separatedBy: "\n").map {

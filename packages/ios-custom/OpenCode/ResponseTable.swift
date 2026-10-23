@@ -11,6 +11,7 @@ struct ResponseTable: View {
   @Environment(\.conversationImages) private var imageContext
   @Environment(\.openFile) private var fileAction
   @Environment(\.responseFilesStable) private var filesStable
+  @Environment(\.responseQuotes) private var quotes
   @AppStorage("OpenCodeMarkdownTableWrap") private var wrap = true
   @State private var exporting = false
   @State private var document = ResponseTextDocument(text: "")
@@ -55,7 +56,7 @@ struct ResponseTable: View {
           block: block, table: table, source: source, messageID: messageID, partID: partID,
           theme: theme, wrap: wrap, actions: actions, selected: selection?.selected,
           highlights: highlights, rasters: rasters, openNote: openNote,
-          imageContext: imageContext, fileOpen: fileAction?.open, filesStable: filesStable)
+          imageContext: imageContext, fileOpen: fileAction?.open, filesStable: filesStable, quotes: quotes)
       }
     }
     .fileExporter(isPresented: $exporting, document: document, contentType: exportType,
@@ -113,6 +114,7 @@ private struct ResponseTableContent: UIViewRepresentable {
   let imageContext: ConversationImageContext?
   let fileOpen: ((String) -> Void)?
   let filesStable: Bool
+  let quotes: ResponseQuoteContext
 
   func makeUIView(context: Context) -> ResponseTableView { ResponseTableView() }
   func updateUIView(_ view: ResponseTableView, context: Context) {
@@ -145,7 +147,7 @@ private struct ResponseTableContent: UIViewRepresentable {
           theme: theme, source: source, actions: actions, selectionChanged: selected,
           highlights: highlights, rasters: rasters, wrap: wrap, tableHeader: row == 0, openNote: openNote,
           fileContextOverride: imageContext, fileOpenOverride: fileOpen, filesStableOverride: filesStable,
-          contentSizeOverride: typeSize.uiCategory)
+          contentSizeOverride: typeSize.uiCategory, quotesOverride: quotes)
         view.cells[row][column].delegate = view.coordinators[row][column]
         cell.configure(view.cells[row][column], coordinator: view.coordinators[row][column])
         if previous != view.coordinators[row][column].rendering { changed = true }

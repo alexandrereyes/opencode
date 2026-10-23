@@ -64,6 +64,7 @@ struct UserBubble: View {
   @Environment(\.userMessageRevert) private var reversion
   @Environment(ToastCenter.self) private var toast
   @Environment(\.conversationSearch) private var highlights
+  @Environment(\.conversationQuotes) private var quoteContext
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
   @State private var expanded = false
   @State private var truncated = false
@@ -84,6 +85,12 @@ struct UserBubble: View {
               summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
               comment: quote.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
               id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
+            if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
+              Button("Ir ao trecho citado", systemImage: "text.quote") {
+                quoteContext.source?(mark.quote)
+              }.appFont(.caption).buttonStyle(.plain).foregroundStyle(theme.color(.userBubbleSecondary))
+                .accessibilityIdentifier("quote-source-\(message.id)-\(index)")
+            }
           }
           ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
             index, comment in

@@ -124,6 +124,10 @@ const roles = {
   diagramMuted: "text-weak",
   diagramSurface: "surface-base",
   diagramBorder: "border-base",
+  quoteHighlight: "v2-border-border-focus",
+  quoteUnderline: "v2-border-border-focus",
+  quoteBadge: "v2-border-border-focus",
+  quoteBadgeSurface: "v2-background-bg-layer-01",
 } as const
 
 const themes = new Bun.Glob("*.json")

@@ -111,7 +111,11 @@
     "diagramAccent": "#6200ff",
     "diagramMuted": "#232323",
     "diagramSurface": "#e3e3e3",
-    "diagramBorder": "#b9b9b9"
+    "diagramBorder": "#b9b9b9",
+    "quoteHighlight": "#c2c3fc",
+    "quoteUnderline": "#c2c3fc",
+    "quoteBadge": "#c2c3fc",
+    "quoteBadgeSurface": "#e6e6e6"
   },
   "avatars": {
     "lime": {
@@ -248,6 +252,10 @@
     "diagramAccent": "ios-primary",
     "diagramMuted": "text-weak",
     "diagramSurface": "surface-base",
-    "diagramBorder": "border-base"
+    "diagramBorder": "border-base",
+    "quoteHighlight": "v2-border-border-focus",
+    "quoteUnderline": "v2-border-border-focus",
+    "quoteBadge": "v2-border-border-focus",
+    "quoteBadgeSurface": "v2-background-bg-layer-01"
   }
 }

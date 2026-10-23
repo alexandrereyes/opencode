@@ -183,6 +183,52 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
   `accent` palette colors.
 
+### Quote marks — 23 October
+
+Selected assistant text remains marked with the web's focus-token background (12%; 28% while its details are open),
+one-point underline (40%) and an outlined numbered circle at the last marked block's trailing edge. Numbering follows
+draft order; overlapping badges pack into a small independently scrollable rail. The existing **Citações · N** tray
+retains comments, editing and removal, now with numbered items and **Ir ao trecho citado**. Text taps and badge taps
+open a compact native quote/comment sheet; links and active text selections retain their original behavior. Code and
+table selections use the same source mappings. No font scale, transcript margins or user metadata-row changes belong
+to this feature.
+
+The web currently marks **draft quotes only**. Persistent sent marks, **Ir à mensagem com o comentário** and reverse
+source navigation are requested native additions, not claims of web parity. Sent marks reconstruct from ordinary
+`metadata.quotes` on loaded user messages, including old sessions; no formatted-prompt parsing, annotation RPC or
+thread service is introduced. Sent comments remain immutable; whole-message undo retains its existing behavior.
+
+New native anchors retain exact UTF-16 source coordinates with an optional `coordinate: "source"` discriminator;
+untagged old native anchors remain readable, and web rendered-text anchors use the existing Markdown source mapping.
+Exact offsets must still match: streaming append survives, edits before/inside the quote do not silently relocate it.
+Unanchored legacy text resolves only when unique. The metadata index caches decoded user quotes independently of text
+streaming; only changed marks/parsed blocks recompute range projections. TextKit draws decorations without modifying
+attributed text or its typography. Only adding/removing the quote gutter invalidates measured text widths; comment
+edits and active-state changes reuse measurements. Explicit source jumps reuse the sole reading/scroll owner and its
+five-page continuation affordance; unavailable/changed sources retain the comment and report a pt-BR notice.
+Session IDs are local to each conversation, including children; there is no invented cross-session source identity.
+
+The source audit is `.agent-artifacts/citacoes/WEB.md`. Verification uses only **OpenCode Citacoes**
+(`C8FF24A6-89EE-42D4-B7E2-4BEDBE5E5060`) and **OpenCode Citacoes Light**
+(`473B6A95-46F4-4A9C-AF04-0992216DC2D2`), iPhone 18 Pro/iOS 27, sandbox **4184** and
+`$TMPDIR/opencode/ios-citacoes-derived`. After `build-for-testing` with `COPY_PHASE_STRIP=NO`, run
+`python3 packages/ios-custom/script/test-quotes.py prepare`, then `test --label dark` and
+`test --device 473B6A95-46F4-4A9C-AF04-0992216DC2D2 --theme openchamber-light --label light` concurrently.
+Use separate labels/results, never overlapping launches on a simulator. The runner imports only owned synthetic
+histories in its fake repository, restores only an owned simulator draft for full-passage visual comparison, supplies
+explicit sandbox credentials, and deletes private xctestrun files. Finish with `cleanup`. No model call, physical
+device or production request is needed for those fixtures. Explicitly selecting `OpenCodeUITests/QuoteSendingTests`
+adds one tiny real Luna-6/low send per theme in the worker's owned Session; the runner verifies the persisted comment,
+model and exact anchor from the backend afterward. `profile-scrolling.py --server-url … --home …` accepts this sandbox.
+Both-theme web/native captures and result bundles live under `$TMPDIR/opencode/ios-citacoes-prints/`.
+The five quote UI cases pass in both themes; five focused UIKit/cache tests and all 320 Kit tests pass. Debug/Release
+builds are warning-free. The existing five-iteration conversation scrolling test passes (3.155 s mean process CPU).
+The 12-second 300-message simulator trace kept p95 at **16.67 → 16.67 ms**, with process CPU **3063 → 3008 ms**,
+main-thread CPU **2620 → 2986 ms**, and display-link stall ratio **4.72% → 3.51%**. These are individual shared-Mac
+samples, not a claim of improved CPU or physical-device frame performance. Captures compare the real sandbox web
+renderer against the native production views. Both real-send checks also passed, with Luna/low, zero tool calls and
+marks retained after relaunch. No physical device, production mutation or new backend API was used.
+
 ### MCPs in the conversation — 23 October
 
 The approved B layout puts a compact glass pill immediately after model/effort, without adding a composer row or

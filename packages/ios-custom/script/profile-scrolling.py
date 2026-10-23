@@ -21,6 +21,8 @@ parser.add_argument("--frames", action="store_true", help="Measure the display-l
 parser.add_argument("--simulator", default="C960B2FA-F2AB-4E39-BF82-50050DF20A27")
 parser.add_argument("--derived", type=Path)
 parser.add_argument("--evidence", type=Path)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--home", type=Path)
 args = parser.parse_args()
 run_id = uuid.uuid4().hex
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
@@ -45,7 +47,7 @@ container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container"
 if args.template or args.frames:
     (container / "Documents/scroll-fixture-metrics.json").unlink(missing_ok=True)
 subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
-arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
+arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
 arguments += ["-OpenCodeFixtureRunID", run_id]
 arguments += ["-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"]
 if args.markdown:
@@ -55,7 +57,7 @@ if args.updates:
 if args.template or args.frames:
     arguments.append("-OpenCodeFixtureAutoScroll")
 try:
-    environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": (temporary / "custom-sandbox-4177/password").read_text().strip()}
+    environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": ((args.home or temporary / "custom-sandbox-4177") / "password").read_text().strip()}
     launch = subprocess.check_output(["xcrun", "simctl", "launch", "--terminate-running-process", device, bundle] + arguments, text=True, env=environment)
     pid = launch.strip().split(": ")[-1]
     if args.template:

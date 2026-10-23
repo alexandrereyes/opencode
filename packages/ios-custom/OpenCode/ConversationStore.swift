@@ -7,6 +7,7 @@ import OpenCodeKit
   private(set) var session: Session?
   private(set) var messages: [ConversationMessage] = []
   var activity = ConversationActivity.empty
+  var quoteIndex = ChatQuoteIndex()
   private(set) var models: [ModelInfo] = []
   private(set) var defaultModel: ModelInfo?
   private(set) var agents: [AgentInfo] = []

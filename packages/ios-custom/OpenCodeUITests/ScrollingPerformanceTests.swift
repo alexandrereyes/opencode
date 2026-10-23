@@ -4,7 +4,7 @@ import XCTest
   private func launch(_ mode: String, updates: Bool, theme: String? = nil) -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177",
+      "-OpenCodeServerURL", ProcessInfo.processInfo.environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177",
       "-OpenCodeScrollFixture", mode, "-OpenCodeFixturePosition", "middle",
       "-OpenCodeTheme", theme ?? ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
     ]

@@ -26,6 +26,20 @@ final class ResponseTextView: UITextView {
   var gutterBorderColor = UIColor.clear
   var openNote: ((String) -> Void)?
   var openFile: ((String) -> Void)?
+  var quoteHighlights: [ResponseQuoteHighlight] = []
+  var quoteRects: [(ChatQuoteMark, [CGRect])] = []
+  var quoteButtons: [UIButton] = []
+  var quoteRail: UIScrollView?
+  var quoteFill = UIColor.clear
+  var quoteLine = UIColor.clear
+  var quoteBadge = UIColor.clear
+  var quoteText = UIColor.clear
+  var quoteSurface = UIColor.clear
+  var openQuote: ((ChatQuoteMark) -> Void)?
+  var quoteTarget: String?
+  var quoteActive: String?
+  var quoteAlign: ((String, String, Double) -> Void)?
+  var quoteGeometryDirty = false
   private var decorationWidth: CGFloat?
   private var inlineCodeRects: [CGRect] = []
   private var lineRects: [CGRect] = []
@@ -59,6 +73,7 @@ final class ResponseTextView: UITextView {
   override func layoutSubviews() {
     super.layoutSubviews()
     if decorationWidth != bounds.width {
+      quoteGeometryDirty = true
       decorationWidth = bounds.width
       inlineCodeRects = inlineCodeRanges.flatMap { range -> [CGRect] in
         guard let start = position(from: beginningOfDocument, offset: range.location),
@@ -76,6 +91,7 @@ final class ResponseTextView: UITextView {
       }
       setNeedsDisplay()
     }
+    layoutQuoteDecorations()
     guard let match = searchMatch, let range = searchRange, let align = searchAlign,
       let start = position(from: beginningOfDocument, offset: range.location),
       let end = position(from: start, offset: range.length),
@@ -97,6 +113,7 @@ final class ResponseTextView: UITextView {
   override func draw(_ rect: CGRect) {
     inlineCodeColor.setFill()
     inlineCodeRects.forEach { UIBezierPath(roundedRect: $0.insetBy(dx: -2.4, dy: -1.6), cornerRadius: 6).fill() }
+    drawQuoteDecorations()
     super.draw(rect)
     guard codeGutter else { return }
     gutterBorderColor.setFill()
@@ -119,6 +136,7 @@ final class ResponseTextView: UITextView {
 }
 
 struct SelectableResponseText: UIViewRepresentable {
+  @Environment(\.responseQuotes) private var quotes
   @Environment(\.dynamicTypeSize) private var typeSize
   @Environment(\.conversationImages) private var imageContext
   @Environment(\.openFile) private var fileAction
@@ -140,6 +158,7 @@ struct SelectableResponseText: UIViewRepresentable {
   var fileOpenOverride: ((String) -> Void)? = nil
   var filesStableOverride: Bool? = nil
   var contentSizeOverride: UIContentSizeCategory? = nil
+  var quotesOverride: ResponseQuoteContext? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -154,6 +173,9 @@ struct SelectableResponseText: UIViewRepresentable {
     view.isSelectable = true
     view.isScrollEnabled = false
     view.delegate = coordinator
+    let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.openQuote(_:)))
+    tap.delegate = coordinator
+    view.addGestureRecognizer(tap)
     view.backgroundColor = theme.uiColor(.background).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
@@ -177,6 +199,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.selectionChanged = selectionChanged
     view.openNote = openNote
     view.openFile = fileOpenOverride ?? fileAction?.open
+    view.configureQuotes(quotesOverride ?? quotes, block: block, theme: theme)
     if filesStableOverride ?? filesStable {
       coordinator.resolveFiles(view, block: block, context: fileContextOverride ?? imageContext)
     } else {
@@ -200,7 +223,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.codeGutter = gutter
     view.gutterWidth = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 44,
       compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
-    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? view.gutterWidth : 0, bottom: 0, right: 0)
+    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? view.gutterWidth : 0, bottom: 0, right: view.quoteHighlights.isEmpty ? 0 : 28)
     view.textContainer.lineBreakMode = wrap ? .byWordWrapping : .byClipping
     view.inlineCodeColor = theme.uiColor(.inlineCodeBackground).withAlphaComponent(0.5)
     view.gutterColor = theme.uiColor(.codeLineNumber)
@@ -249,9 +272,27 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchAlign = nil
     view.openNote = nil
     view.openFile = nil
+    view.openQuote = nil
+    view.quoteAlign = nil
+    view.quoteHighlights = []
+    view.quoteRects = []
+    view.quoteButtons.forEach { $0.removeFromSuperview() }
+    view.quoteButtons = []
+    view.quoteRail?.removeFromSuperview()
+    view.quoteRail = nil
     view.delegate = nil
   }
-  final class Coordinator: NSObject, UITextViewDelegate {
+  final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+      guard let view = gestureRecognizer.view as? ResponseTextView, view.selectedRange.length == 0,
+        !(touch.view is UIControl) else { return false }
+      return view.quote(at: touch.location(in: view)) != nil
+    }
+    @objc func openQuote(_ gesture: UITapGestureRecognizer) {
+      guard let view = gesture.view as? ResponseTextView, let mark = view.quote(at: gesture.location(in: view)) else { return }
+      view.selectionChanged?()
+      view.openQuote?(mark)
+    }
     var rendering: Rendering?
     var fileTask: Task<Void, Never>?
     var fileKey: String?
@@ -321,6 +362,7 @@ struct ResponseMarkdown: View {
   @Environment(\.responseSelectionChanged) private var selectionChanged
   @Environment(\.conversationSearch) private var highlights
   @Environment(\.displayScale) private var displayScale
+  @Environment(\.conversationQuotes) private var quotes
   let text: String
   let messageID: String
   let partID: String
@@ -331,6 +373,7 @@ struct ResponseMarkdown: View {
   @State private var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
   @State private var rasterTheme = ""
   @State private var note: Note?
+  @State private var quoteHighlights: [ResponseQuoteHighlight] = []
   private struct Note: Identifiable { let id: String }
   init(text: String, messageID: String, partID: String) {
     self.text = text
@@ -342,6 +385,10 @@ struct ResponseMarkdown: View {
     ResponseBlocks(blocks: blocks, source: text, messageID: messageID, partID: partID,
       rasters: rasterTheme == theme.id ? rasters : [:], openNote: { note = Note(id: $0) })
     .frame(minHeight: blocks.isEmpty ? measuredHeight : nil)
+    .environment(\.responseQuotes, ResponseQuoteContext(highlights: quoteHighlights,
+      open: quotes.open, target: quotes.target, active: quotes.active, align: quotes.align))
+    .onChange(of: marks, initial: true) { _, _ in resolveQuotes() }
+    .onChange(of: blocks) { _, _ in resolveQuotes() }
     .onGeometryChange(for: CGFloat.self) {
       $0.size.height
     } action: { _, height in
@@ -370,6 +417,15 @@ struct ResponseMarkdown: View {
           .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { self.note = nil } } }
         }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
       }
+    }
+  }
+  private var marks: [ChatQuoteMark] {
+    quotes.index.marks(messageID: messageID, partID: partID, pending: quotes.pending)
+  }
+  private func resolveQuotes() {
+    quoteHighlights = marks.compactMap { mark in
+      let ranges = ChatQuoteAnchoring.sourceRanges(mark.quote, source: text, blocks: blocks)
+      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: mark, ranges: ranges)
     }
   }
   private func parse() {

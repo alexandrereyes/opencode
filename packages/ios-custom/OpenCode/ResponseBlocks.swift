@@ -60,7 +60,7 @@ private struct ResponseBlock: View {
       if language?.lowercased() == "mermaid" {
         ResponseDiagram(block: block, messageID: messageID, partID: partID)
       } else {
-        ResponseCode(block: block, messageID: messageID, partID: partID)
+        ResponseCode(source: source, block: block, messageID: messageID, partID: partID)
       }
     case .table:
       if let table = block.table {

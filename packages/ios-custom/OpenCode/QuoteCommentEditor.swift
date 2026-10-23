@@ -13,6 +13,7 @@ struct QuotedPassage: View {
 
 struct DraftQuotesCard: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.conversationQuotes) private var quoteContext
   @Bindable var draft: ConversationDraft
   @State private var expanded = false
   var body: some View {
@@ -29,8 +30,9 @@ struct DraftQuotesCard: View {
       if expanded {
         ScrollView {
           VStack(alignment: .leading, spacing: 16) {
-            ForEach(draft.quotes) { quote in
+            ForEach(Array(draft.quotes.enumerated()), id: \.element.id) { index, quote in
               VStack(alignment: .leading, spacing: 8) {
+                Text("Citação \(index + 1)").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
                 HStack(alignment: .top) {
                   QuotedPassage(text: quote.text).lineLimit(4)
                   Button("Editar citação", systemImage: "pencil") {
@@ -44,6 +46,8 @@ struct DraftQuotesCard: View {
                 if !quote.comment.isEmpty {
                   Text(quote.comment).font(.subheadline).lineLimit(4).padding(.leading, 12)
                 }
+                Button("Ir ao trecho citado", systemImage: "text.quote") { quoteContext.source?(quote) }
+                  .appFont(.caption).buttonStyle(.plain)
                 ForEach(draft.attachments.filter { $0.quoteID == quote.id }) { attachment in
                   Label(
                     attachment.name,

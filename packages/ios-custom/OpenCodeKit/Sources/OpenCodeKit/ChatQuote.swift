@@ -12,6 +12,13 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
     public let start: Int
     public let end: Int
     public let exact: String
+    public let coordinate: String?
+    public init(start: Int, end: Int, exact: String, coordinate: String? = nil) {
+      self.start = start
+      self.end = end
+      self.exact = exact
+      self.coordinate = coordinate
+    }
   }
   public init(
     id: String = UUID().uuidString, messageID: String, partID: String, text: String,
@@ -32,8 +39,8 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
     let exact = (source as NSString).substring(with: mapped)
     guard !exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     return Self(
-      messageID: messageID, partID: partID, text: exact,
-      anchor: Anchor(start: mapped.location, end: NSMaxRange(mapped), exact: exact))
+      messageID: messageID, partID: partID, text: block.copyText(in: range).trimmingCharacters(in: .whitespacesAndNewlines),
+      anchor: Anchor(start: mapped.location, end: NSMaxRange(mapped), exact: exact, coordinate: "source"))
   }
   public var document: ComposerDocument {
     get { ComposerDocument(parts: commentPrompt ?? [], fallback: comment) }

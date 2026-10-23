@@ -153,6 +153,11 @@ struct ConversationView: View {
   @State private var viewport = ConversationViewport()
   @State private var screenVisible = true
   @State private var promptViewportHeight: CGFloat = 800
+  @State private var quoteDetail: ChatQuoteMark?
+  @State private var quoteTarget: ChatQuoteMark?
+  @State private var quoteAligned: String?
+  @State private var quoteEditing: ChatQuote?
+  @State private var quoteValidation: Task<Void, Never>?
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
@@ -233,6 +238,15 @@ struct ConversationView: View {
     .modifier(ConversationMCPOverlay(store: conversation.mcps))
     .modifier(FileViewerHost())
     .environment(conversation.toast)
+    .environment(\.conversationQuotes, ConversationQuoteContext(
+      index: conversation.quoteIndex, pending: sessions.drafts.draft(conversation.id).quotes,
+      open: { quoteDetail = $0 }, source: { revealQuote($0) }, target: quoteTarget?.id, active: quoteDetail?.id,
+      align: { id, message, offset in
+        guard quoteTarget?.id == id, quoteAligned != id else { return }
+        quoteAligned = id
+        quoteTarget = nil
+        conversation.revealMessage(message, offset: max(0, offset - 24), persist: false)
+      }))
     .environment(\.userMessageRevert, conversation.isChild ? nil : UserMessageRevertAction(
       pending: sessions.drafts.draft(conversation.id).sending
         || sessions.drafts.draft(conversation.id).importing,
@@ -302,6 +316,28 @@ struct ConversationView: View {
       }.sessionAlertOverlay()
     }
     .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation, showLocation: showLocation).sessionAlertOverlay() }
+    .sheet(item: $quoteDetail, onDismiss: {
+      if let quote = quoteEditing {
+        quoteEditing = nil
+        sessions.drafts.draft(conversation.id).commenting = quote
+      }
+    }) { mark in
+      QuoteDetailsSheet(mark: mark, edit: {
+        quoteDetail = nil
+        let draft = sessions.drafts.draft(conversation.id)
+        draft.focused = false
+        quoteEditing = draft.quotes.first { $0.id == mark.quote.id }
+      }, remove: {
+        sessions.drafts.draft(conversation.id).removeQuote(mark.quote)
+        quoteDetail = nil
+      }, source: {
+        quoteDetail = nil
+        revealQuote(mark.quote, mark: mark)
+      }, message: {
+        quoteDetail = nil
+        if let id = mark.carryingMessageID { conversation.revealMessage(id, persist: false) }
+      }, close: { quoteDetail = nil })
+    }
     .sheet(isPresented: $detailsOpen) {
       SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }, isChat: chat, showLocation: showLocation) {
         contextOpen = true
@@ -333,6 +369,25 @@ struct ConversationView: View {
     .onChange(of: conversation.revision) { _, _ in
       if search.open { search.update(conversation) }
     }
+    .onChange(of: restoring) { old, value in
+      guard old, !value, !resumeOffered, screenVisible, let mark = quoteTarget else { return }
+      quoteValidation?.cancel()
+      quoteValidation = Task { @MainActor in
+        guard let message = conversation.activity.messages.first(where: { $0.message.id == mark.quote.messageID })?.message,
+          let entry = (message.content ?? []).enumerated().first(where: { message.partID(at: $0.offset) == mark.quote.partID }),
+          let source = entry.element.text else {
+          conversation.toast.show("O trecho citado não está mais disponível.")
+          quoteTarget = nil
+          return
+        }
+        let blocks = await ResponseMarkdownCache.shared.parse(source)
+        guard !Task.isCancelled else { return }
+        if ChatQuoteAnchoring.sourceRanges(mark.quote, source: source, blocks: blocks).isEmpty {
+          conversation.toast.show("O trecho citado foi alterado e não pode ser marcado.")
+          quoteTarget = nil
+        }
+      }
+    }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
     .task(id: conversation.session) {
       if screenVisible { await conversation.presented() }
@@ -352,6 +407,7 @@ struct ConversationView: View {
       scrollState.correctAnchor()
     }
     .onDisappear {
+      quoteValidation?.cancel()
       conversation.mcps.close()
       search.cancelPaging()
       leavePosition()
@@ -765,7 +821,7 @@ struct ConversationView: View {
       .overlay(alignment: .top) {
         ConversationViewportNotices(
           viewport: viewport, offersResume: resumeOffered,
-          resume: { restore(savedPosition, proxy: proxy) })
+          resume: { restore(quoteTarget.map { ReadingPosition(.message(id: $0.quote.messageID, offset: 0)) } ?? savedPosition, proxy: proxy) })
       }
       .overlay { if conversation.loading { ProgressView("Carregando conversa…").appFont(.caption) } }
       #if DEBUG
@@ -791,6 +847,12 @@ struct ConversationView: View {
     captureRequested = true
     scrollState.followToEnd(animated: animated)
     scheduleCapture()
+  }
+  private func revealQuote(_ quote: ChatQuote, mark: ChatQuoteMark? = nil) {
+    quoteAligned = nil
+    quoteTarget = mark ?? conversation.quoteIndex.marks(messageID: quote.messageID, partID: quote.partID)
+      .first { $0.quote.id == quote.id } ?? ChatQuoteMark(quote: quote, number: 1)
+    conversation.revealMessage(quote.messageID, persist: false)
   }
   private func openChild(_ id: String) {
     leavePosition()

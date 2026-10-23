@@ -22,7 +22,7 @@ func selectionMapsRenderedToExactSource(_ sample: (String, String, String)) thro
       source: sample.0, block: block, range: selected,
       messageID: "msg_test", partID: "msg_test:text:1"))
   #expect(quote.messageID == "msg_test" && quote.partID == "msg_test:text:1")
-  #expect(quote.text == sample.2)
+  #expect(quote.text == sample.1)
   let anchor = try #require(quote.anchor)
   #expect(anchor.exact == sample.2)
   #expect(
