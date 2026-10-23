@@ -48,6 +48,8 @@ Os títulos ajudam a dividir um conteúdo longo em partes fáceis de encontrar.
       1. Confirme os detalhes.
 3. Execute o plano.
 4. Confira o resultado.
+5. **Testes sem depender da ordem.** Cada cenário com o modelo real agora prepara seus próprios dados.
+   1. **Cenário aninhado.** O restante continua com peso regular e `código em linha`.
 
 Outra lista, com início explícito:
 

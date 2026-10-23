@@ -10,7 +10,7 @@ import UIKit
   private func document(_ theme: String) throws {
     continueAfterFailure = false
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", ProcessInfo.processInfo.environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
       "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top", "-OpenCodeMarkdownFixture"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
@@ -20,6 +20,8 @@ import UIKit
     let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
     XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed)
     visibleTop = app.buttons["Voltar"].firstMatch.frame.maxY + 132
+    let pinned = app.otherElements["conversation-pinned-user"]
+    if pinned.exists { visibleTop = max(visibleTop, pinned.frame.maxY + 12) }
     visibleBottom = app.textViews["conversation-composer"].frame.minY - 20
     let title = app.textViews.matching(NSPredicate(format: "value == %@", "✨ Formatação no OpenChamber")).firstMatch
     reveal(title, transcript: transcript)
@@ -108,8 +110,10 @@ import UIKit
     let deadline = Date().addingTimeInterval(45)
     while Date() < deadline {
       let frame = element.exists ? element.frame : .zero
-      if element.exists && element.isHittable && (!align || frame.minY >= 230 && frame.minY <= visibleBottom - 120) { return }
-      let above = frame.height > 0 && (align ? frame.minY < 230 : frame.midY < transcript.frame.minY + 100)
+      // Hittable alone includes buttons overlapped by the pinned prompt/composer.
+      let visible = frame.minY >= visibleTop && frame.minY + min(40, frame.height) <= visibleBottom
+      if element.exists && element.isHittable && visible && (!align || frame.minY <= visibleBottom - 120) { return }
+      let above = frame.height > 0 && frame.minY < visibleTop
       let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.45 : 0.78))
       let end = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.78 : 0.45))
       start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.15)

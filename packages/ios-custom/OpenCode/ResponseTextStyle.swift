@@ -13,7 +13,7 @@ import UIKit
       let style: AppTextStyle = run.superscript ? .footnote
         : heading.map { [.title, .heading, .message, .secondary, .secondary, .secondary][min(5, max(0, $0 - 1))] }
           ?? (run.code || code || block.kind == .table ? .secondary : .body)
-      let weight: UIFont.Weight = heading != nil || run.strong || block.marker != nil || tableHeader || run.syntax == .function ? .semibold : summary ? .medium : .regular
+      let weight: UIFont.Weight = heading != nil || run.strong || tableHeader || run.syntax == .function ? .semibold : summary ? .medium : .regular
       let base = AppTypography.font(style, weight: weight, monospaced: run.code || code, compatibleWith: traits)
       let font = run.emphasis ? UIFont(descriptor: base.fontDescriptor.withSymbolicTraits(base.fontDescriptor.symbolicTraits.union(.traitItalic)) ?? base.fontDescriptor, size: base.pointSize) : base
       let paragraph = NSMutableParagraphStyle()
@@ -70,8 +70,8 @@ import UIKit
       result.addAttribute(.foregroundColor, value: theme.uiColor(role), range: NSRange(location: 0, length: 1))
     }
     if block.marker?.first == true, let tab = result.string.firstIndex(of: "\t") {
-      let font = AppTypography.font(.body, weight: .semibold, compatibleWith: traits)
-      result.addAttribute(.font, value: UIFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .semibold),
+      let font = AppTypography.font(.body, weight: .regular, compatibleWith: traits)
+      result.addAttribute(.font, value: UIFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .regular),
         range: NSRange(result.string.startIndex..<tab, in: result.string))
     }
     return result

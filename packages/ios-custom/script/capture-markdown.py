@@ -13,13 +13,22 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--simulator", default="7C70FB07-A886-43BD-8A39-42D92E0C9937")
 parser.add_argument("--themes", nargs="+", default=["dark", "light"])
 parser.add_argument("--sections", type=int, nargs="+", default=list(range(17)))
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--home", type=Path, help="Sandbox home (ignored in --offline mode)")
+parser.add_argument("--offline", action="store_true", help="Use the server-free Markdown fixture without sandbox credentials")
+parser.add_argument("--text", help="Align a matching Markdown block instead of a section heading")
+parser.add_argument("--top", type=float, default=240, help="Block position below the pinned user bubble")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 root = Path(__file__).resolve().parents[1]
-app = temporary / "ios-formatacao-derived/Build/Products/Debug-iphonesimulator/OpenCode.app"
-evidence = temporary / "ios-formatacao-prints"
+app = (args.derived or temporary / "ios-formatacao-derived") / "Build/Products/Debug-iphonesimulator/OpenCode.app"
+evidence = args.evidence or temporary / "ios-formatacao-prints"
+evidence.mkdir(parents=True, exist_ok=True)
 bundle = "br.com.alexandrem.opencode"
-environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": (temporary / "custom-sandbox-4177/password").read_text().strip()}
+environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": "offline-markdown-fixture" if args.offline
+    else ((args.home or temporary / "custom-sandbox-4177") / "password").read_text().strip()}
 source = (root / "OpenCode/Fixtures/markdown-fixture.md").read_bytes()
 assert hashlib.sha256(next(app.rglob("markdown-fixture.md")).read_bytes()).digest() == hashlib.sha256(source).digest()
 subprocess.run(["xcrun", "simctl", "install", args.simulator, str(app)], check=True)
@@ -41,10 +50,13 @@ try:
             assert 0 <= section <= 16
             run = uuid.uuid4().hex
             ready.unlink(missing_ok=True)
-            arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", "openchamber-" + theme,
+            arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeTheme", "openchamber-" + theme,
                 "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top", "-OpenCodeMarkdownFixture",
                 "-OpenCodeMarkdownExpandDetails", "-OpenCodeMarkdownSection", str(section), "-OpenCodeFixtureRunID", run,
                 "-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"]
+            arguments += ["-OpenCodeMarkdownCaptureTop", str(args.top)]
+            if args.text:
+                arguments += ["-OpenCodeMarkdownCaptureText", args.text]
             subprocess.run(["xcrun", "simctl", "launch", "--terminate-running-process", args.simulator, bundle] + arguments,
                 env=environment, check=True, stdout=subprocess.DEVNULL)
             deadline = time.monotonic() + 75

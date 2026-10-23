@@ -29,6 +29,12 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
     private var cancelledAnchor = false
     private var searchFrames = 0
     private var status = "Aguardando a coleção"
+    private let captureText: String? = {
+      let arguments = ProcessInfo.processInfo.arguments
+      return arguments.firstIndex(of: "-OpenCodeMarkdownCaptureText").flatMap {
+        arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+      }
+    }()
     private let section: Int? = {
       let arguments = ProcessInfo.processInfo.arguments
       guard arguments.contains("-OpenCodeMarkdownFixture"), let index = arguments.firstIndex(of: "-OpenCodeMarkdownSection"),
@@ -62,7 +68,8 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
         return
       }
       status = "Alinhando a geometria do título \(section)"
-      let delta = heading.convert(heading.bounds, to: window).minY - 240
+      let requestedTop = UserDefaults.standard.double(forKey: "OpenCodeMarkdownCaptureTop")
+      let delta = heading.convert(heading.bounds, to: window).minY - (requestedTop > 0 ? requestedTop : 240)
       let target = min(bottom, max(top, scroll.contentOffset.y + delta))
       ScrollFixtures.scrollState?.cancelAnchor()
       scroll.setContentOffset(CGPoint(x: 0, y: target), animated: false)
@@ -76,6 +83,7 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
     }
     private func findHeading(_ view: UIView, section: Int) -> ResponseTextView? {
       if let text = view as? ResponseTextView, let block = text.sourceBlock {
+        if let captureText { return block.copyText.contains(captureText) ? text : nil }
         if section == 0 && block.kind == .heading(1) && block.copyText == "✨ Formatação no OpenChamber" { return text }
         if section > 0 && block.kind == .heading(2) && block.copyText.hasPrefix("\(section). ") { return text }
       }

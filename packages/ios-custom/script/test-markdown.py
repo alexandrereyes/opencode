@@ -17,14 +17,23 @@ parser.add_argument("--label", required=True)
 parser.add_argument("--simulator", default="7C70FB07-A886-43BD-8A39-42D92E0C9937")
 parser.add_argument("--regressions", action="store_true")
 parser.add_argument("--fixed-wrap", action="store_true", help="Hold code/table wrapping on for reproducible scroll benchmarks")
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--home", type=Path, help="Sandbox home (ignored in --offline mode)")
+parser.add_argument("--offline", action="store_true", help="Run only server-free Markdown rendering suites")
 parser.add_argument("tests", nargs="*")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-products = temporary / "ios-formatacao-derived/Build/Products"
-evidence = temporary / "ios-formatacao-prints"
+home = args.home or temporary / "custom-sandbox-4177"
+products = (args.derived or temporary / "ios-formatacao-derived") / "Build/Products"
+evidence = args.evidence or temporary / "ios-formatacao-prints"
 evidence.mkdir(exist_ok=True)
-password = (home / "password").read_text().strip()
+if args.offline:
+    assert not args.regressions
+    assert all(test.startswith(("OpenCodeTests/MarkdownRenderingTests", "OpenCodeTests/ResponseMeasurementTests",
+        "OpenCodeUITests/MarkdownRenderingTests")) for test in args.tests)
+password = "offline-markdown-fixture" if args.offline else (home / "password").read_text().strip()
 run = plistlib.loads(next(products.glob("OpenCode_iphonesimulator*.xctestrun")).read_bytes())
 targets = ([target for configuration in run["TestConfigurations"] for target in configuration["TestTargets"]]
            if "TestConfigurations" in run else [value for key, value in run.items() if key != "__xctestrun_metadata__"])
@@ -33,7 +42,7 @@ extra = {}
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(args.server_url.rstrip("/") + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -68,14 +77,14 @@ try:
         missing.rmdir()
         for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1")]:
             extra["OPENCODE_TEST_" + key] = next(session["id"] for session in manifest["sessions"] if session["role"] == role)
-    arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "sessions"]
+    arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeScrollFixture", "sessions"]
     for target in targets:
         environment = target.setdefault("EnvironmentVariables", {})
-        environment.update({"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
+        environment.update({"OPENCODE_TEST_SERVER_URL": args.server_url, "OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
             "OPENCODE_TEST_THEME": os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")})
         environment.update(extra)
         target["CommandLineArguments"] = arguments
-        target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"] + (
+        target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", args.server_url] + (
             ["-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"] if args.fixed_wrap else [])
         target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
     configured.write_bytes(plistlib.dumps(run))

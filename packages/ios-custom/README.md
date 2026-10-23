@@ -444,6 +444,14 @@ directory for before/after frame measurements; `--markdown --frames` profiles th
 positioning (`-OpenCodeMarkdownSection 0…16`) with the same full assistant message. It expands disclosures and fixes
 wrap settings only for those launches, retains geometry/source/binary hashes and warms cold simulator WebKit for the
 diagram shot. Functional XCTest uses real gestures/actions, independently of that capture driver.
+Both runners accept `--simulator`, `--derived`, `--evidence`, `--server-url` and `--home` for isolated workers.
+Use `--offline` for the server-free Markdown/rendering suites without reading sandbox credentials or starting a
+backend. Captures additionally accept `--text` to align a particular block and `--top` to clear a taller pinned bubble.
+The fixture includes leading-strong numbered/nested items; UIKit tests check regular body/markers after strong spans,
+semibold headings/table headers, inline code, both themes and Dynamic Type without changing the shared font sizes.
+List structure affects indentation, not font weight: body text and markers are regular; only strong spans remain
+semibold. Headings h1–h6 and table headers remain semibold. Note that the pinned `801f59b` web renderer's custom
+`<strong>` computes to 700 (not Streamdown's default 600); the native app deliberately retains the requested 600.
 Source hashes, test results and both-theme reference/native captures
 are under `$TMPDIR/opencode/ios-formatacao-prints/`; the pinned, backend-free reference harness is documented in
 `.agent-artifacts/formatacao/reference/README.md`.
