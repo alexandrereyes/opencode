@@ -81,6 +81,30 @@ extension ComposerTokenKind {
   var focused = false
   // Presentation is runtime-only, including transfer after a failed new-session send.
   var expanded = false
+  var dictationReview = false
+  private var dictationPending = false { didSet { changed() } }
+  @ObservationIgnored var recordingFactory: ((URL) -> VoiceRecordingComposer)?
+  @ObservationIgnored lazy var recording: VoiceRecordingComposer = {
+    let file = persistence.directory.appending(path: "dictation.caf")
+    let recording = recordingFactory?(file) ?? VoiceRecordingComposer(file: file)
+    recording.pendingChanged = { [weak self] pending in
+      self?.dictationPending = pending
+      if pending { Task { await self?.persist() } }
+    }
+    recording.receive = { [weak self] text in await self?.insertTranscription(text) }
+    return recording
+  }()
+  func insertTranscription(_ text: String) async {
+    guard !deleted else { return }
+    // Pending downloads must not overwrite text typed meanwhile or a selected token.
+    let location = min(selection.location, editorText.length)
+    let prefix = location > 0 && !(editorText.string as NSString).substring(with: NSRange(location: location - 1, length: 1)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : ""
+    let suffix = location < editorText.length && !(editorText.string as NSString).substring(with: NSRange(location: location, length: 1)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : ""
+    replace(NSRange(location: location, length: 0), with: NSAttributedString(string: prefix + text + suffix, attributes: input?.plainAttributes))
+    dictationPending = false
+    dictationReview = true
+    await persist()
+  }
   private(set) var sendRevision = 0
   func didSend() {
     sendRevision += 1
@@ -112,7 +136,7 @@ extension ComposerTokenKind {
     return .init(
       document: document, attachments: attachments, model: model, agent: agent,
       cursor: document.documentOffset(selection.location), replacing: replacing, quotes: quotes, newSession: newSession,
-      revertedContext: revertedContext)
+      revertedContext: revertedContext, dictationPending: dictationPending ? true : nil)
   }
   var trigger: ComposerTrigger? {
     guard focused, selection.length == 0, input?.markedTextRange == nil else { return nil }
@@ -138,6 +162,8 @@ extension ComposerTokenKind {
         agent = value.agent
         replacing = value.replacing
         selection = NSRange(location: value.document.editorOffset(value.cursor), length: 0)
+        dictationPending = value.dictationPending == true
+        if dictationPending { recording.restorePending() }
       }
       if dropped {
         persistenceError =
@@ -172,6 +198,7 @@ extension ComposerTokenKind {
     focused = true
   }
   func discard() async throws {
+    recording.discard()
     revertedContext = nil
     deleted = true
     saving?.cancel()
@@ -208,7 +235,9 @@ extension ComposerTokenKind {
     changed()
   }
   func replace(_ range: NSRange, with value: NSAttributedString) {
-    if let input, input.representedDraft === self, input.representedRevision == sourceRevision {
+    // A queued transcription may finish after the old input has left the screen.
+    if let input, input.representedDraft === self, input.representedRevision == sourceRevision,
+      editorOwner != nil, input.composerOwner == editorOwner {
       input.replaceCharacters(in: range, with: value)
       return
     }
@@ -228,6 +257,7 @@ extension ComposerTokenKind {
     }
   }
   func clear() async {
+    recording.discard()
     revertedContext = nil
     text = NSAttributedString()
     attachments = []
@@ -324,6 +354,7 @@ extension ComposerTokenKind {
   init(server: String) { self.server = server }
   func flush() async {
     for draft in values.values {
+      draft.recording.suspend()
       draft.focused = false
       await draft.persist()
     }

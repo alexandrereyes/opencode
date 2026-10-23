@@ -4,10 +4,12 @@ import SwiftUI
 struct ConversationComposer: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.sessionAlerts) private var alerts
+  @Environment(\.scenePhase) private var scenePhase
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
   @State private var expandedSendRevision = 0
   @State private var expandedNavigationID: UUID?
+  @State private var visible = false
   var body: some View {
     VStack(spacing: 0) {
       ConversationRevertStatus(store: store, draft: draft)
@@ -40,12 +42,23 @@ struct ConversationComposer: View {
         }
     }
     .task { await draft.load() }
+    .onAppear { visible = true; reviewDictation() }
+    .onDisappear { visible = false }
+    .onChange(of: draft.dictationReview) { reviewDictation() }
+    .onChange(of: draft.focusSuppressed) { reviewDictation() }
+    .onChange(of: scenePhase) { reviewDictation() }
     .onChange(of: draft.persistenceError) { _, error in
       if let error {
         store.toast.show(error, kind: .error)
         draft.persistenceError = nil
       }
     }
+  }
+  private func reviewDictation() {
+    guard draft.dictationReview, scenePhase == .active, (visible || draft.expanded), !draft.focusSuppressed else { return }
+    draft.dictationReview = false
+    draft.expanded = true
+    draft.focused = true
   }
 }
 

@@ -29,6 +29,7 @@ struct ComposerTextView: UIViewRepresentable {
   func updateUIView(_ view: ComposerInputView, context: Context) {
     _ = draft.contentRevision
     context.coordinator.parent = self
+    view.composerOwner = owner
     context.coordinator.updating = true
     defer { context.coordinator.updating = false }
     view.isEditable = !draft.sending
@@ -140,6 +141,7 @@ final class ComposerInputView: UITextView {
     }
   }
   weak var representedDraft: ConversationDraft?
+  var composerOwner: UUID?
   var representedRevision = -1
   var composerTheme = AppTheme.selected
   var composerFont = AppTypography.font(.body)

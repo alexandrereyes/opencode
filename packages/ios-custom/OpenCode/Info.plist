@@ -17,7 +17,7 @@
     <key>UILaunchScreen</key><dict><key>UIColorName</key><string>LaunchBackground</string></dict>
     <key>NSLocalNetworkUsageDescription</key><string>O OpenCode acessa o servidor do seu Mac pela rede privada.</string>
     <key>NSCameraUsageDescription</key><string>O OpenCode usa a câmera para ler o QR code de pareamento do seu servidor.</string>
-    <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para conversar por voz com a Sessão mestra, inclusive durante a chamada em segundo plano.</string>
+    <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para ditar mensagens com transcrição neste iPhone e para conversar por voz com a Sessão mestra, inclusive durante a chamada em segundo plano.</string>
     <key>UIBackgroundModes</key><array><string>audio</string></array>
     <key>NSSupportsLiveActivities</key><true/>
     <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>

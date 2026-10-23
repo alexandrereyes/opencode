@@ -341,7 +341,7 @@ search navigates to messages and reuses wave 6's position restoration).
 | 6. Reading continuity    | Final-answer divider with the web rule (`finish stop`, completed, no error or retry, after activity, prefers `final_answer`, possibly several per exchange). Reading position per server and session (follow the tail, or message ID plus offset), kept in memory and across launches, restored with cancellable paging and a fallback to the tail. Selecting text pauses following the tail. Expanded tools remembered per session (IDs only). "Ir às novas mensagens" when unread messages are above. Shift+Return sends and Return alone inserts a newline, on hardware keyboards (`UIKeyCommand`) and on the software keyboard through the private `UIKeyboardImpl` state (`isShifted` without `isAutoShifted` or `isShiftLocked`), isolated in one file and falling back to a newline; remove it if TestFlight processing rejects the build (`ITMS-90338`). Edge-swipe back keeps working. |
 | 7. Subagents and alerts  | Composer in child sessions, keeping the child's agent and with no notice; replies sent after the child delivered its result stay in the child (automatic delivery to the parent would need backend work and is out). In-app banner, tappable, when another session finishes, fails, or needs you, respecting mutes, ignoring child completions, deduplicated. Light haptics on explicit actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-Out of scope for this screen for now: the microphone (visual only), "Alterações" and "Arquivos" in the `…` menu,
+Out of scope for this screen for now: "Alterações" and "Arquivos" in the `…` menu,
 and the fork action on messages.
 
 ### Desfazer mensagem enviada
@@ -533,6 +533,91 @@ header to share an image row's height. Plain UIKit tables also top-align short a
 cover media/plain/wide tables and the four literal tables extracted from the formatting fixture, in both themes.
 
 ## Voice conversation
+
+### Composer dictation (independent of GPT Live calls)
+
+The empty composer's microphone records locally in conversations, Nova sessão and Sessão mestra. The gesture is
+ported from Abacato v2's `VoiceRecordingGesture.swift`: tap starts hands-free; hold begins at 220 ms; slide left
+100 pt to discard or up 80 pt to lock. Diagonal movement uses normalized dominant progress. Release transcribes a
+held recording; locked recording offers pause, local preview/seek/resume, trash and **Parar e transcrever**. Audio
+shorter than one second is discarded. A locked recording pauses on background, route changes or interruption and
+never automatically resumes; an interrupted hold is discarded. The UIKit touch target stays mounted throughout.
+
+**Nothing sends automatically.** Parakeet Ultra inserts plain text at the current caret through the existing
+incremental/undoable editing path, preserving tokens and any text typed during a download. It then opens the real
+fullscreen composer with the keyboard and caret after the inserted text. A selected range is not overwritten.
+Completed audio is removed only after insertion/persistence; failures retain protected local audio with **Tentar
+de novo** / **Descartar**. Pending audio is scoped to the existing server/draft persistence and survives relaunch;
+leaving a conversation keeps its own paused or pending recording. Simultaneous recorders yield audio ownership.
+An active GPT Live call disables dictation with an explanation; these paths share no proxy or server API.
+
+**Você → Transcrição** shows model status/progress, download/disk size, retry, deletion and redownload. First use
+asks before downloading **632,162,964 bytes** (632 MB / 603 MiB), recommends Wi-Fi and explains the roughly 15-second
+first-device preparation. Recording remains usable while missing/downloading; audio waits locally. The download
+uses background URLSession, resumable files, exact byte counts and SHA-256 before atomic installation. Inference
+starts only on-device in the foreground, one recording at a time, with the CPU preprocessor and Neural Engine;
+the model unloads after idle time. Download continuation is not a promise of background inference.
+
+The package is **FluidAudio 0.17.7** (`503b4bd1…`), a tagged descendant of Abacato's `c3881073…` that includes
+`.ultra` and the same `loadLocal` API. Weights remain pinned to Hugging Face
+`FluidInference/parakeet-ultra-coreml@95eaa59a39d4394f047a4dc5cce480388a60d1b6`, 18 files, never bundled.
+The model supports 25 languages including Portuguese, using Abacato's automatic language/no-VAD setup and serial
+long-audio chunks. `Resources/TranscriptionNotices.txt` bundles FluidAudio's Apache-2.0, its third-party notices and
+the model's CC-BY-4.0 license/attribution. Regenerate with `script/update-transcription-notices.py`.
+
+The port also draws from Abacato's `VoiceRecordingComposer`, `VoiceRecordingCapture`, `VoiceRecordingSnapshot`,
+`VoiceRecordingPreparation`, `VoiceRecordingDrafts`, `TranscriptionEngine`, `TranscriptionManifest`,
+`TranscriptionModelFiles` and `TranscriptionDownloader`. Abacato's WhatsApp posting/media preparation, received-message
+priorities and background backlog processing are deliberately not imported. iOS 27's new inactive notification
+replaces the deprecated interruption-type API. Every color uses the app's typed semantic theme roles.
+
+#### Isolated dictation verification
+
+Use **OpenCode Gravacao** (`0C2C8A7F-CD76-43D5-88F5-A880D5A80B78`) and
+**OpenCode Gravacao Light** (`EAFA2B6D-1296-47CE-A6B2-BF6A19312F20`), iPhone 18 Pro/iOS 27.
+Build-for-testing with `$TMPDIR/opencode/ios-gravacao-derived`, then run these concurrently on the separate simulators:
+
+```sh
+python3 packages/ios-custom/script/test-dictation.py --label dark
+python3 packages/ios-custom/script/test-dictation.py --label light --theme openchamber-light \
+  --simulator EAFA2B6D-1296-47CE-A6B2-BF6A19312F20 OpenCodeUITests/DictationUITests
+```
+
+The runner supplies explicit sandbox-4177 arguments/password but never accesses the server or changes its lifecycle.
+The DEBUG-only, explicit-loopback-gated `-OpenCodeDictationFixture fake` mounts the production composer with prerecorded
+pt-BR PCM and a fake model/engine: no microphone, model download, inference server or auto-send is involved. Release
+excludes the fixture audio and code. `-OpenCodeDictationFixture device` instead exercises the real microphone,
+background downloader and Parakeet in the same server-free root; acquire the physical iPhone 14 lease first.
+Evidence is under `$TMPDIR/opencode/ios-gravacao-prints/`. Run `swift test` from `OpenCodeKit` for pure gesture,
+manifest/checksum/resume-file and draft-retention coverage; hosted `DictationPipelineTests` exercise queue/failure/retry,
+permission cancellation and native token-preserving insertion/undo. No live server or GPT Live call is required.
+
+After the leased iPhone has downloaded the real model, `python3 packages/ios-custom/script/test-dictation-device.py`
+feeds the bundled Portuguese PCM (padded to 10 seconds) directly into only the server-free fixture's pending draft,
+then verifies real Parakeet inference/fullscreen review in both themes. It uses `ios-gravacao-device-derived`, preserves
+the installed model, saves timing JSON and screenshots, and copies no recorded microphone audio off the device.
+This deterministic quality check is separate from live microphone/gesture checks: music/noise from Mac-speaker
+playback is test-environment contamination, not an accuracy assertion or a reason to change audio-session policy.
+
+Verification: 315 Kit tests; 27 hosted composer/dictation/voice regressions passed, with the two existing opt-in live
+proxy probes skipped. All six dictation UI cases passed in each theme on separate simulators, including gestures,
+large-text 44-point controls, preview, settings confirmation and fullscreen review with keyboard/caret restoration.
+Hosted checks cover incremental token-preserving insertion/undo, off-screen insertion and failed-audio retention/retry.
+The decoder explicitly bounds its
+last PCM read: normal end-of-file must not be reported as a failed recording, while actual read failures retain audio.
+
+The leased iPhone 14 verified real recording, hold/release, left cancellation, up-lock, pause/resume and the real model
+download. The clean 10-second PCM benchmark (7.96 seconds of synthesized Portuguese plus end padding) measured
+**15.89 s** cold preparation, **0.19 s** warm load and **0.19 / 0.11 s** inference in dark/light respectively. These are
+individual local runs, not latency guarantees; loading is measured separately from inference. Both outputs preserved
+the sentence with one extra **“o”** in **“Não o envie…”**, demonstrating why review is required. After success, device
+inspection found only `draft.json`, no recording/preview audio. The device was released and owned simulators shut down.
+
+Debug/test builds and the signed Release archive/export are warning-free. The dry-run uses a temporary
+`XCODE_XCCONFIG_FILE` containing `COPY_PHASE_STRIP = NO`, the existing verification workaround for an already-signed
+VoiceActivity extension; no permanent project setting changes. The signed IPA is about 31.9 MB, contains the notices
+and contains neither Parakeet weights nor DEBUG fixture audio. Nothing was uploaded. Screenshots, videos, xcresults,
+device timing/cleanup JSON and the artifact manifest are in `$TMPDIR/opencode/ios-gravacao-prints/`.
 
 The waveform in **Sessões** starts a native, full-duplex GPT Live call through the private
 `llm-proxy-svc:8080` lease/signaling contract. The floating glass bar replaces the master accessory
@@ -1327,8 +1412,8 @@ reuse the same delivery channel.
 
 - Swift 6 with strict concurrency, SwiftUI, Observation (`@Observable`), and `async`/`await`.
 - Networking with `URLSession`, including SSE (`bytes(for:)`), with no third-party networking dependencies.
-- The only package dependency is Apple's `swift-markdown` (GitHub-flavored Markdown parsing for responses).
-  Rendering stays in the app; adding any other dependency needs an explicit decision.
+- Package dependencies are `swift-markdown` (response parsing), SwaTexRender (math), WebRTC (voice calls), and
+  FluidAudio (local transcription). Rendering stays in the app; other dependencies need an explicit decision.
 - Separate the client layer (models, HTTP, SSE, pairing, credentials) from the UI so it can be tested without the
   simulator and reused by extensions (notifications, widgets, Live Activities, share sheet).
 - The server is the source of truth. The app keeps only cache and local preferences, and does not duplicate rules the
@@ -1619,7 +1704,7 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
   edit and local model/agent choices. Wave 3 adds protected on-disk persistence, tokens, attachments and the `+` menu
   (details below). `ComposerTextView` is a TextKit 2 `UITextView`, growing to six lines before scrolling, with native
   selection. Dragging or tapping the transcript dismisses the keyboard; no accessory row consumes conversation
-  space. Empty input shows a disabled microphone with “Em breve”.
+  space. Empty input shows the local-dictation microphone described above.
 - `PromptRequest` and `PromptSubmission` own serialization and sending. New sends have a unique `msg_` ID,
   `metadata.displayText` and `comments:[]`. Admission gets one automatic transport/5xx retry with the exact same ID;
   a failed attempt keeps the text and request for a manual retry. Steer applies agent, then model, then prompt;
@@ -1808,7 +1893,8 @@ permission and D's question remain pending. Screenshots in both themes:
 For wave 7: preserve the quote array in `DraftSnapshot` and the exact-ID failed-send comparison, the rendered/source
 mapping, recycling timeline and shared SSE hub. File
 review comments are still separate from chat quotes and are not exposed by this screen. A failed backend command
-cannot be retried exactly-once; do not imply otherwise in its UI. The microphone remains visual only.
+cannot be retried exactly-once; do not imply otherwise in its UI. The microphone was visual-only in this wave;
+local composer dictation is described above.
 
 For memory checks, build with `-configuration Release`, install `Release-iphonesimulator/OpenCode.app`, and run
 `vmmap -summary <app-pid>` after Sessões settles, after opening C's tail, at the first history page, and after returning
@@ -2049,7 +2135,7 @@ includes all 54 owned sessions from preparatory and final runs, with none active
 The conversation seed's permission and question are still pending; no seed reset was needed.
 
 Still out of scope: automatic redelivery of later child replies to the parent (requires a backend observation
-contract), system notifications/APNs/background delivery, microphone, Changes/Files views,
+contract), system notifications/APNs/background delivery, Changes/Files views,
 fork/revert and offline editing. The earlier software-keyboard private-API/TestFlight caveat and physical-keyboard
 manual check remain unchanged.
 

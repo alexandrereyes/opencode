@@ -11,10 +11,12 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
   public var quotes: [ChatQuote]
   public var newSession: NewSessionContext?
   public var revertedContext: RevertedContext?
+  public var dictationPending: Bool?
   public init(
     document: ComposerDocument = .init(), attachments: [DraftAttachment] = [],
     model: ModelReference? = nil, agent: String? = nil, cursor: Int = 0, replacing: String? = nil,
-    quotes: [ChatQuote] = [], newSession: NewSessionContext? = nil, revertedContext: RevertedContext? = nil
+    quotes: [ChatQuote] = [], newSession: NewSessionContext? = nil, revertedContext: RevertedContext? = nil,
+    dictationPending: Bool? = nil
   ) {
     self.document = document
     self.attachments = attachments
@@ -25,9 +27,10 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     self.quotes = quotes
     self.newSession = newSession
     self.revertedContext = revertedContext
+    self.dictationPending = dictationPending
   }
   private enum CodingKeys: CodingKey {
-    case document, attachments, model, agent, cursor, replacing, quotes, newSession, revertedContext
+    case document, attachments, model, agent, cursor, replacing, quotes, newSession, revertedContext, dictationPending
   }
   public init(from decoder: any Decoder) throws {
     let value = try decoder.container(keyedBy: CodingKeys.self)
@@ -40,6 +43,7 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     quotes = try value.decodeIfPresent([ChatQuote].self, forKey: .quotes) ?? []
     newSession = try value.decodeIfPresent(NewSessionContext.self, forKey: .newSession)
     revertedContext = try value.decodeIfPresent(RevertedContext.self, forKey: .revertedContext)
+    dictationPending = try value.decodeIfPresent(Bool.self, forKey: .dictationPending)
   }
 }
 
@@ -61,6 +65,11 @@ public actor DraftPersistence {
     let url = directory.appendingPathComponent("draft.json")
     guard FileManager.default.fileExists(atPath: url.path) else { return (nil, false) }
     var snapshot = try JSONDecoder().decode(DraftSnapshot.self, from: Data(contentsOf: url))
+    for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+    where file.lastPathComponent.hasPrefix("dictation-preview-")
+      || (file.lastPathComponent == "dictation.caf" && snapshot.dictationPending != true) {
+      try? FileManager.default.removeItem(at: file)
+    }
     var total = 0
     let count = snapshot.attachments.count
     snapshot.attachments = snapshot.attachments.filter { item in
@@ -79,10 +88,10 @@ public actor DraftPersistence {
   }
   public func cleanAttachments(retaining attachments: [DraftAttachment]) throws {
     guard FileManager.default.fileExists(atPath: directory.path) else { return }
-    let retained = Set(attachments.map(\.id) + ["draft.json"])
+    let retained = Set(attachments.map(\.id) + ["draft.json", "dictation.caf"])
     for url in try FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil)
-    where !retained.contains(url.lastPathComponent) {
+    where !retained.contains(url.lastPathComponent) && !url.lastPathComponent.hasPrefix("dictation-preview-") {
       try FileManager.default.removeItem(at: url)
     }
   }

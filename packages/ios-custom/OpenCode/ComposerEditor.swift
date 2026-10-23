@@ -7,6 +7,7 @@ struct ComposerEditor: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.voiceController) private var voice
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
@@ -24,7 +25,7 @@ struct ComposerEditor: View {
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
   private var canSubmit: Bool {
-    hasContent && !draft.sending && !draft.importing && store.ready
+    hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
       && store.selectedModel(draft) != nil
   }
   private func submit() {
@@ -72,6 +73,13 @@ struct ComposerEditor: View {
           "send-error")
       }
       if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
+      if draft.recording.state == .pending { DictationPendingView(recording: draft.recording) }
+      if let error = draft.recording.error, draft.recording.state != .pending {
+        Text(error).appFont(.caption).foregroundStyle(theme.color(.error))
+      }
+      if voice?.sessionID != nil && !hasContent {
+        Text("Encerre a chamada para ditar uma mensagem.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+      }
       VStack(alignment: .leading, spacing: 12) {
         if draft.attachments.contains(where: { $0.quoteID == nil }) {
           attachmentRow.padding(.trailing, showExpand ? 26 : 0)
@@ -95,6 +103,10 @@ struct ComposerEditor: View {
           longText = $0
         }
         .padding(.trailing, showExpand && draft.attachments.isEmpty ? 26 : 0)
+        .simultaneousGesture(
+          DragGesture(minimumDistance: 60).onEnded { value in
+            if !expanded && !draft.recording.visible && value.translation.height < -60 && abs(value.translation.width) < 70 { expand() }
+          })
         controls
       }
       .padding(16).background(
@@ -114,12 +126,6 @@ struct ComposerEditor: View {
           .frame(width: 28, height: 28).padding(7).buttonStyle(.plain)
         }
       }
-      .simultaneousGesture(
-        DragGesture(minimumDistance: 60).onEnded { value in
-          if !expanded && value.translation.height < -60 && abs(value.translation.width) < 70 {
-            expand()
-          }
-        })
     }
     .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft).sessionAlertOverlay() }
     .sheet(isPresented: $agents) { agentSheet.sessionAlertOverlay() }
@@ -173,18 +179,48 @@ struct ComposerEditor: View {
         } catch { store.toast.show(error.localizedDescription, kind: .error) }
       }
     }
-    .onAppear { draft.editorOwner = editorID }
+    .onAppear {
+      draft.editorOwner = editorID
+      draft.recording.willUseAudio = { voice?.sessionID == nil }
+    }
+    .onChange(of: voice?.sessionID) { _, id in if id != nil { draft.recording.suspend() } }
+    .alert("Baixar transcrição no aparelho?", isPresented: $draft.recording.asksDownload) {
+      Button("Baixar por Wi-Fi") { draft.recording.transcription.download(cellular: false) }
+      Button("Usar dados móveis") { draft.recording.transcription.download(cellular: true) }
+      Button("Agora não", role: .cancel) {}
+    } message: { Text(TranscriptionController.downloadMessage) }
+    .alert("Permita o microfone", isPresented: $draft.recording.permissionDenied) {
+      Button("Abrir Ajustes") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+      Button("Cancelar", role: .cancel) {}
+    } message: { Text("Ative o microfone nos Ajustes para ditar mensagens. A transcrição é feita neste iPhone.") }
     .onDisappear {
+      draft.recording.suspend()
       if draft.editorOwner == editorID { draft.editorOwner = nil }
       Task { await draft.persist() }
     }
   }
   private var controls: some View {
-    Group {
-      if typeSize.isAccessibilitySize {
-        ScrollView(.horizontal) { controlRow.fixedSize(horizontal: true, vertical: false) }.scrollIndicators(.hidden)
-      } else { controlRow }
-    }
+    ZStack(alignment: .bottomTrailing) {
+      Group {
+        if typeSize.isAccessibilitySize {
+          ScrollView(.horizontal) { controlRow.fixedSize(horizontal: true, vertical: false) }.scrollIndicators(.hidden)
+        } else { controlRow }
+      }.padding(.trailing, 52).opacity(draft.recording.capturing || draft.recording.discarding ? 0 : 1)
+        .allowsHitTesting(!draft.recording.capturing).accessibilityHidden(draft.recording.capturing)
+      if draft.recording.capturing || draft.recording.discarding {
+        DictationRecordingPanel(recording: draft.recording).padding(.trailing, 52)
+      }
+      DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
+        sending: draft.sending, available: !draft.sending && !draft.importing && voice?.sessionID == nil,
+        submit: submit)
+        .contextMenu {
+          if hasContent && store.executing {
+            Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
+              Task { await store.send(draft, alternate: true) }
+            }.disabled(!canSubmit)
+          }
+        }
+    }.frame(minHeight: 44)
   }
   private var controlRow: some View {
     HStack(spacing: 12) {
@@ -231,33 +267,6 @@ struct ComposerEditor: View {
         } label: {
           Text(store.selectedAgent(draft)).appFont(.caption).lineLimit(1)
         }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
-      }
-      Button {
-        submit()
-      } label: {
-        Group {
-          if draft.sending {
-            ProgressView().tint(theme.color(.onPrimary))
-          } else {
-            Image(systemName: hasContent ? "arrow.up" : "mic.fill").appSymbol(.action)
-          }
-        }.foregroundStyle(theme.color(.onPrimary)).frame(width: 36, height: 36)
-          .background(theme.color(.primary), in: Circle())
-      }
-      .disabled(!canSubmit)
-      .buttonStyle(ComposerSendStyle()).accessibilityLabel(
-        hasContent ? "Enviar mensagem" : "Microfone"
-      )
-      .accessibilityHint(hasContent ? "" : "Em breve")
-      .contextMenu {
-        if hasContent && store.executing {
-          Button(
-            store.preferences?.data.settings.followUpBehavior == .queue
-              ? "Enviar agora" : "Adicionar à fila"
-          ) {
-            Task { await store.send(draft, alternate: true) }
-          }
-        }
       }
     }.frame(minHeight: 36).foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(
       draft.sending || draft.importing)

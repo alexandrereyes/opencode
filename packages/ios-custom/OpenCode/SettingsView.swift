@@ -51,6 +51,10 @@ struct SettingsView: View {
         } header: { Text("Conversa por voz") } footer: {
           if floatingVoice?.visible(runtime.voice) == true { Text("Vale a partir da próxima chamada") }
         }.listRowBackground(theme.color(.surface))
+        Section("Transcrição") {
+          NavigationLink("Transcrição no aparelho") { TranscriptionSettingsView(transcription: .shared) }
+            .accessibilityIdentifier("settings-transcription")
+        }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {
             ServerListView(runtime: runtime, store: store)

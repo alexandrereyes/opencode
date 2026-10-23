@@ -5,11 +5,13 @@ import SwiftUI
 
 @main
 struct OpenCodeApp: App {
+  @UIApplicationDelegateAdaptor(TranscriptionAppDelegate.self) private var delegate
   init() { FilePreviewStorage.clean() }
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if MCPFixtures.mode != nil { MCPFixtureRoot() }
+      if DictationFixtures.mode != nil { DictationFixtureRoot() }
+      else if MCPFixtures.mode != nil { MCPFixtureRoot() }
       else if ComposerFixtures.enabled { ComposerFixtureRoot() }
       else if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
       #else
@@ -50,6 +52,7 @@ struct OpenCodeApp: App {
 }
 
 private struct AppRoot: View {
+  @Environment(\.scenePhase) private var scenePhase
   @Environment(\.colorScheme) private var systemScheme
   @State private var runtime = AppRuntime()
   var body: some View {
@@ -74,6 +77,8 @@ private struct AppRoot: View {
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
     .task(id: runtime.servers.revision) { await runtime.rebuild() }
+    .task { TranscriptionController.shared.start() }
+    .onChange(of: scenePhase, initial: true) { _, phase in TranscriptionController.shared.setActive(phase == .active) }
     .onChange(of: theme.id, initial: true) { runtime.voice.setTheme(theme) }
   }
 }
