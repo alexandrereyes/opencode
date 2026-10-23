@@ -1,6 +1,7 @@
 import XCTest
 
 @MainActor final class SettingsTests: XCTestCase {
+  override func setUp() { continueAfterFailure = false }
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
   private var run: String { environment["OPENCODE_TEST_RUN_ID"] ?? "onda8" }
   private var manualName: String { "Sandbox manual · " + run }
@@ -32,7 +33,7 @@ import XCTest
       XCTAssertTrue(close.waitForNonExistence(timeout: 3))
     }
   }
-  private func settings(_ app: XCUIApplication) {
+  private func settings(_ app: XCUIApplication, appearance: Bool = false) {
     dismissAlert(app)
     XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 5))
     app.tabBars.buttons["Você"].tap()
@@ -40,16 +41,21 @@ import XCTest
       if app.navigationBars["Você"].exists { break }
       app.navigationBars.buttons.firstMatch.tap()
     }
-    XCTAssertTrue(app.buttons["settings-themes"].waitForExistence(timeout: 10))
-    reveal(app.buttons["settings-themes"], app: app)
+    XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 10))
+    if appearance { reveal(app.buttons["settings-themes"], app: app) }
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
-    for _ in 0..<30 {
-      let top = app.navigationBars.firstMatch.frame.maxY
-      let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 60 : app.frame.maxY
-      if element.exists && element.isHittable && element.frame.minY >= top && element.frame.maxY < bottom { return }
-      if element.exists && element.frame.minY < top { app.swipeDown(velocity: .slow) }
-      else { app.swipeUp(velocity: .slow) }
+    let list = app.collectionViews.firstMatch
+    let top = app.navigationBars.firstMatch.frame.maxY
+    let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 60 : app.frame.maxY
+    for _ in 0..<20 {
+      let frame = element.exists ? element.frame : .zero
+      if frame.height > 0 && frame.minY >= top && frame.maxY < bottom && element.isHittable { return }
+      if frame.height > 0 && frame.minY < top {
+        list.swipeDown(velocity: .slow)
+        continue
+      }
+      list.swipeUp(velocity: .slow)
     }
     XCTAssertTrue(element.exists && element.isHittable)
   }
@@ -67,7 +73,7 @@ import XCTest
   func testLiveThemesAndAppearancesAcrossScreens() throws {
     let app = try launch()
     XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 20))
-    settings(app)
+    settings(app, appearance: true)
     chooseTheme("openchamber", app: app)
     for (family, mode, name) in [("openchamber", "Escuro", "openchamber-dark"),
                                   ("openchamber", "Claro", "openchamber-light"),
@@ -79,8 +85,8 @@ import XCTest
       reveal(app.buttons["theme-" + family], app: app)
       shot("theme-picker-" + name)
       app.navigationBars.buttons.firstMatch.tap()
-      reveal(app.buttons["settings-about"], app: app)
-      app.buttons["settings-about"].tap()
+      reveal(app.descendants(matching: .any)["settings-about"].firstMatch, app: app)
+      app.descendants(matching: .any)["settings-about"].firstMatch.tap()
       XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'desenvolvimento' OR value CONTAINS 'desenvolvimento'")).firstMatch.waitForExistence(timeout: 5))
       shot("about-" + name)
       app.navigationBars.buttons.firstMatch.tap()
@@ -94,7 +100,7 @@ import XCTest
       shot("conversation-" + name)
       dismissAlert(app)
       app.buttons["Voltar"].tap()
-      settings(app)
+      settings(app, appearance: true)
     }
     chooseTheme("openchamber", app: app)
     app.segmentedControls["settings-appearance"].buttons["Sistema"].tap()
@@ -109,7 +115,7 @@ import XCTest
     reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
     cleanPreviousTestServers(app)
-    reveal(app.buttons["server-add"], app: app)
+    reveal(app.descendants(matching: .any)["server-add"].firstMatch, app: app)
     shot("servers-initial-" + mode)
     addServer(app, name: manualName, address: "http://127.0.0.1:4177",
               password: try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"]), success: true, mode: mode)
@@ -133,7 +139,7 @@ import XCTest
     settings(app)
     reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
-    let pairing = app.buttons["server-pair"]
+    let pairing = app.descendants(matching: .any)["server-pair"].firstMatch
     reveal(pairing, app: app)
     pairing.tap()
     XCTAssertTrue(app.textViews["pairing-payload"].waitForExistence(timeout: 5))
@@ -179,8 +185,10 @@ import XCTest
     }
   }
   private func addServer(_ app: XCUIApplication, name: String, address: String, password: String?, success: Bool, mode: String) {
-    reveal(app.buttons["server-add"], app: app)
-    app.buttons["server-add"].tap()
+    // Native automatic List actions may be exposed as cells, not buttons.
+    let add = app.descendants(matching: .any)["server-add"].firstMatch
+    reveal(add, app: app)
+    add.tap()
     XCTAssertTrue(app.navigationBars["Adicionar servidor"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.textFields["server-name"].waitForExistence(timeout: 5))
     app.textFields["server-name"].tap()
@@ -201,15 +209,17 @@ import XCTest
     shot("server-add-" + (success ? "success-" : "failure-") + mode)
     app.buttons["server-save"].tap()
     XCTAssertTrue(app.navigationBars["Adicionar servidor"].waitForNonExistence(timeout: 5))
-    // AutoFill arrives after dismissal; a temporarily blocked Back button is not proof it is ready.
+    // AutoFill may be hosted out of process; a blocked Back button is not proof it is ready.
     if success {
-      let decline = app.buttons["Agora Não"].firstMatch
-      if decline.waitForExistence(timeout: 5) {
+      let decline = [app.buttons["Agora Não"].firstMatch,
+        XCUIApplication(bundleIdentifier: "com.apple.SafariViewService").buttons["Agora Não"]]
+        .first { $0.waitForExistence(timeout: 5) }
+      if let decline {
         decline.tap()
         XCTAssertTrue(decline.waitForNonExistence(timeout: 5))
       }
     }
-    XCTAssertTrue(app.buttons["server-add"].waitForExistence(timeout: 10))
+    XCTAssertTrue(add.waitForExistence(timeout: 10))
   }
   private func selectServer(_ title: String, app: XCUIApplication) {
     let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-select-' AND label CONTAINS %@", title)).firstMatch

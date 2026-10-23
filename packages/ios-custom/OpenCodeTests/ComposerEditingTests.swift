@@ -49,6 +49,23 @@ import XCTest
 
   private func settle() async throws { try await Task.sleep(for: .milliseconds(40)) }
 
+  func testSendingDisablesFocusedEditorOutsideTheSwiftUIGraphUpdate() async throws {
+    let (draft, window) = try mount(ComposerDocument(text: "Envio de exemplo"), expanded: false)
+    defer { window.isHidden = true; window.rootViewController = nil }
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in draft.input != nil }, evaluatedWith: nil)], timeout: 5)
+    let input = try XCTUnwrap(draft.input)
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in input.isFirstResponder }, evaluatedWith: nil)], timeout: 5)
+    draft.sending = true
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in
+      !input.isEditable && !input.isFirstResponder
+    }, evaluatedWith: nil)], timeout: 5)
+    draft.sending = false
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in input.isEditable }, evaluatedWith: nil)], timeout: 5)
+    draft.focused = true
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in input.isFirstResponder }, evaluatedWith: nil)], timeout: 5)
+    XCTAssertEqual(input.text, "Envio de exemplo")
+  }
+
   func testTypingCostAndSelection() async throws {
     let profiling = ProcessInfo.processInfo.environment["OPENCODE_PROFILE_COMPOSER"] == "1"
     let iterations = profiling ? 200 : 30

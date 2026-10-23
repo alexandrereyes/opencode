@@ -65,7 +65,12 @@ import XCTest
   }
 
   func testStreamingSubmitChildAndPaginationInBothThemes() async throws {
-    for (key, theme) in [("DARK", "openchamber-dark"), ("LIGHT", "openchamber-light")] {
+    // The long live history can be assigned one theme per runner invocation.
+    let themes = [("DARK", "openchamber-dark"), ("LIGHT", "openchamber-light")].filter {
+      environment["OPENCODE_TEST_THEME"] == nil || environment["OPENCODE_TEST_THEME"] == $0.1
+    }
+    XCTAssertFalse(themes.isEmpty)
+    for (key, theme) in themes {
       let root = try XCTUnwrap(environment["OPENCODE_NOVAS_ROOT_" + key])
       let childID = try XCTUnwrap(environment["OPENCODE_NOVAS_CHILD_" + key])
       let app = XCUIApplication()
@@ -121,20 +126,25 @@ import XCTest
       screenshot(app, "app-submit-" + theme)
       transcript.tap()
       let child = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Abrir filho de teste'")).firstMatch
-      for _ in 0..<16 {
-        if child.exists && child.isHittable && child.frame.minY > transcript.frame.minY + 180
-          && child.frame.maxY < transcript.frame.maxY - 40 { break }
+      // The streamed checklist can wrap across several screens at the larger type scale.
+      for _ in 0..<40 {
+        let visible = app.transcriptViewport(transcript)
+        if child.exists && child.isHittable && visible.contains(child.frame) { break }
+        if !child.exists, let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-'"))
+          .allElementsBoundByIndex.first(where: { visible.contains($0.frame) && $0.isHittable && $0.value as? String == "Recolhido" }) {
+          group.tap()
+          continue
+        }
         if child.exists {
-          // XCTest can call a card hittable while the sticky prompt covers its center.
-          let distance = max(-transcript.frame.height * 0.25,
-            min(transcript.frame.height * 0.25, transcript.frame.midY - child.frame.midY))
-          let point = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
-          point.press(forDuration: 0.1, thenDragTo: point.withOffset(CGVector(dx: 0, dy: distance)),
-            withVelocity: .slow, thenHoldForDuration: 0.3)
-        } else { transcript.swipeDown(velocity: .slow) }
+          let frame = child.frame
+          app.dragTranscript(transcript, viewport: visible,
+            delta: frame.minY < visible.minY ? visible.minY - frame.minY : visible.maxY - frame.maxY)
+          continue
+        }
+        app.dragTranscript(transcript, viewport: visible, delta: 120)
       }
       XCTAssertTrue(child.exists && child.isHittable)
-      XCTAssertGreaterThan(child.frame.minY, transcript.frame.minY + 180)
+      XCTAssertTrue(app.transcriptViewport(transcript).contains(child.frame))
       child.tap()
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 20))
       wait(NSPredicate(format: "value != 'Restaurando leitura'"), on: transcript)
@@ -144,8 +154,16 @@ import XCTest
       wait(NSPredicate(format: "value != 'Restaurando leitura'"), on: transcript)
       screenshot(app, "app-return-child-" + theme)
       XCTAssertFalse(app.buttons["Ir às novas mensagens"].exists)
-      for _ in 0..<16 { transcript.swipeDown(velocity: .fast) }
       let oldest = app.textViews.matching(NSPredicate(format: "value == 'Etapa 1'")).firstMatch
+      // Center-origin swipes can scroll the pinned prompt instead of paging the transcript.
+      for _ in 0..<48 {
+        if oldest.exists && oldest.isHittable { break }
+        let visible = app.transcriptViewport(transcript)
+        let start = transcript.coordinate(withNormalizedOffset: .zero)
+          .withOffset(CGVector(dx: 32, dy: visible.minY + visible.height * 0.1 - transcript.frame.minY))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: visible.height * 0.8)),
+          withVelocity: .fast, thenHoldForDuration: 0)
+      }
       XCTAssertTrue(oldest.exists && oldest.isHittable, "A paginação deve chegar à primeira resposta")
       screenshot(app, "app-pagination-" + theme)
       XCTAssertTrue(latest.exists)

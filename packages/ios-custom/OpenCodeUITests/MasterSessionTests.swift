@@ -2,11 +2,13 @@ import XCTest
 
 @MainActor final class MasterSessionTests: XCTestCase {
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
+  private var serverURL: String { environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4179" }
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private func launch(old: Bool = false, session: String? = nil) throws -> XCUIApplication {
     continueAfterFailure = false
+    XCTAssertEqual(try XCTUnwrap(URL(string: serverURL)).host, "127.0.0.1")
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4179", "-OpenCodeTheme", theme]
+    app.launchArguments = ["-OpenCodeServerURL", serverURL, "-OpenCodeTheme", theme]
     if let session { app.launchArguments += ["-OpenCodeOpenSession", session] }
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     if old { app.launchEnvironment["OPENCODE_MASTER_OLD_SERVER"] = "1" }
@@ -24,7 +26,7 @@ import XCTest
     add(attachment)
   }
   private func request(_ path: String, body: Data? = nil) async throws -> Data {
-    var request = URLRequest(url: URL(string: "http://127.0.0.1:4179" + path)!)
+    var request = URLRequest(url: URL(string: serverURL + path)!)
     request.httpMethod = body == nil ? "GET" : "POST"
     request.httpBody = body
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -48,6 +50,25 @@ import XCTest
     XCTAssertEqual(app.staticTexts["child-agent"].label, "Agente: Mestra")
     XCTAssertTrue(app.buttons["model-picker"].exists)
     shot("empty")
+    if environment["OPENCODE_TEST_CHEAP_INFERENCE"] == "1" {
+      app.buttons["model-picker"].tap()
+      let search = app.searchFields.firstMatch
+      XCTAssertTrue(search.waitForExistence(timeout: 5))
+      search.tap()
+      search.typeText("gpt-6-luna")
+      let luna = app.buttons["choose-llm-proxy/gpt-6-luna"]
+      for _ in 0..<5 {
+        if luna.exists && luna.isHittable { break }
+        app.swipeUp(velocity: .slow)
+      }
+      shot("cheap-model-search")
+      XCTAssertTrue(luna.waitForExistence(timeout: 10))
+      luna.tap()
+      app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Esforço' AND label CONTAINS 'Luna'")).firstMatch.tap()
+      app.buttons["low"].tap()
+      app.buttons["fechar"].tap()
+      app.buttons["Concluir"].tap()
+    }
     input.typeText("Responda somente MESTRA OK, sem usar ferramentas.")
     app.buttons["Enviar mensagem"].tap()
     XCTAssertTrue(app.buttons["master-trash"].waitForExistence(timeout: 60))
@@ -74,7 +95,10 @@ import XCTest
       struct Info: Decodable { let model: Created.Model? }
     }
     let capability = try JSONDecoder().decode(Capability.self, from: await request("/api/rpc/custom.master/info", body: Data(#"{"input":{}}"#.utf8)))
-    if let preferred = capability.output.model {
+    if environment["OPENCODE_TEST_CHEAP_INFERENCE"] == "1" {
+      XCTAssertEqual(created.data.model.id, "gpt-6-luna")
+      XCTAssertEqual(created.data.model.variant, "low")
+    } else if let preferred = capability.output.model {
       XCTAssertEqual(created.data.model.id, preferred.id)
       XCTAssertEqual(created.data.model.variant, preferred.variant)
     } else {

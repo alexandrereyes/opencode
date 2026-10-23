@@ -15,11 +15,12 @@ import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 home = temporary / "custom-sandbox-4177"
-derived = Path(os.environ.get("OPENCODE_SETTINGS_DERIVED", temporary / "ios-sessoes-derived"))
-evidence = Path(os.environ.get("OPENCODE_SETTINGS_EVIDENCE", temporary / "ios-onda8-prints"))
+derived = Path(os.environ.get("OPENCODE_SETTINGS_DERIVED", os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-sessoes-derived")))
+evidence = Path(os.environ.get("OPENCODE_SETTINGS_EVIDENCE", os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-onda8-prints")))
 device_name = os.environ.get("OPENCODE_SETTINGS_SIMULATOR", "OpenCode Sessoes")
-lease = (temporary / ("ios-sessoes-test.lock" if device_name == "OpenCode Sessoes"
-    else device_name.replace(" ", "-") + "-settings-test.lock")).open("a")
+device_hint = os.environ.get("OPENCODE_TEST_DEVICE", device_name)
+lease = (temporary / ("ios-sessoes-test.lock" if device_hint == "OpenCode Sessoes"
+    else device_hint.replace(" ", "-") + "-settings-test.lock")).open("a")
 fcntl.flock(lease, fcntl.LOCK_EX)
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
@@ -69,7 +70,7 @@ try:
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-    device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == device_name)
+    device = os.environ.get("OPENCODE_TEST_DEVICE") or next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == device_name)
     subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
     command = ["xcodebuild", "test-without-building", "-xctestrun", str(configured), "-destination", "platform=iOS Simulator,id=" + device, "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result)]
     for test in sys.argv[1:] or ["OpenCodeUITests/SettingsTests"]:

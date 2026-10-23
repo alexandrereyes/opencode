@@ -244,6 +244,7 @@ struct ConversationStep: View {
               }.buttonStyle(.plain).appFont(.caption).foregroundStyle(
                 theme.color(.textSecondary))
                 .accessibilityLabel(entry.reasoningLabel)
+                .accessibilityValue(detail(key) ? "Expandido" : "Recolhido")
                 .accessibilityIdentifier("reasoning-\(entry.id)")
               if detail(key) {
                 ResponseMarkdown(text: part.text ?? "", messageID: entry.messageID, partID: entry.id)

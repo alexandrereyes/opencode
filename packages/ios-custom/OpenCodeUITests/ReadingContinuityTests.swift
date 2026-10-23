@@ -2,6 +2,7 @@ import AppIntents
 import XCTest
 
 @MainActor final class ReadingContinuityTests: XCTestCase {
+  override func setUp() { continueAfterFailure = false }
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
   private func launch(_ role: String, theme: String = "openchamber-dark") throws -> XCUIApplication
   {
@@ -61,24 +62,32 @@ import XCTest
     editor.tap()
     waitValue(editor, "")
     editor.typeText("OK")
-    let keyboard = app.keyboards.firstMatch
-    XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
-    keyboard.buttons["Return"].tap()
+    func keyboard() throws -> XCUIElement {
+      let bounds = app.frame
+      let visible = { app.keyboards.allElementsBoundByIndex.first {
+        let frame = $0.frame
+        return frame.height > 0 && frame.minY >= bounds.minY && frame.maxY <= bounds.maxY + 1
+      } }
+      XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+        predicate: NSPredicate { _, _ in visible() != nil }, object: nil)], timeout: 10), .completed)
+      return try XCTUnwrap(visible())
+    }
+    try keyboard().buttons["Return"].tap()
     waitValue(editor, "OK\n")
     // A new sentence is automatically shifted; Return must still insert a newline.
-    keyboard.buttons["Return"].tap()
+    try keyboard().buttons["Return"].tap()
     waitValue(editor, "OK\n\n")
     // Disable automatic Shift, then double-tap to lock it.
-    keyboard.buttons["shift"].tap()
-    keyboard.buttons["shift"].doubleTap()
-    keyboard.buttons["Return"].tap()
+    try keyboard().buttons["shift"].tap()
+    try keyboard().buttons["shift"].doubleTap()
+    try keyboard().buttons["Return"].tap()
     waitValue(editor, "OK\n\n\n")
     screenshot("keyboard-caps-lock-newline-" + theme)
     // Leave Caps Lock, type prose to clear automatic capitalization, then manually Shift.
-    keyboard.buttons["shift"].tap()
+    try keyboard().buttons["shift"].tap()
     editor.typeText("ok")
-    keyboard.buttons["shift"].tap()
-    keyboard.buttons["Return"].tap()
+    try keyboard().buttons["shift"].tap()
+    try keyboard().buttons["Return"].tap()
     XCTAssertTrue(
       NSPredicate(format: "value == %@", "").evaluate(with: editor)
         || XCTWaiter.wait(
@@ -136,17 +145,24 @@ import XCTest
     screenshot("c-after-relaunch-" + theme)
   }
   func testParentChildEdgeSwipeAndExpansion() throws {
-    for theme in environment["OPENCODE_TEST_THEME"].map({ [$0] }) ?? ["openchamber-dark", "openchamber-light"] {
+    // Each theme has its own runner invocation and 180-second execution budget.
+    for theme in environment["OPENCODE_TEST_THEME"].map({ [$0] }) ?? ["openchamber-dark"] {
       let app = try launch("A", theme: theme)
       let transcript = app.collectionViews["conversation-transcript"]
-      func reveal(_ element: XCUIElement) {
-        for attempt in 0..<48 {
-          if element.exists && element.isHittable,
-            element.frame.minY > transcript.frame.minY + 180, element.frame.maxY < transcript.frame.maxY { return }
-          let forward = element.exists ? element.frame.midY > transcript.frame.midY : attempt >= 24
-          transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.75 : 0.45))
-            .press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.45 : 0.75)))
+      func reveal(_ element: XCUIElement, forward: Bool = false) {
+        for attempt in 0..<20 {
+          let visible = app.transcriptViewport(transcript)
+          let exists = element.exists
+          let frame = exists ? element.frame : .zero
+          if exists && element.isHittable && visible.contains(frame) { return }
+          // Move only the missing distance; fixed drags can oscillate across the
+          // narrow viewport between a tall pinned prompt and the composer.
+          let delta = exists ? (frame.minY < visible.minY ? visible.minY - frame.minY : visible.maxY - frame.maxY)
+            : ((attempt < 10) == forward ? -120.0 : 120.0)
+          print("TRANSCRIPT-REVEAL attempt=\(attempt) frame=\(frame) usable=\(visible) delta=\(delta)")
+          app.dragTranscript(transcript, viewport: visible, delta: delta)
         }
+        screenshot("reveal-failure-" + theme)
         XCTFail("O conteúdo deve estar visível abaixo da mensagem fixada")
       }
       let step = app.buttons["Usou 5 · Ler, Agente e Editar"]
@@ -159,9 +175,15 @@ import XCTest
       // place this button under the pinned user bubble instead of making it tappable.
       reveal(reasoning)
       let thought = app.textViews.matching(NSPredicate(format: "value CONTAINS 'Vou consultar a infraestrutura e separar licença de integrações.'")).firstMatch
-      if !thought.exists { reasoning.tap() }
+      if reasoning.value as? String != "Expandido" { reasoning.tap() }
       XCTAssertTrue(thought.waitForExistence(timeout: 5))
       screenshot("expanded-before-child-" + theme)
+      let prompt = app.buttons["Mostrar mensagem completa"].firstMatch
+      if prompt.exists && prompt.isHittable {
+        prompt.tap()
+        reveal(thought, forward: true)
+        screenshot("expanded-prompt-before-child-" + theme)
+      }
       let agents = app.buttons.matching(NSPredicate(format: "label CONTAINS 'agentes em execução'")).firstMatch
       if agents.exists {
         agents.tap()
@@ -171,8 +193,9 @@ import XCTest
       } else {
         // The seed's executions may have finished; the real child card remains navigable.
         let child = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Comparar alternativas Linear'")).firstMatch
-        reveal(child)
+        reveal(child, forward: true)
         XCTAssertTrue(child.exists && child.isHittable)
+        screenshot("child-card-visible-" + theme)
         child.tap()
       }
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 10))
@@ -180,13 +203,12 @@ import XCTest
         .press(
           forDuration: 0.05,
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
-      for _ in 0..<20 {
-        if step.exists && step.isHittable { break }
-        transcript.swipeDown(velocity: .fast)
-      }
+      screenshot("parent-edge-swipe-" + theme)
+      XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForNonExistence(timeout: 5))
+      reveal(step)
       XCTAssertTrue(step.waitForExistence(timeout: 10))
       XCTAssertEqual(step.value as? String, "Expandido")
-      reveal(thought)
+      reveal(thought, forward: true)
       XCTAssertTrue(thought.exists)
       screenshot("expanded-after-child-" + theme)
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
@@ -195,8 +217,9 @@ import XCTest
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
       XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
       openFromSessions(app, title: "Conversa A — trabalhando")
+      reveal(step)
       XCTAssertEqual(step.value as? String, "Expandido")
-      reveal(thought)
+      reveal(thought, forward: true)
       XCTAssertTrue(thought.exists)
       screenshot("expanded-reopened-" + theme)
     }

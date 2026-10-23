@@ -32,7 +32,14 @@ struct ComposerTextView: UIViewRepresentable {
     view.composerOwner = owner
     context.coordinator.updating = true
     defer { context.coordinator.updating = false }
-    view.isEditable = !draft.sending
+    if view.isEditable != !draft.sending {
+      // setEditable(false) also resigns focus. UIKit must not ask the SwiftUI
+      // host for its next responder while that host is updating this view.
+      DispatchQueue.main.async { [weak view, weak draft] in
+        guard let view, let draft, view.representedDraft === draft else { return }
+        if view.isEditable != !draft.sending { view.isEditable = !draft.sending }
+      }
+    }
     // A cover and its presenter coexist during dismissal; only one may own the keyboard.
     if draft.editorOwner == owner { draft.input = view }
     let focused = draft.focused && !draft.focusSuppressed && draft.editorOwner == owner

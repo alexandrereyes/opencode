@@ -997,6 +997,8 @@ private struct StickyUserHeader: View {
     .background(
       PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background))
     )
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("conversation-pinned-user")
   }
 }
 

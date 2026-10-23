@@ -108,6 +108,8 @@ import XCTest
       let id = try XCTUnwrap(environment["OPENCODE_FOLLOW_CHILD_" + role])
       let title = try XCTUnwrap(environment["OPENCODE_FOLLOW_TITLE_" + role])
       for _ in 0..<7 { list.swipeDown(velocity: .fast) }
+      let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-'")).firstMatch
+      if group.exists && group.value as? String == "Recolhido" { group.tap() }
       let child = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
       XCTAssertTrue(child.waitForExistence(timeout: 10))
       child.tap()

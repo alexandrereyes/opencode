@@ -23,10 +23,25 @@ import XCTest
       let composer = app.textViews["conversation-composer"]
       composer.tap()
       composer.typeText("Responda apenas OK, sem ferramentas. \(index)")
-      app.buttons["Enviar mensagem"].tap()
+      let send = app.buttons["Enviar mensagem"]
       XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-        predicate: NSPredicate(format: "value == ''"), object: composer)], timeout: 30), .completed)
+        predicate: NSPredicate(format: "enabled == true"), object: send)], timeout: 30), .completed)
+      let before = XCTAttachment(screenshot: app.screenshot())
+      before.name = "agent-send-\(index)"
+      before.lifetime = .keepAlways
+      add(before)
+      send.tap()
+      let cleared = await XCTWaiter.fulfillment(of: [XCTNSPredicateExpectation(
+        predicate: NSPredicate(format: "value == ''"), object: composer)], timeout: 30)
       let messages = try await messages(id, password: password)
+      if cleared != .completed {
+        let failure = XCTAttachment(screenshot: app.screenshot())
+        failure.name = "agent-send-failure-\(index)"
+        failure.lifetime = .keepAlways
+        add(failure)
+        print("AGENT-SEND index=\(index) users=\(messages.filter { $0.type == "user" }.count) value=\(String(describing: composer.value)) frame=\(send.frame)")
+      }
+      XCTAssertEqual(cleared, .completed)
       XCTAssertEqual(messages.filter { $0.type == "agent-switched" }.count, index == 3 ? 1 : 0)
       XCTAssertEqual(messages.filter { $0.type == "model-switched" }.count, 0)
       try await waitForIdle(id, password: password)

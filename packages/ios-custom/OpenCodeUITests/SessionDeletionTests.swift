@@ -36,8 +36,9 @@ import XCTest
     let app = try launch()
     defer { app.terminate() }
     let row = app.buttons["session-row-" + session]
-    XCTAssertTrue(row.waitForExistence(timeout: 30))
+    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
     app.revealSessionRow(row)
+    XCTAssertTrue(row.exists)
     row.swipeLeft()
     shot("swipe")
     XCTAssertFalse(app.alerts["Excluir sessão"].exists)
@@ -84,8 +85,9 @@ import XCTest
     let app = try launch()
     defer { app.terminate() }
     let button = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Arquivadas'")).firstMatch
-    XCTAssertTrue(button.waitForExistence(timeout: 30))
+    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
     app.revealSessionRow(button)
+    XCTAssertTrue(button.exists)
     button.tap()
     XCTAssertTrue(app.navigationBars["Arquivadas"].waitForExistence(timeout: 10))
     let row = app.buttons["archived-row-" + (try id("ARCHIVED"))]

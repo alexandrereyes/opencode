@@ -54,10 +54,22 @@ import UIKit
       if section == 11 {
         let reference = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'Uma afirmação com uma nota explicativa'")).firstMatch
         reveal(reference, transcript: transcript, align: true)
-        let prefix = ("Uma afirmação com uma nota explicativa" as NSString).size(withAttributes: [
+        // The note wraps on the narrower iPhone 14; a single-line prefix width
+        // otherwise taps outside the text view instead of its inline reference.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = UIFontMetrics(forTextStyle: .body).scaledValue(for: 28.5)
+        let storage = NSTextStorage(string: try XCTUnwrap(reference.value as? String), attributes: [
           .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: 18.5)),
-        ]).width
-        reference.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: prefix + 3, dy: 8)).tap()
+          .paragraphStyle: paragraph,
+        ])
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: reference.frame.width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: "Uma afirmação com uma nota explicativa".utf16.count, length: 1), actualCharacterRange: nil)
+        let note = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        reference.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: note.midX, dy: note.midY)).tap()
         XCTAssertTrue(app.navigationBars["Nota de rodapé"].waitForExistence(timeout: 10))
         capture(app, "native-\(theme)-footnote-sheet")
         app.buttons["Fechar"].tap()

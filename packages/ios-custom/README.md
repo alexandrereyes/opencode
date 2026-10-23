@@ -272,6 +272,11 @@ sends use Luna 6/low, and `comment-wire.json` verifies the received file/skill p
 Marked text, adjacent replacements and theme changes during composition are exercised through native text-input
 APIs. Microphone/audio dictation was not exercised; no physical device was needed to reproduce the bug.
 
+Changing the editor's editability during send is deferred outside SwiftUI's graph update and applied only when its
+value changes and the UIKit view still represents that draft. `UITextView.setEditable(false)` can synchronously resign
+focus and ask the hosting view for its next responder; doing that inside `updateUIView` reenters AttributeGraph and
+freezes repeated sends. A focused-editor hosted regression exercises disabling, re-enabling and refocusing.
+
 **Expanded composer after send:** a successfully acknowledged prompt (including steer/queue), backend command or
 local compact operation closes the fullscreen composer using the normal cover dismissal. That dismissal does not
 restore keyboard focus; manual **Recolher** retains its existing focus restoration. A failed operation keeps its
@@ -1452,6 +1457,72 @@ packages/ios-custom/
 - The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
   `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
   require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
+
+### Parallel verification without shared-device races
+
+Build once for an iOS 27 simulator with `build-for-testing`, `COPY_PHASE_STRIP=NO` and isolated DerivedData. Reuse its
+`OpenCode_*.xctestrun` products on **three different simulators** (for example OpenCode Correcoes 1/2/3). Each worker
+must have its own result bundle and credential-bearing configuration; never launch two runners on one simulator.
+Keep Xcode's internal parallel testing **off** when assigning explicit workers. Alternatively, for fully independent
+fixtures only, use `-parallel-testing-enabled YES -parallel-testing-worker-count 3` and let Xcode create clones.
+
+Partition by mutable state, not just by test class:
+
+1. **Shared sandbox worker:** serially run seeded reading, manual servers/pairing, new-session selectors/sends,
+   Safari MCP toggles, agent selection, comments and alert/preferences scenarios. Keep tests sharing a fake repository,
+   MCP intent or backend preferences in this worker. Use only `llm-proxy/gpt-6-luna` / `low` for live inference.
+2. **Offline/hosted worker:** UIKit tests, composer/MCP fixtures, menus and follow fixtures; these never mutate the
+   shared sandbox. Run the fixed MCP keyboard check in both themes.
+3. **Owned-repository worker:** deletion/revert histories in separate fake repositories, then the master scenario on
+   a separately owned sandbox. Do not overlap its pin/mute preference mutations with worker 1's preference mutations.
+   A master test accepts `OPENCODE_TEST_SERVER_URL`; `OPENCODE_TEST_CHEAP_INFERENCE=1` explicitly selects Luna/low before send.
+   First mark Luna visible in that sandbox's model preferences (`model.visibility`, `visibility: "show"`): a fresh
+   profile intentionally lists no models until the user chooses which ones to show.
+
+The settings runner accepts `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; the grouping
+runner also accepts `OPENCODE_TEST_DESTINATION` / `OPENCODE_GROUP_EVIDENCE`, and the MCP runner accepts the same device,
+DerivedData and evidence overrides. Other live runners still declare their fixture destinations: inspect/configure
+them before running, rather than accidentally using a worker's simulator concurrently.
+
+For already prepared tests, `script/test-isolated.py` supplies private launch arguments/password, serializes each
+explicit device and records wall-clock timing plus attachments. For example, launch these **in separate terminals**:
+
+```sh
+python3 packages/ios-custom/script/test-isolated.py --device "$SIM2" --derived "$DERIVED" \
+  --evidence "$EVIDENCE/worker2" --label hosted --dictation-fixture OpenCodeTests
+python3 packages/ios-custom/script/test-isolated.py --device "$SIM3" --derived "$DERIVED" \
+  --evidence "$EVIDENCE/worker3" --label composer OpenCodeUITests/ComposerEditingUITests
+```
+
+Include `OpenCodeUITests/DictationUITests` in an independent offline worker in each theme. Its own launches and
+`--dictation-fixture` use the DEBUG fake engine/PCM, never the device mode or a real-model download.
+
+An extra **physical iPhone 14** worker is restricted to server-free DEBUG fixtures. Reserve it through `device-lease`
+before the signed device `build-for-testing` (`DEVELOPMENT_TEAM=ERRYZ68LX5`, explicit UDID, separate device DerivedData).
+Then run:
+
+```sh
+python3 packages/ios-custom/script/test-isolated.py --physical --device 00008110-00065DA13A78401E \
+  --derived "$DEVICE_DERIVED" --evidence "$EVIDENCE/iphone14" --label offline \
+  OpenCodeUITests/MarkdownRenderingTests OpenCodeUITests/ScrollComparisonTests
+```
+
+The physical runner acquires a process lease, routes Xcode through `device-lease exec`, and releases in `finally`.
+Its allowlist rejects live cases; even the hosted launch has explicit loopback sandbox arguments and an offline
+fixture transport that rejects HTTP. Do not replace loopback with production/LAN to make live tests reach the phone.
+No real voice or proxy-admin/reset actions belong in this run. Delete only owned Sessions/checkouts, verify the fake
+repositories' worktree registrations and `~/Worktrees` inventory, stop only an owned sandbox, and shut down every
+simulator booted for the run. Report total elapsed time and each worker's cases/results, including skips and reasons.
+Before physical gesture checks, move any overlapping floating system control out of the test area and restore its
+position afterwards; AssistiveTouch can intercept a valid app button while remaining absent from the app's AX tree.
+Reading checks measure `conversation-pinned-user`, not a fixed header height, and drag in the transcript gutter outside
+the edge-pop zone, holding briefly at the end to avoid deceleration overshooting a narrow viewport. Keyboard checks
+resolve a visible keyboard afresh and wait for stable keyboard/composer geometry; MCP focus checks arrange the draft
+before mounting and tap actual software keys instead of invoking XCTest's temporary hardware-keyboard injection.
+Settings actions are found by identifier regardless of native List cell/button exposure; readiness waits use the
+navigation screen, not an unmounted row.
+Use separate `OPENCODE_TEST_THEME` invocations for the long live `NewMessagesTests` history. Each themed invocation
+keeps the 300-second limit; the legacy combined two-theme run has a 600-second allowance for rendering and paging.
 
 ### Private TestFlight uploads
 

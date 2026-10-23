@@ -31,8 +31,9 @@ manifest = json.loads((home / "seed-conversation.json").read_text())
 directory = manifest["directory"]
 assert Path(directory).is_relative_to(home / "repos")
 owned = []
-environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
-    "OPENCODE_TEST_THEME": os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")}
+environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password}
+if "OPENCODE_TEST_THEME" in os.environ:
+    environment["OPENCODE_TEST_THEME"] = os.environ["OPENCODE_TEST_THEME"]
 model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
 
 def api(path, body=None, method="GET"):
@@ -102,7 +103,8 @@ try:
     with (evidence / (args.label + "-test.log")).open("w") as output:
         status = subprocess.call(["xcodebuild", "test-without-building", "-xctestrun", str(configured),
             "-destination", "platform=iOS Simulator,id=" + device, "-parallel-testing-enabled", "NO",
-            "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "300",
+            "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance",
+            "600" if args.live and any("/NewMessagesTests" in test for test in tests) and "OPENCODE_TEST_THEME" not in environment else "300",
             "-resultBundlePath", str(result)] + ["-only-testing:" + test for test in tests], stdout=output, stderr=subprocess.STDOUT)
     attachments = evidence / (args.label + "-attachments")
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(attachments)], check=True, stdout=subprocess.DEVNULL)

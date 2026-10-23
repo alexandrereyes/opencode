@@ -1,4 +1,5 @@
 import OpenCodeKit
+import SwiftUI
 import UIKit
 import XCTest
 
@@ -34,20 +35,27 @@ import XCTest
     XCTAssertLessThan(view.fittingSize(width: 300).height, first.height)
   }
 
-  func testTextMeasurementInvalidatesWhenDynamicTypeChanges() throws {
+  func testTextMeasurementInvalidatesWhenDynamicTypeChanges() async throws {
     let block = try XCTUnwrap(MarkdownBlocks.parse(String(repeating: "Texto com palavras e **ênfase**. ", count: 15)).first)
-    let view = ResponseTextView(frame: .zero, textContainer: nil)
-    view.isScrollEnabled = false
-    view.textContainerInset = .zero
-    view.textContainer.lineFragmentPadding = 0
-    let coordinator = SelectableResponseText.Coordinator()
-    SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected,
-      contentSizeOverride: .large).configure(view, coordinator: coordinator)
+    let window = UIWindow(windowScene: try XCTUnwrap(
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    let host = UIHostingController(rootView:
+      SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected)
+        .environment(\.dynamicTypeSize, .large))
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+    window.layoutIfNeeded()
+    defer { window.isHidden = true; window.rootViewController = nil }
+    func response(in parent: UIView) -> ResponseTextView? {
+      (parent as? ResponseTextView) ?? parent.subviews.lazy.compactMap { response(in: $0) }.first
+    }
+    let view = try XCTUnwrap(response(in: host.view))
     let first = view.fittingSize(width: 300)
-    XCTAssertEqual(view.measuredSizes.count, 1)
-    SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected,
-      contentSizeOverride: .accessibilityExtraExtraExtraLarge).configure(view, coordinator: coordinator)
-    XCTAssertTrue(view.measuredSizes.isEmpty)
+    host.rootView = SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected)
+      .environment(\.dynamicTypeSize, .accessibility5)
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in
+      view.fittingSize(width: 300).height > first.height
+    }, evaluatedWith: nil)], timeout: 5)
     XCTAssertGreaterThan(view.fittingSize(width: 300).height, first.height)
   }
 

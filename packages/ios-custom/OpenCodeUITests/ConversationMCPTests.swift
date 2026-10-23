@@ -26,18 +26,22 @@ import XCTest
     XCTAssertTrue(first.frame.minY < second.frame.minY
       || (abs(first.frame.minY - second.frame.minY) < 1 && first.frame.minX < second.frame.minX), file: file, line: line)
   }
-  private func clearAndType(_ input: XCUIElement, _ text: String) {
-    input.tap()
-    if let current = input.value as? String, !current.isEmpty {
-      input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
-    }
-    input.typeText(text)
-  }
-  private func keyboardSettled(_ app: XCUIApplication) {
-    let keyboard = app.keyboards.firstMatch
+  @discardableResult private func keyboardSettled(_ app: XCUIApplication) throws -> XCUIElement {
+    // Text injection can retain an offscreen keyboard in the simulator AX tree.
+    // Resolve the visible keyboard afresh instead of keeping its first identity.
+    var previous: [CGRect] = []
     XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-      keyboard.exists && keyboard.frame.minY < app.frame.height - 280 && keyboard.frame.maxY <= app.frame.maxY + 1
+      guard let frame = app.keyboards.allElementsBoundByIndex.map(\.frame).first(where: { frame in
+        return frame.height > 0 && frame.minY >= app.frame.minY && frame.maxY <= app.frame.maxY + 1
+      }) else { previous = []; return false }
+      let sample = [frame, app.textViews["conversation-composer"].frame]
+      defer { previous = sample }
+      return previous == sample
     }, object: nil)], timeout: 10), .completed)
+    return try XCTUnwrap(app.keyboards.allElementsBoundByIndex.first {
+      let frame = $0.frame
+      return frame.height > 0 && frame.minY >= app.frame.minY && frame.maxY <= app.frame.maxY + 1
+    })
   }
   func testPanelTogglesPendingAndPreservesComposerFocusTextAndHeight() throws {
     let app = try launch("pending")
@@ -46,9 +50,10 @@ import XCTest
     XCTAssertTrue(pill.waitForExistence(timeout: 20))
     XCTAssertEqual(pill.label, "MCPs, 1 de 5 conectados")
     let input = app.textViews["conversation-composer"]
-    clearAndType(input, "Meu rascunho com MCPs")
+    XCTAssertEqual(input.value as? String, "Meu rascunho com MCPs")
+    input.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-    keyboardSettled(app)
+    try keyboardSettled(app)
     let frame = input.frame
     shot("pill-closed")
     pill.tap()
@@ -71,15 +76,14 @@ import XCTest
     safari.tap()
     waitValue(safari, "Ativado")
     XCTAssertEqual(input.value as? String, "Meu rascunho com MCPs")
-    app.typeText("x")
+    // Real key taps prove retained focus without XCTest's temporary hardware-keyboard injection.
+    try keyboardSettled(app).keys["x"].tap()
     XCTAssertEqual(input.value as? String, "Meu rascunho com MCPsx")
-    // XCTest can briefly hide the software keyboard while injecting text, which dismisses the panel.
-    if !panel(app).exists { pill.tap() }
     XCTAssertTrue(panel(app).waitForExistence(timeout: 5))
     let outside = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.23))
     outside.tap()
     XCTAssertTrue(panel(app).waitForNonExistence(timeout: 5))
-    app.typeText("y")
+    try keyboardSettled(app).keys["y"].tap()
     XCTAssertEqual(input.value as? String, "Meu rascunho com MCPsxy")
     pill.tap()
     XCTAssertTrue(panel(app).waitForExistence(timeout: 5))

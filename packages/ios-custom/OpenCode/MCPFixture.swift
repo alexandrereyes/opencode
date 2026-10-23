@@ -36,6 +36,12 @@ struct MCPFixtureRoot: View {
         let draft = sessions.drafts.draft("ses_mcp_fixture")
         await draft.load()
         await draft.clear()
+        // Arrange before mounting; typeText can replace the simulator's software keyboard.
+        if MCPFixtures.mode == "pending" {
+          let text = "Meu rascunho com MCPs"
+          draft.text = NSAttributedString(string: text)
+          draft.selection = NSRange(location: text.utf16.count, length: 0)
+        }
         prepared = true
       }
   }
