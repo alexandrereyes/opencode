@@ -291,7 +291,7 @@ struct ResponseMarkdown: View {
     .onDisappear {
       mounted = false
       parsing?.cancel()
-      blocks = []
+      // List can recycle a still-measured cell; clearing its blocks creates an empty layout pass.
     }
   }
   private func parse() {

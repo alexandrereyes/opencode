@@ -29,15 +29,18 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
     view.refresh(force: changed)
   }
   static func dismantleUIView(_ view: Probe, coordinator: ()) { view.fade.removeFromSuperlayer() }
-  final class Probe: UIView {
+  final class Probe: UIView, ConversationHeaderLayout {
     var update: (Bool) -> Void
-    var id: String
+    var id: String {
+      didSet { if oldValue != id { anticipatedOffset = nil } }
+    }
     var state: ConversationScrollState
     var color: UIColor
     weak var scroll: UIScrollView?
     weak var container: UICollectionReusableView?
     var observation: NSKeyValueObservation?
     var pinned = false
+    private var anticipatedOffset: CGFloat?
     let fade = CAGradientLayer()
     init(
       id: String, state: ConversationScrollState, color: UIColor, update: @escaping (Bool) -> Void
@@ -88,6 +91,12 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       attach()
       refresh()
     }
+    func prepareForFollowing(offset: CGFloat) -> Bool {
+      guard !pinned, let scroll, offset > -scroll.adjustedContentInset.top + 1 else { return false }
+      anticipatedOffset = offset
+      refresh()
+      return pinned
+    }
     func refresh(force: Bool = false) {
       guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
       container.backgroundColor = color
@@ -103,11 +112,15 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       }
       state.registerHeader(self, container: container, id: id)
       let frame = container.convert(container.bounds, to: scroll)
+      if !state.following || anticipatedOffset.map({ scroll.contentOffset.y >= $0 - 1 }) == true {
+        anticipatedOffset = nil
+      }
+      let offset = anticipatedOffset ?? scroll.contentOffset.y
       // List prefetches headers above the viewport; only the header crossing its
       // top edge is sticky, not every previously visited prompt.
       let next =
-        scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
-        && frame.minY - scroll.bounds.minY <= 2 && frame.maxY > scroll.bounds.minY + 1
+        offset > -scroll.adjustedContentInset.top + 1
+        && frame.minY - offset <= 2 && (anticipatedOffset != nil || frame.maxY > scroll.bounds.minY + 1)
       // The SwiftUI content is inset inside the native header. Its overlay starts
       // beneath opaque native padding, truncating most of the gradient. Draw from
       // the actual full-width header edge instead, without changing row geometry.
@@ -247,7 +260,12 @@ struct ConversationView: View {
           conversation.sideQuestion = SideQuestionLaunch(text: SideQuestionRequest.quote(text))
         })
     )
-    .background(ConversationBackGesture(capture: leavePosition, appeared: { screenVisible = true }))
+    .background(ConversationBackGesture(capture: leavePosition, appeared: {
+      screenVisible = true
+      scrollState.setVisible(true)
+      if atBottom { scrollState.followToEnd() }
+      else { scrollState.correctAnchor() }
+    }))
     .toolbar(.hidden, for: .navigationBar, .tabBar)
     .sheet(isPresented: $agentsOpen) {
       ConversationAgentsSheet(store: conversation) { work in
@@ -300,6 +318,7 @@ struct ConversationView: View {
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
       screenVisible = true
+      scrollState.setVisible(true)
       scrollState.correctAnchor()
     }
     .onDisappear {
@@ -422,28 +441,26 @@ struct ConversationView: View {
           conversation.runningCount == 1
             ? "1 agente em execução" : "\(conversation.runningCount) agentes em execução")
       }
-      Menu {
-        Button("Buscar na conversa", systemImage: "magnifyingglass") {
+      ConversationOptionsMenu(
+        sessionID: conversation.id, available: conversation.session != nil,
+        canArchive: conversation.session?.parentID == nil, archiving: conversation.acting.contains("archive"),
+        theme: theme,
+        actions: .init(search: {
           sessions.drafts.draft(conversation.id).focused = false
           capturePosition()
           search.open = true
-        }
-        Button("Renomear", systemImage: "pencil") {
+        }, rename: {
           renameTitle = conversation.session?.title ?? ""
           renameOpen = true
-        }.disabled(conversation.session == nil)
-        Button("Detalhes da sessão", systemImage: "info.circle") { detailsOpen = true }
-          .disabled(conversation.session == nil)
-        if conversation.session?.parentID == nil {
-          Divider()
-          Button("Arquivar", systemImage: "archivebox", role: .destructive) { archiveOpen = true }
-            .disabled(conversation.session == nil || conversation.acting.contains("archive"))
-        }
-      } label: {
-        Image(systemName: "ellipsis").font(.system(size: 19)).frame(width: 36, height: 36)
-          .glassEffect(.regular.interactive(), in: .circle)
-      }
-      .buttonStyle(.plain).accessibilityLabel("Mais opções")
+        }, details: {
+          #if DEBUG
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeMenuDiagnostics") {
+            NSLog("DETAILS action session=%@ child=%@", conversation.id, String(conversation.isChild))
+          }
+          #endif
+          detailsOpen = true
+        }, archive: { archiveOpen = true }))
+        .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
     }
     .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
     .background(theme.color(.background))
@@ -473,7 +490,7 @@ struct ConversationView: View {
             conversation.paging || restoring
               ? "Carregando mensagens anteriores" : "Mensagens anteriores"
           )
-          .onAppear { if !search.open && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
+          .onAppear { if !search.open && !atBottom && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
         }
         ForEach(sections) { section in
           Section {
@@ -561,6 +578,7 @@ struct ConversationView: View {
             .id(form.id)
         }
         theme.color(.background).opacity(0).frame(height: 12).id("bottom")
+          .background(ConversationRowProbe(state: scrollState, id: "bottom", color: theme.uiColor(.background)))
           .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(
             theme.color(.background)
           )
@@ -613,13 +631,12 @@ struct ConversationView: View {
           scrollState.cancelAnchor()
         }
         updateUnread()
-        if !search.open && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
+        if !search.open && !atBottom && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
-          && !restoring
+          && !restoring && screenVisible
         {
-          proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
-        } else if !interacting {
+        } else if !interacting && screenVisible {
           scrollState.correctAnchor()
         }
       }
@@ -639,7 +656,6 @@ struct ConversationView: View {
           && scrollState.view.map({ !$0.isTracking && !$0.isDragging && !$0.isDecelerating })
             != false
         {
-          proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
         }
       }
@@ -681,11 +697,7 @@ struct ConversationView: View {
             userScrolling = false
             atBottom = true
             captureRequested = true
-            proxy.scrollTo("bottom", anchor: .bottom)
-            Task { @MainActor in
-              await Task.yield()
-              scrollState.followToEnd()
-            }
+            scrollState.followToEnd(animated: true)
             scheduleCapture()
           } label: {
             Image(systemName: "arrow.down").frame(width: 42, height: 42)
@@ -700,7 +712,17 @@ struct ConversationView: View {
       }
       .overlay { if conversation.loading { ProgressView("Carregando conversa…").font(.footnote) } }
       #if DEBUG
+      .overlay(alignment: .bottomLeading) {
+        if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMeasureGrowth") {
+          ScrollGrowthMeasurement(store: conversation, state: scrollState).frame(width: 180, height: 40)
+        }
+      }
       .background { ConversationOpeningProbe(id: conversation.id, ready: conversation.hasTranscript).frame(width: 1, height: 1) }
+      .overlay(alignment: .topTrailing) {
+        if ScrollFixtures.mode == "conversation", ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureFollow") {
+          ConversationFollowFixture(store: conversation, state: scrollState, color: theme.uiColor(.textStrong)).frame(width: 160, height: 40)
+        }
+      }
       #endif
     }
   }
@@ -715,6 +737,7 @@ struct ConversationView: View {
     guard screenVisible else { return }
     capturePosition()
     screenVisible = false
+    scrollState.setVisible(false)
   }
   private func cancelRestoration() {
     restorationTask?.cancel()
@@ -838,10 +861,13 @@ struct ConversationView: View {
           scrollState.cancelAnchor()
           selectionPaused = false
           atBottom = true
-          proxy.scrollTo("bottom", anchor: .bottom)
-          await Task.yield()
-          guard !Task.isCancelled else { return }
           scrollState.followToEnd()
+          // Publishing restoration early lets List's estimated zero offset page
+          // backwards before the final cell has reached its real layout.
+          while !scrollState.tailSettled {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+          }
+          guard !Task.isCancelled else { return }
           restoring = false
           if position?.target != .followTail {
             let tail = ReadingPosition(.followTail)
@@ -855,7 +881,9 @@ struct ConversationView: View {
           await Task.yield()
           guard !Task.isCancelled else { return }
           let anchorID = conversation.activity.anchors[id] ?? id
-          proxy.scrollTo(anchorID, anchor: .top)
+          if scrollState.frames[anchorID] == nil || scrollState.pinned.contains(anchorID) {
+            proxy.scrollTo(anchorID, anchor: .top)
+          }
           scrollState.anchor = nil
           scrollState.readingAnchor = (anchorID, offset, position?.viewportTop)
           // Materialize the recycled row, then correct using real TextKit/image geometry.

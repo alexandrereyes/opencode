@@ -460,6 +460,62 @@ from three read-only, 100-message pages; every displayed string/identifier/path 
 `script/generate-scroll-fixture.py` documents safe regeneration from temporary GET response files.
 Release builds exclude the fixture JSON and compile out its launch mode/client/driver.
 
+### Following a changing tail
+
+`ConversationScrollState` is the sole owner of tail and reading corrections. It coalesces row/revision/viewport
+notifications and requires matching native display-layout passes without restarting on each notification. It never
+combines `ScrollViewReader.scrollTo` with a tail offset. User scrolling, selection, reading restoration and navigation
+cancel following. An explicit request waits for existing tracking/deceleration, never fighting it. **Ir para o fim**
+requests one animation, then follows later growth without replaying it.
+The last materialized sticky prompt is compacted before the tail target is consumed, rather than shrinking after
+an initial scroll and issuing a backwards correction.
+Initial tail restoration remains active until the real final native cell is materialized and pinned; automatic
+history prepend is disabled while following, so a transient zero offset cannot page backwards during entry.
+Parsed blocks survive transient row disappearance; the shared bounded Markdown cache and size-only viewport
+observation remain unchanged. Returning from a child reuses a materialized reading anchor instead of first scrolling
+that message back to its top (pinned-header targets still materialize their original message).
+
+Follow verification uses **OpenCode Follow** (`8291AAB6-DF26-4128-BE44-A459BAD14186`) and `ios-follow-derived`.
+After `build-for-testing` with that destination/DerivedData, run
+`python3 packages/ios-custom/script/test-follow.py --label follow`.
+The DEBUG-only `-OpenCodeFixtureFollow` control uses a four-message measured slice, grows three real Markdown rows in
+sequence, then continues growing the last row (24 updates per run). XCTest records native offsets at display cadence
+in both themes, requiring no backward step above 2 pt and a final gap
+within 2 pt. Pure `ConversationScrollPlan` tests cover coalescing, layout changes, exclusive reading ownership and
+cancellation; the UIKit-hosted check proves an explicit end request waits for existing deceleration and cannot run
+after navigation hides the reader. Empty-tail restoration and offline unread navigation are also checked without
+resetting any viewed watermark. `--live` explicitly enables tiny read-only follow-ups in the two owned sandbox replay
+children; it never answers seeded requests. The runner supplies sandbox credentials even for the disconnected fixture client,
+records video/follow logs in `$TMPDIR/opencode/ios-follow-prints/`, and removes private xctestrun credentials.
+`--regressions` supplies disposable action/missing-directory imports for the existing `SessionReadingTests`.
+`profile-scrolling.py` accepts `--simulator`, `--derived` and `--evidence` to keep performance verification isolated.
+
+Device verification against shipped `63d8650d44` used the same offline JSON and DEBUG growth harness in a temporary
+local clone (no scrolling/rendering production code ported). On iPhone 14, five-iteration long-scroll XCTest results
+were **59.20 → 58.89 fps**, **1.31 → 0 ms/s hitches**, **4.62 → 4.58 s CPU**; three fresh-process driver runs had
+median p95 **16.682 → 16.680 ms**. For 60 edits at 100-ms cadence, median growth results were **49.60 → 49.50 fps**,
+**41.86 → 43.01 ms p95**, **3.74 → 3.70 s CPU**, with backward movement **35.33 → 0 pt**. An Animation Hitches
+capture bounded by the complete `FixtureGrowth` signpost measured **79.13 → 40.90 ms/s**. The simulator p95 increase
+did not reproduce as a perceptible device regression; the coalesced follow owner is retained.
+`script/compare-scroll-device.py --label <name>` records the comparison after a leased device build; `--growth-trace-only`
+adds an 8-second lead-in and Points of Interest instrumentation so the complete growth interval is captured.
+The final menu build was rechecked at **59.20 fps**, **0 ms/s**, **4.56 s CPU**, **16.686 ms p95** for the long scroll;
+growth medians were **49.93 fps**, **42.53 ms p95**, **3.68 s CPU**, still **0 pt backward**. Matched all-processes
+captures, filtered by app PID and the complete growth signpost, measured **131.57 → 66.98 ms/s**. Instrumented and
+uninstrumented frame runs are separate series. `--no-trace` avoids Instruments discovery for frame-only rechecks;
+`--trace-all-processes` works around CoreDevice's stale per-process discovery while exported hitches remain PID-filtered.
+
+### Menu interaction during updates
+
+`ConversationOptionsMenu` keeps one native UIButton/UIMenu and refreshes it only when command availability, Session
+identity or theme changes; handlers read the latest callbacks. Rebuilding SwiftUI menu content with unrelated header
+updates restarted native menu animations indefinitely in the 4-Hz offline stress fixture. The stable owner removes
+those quiescence stalls without sleeps, delayed actions or tap retries. Root/child archive availability is preserved.
+`ConversationMenuTests` exercises first-tap Details presentation during header-only and transcript updates; the UIKit
+test also asserts stable menu identity and fresh callbacks. Repeat the original real-sandbox check with
+`test-scrolling.py --sandbox --iterations 10 --label <unique> OpenCodeUITests/SessionReadingTests/testDetailsRootAndChild`,
+once per `OPENCODE_TEST_THEME=openchamber-dark` / `openchamber-light`. Logs and snapshots record the actual first tap.
+
 Use **OpenCode Fluidez** (`C960B2FA-F2AB-4E39-BF82-50050DF20A27`) and DerivedData
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-fluidez-derived`:
 

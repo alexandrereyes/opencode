@@ -10,6 +10,7 @@ import XCTest
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    if environment["OPENCODE_TEST_MENU_DIAGNOSTICS"] == "1" { app.launchArguments.append("-OpenCodeMenuDiagnostics") }
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))

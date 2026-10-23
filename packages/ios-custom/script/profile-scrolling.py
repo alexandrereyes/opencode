@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,13 +17,16 @@ parser.add_argument("--template", choices=["Time Profiler", "SwiftUI", "Animatio
 parser.add_argument("--theme", default="openchamber-dark")
 parser.add_argument("--updates", action="store_true")
 parser.add_argument("--frames", action="store_true", help="Measure the display-link driver without Instruments")
+parser.add_argument("--simulator", default="C960B2FA-F2AB-4E39-BF82-50050DF20A27")
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
 args = parser.parse_args()
 run_id = uuid.uuid4().hex
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-derived = temporary / "ios-fluidez-derived"
-evidence = temporary / "ios-fluidez-prints"
+derived = args.derived or temporary / "ios-fluidez-derived"
+evidence = args.evidence or temporary / "ios-fluidez-prints"
 evidence.mkdir(exist_ok=True)
-device = "C960B2FA-F2AB-4E39-BF82-50050DF20A27"
+device = args.simulator
 bundle = "br.com.alexandrem.opencode"
 root = Path(__file__).resolve().parents[1]
 state = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
@@ -37,14 +41,15 @@ container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container"
 if args.template or args.frames:
     (container / "Documents/scroll-fixture-metrics.json").unlink(missing_ok=True)
 subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
-arguments = ["-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
+arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
 arguments += ["-OpenCodeFixtureRunID", run_id]
 if args.updates:
     arguments.append("-OpenCodeFixtureUpdates")
 if args.template or args.frames:
     arguments.append("-OpenCodeFixtureAutoScroll")
 try:
-    launch = subprocess.check_output(["xcrun", "simctl", "launch", "--terminate-running-process", device, bundle] + arguments, text=True)
+    environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": (temporary / "custom-sandbox-4177/password").read_text().strip()}
+    launch = subprocess.check_output(["xcrun", "simctl", "launch", "--terminate-running-process", device, bundle] + arguments, text=True, env=environment)
     pid = launch.strip().split(": ")[-1]
     if args.template:
         trace = evidence / (args.label + ".trace")

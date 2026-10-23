@@ -10,9 +10,31 @@ import SwiftUI
     guard arguments.indices.contains(index + 1) else { return "" }
     return arguments[index + 1]
   }()
-  static let snapshot = try! JSONDecoder().decode(
-    ScrollFixtureSnapshot.self,
-    from: Data(contentsOf: Bundle.main.url(forResource: "scroll-fixture", withExtension: "json")!))
+  static let snapshot: ScrollFixtureSnapshot = {
+    let snapshot = try! JSONDecoder().decode(
+      ScrollFixtureSnapshot.self,
+      from: Data(contentsOf: Bundle.main.url(forResource: "scroll-fixture", withExtension: "json")!))
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureEmpty") {
+      return ScrollFixtureSnapshot(
+        messages: [], entries: snapshot.entries, projects: snapshot.projects,
+        preferences: snapshot.preferences, models: snapshot.models)
+    }
+    guard ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureFollow") else { return snapshot }
+    // A small, fully measured starting transcript separates real row growth from
+    // the unrelated coordinate renumbering of hundreds of unmeasured List items.
+    let rows = snapshot.messages.filter {
+      $0.type == "assistant" && (100...200).contains($0.responseText.count)
+    }.suffix(3).map { message in
+      var row = message
+      row.content = message.content?.filter { $0.type == "text" }
+      return row
+    }
+    var user = snapshot.messages[snapshot.messages.count - 3]
+    user.text = "Acompanhe o checklist sintético."
+    return ScrollFixtureSnapshot(
+      messages: [user] + rows,
+      entries: snapshot.entries, projects: snapshot.projects, preferences: snapshot.preferences, models: snapshot.models)
+  }()
 }
 
 struct ScrollFixtureSnapshot: Decodable {

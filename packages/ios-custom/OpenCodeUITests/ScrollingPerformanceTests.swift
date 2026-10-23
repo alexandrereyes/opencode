@@ -4,9 +4,11 @@ import XCTest
   private func launch(_ mode: String, updates: Bool, theme: String? = nil) -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
+      "-OpenCodeServerURL", "http://127.0.0.1:4177",
       "-OpenCodeScrollFixture", mode, "-OpenCodeFixturePosition", "middle",
       "-OpenCodeTheme", theme ?? ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
     ]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"]
     if updates { app.launchArguments.append("-OpenCodeFixtureUpdates") }
     app.launch()
     return app

@@ -1,7 +1,11 @@
 import OpenCodeKit
 import SwiftUI
 
-@MainActor final class ConversationScrollState {
+@MainActor protocol ConversationHeaderLayout: AnyObject {
+  func prepareForFollowing(offset: CGFloat) -> Bool
+}
+
+@MainActor final class ConversationScrollState: NSObject {
   private let probes = NSMapTable<NSString, UIView>(
     keyOptions: .strongMemory, valueOptions: .weakMemory)
   private let headers = NSMapTable<UIView, UICollectionReusableView>(
@@ -10,12 +14,21 @@ import SwiftUI
     keyOptions: .weakMemory, valueOptions: .strongMemory)
   weak var view: UIScrollView?
   var nearBottom = true
+  var following: Bool { plan.following }
+  private(set) var tailSettled = false
   var pinned: Set<String> {
     Set(activeHeaders.map(\.id))
   }
   var anchor: (id: String, y: CGFloat)?
   var readingAnchor: (id: String, offset: Double, viewportTop: Double?)?
-  private var correctionPending = false
+  private var plan = ConversationScrollPlan()
+  private var link: CADisplayLink?
+  private var animation: UIViewPropertyAnimator?
+  private weak var observedView: UIScrollView?
+  private var active = true
+  #if DEBUG
+  private(set) var tailAnimationCount = 0
+  #endif
   var frames: [String: CGRect] {
     guard let view else { return [:] }
     return Dictionary(
@@ -67,7 +80,9 @@ import SwiftUI
     headerIDs.setObject(id as NSString, forKey: probe)
   }
   func register(_ probe: UIView, id: String) {
-    probes.setObject(probe, forKey: id as NSString)
+    // The tail discovers empty Lists but must never become a message bookmark.
+    if id != "bottom" { probes.setObject(probe, forKey: id as NSString) }
+    if plan.pending { schedule() }
     #if DEBUG
     if ScrollFixtures.mode != nil { ScrollFixtures.scrollState = self }
     #endif
@@ -91,19 +106,120 @@ import SwiftUI
       }, usableTop: usableTop, viewportBottom: view.bounds.height)
   }
   func cancelAnchor() {
+    stop()
     anchor = nil
     readingAnchor = nil
   }
+  func stop() {
+    plan.cancel()
+    tailSettled = false
+    link?.invalidate()
+    link = nil
+    animation?.stopAnimation(false)
+    animation?.finishAnimation(at: .current)
+    animation = nil
+  }
+  func setVisible(_ visible: Bool) {
+    active = visible
+    if !visible { stop() }
+  }
   func correctAnchor() {
-    guard !correctionPending, anchor != nil || readingAnchor != nil else { return }
-    correctionPending = true
-    // Never mutate List's contentOffset inside its geometry/observation transaction.
-    Task { @MainActor [weak self] in
-      try? await Task.sleep(for: .milliseconds(16))
-      guard let self else { return }
-      correctionPending = false
-      applyCorrection()
+    guard active, plan.following || anchor != nil || readingAnchor != nil else { return }
+    if plan.following { tailSettled = false }
+    plan.invalidate()
+    schedule()
+  }
+  private func schedule() {
+    guard active, link == nil, animation == nil, let view, view.window != nil else { return }
+    if observedView !== view {
+      observedView?.panGestureRecognizer.removeTarget(self, action: #selector(dragged))
+      view.panGestureRecognizer.addTarget(self, action: #selector(dragged))
+      observedView = view
     }
+    let link = CADisplayLink(target: self, selector: #selector(settle))
+    self.link = link
+    link.add(to: .main, forMode: .common)
+  }
+  @objc private func dragged() {
+    if view?.panGestureRecognizer.state == .began { cancelAnchor() }
+  }
+  @objc func settle() {
+    guard active, let view, view.window != nil else { stop(); return }
+    guard !view.isDragging else { cancelAnchor(); return }
+    if view.isTracking || view.isDecelerating { return }
+    // Require a coherent native layout and a matching display pass. Repeated
+    // notifications retain the pending sample instead of starving a stream.
+    guard let first = measure(view), let second = measure(view), first == second else { return }
+    let target = max(
+      -view.adjustedContentInset.top,
+      min(second.bottom, second.height) - view.bounds.height + view.adjustedContentInset.bottom)
+    // Crossing a sticky prompt compacts it on the next SwiftUI layout. Resolve
+    // that height change before using its expanded height as the tail target.
+    if plan.following && prepareHeader(offset: target) { return }
+    guard let action = plan.consume(second, interacting: false) else { return }
+    link?.invalidate()
+    link = nil
+    if case .reading = action { applyCorrection(); return }
+    if abs(view.contentOffset.y - target) <= 1 {
+      tailSettled = tailMaterialized(view)
+      if !tailSettled { correctAnchor() }
+      return
+    }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("FOLLOW tail state=%@ from=%.2f to=%.2f height=%.2f", String(describing: ObjectIdentifier(self)), view.contentOffset.y, target, view.contentSize.height)
+    }
+    #endif
+    if case .tail(animated: true) = action, !UIAccessibility.isReduceMotionEnabled {
+      #if DEBUG
+      tailAnimationCount += 1
+      #endif
+      let animation = UIViewPropertyAnimator(duration: 0.28, curve: .easeOut) {
+        view.contentOffset = CGPoint(x: view.contentOffset.x, y: target)
+      }
+      self.animation = animation
+      animation.addCompletion { [weak self] _ in
+        guard let self else { return }
+        self.animation = nil
+        correctAnchor()
+      }
+      animation.startAnimation()
+      return
+    }
+    view.setContentOffset(CGPoint(x: view.contentOffset.x, y: target), animated: false)
+    correctAnchor()
+  }
+  private func tailMaterialized(_ view: UIScrollView) -> Bool {
+    guard let collection = view as? UICollectionView else { return true }
+    let section = collection.numberOfSections - 1
+    guard section >= 0, collection.numberOfItems(inSection: section) > 0 else { return false }
+    return collection.cellForItem(at: IndexPath(item: collection.numberOfItems(inSection: section) - 1, section: section))?.window != nil
+  }
+  private func prepareHeader(offset: CGFloat) -> Bool {
+    guard let view else { return false }
+    let candidate = headers.keyEnumerator().allObjects.compactMap { item -> (probe: any ConversationHeaderLayout, y: CGFloat)? in
+      guard let probe = item as? UIView, probe.window != nil,
+        let layout = probe as? any ConversationHeaderLayout, let header = headers.object(forKey: probe)
+      else { return nil }
+      let y = header.convert(header.bounds, to: view).minY
+      return y <= offset + 2 ? (layout, y) : nil
+    }.max { $0.y < $1.y }
+    return candidate?.probe.prepareForFollowing(offset: offset) ?? false
+  }
+  private func measure(_ view: UIScrollView) -> ConversationScrollPlan.Layout? {
+    view.layoutIfNeeded()
+    guard let collection = view as? UICollectionView else {
+      return ConversationScrollPlan.Layout(
+        height: view.contentSize.height, width: view.bounds.width, viewport: view.bounds.height,
+        bottom: view.contentSize.height)
+    }
+    guard !collection.hasUncommittedUpdates, collection.numberOfSections > 0 else { return nil }
+    let section = collection.numberOfSections - 1
+    guard collection.numberOfItems(inSection: section) > 0,
+      let bottom = collection.layoutAttributesForItem(at: IndexPath(item: collection.numberOfItems(inSection: section) - 1, section: section))?.frame.maxY
+    else { return nil }
+    return ConversationScrollPlan.Layout(
+      height: view.contentSize.height, width: view.bounds.width, viewport: view.bounds.height, bottom: bottom)
   }
   private func applyCorrection() {
     guard let view, !view.isTracking, !view.isDragging, !view.isDecelerating else { return }
@@ -124,17 +240,21 @@ import SwiftUI
         -view.adjustedContentInset.top,
         view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom))
     if abs(view.contentOffset.y - y) > 0.75 {
+      #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+        NSLog("FOLLOW correction state=%@ from=%.2f to=%.2f", String(describing: ObjectIdentifier(self)), view.contentOffset.y, y)
+      }
+      #endif
       view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: false)
     }
   }
-  func followToEnd() {
-    guard let view else { return }
-    let y = max(
-      -view.adjustedContentInset.top,
-      view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
-    if abs(view.contentOffset.y - y) > 1 {
-      view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: false)
-    }
+  func followToEnd(animated: Bool = false) {
+    guard active else { return }
+    tailSettled = false
+    anchor = nil
+    readingAnchor = nil
+    plan.follow(animated: animated)
+    schedule()
   }
 }
 

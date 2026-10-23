@@ -405,14 +405,40 @@ import OpenCodeKit
     if ScrollFixtures.mode != nil {
       let fixture = ScrollFixtures.snapshot
       session = fixture.entries.first?.session
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureChild") {
+        var value = try! JSONDecoder().decode([String: JSONValue].self,
+          from: JSONEncoder().encode(fixture.entries[0].session))
+        value["parentID"] = .string("ses_fixture_parent")
+        session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
+      }
       messages = fixture.messages
       models = fixture.models
-      viewedBoundary = fixture.messages[fixture.messages.count / 3].time.created
+      viewedBoundary = fixture.messages.dropFirst(fixture.messages.count / 3).first?.time.created
       branch = "exemplo-sintetico"
       hasOlder = false
       hasTranscript = true
       ready = true
       revision += 1
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMenuUpdates") {
+        let source = messages
+        let updating = source.last { $0.type == "assistant" && !$0.responseText.isEmpty }?.id
+        var tick = 0
+        while !Task.isCancelled {
+          do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+          branch = "fixture-menu-\(tick)"
+          if !ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMenuHeaderOnly") {
+            messages = source.map { message in
+              guard message.id == updating,
+                let part = message.content?.lastIndex(where: { $0.type == "text" }) else { return message }
+              var updated = message
+              updated.content?[part].text = (message.content?[part].text ?? "") + "\n\nEstado sintético \(tick)."
+              return updated
+            }
+            revision += 1
+          }
+          tick += 1
+        }
+      }
       return
     }
     #endif
@@ -451,6 +477,22 @@ import OpenCodeKit
     batchTask?.cancel()
     batchTask = nil
   }
+  #if DEBUG
+  func growScrollFixture(_ iteration: Int) {
+    guard ScrollFixtures.mode == "conversation" else { return }
+    let rows = messages.filter { $0.type == "assistant" }.suffix(3).map(\.id)
+    guard !rows.isEmpty else { return }
+    let id = rows[min(iteration, rows.count - 1)]
+    messages = messages.map { message in
+      guard message.id == id, let part = message.content?.lastIndex(where: { $0.type == "text" }) else { return message }
+      var updated = message
+      updated.content?[part].text = (message.content?[part].text ?? "")
+        + "\n\n- [ ] Verificação \(iteration): altura variável durante o acompanhamento do fim."
+      return updated
+    }
+    revision += 1
+  }
+  #endif
   private func scheduleBatch() {
     guard batchTask == nil else { return }
     batchTask = Task {

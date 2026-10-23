@@ -12,9 +12,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--label", default="current")
 parser.add_argument("--device", choices=["simulator", "iphone14"], default="simulator")
 parser.add_argument("--sandbox", action="store_true", help="Run existing simulator regressions with explicit sandbox credentials")
+parser.add_argument("--iterations", type=int, default=1, help="Repeat each selected test without retry-until-pass semantics")
 parser.add_argument("tests", nargs="*", default=["OpenCodeUITests/ScrollingPerformanceTests"])
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
+home = temporary / "custom-sandbox-4177"
+password = (home / "password").read_text().strip()
 derived = temporary / "ios-fluidez-derived"
 evidence = temporary / "ios-fluidez-prints"
 evidence.mkdir(exist_ok=True)
@@ -38,13 +41,13 @@ targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]]
            if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
 for target in targets:
     target.setdefault("EnvironmentVariables", {})["OPENCODE_TEST_THEME"] = theme
-    target["CommandLineArguments"] = ["-OpenCodeScrollFixture", "sessions"]
+    target["EnvironmentVariables"]["OPENCODE_TEST_PASSWORD"] = password
+    target["EnvironmentVariables"]["OPENCODE_SERVER_PASSWORD"] = password
+    target["EnvironmentVariables"]["OPENCODE_TEST_MENU_DIAGNOSTICS"] = os.environ.get("OPENCODE_TEST_MENU_DIAGNOSTICS", "0")
+    target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "sessions"]
     if args.sandbox:
-        home = temporary / "custom-sandbox-4177"
         manifest = json.loads((home / "seed-conversation.json").read_text())
         environment = target["EnvironmentVariables"]
-        environment["OPENCODE_TEST_PASSWORD"] = (home / "password").read_text().strip()
-        environment["OPENCODE_SERVER_PASSWORD"] = environment["OPENCODE_TEST_PASSWORD"]
         for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1")]:
             environment["OPENCODE_TEST_" + key] = next(s["id"] for s in manifest["sessions"] if s["role"] == role)
         target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
@@ -52,10 +55,19 @@ configured = derived / ("Build/Products/Scroll-" + args.label + ".xctestrun")
 configured.write_bytes(plistlib.dumps(run))
 configured.chmod(0o600)
 result = evidence / (args.label + ".xcresult")
+menu_log = None
+menu_process = None
+if not physical and os.environ.get("OPENCODE_TEST_MENU_DIAGNOSTICS") == "1":
+    menu_log = (evidence / (args.label + "-menu.log")).open("w")
+    menu_process = subprocess.Popen(["xcrun", "simctl", "spawn", device, "log", "stream", "--level", "debug",
+                                    "--style", "compact", "--predicate", 'eventMessage BEGINSWITH "DETAILS"'],
+                                   stdout=menu_log, stderr=subprocess.STDOUT)
 try:
     command = lease + ["xcodebuild", "test-without-building", "-xctestrun", str(configured), "-destination",
-               "platform=" + ("iOS" if physical else "iOS Simulator") + ",id=" + device, "-parallel-testing-enabled", "NO",
-               "-collect-test-diagnostics", "never", "-resultBundlePath", str(result)]
+                "platform=" + ("iOS" if physical else "iOS Simulator") + ",id=" + device, "-parallel-testing-enabled", "NO",
+                "-collect-test-diagnostics", "never", "-resultBundlePath", str(result)]
+    if args.iterations > 1:
+        command += ["-test-iterations", str(args.iterations)]
     status = subprocess.call(command + ["-only-testing:" + test for test in args.tests])
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
                     "--output-path", str(evidence / (args.label + "-attachments"))], check=True)
@@ -63,6 +75,10 @@ try:
                     "--output-path", str(evidence / (args.label + "-metrics"))], check=True)
     raise SystemExit(status)
 finally:
+    if menu_process is not None:
+        menu_process.terminate()
+        menu_process.wait(timeout=20)
+        menu_log.close()
     configured.unlink(missing_ok=True)
     if not physical:
         subprocess.run(["xcrun", "simctl", "terminate", device, "br.com.alexandrem.opencode"],
