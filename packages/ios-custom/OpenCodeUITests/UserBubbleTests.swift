@@ -4,10 +4,10 @@ import XCTest
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
   override func setUp() { continueAfterFailure = false }
 
-  private func launch(_ role: String = "BUBBLE", theme: String = "openchamber-dark", preference: Bool? = true) throws -> XCUIApplication {
+  private func launch(_ role: String = "BUBBLE", theme: String? = nil, preference: Bool? = true) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme ?? environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     if let preference { app.launchArguments += ["-OpenCodeCollapsibleUserMessages", preference ? "YES" : "NO"] }
@@ -90,6 +90,39 @@ import XCTest
     let app = try launch("SHORT")
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'user-prompt-toggle-'")).firstMatch.exists)
     app.terminate()
+  }
+
+  func testPromptTextIsAccessibleSeparatelyFromExpansionInBothThemes() throws {
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let app = try launch(theme: theme)
+      let control = try toggle(app)
+      XCTAssertTrue(control.waitForExistence(timeout: 10))
+      let text = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Pedido longo de comparação.'")).firstMatch
+      let collapsedTree = XCTAttachment(string: app.debugDescription)
+      collapsedTree.name = "user-prompt-accessibility-collapsed-" + theme
+      collapsedTree.lifetime = .keepAlways
+      add(collapsedTree)
+      XCTAssertTrue(text.waitForExistence(timeout: 5))
+      XCTAssertTrue(text.label.contains("Detalhe final exclusivo."))
+      XCTAssertFalse(text.label.contains("Mostrar mensagem completa"))
+      XCTAssertEqual(control.label, "Mostrar mensagem completa")
+      scrollAnswer(app, below: control.frame.maxY, up: false)
+      XCTAssertTrue(text.exists)
+      XCTAssertEqual(control.value as? String, "Recolhido")
+      control.tap()
+      wait(NSPredicate(format: "value == 'Expandido'"), on: control)
+      XCTAssertTrue(text.exists)
+      XCTAssertTrue(text.label.contains("Detalhe final exclusivo."))
+      XCTAssertFalse(text.label.contains("Mostrar menos"))
+      let expandedTree = XCTAttachment(string: app.debugDescription)
+      expandedTree.name = "user-prompt-accessibility-expanded-" + theme
+      expandedTree.lifetime = .keepAlways
+      add(expandedTree)
+      control.tap()
+      wait(NSPredicate(format: "value == 'Recolhido'"), on: control)
+      XCTAssertTrue(text.exists)
+      app.terminate()
+    }
   }
 
   func testCopyAndQuoteMenuPreserveCollapsedState() throws {

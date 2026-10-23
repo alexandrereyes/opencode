@@ -54,6 +54,10 @@ final class UserPromptScrollView: UIScrollView {
     label.attributedText = NSAttributedString(string: "")
     label.isUserInteractionEnabled = true
     label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+    // UIKit infers a button from the tap gesture; reading the prompt must remain
+    // separate from the explicit expansion control below it.
+    label.isAccessibilityElement = true
+    label.accessibilityTraits = .staticText
     addSubview(label)
   }
   required init?(coder: NSCoder) { nil }

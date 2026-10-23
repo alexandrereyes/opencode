@@ -4,6 +4,13 @@ import XCTest
 @testable import OpenCode
 
 @MainActor final class UserPromptTests: XCTestCase {
+  func testTapToExpandKeepsThePromptAStaticTextElement() {
+    let view = UserPromptScrollView()
+    XCTAssertTrue(view.label.isAccessibilityElement)
+    XCTAssertTrue(view.label.accessibilityTraits.contains(.staticText))
+    XCTAssertFalse(view.label.accessibilityTraits.contains(.button))
+  }
+
   func testMeasuredTwoLineThresholdPreservesNewlinesAndInternalScrolling() {
     let view = UserPromptScrollView()
     view.label.text = "Primeira linha\nSegunda linha"

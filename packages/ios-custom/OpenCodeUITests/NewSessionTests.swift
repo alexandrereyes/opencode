@@ -299,7 +299,6 @@ import XCTest
     chooseProject("ios-conversation", app)
     chooseDestination("new-root", app)
     submit("Responda apenas OK, sem ferramentas. Onda 9 raiz.", app)
-    guard !theme.hasSuffix("light") else { return }
     openNewSession(app)
     ready(app)
     chooseProject("abacato-v2", app)
