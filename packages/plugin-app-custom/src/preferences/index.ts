@@ -27,6 +27,7 @@ const encode = Schema.encodeSync(Preferences.Profile)
 
 export function applyIntent(profile: Preferences.Profile, intent: Preferences.Intent): Preferences.Profile {
   const data = mutableData(profile.data)
+  if (intent.type === "voice.set") data.voiceSessions = { ...data.voiceSessions, [intent.server]: intent.sessionID }
   if (intent.type === "master.set") data.masterSessions = { ...data.masterSessions, [intent.server]: intent.sessionID }
   if (intent.type === "master.clear") {
     data.masterSessions = Object.fromEntries(
@@ -119,9 +120,19 @@ export function importProfile(profile: Preferences.Profile, input: { hasLegacyDa
 export const registerPreferences = Effect.fn("Preferences.register")(function* (ctx: Plugin.Context) {
   yield* ctx.storage.adoptLegacy(key)
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? defaults)), undefined])
+  const get = () => ctx.storage.get(key).pipe(Effect.map((value) => decode(value ?? defaults)))
+  const mutate = (intent: Preferences.Intent) =>
+    Effect.gen(function* () {
+      const profile = yield* ctx.storage.update(key, (current) => {
+        const next = { ...applyIntent(decode(current ?? defaults), intent), imported: true }
+        return [encode(next), next]
+      })
+      yield* registration.events.emit("updated", { revision: profile.revision }).pipe(Effect.orDie)
+      return profile
+    })
   const registration: RpcRegistration<typeof Preferences.Definition> = yield* ctx.rpc
     .register(Preferences.Definition, {
-      get: () => ctx.storage.get(key).pipe(Effect.map((value) => decode(value ?? defaults))),
+      get,
       import: (input) =>
         Effect.gen(function* () {
           const result = yield* ctx.storage.update(key, (current) => {
@@ -133,18 +144,13 @@ export const registerPreferences = Effect.fn("Preferences.register")(function* (
             yield* registration.events.emit("updated", { revision: result.profile.revision }).pipe(Effect.orDie)
           return result.profile
         }),
-      mutate: (intent) =>
-        Effect.gen(function* () {
-          const profile = yield* ctx.storage.update(key, (current) => {
-            const next = { ...applyIntent(decode(current ?? defaults), intent), imported: true }
-            return [encode(next), next]
-          })
-          yield* registration.events.emit("updated", { revision: profile.revision }).pipe(Effect.orDie)
-          return profile
-        }),
+      mutate,
     })
     .pipe(Effect.orDie)
+  return { get, mutate }
 })
+
+export type PreferencesService = Effect.Success<ReturnType<typeof registerPreferences>>
 
 function pathKey(path: string) {
   const value = path[1] === ":" || path.startsWith("\\\\") ? path.replaceAll("\\", "/") : path
@@ -170,6 +176,7 @@ function mutableData(data: Preferences.Data) {
     pinnedSessions: [...data.pinnedSessions],
     mutedSessions: data.mutedSessions && [...data.mutedSessions],
     masterSessions: data.masterSessions && { ...data.masterSessions },
+    voiceSessions: data.voiceSessions && { ...data.voiceSessions },
     models: {
       user: data.models.user.map((model) => ({ ...model })),
       variant: { ...data.models.variant },

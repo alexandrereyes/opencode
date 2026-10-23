@@ -15,6 +15,7 @@ import { registerRequests } from "./requests/index.js"
 import { registerCodexSearch } from "./codex-search/index.js"
 import { registerTranscript } from "./transcript/index.js"
 import { registerMaster } from "./master/index.js"
+import { registerVoice } from "./voice/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -32,11 +33,12 @@ export default Plugin.define({
       yield* registerWorktrees(ctx)
       yield* registerNavigation(ctx)
       yield* registerArchive(ctx)
-      yield* registerPreferences(ctx)
+      const preferences = yield* registerPreferences(ctx)
       yield* registerChats(ctx)
       yield* registerRequests(ctx)
       yield* registerFamily(ctx)
       yield* registerTranscript(ctx)
       yield* registerMaster(ctx)
+      yield* registerVoice(ctx, preferences)
     }),
 })

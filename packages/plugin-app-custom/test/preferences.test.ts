@@ -47,6 +47,17 @@ test("master intents are per server, backward compatible and preserve project pr
   expect(profile.data.masterSessions).toBeUndefined()
 })
 
+test("voice pointer is optional for old clients and survives unrelated preference mutations", () => {
+  const voice = applyIntent(profile, { type: "voice.set", server: "local", sessionID: Session.ID.make("ses_voice") })
+  const next = applyIntent(voice, { type: "settings.autoApprove", value: true })
+  expect(next.data.voiceSessions).toEqual({ local: Session.ID.make("ses_voice") })
+  expect(next.data.masterSessions).toBeUndefined()
+  expect(
+    Schema.decodeUnknownSync(Preferences.Profile)(Schema.encodeSync(Preferences.Profile)(profile)).data.voiceSessions,
+  ).toBeUndefined()
+  expect(profile.data.voiceSessions).toBeUndefined()
+})
+
 test("project intents preserve close history and unknown references", () => {
   const closed = Array.from({ length: 18 }, (_, index) => `/closed/${index}`).reduce(
     (current, directory) => applyIntent(current, { type: "project.close", server: "local", directory }),
