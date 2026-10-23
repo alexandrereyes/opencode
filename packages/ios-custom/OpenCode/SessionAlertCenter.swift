@@ -68,6 +68,11 @@ import SwiftUI
     }
   }
   func dismiss(_ id: UUID) { if message?.id == id { message = nil } }
+  func remove(_ ids: Set<String>) {
+    policy.remove(ids)
+    UserDefaults.standard.set(policy.claims, forKey: storageKey)
+    if let message, ids.contains(message.session.id) { dismiss(message.id) }
+  }
   func openingSession() { navigationID = UUID() }
   func presented(_ id: UUID) {
     presentations.removeAll { $0 == id }
@@ -88,6 +93,7 @@ private struct SessionAlertOverlay: ViewModifier {
   @Environment(\.dismiss) private var dismiss
   @State private var presentationID = UUID()
   let modal: Bool
+  let voice: Bool
   func body(content: Content) -> some View {
     content.overlay(alignment: .top) {
       if let alerts,
@@ -103,11 +109,13 @@ private struct SessionAlertOverlay: ViewModifier {
       // Each modal presentation boundary closes itself, including nested composer sheets.
       if modal { dismiss() }
     }
+    .floatingVoiceInset(enabled: modal && voice)
+    .modifier(FloatingVoiceScope(enabled: modal))
   }
 }
 extension View {
-  func sessionAlertOverlay(modal: Bool = true) -> some View {
-    modifier(SessionAlertOverlay(modal: modal))
+  func sessionAlertOverlay(modal: Bool = true, voice: Bool = true) -> some View {
+    modifier(SessionAlertOverlay(modal: modal, voice: voice))
   }
 }
 

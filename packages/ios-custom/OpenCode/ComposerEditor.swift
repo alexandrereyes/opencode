@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 struct ComposerEditor: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  @Environment(\.dynamicTypeSize) private var typeSize
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
@@ -18,7 +20,7 @@ struct ComposerEditor: View {
   @State private var longText = false
   private var showExpand: Bool { !expanded && (longText || !draft.attachments.isEmpty) }
   private var hasContent: Bool {
-    !draft.text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    draft.hasText
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
   private var canSubmit: Bool {
@@ -36,10 +38,7 @@ struct ComposerEditor: View {
           if item.token.kind == .command && item.token.value == "client"
             && item.token.id != "compact"
           {
-            let value = NSMutableAttributedString(attributedString: draft.text)
-            value.replaceCharacters(in: trigger.range, with: "")
-            draft.selection = NSRange(location: trigger.range.location, length: 0)
-            draft.text = value
+            draft.replace(trigger.range, with: NSAttributedString())
             draft.focused = false
             if item.token.id == "btw" {
               let question = draft.document.expanded.text.trimmingCharacters(
@@ -58,7 +57,7 @@ struct ComposerEditor: View {
       }
       if draft.replacing != nil {
         HStack {
-          Label("Editando mensagem da fila", systemImage: "pencil").font(.caption)
+          Label("Editando mensagem da fila", systemImage: "pencil").appFont(.caption)
           Spacer()
           Button("Cancelar edição", systemImage: "xmark") {
             draft.editing = nil
@@ -69,7 +68,7 @@ struct ComposerEditor: View {
         }.foregroundStyle(theme.color(.textSecondary))
       }
       if let error = draft.error {
-        Text(error).font(.caption).foregroundStyle(theme.color(.error)).accessibilityIdentifier(
+        Text(error).appFont(.caption).foregroundStyle(theme.color(.error)).accessibilityIdentifier(
           "send-error")
       }
       if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
@@ -78,15 +77,15 @@ struct ComposerEditor: View {
           attachmentRow.padding(.trailing, showExpand ? 26 : 0)
         }
         if draft.importing {
-          ProgressView("Preparando anexos…").font(.caption).tint(theme.color(.primary))
+          ProgressView("Preparando anexos…").appFont(.caption).tint(theme.color(.primary))
         }
         ComposerTextView(
           draft: draft, theme: theme, expanded: expanded, owner: editorID,
           submit: submit, canSubmit: canSubmit
         )
         .overlay(alignment: .topLeading) {
-          if draft.text.length == 0 {
-            Text("Mensagem").font(.body).foregroundStyle(theme.color(.textSecondary))
+           if draft.isEmpty {
+            Text("Mensagem").appFont(.body).foregroundStyle(theme.color(.textMuted))
               .allowsHitTesting(false)
           }
         }
@@ -98,18 +97,18 @@ struct ComposerEditor: View {
         .padding(.trailing, showExpand && draft.attachments.isEmpty ? 26 : 0)
         controls
       }
-      .padding(14).background(
+      .padding(16).background(
         theme.color(.surface).opacity(0.6), in: RoundedRectangle(cornerRadius: 22)
       )
       .overlay {
-        RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
+        RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale)
       }
       .overlay(alignment: .topTrailing) {
         if showExpand {
           Button(
             "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
           )
-          .labelStyle(.iconOnly).font(.system(size: 12)).foregroundStyle(
+          .labelStyle(.iconOnly).appSymbol(.inline).foregroundStyle(
             theme.color(.textSecondary)
           )
           .frame(width: 28, height: 28).padding(7).buttonStyle(.plain)
@@ -181,7 +180,14 @@ struct ComposerEditor: View {
     }
   }
   private var controls: some View {
-    HStack(spacing: 10) {
+    Group {
+      if typeSize.isAccessibilitySize {
+        ScrollView(.horizontal) { controlRow.fixedSize(horizontal: true, vertical: false) }.scrollIndicators(.hidden)
+      } else { controlRow }
+    }
+  }
+  private var controlRow: some View {
+    HStack(spacing: 12) {
       Menu {
         Menu("Imagens e arquivos", systemImage: "photo") {
           Button("Fotos", systemImage: "photo.on.rectangle") {
@@ -201,18 +207,21 @@ struct ComposerEditor: View {
           )
         }
       } label: {
-        Image(systemName: "plus").font(.system(size: 18)).frame(width: 31, height: 31)
-          .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1) }
+        Image(systemName: "plus").appSymbol(.action).frame(width: 31, height: 36)
+          .overlay { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
       }.accessibilityLabel("Adicionar")
       Button {
         draft.focused = false
         models = true
       } label: {
-        Text(store.modelLabel(store.selectedModel(draft))).font(.system(size: 12)).lineLimit(1)
+        Text(store.modelLabel(store.selectedModel(draft))).appFont(.caption).lineLimit(1).minimumScaleFactor(0.75)
       }.accessibilityLabel("Modelo e esforço").accessibilityIdentifier("model-picker")
+      if !expanded && !store.isNewSession && store.mcps.summary.visible {
+        ConversationMCPPill(store: store.mcps)
+      }
       Spacer(minLength: 2)
       if store.isChild || store.masterMode {
-        Text(store.childAgentName).font(.system(size: 12)).lineLimit(1)
+        Text(store.childAgentName).appFont(.caption).lineLimit(1)
           .accessibilityLabel("Agente: \(store.childAgentName)")
           .accessibilityIdentifier("child-agent")
       } else {
@@ -220,7 +229,7 @@ struct ComposerEditor: View {
           draft.focused = false
           agents = true
         } label: {
-          Text(store.selectedAgent(draft)).font(.system(size: 12)).lineLimit(1)
+          Text(store.selectedAgent(draft)).appFont(.caption).lineLimit(1)
         }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
       }
       Button {
@@ -230,8 +239,7 @@ struct ComposerEditor: View {
           if draft.sending {
             ProgressView().tint(theme.color(.onPrimary))
           } else {
-            Image(systemName: hasContent ? "arrow.up" : "mic.fill").font(
-              .system(size: 19, weight: .medium))
+            Image(systemName: hasContent ? "arrow.up" : "mic.fill").appSymbol(.action)
           }
         }.foregroundStyle(theme.color(.onPrimary)).frame(width: 36, height: 36)
           .background(theme.color(.primary), in: Circle())
@@ -251,7 +259,7 @@ struct ComposerEditor: View {
           }
         }
       }
-    }.foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(
+    }.frame(minHeight: 36).foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(
       draft.sending || draft.importing)
   }
   private var attachmentRow: some View {
@@ -311,11 +319,11 @@ private struct DraftAttachmentChip: View {
       } else {
         Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc").frame(width: 24)
       }
-      Text(attachment.name).font(.caption).lineLimit(1).frame(maxWidth: 130)
+      Text(attachment.name).appFont(.caption).lineLimit(1).frame(maxWidth: 130)
       Button("Remover \(attachment.name)", systemImage: "xmark", action: remove).labelStyle(
         .iconOnly
       )
-      .font(.caption).frame(width: 24, height: 34)
+      .appSymbol(.inline).frame(width: 24, height: 34)
     }.foregroundStyle(theme.color(.textSecondary)).padding(6)
       .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
       .task(id: url) {

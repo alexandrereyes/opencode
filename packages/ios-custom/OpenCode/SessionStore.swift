@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OpenCodeKit
+import SwiftUI
 
 @MainActor @Observable
 final class SessionStore {
@@ -44,6 +45,7 @@ final class SessionStore {
     await reload()
   }
   private(set) var busy: Set<String> = []
+  private(set) var deletedIDs: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
   var filter = SessionFilter.all
@@ -74,6 +76,7 @@ final class SessionStore {
   @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let expansions = ConversationExpansionMemory()
+  @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored private var order = RecentOrder()
   private(set) var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -88,13 +91,22 @@ final class SessionStore {
   @ObservationIgnored private var runID = UUID()
   @ObservationIgnored private var pruning: Task<Void, Never>?
 
-  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true) {
+  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil) {
     self.acceptsLaunchSession = acceptsLaunchSession
     #if DEBUG
-    let client = ScrollFixtures.mode == nil
-      ? OpenCodeClient(configuration: configuration) : .scrollFixture(configuration: configuration)
+    let failure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+      ? ProcessInfo.processInfo.environment["OPENCODE_TEST_DELETE_FAILURE"] : nil
+    let composerFailure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+      ? ProcessInfo.processInfo.environment["OPENCODE_TEST_COMPOSER_FAILURE"] : nil
+    let revertFailure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+      ? ProcessInfo.processInfo.environment["OPENCODE_TEST_REVERT_FAILURE"] : nil
+    let client = suppliedClient ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
+      ?? composerFailure.map { OpenCodeClient.composerSubmissionFailure(configuration: configuration, sessionID: $0) }
+      ?? revertFailure.map { OpenCodeClient.revertFailureFixture(configuration: configuration, sessionID: $0) }
+      ?? (ScrollFixtures.mode == nil
+        ? OpenCodeClient(configuration: configuration) : .scrollFixture(configuration: configuration))
     #else
-    let client = OpenCodeClient(configuration: configuration)
+    let client = suppliedClient ?? OpenCodeClient(configuration: configuration)
     #endif
     self.client = client
     quota = SubscriptionStore(server: configuration.url.absoluteString,
@@ -286,12 +298,12 @@ final class SessionStore {
       async let master: Void = loadMaster()
       let snapshot = try await (navigation, prefs, inventory, running, requests, archives)
       try Task.checkCancellation()
-      entries = snapshot.0
+      entries = snapshot.0.filter { !deletedIDs.contains($0.session.id) }
       if snapshot.1.revision >= (preferences?.revision ?? -1) { preferences = snapshot.1 }
       projects = snapshot.2
       active = Set(snapshot.3.filter { $0.value.isRunning }.map(\.key))
       permissions = snapshot.4
-      archived = snapshot.5.sorted { ($0.time.archived ?? 0) > ($1.time.archived ?? 0) }
+      archived = snapshot.5.filter { !deletedIDs.contains($0.id) }.sorted { ($0.time.archived ?? 0) > ($1.time.archived ?? 0) }
       order.snapshot(entries, active: active)
       chatRoot = await chats
       await master
@@ -371,7 +383,7 @@ final class SessionStore {
       let id = previewQueue.removeFirst()
       previewing.insert(id)
       Task {
-        if let preview = try? await client.preview(id) { previews[id] = preview }
+        if let preview = try? await client.preview(id), !deletedIDs.contains(id) { previews[id] = preview }
         previewing.remove(id)
         if previewDirty.remove(id) != nil { enqueuePreview(id) }
         drainPreviews()
@@ -428,6 +440,47 @@ final class SessionStore {
   }
   func archive(_ row: SessionRow) async {
     await perform(row.id, feedback: .light) { try await client.archive(row.id) }
+  }
+  func delete(_ session: Session) async {
+    guard session.id != masterID, busy.insert(session.id).inserted else { return }
+    defer { busy.remove(session.id) }
+    let plan: SessionDeletionPlan
+    do {
+      plan = try await client.deletionPlan(session.id)
+      guard !plan.ids.contains(masterID ?? "") else { return }
+      try await client.deleteSession(session.id)
+    } catch {
+      toast.show("Falha ao excluir sessão. \(error.localizedDescription)", kind: .error)
+      return
+    }
+    deletedIDs.formUnion(plan.ids)
+    withAnimation {
+      entries.removeAll { plan.ids.contains($0.session.id) }
+      archived.removeAll { plan.ids.contains($0.id) }
+      if conversationPath.contains(where: { plan.ids.contains($0.id) }) { conversationPath = [] }
+    }
+    previews = previews.filter { !plan.ids.contains($0.key) }
+    active.subtract(plan.ids)
+    visible.subtract(plan.ids)
+    previewQueue.removeAll { plan.ids.contains($0) }
+    previewDirty.subtract(plan.ids)
+    permissions.removeAll { plan.ids.contains($0.sessionID) }
+    forms.removeAll { plan.ids.contains($0.sessionID) }
+    expansions.remove(plan.ids)
+    order.snapshot(entries, active: active)
+    alerts.remove(plan.ids)
+    Haptics.play(.success)
+    var cleanupFailed = false
+    do { try reading.remove(plan.ids) } catch { cleanupFailed = true }
+    do { try await drafts.remove(plan.ids) } catch { cleanupFailed = true }
+    do {
+      let current = try await client.preferences()
+      preferences = current
+      for intent in plan.preferenceCleanup(current) { preferences = try await client.mutate(intent) }
+    } catch { cleanupFailed = true }
+    if cleanupFailed {
+      toast.show("Sessão excluída, mas não foi possível limpar todos os dados salvos.", kind: .error)
+    }
   }
   func reply(_ row: SessionRow, allow: Bool) async {
     guard let permission = permission(row) else { return }

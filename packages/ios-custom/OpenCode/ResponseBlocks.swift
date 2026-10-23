@@ -14,7 +14,7 @@ struct ResponseBlocks: View {
       ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
         VStack(alignment: .leading, spacing: 8) {
           if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
-            Text("Notas").font(.system(size: 18, weight: .semibold)).foregroundStyle(theme.color(.markdownHeading))
+            Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
           }
           HStack(alignment: .top, spacing: 12.8) {
             ForEach(0..<block.quoteDepth, id: \.self) { _ in
@@ -32,9 +32,9 @@ struct ResponseBlocks: View {
   private func spacing(_ index: Int) -> CGFloat {
     guard index > 0 else { return 0 }
     if case .heading = blocks[index].kind { return 20 }
-    if blocks[index].marker != nil && blocks[index - 1].marker != nil { return 4 }
+    if blocks[index].marker != nil && blocks[index - 1].marker != nil { return 10 }
     if isFootnote(blocks[index]) && !isFootnote(blocks[index - 1]) { return 20 }
-    return 10.4
+    return 14
   }
 }
 
@@ -51,7 +51,10 @@ private struct ResponseBlock: View {
   let openNote: (String) -> Void
   var body: some View {
     switch block.kind {
-    case .image(let source): FeedImageView(source: source, name: block.text)
+    case .image(let source):
+      if FileViewerKind(path: source) == .audiovisual {
+        FileMediaReference(source: source, name: block.text)
+      } else { FeedImageView(source: source, name: block.text) }
     case .rule: Rectangle().fill(theme.color(.markdownRule)).frame(height: 1)
     case .code(let language):
       if language?.lowercased() == "mermaid" {
@@ -70,7 +73,7 @@ private struct ResponseBlock: View {
         rasters: rasters, openNote: openNote, initiallyOpen: open)
     case .footnote(_, let number):
       HStack(alignment: .top, spacing: 8) {
-        Text("\(number).").font(.system(size: 14)).foregroundStyle(theme.color(.textSecondary)).frame(width: 24, alignment: .trailing)
+        Text("\(number).").appFont(.secondary).monospacedDigit().foregroundStyle(theme.color(.textSecondary)).frame(width: 24, alignment: .trailing)
         AnyView(ResponseBlocks(blocks: block.children, source: source, messageID: messageID, partID: partID, rasters: rasters, openNote: openNote))
       }
     default: text
@@ -112,7 +115,7 @@ private struct ResponseDisclosure: View {
     VStack(alignment: .leading, spacing: 0) {
       Button { expanded.toggle(); selection?.selected() } label: {
         HStack(alignment: .top, spacing: 6) {
-          Image(systemName: "chevron.right").font(.system(size: 14)).frame(width: 14, height: 26).rotationEffect(.degrees(expanded ? 90 : 0))
+          Image(systemName: "chevron.right").appSymbol(.inline).frame(width: 14, height: 26).rotationEffect(.degrees(expanded ? 90 : 0))
           SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme,
             rasters: rasters, openNote: openNote).allowsHitTesting(false)
           Spacer(minLength: 0)

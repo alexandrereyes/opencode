@@ -127,7 +127,7 @@ run_xcode() {
 }
 
 settings=(-project "$package/OpenCode.xcodeproj" -scheme OpenCode -configuration Release
-  -destination 'generic/platform=iOS' -derivedDataPath "$temporary/ios-sessoes-derived"
+  -destination 'generic/platform=iOS' -derivedDataPath "${OPENCODE_DERIVED_DATA:-$temporary/ios-sessoes-derived}"
   -archivePath "$archive" "CURRENT_PROJECT_VERSION=$build" "OPENCODE_COMMIT=$commit")
 if [[ "$mode" == unsigned-check ]]; then
   run_xcode Archive archive "${settings[@]}" CODE_SIGNING_ALLOWED=NO

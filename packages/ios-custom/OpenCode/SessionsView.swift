@@ -3,8 +3,13 @@ import SwiftUI
 
 struct SessionsView: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.voiceController) private var voice
+  @Environment(\.floatingVoice) private var floatingVoice
   @Bindable var store: SessionStore
   @State private var archiveCandidate: SessionRow?
+  @State private var deleteCandidate: Session?
   @State private var projectAction: ProjectAction?
   @State private var showProjects = false
   @State private var showArchived = false
@@ -22,13 +27,13 @@ struct SessionsView: View {
   var body: some View {
     NavigationStack(path: $store.conversationPath) {
       List {
-        VStack(spacing: 13) {
+        VStack(spacing: 16) {
           usage
           chips
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 1)
-        .padding(.bottom, 10)
+        .padding(.horizontal, AppLayout.margin)
+        .padding(.top, 9)
+        .padding(.bottom, 16)
         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         .listRowSeparator(.hidden)
         .listRowBackground(theme.color(.background))
@@ -38,9 +43,9 @@ struct SessionsView: View {
         } else if let error = store.error {
           HStack(alignment: .top) {
             Image(systemName: "wifi.exclamationmark")
-            Text(error).font(.footnote)
+            Text(error).appFont(.caption)
             Spacer()
-            Button("Tentar novamente") { Task { await store.reload() } }.font(.footnote)
+            Button("Tentar novamente") { Task { await store.reload() } }.appFont(.caption)
           }
           .foregroundStyle(theme.color(.error))
           .listRowSeparator(.hidden)
@@ -49,7 +54,7 @@ struct SessionsView: View {
 
         if !store.attention.isEmpty {
           attentionCard
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 9, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 16, trailing: AppLayout.margin))
             .listRowSeparator(.hidden)
             .listRowBackground(theme.color(.background))
         }
@@ -57,19 +62,19 @@ struct SessionsView: View {
         Button {
           showArchived = true
         } label: {
-          HStack(spacing: 16) {
-            Image(systemName: "archivebox").font(.system(size: 21)).frame(width: 44)
-            Text("Arquivadas").font(.system(size: 16, weight: .semibold))
+          HStack(spacing: AppLayout.avatarGap) {
+            Image(systemName: "archivebox").appSymbol(.header).frame(width: AppLayout.avatar)
+            Text("Arquivadas").appFont(.heading, weight: .semibold)
             Spacer()
-            Text("\(store.archived.count)").font(.system(size: 14)).monospacedDigit()
+            Text("\(store.archived.count)").appFont(.secondary).monospacedDigit()
           }
           .foregroundStyle(theme.color(.textSecondary))
-          .padding(.vertical, 8)
+          .padding(.vertical, 14)
         }
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 19))
+        .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 0, trailing: AppLayout.margin))
         .listRowSeparatorTint(theme.color(.border))
         .listRowBackground(theme.color(.background))
-        .alignmentGuide(.listRowSeparatorLeading) { _ in 60 }
+        .alignmentGuide(.listRowSeparatorLeading) { _ in AppLayout.rowTextInset }
 
         ForEach(store.recent) { row in
           Button {
@@ -81,11 +86,18 @@ struct SessionsView: View {
           }
           .buttonStyle(.plain)
           .accessibilityIdentifier("session-row-" + row.id)
-          .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 18))
+          .listRowInsets(EdgeInsets(top: 14, leading: AppLayout.margin, bottom: 14, trailing: AppLayout.margin))
           .listRowSeparatorTint(theme.color(.border))
           .listRowBackground(theme.color(.background))
-          .alignmentGuide(.listRowSeparatorLeading) { _ in 60 }
+          .alignmentGuide(.listRowSeparatorLeading) { _ in AppLayout.rowTextInset }
           .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // A destructive swipe role removes the row before confirmation in SwiftUI.
+            Button {
+              Haptics.play(.warning)
+              deleteCandidate = row.session
+            } label: {
+              Label("Excluir", systemImage: "trash")
+            }.tint(theme.color(.error))
             Button {
               moreSession = row
             } label: {
@@ -149,6 +161,7 @@ struct SessionsView: View {
       .background(theme.color(.background))
       .scrollEdgeEffectStyle(.soft, for: .top)
       .scrollEdgeEffectStyle(.hard, for: .bottom)
+      .floatingVoiceInset(sessions: store)
       .refreshable {
         async let sessions: Void = store.reload()
         await store.quota.refresh()
@@ -170,20 +183,24 @@ struct SessionsView: View {
             }
             Button("Configurações", systemImage: "gearshape") {}.disabled(true)
           } label: {
-            Image(systemName: "ellipsis").foregroundStyle(theme.color(.textStrong))
+            Image(systemName: "ellipsis").appSymbol(.header).foregroundStyle(theme.color(.textStrong))
           }
           .accessibilityLabel("Mais opções")
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
           Button {
+            if let floatingVoice { floatingVoice.toggle(voice, sessions: store) }
+            else { voice?.toggle(sessions: store) }
           } label: {
-            Image(systemName: "waveform").foregroundStyle(theme.color(.textStrong))
+            Image(systemName: "waveform").appSymbol(.header).foregroundStyle(
+              theme.color(floatingVoice?.visible(voice) == true ? .primary : .textStrong))
           }
-          .accessibilityLabel("Conversar por voz").accessibilityHint("Em construção")
+          .accessibilityLabel(floatingVoice?.visible(voice) == true ? "Encerrar conversa por voz" : "Conversar por voz")
+          .accessibilityIdentifier("voice-start")
           Button {
             store.conversationPath.append(.init(id: "draft_" + UUID().uuidString, newSession: true))
           } label: {
-            Image(systemName: "plus").foregroundStyle(theme.color(.onPrimary))
+            Image(systemName: "plus").appSymbol(.header).foregroundStyle(theme.color(.onPrimary))
           }
           .buttonStyle(.glassProminent)
           .tint(theme.color(.primary))
@@ -216,6 +233,7 @@ struct SessionsView: View {
         }
       }
       .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).sessionAlertOverlay() }
+      .sessionDeleteConfirmation($deleteCandidate, store: store)
       .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store).sessionAlertOverlay() }
       .sheet(item: $proxyProvider) { provider in
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
@@ -274,7 +292,10 @@ struct SessionsView: View {
   }
 
   private var usage: some View {
-    HStack(spacing: 20) {
+    let layout = dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+      : AnyLayout(HStackLayout(spacing: 20))
+    return layout {
       ForEach(store.quota.providers) { provider in
         Button { proxyProvider = provider } label: {
           UsageMeter(summary: store.quota.summary(provider),
@@ -287,7 +308,7 @@ struct SessionsView: View {
 
   private var chips: some View {
     ScrollView(.horizontal) {
-      HStack(spacing: 7) {
+      HStack(spacing: 8) {
         Menu {
           ForEach(SessionFilter.allCases.filter { $0 != .all }) { filter in
             Button(filter.rawValue) { store.filter = filter }
@@ -349,27 +370,26 @@ struct SessionsView: View {
   private var attentionCard: some View {
     VStack(alignment: .leading, spacing: 0) {
       Text("Precisa de você · \(store.attention.count)")
-        .font(.system(size: 13, weight: .semibold))
+        .appFont(.preview, weight: .semibold).monospacedDigit()
         .foregroundStyle(theme.color(.textSecondary))
-        .padding(.bottom, 9)
+        .padding(.bottom, 12)
       ForEach(Array(store.attention.enumerated()), id: \.element.id) { index, row in
         if index > 0 {
-          Rectangle().fill(theme.color(.border)).frame(height: 0.5).padding(.vertical, 9)
+          Rectangle().fill(theme.color(.border)).frame(height: 1 / displayScale)
+            .padding(.leading, AppLayout.rowTextInset).padding(.vertical, 12)
         }
-        VStack(alignment: .trailing, spacing: 8) {
-          HStack(spacing: 10) {
-            SessionAvatar(row: row, size: 42)
+        VStack(alignment: .trailing, spacing: 12) {
+          HStack(spacing: AppLayout.avatarGap) {
+            SessionAvatar(row: row, size: AppLayout.avatar)
             VStack(alignment: .leading, spacing: 3) {
               Button {
                 store.conversationPath.append(.init(id: row.id))
               } label: {
-                HStack(alignment: .firstTextBaseline) {
-                  Text(row.session.displayTitle).font(
-                    .system(size: 15, weight: row.unread ? .semibold : .regular)
-                  )
-                  .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
-                  Spacer(minLength: 0)
-                  SessionRowTime(at: row.interactionAt, unread: row.unread)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                  Text(row.session.displayTitle).appFont(.heading, weight: row.unread ? .bold : .regular)
+                  .foregroundStyle(theme.color(.textStrong)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  SessionRowTime(at: row.interactionAt, unread: row.unread).layoutPriority(1)
                 }
               }.buttonStyle(.plain)
               SessionDirectoryLine(label: store.directoryLabel(row.session))
@@ -377,42 +397,45 @@ struct SessionsView: View {
                 row.state == .permission
                   ? store.permission(row)?.preview ?? "Permissão pendente" : store.question(row)
               )
-              .font(.system(size: 12.5)).foregroundStyle(
+              .appFont(.preview).foregroundStyle(
                 theme.color(row.state == .permission ? .error : .info)
               )
-              .lineLimit(1)
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).padding(.top, 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
           }
           if row.state == .permission {
-            HStack(spacing: 5) {
+            HStack(spacing: 8) {
               Button("Negar") { Task { await store.reply(row, allow: false) } }
-                .font(.system(size: 12))
+                .appFont(.secondary, weight: .medium)
                 .foregroundStyle(theme.color(.text))
-                .padding(.horizontal, 11).padding(.vertical, 6)
+                .padding(.horizontal, 16).frame(minHeight: 34)
                 .contentShape(Capsule())
-                .overlay { Capsule().strokeBorder(theme.color(.border), lineWidth: 1) }
+                .overlay { Capsule().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
                 .buttonStyle(.plain)
               Button("Permitir") { Task { await store.reply(row, allow: true) } }
-                .buttonStyle(.borderedProminent).tint(theme.color(.filledButton))
+                .padding(.horizontal, 16).frame(minHeight: 34)
+                .background(theme.color(.filledButton), in: Capsule()).buttonStyle(.plain)
                 .foregroundStyle(theme.color(.onFilledButton))
             }
             .disabled(store.busy.contains(row.id) || store.permission(row) == nil)
           } else {
             Button("Responder") { store.conversationPath.append(.init(id: row.id)) }
-              .buttonStyle(.borderedProminent).tint(theme.color(.info))
+              .padding(.horizontal, 16).frame(minHeight: 34)
+              .background(theme.color(.infoFill), in: Capsule()).buttonStyle(.plain)
               .foregroundStyle(theme.color(.onInfo))
           }
         }
-        .font(.system(size: 12, weight: .medium))
+        .appFont(.secondary, weight: .medium)
         .buttonBorderShape(.capsule)
         .controlSize(.small)
+        .contextMenu { rowActions(row) }
       }
     }
-    .padding(12)
+    .padding(16)
     .background(theme.color(.surface).opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     .overlay {
-      RoundedRectangle(cornerRadius: 12).strokeBorder(theme.color(.border), lineWidth: 0.75)
+      RoundedRectangle(cornerRadius: 12).strokeBorder(theme.color(.border), lineWidth: 1 / displayScale)
     }
   }
 
@@ -429,49 +452,56 @@ struct SessionsView: View {
         Task { await store.markRead(row.session) }
       }
     }
+    Button("Excluir sessão", systemImage: "trash", role: .destructive) {
+      Haptics.play(.warning)
+      deleteCandidate = row.session
+    }
   }
 }
 
 private struct Chip: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  @ScaledMetric(relativeTo: .subheadline) private var minimumHeight = 36.0
   let title: String
   let selected: Bool
   var running = false
   var count = 0
 
   var body: some View {
-    HStack(spacing: 5) {
+    HStack(spacing: 8) {
       if running { RunningArc(size: 9, filled: true) }
-      Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
+      Text(title).appFont(.secondary, weight: selected ? .semibold : .regular).lineLimit(1)
       if count > 0 {
-        Text("\(count)").font(.system(size: 11, weight: .medium)).padding(.horizontal, 5).padding(
+        Text("\(count)").appFont(.footnote, weight: .medium).monospacedDigit().padding(.horizontal, 5).padding(
           .vertical, 1
         ).background(theme.color(.highlight), in: Capsule())
       }
     }
-    .foregroundStyle(theme.color(selected ? .primary : .text))
-    .padding(.horizontal, 12).frame(height: 32)
+    .foregroundStyle(theme.color(selected ? .textAccent : .text))
+    .padding(.horizontal, 16).frame(minHeight: minimumHeight)
     .background(
       theme.color(selected ? .primary : .surface).opacity(selected ? 0.08 : 1), in: Capsule()
     )
     .overlay {
-      Capsule().strokeBorder(theme.color(selected ? .primary : .border), lineWidth: 0.75)
+      Capsule().strokeBorder(theme.color(selected ? .primary : .controlBorder), lineWidth: 1 / displayScale)
     }
   }
 }
 
 private struct UsageMeter: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let summary: Subscriptions.Summary?
   let name: String
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 5) {
         Circle().fill(theme.color(summary?.ready == true ? .success : .warning)).frame(
-          width: 7, height: 7)
-        Text(summary?.label(name) ?? "\(name) — · —").font(.system(size: 12.5)).foregroundStyle(
-          theme.color(.text)).lineLimit(1).truncationMode(.middle)
+          width: 8, height: 8)
+        Text(summary?.label(name) ?? "\(name) — · —").appFont(.secondary).monospacedDigit().foregroundStyle(
+          theme.color(.text)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
       }
       GeometryReader { geometry in
         Capsule().fill(theme.color(.highlight))

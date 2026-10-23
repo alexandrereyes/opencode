@@ -3,26 +3,27 @@ import UIKit
 
 @MainActor enum ResponseTextStyle {
   static func text(_ block: MarkdownBlock, theme: AppTheme,
-    rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:], tableHeader: Bool = false) -> NSMutableAttributedString {
+    rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:], tableHeader: Bool = false,
+    traits: UITraitCollection? = nil) -> NSMutableAttributedString {
     let result = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
     let code: Bool = { if case .code = block.kind { true } else { false } }()
     let summary: Bool = { if case .details = block.kind { true } else { false } }()
     for run in block.runs {
-      let size: CGFloat = run.superscript ? 12
-        : heading.map { [20.0, 18, 16, 14, 14, 14][min(5, max(0, $0 - 1))] }
-          ?? (run.code || code || block.kind == .table ? 14 : 16)
-      let weight: UIFont.Weight = heading != nil || run.strong || tableHeader || run.syntax == .function ? .semibold : summary ? .medium : .regular
-      let base = run.code || code ? UIFont.monospacedSystemFont(ofSize: size, weight: weight) : UIFont.systemFont(ofSize: size, weight: weight)
-      let font = run.emphasis ? UIFont(descriptor: base.fontDescriptor.withSymbolicTraits(base.fontDescriptor.symbolicTraits.union(.traitItalic)) ?? base.fontDescriptor, size: size) : base
+      let style: AppTextStyle = run.superscript ? .footnote
+        : heading.map { [.title, .heading, .message, .secondary, .secondary, .secondary][min(5, max(0, $0 - 1))] }
+          ?? (run.code || code || block.kind == .table ? .secondary : .body)
+      let weight: UIFont.Weight = heading != nil || run.strong || block.marker != nil || tableHeader || run.syntax == .function ? .semibold : summary ? .medium : .regular
+      let base = AppTypography.font(style, weight: weight, monospaced: run.code || code, compatibleWith: traits)
+      let font = run.emphasis ? UIFont(descriptor: base.fontDescriptor.withSymbolicTraits(base.fontDescriptor.symbolicTraits.union(.traitItalic)) ?? base.fontDescriptor, size: base.pointSize) : base
       let paragraph = NSMutableParagraphStyle()
-      paragraph.minimumLineHeight = heading == nil ? 26 : size * 1.3
-      paragraph.maximumLineHeight = heading == nil ? 0 : size * 1.3
+      paragraph.minimumLineHeight = AppTypography.lineHeight(heading == nil ? .body : style, compatibleWith: traits)
       if let marker = block.marker {
-        paragraph.headIndent = marker.width
-        paragraph.firstLineHeadIndent = marker.first ? 0 : marker.width
-        paragraph.tabStops = [NSTextTab(textAlignment: .left, location: marker.width)]
-        paragraph.defaultTabInterval = marker.width
+        let width = UIFontMetrics(forTextStyle: .body).scaledValue(for: max(24, marker.width), compatibleWith: traits)
+        paragraph.headIndent = width
+        paragraph.firstLineHeadIndent = marker.first ? 0 : width
+        paragraph.tabStops = [NSTextTab(textAlignment: .left, location: width)]
+        paragraph.defaultTabInterval = width
       }
       if block.kind == .table {
         paragraph.alignment = switch block.alignment { case .leading: .left; case .center: .center; case .trailing: .right }
@@ -33,15 +34,27 @@ import UIKit
         : heading != nil ? .markdownHeading
         : run.strong ? .markdownStrong
         : block.kind == .table ? (tableHeader ? .tableHeaderText : .tableText) : .markdownBody
-      let opacity = heading != nil ? 0.95 : run.code && !code ? 0.9 : block.kind == .table && !tableHeader ? 0.9 : 1
       var attributes: [NSAttributedString.Key: Any] = [
         .font: font, .paragraphStyle: paragraph,
-        .foregroundColor: theme.uiColor(role).withAlphaComponent(theme.value(role).opacity * opacity),
+        .foregroundColor: theme.uiColor(role),
       ]
       if run.strikethrough { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
       if run.superscript { attributes[.baselineOffset] = 6 }
       if let link = run.link, let url = URL(string: link),
-        ["http", "https", "mailto", "tel", "sms", "opencode-markdown"].contains(url.scheme) { attributes[.link] = url }
+        ["http", "https", "mailto", "tel", "sms", "opencode-markdown"].contains(url.scheme) {
+        attributes[.link] = url
+        attributes[.foregroundColor] = theme.uiColor(.markdownLink)
+      }
+      if let link = run.link, let path = FileReference.local(link) {
+        attributes[.link] = FileReference.link(path.removingPercentEncoding ?? path)
+        attributes[.foregroundColor] = theme.uiColor(.markdownLink)
+      }
+      if run.code, !code, run.link == nil, let url = FileReference.inlineURL(run.text) {
+        attributes[.link] = url
+        attributes[.foregroundColor] = theme.uiColor(.inlineCode)
+        attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        attributes[.underlineColor] = theme.uiColor(.inlineCode).withAlphaComponent(0.25)
+      }
       if let formula = run.formula, let metrics = formula.metrics {
         let attachment = NSTextAttachment()
         if let raster = rasters[ResponseFormulaKey(formula)] {
@@ -55,6 +68,11 @@ import UIKit
     if let checked = block.marker?.checked, block.marker?.first == true, result.length > 0 {
       let role: ThemeRole = checked ? .markdownTask : .markdownBody
       result.addAttribute(.foregroundColor, value: theme.uiColor(role), range: NSRange(location: 0, length: 1))
+    }
+    if block.marker?.first == true, let tab = result.string.firstIndex(of: "\t") {
+      let font = AppTypography.font(.body, weight: .semibold, compatibleWith: traits)
+      result.addAttribute(.font, value: UIFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .semibold),
+        range: NSRange(result.string.startIndex..<tab, in: result.string))
     }
     return result
   }

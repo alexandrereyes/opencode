@@ -19,7 +19,8 @@ import XCTest
           continue
         }
       }
-      list.swipeUp(velocity: .slow)
+      // Larger rows expose fewer sessions per page; search quickly until the target mounts.
+      list.swipeUp(velocity: row.exists ? .slow : .fast)
     }
     XCTFail("A sessão não ficou visível acima da barra de abas.")
   }

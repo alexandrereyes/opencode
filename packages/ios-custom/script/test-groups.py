@@ -17,9 +17,9 @@ signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-grupos-derived"
-evidence = temporary / "ios-grupos-prints"
-evidence.mkdir(exist_ok=True)
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-grupos2-derived"))
+evidence = Path(os.environ.get("OPENCODE_GROUP_EVIDENCE", temporary / "ios-grupos2-prints"))
+evidence.mkdir(parents=True, exist_ok=True)
 manifest = json.loads((home / "seed-conversation.json").read_text())
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
@@ -44,12 +44,17 @@ def assistant(parts, **fields):
     return message("assistant", agent="build", model=model,
         time={"created": now - 15000, "completed": now - 1000}, finish="tool-calls", content=parts, **fields)
 
-def tool(name, index, running=False):
+def tool(name, index, status="completed"):
+    running = status in ["running", "streaming"]
     inputs = {"glob": {"pattern": "docs/**/*.md"}, "grep": {"pattern": "exemplo", "path": "docs"},
-        "read": {"path": "docs/exemplo-" + str(index) + ".md"}, "shell": {"command": "printf 'verificação'"}}
+        "read": {"path": "docs/exemplo-" + str(index) + ".md"}, "shell": {"command": "printf 'verificação'"},
+        "patch": {"patchText": "*** Begin Patch\n*** Update File: docs/exemplo.md\n@@\n-antigo\n+novo\n*** End Patch"}}
+    metadata = {"files": [{"file": "docs/exemplo.md", "status": "modified", "additions": 1, "deletions": 1,
+        "before": "antigo\n", "after": "novo\n", "patch": "--- a/docs/exemplo.md\n+++ b/docs/exemplo.md\n@@ -1 +1 @@\n-antigo\n+novo"}]} if name == "patch" and status == "completed" else {}
     return {"type": "tool", "id": "tool_" + uuid.uuid4().hex, "name": name,
         "time": {"created": now - 4000, "ran": now - 3000, **({} if running else {"completed": now - 1000})},
-        "state": {"status": "running" if running else "completed", "input": inputs[name], "metadata": {},
+        "state": {"status": status, "input": inputs[name], "metadata": metadata,
+            **({"error": {"type": "tool.execution", "message": "Falha de exemplo"}} if status == "error" else {}),
             **({} if running else {"content": [{"type": "text", "text": "Resultado sintético de verificação."}]})}}
 
 def create(title, messages, directory=None):
@@ -66,17 +71,20 @@ def create(title, messages, directory=None):
 try:
     environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_TEST_THEME": theme}
     for role, running in [("FINISHED", False), ("RUNNING", True)]:
-        steps = [["glob", "read"], ["read"], ["grep"], ["read"] * 5, ["shell"], ["shell"]]
+        steps = json.loads((Path(__file__).parent / "fixtures/tool-groups.json").read_text())
         messages = [message("user", text="Confira os documentos de exemplo."), assistant([{"type": "text", "text": "Vou conferir os documentos e validar o resultado."}])]
         for index, names in enumerate(steps):
-            parts = ([{"type": "reasoning", "text": "Conferir os arquivos antes da validação.",
-                "time": {"created": now - 12000, "completed": now - 11000}}] if index == 0 else [])
-            parts += [tool(name, index * 5 + offset, running and index == len(steps) - 1) for offset, name in enumerate(names)]
+            parts = [{"type": "reasoning", "text": "Conferir os arquivos antes da validação.",
+                "time": {"created": now - 12000, "completed": now - 11000}} if name == "reasoning"
+                else tool(name.split(":")[0], index * 10 + offset,
+                    "running" if running and index == len(steps) - 1 else name.split(":")[1])
+                for offset, name in enumerate(names)]
             messages.append(assistant(parts))
         if not running:
             messages.append(assistant([{"type": "text", "text": "Conferência concluída. Os documentos estão consistentes."}]))
         session = create("Grupos — " + ("em execução" if running else "concluído"), messages)
         environment["OPENCODE_TEST_GROUP_" + role] = session
+    (evidence / "sessions.json").write_text(json.dumps({key: value for key, value in environment.items() if key.startswith("OPENCODE_TEST_GROUP_")}))
     for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1"),
         ("WORKING", "working"), ("HISTORY", "history"), ("PERMISSION", "permission"), ("QUESTION", "question")]:
         environment["OPENCODE_TEST_" + key] = next(s["id"] for s in manifest["sessions"] if s["role"] == role)
@@ -96,9 +104,14 @@ try:
     configuration.chmod(0o600)
     result = evidence / ("groups-" + theme + "-" + token + ".xcresult")
     command = ["xcodebuild", "test-without-building", "-xctestrun", str(configuration), "-destination",
-        "platform=iOS Simulator,name=OpenCode Grupos", "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
+        os.environ.get("OPENCODE_TEST_DESTINATION", "platform=iOS Simulator,name=OpenCode Grupos2"), "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
         "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "180", "-resultBundlePath", str(result)]
-    command += ["-only-testing:" + method for method in (sys.argv[1:] or ["OpenCodeUITests/ToolGroupingTests", "OpenCodeUITests/SessionReadingTests"])]
+    command += ["-only-testing:" + method for method in (sys.argv[1:] or [
+        "OpenCodeUITests/ToolGroupingTests",
+        "OpenCodeUITests/TranscriptCompatibilityTests/testToolsReasoningAndChildThroughBothTransports",
+        "OpenCodeUITests/ReadingContinuityTests/testParentChildEdgeSwipeAndExpansion",
+        "OpenCodeUITests/SessionReadingTests",
+    ])]
     status = subprocess.call(command)
     attachments = evidence / ("attachments-" + theme + "-" + token)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(attachments)], check=True)

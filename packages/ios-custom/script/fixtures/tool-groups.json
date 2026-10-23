@@ -1,0 +1,21 @@
+[
+  ["reasoning", "patch:completed"],
+  ["reasoning", "shell:completed"],
+  ["reasoning", "patch:completed"],
+  ["shell:completed"],
+  ["reasoning", "patch:completed"],
+  ["reasoning", "read:completed"],
+  ["shell:completed"],
+  ["reasoning", "read:completed", "read:completed", "read:completed", "read:completed", "read:completed", "read:completed"],
+  ["reasoning", "patch:completed"],
+  ["reasoning", "patch:completed"],
+  ["reasoning", "shell:completed", "shell:completed", "shell:completed", "shell:completed"],
+  ["reasoning", "patch:completed"],
+  ["reasoning", "shell:completed", "shell:completed", "shell:completed", "shell:completed"],
+  ["shell:completed"],
+  ["reasoning", "read:completed", "read:completed", "shell:completed", "shell:completed"],
+  ["reasoning", "grep:completed"],
+  ["reasoning", "shell:completed"],
+  ["reasoning", "patch:error"],
+  ["patch:completed"]
+]

@@ -3,19 +3,23 @@ import ImageIO
 import zlib
 
 public enum AttachmentImage {
-  public static func thumbnail(_ data: Data, maxPixelSize: Int) -> CGImage? {
-    guard maxPixelSize > 0, validPNG(data),
+  public static func thumbnail(_ data: Data, maxPixelSize: Int?) -> CGImage? {
+    guard (maxPixelSize ?? 1) > 0, validPNG(data),
       let source = CGImageSourceCreateWithData(
         data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
       CGImageSourceGetStatus(source) == .statusComplete
     else { return nil }
+    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    let dimension = max(properties?[kCGImagePropertyPixelWidth] as? Int ?? 0,
+      properties?[kCGImagePropertyPixelHeight] as? Int ?? 0)
+    guard let size = maxPixelSize ?? (dimension > 0 ? dimension : nil) else { return nil }
     return CGImageSourceCreateThumbnailAtIndex(
       source, 0,
       [
         kCGImageSourceCreateThumbnailFromImageAlways: true,
         kCGImageSourceCreateThumbnailWithTransform: true,
         kCGImageSourceShouldCacheImmediately: true,
-        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        kCGImageSourceThumbnailMaxPixelSize: size,
       ] as CFDictionary)
   }
 

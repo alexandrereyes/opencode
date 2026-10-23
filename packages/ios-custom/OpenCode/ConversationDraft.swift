@@ -14,10 +14,17 @@ extension ComposerDocument {
       .composerToken, in: NSRange(location: 0, length: attributed.length)
     ) { value, range, _ in
       guard let data = value as? Data,
-        let token = try? JSONDecoder().decode(ComposerToken.self, from: data),
-        (attributed.string as NSString).substring(with: range) == token.text
+        let token = try? JSONDecoder().decode(ComposerToken.self, from: data)
       else { return }
-      tokens.append(.init(start: range.location, end: NSMaxRange(range), token: token))
+      let length = token.text.utf16.count
+      guard length > 0, range.length % length == 0,
+        (attributed.string as NSString).substring(with: range)
+          == String(repeating: token.text, count: range.length / length)
+      else { return }
+      // Foundation merges neighboring equal attributes, including repeated identical tokens.
+      for start in stride(from: range.location, to: NSMaxRange(range), by: length) {
+        tokens.append(.init(start: start, end: start + length, token: token))
+      }
     }
   }
   var attributed: NSAttributedString {
@@ -44,15 +51,42 @@ extension ComposerTokenKind {
 }
 
 @MainActor @Observable final class ConversationDraft {
-  var text = NSAttributedString() { didSet { changed() } }
+  @ObservationIgnored private(set) var editorText = NSAttributedString()
+  // Native edits publish contentRevision without echoing storage/selection back into TextKit.
+  private(set) var sourceRevision = 0
+  private(set) var contentRevision = 0
+  var text: NSAttributedString {
+    get { document.attributed }
+    set {
+      editorText = ComposerDocument(attributed: newValue).editorAttributed()
+      sourceRevision += 1
+      contentRevision += 1
+      changed()
+    }
+  }
+  var hasText: Bool {
+    _ = contentRevision
+    return (editorText.string as NSString).rangeOfCharacter(from: .whitespacesAndNewlines.inverted).location != NSNotFound
+  }
+  var isEmpty: Bool { _ = contentRevision; return editorText.length == 0 }
   var model: ModelReference? { didSet { changed() } }
   var newSession: NewSessionContext? { didSet { changed() } }
   var agent: String? { didSet { changed() } }
   var attachments: [DraftAttachment] = [] { didSet { changed() } }
   var quotes: [ChatQuote] = [] { didSet { changed() } }
+  var revertedContext: RevertedContext? { didSet { changed() } }
   var commenting: ChatQuote?
+  // Editor UTF-16 offsets; snapshots convert the cursor to the persisted label offsets.
   var selection = NSRange(location: 0, length: 0)
   var focused = false
+  // Presentation is runtime-only, including transfer after a failed new-session send.
+  var expanded = false
+  private(set) var sendRevision = 0
+  func didSend() {
+    sendRevision += 1
+    focused = false
+    expanded = false
+  }
   var focusSuppressed = false
   @ObservationIgnored weak var input: ComposerInputView?
   var editorOwner: UUID?
@@ -69,35 +103,41 @@ extension ComposerTokenKind {
   let persistence: DraftPersistence
   @ObservationIgnored private var saving: Task<Void, Never>?
   @ObservationIgnored private var restoring = false
+  @ObservationIgnored private var deleted = false
 
   init(server: String, id: String) { persistence = DraftPersistence(server: server, sessionID: id) }
-  var document: ComposerDocument { ComposerDocument(attributed: text) }
+  var document: ComposerDocument { _ = contentRevision; return ComposerDocument(editor: editorText) }
   var snapshot: DraftSnapshot {
-    .init(
+    let document = self.document
+    return .init(
       document: document, attachments: attachments, model: model, agent: agent,
-      cursor: selection.location, replacing: replacing, quotes: quotes, newSession: newSession)
+      cursor: document.documentOffset(selection.location), replacing: replacing, quotes: quotes, newSession: newSession,
+      revertedContext: revertedContext)
   }
   var trigger: ComposerTrigger? {
-    guard focused, selection.length == 0 else { return nil }
-    let trigger = ComposerTrigger.detect(in: document, cursor: selection.location)
+    guard focused, selection.length == 0, input?.markedTextRange == nil else { return nil }
+    _ = contentRevision
+    let trigger = ComposerTrigger.detect(in: editorText.string as NSString, cursor: selection.location)
     return trigger == dismissedTrigger ? nil : trigger
   }
   func load() async {
-    guard !restored else { return }
+    guard !restored, !deleted else { return }
     restored = true
     restoring = true
     defer { restoring = false }
     do {
       let (value, dropped) = try await persistence.load()
+      guard !deleted else { return }
       if let value {
         text = value.document.attributed
         attachments = value.attachments
         quotes = value.quotes
+        revertedContext = value.revertedContext
         model = value.model
         newSession = value.newSession
         agent = value.agent
         replacing = value.replacing
-        selection = NSRange(location: min(value.cursor, text.length), length: 0)
+        selection = NSRange(location: value.document.editorOffset(value.cursor), length: 0)
       }
       if dropped {
         persistenceError =
@@ -107,13 +147,14 @@ extension ComposerTokenKind {
     } catch { persistenceError = "Não foi possível restaurar o rascunho." }
   }
   func persist() async {
+    guard !deleted else { return }
     saving?.cancel()
     do { try await persistence.save(snapshot) } catch {
       persistenceError = "Não foi possível salvar o rascunho."
     }
   }
   private func changed() {
-    guard restored, !restoring else { return }
+    guard restored, !restoring, !deleted else { return }
     saving?.cancel()
     saving = Task {
       do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
@@ -121,31 +162,64 @@ extension ComposerTokenKind {
     }
   }
   func insert(_ token: ComposerToken, replacing range: NSRange) {
-    let value = NSMutableAttributedString(attributedString: text)
-    value.replaceCharacters(
-      in: range,
-      with: ComposerDocument(
+    let value = NSMutableAttributedString(attributedString: ComposerDocument(
         text: token.text,
         tokens: [.init(start: 0, end: token.text.utf16.count, token: token)]
-      ).attributed)
-    value.insert(NSAttributedString(string: " "), at: range.location + token.text.utf16.count)
-    selection = NSRange(location: range.location + token.text.utf16.count + 1, length: 0)
-    text = value
+      ).editorAttributed(theme: input?.composerTheme ?? .selected))
+    value.append(NSAttributedString(string: " ", attributes: input?.plainAttributes))
+    replace(range, with: value)
     dismissedTrigger = nil
     focused = true
   }
+  func discard() async throws {
+    revertedContext = nil
+    deleted = true
+    saving?.cancel()
+    await saving?.value
+    focused = false
+    text = NSAttributedString()
+    attachments = []
+    quotes = []
+    commenting = nil
+    editing = nil
+    replacing = nil
+    selection = NSRange(location: 0, length: 0)
+    submission = nil
+    submissionDocument = nil
+    try await persistence.remove()
+  }
   func insertTrigger(_ marker: String) {
-    let value = NSMutableAttributedString(attributedString: text)
-    let position = marker == "/" ? 0 : min(selection.location, value.length)
+    let position = marker == "/" ? 0 : min(selection.location, editorText.length)
     let separator =
-      position > 0 && !(value.string as NSString).substring(to: position).hasSuffix(" ") ? " " : ""
-    value.insert(NSAttributedString(string: separator + marker), at: position)
-    selection = NSRange(location: position + separator.utf16.count + 1, length: 0)
-    text = value
+      position > 0 && (editorText.string as NSString).character(at: position - 1) != 32 ? " " : ""
+    replace(NSRange(location: position, length: 0), with: NSAttributedString(string: separator + marker, attributes: input?.plainAttributes))
     focused = true
     dismissedTrigger = nil
   }
   func dismissSuggestions() { dismissedTrigger = trigger }
+  func receiveEditor(_ view: ComposerInputView) {
+    guard view.representedDraft === self, view.representedRevision == sourceRevision else {
+      contentRevision += 1
+      return
+    }
+    editorText = view.textStorage
+    selection = view.selectedRange
+    contentRevision += 1
+    changed()
+  }
+  func replace(_ range: NSRange, with value: NSAttributedString) {
+    if let input, input.representedDraft === self, input.representedRevision == sourceRevision {
+      input.replaceCharacters(in: range, with: value)
+      return
+    }
+    let result = NSMutableAttributedString(attributedString: editorText)
+    result.replaceCharacters(in: range, with: value)
+    editorText = result
+    selection = NSRange(location: range.location + value.length, length: 0)
+    sourceRevision += 1
+    contentRevision += 1
+    changed()
+  }
   func remove(_ attachment: DraftAttachment) {
     attachments.removeAll { $0.id == attachment.id }
     Task {
@@ -154,6 +228,7 @@ extension ComposerTokenKind {
     }
   }
   func clear() async {
+    revertedContext = nil
     text = NSAttributedString()
     attachments = []
     quotes = []
@@ -174,9 +249,10 @@ extension ComposerTokenKind {
     }
   }
   func restore(_ item: InboxItem) {
+    revertedContext = nil
     text = ComposerDocument(restoring: item.payload).attributed
     quotes = ChatQuote.read(item.payload.metadata?["quotes"])
-    selection = NSRange(location: text.length, length: 0)
+    selection = NSRange(location: editorText.length, length: 0)
     attachments = (item.payload.metadata?["attachments"]?.array ?? []).compactMap { value in
       guard let object = value.object, let name = object["name"]?.string,
         let mime = object["mime"]?.string, let path = object["path"]?.string
@@ -257,5 +333,12 @@ extension ComposerTokenKind {
     let draft = ConversationDraft(server: server, id: id)
     values[id] = draft
     return draft
+  }
+  func remove(_ ids: Set<String>) async throws {
+    for id in ids {
+      // Keep an empty, disabled draft until this runtime ends: disappearing editors
+      // can still hold it or ask for it while NavigationStack is animating away.
+      try await draft(id).discard()
+    }
   }
 }

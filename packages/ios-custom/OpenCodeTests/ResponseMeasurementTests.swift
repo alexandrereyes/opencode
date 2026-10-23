@@ -34,4 +34,21 @@ import XCTest
     XCTAssertLessThan(view.fittingSize(width: 300).height, first.height)
   }
 
+  func testTextMeasurementInvalidatesWhenDynamicTypeChanges() throws {
+    let block = try XCTUnwrap(MarkdownBlocks.parse(String(repeating: "Texto com palavras e **ênfase**. ", count: 15)).first)
+    let view = ResponseTextView(frame: .zero, textContainer: nil)
+    view.isScrollEnabled = false
+    view.textContainerInset = .zero
+    view.textContainer.lineFragmentPadding = 0
+    let coordinator = SelectableResponseText.Coordinator()
+    SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected,
+      contentSizeOverride: .large).configure(view, coordinator: coordinator)
+    let first = view.fittingSize(width: 300)
+    XCTAssertEqual(view.measuredSizes.count, 1)
+    SelectableResponseText(block: block, messageID: "message", partID: "part", theme: .selected,
+      contentSizeOverride: .accessibilityExtraExtraExtraLarge).configure(view, coordinator: coordinator)
+    XCTAssertTrue(view.measuredSizes.isEmpty)
+    XCTAssertGreaterThan(view.fittingSize(width: 300).height, first.height)
+  }
+
 }

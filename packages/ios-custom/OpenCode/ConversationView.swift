@@ -127,6 +127,8 @@ struct ConversationView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.voiceController) private var voice
+  @Environment(\.floatingVoice) private var floatingVoice
   @State private var conversation: ConversationStore
   @State private var atBottom = true
   @State private var selectionPaused = false
@@ -139,6 +141,7 @@ struct ConversationView: View {
   @State private var renameOpen = false
   @State private var renameTitle = ""
   @State private var archiveOpen = false
+  @State private var deleteCandidate: Session?
   @State private var search = ConversationSearchState()
   @State private var requestedTool: String?
   @State private var savedPosition: ReadingPosition?
@@ -166,7 +169,8 @@ struct ConversationView: View {
     _atBottom = State(initialValue: initialFollowTail && toolID == nil)
     let conversation = ConversationStore(
         id: id, client: sessions.client, hub: sessions.hub,
-        expansions: sessions.expansions, catalog: sessions.catalog)
+        expansions: sessions.expansions, catalog: sessions.catalog,
+        reversion: sessions.reversions.value(id, client: sessions.client))
     conversation.masterMode = master
     _conversation = State(initialValue: conversation)
   }
@@ -206,21 +210,39 @@ struct ConversationView: View {
         Button {
           Task { await conversation.refresh() }
         } label: {
-          Label(error, systemImage: "arrow.clockwise").font(.caption).foregroundStyle(
+          Label(error, systemImage: "arrow.clockwise").appFont(.caption).foregroundStyle(
             theme.color(.error)
           ).padding(10)
         }
       }
       timeline.toastOverlay(conversation.toast)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { conversation.mcps.transcriptFrame = $0 }
+        .highPriorityGesture(TapGesture().onEnded { conversation.mcps.close() },
+          including: conversation.mcps.isOpen ? .all : .none)
         .simultaneousGesture(
           TapGesture().onEnded {
             sessions.drafts.draft(conversation.id).dismissSuggestions()
             sessions.drafts.draft(conversation.id).focused = false
-          })
+          }, including: conversation.mcps.isOpen ? .none : .all)
+      if floatingVoice?.visible(voice) == true {
+        FloatingVoiceHost(sessions: sessions).padding(.horizontal, 12).padding(.top, 8)
+      }
       bottomArea
     }
     .background(theme.color(.background))
+    .modifier(ConversationMCPOverlay(store: conversation.mcps))
+    .modifier(FileViewerHost())
     .environment(conversation.toast)
+    .environment(\.userMessageRevert, conversation.isChild ? nil : UserMessageRevertAction(
+      pending: sessions.drafts.draft(conversation.id).sending
+        || sessions.drafts.draft(conversation.id).importing,
+      revert: { id in
+        guard let message = conversation.messages.first(where: { $0.id == id && $0.type == "user" }) else { return }
+        Task {
+          await conversation.reversion.perform(target: message, store: conversation,
+            draft: sessions.drafts.draft(conversation.id))
+        }
+      }))
     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { promptViewportHeight = $0 }
     .environment(\.conversationImages, conversation.session.map {
       ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
@@ -261,6 +283,9 @@ struct ConversationView: View {
       else { scrollState.correctAnchor() }
     }))
     .toolbar(.hidden, for: .navigationBar, .tabBar)
+    .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in
+      conversation.updateActivity()
+    }
     .sheet(isPresented: $agentsOpen) {
       ConversationAgentsSheet(store: conversation) { work in
         if let id = work.sessionID {
@@ -300,6 +325,7 @@ struct ConversationView: View {
     } message: {
       Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
     }
+    .sessionDeleteConfirmation($deleteCandidate, store: sessions)
     .onChange(of: search.query) { _, _ in
       search.cancelPaging()
       search.update(conversation, reset: true)
@@ -311,6 +337,14 @@ struct ConversationView: View {
     .task(id: conversation.session) {
       if screenVisible { await conversation.presented() }
     }
+    .task(id: conversation.session?.location.directory) {
+      await conversation.mcps.load(directory: conversation.session?.location.directory)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+      conversation.mcps.close()
+    }
+    .onChange(of: sessions.drafts.draft(conversation.id).expanded) { _, _ in conversation.mcps.close() }
+    .onChange(of: sessions.drafts.draft(conversation.id).trigger) { _, _ in conversation.mcps.close() }
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
       screenVisible = true
@@ -318,6 +352,7 @@ struct ConversationView: View {
       scrollState.correctAnchor()
     }
     .onDisappear {
+      conversation.mcps.close()
       search.cancelPaging()
       leavePosition()
       restorationTask?.cancel()
@@ -338,7 +373,7 @@ struct ConversationView: View {
       if search.open {
         ConversationSearchBar(search: search, store: conversation)
       } else if conversation.notice != nil {
-        Text("Envio indisponível até resolver o aviso acima.").font(.footnote)
+        Text("Envio indisponível até resolver o aviso acima.").appFont(.caption)
           .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
       } else {
         VStack(spacing: 8) {
@@ -348,13 +383,17 @@ struct ConversationView: View {
                 leavePosition()
                 dismiss()
               } else { openChild(parent) }
-            }.font(.caption).foregroundStyle(theme.color(.textSecondary))
+            }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
           ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
+            .anchorPreference(key: MCPComposerAnchorKey.self, value: .bounds) { $0 }
             .disabled(!conversation.ready)
+          if !sessions.drafts.draft(conversation.id).expanded, let usage = conversation.sessionUsage {
+            ConversationUsageBar(usage: usage) { detailsOpen = true }
+          }
         }
-        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6).background(
+        .padding(.horizontal, AppLayout.margin).padding(.top, 8).padding(.bottom, 6).background(
           theme.color(.background))
       }
     }
@@ -369,6 +408,7 @@ struct ConversationView: View {
           Button("Cancelar") {
             search.close()
           }
+          .accessibilityIdentifier("conversation-search-close")
         }.padding(.horizontal, 16).padding(.vertical, 8)
       } else { normalHeader }
     }.background(theme.color(.background))
@@ -379,7 +419,7 @@ struct ConversationView: View {
         leavePosition()
         dismiss()
       } label: {
-        Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium)).frame(
+        Image(systemName: "chevron.left").appSymbol(.navigation).frame(
           width: 36, height: 36
         ).glassEffect(.regular.interactive(), in: .circle)
       }
@@ -389,7 +429,7 @@ struct ConversationView: View {
         let colors = theme.avatar(SessionList.avatarColor(project, fallback: session.projectID))
         let monogram = SessionList.monogram(chat || project?.vcs == nil ? session.displayTitle : project?.displayName ?? session.displayTitle)
         Button {
-          contextOpen = true
+          detailsOpen = true
         } label: {
           ZStack {
             Circle().stroke(theme.color(.contextTrack), lineWidth: 2.5)
@@ -404,11 +444,12 @@ struct ConversationView: View {
             Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
             if master {
               Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 18)).foregroundStyle(theme.color(.accent))
+                .appSymbol(.action).foregroundStyle(theme.color(.accent))
             } else {
-              Text(monogram).font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+              Text(monogram).appFont(.message, weight: .medium).foregroundStyle(colors.text)
+                .lineLimit(1).minimumScaleFactor(0.5)
             }
-          }.frame(width: 38, height: 38)
+          }.frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
@@ -418,14 +459,13 @@ struct ConversationView: View {
         .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
       VStack(alignment: .leading, spacing: 4) {
-        Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa").font(
-          .system(size: 14, weight: .semibold)
-        ).lineLimit(1)
+        Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa")
+          .appFont(.heading, weight: .semibold).lineLimit(1)
         if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
           Text(
             "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
           )
-          .font(.system(size: 11)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+          .appFont(.caption).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
           .accessibilityIdentifier("conversation-header-subtitle")
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
@@ -435,7 +475,7 @@ struct ConversationView: View {
         } label: {
           HStack(spacing: 6) {
             AgentPixels(color: theme.color(.success), size: 16)
-            Text("\(conversation.runningCount)").font(.system(size: 13))
+            Text("\(conversation.runningCount)").appFont(.secondary).monospacedDigit()
           }
           .padding(.horizontal, 9).frame(height: 36).glassEffect(
             .regular.interactive(), in: .capsule)
@@ -456,6 +496,7 @@ struct ConversationView: View {
       ConversationOptionsMenu(
         sessionID: conversation.id, available: conversation.session != nil,
         canArchive: conversation.session?.parentID == nil, archiving: conversation.acting.contains("archive"),
+        deleting: sessions.busy.contains(conversation.id),
         theme: theme,
         actions: .init(search: {
           sessions.drafts.draft(conversation.id).focused = false
@@ -471,11 +512,15 @@ struct ConversationView: View {
           }
           #endif
           detailsOpen = true
-        }, archive: { archiveOpen = true }))
+        }, archive: { archiveOpen = true }, delete: conversation.id == sessions.masterID ? nil : {
+          sessions.drafts.draft(conversation.id).focused = false
+          Haptics.play(.warning)
+          deleteCandidate = conversation.session
+        }))
         .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
       }
     }
-    .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
+    .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 12)
     .background(theme.color(.background))
   }
   private var timeline: some View {
@@ -488,7 +533,7 @@ struct ConversationView: View {
             if conversation.paging || restoring {
               ProgressView().controlSize(.small)
             } else {
-              Button("Mensagens anteriores") { loadOlder() }.font(.caption)
+              Button("Mensagens anteriores") { loadOlder() }.appFont(.caption)
                 .foregroundStyle(theme.color(.textSecondary))
             }
             Spacer()
@@ -521,7 +566,7 @@ struct ConversationView: View {
               }
               .padding(.vertical, 10)
               .background(theme.color(.background))
-              .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 0, trailing: AppLayout.margin))
               .listRowSeparator(.hidden)
               .listRowBackground(theme.color(.background))
               .id(message.id)
@@ -535,7 +580,7 @@ struct ConversationView: View {
                 scrollState.correctAnchor()
                 viewport.stickyHeight = scrollState.usableTop
               }
-              .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+              .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 0, trailing: AppLayout.margin))
               .listRowSeparator(.hidden)
               .listRowBackground(theme.color(.background))
             }
@@ -569,7 +614,7 @@ struct ConversationView: View {
         ForEach(conversation.family?.permissions ?? []) { request in
           ConversationPermissionCard(request: request, store: conversation)
             .padding(.vertical, 10)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 0, trailing: AppLayout.margin))
             .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
             .id(request.id)
         }
@@ -578,7 +623,7 @@ struct ConversationView: View {
         ) { form in
           ConversationQuestionCard(form: form, store: conversation)
             .padding(.vertical, 10)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 0, leading: AppLayout.margin, bottom: 0, trailing: AppLayout.margin))
             .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
             .id(form.id)
         }
@@ -609,6 +654,7 @@ struct ConversationView: View {
       .onScrollPhaseChange { _, phase in
         // Tracking also includes taps on the overlaid controls, not just scrolling.
         if phase == .interacting || phase == .decelerating {
+          conversation.mcps.close()
           cancelRestoration()
           userScrolling = true
           atBottom = false
@@ -721,7 +767,7 @@ struct ConversationView: View {
           viewport: viewport, offersResume: resumeOffered,
           resume: { restore(savedPosition, proxy: proxy) })
       }
-      .overlay { if conversation.loading { ProgressView("Carregando conversa…").font(.footnote) } }
+      .overlay { if conversation.loading { ProgressView("Carregando conversa…").appFont(.caption) } }
       #if DEBUG
       .overlay(alignment: .bottomLeading) {
         if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMeasureGrowth") {
@@ -775,6 +821,7 @@ struct ConversationView: View {
     }
   }
   private func capturePosition() {
+    guard !sessions.deletedIDs.contains(conversation.id) else { return }
     guard screenVisible, conversation.ready, !firstLoad, !restoring, !resumeOffered else { return }
     // Restoring and layout are not new reading intent, including navigation's
     // safe-area changes. Never persist a drifted copy of a restored bookmark.
@@ -916,7 +963,7 @@ struct ConversationView: View {
     )
   }
   private func day(_ milliseconds: Double) -> some View {
-    Text(ConversationProjection.day(milliseconds)).font(.system(size: 11, weight: .medium))
+    Text(ConversationProjection.day(milliseconds)).appFont(.footnote, weight: .medium)
       .foregroundStyle(theme.color(.textSecondary))
       .padding(.horizontal, 10).padding(.vertical, 5).background(
         theme.color(.codeSurface), in: Capsule()
@@ -941,7 +988,7 @@ private struct StickyUserHeader: View {
   let maximumTextHeight: CGFloat
   var body: some View {
     UserBubble(message: message, maximumTextHeight: maximumTextHeight)
-    .padding(.vertical, 6).padding(.horizontal, 16)
+    .padding(.vertical, 8).padding(.horizontal, AppLayout.margin)
     .background {
       // Native List headers inset their SwiftUI content. Paint beyond those margins,
       // otherwise the pinned backdrop cuts a rectangular hole in the response below.
@@ -962,8 +1009,8 @@ private struct ConversationMessageView: View {
   let rows: [ConversationActivityRow]
   let openChild: (String) -> Void
   var body: some View {
-    VStack(alignment: .leading, spacing: 15) {
-      if message.type == "assistant" {
+    VStack(alignment: .leading, spacing: 16) {
+      if message.type == "assistant" || !rows.isEmpty {
         ForEach(rows) { row in
           if row.kind == .text, let entry = row.parts.first {
             VStack(alignment: .leading, spacing: 12) {
@@ -972,42 +1019,46 @@ private struct ConversationMessageView: View {
                   .accessibilityHidden(true)
               }
               ResponseMarkdown(text: entry.part.text ?? "", messageID: entry.messageID, partID: entry.id)
+                .environment(\.responseFilesStable, store.messages.first { $0.id == entry.messageID }?.time.completed != nil)
             }
+          } else if row.kind == .divider {
+            Rectangle().fill(theme.color(.borderStrong)).frame(height: 1).accessibilityHidden(true)
           } else if !row.parts.isEmpty {
             ConversationStep(
               parts: row.parts.map(\.part), id: row.id, store: store,
-              openChild: openChild, references: row.parts, grouped: row.kind == .group, busy: row.pending)
+              openChild: openChild, references: row.parts, items: row.items, grouped: row.kind == .group, busy: row.pending)
           }
         }
         if let error = message.error {
-          Text(error.object?["message"]?.string ?? error.formatted).font(.footnote).foregroundStyle(
+          Text(error.object?["message"]?.string ?? error.formatted).appFont(.caption).foregroundStyle(
             theme.color(.error))
         }
         if let retry = message.retry {
-          Text("Nova tentativa \(Int(retry.object?["attempt"]?.number ?? 0)) agendada").font(
-            .footnote
-          ).foregroundStyle(theme.color(.warning))
+          Text("Nova tentativa \(Int(retry.object?["attempt"]?.number ?? 0)) agendada")
+            .appFont(.caption).foregroundStyle(theme.color(.warning))
         }
         if footer {
-          HStack(spacing: 10) {
-            Text(ConversationProjection.footer(message, models: store.displayModels)).font(
-              .system(size: 11))
-            Button {
-              UIPasteboard.general.string = store.responseText(endingAt: message.id)
-              Haptics.play(.selection)
-              store.toast.show("Resposta copiada")
-            } label: {
-              Image(systemName: "doc.on.doc").font(.system(size: 13))
-            }
-            .buttonStyle(.plain).accessibilityLabel("Copiar resposta")
-          }.foregroundStyle(theme.color(.textSecondary))
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+              Text(ConversationProjection.footer(message, models: store.displayModels))
+                .appFont(.caption).monospacedDigit()
+              Button {
+                UIPasteboard.general.string = store.responseText(endingAt: message.id)
+                Haptics.play(.selection)
+                store.toast.show("Resposta copiada")
+              } label: {
+                Image(systemName: "doc.on.doc").appSymbol(.inline)
+              }
+              .buttonStyle(.plain).accessibilityLabel("Copiar resposta")
+            }.foregroundStyle(theme.color(.textSecondary))
+          }
         }
       } else if message.type == "shell" {
         ConversationStep(parts: message.tools, id: message.id, store: store, openChild: openChild)
       } else if message.type != "idle" || message.outcome == "interrupted"
         || message.outcome == "failed"
       {
-        Text(message.notice).font(.system(size: 12)).foregroundStyle(
+        Text(message.notice).appFont(.caption).foregroundStyle(
           theme.color(message.type == "idle" ? .warning : .textSecondary)
         )
         .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)

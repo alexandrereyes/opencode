@@ -8,13 +8,11 @@ struct ConversationPermissionCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       HStack(alignment: .top, spacing: 12) {
-        Image(systemName: "shield.fill").font(.title3).foregroundStyle(theme.color(.error))
+        Image(systemName: "shield.fill").appSymbol(.navigation).foregroundStyle(theme.color(.error))
         VStack(alignment: .leading, spacing: 6) {
-          Text("Quer rodar:").font(.subheadline.weight(.semibold)).foregroundStyle(
+          Text("Quer rodar:").appFont(.preview, weight: .semibold).foregroundStyle(
             theme.color(.error))
-          Text(request.resources.first ?? request.action).font(
-            .system(size: 13, design: .monospaced)
-          )
+          Text(request.resources.first ?? request.action).appFont(.caption, design: .monospaced)
           .foregroundStyle(theme.color(.text)).textSelection(.enabled)
         }
         Spacer(minLength: 0)
@@ -50,7 +48,7 @@ struct RequestButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var enabled
   var filled: Bool
   func makeBody(configuration: Configuration) -> some View {
-    configuration.label.font(.system(size: 14, weight: .medium)).padding(.horizontal, 18).padding(
+    configuration.label.appFont(.secondary, weight: .medium).padding(.horizontal, 18).padding(
       .vertical, 11
     )
     .foregroundStyle(theme.color(filled ? .onFilledButton : .text))
@@ -73,11 +71,11 @@ struct ConversationQuestionCard: View {
         form.title == "Questions" ? "Uma pergunta para você" : form.title,
         systemImage: "questionmark.bubble"
       )
-      .font(.subheadline.weight(.semibold)).foregroundStyle(theme.color(.info))
+      .appFont(.preview, weight: .semibold).foregroundStyle(theme.color(.info))
       ForEach(form.fields.filter { QuestionReply.visible($0, values: reply.answer) }) { field in
         VStack(alignment: .leading, spacing: 10) {
-          if let title = field.title { Text(title).font(.subheadline.weight(.semibold)) }
-          if let description = field.description { Text(description).font(.subheadline) }
+          if let title = field.title { Text(title).appFont(.preview, weight: .semibold) }
+          if let description = field.description { Text(description).appFont(.preview) }
           ForEach(field.options ?? []) { option in
             Button {
               if field.type == .multiselect {
@@ -100,9 +98,9 @@ struct ConversationQuestionCard: View {
                 .foregroundStyle(
                   theme.color(selected(option.value, field: field) ? .primary : .textSecondary))
                 VStack(alignment: .leading, spacing: 3) {
-                  Text(option.label).font(.subheadline.weight(.medium))
+                  Text(option.label).appFont(.preview, weight: .medium)
                   if let description = option.description {
-                    Text(description).font(.caption).foregroundStyle(theme.color(.textSecondary))
+                    Text(description).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
                   }
                 }
                 Spacer()
@@ -119,7 +117,7 @@ struct ConversationQuestionCard: View {
                   return field.options?.contains { $0.value == text } == true ? "" : text
                 }, set: { values[field.key] = .string($0) })
             )
-            .font(.subheadline).padding(11).background(
+            .appFont(.preview).padding(11).background(
               theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
           }
           if field.type == .multiselect && field.custom == true {
@@ -129,7 +127,7 @@ struct ConversationQuestionCard: View {
               }, id: \.self
             ) { value in
               HStack {
-                Text(value).font(.subheadline)
+                Text(value).appFont(.preview)
                 Spacer()
                 Button("Remover", systemImage: "xmark") {
                   values[field.key] = .array(
@@ -151,11 +149,11 @@ struct ConversationQuestionCard: View {
                 custom[field.key] = ""
               }.disabled(
                 (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }.font(.subheadline).padding(11).background(
+            }.appFont(.preview).padding(11).background(
               theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
           }
           if field.type != .string && field.type != .multiselect {
-            Text("Este tipo de pergunta ainda não é compatível.").font(.caption).foregroundStyle(
+            Text("Este tipo de pergunta ainda não é compatível.").appFont(.caption).foregroundStyle(
               theme.color(.warning))
           }
         }
@@ -198,16 +196,16 @@ struct ConversationTray: View {
             Text(
               "\(store.modelLabel(store.session?.model).components(separatedBy: " · ").first ?? "Agente") · trabalhando"
             )
-            .font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.85)
+            .appFont(.footnote).lineLimit(1).minimumScaleFactor(0.85).monospacedDigit()
             Spacer(minLength: 0)
             if store.canBackground {
               Button("Background") { Task { await store.background() } }
-                .font(.system(size: 11)).disabled(store.acting.contains("background"))
+                .appFont(.footnote).disabled(store.acting.contains("background"))
             }
             Button {
               Task { await store.stop() }
             } label: {
-              Label("Parar", systemImage: "stop.fill").font(.system(size: 12))
+              Label("Parar", systemImage: "stop.fill").appFont(.footnote)
             }.padding(8).overlay {
               RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.controlBorder))
             }
@@ -222,9 +220,9 @@ struct ConversationTray: View {
                 HStack(alignment: .top, spacing: 10) {
                   Image(systemName: "clock").foregroundStyle(theme.color(.textSecondary))
                   VStack(alignment: .leading, spacing: 7) {
-                    Text(item.payload.displayText).font(.system(size: 13)).lineLimit(2)
+                    Text(item.payload.displayText).appFont(.caption).lineLimit(2)
                     Button("Enviar agora") { Task { await store.promote(item) } }
-                      .font(.system(size: 12, weight: .medium)).foregroundStyle(
+                      .appFont(.footnote, weight: .medium).foregroundStyle(
                         theme.color(.primary))
                   }.frame(maxWidth: .infinity, alignment: .leading)
                   Button {

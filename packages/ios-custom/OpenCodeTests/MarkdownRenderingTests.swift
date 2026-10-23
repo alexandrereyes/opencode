@@ -46,7 +46,7 @@ import XCTest
   func testHeadingScaleLineRhythmAndTypedRolesInBothThemes() throws {
     for id in ["openchamber-dark", "openchamber-light"] {
       let theme = AppTheme.load(id)
-      for (level, size) in [(1, 20.0), (2, 18), (3, 16), (4, 14), (5, 14), (6, 14)] {
+      for (level, size) in [(1, 22.0), (2, 19), (3, 18), (4, 15), (5, 15), (6, 15)] {
         let block = try XCTUnwrap(MarkdownBlocks.parse(String(repeating: "#", count: level) + " Título").first)
         let text = ResponseTextStyle.text(block, theme: theme)
         let font = try XCTUnwrap(text.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
@@ -54,7 +54,7 @@ import XCTest
       }
       let paragraph = ResponseTextStyle.text(MarkdownBlocks.parse("Corpo **forte** e ~~antigo~~.")[0], theme: theme)
       let style = try XCTUnwrap(paragraph.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
-      XCTAssertEqual(style.minimumLineHeight, 26)
+      XCTAssertEqual(style.minimumLineHeight, AppTypography.lineHeight(.body))
       XCTAssertEqual(paragraph.attribute(.strikethroughStyle, at: (paragraph.string as NSString).range(of: "antigo").location, effectiveRange: nil) as? Int, NSUnderlineStyle.single.rawValue)
     }
   }

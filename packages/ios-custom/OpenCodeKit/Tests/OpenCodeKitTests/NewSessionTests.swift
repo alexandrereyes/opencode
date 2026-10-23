@@ -79,7 +79,8 @@ private func newProjects() throws -> [Project] {
     MCPServer(name: "beta", state: .failed),
   ]
   #expect(
-    MCPServer.ordered(servers, configuration: config).map(\.name) == ["alpha", "beta", "zeta"])
+    MCPServer.ordered(servers).map(\.name) == ["zeta", "alpha", "beta"])
+  #expect(MCPServer.defaults(config) == ["alpha": true, "zeta": false])
   #expect(config.first?.info.model?.id == "luna")
   let future: MCPServer = try newDecode(#"{"name":"x","status":{"status":"new-status"}}"#)
   #expect(future.status.status == .unknown)

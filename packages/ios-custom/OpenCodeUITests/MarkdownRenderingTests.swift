@@ -54,7 +54,9 @@ import UIKit
       if section == 11 {
         let reference = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'Uma afirmação com uma nota explicativa'")).firstMatch
         reveal(reference, transcript: transcript, align: true)
-        let prefix = ("Uma afirmação com uma nota explicativa" as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 16)]).width
+        let prefix = ("Uma afirmação com uma nota explicativa" as NSString).size(withAttributes: [
+          .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: 18.5)),
+        ]).width
         reference.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: prefix + 3, dy: 8)).tap()
         XCTAssertTrue(app.navigationBars["Nota de rodapé"].waitForExistence(timeout: 10))
         capture(app, "native-\(theme)-footnote-sheet")

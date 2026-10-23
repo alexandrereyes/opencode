@@ -21,10 +21,10 @@ public actor FeedImageLoader {
     self.diskLimit = diskLimit
   }
 
-  public func load(_ source: String, client: OpenCodeClient, directory: String, maxPixelSize: Int)
+  public func load(_ source: String, client: OpenCodeClient, directory: String, maxPixelSize: Int? = nil)
     async throws -> CGImage {
     let key = Self.cacheKey(source, configuration: client.configuration, directory: directory)
-    let thumbnailKey = "\(key)-\(maxPixelSize)"
+    let thumbnailKey = "\(key)-\(maxPixelSize.map(String.init) ?? "original")"
     if let image = images[thumbnailKey] { touch(thumbnailKey); return image }
     if let task = pending[thumbnailKey] { return try await task.value }
     let task = Task {

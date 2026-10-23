@@ -17,11 +17,11 @@ struct ComposerSuggestions: View {
         }
         if !loading && items.isEmpty {
           Text(failed ? "Não foi possível carregar sugestões" : "Nenhum item correspondente")
-            .font(.subheadline).foregroundStyle(theme.color(.textSecondary)).padding(16)
+            .appFont(.preview).foregroundStyle(theme.color(.textSecondary)).padding(16)
         }
         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
           if index == 0 || item.section != items[index - 1].section {
-            Text(item.section).font(.caption).foregroundStyle(theme.color(.textSecondary)).padding(
+            Text(item.section).appFont(.caption).foregroundStyle(theme.color(.textSecondary)).padding(
               .horizontal, 12
             ).padding(.top, 9).padding(.bottom, 4)
           }
@@ -40,12 +40,12 @@ struct ComposerSuggestions: View {
               VStack(alignment: .leading, spacing: 3) {
                 title(item)
                 if !item.subtitle.isEmpty {
-                  Text(item.subtitle).font(.caption).foregroundStyle(theme.color(.textSecondary))
+                  Text(item.subtitle).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
                     .lineLimit(2)
                 }
               }
               Spacer(minLength: 0)
-            }.font(.system(size: 15)).foregroundStyle(theme.color(item.token.kind.role))
+            }.appFont(.preview).foregroundStyle(theme.color(item.token.kind.role))
               .padding(.horizontal, 12).padding(.vertical, 8).contentShape(Rectangle())
               .background(
                 item.id == items.first?.id
@@ -66,7 +66,11 @@ struct ComposerSuggestions: View {
         failed = false
         do {
           try await Task.sleep(for: .milliseconds(180))
+          #if DEBUG
+          let next = ComposerFixtures.enabled ? ComposerFixtures.suggestions(trigger) : try await store.suggestions(trigger)
+          #else
           let next = try await store.suggestions(trigger)
+          #endif
           try Task.checkCancellation()
           items = next
           loading = false

@@ -57,10 +57,12 @@ struct NewSessionView: View {
                 .font(.caption).foregroundStyle(theme.color(.error))
             }
           }
+          FloatingVoiceHost(sessions: store.sessions)
           ConversationComposer(store: store.composer, draft: store.draft)
         }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
       } else if !store.initialized {
         ProgressView("Carregando projetos…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)
       } else {
         ContentUnavailableView {
           Label("Nenhum projeto selecionado", systemImage: "folder")
@@ -69,6 +71,7 @@ struct NewSessionView: View {
         } actions: {
           Button("Adicionar projeto") { show(.add) }.buttonStyle(.borderedProminent)
         }
+        FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)
       }
     }
     .background(theme.color(.background)).tint(theme.color(.primary))
@@ -81,7 +84,9 @@ struct NewSessionView: View {
     .environment(store.composer.toast)
     .task { await store.open() }
     .task(id: store.loadKey) { await store.reloadSelection() }
+    .onAppear { store.showMCPs() }
     .onDisappear {
+      store.hideMCPs()
       presentation?.cancel()
       presentingSelector = false
       store.draft.focused = false
@@ -248,7 +253,7 @@ struct GitBranchIcon: View {
   }
 }
 
-private struct MCPChip: View {
+struct MCPChip: View {
   @Environment(\.appTheme) private var theme
   let server: MCPServer
   let preview: Bool
@@ -300,8 +305,9 @@ private struct MCPChip: View {
   }
 }
 
-private struct MCPFlowLayout: Layout {
+struct MCPFlowLayout: Layout {
   let spacing: CGFloat
+  var centered = true
   private func rows(_ subviews: Subviews, width: CGFloat) -> [[LayoutSubview]] {
     var rows: [[LayoutSubview]] = [[]]
     var used: CGFloat = 0
@@ -331,7 +337,7 @@ private struct MCPFlowLayout: Layout {
     for row in rows(subviews, width: bounds.width) {
       let sizes = row.map { $0.sizeThatFits(.unspecified) }
       let width = sizes.reduce(0) { $0 + $1.width } + CGFloat(max(0, row.count - 1)) * spacing
-      var x = bounds.midX - width / 2
+      var x = centered ? bounds.midX - width / 2 : bounds.minX
       for (index, view) in row.enumerated() {
         view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(sizes[index]))
         x += sizes[index].width + spacing

@@ -262,6 +262,22 @@ the app against production; raw data was deleted afterwards. SeaweedFS needs sep
 signature. Serving stable artifacts under an authenticated backend namespace would remove that dependency, but
 requires a separately approved backend/storage design rather than an arbitrary-URL proxy.
 
+Native file follow-up (2026-10-23), checked against `1042585c28`: explicit local Markdown links do not need an existence
+gate. Inline-code candidates use the web punctuation/filename rules, `GET /api/fs/list` for absolute parents and
+`GET /api/fs/find?type=file&limit=200` for relative exact/suffix matches. Ambiguous suffixes open a picker; missing
+inline candidates stay ordinary code. Native `~` resolution additionally uses `custom.directories/home`. User prompt
+bodies stay literal, as in the web. Ellipsis paths remain incomplete; no guessed prefix is substituted.
+
+`FileTransfer.fileRequest` reuses `imageFileRequest` authentication and parent Location but removes its image-only
+Accept and 32-MiB Range. Metadata requests use `Range: bytes=0-0` (not HEAD); `Content-Range` supplies total size,
+including the empty-file `416 bytes */0` case. Files above 50 MiB require explicit consent before the actual download.
+URLSession download delegates publish progress and cancellation; completed files move atomically into a protected,
+app-owned temporary folder. Dismissal removes only that download's folder; app launch removes stale owned folders.
+The backend still confines each read lexically and by realpath to the selected Location, not permanently to the
+Session directory. No backend changes are needed for temp-folder evidence. Images use the shared zoom component;
+AVPlayer/Quick Look consume downloaded local URLs, never a Mac `file://` path or a password/token embedded in a URL.
+Share exports the actual local file, and Copy path preserves the resolved server path.
+
 ### Groups, sticky prompt, days and unread
 
 Web projection sources: `packages/session-ui-custom/src/timeline/{projection,detail,timeline-row}.ts`,
@@ -422,6 +438,64 @@ Web sources: `packages/session-ui-custom/src/message/message-content.tsx`,
 `src/timeline/session-timeline-row.tsx`; optional web metrics in `packages/client/src/session-metrics.ts`.
 
 ## 4. Context ring and details — waves 1–2
+
+### Native context/cache surfaces (2026-10-23)
+
+Review 1 replaces the per-answer metrics with **one fixed line below the conversation composer**, left-aligned with
+its inner padding. Answer footers return to model/date and copy only. `ContextUsage` remains the shared pure pt-BR
+projection/formatter for this line, the top **Uso da sessão** section and subagent task rows. The fixed line uses the
+conversation's latest measured assistant step for both context and cache, exactly like the header ring. A newer
+unmeasured streaming step does not clear it; before the first measurement it is hidden. Child and master stores never
+borrow the parent's/target's measurement or cumulative Session tokens.
+
+The line is a tappable native button opening the existing Details sheet, with the shared `.micro` typography and
+monospaced digits. It participates in the normal VStack below the composer, above the bottom safe area/keyboard;
+its height reduces the timeline viewport automatically, as does the voice bar above the composer. No overlay or
+hand-maintained keyboard offset can cover the last message. The line is removed while the fullscreen composer is open
+and does not exist in the Nova sessão view. Search and unavailable-composer notices retain their existing bottom area.
+
+The ring opens the existing **Detalhes da sessão** sheet, initially large (medium remains available), not a popover.
+Its context numerator and limit belong to the latest measured step. Its separate Cache row uses **Session totals**:
+`session.tokens.cache.read / (session.tokens.input + session.tokens.cache.read + session.tokens.cache.write)`.
+Read/write counts and Tokens also come from Session totals; cost is `session.cost`, with `family.cost` and their sum
+shown separately when descendants exist. No tokens or costs are silently added across the family.
+
+Task rows use the `context:{id,tokens,model}` already returned on each family member, **not** its cumulative `tokens`.
+Swift `Session.context` now retains that previously ignored field. The installed backend
+`1042585c285c25d4b5d4fd292d0b7eb5fb7c470e` was verified by authenticated GET health plus its exact schema, family SQL
+selection and RPC `encodeMember` implementation; no production RPC POST was replayed. The existing family-page,
+transcript, Session and model-list requests are unchanged. Existing live event invalidations refresh family contexts.
+
+Unknown/nonpositive limits omit the percentage, not the measured token count. A zero input-side cache denominator is
+unknown (`—`), not 0%. Display uses `k`/`M` and a decimal comma; VoiceOver retains the exact capacity, including
+“1 milhão e 50 mil” for Luna's 1,050,000 window. Drawing alone clamps to [0,1]; severity uses the unrounded fraction
+(warning only strictly above 80%). A bounded 512-entry, store-local formatting cache keys measured facts and limit,
+not changing text/tool payloads. No per-row or per-render network request is introduced.
+
+The old per-answer measurement map is no longer needed; the current measurement is selected by scanning backwards
+from the tail, and metric lookup does not merge/sort model catalogs. The 300-message scroll fixture has no measurements,
+so an additional DEBUG-only variant supplies 223 measured assistant steps without changing IDs, body text or the production component.
+Pre-review five-iteration, four-gesture simulator results: original conversation dragging/deceleration **2.620 s**, then
+unmeasured **2.570 s**, measured **2.570 s**; current CPU **3.459 s** unmeasured versus **2.832 s** measured. CPU varied
+between runs even in Sessões (where this feature does not render); these are recorded samples, not an isolated claim
+that metrics improve CPU. Sessões durations stayed **2.580 → 2.589 s**, with preview updates **2.560 → 2.566 s**.
+Raw XCTest metrics and source/binary hashes live under `ios-cache-prints/{before-metrics,after-cached}*`.
+
+Review verification covers fixed-line visibility, tap-to-details, keyboard/fullscreen transitions, Nova sessão,
+unmeasured streaming retention and the voice bar's combined insets in both themes. A real owned Luna-6/low child
+updates the fixed line live; family context also changes while **Agentes e tarefas** remains open. All owned runs,
+shells and histories are stopped/removed afterwards.
+Existing conversation/details and subagent/alert UI cases are exercised separately with owned fixtures. The details
+regression checks visible geometry of read-only labels rather than their unreliable native `isHittable` flag, and
+reveals the renamed row before waiting for it in the longer fixture list. Chat-ring privacy checks retain their
+directory assertions and now expect **Detalhes da sessão** after the approved presentation change.
+
+Review-1 evidence is in `ios-cache-prints/review-1/`: `cache-fixed-*`, `cache-keyboard-*`, `cache-child-*`, plus expanded
+composer, live-update and voice/keyboard captures. The final run passes 14 UI cases (seven in each theme), including
+tap-to-details with the keyboard already open. The live runner waits for a child interruption to settle before its
+next prompt so the verification itself cannot race prompt admission against cancellation. The importer deliberately
+drops unfinished assistant messages, so streaming retention is checked against the real owned running child instead
+of an imported incomplete row.
 
 Use the **latest loaded assistant with `tokens`**, and that message's model catalog entry, not session total usage:
 
@@ -720,8 +794,8 @@ Client commands are not backend names just because they appear next to them:
 - `/undo`: local revert workflow, not `/command {name:"undo"}`. The web restores the last user draft, cascades child
   boundaries through `custom.session-family/revert({sessionID,cutoff})`, interrupts/waits, stages
   `POST /api/session/{sid}/revert/stage {messageID,files?}`, and cancels pending prompts referring to the old history.
-  `/redo` clears/advances staged reverts. Do not expose a nonworking “undo” action merely for visual parity; full
-  revert/fork is outside this screen's initial scope.
+  `/redo` clears/advances staged reverts. Fork is outside this screen's initial scope. Native sent-message revert
+  is specified below.
 - `/model`, `/agent`, `/new`, etc. open local pickers/navigation.
 - A slash-enabled skill becomes a **normal prompt** with `skills:[{id,mention}]`; it is not `/command`.
   `POST /api/experimental/session/{sid}/skill {id,resume?}` exists for explicit activation, but is not the web
@@ -732,6 +806,42 @@ Source: `packages/app-custom/src/composer/{model,submit,prompt-parts,session-ref
 `packages/app-custom/src/composer/suggestions/machine.ts`,
 `packages/app-custom/src/session/commands/use-session-commands.tsx`, `packages/app-custom/src/session/revert.ts`,
 `packages/plugin-app-custom/src/{snippets,app-mentions}/rpc.ts`.
+
+### Sent-message undo (23 October)
+
+Compatible unchanged with installed custom `1042585c285c25d4b5d4fd292d0b7eb5fb7c470e`:
+
+1. The loaded user message supplies restoration data. Lean history omits only assistant tool-result media.
+2. `custom.session-family/revert({sessionID,cutoff:target.time.created})`, scoped to the viewed Session's directory,
+   returns descendant boundaries in breadth-first order. This RPC **does not perform rollback**.
+3. In that order: interrupt/wait each busy child, then `POST /api/session/:child/revert/stage`
+   `{messageID,files:false}`. Child Sessions remain present, including their preferences and local drafts.
+4. Always bodyless POST parent `interrupt`, then `/api/experimental/session/:id/wait`, then parent
+   `/revert/stage` with `{messageID}`. Only parent staging rolls back files through its native snapshots.
+5. Capture pending parent user inbox items, GET `/inbox`, and cancel the union of captured IDs and authoritative
+   user rows created by the post-stage cutoff. This is best effort, like the web; child inboxes remain untouched.
+
+Each child/planning failure is reported while continuing; a parent failure restores the server timeline boundary.
+The restored draft remains editable. Repeated same-target requests join; other reverts serialize while immediately
+projecting the requested boundary/draft. Submission waits for the operations, including inbox cleanup. The
+per-server/session coordinator survives conversation remounts.
+
+Every delivered root/master user bubble (also its sticky header and long-press menu) offers
+**Redefinir para este ponto**, without confirmation. Child bubbles omit it, as the web does. Hidden history begins
+at the selected user message. **Refazer** advances one user boundary; at the last boundary it asks
+`custom.session-family/clear({sessionID})`, clears descendants sequentially (interrupt/wait busy ones), then
+bodyless `DELETE /api/session/:id/revert` and resets the composer. No Session DELETE is involved.
+
+Restoration replaces text, valid token spans, inline/path attachments, quotes and unmentioned file/comment context;
+keeps agent/model selection; and clears queue-edit/submission identity. Web presentation metadata requires a string
+`displayText` plus `comments` array; otherwise restoration uses wire text. Files and context survive draft persistence.
+The next prompt/command switches agent, commits the staged parent boundary via bodyless
+`POST /api/session/:id/revert/commit`, switches model, then admits work. Queue commits before admission too.
+SSE staged/cleared/committed events trigger authoritative history reconciliation and filtering by the current boundary.
+
+References and verified web request traces: `.agent-artifacts/desfazer/WEB.md`, `web-cascade-result.txt`,
+`web-redo-result.txt`. The dedicated runner `script/test-revert.py` only creates/mutates its ledger-owned 4177 fake
+repositories and Sessions; native transport failure injection is DEBUG-only and restricted to one named Session.
 
 ## 13. Attachments — wave 3
 

@@ -25,9 +25,10 @@ import XCTest
       let image = app.buttons["feed-image-" + role]
       XCTAssertTrue(image.waitForExistence(timeout: 25), role)
       screenshot(role.lowercased())
-      if role == "RELATIVE" {
+      if ["RELATIVE", "HTML", "ATTACHMENT"].contains(role) {
         image.tap()
         XCTAssertTrue(app.navigationBars[role].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.images["fullscreen-image"].waitForExistence(timeout: 25))
         screenshot("fullscreen")
         app.buttons["Fechar"].tap()
       }
@@ -49,11 +50,54 @@ import XCTest
       let group = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Usou 1'")).firstMatch
       XCTAssertTrue(group.waitForExistence(timeout: 15))
       group.tap()
-      let tool = app.buttons.matching(NSPredicate(format: role == "READ" ? "label BEGINSWITH 'Leu '" : "label BEGINSWITH 'browser_screenshot'")).firstMatch
-      XCTAssertTrue(tool.waitForExistence(timeout: 5))
-      tool.tap()
+      do {
+        let tool = app.buttons.matching(NSPredicate(format: role == "READ" ? "label BEGINSWITH 'Ler '" : "label BEGINSWITH 'browser_screenshot'")).firstMatch
+        XCTAssertTrue(tool.waitForExistence(timeout: 5))
+        tool.tap()
+      }
       XCTAssertTrue(app.buttons["feed-image-" + role].waitForExistence(timeout: 25))
       screenshot(role.lowercased())
+      app.buttons["feed-image-" + role].tap()
+      XCTAssertTrue(app.images["fullscreen-image"].waitForExistence(timeout: 25))
+      app.buttons["Fechar"].tap()
+      app.terminate()
+    }
+  }
+
+  func testFullscreenZoomPanDismissAndRotation() throws {
+    for role in ["RELATIVE", "TALL"] {
+      let app = try launch(role)
+      let thumbnail = app.buttons["feed-image-" + role]
+      XCTAssertTrue(thumbnail.waitForExistence(timeout: 25))
+      thumbnail.tap()
+      let image = app.images["fullscreen-image"]
+      XCTAssertTrue(image.waitForExistence(timeout: 25))
+      func expect(_ value: String) {
+        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: image)
+        XCTAssertEqual(XCTWaiter.wait(for: [condition], timeout: 5), .completed)
+      }
+      expect("Ajustada à tela")
+      screenshot("zoom-fit-" + role.lowercased())
+      image.pinch(withScale: 2, velocity: 1)
+      expect("Ampliada")
+      image.swipeDown()
+      XCTAssertTrue(app.buttons["Fechar"].exists)
+      expect("Ampliada")
+      screenshot("zoom-pan-" + role.lowercased())
+      image.doubleTap()
+      expect("Ajustada à tela")
+      image.doubleTap()
+      expect("Ampliada")
+      screenshot("zoom-double-tap-" + role.lowercased())
+      image.doubleTap()
+      expect("Ajustada à tela")
+      // The app is portrait-only; resize/refit itself is exercised in ImageZoomViewTests.
+      XCUIDevice.shared.orientation = .landscapeLeft
+      expect("Ajustada à tela")
+      XCUIDevice.shared.orientation = .portrait
+      expect("Ajustada à tela")
+      image.swipeDown()
+      XCTAssertTrue(app.buttons["Fechar"].waitForNonExistence(timeout: 5))
       app.terminate()
     }
   }

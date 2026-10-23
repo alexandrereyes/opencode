@@ -5,10 +5,13 @@ import SwiftUI
 
 @main
 struct OpenCodeApp: App {
+  init() { FilePreviewStorage.clean() }
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
+      if MCPFixtures.mode != nil { MCPFixtureRoot() }
+      else if ComposerFixtures.enabled { ComposerFixtureRoot() }
+      else if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
       #else
       AppRoot()
       #endif
@@ -19,6 +22,7 @@ struct OpenCodeApp: App {
 @MainActor @Observable final class AppRuntime {
   let servers = ServerStore(launchOverride: .override())
   let appearance = AppearanceSettings()
+  let voice = VoiceController()
   var store: SessionStore?
   var identity = UUID()
   var appliedRevision = -1
@@ -28,6 +32,7 @@ struct OpenCodeApp: App {
     switching = true
     defer { switching = false }
     let previous = store
+    if previous != nil { await voice.end() }
     await previous?.stop()
     guard !Task.isCancelled else { return }
     do {
@@ -53,6 +58,8 @@ private struct AppRoot: View {
       if let store = runtime.store, runtime.appliedRevision == runtime.servers.revision {
         AppTabs(store: store, runtime: runtime).id(runtime.identity)
           .allowsHitTesting(!runtime.switching)
+          .environment(\.voiceController, runtime.voice)
+          .environment(\.voiceSessionStore, store)
       } else if let error = runtime.error {
         ContentUnavailableView {
           Label("Credenciais indisponíveis", systemImage: "key")
@@ -67,12 +74,14 @@ private struct AppRoot: View {
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
     .task(id: runtime.servers.revision) { await runtime.rebuild() }
+    .onChange(of: theme.id, initial: true) { runtime.voice.setTheme(theme) }
   }
 }
 
 private struct AppTabs: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
+  @State private var floatingVoice = FloatingVoicePresentation()
   @Bindable var store: SessionStore
   let runtime: AppRuntime
 
@@ -80,10 +89,15 @@ private struct AppTabs: View {
     TabView(selection: $store.selectedTab) {
       Tab("Painel", systemImage: "square.grid.2x2", value: 0) {
         placeholder("Painel", icon: "square.grid.2x2")
+          .floatingVoiceInset(sessions: store)
       }
-      Tab("Pedidos", systemImage: "tray", value: 1) { placeholder("Pedidos", icon: "tray") }.badge(
+      Tab("Pedidos", systemImage: "tray", value: 1) {
+        placeholder("Pedidos", icon: "tray").floatingVoiceInset(sessions: store)
+      }.badge(
         store.requestCount)
-      Tab("Projetos", systemImage: "folder", value: 2) { placeholder("Projetos", icon: "folder") }
+      Tab("Projetos", systemImage: "folder", value: 2) {
+        placeholder("Projetos", icon: "folder").floatingVoiceInset(sessions: store)
+      }
       Tab("Sessões", systemImage: "bubble.left.and.bubble.right.fill", value: 3) {
         SessionsView(store: store)
       }
@@ -97,30 +111,36 @@ private struct AppTabs: View {
         }
       }
     }
-    .tabViewBottomAccessory(isEnabled: !store.conversationOpen) {
+    .tabViewBottomAccessory(isEnabled: !(store.selectedTab == 3 && store.conversationOpen)
+      && !floatingVoice.visible(runtime.voice)) {
       Button {
         store.selectedTab = 3
         store.conversationPath.append(.init(id: "master", master: true))
       } label: {
         HStack(spacing: 8) {
-          Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(
+          Image(systemName: "point.3.connected.trianglepath.dotted").appSymbol(.action).foregroundStyle(
             theme.color(.accent))
+          // The native tab accessory has a fixed height; shrink its labels before clipping them.
           Text("Sessão mestra").fontWeight(.medium)
+            .lineLimit(1).minimumScaleFactor(0.45)
           Spacer(minLength: 4)
           Text(store.masterAvailability == .available
             ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
             : store.masterAvailability.label)
-            .foregroundStyle(theme.color(.textSecondary))
-          Image(systemName: "arrow.right").foregroundStyle(theme.color(.icon))
+            .foregroundStyle(theme.color(.glassSecondary))
+            .lineLimit(1).minimumScaleFactor(0.45)
+          Image(systemName: "arrow.right").appSymbol(.inline).foregroundStyle(theme.color(.icon))
         }
-        .font(.system(size: 13))
+        .appFont(.caption).monospacedDigit()
         .foregroundStyle(theme.color(.textStrong))
-        .padding(.horizontal, 18)
+        .padding(.horizontal, AppLayout.margin)
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
       }.buttonStyle(.plain).accessibilityIdentifier("master-accessory")
     }
+    .environment(\.floatingVoice, floatingVoice)
+    .onChange(of: runtime.voice.sessionID, initial: true) { _, id in floatingVoice.observe(id) }
     .background(theme.color(.background))
     .sessionAlertOverlay(modal: false)
     .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in
@@ -129,8 +149,8 @@ private struct AppTabs: View {
       store.selectedTab = 3
       store.conversationPath.append(.init(id: id))
     }))
-    .task(id: scenePhase) {
-      if scenePhase == .active { await store.run() }
+    .task(id: scenePhase == .active || runtime.voice.sessionID != nil) {
+      if scenePhase == .active || runtime.voice.sessionID != nil { await store.run() }
     }
   }
 
@@ -148,7 +168,8 @@ private struct AppTabs: View {
       quota.lineWidth = 1.5
       quota.stroke()
       let attributes: [NSAttributedString.Key: Any] = [
-        .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+        .font: AppTypography.font(.micro, weight: .medium,
+          compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)),
         .foregroundColor: theme.uiColor(.textStrong),
       ]
       let text = NSString(string: "AR")

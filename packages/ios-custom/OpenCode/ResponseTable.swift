@@ -8,6 +8,9 @@ struct ResponseTable: View {
   @Environment(\.responseSelection) private var actions
   @Environment(\.responseSelectionChanged) private var selection
   @Environment(\.conversationSearch) private var highlights
+  @Environment(\.conversationImages) private var imageContext
+  @Environment(\.openFile) private var fileAction
+  @Environment(\.responseFilesStable) private var filesStable
   @AppStorage("OpenCodeMarkdownTableWrap") private var wrap = true
   @State private var exporting = false
   @State private var document = ResponseTextDocument(text: "")
@@ -44,10 +47,16 @@ struct ResponseTable: View {
       }
       .buttonStyle(MarkdownToolbarButton())
       .foregroundStyle(theme.color(.codeHeaderText))
-      ResponseTableContent(
-        block: block, table: table, source: source, messageID: messageID, partID: partID,
-        theme: theme, wrap: wrap, actions: actions, selected: selection?.selected,
-        highlights: highlights, rasters: rasters, openNote: openNote)
+      if table.rows.contains(where: { $0.contains { $0.contains { $0.image != nil } } }) {
+        ResponseMediaTable(block: block, table: table, source: source, messageID: messageID,
+          partID: partID, rasters: rasters, openNote: openNote, wrap: wrap)
+      } else {
+        ResponseTableContent(
+          block: block, table: table, source: source, messageID: messageID, partID: partID,
+          theme: theme, wrap: wrap, actions: actions, selected: selection?.selected,
+          highlights: highlights, rasters: rasters, openNote: openNote,
+          imageContext: imageContext, fileOpen: fileAction?.open, filesStable: filesStable)
+      }
     }
     .fileExporter(isPresented: $exporting, document: document, contentType: exportType,
       defaultFilename: exportType == .commaSeparatedText ? "tabela.csv" : "tabela.md") {
@@ -68,7 +77,7 @@ struct ResponseTable: View {
 
 struct MarkdownToolbarButton: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
-    configuration.label.font(.system(size: 14)).frame(width: 36, height: 36)
+    configuration.label.appSymbol(.inline).frame(width: 36, height: 36)
       .opacity(configuration.isPressed ? 0.55 : 1)
       .contentShape(Rectangle())
   }
@@ -88,6 +97,7 @@ struct ResponseTextDocument: FileDocument {
 }
 
 private struct ResponseTableContent: UIViewRepresentable {
+  @Environment(\.dynamicTypeSize) private var typeSize
   let block: MarkdownBlock
   let table: MarkdownTable
   let source: String
@@ -100,6 +110,9 @@ private struct ResponseTableContent: UIViewRepresentable {
   let highlights: ConversationSearchHighlight
   let rasters: [ResponseFormulaKey: ResponseFormulaRaster]
   let openNote: (String) -> Void
+  let imageContext: ConversationImageContext?
+  let fileOpen: ((String) -> Void)?
+  let filesStable: Bool
 
   func makeUIView(context: Context) -> ResponseTableView { ResponseTableView() }
   func updateUIView(_ view: ResponseTableView, context: Context) {
@@ -119,6 +132,7 @@ private struct ResponseTableContent: UIViewRepresentable {
       }
     }
     view.columns = table.alignments.count
+    view.accessibilityIdentifier = "markdown-table-content-\(block.id)"
     view.wrap = wrap
     view.backgroundColor = theme.uiColor(.tableSurface)
     view.border = theme.uiColor(.tableSeparator).withAlphaComponent(theme.value(.tableSeparator).opacity * 0.6)
@@ -129,7 +143,9 @@ private struct ResponseTableContent: UIViewRepresentable {
         let cell = SelectableResponseText(
           block: block.cell(runs, alignment: table.alignments[column]), messageID: messageID, partID: partID,
           theme: theme, source: source, actions: actions, selectionChanged: selected,
-          highlights: highlights, rasters: rasters, wrap: wrap, tableHeader: row == 0, openNote: openNote)
+          highlights: highlights, rasters: rasters, wrap: wrap, tableHeader: row == 0, openNote: openNote,
+          fileContextOverride: imageContext, fileOpenOverride: fileOpen, filesStableOverride: filesStable,
+          contentSizeOverride: typeSize.uiCategory)
         view.cells[row][column].delegate = view.coordinators[row][column]
         cell.configure(view.cells[row][column], coordinator: view.coordinators[row][column])
         if previous != view.coordinators[row][column].rendering { changed = true }
@@ -222,7 +238,7 @@ private final class ResponseTableView: UIScrollView {
       var x: CGFloat = 0
       for (column, text) in texts.enumerated() {
         let height = text.fittingSize(width: layout.widths[column] - 32).height
-        text.frame = CGRect(x: x + 16, y: y + 10 + max(0, (layout.heights[row] - 20 - height) / 2), width: layout.widths[column] - 32, height: height)
+        text.frame = CGRect(x: x + 16, y: y + 10, width: layout.widths[column] - 32, height: height)
         x += layout.widths[column]
         if column < columns - 1 { separators.append(CGRect(x: x, y: y, width: 1, height: layout.heights[row])) }
       }

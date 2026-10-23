@@ -81,6 +81,8 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
   public var retry: JSONValue?
   public var metadata: [String: JSONValue]?
   public var files: [JSONValue]?
+  public var agents: [JSONValue]?
+  public var skills: [JSONValue]?
   public var status: String?
   public var outcome: String?
   public var command: String?
@@ -158,7 +160,11 @@ public struct ConversationPart: Codable, Sendable, Equatable {
   }
   public var status: String? { state?.object?["status"]?.string }
   public var suppressed: Bool { type == "tool" && name == "todowrite" }
-  public var input: [String: JSONValue] { state?.object?["input"]?.object ?? [:] }
+  public var input: [String: JSONValue] {
+    if let value = state?.object?["input"]?.object { return value }
+    guard status == "streaming", let text = state?.object?["input"]?.string else { return [:] }
+    return (try? JSONDecoder().decode([String: JSONValue].self, from: Data(text.utf8))) ?? [:]
+  }
   public var metadata: [String: JSONValue] { state?.object?["metadata"]?.object ?? [:] }
   public var childID: String? { metadata["sessionID"]?.string }
   public var running: Bool { status == "running" || status == "streaming" }
@@ -170,8 +176,7 @@ public struct ConversationPart: Codable, Sendable, Equatable {
     guard name == "execute" else { return false }
     return metadata["error"]?.bool == true
       || metadata["toolCalls"]?.array?.contains {
-        $0.object?["status"]?.string == "error" || $0.object?["status"]?.string == "failed"
-          || ($0.object?["error"] != nil && $0.object?["error"] != .null)
+        $0.object?["status"]?.string == "error"
       } == true
   }
   public var output: String {
@@ -322,10 +327,10 @@ public enum ConversationProjection {
   }
   public static func stepLabel(_ parts: [ConversationPart]) -> String {
     let tools = parts.filter {
-      $0.type == "tool" && !$0.suppressed
+      $0.type == "tool" && (!$0.suppressed || $0.failed)
     }
     let count = tools.isEmpty ? parts.filter { $0.type == "reasoning" }.count : tools.count
-    if count == 0 { return "Atividade" }
+    if count == 0 { return "Atualizações" }
     var names: [String] = []
     for tool in tools where !names.contains(tool.groupTitle) { names.append(tool.groupTitle) }
     let list =

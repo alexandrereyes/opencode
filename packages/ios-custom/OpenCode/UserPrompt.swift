@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct UserPrompt: UIViewRepresentable {
+  @Environment(\.dynamicTypeSize) private var typeSize
   let text: AttributedString
   let theme: AppTheme
   let collapsed: Bool
@@ -12,8 +13,14 @@ struct UserPrompt: UIViewRepresentable {
   func makeUIView(context: Context) -> UserPromptScrollView { UserPromptScrollView() }
   func updateUIView(_ view: UserPromptScrollView, context: Context) {
     let value = NSMutableAttributedString(attributedString: NSAttributedString(text))
-    value.addAttribute(.font, value: UIFont.systemFont(ofSize: 16), range: NSRange(location: 0, length: value.length))
-    if view.label.attributedText?.isEqual(to: value) != true {
+    let traits = UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory)
+    let font = AppTypography.font(.message, compatibleWith: traits)
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.minimumLineHeight = AppTypography.lineHeight(.message, compatibleWith: traits)
+    paragraph.lineBreakMode = .byTruncatingTail
+    value.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: value.length))
+    if view.label.font != font || view.label.attributedText?.isEqual(to: value) != true {
+      view.label.font = font
       view.label.attributedText = value
       view.measurements.removeAll(keepingCapacity: true)
     }
@@ -23,6 +30,7 @@ struct UserPrompt: UIViewRepresentable {
     view.truncationChanged = truncationChanged
     view.expand = expand
     view.revealRange = revealRange
+    view.setNeedsLayout()
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: UserPromptScrollView, context: Context) -> CGSize? {
     guard let width = proposal.width, width > 0 else { return nil }
@@ -40,6 +48,7 @@ final class UserPromptScrollView: UIScrollView {
   }
   private var revealedRange: NSRange?
   private var revealedSize: CGSize?
+  private var revealedContainerSize: CGSize?
   var measurements: [CGFloat: (full: CGSize, clamped: CGSize)] = [:]
   private var reported: Bool?
   private var truncated = false
@@ -49,7 +58,7 @@ final class UserPromptScrollView: UIScrollView {
     contentInsetAdjustmentBehavior = .never
     showsVerticalScrollIndicator = false
     bounces = false
-    label.font = .systemFont(ofSize: 16)
+    label.font = AppTypography.font(.message)
     label.lineBreakMode = .byTruncatingTail
     label.attributedText = NSAttributedString(string: "")
     label.isUserInteractionEnabled = true
@@ -95,8 +104,10 @@ final class UserPromptScrollView: UIScrollView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    guard !collapsed, isScrollEnabled, let revealRange,
-      revealedRange != revealRange || revealedSize != bounds.size,
+    let viewport = sequence(first: superview, next: { $0?.superview })
+      .compactMap { $0 as? UIScrollView }.first
+    guard !collapsed, let revealRange,
+      revealedRange != revealRange || revealedSize != bounds.size || revealedContainerSize != viewport?.bounds.size,
       bounds.height > 0, let text = label.attributedText else { return }
     let storage = NSTextStorage(attributedString: text)
     let layout = NSLayoutManager()
@@ -106,9 +117,16 @@ final class UserPromptScrollView: UIScrollView {
     storage.addLayoutManager(layout)
     layout.ensureLayout(for: container)
     let glyphs = layout.glyphRange(forCharacterRange: revealRange, actualCharacterRange: nil)
-    scrollRectToVisible(layout.boundingRect(forGlyphRange: glyphs, in: container), animated: false)
+    let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+    scrollRectToVisible(rect, animated: false)
+    // Reveal through the message's context viewport, never through the transcript's
+    // collection view, whose reading/follow corrections have a separate owner.
+    if let viewport, !(viewport is UICollectionView) {
+      viewport.scrollRectToVisible(label.convert(rect, to: viewport), animated: false)
+    }
     revealedRange = revealRange
     revealedSize = bounds.size
+    revealedContainerSize = viewport?.bounds.size
   }
 
   @objc private func tapped() {

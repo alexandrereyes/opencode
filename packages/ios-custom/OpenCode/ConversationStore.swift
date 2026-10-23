@@ -12,6 +12,8 @@ import OpenCodeKit
   private(set) var agents: [AgentInfo] = []
   private(set) var providers: [ProviderInfo] = []
   let toast = ToastCenter()
+  let mcps: ConversationMCPStore
+  let reversion: ConversationRevert
   private(set) var family: FamilySnapshot?
   private(set) var children: [Session] = []
   private(set) var active: Set<String> = []
@@ -44,6 +46,7 @@ import OpenCodeKit
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let hub: EventHub
   private let catalog: ModelCatalogCache?
+  @ObservationIgnored let usageCache = ContextUsageCache()
   @ObservationIgnored private var cursor: String?
   @ObservationIgnored private var refreshing = false
   @ObservationIgnored private var dirty = false
@@ -86,10 +89,13 @@ import OpenCodeKit
 
   init(
     id: String, client: OpenCodeClient, hub: EventHub,
-    expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil
+    expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil,
+    reversion: ConversationRevert? = nil
   ) {
     self.id = id
     self.client = client
+    self.reversion = reversion ?? ConversationRevert(client: client)
+    mcps = ConversationMCPStore(client: client, toast: toast)
     self.hub = hub
     self.catalog = catalog
     expansionMemory = expansions
@@ -129,6 +135,9 @@ import OpenCodeKit
     return await client.sessionServices(directory: directory)
   }
   var displayModels: [ModelInfo] { ModelCatalog.merging(models, fallback: catalog?.models ?? []) }
+  func usageLimit(_ model: ModelReference?) -> Double? {
+    ContextUsage.limit(model, models: models) ?? ContextUsage.limit(model, models: catalog?.models ?? [])
+  }
   var isChild: Bool { session?.parentID != nil }
   func selectedAgent(_ draft: ConversationDraft) -> String {
     if masterMode { return "mestra" }
@@ -193,7 +202,7 @@ import OpenCodeKit
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
     if let newSessionSubmit { await newSessionSubmit(draft); return }
-    guard ready, notice == nil else { return }
+    guard await reversion.wait(), ready, notice == nil else { return }
     if let question = SideQuestionRequest.slashQuestion(draft.document) {
       sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
       draft.text = NSAttributedString()
@@ -219,6 +228,7 @@ import OpenCodeKit
       if draft.submissionDocument?.document != draft.document
         || draft.submissionDocument?.attachments != draft.attachments
         || draft.submissionDocument?.quotes != draft.quotes
+        || draft.submissionDocument?.revertedContext != draft.revertedContext
         || draft.submission?.model != model
         || draft.submission?.agent != agent || draft.submission == nil
       {
@@ -242,8 +252,10 @@ import OpenCodeKit
             document: draft.document,
             delivery: delivery, agent: agent, model: model, attachments: attachments,
             quotes: draft.quotes,
-            metadata: draft.editing?.payload.metadata ?? [:]),
-          sessionID: id, agent: agent, model: model, replacing: draft.replacing, keepsAgent: isChild)
+            metadata: draft.editing?.payload.metadata ?? draft.revertedContext?.metadata ?? [:],
+            contextFiles: draft.revertedContext?.allFiles ?? [], contextText: draft.revertedContext?.text ?? []),
+          sessionID: id, agent: agent, model: model, replacing: draft.replacing, keepsAgent: isChild,
+          commitsRevert: reversion.boundary(session) != nil)
         draft.submissionDocument = draft.snapshot
       }
       guard let submission = draft.submission else { return }
@@ -254,10 +266,7 @@ import OpenCodeKit
       case .command(let name, _):
         submitted += 1
         // Command callbacks have no idempotency key. Never automatically retry them.
-        if delivery == .steer {
-          if !isChild { try await client.selectAgent(agent, sessionID: id) }
-          try await client.selectModel(model, sessionID: id)
-        }
+        try await submission.applySelection(using: client)
         try await client.command(name, request: submission.request, sessionID: id)
         if let replacing = submission.replacing {
           try await client.cancelInbox(replacing, sessionID: id)
@@ -266,12 +275,14 @@ import OpenCodeKit
         guard name == "compact" else { return }
         try await client.compact(id, id: submission.request.id)
       }
+      draft.didSend()
       await draft.clear()
       catalog?.committed(submission.model)
       Haptics.play(.light)
       draft.focused = false
       toast.show(
         submission.request.delivery == .queue ? "Mensagem adicionada à fila" : "Mensagem enviada")
+      if submission.commitsRevert { replaceHistory = true }
       await refresh()
     } catch {
       draft.error =
@@ -552,6 +563,7 @@ import OpenCodeKit
       let infoValue = try await info
       try Task.checkCancellation()
       session = infoValue
+      reversion.reconcile(infoValue)
       if let renaming { session?.title = renaming.title }
       let (pageValue, runningValue) = try await (page, running)
       try Task.checkCancellation()
@@ -583,9 +595,19 @@ import OpenCodeKit
         hasOlder = next != nil
         replaceHistory = false
       }
+      // Reopening a staged Session must load its boundary, not offer full redo from a hidden tail page.
+      while let boundary = infoValue.revert?.messageID, let current = cursor,
+        !nextMessages.contains(where: { $0.id == boundary })
+          || !nextMessages.contains(where: { $0.type == "user" && $0.id < boundary }) {
+        let older = try await client.conversation(id, cursor: current)
+        nextMessages = ConversationProjection.merge(nextMessages, page: older.data.reversed(), older: true)
+        cursor = older.data.isEmpty || older.cursor?.next == current ? nil : older.cursor?.next
+        hasOlder = cursor != nil
+      }
       let directory = infoValue.location.directory
       active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       messages = nextMessages
+      reversion.reconcile(infoValue, messages: nextMessages)
       hasTranscript = true
       loading = false
       revision += 1

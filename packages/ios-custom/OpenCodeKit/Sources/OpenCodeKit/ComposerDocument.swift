@@ -117,6 +117,24 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
     result.text += Self.normalize((text as NSString).substring(from: offset))
     return result
   }
+  /// Map the persisted UTF-16 cursor to the editor's single-character tokens.
+  public func editorOffset(_ offset: Int) -> Int {
+    var removed = 0
+    for span in validTokens {
+      if offset <= span.start { break }
+      if offset < span.end { return span.start - removed + 1 }
+      removed += span.range.length - 1
+    }
+    return min(max(0, offset), text.utf16.count) - removed
+  }
+  public func documentOffset(_ offset: Int) -> Int {
+    var removed = 0
+    for span in validTokens {
+      if offset <= span.start - removed { break }
+      removed += span.range.length - 1
+    }
+    return min(max(0, offset + removed), text.utf16.count)
+  }
   public var expanded: Self {
     let source = normalized
     var result = Self()
@@ -151,17 +169,33 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
 }
 
 public struct ComposerTrigger: Sendable, Equatable {
+  private static let expression = try! NSRegularExpression(pattern: #"(^|[\s(\[{\"'])\s*([@/$#])([^\s@$#]*)$"#)
   public let character: String
   public let query: String
   public let range: NSRange
+  public static func detect(in text: NSString, cursor: Int) -> Self? {
+    guard cursor > 0, cursor <= text.length else { return nil }
+    // Only the current word can be a query; no document/token scan on a caret move.
+    var start = cursor
+    while start > 0 {
+      // A pasted megabyte-sized word must not become a megabyte-sized suggestion query.
+      if cursor - start >= 2048 { return nil }
+      let unit = text.character(at: start - 1)
+      if unit == 0xFFFC || unit == 32 || unit == 10 || unit == 13 || unit == 9 { break }
+      start -= 1
+    }
+    let word = text.substring(with: NSRange(location: start, length: cursor - start))
+    guard let trigger = detect(in: ComposerDocument(text: word), cursor: word.utf16.count),
+      trigger.character != "/" || start + trigger.range.location == 0 else { return nil }
+    return Self(character: trigger.character, query: trigger.query,
+                range: NSRange(location: start + trigger.range.location, length: trigger.range.length))
+  }
   public static func detect(in document: ComposerDocument, cursor: Int) -> Self? {
     guard cursor >= 0, cursor <= document.text.utf16.count,
       !document.validTokens.contains(where: { cursor > $0.start && cursor <= $0.end })
     else { return nil }
     let prefix = (document.text as NSString).substring(to: cursor)
     guard
-      let expression = try? NSRegularExpression(
-        pattern: #"(^|[\s(\[{\"'])\s*([@/$#])([^\s@$#]*)$"#),
       let match = expression.firstMatch(in: prefix, range: NSRange(location: 0, length: cursor))
     else { return nil }
     let marker = (prefix as NSString).substring(with: match.range(at: 2))

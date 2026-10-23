@@ -251,7 +251,7 @@ struct ServerEditor: View {
         } footer: { Text("O teste consulta apenas /api/info. Nenhuma sessão é criada ou executada.") }
           .listRowBackground(theme.color(.surface))
         if let error { Section { Text(error).foregroundStyle(theme.color(.error)) }.listRowBackground(theme.color(.surface)) }
-      }.settingsList(theme).navigationTitle(server == nil ? "Adicionar servidor" : "Editar servidor")
+      }.settingsList(theme, voice: false).navigationTitle(server == nil ? "Adicionar servidor" : "Editar servidor")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
           ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
@@ -335,10 +335,11 @@ private struct AboutView: View {
 }
 
 extension View {
-  func settingsList(_ theme: AppTheme) -> some View {
+  func settingsList(_ theme: AppTheme, voice: Bool = true) -> some View {
     self.listStyle(.insetGrouped).scrollContentBackground(.hidden)
       .background(theme.color(.background)).foregroundStyle(theme.color(.textStrong))
       .listSectionSeparatorTint(theme.color(.border))
       .listRowSeparatorTint(theme.color(.border))
+      .floatingVoiceInset(enabled: voice)
   }
 }

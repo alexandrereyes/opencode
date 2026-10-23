@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Testing
 @testable import OpenCodeKit
 
@@ -79,6 +80,14 @@ import Testing
   let first = FeedImageLoader(directory: root)
   let thumb = try await first.load(image.source, client: client, directory: "/repo", maxPixelSize: 32)
   #expect(max(thumb.width, thumb.height) == 32)
+  let original = try await first.load(image.source, client: client, directory: "/repo")
+  let comma = try #require(image.source.firstIndex(of: ","))
+  let bytes = try #require(Data(base64Encoded: String(image.source[image.source.index(after: comma)...])))
+  let source = try #require(CGImageSourceCreateWithData(bytes as CFData, nil))
+  let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+  #expect(original.width == properties[kCGImagePropertyPixelWidth] as? Int)
+  #expect(original.height == properties[kCGImagePropertyPixelHeight] as? Int)
+  #expect(max(original.width, original.height) > 32)
   let second = FeedImageLoader(directory: root)
   #expect(try await second.load(image.source, client: client, directory: "/repo", maxPixelSize: 64).width <= 64)
   #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).count == 1)

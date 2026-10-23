@@ -4,6 +4,7 @@ import SwiftUI
 /// Install on the native header without an overlay that would intercept expansion,
 /// attachment taps or the prompt's internal scroll.
 struct UserMessageCopyMenu: UIViewRepresentable {
+  @Environment(\.userMessageRevert) private var reversion
   let message: ConversationMessage
   let toast: ToastCenter
   func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -58,6 +59,7 @@ struct UserMessageCopyMenu: UIViewRepresentable {
     ) -> UIContextMenuConfiguration? {
       let message = parent.message
       let toast = parent.toast
+      let reversion = parent.reversion
       return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
         let copy = UIAction(title: "Copiar", image: UIImage(systemName: "doc.on.doc")) { _ in
           UIPasteboard.general.string = message.copyText
@@ -70,7 +72,12 @@ struct UserMessageCopyMenu: UIViewRepresentable {
           Haptics.play(.selection)
           toast.show("Citação copiada")
         }
-        return UIMenu(children: message.quotes.isEmpty ? [copy] : [copy, quote])
+        var actions: [UIMenuElement] = message.quotes.isEmpty ? [copy] : [copy, quote]
+        if let reversion {
+          actions.append(UIAction(title: "Redefinir para este ponto", image: UIImage(systemName: "arrow.uturn.backward"),
+            attributes: reversion.pending ? [.disabled] : []) { _ in reversion.revert(message.id) })
+        }
+        return UIMenu(children: actions)
       }
     }
   }

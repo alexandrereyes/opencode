@@ -4,43 +4,44 @@ import SwiftUI
 struct SessionRowView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.sessionRowDate) private var now
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let row: SessionRow
   let preview: SessionPreview
   let directory: SessionDirectoryLabel?
 
   var body: some View {
-    HStack(spacing: 12) {
-      SessionAvatar(row: row, size: 44)
-      VStack(alignment: .leading, spacing: 5) {
+    HStack(spacing: AppLayout.avatarGap) {
+      SessionAvatar(row: row, size: AppLayout.avatar)
+      VStack(alignment: .leading, spacing: 3) {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
           Text(row.session.displayTitle)
-            .font(.system(size: 16, weight: row.unread ? .semibold : .regular))
+            .appFont(.heading, weight: row.unread ? .bold : .regular)
             .foregroundStyle(theme.color(.textStrong))
-            .lineLimit(1)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
           Spacer(minLength: 0)
           SessionRowTime(at: row.interactionAt, unread: row.unread)
         }
         SessionDirectoryLine(label: directory)
         HStack(spacing: 7) {
           Text(
-            "\(preview.image && row.state != .running ? Text("\(Image(systemName: "photo")) ").foregroundColor(theme.color(.icon)) : Text(""))\(Text(row.state == .running ? "trabalhando · \(preview.activity ?? "pensando")" : preview.text).foregroundColor(theme.color(row.state == .running ? .success : .textSecondary)))"
+            "\(preview.image && row.state != .running ? Text("\(Image(systemName: "photo")) ").foregroundColor(theme.color(.icon)) : Text(""))\(Text(row.state == .running ? "trabalhando · \(preview.activity ?? "pensando")" : preview.text).foregroundColor(theme.color(row.state == .running ? .success : .textPreview)))"
           )
-          .font(.system(size: 13))
-          .lineLimit(1)
+          .appFont(.preview)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
           .frame(maxWidth: .infinity, alignment: .leading)
           if row.muted {
-            Image(systemName: "bell.slash.fill").font(.system(size: 12)).foregroundStyle(
+            Image(systemName: "bell.slash.fill").appSymbol(.inline).foregroundStyle(
               theme.color(.icon))
           }
           if row.pinned {
-            Image(systemName: "pin.fill").font(.system(size: 12)).foregroundStyle(
+            Image(systemName: "pin.fill").appSymbol(.inline).foregroundStyle(
               theme.color(.icon))
           }
           if row.unread {
             Circle().fill(theme.color(row.muted ? .textWeak : .primary)).frame(
-              width: 7, height: 7)
+              width: 8, height: 8)
           }
-        }
+        }.padding(.top, 1)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -54,6 +55,7 @@ struct SessionRowView: View {
 
 struct SessionAvatar: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
   let row: SessionRow
   let size: CGFloat
 
@@ -61,25 +63,26 @@ struct SessionAvatar: View {
     let colors = theme.avatar(SessionList.avatarColor(row.project, fallback: row.session.projectID))
     ZStack {
       Circle().fill(colors.background)
-      Text(SessionList.monogram(row.projectName)).font(.system(size: size * 0.34, weight: .medium))
+      Text(SessionList.monogram(row.projectName)).appFont(.message, weight: .medium)
+        .minimumScaleFactor(0.6).lineLimit(1)
         .foregroundStyle(colors.text)
       if row.state == .running { RunningArc(size: size + 5).allowsHitTesting(false) }
     }
     .frame(width: size, height: size)
     .overlay(alignment: .bottomTrailing) {
       if row.activeChildren > 0 {
-        Text("+\(row.activeChildren)").font(.system(size: 9, weight: .semibold))
+        Text("+\(row.activeChildren)").appFont(.micro, weight: .semibold).monospacedDigit()
           .foregroundStyle(theme.color(.textStrong))
           .padding(4).background(theme.color(.surfaceRaised), in: Capsule())
-          .overlay { Capsule().strokeBorder(theme.color(.border), lineWidth: 0.7) }
+          .overlay { Capsule().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale) }
           .offset(x: 3, y: 2)
       } else if row.state == .permission || row.state == .question {
         Image(systemName: row.state == .permission ? "shield.fill" : "questionmark")
-          .font(.system(size: 8, weight: .bold))
+          .appSymbol(.disclosure, weight: .semibold)
           .foregroundStyle(theme.color(.background))
-          .frame(width: 16, height: 16)
+          .frame(width: 18, height: 18)
           .background(theme.color(row.state == .permission ? .error : .info), in: Circle())
-          .overlay { Circle().strokeBorder(theme.color(.background), lineWidth: 1) }
+          .overlay { Circle().strokeBorder(theme.color(.background), lineWidth: 2) }
           .offset(x: 2, y: 2)
       }
     }

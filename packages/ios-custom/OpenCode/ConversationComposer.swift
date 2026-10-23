@@ -6,30 +6,38 @@ struct ConversationComposer: View {
   @Environment(\.sessionAlerts) private var alerts
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
-  @State private var expanded = false
+  @State private var expandedSendRevision = 0
   @State private var expandedNavigationID: UUID?
   var body: some View {
     VStack(spacing: 0) {
-      if !expanded {
-        ComposerEditor(store: store, draft: draft, expanded: false) { expanded = true }
+      ConversationRevertStatus(store: store, draft: draft)
+      if !draft.expanded {
+        ComposerEditor(store: store, draft: draft, expanded: false) { draft.expanded = true }
       }
     }
-    .fullScreenCover(isPresented: $expanded, onDismiss: {
-      if alerts?.center.navigationID == expandedNavigationID { draft.focused = true }
+    .fullScreenCover(isPresented: $draft.expanded, onDismiss: {
+      if draft.sendRevision == expandedSendRevision,
+        alerts?.center.navigationID == expandedNavigationID { draft.focused = true }
     }) {
       NavigationStack {
-        ComposerEditor(store: store, draft: draft, expanded: true) { expanded = false }
+        VStack(spacing: 8) {
+          FloatingVoiceHost()
+          ComposerEditor(store: store, draft: draft, expanded: true) { draft.expanded = false }
+        }
           .padding(12).background(theme.color(.background))
           .navigationTitle("Mensagem").navigationBarTitleDisplayMode(.inline)
           .toolbar {
             ToolbarItem(placement: .confirmationAction) {
               Button("Recolher", systemImage: "arrow.down.right.and.arrow.up.left") {
-                expanded = false
+                draft.expanded = false
               }
             }
           }.toastOverlay(store.toast).onAppear { draft.focused = true }
-      }.tint(theme.color(.primary)).sessionAlertOverlay()
-        .onAppear { expandedNavigationID = alerts?.center.navigationID }
+      }.tint(theme.color(.primary)).sessionAlertOverlay(voice: false)
+        .onAppear {
+          expandedNavigationID = alerts?.center.navigationID
+          expandedSendRevision = draft.sendRevision
+        }
     }
     .task { await draft.load() }
     .onChange(of: draft.persistenceError) { _, error in

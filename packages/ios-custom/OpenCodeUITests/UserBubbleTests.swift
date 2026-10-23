@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor final class UserBubbleTests: XCTestCase {
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
@@ -48,10 +49,15 @@ import XCTest
       let control = try toggle(app)
       let text = try prompt(app)
       XCTAssertTrue(control.waitForExistence(timeout: 10))
+      // A saved reading anchor can open with the prompt still in its natural
+      // position. Cross the sticky edge before comparing pinned coordinates.
+      scrollAnswer(app, below: control.frame.maxY, up: true)
       XCTAssertEqual(control.value as? String, "Recolhido")
       let height = text.frame.height
       let y = text.frame.minY
-      XCTAssertLessThan(height, 45)
+      // AppTextStyle.message uses a 24 pt line height at the larger baseline.
+      let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 24) * 2
+      XCTAssertEqual(height, ceil(twoLines), accuracy: 1)
       shot(app, "app-collapsed-" + theme)
       for up in [false, true, false] {
         scrollAnswer(app, below: control.frame.maxY, up: up)
@@ -154,7 +160,8 @@ import XCTest
       app.terminate()
       app = try launch(theme: theme, preference: nil)
       XCTAssertFalse(try toggle(app).exists)
-      XCTAssertGreaterThan(try prompt(app).frame.height, 45)
+      XCTAssertGreaterThan(try prompt(app).frame.height,
+        UIFontMetrics(forTextStyle: .body).scaledValue(for: 24) * 2)
       scrollAnswer(app, below: try prompt(app).frame.maxY, up: false)
       XCTAssertFalse(try toggle(app).exists)
       shot(app, "app-collapse-disabled-" + theme)

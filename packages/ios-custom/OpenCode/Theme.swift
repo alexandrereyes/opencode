@@ -81,14 +81,28 @@ struct ThemeChrome: UIViewRepresentable {
   let theme: AppTheme
   func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
   func updateUIView(_ view: UIView, context: Context) {
+    let traits = UITraitCollection(preferredContentSizeCategory: context.environment.dynamicTypeSize.uiCategory)
     let navigation = UINavigationBarAppearance()
     navigation.configureWithDefaultBackground()
-    navigation.titleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
-    navigation.largeTitleTextAttributes = [.foregroundColor: theme.uiColor(.textStrong)]
+    navigation.titleTextAttributes = [
+      .foregroundColor: theme.uiColor(.textStrong),
+      .font: AppTypography.font(.heading, weight: .semibold, compatibleWith: traits),
+    ]
+    navigation.largeTitleTextAttributes = [
+      .foregroundColor: theme.uiColor(.textStrong),
+      .font: AppTypography.font(.largeTitle, weight: .bold, compatibleWith: traits),
+    ]
     UINavigationBar.appearance().standardAppearance = navigation
     UINavigationBar.appearance().scrollEdgeAppearance = navigation
-    UITabBar.appearance().unselectedItemTintColor = theme.uiColor(.icon)
+    UITabBar.appearance().unselectedItemTintColor = theme.uiColor(.glassSecondary)
     UITabBarItem.appearance().badgeColor = theme.uiColor(.error)
+    // Native tabs cannot reflow; bound their scaled captions to the chrome's available height.
+    let tabFont = AppTypography.font(.micro, weight: .medium, compatibleWith: traits)
+    let tabAttributes: [NSAttributedString.Key: Any] = [
+      .font: tabFont.withSize(min(tabFont.pointSize, AppTextStyle.caption.size)),
+    ]
+    UITabBarItem.appearance().setTitleTextAttributes(tabAttributes, for: .normal)
+    UITabBarItem.appearance().setTitleTextAttributes(tabAttributes, for: .selected)
     func update(_ node: UIView) {
       if let bar = node as? UINavigationBar {
         bar.standardAppearance = navigation
@@ -96,8 +110,15 @@ struct ThemeChrome: UIViewRepresentable {
         bar.tintColor = theme.uiColor(.primary)
       }
       if let bar = node as? UITabBar {
-        bar.unselectedItemTintColor = theme.uiColor(.icon)
-        bar.tintColor = theme.uiColor(.primary)
+        bar.unselectedItemTintColor = theme.uiColor(.glassSecondary)
+        bar.tintColor = theme.uiColor(.textAccent)
+        bar.items?.forEach {
+          let symbol = UIImage.SymbolConfiguration(pointSize: AppSymbolSize.tab.rawValue, weight: .medium)
+          $0.image = $0.image?.applyingSymbolConfiguration(symbol) ?? $0.image
+          $0.selectedImage = $0.selectedImage?.applyingSymbolConfiguration(symbol) ?? $0.selectedImage
+          $0.setTitleTextAttributes(tabAttributes, for: .normal)
+          $0.setTitleTextAttributes(tabAttributes, for: .selected)
+        }
       }
       node.subviews.forEach(update)
     }

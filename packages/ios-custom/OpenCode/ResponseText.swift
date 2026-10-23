@@ -19,11 +19,13 @@ final class ResponseTextView: UITextView {
     didSet { invalidateMeasurement() }
   }
   var codeGutter = false
+  var gutterWidth: CGFloat = 44
   var inlineCodeRanges: [NSRange] = []
   var inlineCodeColor = UIColor.clear
   var gutterColor = UIColor.clear
   var gutterBorderColor = UIColor.clear
   var openNote: ((String) -> Void)?
+  var openFile: ((String) -> Void)?
   private var decorationWidth: CGFloat?
   private var inlineCodeRects: [CGRect] = []
   private var lineRects: [CGRect] = []
@@ -98,15 +100,15 @@ final class ResponseTextView: UITextView {
     super.draw(rect)
     guard codeGutter else { return }
     gutterBorderColor.setFill()
-    UIBezierPath(rect: CGRect(x: 31, y: 0, width: 1, height: bounds.height)).fill()
+    UIBezierPath(rect: CGRect(x: gutterWidth * 31 / 44, y: 0, width: 1 / traitCollection.displayScale, height: bounds.height)).fill()
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = .right
     let attributes: [NSAttributedString.Key: Any] = [
-      .font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular),
+      .font: AppTypography.font(.secondary, monospaced: true, compatibleWith: traitCollection),
       .foregroundColor: gutterColor, .paragraphStyle: paragraph,
     ]
     for (index, line) in lineRects.enumerated() {
-      (String(index + 1) as NSString).draw(in: CGRect(x: 0, y: line.minY, width: 25, height: line.height + 2), withAttributes: attributes)
+      (String(index + 1) as NSString).draw(in: CGRect(x: 0, y: line.minY, width: gutterWidth * 25 / 44, height: line.height + 2), withAttributes: attributes)
     }
   }
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
@@ -117,6 +119,10 @@ final class ResponseTextView: UITextView {
 }
 
 struct SelectableResponseText: UIViewRepresentable {
+  @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.conversationImages) private var imageContext
+  @Environment(\.openFile) private var fileAction
+  @Environment(\.responseFilesStable) private var filesStable
   let block: MarkdownBlock
   let messageID: String
   let partID: String
@@ -130,6 +136,10 @@ struct SelectableResponseText: UIViewRepresentable {
   var wrap = true
   var tableHeader = false
   var openNote: ((String) -> Void)? = nil
+  var fileContextOverride: ConversationImageContext? = nil
+  var fileOpenOverride: ((String) -> Void)? = nil
+  var filesStableOverride: Bool? = nil
+  var contentSizeOverride: UIContentSizeCategory? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -154,6 +164,7 @@ struct SelectableResponseText: UIViewRepresentable {
     configure(view, coordinator: context.coordinator)
   }
   func configure(_ view: ResponseTextView, coordinator: Coordinator) {
+    let category = contentSizeOverride ?? typeSize.uiCategory
     if view.messageID != messageID || view.partID != partID || view.sourceBlock != block {
       view.clearSelection()
     }
@@ -165,6 +176,14 @@ struct SelectableResponseText: UIViewRepresentable {
     view.selectionActions = actions
     view.selectionChanged = selectionChanged
     view.openNote = openNote
+    view.openFile = fileOpenOverride ?? fileAction?.open
+    if filesStableOverride ?? filesStable {
+      coordinator.resolveFiles(view, block: block, context: fileContextOverride ?? imageContext)
+    } else {
+      coordinator.fileTask?.cancel()
+      coordinator.fileKey = nil
+      coordinator.knownFiles = []
+    }
     view.tintColor = theme.uiColor(.markdownLink)
     view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
     view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first }
@@ -174,23 +193,27 @@ struct SelectableResponseText: UIViewRepresentable {
       block: block, theme: theme.id, matches: matches,
       current: matches.contains { $0.id == highlights.current } ? highlights.current : nil,
       gutter: gutter, wrap: wrap, tableHeader: tableHeader,
+      contentSize: category.rawValue,
       formulas: block.runs.compactMap(\.formula).filter { rasters[ResponseFormulaKey($0)] != nil }.count)
     guard coordinator.rendering != rendering else { return }
     coordinator.rendering = rendering
     view.codeGutter = gutter
-    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? 44 : 0, bottom: 0, right: 0)
+    view.gutterWidth = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 44,
+      compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
+    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? view.gutterWidth : 0, bottom: 0, right: 0)
     view.textContainer.lineBreakMode = wrap ? .byWordWrapping : .byClipping
     view.inlineCodeColor = theme.uiColor(.inlineCodeBackground).withAlphaComponent(0.5)
-    view.gutterColor = theme.uiColor(.codeLineNumber).withAlphaComponent(0.45)
-    view.gutterBorderColor = theme.uiColor(.codeGutterSeparator).withAlphaComponent(theme.value(.codeGutterSeparator).opacity * 0.5)
+    view.gutterColor = theme.uiColor(.codeLineNumber)
+    view.gutterBorderColor = theme.uiColor(.codeGutterSeparator)
     let fenced: Bool = { if case .code = block.kind { true } else { false } }()
     var cursor = 0
     view.inlineCodeRanges = block.runs.compactMap { run in
       defer { cursor += run.text.utf16.count }
-      guard run.code, !fenced else { return nil }
+      guard run.code, !fenced, FileReference.inlineURL(run.text) == nil else { return nil }
       return NSRange(location: cursor, length: run.text.utf16.count)
     }
-    let text = ResponseTextStyle.text(block, theme: theme, rasters: rasters, tableHeader: tableHeader)
+    let text = ResponseTextStyle.text(block, theme: theme, rasters: rasters, tableHeader: tableHeader,
+      traits: UITraitCollection(preferredContentSizeCategory: category))
     for match in matches {
       for range in ConversationSearch.renderedRanges(match.range, block: block) {
         text.addAttribute(.backgroundColor, value: theme.uiColor(.primary).withAlphaComponent(
@@ -198,11 +221,10 @@ struct SelectableResponseText: UIViewRepresentable {
       }
     }
     if view.attributedText != text { view.attributedText = text }
+    view.applyFileLinks(coordinator.knownFiles)
     view.invalidateMeasurement()
     view.accessibilityLabel = block.copyText
-    view.linkTextAttributes = [
-      .foregroundColor: theme.uiColor(.markdownLink), .underlineStyle: 0,
-    ]
+    view.linkTextAttributes = [:]
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ResponseTextView, context: Context)
     -> CGSize?
@@ -213,6 +235,9 @@ struct SelectableResponseText: UIViewRepresentable {
   }
   static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
     coordinator.rendering = nil
+    coordinator.fileTask?.cancel()
+    coordinator.fileKey = nil
+    coordinator.knownFiles = []
     view.clearSelection()
     view.attributedText = nil
     view.sourceBlock = nil
@@ -223,11 +248,22 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchRange = nil
     view.searchAlign = nil
     view.openNote = nil
+    view.openFile = nil
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate {
     var rendering: Rendering?
+    var fileTask: Task<Void, Never>?
+    var fileKey: String?
+    var knownFiles: Set<String> = []
     func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+      if case .link(let url) = textItem.content, let path = FileReference.path(url) {
+        return UIAction(title: "Abrir arquivo") { [weak textView] _ in
+          guard let view = textView as? ResponseTextView else { return }
+          view.selectionChanged?()
+          view.openFile?(path)
+        }
+      }
       guard case .link(let url) = textItem.content, url.scheme == "opencode-markdown" else { return defaultAction }
       return UIAction(title: "Abrir nota") { [weak textView] _ in
         guard let view = textView as? ResponseTextView else { return }
@@ -273,6 +309,7 @@ struct SelectableResponseText: UIViewRepresentable {
     let gutter: Bool
     let wrap: Bool
     let tableHeader: Bool
+    let contentSize: String
     let formulas: Int
   }
 }

@@ -136,16 +136,31 @@ import XCTest
     screenshot("c-after-relaunch-" + theme)
   }
   func testParentChildEdgeSwipeAndExpansion() throws {
-    for theme in ["openchamber-dark", "openchamber-light"] {
+    for theme in environment["OPENCODE_TEST_THEME"].map({ [$0] }) ?? ["openchamber-dark", "openchamber-light"] {
       let app = try launch("A", theme: theme)
       let transcript = app.collectionViews["conversation-transcript"]
-      for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
-      let step = app.buttons["Usou 1 · Ler"]
+      func reveal(_ element: XCUIElement) {
+        for attempt in 0..<48 {
+          if element.exists && element.isHittable,
+            element.frame.minY > transcript.frame.minY + 180, element.frame.maxY < transcript.frame.maxY { return }
+          let forward = element.exists ? element.frame.midY > transcript.frame.midY : attempt >= 24
+          transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.75 : 0.45))
+            .press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.45 : 0.75)))
+        }
+        XCTFail("O conteúdo deve estar visível abaixo da mensagem fixada")
+      }
+      let step = app.buttons["Usou 5 · Ler, Agente e Editar"]
+      reveal(step)
       XCTAssertTrue(step.waitForExistence(timeout: 10))
       if step.value as? String != "Expandido" { step.tap() }
-      let read = app.buttons.matching(NSPredicate(format: "label CONTAINS '212 linhas'")).firstMatch
-      XCTAssertTrue(read.waitForExistence(timeout: 5))
-      read.tap()
+      let reasoning = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'reasoning-'")).firstMatch
+      XCTAssertTrue(reasoning.waitForExistence(timeout: 5))
+      // Expanding the group may follow the tail; XCTest's automatic scroll can
+      // place this button under the pinned user bubble instead of making it tappable.
+      reveal(reasoning)
+      let thought = app.textViews.matching(NSPredicate(format: "value CONTAINS 'Vou consultar a infraestrutura e separar licença de integrações.'")).firstMatch
+      if !thought.exists { reasoning.tap() }
+      XCTAssertTrue(thought.waitForExistence(timeout: 5))
       screenshot("expanded-before-child-" + theme)
       let agents = app.buttons.matching(NSPredicate(format: "label CONTAINS 'agentes em execução'")).firstMatch
       if agents.exists {
@@ -156,10 +171,7 @@ import XCTest
       } else {
         // The seed's executions may have finished; the real child card remains navigable.
         let child = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Comparar alternativas Linear'")).firstMatch
-        for _ in 0..<20 {
-          if child.exists && child.isHittable { break }
-          transcript.swipeUp(velocity: .fast)
-        }
+        reveal(child)
         XCTAssertTrue(child.exists && child.isHittable)
         child.tap()
       }
@@ -173,10 +185,9 @@ import XCTest
         transcript.swipeDown(velocity: .fast)
       }
       XCTAssertTrue(step.waitForExistence(timeout: 10))
-      XCTAssertTrue(
-        app.staticTexts.matching(
-          NSPredicate(format: "label CONTAINS '212: Infraestrutura fictícia.'")
-        ).firstMatch.exists)
+      XCTAssertEqual(step.value as? String, "Expandido")
+      reveal(thought)
+      XCTAssertTrue(thought.exists)
       screenshot("expanded-after-child-" + theme)
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
         .press(
@@ -184,10 +195,9 @@ import XCTest
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
       XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
       openFromSessions(app, title: "Conversa A — trabalhando")
-      XCTAssertTrue(
-        app.staticTexts.matching(
-          NSPredicate(format: "label CONTAINS '212: Infraestrutura fictícia.'")
-        ).firstMatch.exists)
+      XCTAssertEqual(step.value as? String, "Expandido")
+      reveal(thought)
+      XCTAssertTrue(thought.exists)
       screenshot("expanded-reopened-" + theme)
     }
   }

@@ -14,6 +14,29 @@ private func detected(_ text: String) -> ComposerTrigger? {
   ComposerTrigger.detect(in: .init(text: text), cursor: text.utf16.count)
 }
 
+@Test func atomicEditorOffsetsPreserveLegacyUTF16Cursors() {
+  let token = ComposerToken(kind: .skill, id: "sample", text: "$sample")
+  let document = ComposerDocument(text: "😀 $sample x $sample", tokens: [
+    .init(start: 3, end: 10, token: token), .init(start: 13, end: 20, token: token),
+  ])
+  for cursor in [0, 2, 3, 10, 11, 12, 13, 20] {
+    #expect(document.documentOffset(document.editorOffset(cursor)) == cursor)
+  }
+  #expect(document.editorOffset(7) == 4)
+  #expect(document.editorOffset(18) == 8)
+}
+
+@Test func editorTriggerOnlyReadsTheCurrentWord() {
+  let prefix = String(repeating: "long text\n", count: 1000) + "\u{FFFC} "
+  let text = prefix + "$sam"
+  let trigger = ComposerTrigger.detect(in: text as NSString, cursor: text.utf16.count)
+  #expect(trigger?.query == "sam")
+  #expect(trigger?.range == NSRange(location: prefix.utf16.count, length: 4))
+  #expect(ComposerTrigger.detect(in: String(repeating: "a", count: 10_000) as NSString, cursor: 10_000) == nil)
+  #expect(ComposerTrigger.detect(in: "hello /sam" as NSString, cursor: 10) == nil)
+  #expect(ComposerTrigger.detect(in: "\u{FFFC}" as NSString, cursor: 1) == nil)
+}
+
 @Test func composerTriggerBoundariesAndSlashScope() {
   for marker in ["@", "$", "#"] {
     #expect(detected(marker)?.character == marker)

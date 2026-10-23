@@ -10,12 +10,12 @@ struct SessionDirectoryLine: View {
       SessionDirectoryLayout {
         Text(label.path).lineLimit(1).truncationMode(.middle)
         if let branch = label.branch {
-          Text(" · ").fixedSize()
-          Text(branch).lineLimit(1).truncationMode(.tail)
+          Text(" · ").fixedSize().foregroundStyle(theme.color(.textSecondary))
+          Text(branch).lineLimit(1).truncationMode(.tail).foregroundStyle(theme.color(.textSecondary))
         }
       }
-      .font(.system(size: 11.5))
-      .foregroundStyle(theme.color(.textWeak))
+      .appFont(.secondary)
+      .foregroundStyle(theme.color(.textMuted))
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(label.accessibilityLabel)
     }
@@ -91,8 +91,8 @@ struct SessionRowTime: View {
   var body: some View {
     let time = SessionList.relativeTime(at, now: now)
     Text(time.label)
-      .font(.system(size: 11.5))
-      .foregroundStyle(theme.color(unread ? .primary : .textSecondary))
+      .appFont(.secondary).monospacedDigit()
+      .foregroundStyle(theme.color(unread ? .textAccent : .textSecondary))
       .fixedSize()
       .accessibilityLabel(time.accessibilityLabel)
   }

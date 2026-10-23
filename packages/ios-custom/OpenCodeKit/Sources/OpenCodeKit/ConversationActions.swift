@@ -14,6 +14,7 @@ public struct InboxItem: Codable, Sendable, Identifiable {
   public let type: String
   public let delivery: PromptDelivery
   public let payload: Payload
+  public var time: MessageTime?
   public struct Payload: Codable, Sendable {
     public let text: String?
     public let metadata: [String: JSONValue]?
@@ -71,10 +72,18 @@ public struct PromptRequest: Codable, Sendable, Equatable {
 }
 
 public protocol ConversationActions: Sendable {
+  func session(_ id: String) async throws -> Session
   func selectAgent(_ agent: String, sessionID: String) async throws
   func selectModel(_ model: ModelReference, sessionID: String) async throws
   func prompt(_ request: PromptRequest, sessionID: String) async throws
   func cancelInbox(_ id: String, sessionID: String) async throws
+  func commitRevert(_ sessionID: String) async throws
+}
+
+extension ConversationActions {
+  public func commitRevert(_ sessionID: String) async throws {
+    throw ClientError.operation("Este cliente não permite confirmar uma reversão.")
+  }
 }
 
 public struct PromptSubmission: Sendable {
@@ -84,9 +93,10 @@ public struct PromptSubmission: Sendable {
   public let model: ModelReference
   public let replacing: String?
   public let keepsAgent: Bool
+  public let commitsRevert: Bool
   public init(
     request: PromptRequest, sessionID: String, agent: String, model: ModelReference,
-    replacing: String? = nil, keepsAgent: Bool = false
+    replacing: String? = nil, keepsAgent: Bool = false, commitsRevert: Bool = false
   ) {
     self.request = request
     self.sessionID = sessionID
@@ -94,18 +104,31 @@ public struct PromptSubmission: Sendable {
     self.model = model
     self.replacing = replacing
     self.keepsAgent = keepsAgent
+    self.commitsRevert = commitsRevert
   }
   public func send(using actions: some ConversationActions) async throws {
-    if request.delivery == .steer {
-      if !keepsAgent { try await actions.selectAgent(agent, sessionID: sessionID) }
-      try await actions.selectModel(model, sessionID: sessionID)
-    }
+    try await applySelection(using: actions)
     do { try await actions.prompt(request, sessionID: sessionID) } catch {
       // Only admission is idempotent. A lost response retries this exact request ID.
       guard Self.ambiguous(error), !Task.isCancelled else { throw error }
       try await actions.prompt(request, sessionID: sessionID)
     }
     if let replacing { try await actions.cancelInbox(replacing, sessionID: sessionID) }
+  }
+  public func applySelection(using actions: some ConversationActions) async throws {
+    guard request.delivery == .steer else {
+      if commitsRevert { try await actions.commitRevert(sessionID) }
+      return
+    }
+    if !keepsAgent {
+      // Agent switches are not deduplicated by the server; read past any delayed SSE update.
+      let current = try await actions.session(sessionID)
+      if current.agent != agent { try await actions.selectAgent(agent, sessionID: sessionID) }
+    }
+    if commitsRevert { try await actions.commitRevert(sessionID) }
+    // Commit before the model switch, which would otherwise be removed with the old history.
+    // Like the web, let the server deduplicate model/variant selection.
+    try await actions.selectModel(model, sessionID: sessionID)
   }
   private static func ambiguous(_ error: any Error) -> Bool {
     if let error = error as? URLError { return error.code != .cancelled }

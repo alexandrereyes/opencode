@@ -44,3 +44,15 @@ private func themeSource() -> [String: JSONValue] {
   #expect(throws: ThemeError.self) { try ThemeColor(hex: "not a color") }
   #expect(throws: ThemeError.self) { try ThemeColor(hex: "#xyzxyz") }
 }
+
+@Test func bundledThemeVariantsContainAllSemanticRoles() throws {
+  let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("OpenCode/Resources/Themes")
+  let variants = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+    .filter { $0.pathExtension == "json" && $0.lastPathComponent != "registry.json" }
+  #expect(variants.count == 76)
+  for variant in variants {
+    let theme = try JSONDecoder().decode(ThemeDefinition.self, from: Data(contentsOf: variant))
+    #expect(!theme.id.isEmpty)
+  }
+}

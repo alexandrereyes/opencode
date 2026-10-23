@@ -10,9 +10,11 @@ struct SessionDetailsSheet: View {
   var showLocation = true
   let context: () -> Void
   @State private var services: SessionServices?
+  @State private var detent = PresentationDetent.large
   var body: some View {
     NavigationStack {
       List {
+        SessionUsageSection(store: store)
         Section("Sessão") {
           LabeledContent("Projeto", value: isChat ? "Sem repositório" : project?.displayName ?? "Indisponível")
           if showLocation {
@@ -49,7 +51,7 @@ struct SessionDetailsSheet: View {
       .navigationTitle("Detalhes da sessão").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { dismiss() } } }
     }
-    .tint(theme.color(.primary)).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    .tint(theme.color(.primary)).presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.visible)
     .task { services = await store.services() }
   }
   private func serviceSection(_ title: String, items: [SessionService]?) -> some View {

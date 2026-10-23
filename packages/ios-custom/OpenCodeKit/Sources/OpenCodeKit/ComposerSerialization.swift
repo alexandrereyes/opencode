@@ -5,7 +5,7 @@ extension PromptRequest {
     id: String = "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""),
     document: ComposerDocument, delivery: PromptDelivery, agent: String, model: ModelReference,
     attachments: [DeliveredAttachment] = [], quotes: [ChatQuote] = [],
-    metadata extra: [String: JSONValue] = [:]
+    metadata extra: [String: JSONValue] = [:], contextFiles: [JSONValue] = [], contextText: [String] = []
   ) {
     let display = document.normalized
     let quotes = quotes.map { $0.delivered(attachments) }
@@ -21,11 +21,11 @@ extension PromptRequest {
           .init(start: $0.start - removed, end: $0.end - removed, token: $0.token)
         })
     }
-    var files: [JSONValue] = []
+    var files: [JSONValue] = contextFiles
     var agents: [JSONValue] = []
     var skills: [JSONValue] = []
     var sessions: [JSONValue] = []
-    var suffix: [String] = []
+    var suffix: [String] = contextText
     for span in expanded.validTokens {
       let mention = JSONValue.object([
         "start": .number(Double(span.start)), "end": .number(Double(span.end)),

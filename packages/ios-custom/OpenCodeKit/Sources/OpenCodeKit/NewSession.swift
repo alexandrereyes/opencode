@@ -264,14 +264,15 @@ public struct MCPServer: Codable, Sendable, Identifiable, Equatable {
     }
     return enabled
   }
-  public static func ordered(_ servers: [Self], configuration: [NewSessionConfiguration]) -> [Self]
-  {
-    let enabled = defaults(configuration)
+  public static func ordered(_ servers: [Self]) -> [Self] {
     return servers.sorted {
-      let first = enabled[$0.name] ?? true
-      let second = enabled[$1.name] ?? true
-      return first != second
-        ? first : $0.name.localizedCompare($1.name) == .orderedAscending
+      let first = $0.status.status == .connected
+      let second = $1.status.status == .connected
+      if first != second { return first }
+      let priority = ["codex-computer-use", "safari-devtools"]
+      let a = priority.firstIndex(of: $0.name) ?? priority.count
+      let b = priority.firstIndex(of: $1.name) ?? priority.count
+      return a != b ? a < b : $0.name < $1.name
     }
   }
   public enum Toggle: Equatable, Sendable { case intent, live, login, unavailable }

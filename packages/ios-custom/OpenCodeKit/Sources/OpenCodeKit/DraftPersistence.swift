@@ -10,10 +10,11 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
   public var replacing: String?
   public var quotes: [ChatQuote]
   public var newSession: NewSessionContext?
+  public var revertedContext: RevertedContext?
   public init(
     document: ComposerDocument = .init(), attachments: [DraftAttachment] = [],
     model: ModelReference? = nil, agent: String? = nil, cursor: Int = 0, replacing: String? = nil,
-    quotes: [ChatQuote] = [], newSession: NewSessionContext? = nil
+    quotes: [ChatQuote] = [], newSession: NewSessionContext? = nil, revertedContext: RevertedContext? = nil
   ) {
     self.document = document
     self.attachments = attachments
@@ -23,9 +24,10 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     self.replacing = replacing
     self.quotes = quotes
     self.newSession = newSession
+    self.revertedContext = revertedContext
   }
   private enum CodingKeys: CodingKey {
-    case document, attachments, model, agent, cursor, replacing, quotes, newSession
+    case document, attachments, model, agent, cursor, replacing, quotes, newSession, revertedContext
   }
   public init(from decoder: any Decoder) throws {
     let value = try decoder.container(keyedBy: CodingKeys.self)
@@ -37,6 +39,7 @@ public struct DraftSnapshot: Codable, Sendable, Equatable {
     replacing = try value.decodeIfPresent(String.self, forKey: .replacing)
     quotes = try value.decodeIfPresent([ChatQuote].self, forKey: .quotes) ?? []
     newSession = try value.decodeIfPresent(NewSessionContext.self, forKey: .newSession)
+    revertedContext = try value.decodeIfPresent(RevertedContext.self, forKey: .revertedContext)
   }
 }
 

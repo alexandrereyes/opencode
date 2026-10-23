@@ -15,11 +15,12 @@ import XCTest
 
   private func exercise(child: Bool, headerOnly: Bool) {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeScrollFixture", "conversation",
+    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
       "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureMenuUpdates", "-OpenCodeMenuDiagnostics",
       "-OpenCodeTheme", ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
     if child { app.launchArguments.append("-OpenCodeFixtureChild") }
     if headerOnly { app.launchArguments += ["-OpenCodeFixtureFollow", "-OpenCodeFixtureMenuHeaderOnly"] }
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"]
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 20))

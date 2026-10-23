@@ -7,7 +7,7 @@ import XCTest
   private func launch(_ role: String, native: Bool) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", "openchamber-dark",
+      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     if native { app.launchArguments.append("-OpenCodeNativeTranscript") }
@@ -24,13 +24,14 @@ import XCTest
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: element)], timeout: 20), .completed)
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication, topInset: CGFloat = 0) {
-    for _ in 0..<24 {
+    for attempt in 0..<48 {
       let transcript = app.collectionViews["conversation-transcript"]
       if element.exists && element.isHittable,
         element.frame.minY > transcript.frame.minY + topInset, element.frame.maxY < transcript.frame.maxY { return }
-      let forward = element.exists && element.frame.midY > transcript.frame.midY
-      transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: forward ? 0.65 : 0.45))
-        .press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: forward ? 0.45 : 0.65)))
+      let forward = element.exists ? element.frame.midY > transcript.frame.midY : attempt >= 24
+      // The left gutter belongs to the transcript, not the pinned bubble's inner scroll view.
+      transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.75 : 0.45))
+        .press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: forward ? 0.45 : 0.75)))
     }
     XCTAssertTrue(element.exists && element.isHittable)
   }
@@ -43,7 +44,7 @@ import XCTest
   func testToolsReasoningAndChildThroughBothTransports() throws {
     for native in [false, true] {
       let app = try launch("WORKING", native: native)
-      let group = app.buttons["Usou 1 · Ler"]
+      let group = app.buttons["Usou 5 · Ler, Agente e Editar"]
       reveal(group, app: app, topInset: 140)
       if group.value as? String != "Expandido" {
         group.tap()
@@ -52,6 +53,8 @@ import XCTest
       let reasoning = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Pensou'")).firstMatch
       reveal(reasoning, app: app)
       XCTAssertTrue(reasoning.exists)
+      let read = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'activity-read-'")).firstMatch
+      XCTAssertEqual(read.label, "Ler infra.md")
       shot("tools-reasoning-subagents", native: native)
       let subagent = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Comparar alternativas Linear'")).firstMatch
       reveal(subagent, app: app)

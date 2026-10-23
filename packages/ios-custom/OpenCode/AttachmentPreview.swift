@@ -32,7 +32,7 @@ struct FeedImageView: View {
   let source: String
   var name = "Imagem"
   var compact = false
-  var fullscreen = false
+  var thumbnailSize: CGFloat? = nil
   @State private var image: CGImage?
   @State private var failure: FeedImageFailure?
   @State private var open = false
@@ -40,14 +40,35 @@ struct FeedImageView: View {
   @State private var measuredHeight: CGFloat?
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
+      if let thumbnailSize {
+        Button {
+          if image != nil { open = true }
+          if failure != nil { attempt += 1 }
+        } label: {
+          Group {
+            if let image {
+              Image(decorative: image, scale: scale).resizable().scaledToFill()
+            } else if failure != nil {
+              Image(systemName: "photo.badge.exclamationmark")
+            } else { ProgressView() }
+          }.frame(width: thumbnailSize, height: thumbnailSize).clipped()
+            .background(theme.color(.codeSurface).opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(theme.color(.border).opacity(0.4)) }
+        }.buttonStyle(.plain).frame(width: thumbnailSize, height: thumbnailSize)
+          .contentShape(Rectangle())
+          .accessibilityLabel(failure == nil ? "Abrir imagem anexada: \(name)" : "Imagem anexada indisponível: \(name)")
+          .accessibilityHint(failure == nil ? "" : "Tentar novamente")
+          .accessibilityIdentifier(image == nil ? "feed-image-placeholder-\(name)" : "feed-image-\(name)")
+      } else {
       if let image {
         Button { open = true } label: {
           Image(decorative: image, scale: scale).resizable().scaledToFit()
-            .frame(maxWidth: compact ? 160 : .infinity, maxHeight: fullscreen ? .infinity : compact ? 110 : 300)
-            .clipShape(RoundedRectangle(cornerRadius: fullscreen ? 0 : 10))
+            .frame(maxWidth: compact ? 160 : .infinity, maxHeight: compact ? 110 : 300)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain).allowsHitTesting(!fullscreen)
-        .accessibilityLabel(fullscreen ? name : "Abrir imagem: \(name)")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Abrir imagem: \(name)")
         .accessibilityIdentifier("feed-image-\(name)")
       } else {
         VStack(alignment: .leading, spacing: 7) {
@@ -66,8 +87,9 @@ struct FeedImageView: View {
           .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
           .accessibilityIdentifier("feed-image-placeholder-\(name)")
       }
-      if !fullscreen && !name.isEmpty && name != "Imagem" {
+      if !name.isEmpty && name != "Imagem" {
         Text(name).font(.caption).lineLimit(2)
+      }
       }
     }
     .frame(minHeight: image == nil && failure == nil ? measuredHeight : nil)
@@ -81,7 +103,7 @@ struct FeedImageView: View {
       guard let context else { failure = .unavailable; return }
       do {
         let loaded = try await FeedImageLoader.shared.load(source, client: context.client,
-          directory: context.directory, maxPixelSize: Int((fullscreen ? 900 : compact ? 160 : 400) * scale))
+          directory: context.directory, maxPixelSize: Int((thumbnailSize ?? (compact ? 160 : 400)) * scale))
         guard !Task.isCancelled else { return }
         image = loaded
       } catch {
@@ -91,6 +113,8 @@ struct FeedImageView: View {
     }
     .fullScreenCover(isPresented: $open) {
       FeedImageFullscreen(source: source, name: name).environment(\.conversationImages, context)
+        .floatingVoiceInset()
+        .modifier(FloatingVoiceScope())
     }
     .onDisappear { image = nil }
   }
@@ -99,17 +123,48 @@ struct FeedImageView: View {
 private struct FeedImageFullscreen: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.conversationImages) private var context
   let source: String
   let name: String
+  @State private var image: CGImage?
+  @State private var failure: FeedImageFailure?
+  @State private var attempt = 0
   var body: some View {
     NavigationStack {
-      ScrollView([.horizontal, .vertical]) {
-        FeedImageView(source: source, name: name, fullscreen: true)
-          .containerRelativeFrame([.horizontal, .vertical])
+      Group {
+        if let image {
+          ZoomableImageView(image: image, name: name) { dismiss() }
+        } else if let failure {
+          VStack(spacing: 12) {
+            Text("Imagem indisponível no iPhone")
+            Text(FeedImageReference.display(source)).font(.caption).lineLimit(3)
+              .textSelection(.enabled)
+            Text(failure.localizedDescription).font(.caption)
+            Button("Tentar novamente") { attempt += 1 }
+          }.foregroundStyle(theme.color(.textSecondary))
+        } else {
+          ProgressView("Carregando imagem…")
+        }
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(theme.color(.background)).navigationTitle(name).navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } }
+        ToolbarItemGroup(placement: .topBarLeading) { FeedImageFileActions(source: source, name: name) }
+      }
     }.tint(theme.color(.primary))
+      .task(id: attempt) {
+        guard let context else { failure = .unavailable; return }
+        failure = nil
+        do {
+          let loaded = try await FeedImageLoader.shared.load(source, client: context.client,
+            directory: context.directory)
+          guard !Task.isCancelled else { return }
+          image = loaded
+        } catch {
+          if !Task.isCancelled { failure = FeedImageFailure.map(error) }
+        }
+      }
   }
 }
 

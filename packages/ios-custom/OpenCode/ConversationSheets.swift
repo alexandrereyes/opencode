@@ -12,50 +12,38 @@ struct ConversationAgentsSheet: View {
     NavigationStack {
       List {
         ForEach(store.runningWork) { work in
-          HStack(spacing: 8) {
+          HStack(alignment: .top, spacing: 8) {
             Button {
               dismiss()
               open(work)
             } label: {
-              HStack(spacing: 12) {
-                let agent = store.agents.first { $0.id == work.agent }
-                if let id = work.agent {
-                  AgentPixels(color: theme.agentColor(agent, id: id))
-                } else {
-                  Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
-                }
-                ViewThatFits(in: .horizontal) {
-                  HStack(spacing: 8) {
-                    Text(agent?.name ?? "Shell em background")
-                      .font(.subheadline.weight(.medium))
-                      .foregroundStyle(
-                        work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text)
-                      ).fixedSize()
-                    Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
-                      .fixedSize()
+              VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                  let agent = store.agents.first { $0.id == work.agent }
+                  if let id = work.agent {
+                    AgentPixels(color: theme.agentColor(agent, id: id))
+                  } else {
+                    Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
                   }
                   VStack(alignment: .leading, spacing: 5) {
-                    Text(
-                      work.agent.flatMap { id in store.agents.first { $0.id == id }?.name }
-                        ?? "Shell em background"
-                    )
-                    .font(.subheadline.weight(.medium)).foregroundStyle(
-                      work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+                    Text(agent?.name ?? "Shell em background")
+                      .font(.subheadline.weight(.medium)).foregroundStyle(
+                        work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
                     Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
                       .lineLimit(2)
                   }
+                  Spacer(minLength: 3)
+                  TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(ConversationProjection.duration(context.date.timeIntervalSince1970 * 1000 - work.started))
+                      .font(.caption2).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
+                      .fixedSize()
+                  }
+                  Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.color(.icon))
                 }
-                Spacer(minLength: 3)
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                  Text(
-                    ConversationProjection.duration(
-                      context.date.timeIntervalSince1970 * 1000 - work.started)
-                  )
-                  .font(.caption2).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-                  .fixedSize()
+                if let usage = store.childUsage(work.sessionID) {
+                  ContextUsageLine(usage: usage, compact: true).padding(.leading, 30)
+                    .accessibilityIdentifier("child-usage-" + work.id)
                 }
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(
-                  theme.color(.icon))
               }.padding(.vertical, 5)
             }.buttonStyle(.plain).disabled(work.sessionID == nil && work.shellID == nil)
             Button {
@@ -99,7 +87,9 @@ struct ConversationAgentsSheet: View {
     }.presentationDetents([
       .height(
         min(
-          580, max(180, store.runningWork.reduce(0) { $0 + (rowHeights[$1.id] ?? 48) + 16 } + 112)))
+           580, max(180, store.runningWork.reduce(0) {
+             $0 + (rowHeights[$1.id] ?? (store.childUsage($1.sessionID) == nil ? 64 : 96)) + 16
+           } + 112)))
     ]).presentationDragIndicator(.visible).tint(
       theme.color(.primary))
   }

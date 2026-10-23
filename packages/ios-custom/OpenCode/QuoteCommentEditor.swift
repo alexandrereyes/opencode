@@ -80,7 +80,7 @@ struct QuoteCommentEditor: View {
     // This editor never loads or persists: Concluir is the only draft mutation.
     let editor = ConversationDraft(server: "local", id: quote.id)
     editor.text = quote.document.attributed
-    editor.selection = NSRange(location: editor.text.length, length: 0)
+    editor.selection = NSRange(location: editor.editorText.length, length: 0)
     _editor = State(initialValue: editor)
   }
   var body: some View {
@@ -98,7 +98,7 @@ struct QuoteCommentEditor: View {
             identifier: "comment-composer"
           )
           .overlay(alignment: .topLeading) {
-            if editor.text.length == 0 {
+            if editor.isEmpty {
               Text("Adicione um comentário sobre este trecho…").foregroundStyle(
                 theme.color(.textSecondary)
               )

@@ -95,6 +95,10 @@ private func alertEvent(_ type: String = "session.execution.succeeded", owner: S
 private actor ChildActions: ConversationActions {
   var calls: [String] = []
   var bodies: [PromptRequest] = []
+  func session(_ id: String) throws -> Session {
+    Issue.record("Child submissions must not read or switch the agent")
+    return try alertSession()
+  }
   func selectAgent(_ agent: String, sessionID: String) { calls.append("agent") }
   func selectModel(_ model: ModelReference, sessionID: String) { calls.append("model:" + sessionID) }
   func prompt(_ request: PromptRequest, sessionID: String) {

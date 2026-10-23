@@ -27,9 +27,11 @@ import XCTest
     let app = try launch("FINISHED")
     let disclosure = group(app)
     XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
-    XCTAssertEqual(disclosure.label, "Usou 11 · Glob, Ler, Grep e Shell")
+    let disclosureID = disclosure.identifier
+    XCTAssertEqual(disclosure.label, "Usou 33 · Patch, Shell, Ler e Grep")
     XCTAssertEqual(disclosure.value as? String, "Recolhido")
     XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:'")).count, 1)
+    XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'activity-file-'")).firstMatch.exists)
     screenshot("collapsed")
     disclosure.tap()
     XCTAssertEqual(disclosure.value as? String, "Expandido")
@@ -40,12 +42,19 @@ import XCTest
       transcript.swipeDown(velocity: .slow)
     }
     screenshot("expanded")
+    let file = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'activity-file-'")).firstMatch
+    XCTAssertTrue(file.exists)
+    XCTAssertEqual(file.value as? String, "Recolhido")
+    file.tap()
+    XCTAssertEqual(file.value as? String, "Expandido")
+    screenshot("diff")
     app.buttons["Voltar"].tap()
-    let session = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Grupos — concluído'")).firstMatch
+    let session = app.buttons["session-row-" + (try XCTUnwrap(environment["OPENCODE_TEST_GROUP_FINISHED"]))]
     app.revealSessionRow(session)
     session.tap()
     let remembered = group(app)
     XCTAssertTrue(remembered.waitForExistence(timeout: 15))
+    XCTAssertEqual(remembered.identifier, disclosureID)
     XCTAssertEqual(remembered.value as? String, "Expandido")
     screenshot("remembered")
   }
@@ -53,9 +62,22 @@ import XCTest
     let app = try launch("RUNNING")
     let disclosure = group(app)
     XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
-    XCTAssertEqual(disclosure.label, "Usou 11 · Glob, Ler, Grep e Shell")
-    XCTAssertEqual(disclosure.value as? String, "Expandido")
-    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Rodando printf' ")).firstMatch.waitForExistence(timeout: 10))
+    XCTAssertEqual(disclosure.label, "Usou 33 · Patch, Shell, Ler e Grep")
+    XCTAssertEqual(disclosure.value as? String, "Recolhido")
     screenshot("running")
+    disclosure.tap()
+    XCTAssertEqual(disclosure.value as? String, "Expandido")
+    let transcript = app.collectionViews["conversation-transcript"]
+    transcript.swipeDown(velocity: .slow)
+    screenshot("running-expanded")
+    let failed = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Falha de exemplo'")).firstMatch
+    for _ in 0..<8 {
+      if failed.isHittable { break }
+      transcript.swipeUp(velocity: .fast)
+    }
+    XCTAssertTrue(failed.isHittable)
+    failed.tap()
+    XCTAssertTrue(app.staticTexts["Falha de exemplo"].exists)
+    screenshot("failed")
   }
 }

@@ -52,6 +52,12 @@ public struct SessionAlertPolicy: Sendable {
   public init(claims: [String] = []) { self.claims = Array(claims.suffix(500)) }
   public mutating func connect(at watermark: Double) { connectedAt = watermark }
   public mutating func disconnect() { connectedAt = nil }
+  public mutating func remove(_ ids: Set<String>) {
+    claims.removeAll { key in
+      let fields = key.components(separatedBy: "\u{0}")
+      return fields.count == 4 && ids.contains(fields[1])
+    }
+  }
   public mutating func admit(
     _ signal: SessionAlertSignal, server: String, session: Session, root: Session,
     current: String?, muted: [String], autoApprove: Bool = false

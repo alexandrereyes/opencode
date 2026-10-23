@@ -41,6 +41,7 @@ private struct EmptyMasterView: View {
           Button(error + " Tentar novamente") { Task { await store.open() } }
             .font(.caption).foregroundStyle(theme.color(.error)).padding()
         }
+        FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 8)
         ConversationComposer(store: store.composer, draft: store.draft)
           .padding(.horizontal, 12).padding(.bottom, 6)
       } else {
@@ -51,6 +52,7 @@ private struct EmptyMasterView: View {
         } actions: {
           Button("Verificar novamente") { Task { await store.sessions.loadMaster(); await store.open() } }
         }.accessibilityIdentifier("master-unavailable")
+        FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)
       }
     }.background(theme.color(.background)).tint(theme.color(.primary))
       .toolbar(.hidden, for: .navigationBar, .tabBar)
@@ -124,10 +126,12 @@ private struct EmptyMasterView: View {
         } else {
           try await sessions.client.prompt(request, sessionID: id)
         }
+        draft.didSend()
       } catch {
         let target = sessions.drafts.draft(id)
         await target.load()
         target.text = draft.text
+        target.expanded = draft.expanded
         target.model = model
         target.quotes = draft.quotes
         target.attachments = delivered.map { item in

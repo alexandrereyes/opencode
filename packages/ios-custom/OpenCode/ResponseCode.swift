@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ResponseCode: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.dynamicTypeSize) private var typeSize
   @Environment(ToastCenter.self) private var toast
   @Environment(\.responseSelectionChanged) private var selection
   @Environment(\.conversationSearch) private var highlights
@@ -16,7 +17,7 @@ struct ResponseCode: View {
       HStack(spacing: 0) {
         if case .code(let language) = block.kind {
           Text(language?.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "texto")
-            .font(.system(size: 13, design: .monospaced)).lineLimit(1)
+            .appFont(.caption, design: .monospaced).lineLimit(1)
         }
         Spacer(minLength: 8)
         Button { wrap.toggle(); selection?.selected() } label: {
@@ -56,7 +57,9 @@ struct ResponseCode: View {
   }
   private var naturalWidth: CGFloat {
     max(120, block.text.components(separatedBy: "\n").map {
-      ($0 as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)]).width
-    }.max() ?? 0) + 44
+      ($0 as NSString).size(withAttributes: [.font: AppTypography.font(.secondary, monospaced: true,
+        compatibleWith: UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory))]).width
+    }.max() ?? 0) + UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 44,
+      compatibleWith: UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory))
   }
 }

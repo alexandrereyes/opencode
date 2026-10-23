@@ -5,6 +5,7 @@ struct ConversationOptionsMenu: UIViewRepresentable {
   let available: Bool
   let canArchive: Bool
   let archiving: Bool
+  var deleting = false
   let theme: AppTheme
   let actions: Actions
 
@@ -13,12 +14,15 @@ struct ConversationOptionsMenu: UIViewRepresentable {
     let rename: () -> Void
     let details: () -> Void
     let archive: () -> Void
+    var delete: (() -> Void)? = nil
   }
   struct Signature: Equatable {
     let sessionID: String
     let available: Bool
     let canArchive: Bool
     let archiving: Bool
+    let canDelete: Bool
+    let deleting: Bool
     let theme: String
   }
   final class Coordinator {
@@ -38,11 +42,12 @@ struct ConversationOptionsMenu: UIViewRepresentable {
   func update(_ button: UIButton, coordinator: Coordinator) {
     coordinator.actions = actions
     let signature = Signature(sessionID: sessionID, available: available, canArchive: canArchive,
-                              archiving: archiving, theme: theme.id)
+                              archiving: archiving, canDelete: actions.delete != nil,
+                              deleting: deleting, theme: theme.id)
     guard coordinator.signature != signature else { return }
     coordinator.signature = signature
     button.tintColor = theme.uiColor(.primary)
-    button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19))?
+    button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: AppSymbolSize.navigation.rawValue, weight: .medium))?
       .withTintColor(theme.uiColor(.textStrong), renderingMode: .alwaysOriginal), for: .normal)
     func icon(_ name: String) -> UIImage? {
       UIImage(systemName: name)?.withTintColor(theme.uiColor(.primary), renderingMode: .alwaysOriginal)
@@ -62,8 +67,13 @@ struct ConversationOptionsMenu: UIViewRepresentable {
                           attributes: available && !archiving ? .destructive : [.destructive, .disabled]) {
       [weak coordinator] _ in coordinator?.actions?.archive()
     }
-    button.menu = UIMenu(children: [search, rename, details] + (canArchive
-      ? [UIMenu(options: .displayInline, children: [archive])] : []))
+    let delete = UIAction(title: "Excluir sessão", image: UIImage(systemName: "trash"),
+                          attributes: available && !deleting ? .destructive : [.destructive, .disabled]) {
+      [weak coordinator] _ in coordinator?.actions?.delete?()
+    }
+    let destructive = (canArchive ? [archive] : []) + (actions.delete != nil ? [delete] : [])
+    button.menu = UIMenu(children: [search, rename, details] + (destructive.isEmpty
+      ? [] : [UIMenu(options: .displayInline, children: destructive)]))
   }
   static func dismantleUIView(_ button: UIButton, coordinator: Coordinator) {
     button.menu = nil

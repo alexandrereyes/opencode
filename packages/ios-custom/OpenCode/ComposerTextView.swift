@@ -2,6 +2,7 @@ import OpenCodeKit
 import SwiftUI
 
 struct ComposerTextView: UIViewRepresentable {
+  @Environment(\.dynamicTypeSize) private var typeSize
   @Bindable var draft: ConversationDraft
   let theme: AppTheme
   var expanded: Bool
@@ -16,7 +17,7 @@ struct ComposerTextView: UIViewRepresentable {
     view.backgroundColor = theme.uiColor(.surface).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
-    view.font = .preferredFont(forTextStyle: .body)
+    view.font = AppTypography.font(.body)
     view.adjustsFontForContentSizeCategory = true
     view.delegate = context.coordinator
     view.accessibilityLabel = label
@@ -26,6 +27,7 @@ struct ComposerTextView: UIViewRepresentable {
     return view
   }
   func updateUIView(_ view: ComposerInputView, context: Context) {
+    _ = draft.contentRevision
     context.coordinator.parent = self
     context.coordinator.updating = true
     defer { context.coordinator.updating = false }
@@ -35,10 +37,11 @@ struct ComposerTextView: UIViewRepresentable {
     let focused = draft.focused && !draft.focusSuppressed && draft.editorOwner == owner
     view.requestFocus = focused
     view.submit = submit
+    view.escape = { draft.dismissSuggestions() }
     view.canSubmit = canSubmit && draft.trigger == nil && draft.editorOwner == owner
     view.tintColor = theme.uiColor(.primary)
     let querying = draft.trigger != nil
-    if view.querying != querying {
+    if view.querying != querying && view.markedTextRange == nil {
       view.querying = querying
       view.autocorrectionType = querying ? .no : .default
       view.autocapitalizationType = querying ? .none : .sentences
@@ -49,33 +52,38 @@ struct ComposerTextView: UIViewRepresentable {
       view.smartInsertDeleteType = querying ? .no : .default
       if view.isFirstResponder { view.reloadInputViews() }
     }
-    let value = NSMutableAttributedString(attributedString: draft.document.attributed)
-    if value.length > 0 {
-      value.addAttributes(
-        [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: theme.uiColor(.text)],
-        range: NSRange(location: 0, length: value.length))
-      for span in draft.document.validTokens {
-        value.addAttributes(
-          [
-            .foregroundColor: theme.uiColor(span.token.kind.role),
-            .backgroundColor: theme.uiColor(span.token.kind.role).withAlphaComponent(0.12),
-          ], range: span.range)
+    if view.markedTextRange == nil {
+      let font = AppTypography.font(.body,
+        compatibleWith: UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory))
+      let restyle = view.composerTheme.id != theme.id || view.composerFont != font
+      view.composerTheme = theme
+      view.composerFont = font
+      if view.representedDraft !== draft || view.representedRevision != draft.sourceRevision {
+        view.textStorage.setAttributedString(draft.editorText)
+        view.representedDraft = draft
+        view.representedRevision = draft.sourceRevision
+        view.selectedRange = NSRange(location: min(draft.selection.location, view.textStorage.length),
+                                     length: min(draft.selection.length, max(0, view.textStorage.length - draft.selection.location)))
+        view.restyle()
+        view.undoManager?.removeAllActions()
+      } else if restyle {
+        view.restyle()
+      }
+      resetTyping(view)
+    }
+    if focused && !view.isFirstResponder && view.window != nil { view.becomeFirstResponder() }
+    if !focused && view.isFirstResponder {
+      // UIKit asks the SwiftUI host for its next responder. Doing that during a
+      // graph update can cycle when the floating voice controls are present.
+      DispatchQueue.main.async { [weak view] in
+        guard let view, !view.requestFocus, view.isFirstResponder else { return }
+        view.resignFirstResponder()
       }
     }
-    if view.markedTextRange == nil && !view.attributedText.isEqual(to: value) {
-      view.attributedText = value
-    }
-    if NSMaxRange(draft.selection) <= value.length, view.selectedRange != draft.selection {
-      view.selectedRange = draft.selection
-    }
-    resetTyping(view)
-    if focused && !view.isFirstResponder && view.window != nil { view.becomeFirstResponder() }
-    if !focused && view.isFirstResponder { view.resignFirstResponder() }
   }
   private func resetTyping(_ view: UITextView) {
-    view.typingAttributes = [
-      .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: theme.uiColor(.text),
-    ]
+    guard view.markedTextRange == nil else { return }
+    view.typingAttributes = [.font: view.font ?? AppTypography.font(.body), .foregroundColor: theme.uiColor(.text)]
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerInputView, context: Context)
     -> CGSize?
@@ -85,10 +93,11 @@ struct ComposerTextView: UIViewRepresentable {
       uiView.isScrollEnabled = true
       return CGSize(width: width, height: proposal.height ?? 240)
     }
-    let line = UIFont.preferredFont(forTextStyle: .body).lineHeight
-    let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-    uiView.isScrollEnabled = fitting.height > line * 6 + 2
-    return CGSize(width: width, height: max(line + 2, min(line * 6 + 2, fitting.height)))
+    let line = uiView.composerFont.lineHeight
+    // Asking sizeThatFits for an unbounded height lays out the entire draft on every edit.
+    // TextKit already maintains contentSize for the visible scrolling editor.
+    uiView.isScrollEnabled = true
+    return CGSize(width: width, height: max(line + 2, min(line * 6 + 2, uiView.contentSize.height)))
   }
   final class Coordinator: NSObject, UITextViewDelegate {
     var parent: ComposerTextView
@@ -102,24 +111,14 @@ struct ComposerTextView: UIViewRepresentable {
     }
     func textViewDidChange(_ textView: UITextView) {
       guard !updating, parent.draft.editorOwner == parent.owner else { return }
-      parent.draft.selection = textView.selectedRange
-      parent.draft.text = textView.attributedText
+      guard let view = textView as? ComposerInputView else { return }
+      parent.draft.receiveEditor(view)
       parent.resetTyping(textView)
     }
     func textViewDidChangeSelection(_ textView: UITextView) {
       guard !updating, parent.draft.editorOwner == parent.owner else { return }
-      let selection = textView.selectedRange
-      if selection.length == 0,
-        let span = ComposerDocument(attributed: textView.attributedText).validTokens.first(where: {
-          selection.location > $0.start && selection.location < $0.end
-        })
-      {
-        textView.selectedRange = NSRange(
-          location: selection.location < parent.draft.selection.location ? span.start : span.end,
-          length: 0)
-        return
-      }
-      parent.draft.selection = selection
+      guard (textView as? ComposerInputView)?.representedDraft === parent.draft else { return }
+      parent.draft.selection = textView.selectedRange
       parent.resetTyping(textView)
     }
     func textView(
@@ -128,28 +127,72 @@ struct ComposerTextView: UIViewRepresentable {
       if text == "\n", let view = textView as? ComposerInputView {
         if view.submittedHardwareReturn || view.submitSoftwareReturn() { return false }
       }
-      // UIKit may notify selection changes before publishing the changed text.
-      let overlaps = ComposerDocument(attributed: textView.attributedText).validTokens.filter {
-        NSIntersectionRange(range, $0.range).length > 0
-          || (range.length == 0 && range.location > $0.start && range.location < $0.end)
-      }
-      guard !overlaps.isEmpty else { return true }
-      // Corrections replace a nonselected range; only deliberate selection or
-      // deletion may replace an atomic token after prose correction is restored.
-      if !text.isEmpty && textView.selectedRange.length == 0 { return false }
-      let start = min(range.location, overlaps.map(\.start).min() ?? range.location)
-      let end = max(NSMaxRange(range), overlaps.map(\.end).max() ?? NSMaxRange(range))
-      let value = NSMutableAttributedString(attributedString: textView.attributedText)
-      value.replaceCharacters(
-        in: NSRange(location: start, length: end - start), with: NSAttributedString(string: text))
-      parent.draft.selection = NSRange(location: start + text.utf16.count, length: 0)
-      parent.draft.text = value
-      return false
+      return true
     }
   }
 }
 
 final class ComposerInputView: UITextView {
+  override var contentSize: CGSize {
+    didSet {
+      // TextKit can finish layout after SwiftUI's first size proposal, without a draft edit.
+      if contentSize.height != oldValue.height { invalidateIntrinsicContentSize() }
+    }
+  }
+  weak var representedDraft: ConversationDraft?
+  var representedRevision = -1
+  var composerTheme = AppTheme.selected
+  var composerFont = AppTypography.font(.body)
+  var plainAttributes: [NSAttributedString.Key: Any] {
+    [.font: composerFont, .foregroundColor: composerTheme.uiColor(.text)]
+  }
+  func restyle() {
+    let selection = selectedRange
+    textStorage.beginEditing()
+    textStorage.addAttributes(plainAttributes, range: NSRange(location: 0, length: textStorage.length))
+    textStorage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
+      guard let attachment = value as? ComposerTokenAttachment else { return }
+      textStorage.addAttribute(.attachment, value: ComposerTokenAttachment(attachment.token, theme: composerTheme, font: composerFont), range: range)
+    }
+    textStorage.endEditing()
+    selectedRange = selection
+  }
+  func replaceCharacters(in range: NSRange, with value: NSAttributedString) {
+    let previous = textStorage.attributedSubstring(from: range)
+    let selection = selectedRange
+    undoManager?.registerUndo(withTarget: self) { view in
+      view.replaceCharacters(in: NSRange(location: range.location, length: value.length), with: previous)
+      view.selectedRange = selection
+      view.delegate?.textViewDidChangeSelection?(view)
+    }
+    textStorage.replaceCharacters(in: range, with: value)
+    selectedRange = NSRange(location: range.location + value.length, length: 0)
+    typingAttributes = plainAttributes
+    delegate?.textViewDidChange?(self)
+  }
+  private static let pasteboardType = "br.com.alexandrem.opencode.composer"
+  override func copy(_ sender: Any?) {
+    guard selectedRange.length > 0 else { return }
+    let document = ComposerDocument(editor: textStorage.attributedSubstring(from: selectedRange))
+    var item: [String: Any] = ["public.utf8-plain-text": document.text]
+    if let data = try? JSONEncoder().encode(document) { item[Self.pasteboardType] = data }
+    UIPasteboard.general.setItems([item])
+  }
+  override func cut(_ sender: Any?) {
+    guard isEditable, selectedRange.length > 0 else { return }
+    copy(sender)
+    replaceCharacters(in: selectedRange, with: NSAttributedString())
+  }
+  override func paste(_ sender: Any?) {
+    guard isEditable else { return }
+    if let data = UIPasteboard.general.data(forPasteboardType: Self.pasteboardType),
+      let document = try? JSONDecoder().decode(ComposerDocument.self, from: data) {
+      replaceCharacters(in: selectedRange, with: document.editorAttributed(theme: composerTheme, font: composerFont))
+      return
+    }
+    // External rich text must not import arbitrary attachments or typing attributes.
+    if let text = UIPasteboard.general.string { insertText(text) }
+  }
   private var keyboardDismissal: CheckedContinuation<Void, Never>?
   private var keyboardObserver: (any NSObjectProtocol)?
   func dismissKeyboard() async {

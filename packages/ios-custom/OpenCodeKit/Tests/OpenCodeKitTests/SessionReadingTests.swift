@@ -55,11 +55,12 @@ import Testing
   #expect(change.rollback(current: "Atualizado externamente") == "Atualizado externamente")
 }
 
-@Test func removedTodoIsSuppressedEvenWhenFailedAndDoesNotCountInStepSummary() {
+@Test func removedTodoOnlyCountsWhenFailedLikeTheCompactWebTimeline() {
   for status in ["completed", "running", "error"] {
     let todo = ConversationPart(type: "tool", name: "todowrite", state: .object(["status": .string(status)]))
     #expect(todo.suppressed)
-    #expect(ConversationProjection.stepLabel([todo, ConversationPart(type: "tool", name: "read")]) == "Usou 1 · Ler")
+    #expect(ConversationProjection.stepLabel([todo, ConversationPart(type: "tool", name: "read")]) ==
+      (status == "error" ? "Usou 2 · todowrite e Ler" : "Usou 1 · Ler"))
   }
 }
 

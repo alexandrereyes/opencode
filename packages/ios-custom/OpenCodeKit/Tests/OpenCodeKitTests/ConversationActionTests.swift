@@ -167,11 +167,23 @@ private actor ActionRecorder: ConversationActions {
   var requests: [PromptRequest] = []
   let failures: Int
   let permanent: Bool
+  var currentAgent = "plan"
   init(failures: Int = 0, permanent: Bool = false) {
     self.failures = failures
     self.permanent = permanent
   }
-  func selectAgent(_ agent: String, sessionID: String) { calls.append("agent:\(agent)") }
+  func session(_ id: String) throws -> Session {
+    try JSONDecoder().decode(Session.self, from: JSONEncoder().encode(JSONValue.object([
+      "id": .string(id), "projectID": .string("project_test"),
+      "location": .object(["directory": .string("/test")]),
+      "time": .object(["created": .number(1), "updated": .number(1)]),
+      "agent": .string(currentAgent),
+    ])))
+  }
+  func selectAgent(_ agent: String, sessionID: String) {
+    calls.append("agent:\(agent)")
+    currentAgent = agent
+  }
   func selectModel(_ model: ModelReference, sessionID: String) {
     calls.append("model:\(model.providerID)/\(model.id):\(model.variant ?? "default")")
   }
@@ -211,6 +223,38 @@ private actor ActionRecorder: ConversationActions {
     #expect(
       PromptDelivery.choose(busy: true, preference: preference, alternate: true) != preference)
   }
+}
+
+@Test(arguments: ["build", "mestra"])
+func repeatedSubmissionsReadCurrentServerAgent(_ agent: String) async throws {
+  let recorder = ActionRecorder()
+  await recorder.selectAgent(agent, sessionID: "ses_test")
+  for _ in 0..<3 {
+    let request = PromptRequest(text: "oi", delivery: .steer, agent: agent, model: actionModel)
+    try await PromptSubmission(
+      request: request, sessionID: "ses_test", agent: agent, model: actionModel
+    ).send(using: recorder)
+  }
+  #expect(await recorder.calls.filter { $0.hasPrefix("agent:") } == ["agent:\(agent)"])
+  let request = PromptRequest(text: "oi", delivery: .steer, agent: "explore", model: actionModel)
+  let submission = PromptSubmission(
+    request: request, sessionID: "ses_test", agent: "explore", model: actionModel)
+  try await submission.send(using: recorder)
+  try await submission.send(using: recorder)
+  #expect(await recorder.calls.filter { $0.hasPrefix("agent:") } == ["agent:\(agent)", "agent:explore"])
+}
+
+@Test(arguments: [nil, "default", "low", "high"] as [String?])
+func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async throws {
+  let recorder = ActionRecorder()
+  let model = ModelReference(id: "gpt-6-luna", providerID: "llm-proxy", variant: variant)
+  let request = PromptRequest(text: "oi", delivery: .steer, agent: "plan", model: model)
+  try await PromptSubmission(
+    request: request, sessionID: "ses_test", agent: "plan", model: model
+  ).send(using: recorder)
+  #expect(await recorder.calls == [
+    "model:llm-proxy/gpt-6-luna:\(variant ?? "default")", "prompt:\(request.id)",
+  ])
 }
 
 @Test func steeringAppliesAgentThenModelThenAdmissionAndRetriesOnlyAdmission() async throws {

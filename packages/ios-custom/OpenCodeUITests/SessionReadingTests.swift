@@ -47,9 +47,9 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Onda 5 — renomeada"].waitForExistence(timeout: 10))
     app.buttons["Voltar"].tap()
     let renamed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 5 — renomeada'")).firstMatch
+    app.revealSessionRow(renamed)
     XCTAssertTrue(renamed.waitForExistence(timeout: 15))
     screenshot("renamed-list")
-    app.revealSessionRow(renamed)
     renamed.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
     app.buttons["Mais opções"].tap()
@@ -66,17 +66,41 @@ import XCTest
       if role == "CHILD" { XCTAssertFalse(app.buttons["Arquivar"].exists) }
       app.buttons["Detalhes da sessão"].tap()
       XCTAssertTrue(app.navigationBars["Detalhes da sessão"].waitForExistence(timeout: 10))
-      XCTAssertTrue(app.staticTexts["Projeto"].exists)
+      func visible(_ element: XCUIElement) -> Bool {
+        element.exists && element.frame.height > 0
+          && element.frame.minY >= app.navigationBars["Detalhes da sessão"].frame.maxY
+          && element.frame.maxY <= app.frame.maxY - 30
+      }
+      func scroll(down: Bool = false) {
+        // Full fast swipes can skip and virtualize a short section header between checks.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.46 : 0.72))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.72 : 0.46))
+        start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+      }
+      let project = app.staticTexts["Projeto"]
+      for _ in 0..<5 {
+        if visible(project) { break }
+        if project.exists && project.frame.minY < app.navigationBars["Detalhes da sessão"].frame.maxY {
+          scroll(down: true)
+          continue
+        }
+        scroll()
+      }
+      XCTAssertTrue(visible(project))
       screenshot("details-" + role.lowercased())
-      app.swipeUp(velocity: .slow)
+      scroll()
       screenshot("details-services-" + role.lowercased())
       for (label, name) in [("Plugins", "plugins"), ("Skills", "skills"), ("LSP · configuração", "lsp")] {
         let section = app.staticTexts[label].firstMatch
-        for _ in 0..<12 {
-          if section.exists && section.isHittable { break }
-          app.swipeUp(velocity: .fast)
+        for _ in 0..<30 {
+          if visible(section) { break }
+          if section.exists && section.frame.minY < app.navigationBars["Detalhes da sessão"].frame.maxY {
+            scroll(down: true)
+            continue
+          }
+          scroll()
         }
-        XCTAssertTrue(section.exists && section.isHittable)
+        XCTAssertTrue(visible(section))
         screenshot("details-" + name + "-" + role.lowercased())
       }
       app.buttons["Fechar"].tap()
@@ -109,7 +133,8 @@ import XCTest
     wait(NSPredicate(format: "label == '1 de 1'"), on: counter)
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Revisão 1 concluída'")).firstMatch.waitForExistence(timeout: 10))
     screenshot("search-older-result")
-    app.buttons["Cancelar"].tap()
+    app.buttons["conversation-search-close"].tap()
+    XCTAssertTrue(field.waitForNonExistence(timeout: 5))
     screenshot("search-closed-position")
     app.buttons["Voltar"].tap()
     app.terminate()

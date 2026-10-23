@@ -70,8 +70,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   "Permitir" and "Negar" answer the permission; "Responder" opens the session.
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
-  "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
-- **Visual only for now:** voice, "Selecionar sessões", "Configurações", and the other
+  "Atualizar", deletion, and the list of archived sessions (open/delete; the backend has no unarchive).
+- **Visual only for now:** "Selecionar sessões", "Configurações", and the other
   tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
@@ -83,6 +83,32 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   stable choice from the project ID when the project has none, through the theme's avatar tokens.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
   "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and a large title with toolbar buttons.
+
+### Excluir sessão
+
+**Excluir** is the outer trailing swipe action (full swipe disabled). **Excluir sessão** also appears in the row's
+long-press/More menu, archived rows, and the conversation's stable UIKit `…` menu, including child conversations.
+The native confirmation uses the web's title/buttons and its cascade/permanence warning in Portuguese, with no child
+count. The web currently falls back to English for that warning because `br.ts` lacks `session.delete.confirmCascade`.
+
+The client reads `custom.session-family/page` for cleanup IDs and sends **one** bodyless `DELETE /api/session/:id`.
+The server interrupts active work and recursively deletes descendants **before** the selected session; iOS does not
+send child DELETEs. These endpoints match installed custom `1042585c…`. Success animates rows away and returns an
+affected conversation stack to Sessões. Failure keeps local data and reports a toast. No undo is offered.
+
+Successful deletion clears parent/child drafts and attachments, reading positions, expansion memory, previews,
+request state, alert claims and recent ranks, plus exact pin/mute preference keys (legacy IDs and server-qualified
+JSON tuples). Late disappearing-editor saves cannot recreate deleted drafts. A saved-data cleanup failure after
+successful deletion is reported separately. The current master remains hidden from ordinary rows and cannot be
+deleted; its existing trash still archives and resets it.
+
+Verification: **OpenCode Excluir** (`BAF8F32A-941F-4407-84A7-BF205CDC9EA6`), `ios-excluir-derived`, explicit sandbox
+launch URL/password. After `build-for-testing`, run `python3 packages/ios-custom/script/test-session-deletion.py
+--live-family`, then repeat with `OPENCODE_TEST_THEME=openchamber-light`. The runner creates only owned sessions in
+an isolated fake repository, uses Luna 6/low, verifies a real spawned child cascade, and keeps a creation/deletion
+ledger. The failure test intercepts only its named session's DELETE with HTTP 503 in Debug. Pass existing test IDs
+as arguments for regressions. Screenshots, ledgers and xcresults live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-excluir-prints/`.
 
 Wave-10 checks use the dedicated **OpenCode Linhas** simulator and `ios-linhas-derived`: after `build-for-testing`,
 run `python3 packages/ios-custom/script/test-session-rows.py`, repeat with `OPENCODE_TEST_THEME=openchamber-light`,
@@ -110,31 +136,38 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
 - **Messages:** the user's messages are bubbles on the right with the time inside. The agent's text uses the full
   width, without a bubble, and is rendered as selectable Markdown with GFM tables/tasks, highlighted code,
   formulas, diagrams and disclosures (see [Markdown rendering](#markdown-rendering)).
-- **Activity groups:** consecutive tools and nonempty reasoning share one `Usou N` disclosure **across backend steps**,
-  up to visible text, a user message, notice, error/retry or a standalone card. Summaries count tools (reasoning only
-  when there are no tools) and deduplicate localized tool titles in first-use order, without truncating categories.
-  Subagent/task cards, edit/write/patch tools (even before their diffs arrive) and question/permission interactions stay
-  outside the disclosure; removed `todowrite` and empty parts do not count or split it. Expanded content reuses the
-  native reasoning/tool details, retaining wire order, failed tools and the running tool's live elapsed time. Newly
-  running groups start open; completing/appending tools never overwrites the stored disclosure choice. Stable
-  member-based IDs and message anchors preserve expansion and reading during streaming and history prepend
-  (`ConversationActivity` in OpenCodeKit).
-  Compared with the PWA's configurable compact preset, this fixed native presentation keeps cards/diffs separate,
-  individual read details, and the approved Portuguese `Usou`/`Pensou` rather than untranslated English fallbacks.
+- **Activity groups:** follow the custom web's default **compact** preset. Consecutive tools, edits, subagents,
+  nonempty reasoning and ordinary notices share one disclosure **across backend steps**. Visible assistant text,
+  user messages, answered questions, compaction, model/location changes and interruption delimit the groups.
+  Running questions, empty parts and successful `todowrite` do not count or split them; failed tools remain visible.
+  Summaries count tool calls (reasoning only when there are no calls), deduplicate titles in first-use order, and
+  use native pt-BR copy: `Usou 33 · Patch, Shell, Ler e Grep`, `Pensou 1s`, `Raciocínio(s)` and `Atualizações`.
+  The app localizes the web's untranslated fallbacks: `Loaded … skill(s)` becomes `Carregou a(s) habilidade(s) …`,
+  `match(es)` becomes `correspondência(s)`, and `Browser` becomes `Navegador`. Tool identifiers remain identifiers.
+  Groups start **closed even while running**; streaming never overwrites a disclosure choice. Expanded consecutive
+  reads share a filename list whose disclosure only wraps names, searches/skills are informational rows, and
+  edit/write/patch sequences aggregate per-file accordions with `+N −M` and independently collapsed diffs.
+  Complete chained file snapshots show net changes; partial patches retain their separate diffs. Stable member-based
+  IDs, subgroup IDs and message anchors preserve expansion during streaming, splits and history prepend. The pure
+  `ConversationActivity`/`ConversationActivityItem` projection feeds the existing single cached-measurement scroll owner.
 - **Response footer:** only when the response finishes, a discreet line with model, effort, date, and copy
   (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`).
 - **Sticky message:** the current turn's user message always sticks below the header. **Alexandre, 22/10: user bubble
   like OpenChamber** — scrolling never collapses or expands it. **Você → Leitura → Recolher mensagens longas do usuário**
   is on by default: overflow beyond two rendered lines offers **Mostrar mensagem completa** / **Mostrar menos**.
   Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
-  fade. Only the text area has internal scrolling capped at 40% of the view; attachments, quotes, timestamp and copy
-  actions remain available. Sticky itself has no off switch in this native app. There is no other pinned banner.
+  fade. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
+  actions stay outside it. OpenChamber keeps attachments visible in both states: 48-point square image thumbnails in
+  a horizontal strip, no repeated image filename, and wrapping one-line file chips (filename up to 140 points).
+  Quotes/comments collapse to a caption/comment line; expanding reveals the quote's separate four-line/full disclosure.
+  Collapsing off shows the content immediately. VoiceOver retains full filenames and announces attached context.
+  The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
 - **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
   free answer) cards inside the conversation.
 - **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
   the queued messages (`Enviar agora`, edit, `×`).
 - **Composer (V2):** one rounded card with the text at full width and, inside it below the text, a row with a small
-  outlined `+` (attachments), `Opus 5.5 · xhigh`, a flexible space, the agent (`build`), and a round button: send when
+  outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space, the agent (`build`), and a round button: send when
   there is text, microphone when the field is empty (WhatsApp style).
 - **Triggers:** `@` context (files, sessions, agents), `/` commands, `$` skills, and `#` snippets open a suggestion
   panel above the composer; the chosen item becomes a colored token in the field.
@@ -149,6 +182,113 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
   `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
   `accent` palette colors.
+
+### MCPs in the conversation — 23 October
+
+The approved B layout puts a compact glass pill immediately after model/effort, without adding a composer row or
+changing its height. Its success/neutral dot and `N/M` count reflect confirmed connections. Tapping opens a small
+glass **MCPs** panel above the composer; the shared wave-9 switches wrap into rows, never a horizontal strip.
+Outside taps, conversation scrolling and keyboard dismissal close it. Opening/toggling does not replace the draft,
+move its selection or take keyboard focus. VoiceOver reads **MCPs, 1 de 5 conectados** and a modal switch container.
+
+`GET /api/mcp?location[directory]=…` loads lazily for the viewed Session's own Location (including children, chats and
+the master), then refreshes on panel opening. Empty/unsupported Locations have no pill or error row; loading appears
+only inside the panel. Connect/disconnect uses bodyless `POST /api/experimental/mcp/:server/connect|disconnect` with
+the same Location query, shows pending, then verifies the server's state with a fresh list. These routes, responses
+and Location semantics were checked against installed backend `1042585c285c25d4b5d4fd292d0b7eb5fb7c470e`.
+Conversation MCPs need no `/api/config` read. Failed actions use the existing toast; login-required switches only
+explain web-app authentication and never start OAuth.
+
+Both this panel and **Nova sessão** now sort connected first, then `codex-computer-use`, then `safari-devtools`, then
+alphabetically, applying those priorities independently in connected and nonconnected groups. Order is captured when
+the chips become visible and retained through pending/status changes and refreshes; reopening re-sorts. New-worktree
+previews still derive their displayed connection state from saved intent/configuration defaults, not root runtime.
+
+Verification uses only **OpenCode Chips** (`9C92A4EB-5CD9-4F31-9A79-707A18D27976`, iPhone 18 Pro/iOS 27),
+`ios-chips-derived` and explicit sandbox URL/password. After `build-for-testing`, run
+`python3 packages/ios-custom/script/test-mcp-chips.py --label dark` and repeat with
+`OPENCODE_TEST_THEME=openchamber-light` and a different label. The DEBUG-only, loopback-gated
+`-OpenCodeMCPFixture conversation|pending|empty|unsupported|new-session` renders production views using a client
+that rejects unknown requests and never forwards MCP operations. `--live` imports/deletes only its own history in a
+fake repository and toggles **only safari-devtools off and back on**, verifying every other MCP remains unchanged.
+Screenshots, logs, xcresults and sanitized verification ledgers live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-chips-prints/`.
+
+The eight MCP checks pass in both themes: three hosted store tests, four stubbed UI cases and one live Safari-only
+case. They cover ordering/reopening, pending/confirmation, counts/hiding, auth/failure toasts, outside/scroll/keyboard
+dismissal and preserved draft/focus/geometry. The Kit suite passed in Debug and optimized Release; the app built without
+warnings (`COPY_PHASE_STRIP=NO` avoids re-stripping already signed embedded frameworks/extensions). Compared with the
+mockup, this uses native Liquid Glass and a rounded panel without a drawn speech-bubble tail; the generator's stray
+dash/dot are absent. `pill-closed`, `panel-open`, `toggle-pending` and `new-session-order` captures exist in both themes.
+
+### Composer editing stability — 23 October
+
+The live `UITextView.textStorage` owns editing. Native edits publish a lightweight content revision; SwiftUI only
+loads storage for an external document replacement and never echoes the cursor back during typing or selection.
+Suggestion insertion and rich paste replace only their affected range and join native undo/redo. Marked text defers
+external loads, keyboard-trait changes and typing-attribute resets. The compact editor uses TextKit's existing content
+size rather than requesting an unbounded layout on every keystroke. Content-height changes invalidate intrinsic
+size, including TextKit layout that completes after SwiftUI's first measurement. Without this notification a restored
+500-line draft could remain 22 pt tall despite 11,022 pt of content; focus events sometimes masked the issue.
+The restoration regression covers both focused and unfocused editors and waits for layout rather than a fixed delay.
+
+Each skill/file/agent/reference/session/command/snippet is one attachment character, with a cached rendered label and
+semantic theme colors (no attachment view providers). UIKit therefore owns atomic cursor movement, double-tap,
+selection and deletion. Document expansion happens at serialization/persistence/copy boundaries: backend wave-3
+encoding, legacy draft JSON and full-label UTF-16 cursor offsets are retained. Copy publishes plain labels plus a
+structured rich document representation; pasting that representation restores tokens. Adjacent identical legacy token
+attributes are split back into individual tokens rather than silently dropping their metadata.
+
+The custom web reference is `app-custom/src/composer/editor/codemirror.ts`: its current implementation uses mark
+decorations and drops metadata for partially edited mentions. Single-character atomic native tokens deliberately
+follow the requested iOS behavior; the wire representation remains the same.
+
+Verification uses **OpenCode Composer** (`8A5B01F4-0114-43FB-A1E4-0E8F2679473B`, iPhone 18 Pro/iOS 27) and
+`$TMPDIR/opencode/ios-composer-derived`. After `build-for-testing`, `python3 script/test-composer.py` runs hosted
+editing regressions; append `OpenCodeUITests/ComposerEditingUITests` for native suggestion/selection/restore tests,
+and repeat with `OPENCODE_TEST_THEME=openchamber-light`. Every launch explicitly selects the sandbox URL/password.
+The DEBUG-only `-OpenCodeComposerFixture` uses the real editor/suggestion views, local skill/file sources, and a
+transport that rejects every HTTP request. It is also available for server-free physical-device diagnosis.
+
+The recorded baseline reproduced partial token deletion (`$sample` becoming `$sampl`) and lost metadata on undo.
+Thirty native insertions per document measured the synchronous main-thread `insertText` + `layoutIfNeeded` interval:
+1/100/500 tokens (50/5,090/25,890 UTF-16 units) averaged **2.58/6.56/18.49 ms before** and
+**1.56/2.14/1.81 ms after** in the initial comparable runs. These are local simulator samples on a shared Mac, not
+physical-device or end-to-end latency claims. The performance regression also checks that attachment identities and
+the external document revision remain unchanged while typing. `COMPOSER_PROFILE=1` requests a separate longer
+Time Profiler run; profiling overhead is excluded from those numbers. Evidence and before/after videos are under
+`$TMPDIR/opencode/ios-composer-prints/`.
+The valid `final-time-profiler.trace` records 27.86 seconds and 5,963 samples; all 84 sampled editing-callback stacks
+contain neither full-document decoding nor attachment construction. `time-profiler-summary.json` and the exported
+table retain that inspection. The first all-processes baseline trace failed with simulator dylib-overlap errors;
+the before/after latency comparison uses the explicit monotonic measurements above, not sampled CPU attribution.
+
+The four native UI cases pass in both themes, including dragging a selection handle from a token across adjacent
+prose. The Kit suite passes 232 tests, all 11 app-hosted editing/key-command tests pass, and Debug/Release builds are
+warning-free. Seven real-sandbox regressions cover new-session selector/focus restoration,
+software Shift+Return, tokenized comments, and all four session-reading cases. Enable `COMPOSER_SANDBOX_REGRESSIONS=1`
+when selecting those cases in the runner; it imports/deletes only its disposable sessions. The tiny keyboard/comment
+sends use Luna 6/low, and `comment-wire.json` verifies the received file/skill payload and UTF-16 mention offsets.
+Marked text, adjacent replacements and theme changes during composition are exercised through native text-input
+APIs. Microphone/audio dictation was not exercised; no physical device was needed to reproduce the bug.
+
+**Expanded composer after send:** a successfully acknowledged prompt (including steer/queue), backend command or
+local compact operation closes the fullscreen composer using the normal cover dismissal. That dismissal does not
+restore keyboard focus; manual **Recolher** retains its existing focus restoration. A failed operation keeps its
+draft and expanded presentation. Expansion is runtime-only and is not part of `DraftSnapshot` or persisted JSON.
+New-session success opens the conversation compact; if a Session was created but submission failed, its restored
+draft inherits the expanded presentation. The initial master-session flow follows the same rule. Side questions
+use their own nonexpandable input/sheet, rather than this fullscreen composer.
+
+Run `COMPOSER_COLLAPSE=1 COMPOSER_SANDBOX_REGRESSIONS=1 python3 script/test-composer.py
+OpenCodeUITests/ComposerCollapseTests` in both themes. It checks success and relaunch, rejection with continued
+editing, and a new-session root send. The rejection transport is DEBUG-only, restricted to one disposable sandbox
+Session's prompt endpoint; the two real sends use Luna 6/low. It seeds only the dedicated simulator's new-session
+draft, creates no worktrees, and removes its Sessions afterwards.
+Follow-up verification: all three collapse cases pass in dark/light, the four existing composer UI cases and all
+12 hosted composer/key-command tests pass, and `swift test` passes 253 tests in the concurrent working tree.
+Debug/test and Release builds are warning-free. Videos/results are `collapse-dark-pass.*` and `collapse-light-pass.*`
+under the composer evidence directory; cleanup ledgers list the disposable Sessions removed after each run.
 
 ### Jump to latest — 22 October
 
@@ -202,13 +342,47 @@ search navigates to messages and reuses wave 6's position restoration).
 | 7. Subagents and alerts  | Composer in child sessions, keeping the child's agent and with no notice; replies sent after the child delivered its result stay in the child (automatic delivery to the parent would need backend work and is out). In-app banner, tappable, when another session finishes, fails, or needs you, respecting mutes, ignoring child completions, deduplicated. Light haptics on explicit actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Out of scope for this screen for now: the microphone (visual only), "Alterações" and "Arquivos" in the `…` menu,
-and balloon actions such as fork and revert.
+and the fork action on messages.
 
-Grouping verification uses **OpenCode Grupos** (iPhone 18 Pro / iOS 27) and `ios-grupos-derived`. After
+### Desfazer mensagem enviada
+
+The backward-arrow action on delivered root/master user messages, including their sticky presentation and long-press
+menu, uses the web's **Redefinir para este ponto** label and acts without confirmation. Child bubbles omit it. Undo hides
+the selected message and later history, restores its text/tokens, attachments, quotes and file/comment context into the
+composer, and preserves the selected model/agent. **Refazer** advances one message at a time, then restores all history.
+The progress row covers descendant planning, Session rollback and pending-inbox cleanup. A partial child failure is
+reported explicitly. Submissions wait for rollback to settle; new admission commits the parent boundary before model
+selection, just like the web. Draft restoration also survives app relaunch.
+
+The cascade is orchestrated by the client: `custom.session-family/revert` only returns boundaries, then children are
+staged sequentially with `files:false`, followed by interrupt/wait and ordinary file-enabled staging of the parent.
+Children are retained; their drafts, reading state, pins and mutes remain intact. These contracts match installed custom
+`1042585c…`. See [the contract](docs/conversation-contract.md#sent-message-undo-23-october) and
+`.agent-artifacts/desfazer/WEB.md` for the source audit and the live web request trace.
+
+Verification uses only **OpenCode Desfazer** (`8AE067E9-2D79-4BBF-80A5-A8965804CB6E`, iPhone 18 Pro/iOS 27),
+`ios-desfazer-derived` and explicit sandbox URL/password. `script/test-revert.py prepare --role dark|light|web` creates
+isolated Git repositories and parent/child Sessions using Luna 6/low. After `build-for-testing`, run
+`script/test-revert.py test --role dark` (then light), and `verify` to check staged parent/child boundaries and the real
+child-created file's rollback. Creation and verification records are in `.agent-artifacts/desfazer/LEDGER.json`.
+Screenshots, xcresults and sanitized evidence are under
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-desfazer-prints/`.
+The six undo UI cases pass in both themes, including the pinned header, and each native parent's rollback patch matches the live web twin byte for
+byte. Children remain staged with empty file diffs; a separate real prompt verifies irreversible history commit.
+The Swift package suite passes 289 tests; three hosted tests cover replacement/persistence and serialized duplicate
+requests without overwriting edits. Simulator Release verification uses `COPY_PHASE_STRIP=NO` to avoid stripping the
+already-signed VoiceActivity extension; this is a command-line verification option, not a project setting change.
+
+Grouping verification uses **OpenCode Grupos2** (iPhone 18 Pro / iOS 27) and `ios-grupos2-derived`. After
 `build-for-testing`, run `python3 packages/ios-custom/script/test-groups.py`, then repeat with
 `OPENCODE_TEST_THEME=openchamber-light`. It supplies explicit sandbox credentials, imports/deletes only its own
-synthetic multi-step histories (no model calls), and includes the existing session-reading regressions. Native
-collapsed/expanded/running captures and headless PWA comparisons are in `$TMPDIR/opencode/ios-grupos-prints/`.
+sanitized 19-step histories (33 tools, including eight patches and one patch failure; no model calls), and includes
+the existing session-reading regressions plus grouped-tool transport parity and parent/child expansion continuity.
+The older working fixture expects `Usou 5 · Ler, Agente e Editar` and a compact `Ler infra.md` row; continuity verifies
+expanded reasoning, since ordinary reads no longer expose their output. Tests reopen owned sessions by ID and scroll
+through the transcript gutter to avoid the pinned bubble's inner scrolling. The tool order/states come from a GET-only production child-session read;
+the fixture contains neutral content and paths. Native collapsed/expanded/running captures and headless PWA comparisons
+are in `$TMPDIR/opencode/ios-grupos2-prints/`; the rule audit is `.agent-artifacts/agrupamento/WEB.md`.
 
 Wave 1 must already render text in a way that supports a custom selection menu (wave 4), and the composer must be
 able to hold attributed tokens (wave 3), so later waves do not rewrite earlier ones.
@@ -217,7 +391,8 @@ able to hold attributed tokens (wave 3), so later waves do not rewrite earlier o
 
 OpenChamber revision `801f59b5ba2cf4be0145edc8451c1593169898bb` is the visual/capability reference.
 `MarkdownBlocks` projects CommonMark/GFM plus footnotes, math and nested `<details>` into typed blocks while
-retaining rendered-to-source UTF-16 selection mappings. H1–H6 use 20/18/16/14/14/14 pt, body 16 pt/26 pt, code 14 pt;
+retaining rendered-to-source UTF-16 selection mappings. H1–H6 use the shared title/heading/message/secondary styles;
+body uses the larger 18.5 pt/28.5 pt baseline and code the 15.25 pt secondary style (UIKit rounds scaled sizes);
 headings, list items and ordinary blocks have distinct spacing. Soft breaks remain spaces, explicit breaks remain
 newlines, and straight punctuation is not silently changed. Nested lists have hanging indents and depth-specific
 markers; disabled task checkboxes and nested quote borders retain their state/depth. General HTML, `<kbd>`, emoji
@@ -285,7 +460,12 @@ installed `1de0005…`. Empty inline tool images from the lean RPC reload the re
 
 ImageIO downsamples off the main actor. A server/credential/directory-scoped cache holds at most 32 MiB of decoded
 images and 128 MiB on disk (24-hour disk freshness); individual images are limited to 32 MiB. Tap opens a full-screen
-viewer. Failures show **Imagem indisponível no iPhone**, the path/URL without query credentials, and retry.
+viewer. The viewer decodes the full-resolution, orientation-correct image off the main actor through the same
+authenticated disk cache, with a loading placeholder. Its native `UIScrollView` supports pinch from fit to 5×,
+double-tap at a point to 3×/fit, panning with edge bounce and centering, and re-fit after rotation. Swipe down closes
+only at fit; **Fechar**, VoiceOver activation, adjustable zoom and named zoom/fit/close actions remain available.
+All image entry points, including the pinned user's attachments, use this viewer. Failures show
+**Imagem indisponível no iPhone**, the path/URL without query credentials, and retry.
 HTTPS and base64 image data URLs retain their sources. Only loopback URLs naming the native file route are moved
 to the configured server; arbitrary localhost services cannot be proxied. `seaweedfs-svc` loads directly, with a
 host-specific HTTP ATS exception: the phone still needs its own authorized WARP DNS/route to port 8333, and signed
@@ -296,10 +476,137 @@ Verification uses only **OpenCode Imagens** and `ios-imagens-derived`; after `bu
 The runner imports/deletes only its own fake-repository histories and image files, makes no model call, supplies the
 explicit sandbox URL/password on every launch, and saves evidence in `$TMPDIR/opencode/ios-imagens-prints/`.
 Internal-host reachability is a network dependency, not claimed by the synthetic unreachable-host failure case.
+Zoom checks use **OpenCode Zoom** (`55A2D57A-6DC1-4645-BB0A-40D79707F311`), `ios-zoom-derived` and
+`ios-zoom-prints`. Set `OPENCODE_IMAGE_DEVICE`, `OPENCODE_IMAGE_DERIVED` and `OPENCODE_IMAGE_EVIDENCE` to those
+values when invoking the same runner; its zoom case covers gestures and a tall screenshot in both themes.
+The app remains portrait-locked: UIKit hosted tests exercise actual viewport resizing, centering and re-fit;
+the UI case also checks device rotation leaves the viewer usable. Debug/Release builds are warning-free,
+254 Swift tests pass, and all four image UI cases pass in both themes (dark tool regression rerun after its label update).
 Final image checks pass in both themes (three UI cases plus all thirteen app-hosted tests), with a warning-free build and
 194 Swift tests green. The four existing `SessionReadingTests` also pass together in light mode; the dark child
 Details case repeatedly missed its native menu tap and was left unchanged. The GET-only Temas audit separately
 decoded/resolved all six Markdown references and all 20 stored PNGs, then deleted its raw page.
+
+### File references and native previews
+
+Assistant Markdown local links now open a native file viewer, including links in lists and table cells. Inline code
+uses the custom web `1042585c28` candidate rules and becomes an underlined path only after the server confirms a file
+through listing/search; HTTP code links retain their external destination. Checks wait until the owning backend message
+finishes (conservative versus the web's block-level streaming boundary). Relative paths prefer exact matches, then
+unique workspace suffixes; ambiguous matches offer a picker. Explicit links also try their literal relative path.
+Absolute paths and `~` use the server filesystem, including temp folders outside the Session directory. The native `~`
+support extends the web resolver. Ellipsis abbreviations are deliberately not expanded. Plain prose/code fences and
+the user-message body remain literal, preserving the web's user-message/token/copy behavior.
+
+`FileViewer` reuses the authenticated image request builder with basename + parent Location, probes size using a one-byte
+Range GET, asks before downloads above 50 MiB, and uses cancellable URLSession downloads with progress rather than
+buffering a movie in memory. Images reuse `ZoomableImageView`; audio/video use AVPlayerViewController; documents,
+PDF/text/code/Markdown/JSON/CSV use Quick Look. Unknown types show metadata and Share, or Quick Look when supported.
+Every viewer offers Share and Copy path. Protected temporary files retain their original names and are removed on
+dismissal/cancellation or at the next app launch. Feed image loading, cache and downsampling are retained; table images
+use the same thumbnail/zoom path. A video/audio file mistakenly written with Markdown image syntax becomes an explicit
+play-file card instead of an ImageIO failure. Code/document previews use a temporary `.txt` copy when necessary
+(notably `.ts`, whose registered MIME/UTI can otherwise mean MPEG transport stream); sharing retains the original file.
+No backend/protocol changes or public credential-bearing URLs are introduced.
+
+Verify only on **OpenCode Imagens**, with `ios-imagens-derived`, by running
+`python3 packages/ios-custom/script/test-files.py` in each theme after `build-for-testing`. The runner creates small
+PNG/MP4/WAV/PDF/TXT fixtures plus an owned sparse large-file fixture inside the sandbox fake repository, imports its own
+histories without model calls, and removes them afterwards. Every launch explicitly supplies the 4177 sandbox URL and
+password. Evidence lives in `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-arquivos-prints/`.
+Verification: 287 Swift tests and all 63 app-hosted tests pass; the four new viewer UI cases pass in both themes,
+including real MP4/WAV playback, TypeScript/PDF/text previews, table-image zoom/share, missing files and large-file
+consent. Both complete Markdown UI documents and all four image UI regressions also pass. A follow-up verified all
+four SessionReadingTests on a clean local clone of `67426eaa46` and on the working tree, using separate DerivedData
+and fresh simulator installs. The earlier red reports used intermediate test assumptions: new context/cache rows
+shifted Details content, and larger polish rows moved the renamed session outside the initial list viewport. Existing
+working-tree frame-based, bidirectional reveal checks and reveal-before-assert changes are preserved; bounded drags
+replace fast swipes that could skip/virtualize the short Skills heading. Search Cancel now has a header-specific
+identifier and the test waits for search to disappear before tapping Back. All four reading tests pass in both themes
+after these selector/scroll changes, plus a separate Details/search repeat. Comparison
+logs, binary/source hashes and captures are in `$TMPDIR/opencode/ios-arquivos-comparison/`; the clone and its
+DerivedData are removed after comparison. Debug test builds use `COPY_PHASE_STRIP=NO` to avoid the new signed
+VoiceActivity extension's copy/strip warning. No backend, seed, model or production mutation was performed.
+
+Media tables size each row independently with intrinsic-height, top-aligned cells; grid borders no longer force the
+header to share an image row's height. Plain UIKit tables also top-align short and multiline cells. Geometry UI checks
+cover media/plain/wide tables and the four literal tables extracted from the formatting fixture, in both themes.
+
+## Voice conversation
+
+The waveform in **Sessões** starts a native, full-duplex GPT Live call through the private
+`llm-proxy-svc:8080` lease/signaling contract. The floating glass bar replaces the master accessory
+on tabs and sits above the composer; mute/end also appear in the Live Activity/Dynamic Island extension.
+Audio continues in the background after microphone consent. Real actions and answers are delegated
+to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
+final answer. Ending the call does not interrupt work already submitted to OpenCode.
+
+See [`docs/voice.md`](docs/voice.md) for the exact proxy contract, WARP requirements, transport and
+background ownership, source revisions, limitations, and test commands. The DEBUG-only
+`-OpenCodeVoiceFixture` uses no microphone, model or proxy; `-OpenCodeVoiceFakeMaster` isolates the
+master during physical audio checks. Both require the explicit sandbox 4177 server arguments.
+`script/test-voice.py` uses the dedicated **OpenCode Voz** simulator and an owned disposable history.
+The TestFlight script also accepts `OPENCODE_DERIVED_DATA` for an isolated archive directory.
+
+### Faixa de voz
+
+`FloatingVoiceBar` is a pure SwiftUI surface driven by `VoiceBarState`: phase, elapsed time, spoken line,
+master progress, mute, expansion, error and pending controls. The adapter in `FloatingVoicePresentation`
+reads the engine's `connectedAt`, `currentSpokenLine` and `masterProgressLine`; it owns only UI expansion.
+The waveform, state and active Sessions waveform button use `primary` (orange in OpenChamber),
+and ending uses the destructive `error` role with a tonal background.
+Typography comes from `AppTypography`; there are no fixed palette colors.
+
+On tab screens the voice surface replaces, rather than stacks on, the master accessory. Its safe-area
+inset reserves the whole expanded height so the last list row remains reachable. In a conversation it is
+a sibling immediately above the composer, including with the keyboard open. It starts compact; tap the
+summary to expand, tap again or swipe down inside the bar to collapse. The microphone and end controls
+stay in the same header row. VoiceOver exposes one element with its state/duration and named actions.
+Reduce Motion stops the waveform; long lines truncate and large Dynamic Type keeps the controls reachable.
+
+The independent DEBUG-only `-OpenCodeVoiceBarFixture <state>` requires explicit
+`-OpenCodeServerURL http://127.0.0.1:4177`. States: `listening`, `speaking`, `thinking`, `connecting`,
+`reconnecting`, `muted`, `error`, `idle` (master idle), `long`, `interrupted`. It never starts the engine,
+microphone, Live Activity or proxy. `script/test-voice-bar.py` imports and deletes one owned history,
+leaves sandbox seeds untouched, and runs on **OpenCode Faixa Voz** (`41015785-0AB5-413B-8CEC-8C986E83BC1E`).
+Use `ios-faixavoz-derived` for `build-for-testing`; repeat the runner with
+`OPENCODE_TEST_THEME=openchamber-light`. Captures, results and cleanup ledgers are in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-faixavoz-prints/`.
+The provisional root `VoiceOverlay` has been removed. New-session/master drafts and the fullscreen
+composer also reserve space above their input; ordinary sheets reserve their bottom safe area.
+See [`docs/voice-bar-integration.md`](docs/voice-bar-integration.md).
+The final layout checks pass in both themes: eight presentation cases, 20 fake-engine/hosted composer
+regressions per theme, and 289 Kit tests in the last shared-checkout run. Debug/test and Release builds are warning-free. The evidence
+directory includes `verification.json` with absolute paths to all 80 state captures and result bundles.
+
+## Context and cache usage
+
+One fixed, left-aligned line below the conversation composer shows a compact context ring, used/limit tokens and
+cache-hit percentage with monospaced digits and the shared micro typography. It uses this conversation's latest
+measured assistant step (including the cache ratio), retaining it while a new step streams without measurements.
+Child and master conversations use their own store; there is no line before any measurement or on Nova sessão.
+Answer footers contain only the existing model/date and copy action. An unknown limit keeps tokens without a percentage.
+
+The fixed line opens **Uso da sessão** in the existing Details sheet. It is a normal bottom-stack child, not an overlay:
+its height reduces the transcript viewport, stays above the keyboard and below the composer, and disappears in the
+fullscreen composer. The voice bar reserves its own height above the composer without sharing this line's inset.
+
+The header ring opens **Detalhes da sessão**, as a native sheet initially at the large detent. **Uso da sessão** sits
+above the existing details: context is the latest measured step, while cache counts/ratio, tokens and cost are Session
+totals; descendant and combined cost remain explicit. The existing detailed context breakdown stays available below.
+**Agentes e tarefas** reads each child's `context` from the already-loaded family page, retaining the clock, chevron
+and stop action. Existing SSE invalidation refreshes those measurements without a transcript request per child.
+
+`ContextUsage` in OpenCodeKit owns the shared math, pt-BR abbreviations, VoiceOver wording and >80% warning threshold.
+A bounded store-local formatter cache is keyed by step ID, measured tokens and resolved context limit, so text/tool
+deltas do not repeatedly format metrics. The ring clamps drawing only, not the displayed percentage or token count.
+All contracts already exist unchanged on installed `1042585c285c25d4b5d4fd292d0b7eb5fb7c470e`.
+
+After building for **OpenCode Abertura** with `ios-abertura-derived`, run
+`python3 packages/ios-custom/script/test-context-usage.py`. It imports only its own histories into a fake repository,
+uses one real Luna-6/low child to verify live family updates in both themes, and interrupts/removes its sessions and
+shells afterwards. Every launch supplies the explicit sandbox 4177 URL/password. Screenshots and the cleanup ledger
+are under `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-cache-prints/review-1/`.
 
 ## Language
 
@@ -316,6 +623,69 @@ one row per family. OpenChamber with **Sistema** is the default. **Sistema**, **
 variant independently of the family; Sistema follows device changes live. Family and appearance persist locally.
 `-OpenCodeTheme <variant>` takes precedence for the whole launch, including over settings changes. The old
 `OpenCodeTheme` preference migrates its family; new preferences are `OpenCodeThemeFamily` and `OpenCodeAppearance`.
+
+### Typography and readable roles
+
+`OpenCode/AppTypography.swift` owns the shared SF scale. Its larger baseline incorporates the approved ~9% text
+increase once, rather than multiplying individual views again. At the default Dynamic Type size the styles are:
+
+| Style | Points | Use |
+| --- | ---: | --- |
+| `largeTitle` | 37 | Native large navigation title |
+| `title` | 22 | Major response headings |
+| `heading` / `body` | 18.5 | Row/header titles and response prose (28.5 pt line height) |
+| `message` | 17.5 | User/composer text (24 pt line height) |
+| `preview` | 16.5 | Session previews and section labels |
+| `secondary` | 15.25 | Paths, row times, controls and chips |
+| `caption` | 14.25 | Response footer and compact metadata |
+| `footnote` | 13.25 | Bubble time and small counts |
+| `micro` | 11.5 | Avatar badges |
+
+SwiftUI uses `appFont`; TextKit uses `AppTypography.font`/`lineHeight`, with the same Dynamic Type category and
+named styles. Icons have a separate optical scale (`appSymbol`) rather than borrowing text sizes. The list uses
+20 pt side margins, a 48 pt avatar plus 12 pt gap, 14 pt row padding and native pixel-aligned separators.
+Rows and quota labels reflow at accessibility sizes. Native fixed-height tab captions are bounded by the caption
+style; the master accessory fits its full labels onto one line instead of drawing text outside the system capsule.
+
+The generator retains each family's surfaces and hue. `textMuted` makes paths quieter but AA-readable;
+`textSecondary` is one step brighter, and `textPreview` approaches body text. `textAccent` is readable interactive
+text without changing the palette's primary button fill. Success/info/error text is derived to meet 4.5:1 against
+the actual background, surface, raised surface and tool surface. `infoFill`/`onInfo` are a separate light fill/dark
+foreground pair for **Responder**. `userBubbleText` and `userBubbleSecondary` are evaluated against the composited
+bubble, whose brightness differs considerably across families. Generated role maps mark these as `ios-derived-*`.
+Syntax, code-line numbers and added/removed diff text also receive the same hue-preserving AA floor on code/table
+surfaces; this fixes light-family syntax colors without replacing their palette with another family's colors.
+No shadow, gradient, material or elevation is introduced by this pass.
+
+`glassSecondary` covers metadata on existing native glass (voice, MCP capsule/panel, inactive tabs and master accessory), including a
+conservative palette-derived glass luminance bound in addition to ordinary surfaces. It changes neither the
+voice waveform/state's `primary` color nor the tonal destructive button. The response text, user bubble and
+composer share the named scale; rendered-text and table measurement keys include the Dynamic Type category,
+and changing the attributed font clears cached widths/heights. Numbered lists retain hanging indents with a
+24 pt minimum marker column, semibold items and 10 pt between items; prose uses 14 pt paragraph spacing.
+Context/cache stays in the fixed, left-aligned line below the composer, never repeated in response footers.
+The collapsed-bubble regression derives its expected height from two scaled 24 pt message lines; the old
+45 pt cap described the previous font. The footnote UI selector likewise measures the larger body font before
+tapping its inline reference, while the copy/selection/expansion behavior assertions remain unchanged.
+The Sessões test helper searches unmounted rows with fast swipes, then uses slow adjustment once mounted;
+it retains the same 60-second budget and requires the whole target row above the native accessory/tab bar.
+The live row-metadata test narrows its root/long-path checks with the existing project chips, excluding unrelated
+parallel-test histories without changing server preferences or hiding any assertion.
+
+Run `bun packages/ios-custom/script/generate-themes.ts`, then `bun packages/ios-custom/script/check-theme-contrast.ts`
+to audit all 76 variants. `capture-polish.py` and `test-polish.py` use only **OpenCode Polimento**, explicit sandbox
+URL/password and `ios-polimento-derived`; captures and results go to `$TMPDIR/opencode/ios-polimento-prints`.
+
+Polish verification: Debug/test and Release builds are warning-free; 289 Kit tests and all 64 hosted app tests
+pass. The final focused UI runs pass in both themes: row metadata, session reading, grouping, user collapse/copy/
+search and attachment/context presentation, MCP chips, fixed usage, voice layout/keyboard and Markdown. The
+scroll/follow/menu regressions pass as well; explicit live model/audio scenarios were not run. All owned imports
+were deleted. `verification.json` in the evidence directory records the absolute screenshot/result paths and
+all 76 contrast variants, including OpenChamber, Dracula and GitHub in dark/light.
+
+The 12-second simulator trace measured p95 frame times of 16.67 → 16.67 ms for Sessões, 16.67 → 16.67 ms with
+preview updates, and 18.46 → 16.67 ms for the conversation. CPU totals were 2413 → 2220, 3546 → 2303 and
+4682 → 3138 ms respectively. These are single local samples on a shared Mac, not isolated or device benchmarks.
 
 ## Third screen: Você (wave 8)
 
@@ -423,8 +793,9 @@ visible; with the keyboard hidden, the introduction is centered in the available
   usable above the keyboard. There is no folder-location promise. Send uses only
   `{projectID,from:<canonical>,branch:<base>}` in `POST /api/worktree`;
   the backend's configured strategy chooses its folder and may create a detached checkout.
-- **MCPs:** `/api/mcp` plus `/api/config` are Location-scoped. Default-enabled servers come first, then names; taps
-  replace status in place, not order. Connected/disabled/failed/needs-login/pending have semantic dots, dashed disabled
+- **MCPs:** `/api/mcp` plus `/api/config` are Location-scoped. Connected servers come first; within each group,
+  `codex-computer-use`, `safari-devtools`, then alphabetical names. The visible order is frozen until reopening or
+  selecting another destination; taps/refreshes update state without moving chips. Connected/disabled/failed/needs-login/pending have semantic dots, dashed disabled
   borders and a pulsing pending state. VoiceOver exposes switches. Root/existing taps connect/disconnect immediately
   for **all sessions of that directory**. New-worktree preview starts from configuration defaults (not the root's
   runtime connection state); taps only save intent, with "Vale quando a worktree for criada".

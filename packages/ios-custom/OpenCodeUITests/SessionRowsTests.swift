@@ -49,6 +49,9 @@ import XCTest
         .firstMatch.waitForExistence(timeout: 10))
     shot("sessions-archived")
     app.buttons["Concluir"].tap()
+    // Concurrent test histories can put these rows over a hundred entries below the top.
+    // Use the existing project filters rather than extending the row-finder's time budget.
+    selectProject("ios-conversation", in: app)
     let root = app.buttons.matching(
       NSPredicate(format: "label BEGINSWITH 'Conversa C — histórico e compositor,'")
     ).firstMatch
@@ -57,9 +60,26 @@ import XCTest
     XCTAssertTrue(root.label.contains("Diretório …/repos/ios-conversation"))
     XCTAssertFalse(root.label.contains("/private/var/folders/"))
     shot("sessions-main-root")
+    selectProject("abacato-v2", in: app)
     let long = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Redesign,'")).firstMatch
     app.revealSessionRow(long)
     XCTAssertTrue(long.label.contains("branch feat/redesign-identidade"))
     shot("sessions-main-long-path-branch")
+  }
+
+  private func selectProject(_ name: String, in app: XCUIApplication) {
+    let all = app.buttons["Todas"]
+    for _ in 0..<20 {
+      if all.isHittable { break }
+      app.collectionViews.firstMatch.swipeDown(velocity: .fast)
+    }
+    all.tap()
+    let project = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+    for _ in 0..<8 {
+      if project.isHittable { break }
+      app.scrollViews.firstMatch.swipeLeft(velocity: .fast)
+    }
+    XCTAssertTrue(project.isHittable)
+    project.tap()
   }
 }

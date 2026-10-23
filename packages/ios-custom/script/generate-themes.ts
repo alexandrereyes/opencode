@@ -3,6 +3,7 @@ import { resolveThemeVariantV2 } from "../../ui-custom/src/theme/v2/resolve"
 import { hexToOklch, oklchToHex } from "../../ui-custom/src/theme/color"
 import type { DesktopTheme, HexColor } from "../../ui-custom/src/theme/types"
 import { join } from "node:path"
+import { composite, legible, luminance, mix } from "./theme-contrast"
 
 const root = join(import.meta.dir, "../OpenCode/Resources/Themes")
 // Alpha primitives live in CSS rather than the web resolver's returned ramp map.
@@ -25,10 +26,15 @@ const roles = {
   text: "text-base",
   textSecondary: "text-weak",
   textWeak: "text-weaker",
+  textMuted: "text-weaker",
+  textPreview: "text-base",
+  textAccent: "ios-primary",
+  glassSecondary: "text-weak",
   icon: "icon-base",
   primary: "ios-primary",
   onPrimary: "background-base",
   onInfo: "text-on-info-base",
+  infoFill: "ios-info",
   success: "ios-success",
   info: "ios-info",
   error: "ios-error",
@@ -38,6 +44,7 @@ const roles = {
   onFilledButton: "background-base",
   userBubble: "v2-user-message-background",
   userBubbleText: "v2-user-message-text",
+  userBubbleSecondary: "text-weak",
   inlineCode: "v2-inline-code-text",
   inlineCodeBackground: "v2-inline-code-background",
   codeSurface: "background-stronger",
@@ -79,8 +86,8 @@ const roles = {
   composerCommand: "ios-info",
   composerSkill: "ios-accent",
   markdownBody: "markdown-text",
-  markdownStrong: "markdown-strong",
-  markdownHeading: "markdown-text",
+  markdownStrong: "text-strong",
+  markdownHeading: "text-strong",
   markdownQuote: "markdown-block-quote",
   markdownQuoteBorder: "markdown-horizontal-rule",
   markdownLink: "markdown-link",
@@ -163,6 +170,53 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
       onInfo: mode === "light" ? "text-on-info-strong" : roles.onInfo,
     }
     const colors = Object.fromEntries(Object.entries(resolvedRoles).map(([role, token]) => [role, resolve(token)]))
+    const surfaces = ["background", "surface", "surfaceRaised", "toolSurface", "codeSurface", "tableSurface"].map((role) =>
+      composite(colors[role]!, colors.background!),
+    )
+    const readable = (color: string, minimum = 4.5) => legible(color, surfaces, minimum, mode === "dark")
+    colors.textStrong = readable(colors.textStrong!)
+    colors.text = readable(colors.text!)
+    colors.textSecondary = readable(mix(colors.textSecondary!, colors.text!, 0.2), 5.5)
+    colors.textMuted = readable(colors.textWeak!)
+    colors.textPreview = readable(mix(colors.text!, colors.textStrong!, 0.15))
+    colors.textAccent = readable(colors.primary!)
+    colors.glassSecondary = legible(colors.textSecondary!, [
+      ...surfaces, mix(colors.background!, colors.textStrong!, mode === "dark" ? 0.35 : 0.2),
+    ], 4.5, mode === "dark")
+    colors.markdownBody = mix(colors.markdownBody!, colors.textStrong!, 0.4)
+    for (const role of ["success", "info", "error"] as const) {
+      colors[role] = readable(mode === "dark" ? mix(colors[role]!, colors.textStrong!, 0.12) : colors[role]!)
+    }
+    for (const role of ["markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink",
+      "inlineCode", "codeText", "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment"] as const) {
+      colors[role] = readable(colors[role]!)
+    }
+    for (const role of Object.keys(roles).filter((role) => role.startsWith("syntax") || role.startsWith("composer"))) {
+      colors[role] = readable(colors[role]!)
+    }
+    colors.diffAdd = readable(colors.diffAdd!)
+    colors.diffDelete = readable(colors.diffDelete!)
+    const bubble = composite(colors.userBubble!, colors.background!)
+    colors.userBubbleText = legible(colors.userBubbleText!, [bubble], 4.5, luminance(bubble) < 0.18)
+    colors.userBubbleSecondary = legible(colors.textSecondary!, [bubble], 4.5, luminance(bubble) < 0.18)
+    // A separate fill keeps information text legible in light themes without making its button dark.
+    const infoHue = hexToOklch(colors.infoFill! as HexColor)
+    colors.onInfo = oklchToHex({ ...infoHue, l: 0.14, c: Math.min(infoHue.c, 0.025) })
+    colors.infoFill = legible(colors.infoFill!, [colors.onInfo], 4.5, true)
+    colors.onPrimary = legible(colors.onPrimary!, [colors.primary!], 4.5, luminance(colors.primary!) < 0.18)
+    colors.onFilledButton = legible(colors.onFilledButton!, [colors.filledButton!], 4.5, luminance(colors.filledButton!) < 0.18)
+    colors.border = legible(colors.border!, [colors.background!], 1.4, mode === "dark")
+    colors.controlBorder = legible(colors.controlBorder!, surfaces, 1.7, mode === "dark")
+    const exportedRoles: Record<string, string> = { ...resolvedRoles }
+    for (const role of [...Object.keys(roles).filter((role) => role.startsWith("syntax") || role.startsWith("composer")), "diffAdd", "diffDelete"]) {
+      exportedRoles[role] = `ios-derived-${role}`
+    }
+    for (const role of ["textStrong", "text", "textSecondary", "textMuted", "textPreview", "textAccent", "glassSecondary", "success", "info", "error",
+      "markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink", "inlineCode", "codeText",
+      "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "userBubbleText", "userBubbleSecondary",
+      "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder"]) {
+      exportedRoles[role] = `ios-derived-${role}`
+    }
     for (const [role, value] of Object.entries(colors)) {
       if (!/^#[\da-f]{6}([\da-f]{2})?$/i.test(value))
         throw new Error(`${theme.id}/${mode}/${role}: unsupported color ${value}`)
@@ -180,7 +234,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     const id = `${theme.id}-${mode}`
     await Bun.write(
       join(root, `${id}.json`),
-      JSON.stringify({ id, name: theme.name, dark: mode === "dark", colors, avatars, roles: resolvedRoles }, null, 2) +
+      JSON.stringify({ id, name: theme.name, dark: mode === "dark", colors, avatars, roles: exportedRoles }, null, 2) +
         "\n",
     )
     registry.push({ id, name: theme.name, dark: mode === "dark" })

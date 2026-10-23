@@ -3,9 +3,10 @@ import Foundation
 public enum ThemeRole: Int, CaseIterable, Sendable {
   case background, surface, surfaceRaised, highlight, border, borderStrong, controlBorder
   case textStrong, text, textSecondary, textWeak, icon
-  case primary, onPrimary, onInfo, success, info, error, warning, accent
+  case textMuted, textPreview, textAccent, glassSecondary
+  case primary, onPrimary, onInfo, infoFill, success, info, error, warning, accent
   case filledButton, onFilledButton
-  case userBubble, userBubbleText, inlineCode, inlineCodeBackground, codeSurface, toolSurface,
+  case userBubble, userBubbleText, userBubbleSecondary, inlineCode, inlineCodeBackground, codeSurface, toolSurface,
     diffAdd, diffDelete
   case contextTrack, contextFill, contextWarning
   case agentBuild, agentExplore, agentPlan, agentReview, agentWriter, agentExplicit

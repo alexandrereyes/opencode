@@ -17,9 +17,9 @@ import zlib
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-imagens-derived"
-device = "C70D22D2-4EFC-4C70-A7D4-F085C26D40D6"
-evidence = temporary / "ios-imagens-prints"
+derived = Path(os.environ.get("OPENCODE_IMAGE_DERIVED", str(temporary / "ios-imagens-derived")))
+device = os.environ.get("OPENCODE_IMAGE_DEVICE", "C70D22D2-4EFC-4C70-A7D4-F085C26D40D6")
+evidence = Path(os.environ.get("OPENCODE_IMAGE_EVIDENCE", str(temporary / "ios-imagens-prints")))
 evidence.mkdir(exist_ok=True)
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
@@ -52,6 +52,9 @@ rows = b"".join(b"\x00" + b"".join(bytes((int(40 + x * 140 / 640), int(90 + y * 
 png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 640, 360, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 (folder / "image.png").write_bytes(png)
 (outside / "outside.png").write_bytes(png)
+rows_tall = b"".join(b"\x00" + bytes((40 + (y // 100) % 180, 120, 200)) * 400 for y in range(4000))
+(folder / "tall.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 400, 4000, 8, 2, 0, 0, 0))
+    + chunk(b"IDAT", zlib.compress(rows_tall)) + chunk(b"IEND", b""))
 encoded = base64.b64encode(png).decode()
 data_uri = "data:image/png;base64," + encoded
 server_home = Path(api("/api/rpc/custom.directories/home", {"input": {}})["output"]["path"])
@@ -61,6 +64,7 @@ configured = derived / ("Build/Products/Images-" + token + ".xctestrun")
 environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
     "OPENCODE_TEST_THEME": os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")}
 sources = {
+    "TALL": "tall.png",
     "RELATIVE": "image.png", "ABSOLUTE": str(outside / "outside.png"),
     "TILDE": "~/" + os.path.relpath(folder / "image.png", server_home),
     "FILE": (folder / "image.png").as_uri(), "DATA": data_uri,
@@ -140,7 +144,7 @@ finally:
     configured.unlink(missing_ok=True)
     for session in created:
         api("/api/session/" + session, method="DELETE")
-    for image in [folder / "image.png", outside / "outside.png"]:
+    for image in [folder / "image.png", folder / "tall.png", outside / "outside.png"]:
         image.unlink(missing_ok=True)
     if "moved" in locals() and moved.exists():
         moved.rmdir()

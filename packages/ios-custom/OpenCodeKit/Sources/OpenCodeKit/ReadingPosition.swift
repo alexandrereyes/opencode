@@ -98,6 +98,10 @@ public enum ReadingCapture {
     entries.append(Entry(sessionID: sessionID, position: position))
     entries = Array(entries.suffix(capacity))
   }
+  public func remove(_ ids: Set<String>) throws {
+    entries.removeAll { ids.contains($0.sessionID) }
+    try flush()
+  }
   public func flush() throws {
     try FileManager.default.createDirectory(
       at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -128,5 +132,8 @@ public enum ReadingCapture {
     sessions.removeAll { $0.id == sessionID }
     sessions.append((sessionID, values))
     sessions = Array(sessions.suffix(capacity))
+  }
+  public func remove(_ ids: Set<String>) {
+    sessions.removeAll { ids.contains($0.id) }
   }
 }

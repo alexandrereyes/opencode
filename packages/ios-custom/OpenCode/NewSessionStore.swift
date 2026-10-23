@@ -12,6 +12,7 @@ import OpenCodeKit
   private(set) var git = false
   private(set) var mcps: [MCPServer] = []
   private var mcpDefaults: [String: Bool] = [:]
+  private var mcpOrder = MCPChipOrder()
   private(set) var mcpLoading = false
   private(set) var mcpError = false
   private(set) var loading = false
@@ -55,6 +56,9 @@ import OpenCodeKit
     }
   }
   var chips: [MCPServer] {
+    mcpOrder.arrange(previewChips)
+  }
+  private var previewChips: [MCPServer] {
     mcps.map { server in
       if toggling.contains(server.name) {
         var pending = server
@@ -67,6 +71,8 @@ import OpenCodeKit
         : server
     }
   }
+  func showMCPs() { mcpOrder.open(previewChips) }
+  func hideMCPs() { mcpOrder.close() }
   func open() async {
     guard !initialized else { return }
     await draft.load()
@@ -119,6 +125,7 @@ import OpenCodeKit
     mcpLoading = true
     mcpError = false
     mcps = []
+    mcpOrder = MCPChipOrder()
     defer {
       if !Task.isCancelled {
         loading = false
@@ -170,7 +177,8 @@ import OpenCodeKit
       try Task.checkCancellation()
       guard directory == self.directory else { return }
       mcpDefaults = MCPServer.defaults(value.1)
-      mcps = MCPServer.ordered(value.0, configuration: value.1)
+      mcps = value.0
+      showMCPs()
     } catch { if !Task.isCancelled && directory == self.directory { mcpError = true } }
   }
   func toggle(_ server: MCPServer) {
@@ -267,6 +275,7 @@ import OpenCodeKit
           attachments: delivered, quotes: snapshot.quotes)
       }
       sessions.catalog.committed(model)
+      draft.didSend()
       await finish(id: submission.id, restore: nil)
       Haptics.play(.light)
     } catch let failure as NewSessionFailure {
@@ -300,7 +309,8 @@ import OpenCodeKit
       target.quotes = restore.quotes
       target.model = restore.model ?? composer.selectedModel(draft)
       target.agent = restore.agent ?? composer.selectedAgent(draft)
-      target.selection = NSRange(location: target.text.length, length: 0)
+      target.selection = NSRange(location: target.editorText.length, length: 0)
+      target.expanded = draft.expanded
       await target.persist()
     }
     draft.focused = false
@@ -313,7 +323,7 @@ import OpenCodeKit
     }
   }
 }
-private struct MCPUIError: LocalizedError {
+struct MCPUIError: LocalizedError {
   var errorDescription: String? {
     "O MCP não confirmou a alteração. Se precisar de login, entre pelo app web."
   }
