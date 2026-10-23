@@ -129,11 +129,7 @@ export const registerMaster = Effect.fn("Master.register")(function* (ctx: Plugi
     Effect.sync(() => {
       if (event.agent === agentID) {
         delete event.tools.subagent
-        return
       }
-      controlNames.forEach((name) => {
-        delete event.tools[`opencode_${name}`]
-      })
     }),
   )
   yield* ctx.tool.transform((editor) => registerTools(editor, ctx))
@@ -175,7 +171,7 @@ export function registerTools(editor: ToolEditor, ctx: MasterContext) {
       description,
       input: standard(input),
       output: standard(output),
-      options: { namespace: "opencode", codemode: true },
+      options: { namespace: "opencode", codemode: true, agents: [agentID] },
       execute: (value, context) =>
         Effect.gen(function* () {
           yield* requireMaster(context)

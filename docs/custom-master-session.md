@@ -20,7 +20,7 @@ limitations and isolated sandbox/simulator commands.
 
 ## Remaining reusable integration points
 
-Four upstream-owned runtime files, **34 additions / 10 removals** relative to the feature base:
+The initial feature changed four upstream-owned runtime files, **34 additions / 10 removals** relative to the feature base:
 
 - `packages/plugin/src/effect/session.ts`: inherit the existing `SessionApi.active` operation and expose
   `form: Pick<SessionApi["form"], "reply">`; no duplicate input/output contracts.
@@ -58,4 +58,42 @@ git diff --numstat --diff-filter=M d4a6223d017e17f1beaa91d3e6ecc6511c5132ad -- \
   blockers separately from the scoped tests above; those tests do not waive it. Evidence is retained under the approved
   temporary `opencode/ios-mestra-prints/` directory.
 
-Production is not activated: Alexandre must run `custom:update` to replace the older installed backend.
+Activation remains manual: implementation and verification never update the installed backend.
+
+## Tool discovery isolation follow-up (2026-10-23)
+
+The first implementation guarded execution correctly but attempted to hide tools through `session.context`. That hook
+runs after the native snapshot has already rendered the Code Mode catalog and captured its executors. Removing individual
+`event.tools.opencode_*` entries therefore cannot remove namespaced tools inside `execute`.
+
+The existing `Tool.snapshot` supports whole-tool permission denies and applies them before Code Mode generation. However,
+appending denies with `agent.transform` cannot enforce an all-other-agents policy: configured agents are added later by
+`ConfigAgentPlugin` (post-plugins), and session rules follow agent rules. No existing tool visibility predicate is exposed.
+Rather than reorder registries or repeat policy in Core, this follow-up adds a generic optional `Tool.Options.agents`
+allowlist. Unscoped tools retain their behavior. Scoped tools are omitted when the selected agent is absent/not listed;
+an empty allowlist hides a tool from all snapshots. Permission denies can still narrow an allowed agent's snapshot.
+Raw `ctx.tool.list()` remains administrative registration inventory, not a model-facing catalog. Tool executors retain
+their own authorization checks; this visibility option does not replace the Mestra guard.
+
+Minimal reusable runtime changes relative to `a0039c2400c997dbff20a1cb0422094f68f0d952`: three files,
+**6 additions / 3 removals**:
+
+- `packages/schema/src/tool.ts`: optional typed `agents` registration option, inherited by Effect/Promise plugin tools.
+- `packages/core/src/tool.ts`: optional agent argument on native snapshot; exclude agent-scoped tools before direct
+  definitions and Code Mode inventory/catalog construction. Existing catalog cache remains keyed by visible tool names.
+- `packages/core/src/session/context.ts`: pass the selected agent ID to that snapshot for every Session/child/auxiliary read.
+
+`plugin-app-custom` sets `[mestra]` on its eight controls and removes the ineffective per-tool context deletion.
+No Protocol/HttpApi or generated client changes, no copied upstream implementation, no iOS/web edits.
+
+Proof: `core/test/tool-opencode-master-visibility.test.ts` fails on the original implementation, then passes for Mestra,
+build, explore/subagent and a configured-later agent, checking both native resolved catalogs and real `execute/search`
+results with an all-allow session rule. Repeating Mestra after other agents checks cache isolation. Generic direct and
+Code Mode allowlist, omitted-agent, empty-list and permission-deny cases live in `core/test/tool-registry.test.ts`.
+The existing custom test still directly exercises all eight unauthorized executors as defense in depth.
+
+Live verification uses only `http://127.0.0.1:4179` and the fake repository under its private sandbox home. The script
+`packages/plugin-app-custom/script/verify-master-visibility.ts` asks real build, Mestra, general-child and late-configured
+sessions to search the complete `opencode` inventory without invoking control tools. Expected master counts: **0 / 8 / 0 / 0**.
+Evidence: `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/master-tool-visibility/summary.json`.
+Installed `1042585c28` predates this fix; Alexandre must trigger another `custom:update` to deploy it.

@@ -5,8 +5,10 @@ pt-BR summaries, explicit-user-request-only actions, untrusted-transcript precau
 guidance. Preferred model: `llm-proxy/gpt-6.1-sol-ultrafast#medium`; when absent/disabled the agent inherits the server
 default. Its rules allow direct execution. `custom.master/info` advertises version 1 and the preferred model when present.
 
-All tools use Standard Schema inputs/outputs in the `opencode` namespace. Non-Mestra contexts omit the control tools;
-every captured executor independently rejects other agents. Existing `session_read` is unchanged. Controls target only
+All tools use Standard Schema inputs/outputs in the `opencode` namespace. Each control registers `options.agents: ["mestra"]`:
+the native request snapshot filters it before direct definitions, inline Code Mode catalogs and Code Mode search/runtime
+are built. This also covers subagents and agents contributed by configuration after the custom plugin, even when a session
+allows every permission. Every captured executor independently rejects other agents. Existing `session_read` is unchanged. Controls target only
 nonarchived top-level sessions, excluding the caller and Mestra sessions; no subagent management or deletion is exposed.
 
 | Tool | Input / result |
@@ -36,6 +38,13 @@ Protocol/HttpApi, schema, generated client, database or upstream implementation 
 
 `test/master.test.ts` covers boundaries, root/self filters, agent restrictions, state, requests, origin metadata,
 create/send/interrupt/answers, bounded output and virtual-clock wait timeout. `test/preferences.test.ts` covers the intents.
-Run package tests with `LC_ALL=C bun test` on a localized Mac: unrelated worktree tests assert English Git diagnostics.
+The package suite runs in the default locale or `LC_ALL=C`; worktree checks assert Git state rather than translated diagnostics.
 `script/verify-master.ts` uses only the owned 4179 sandbox, managed chat and fake repositories, never service discovery or
 production. It requires actual tool calls (not just catalog search) before recording its transcript.
+
+`script/verify-master-visibility.ts` verifies read-only Code Mode discovery in fresh build, Mestra, general-child and
+late-configured-agent sessions in the owned 4179 sandbox. It saves bounded tool inventories under
+`$TMPDIR/opencode/master-tool-visibility/` and removes only its own sessions. Core's
+`test/tool-opencode-master-visibility.test.ts` covers the real custom registration and native snapshots/search; generic
+direct/Code Mode scope and cache isolation are covered by `test/tool-registry.test.ts`. See
+`docs/custom-master-session.md` for why a small generic snapshot extension is necessary instead of a late context hook.

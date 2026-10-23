@@ -208,6 +208,7 @@ function fixture(wait: MasterContext["session"]["wait"] = () => Effect.void, row
 test("every tool rejects other agents even when called through a captured executor", async () => {
   const f = fixture()
   expect(f.tools.map((tool) => tool.name)).toEqual(controlNames)
+  expect(f.tools.map((tool) => tool.options?.agents)).toEqual(controlNames.map(() => [agentID]))
   for (const tool of f.tools)
     await expect(f.run(tool.name, {}, Agent.ID.make("build"))).rejects.toThrow("Only the Mestra")
   expect(f.calls.prompts).toEqual([])
