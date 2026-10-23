@@ -24,7 +24,7 @@ pelo WARP; não se publica essa origem na Internet.
    A resposta 200 fornece `sessionId`, `generation`, `serverTime`, `leaseExpiresAt`; identidade e
    prazo são validados antes da negociação.
 2. `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas`, JSON com `sdp`
-   completo e `session`: modelo `gpt-live-1-codex`, `audio.output.voice=cove`, instruções pt-BR e
+   completo e `session`: modelo `gpt-live-1-codex`, `audio.output.voice` escolhido em Você (Rio por padrão), instruções pt-BR e
    `delegation.type=client` e, quando disponível, `initial_items` com memória nas duas roles.
    As instructions continuam curtas, somente com regras de comportamento. Headers: `OpenAI-Alpha: quicksilver=v2`, `originator: a2a-chat`,
    `session-id`, `thread-id`, `x-session-id` e `x-gpt-live-generation`. O proxy escolhe a conta e
@@ -39,6 +39,60 @@ O protocolo é o privado GPT Live/Codex, **não** `/v1/realtime` público. O can
 `session.started`, `input_transcript.added`, `output_transcript.added`, `turn.done`,
 `delegation.created` e `delegation.context.append`. Appends usam `channel=speakable`, até 500 bytes
 UTF-8 por parte. Eventos e texto têm limites locais. Erros remotos não são despejados em logs.
+
+### Escolha da voz
+
+**Você → Conversa por voz → Voz** apresenta Rio e Viola em **Brasileiras**, antes das demais vozes.
+`GPTLiveVoice`, no Kit, é o catálogo único de IDs e nomes. `VoicePreferences` segue o padrão local
+de UserDefaults, na chave `OpenCodeVoice`, independente do servidor. Sem escolha anterior, usa Rio
+sem gravar uma preferência artificial; um ID local desconhecido também resolve para Rio sem apagar
+o valor salvo. A escolha explícita persiste imediatamente. Não há prévia de áudio.
+
+Catálogo entregue (25 vozes), baseado no enum v3 de `openai/codex`,
+`codex-rs/protocol/src/protocol.rs` L261–409, revisão `f970f4be6783428af0d39527102917a5305c71d7`:
+
+- **Aceitas pelo proxy:** Rio, Viola e Cove (verificação anterior), mais Porto, Selva, Tinta, Sol,
+  Maple e Juniper (seis probes desta frente: todos HTTP 201 e DELETE 204, em 23/10/2026).
+- **Ainda não verificadas ao vivo:** Spruce, Ember, Vale, Breeze, Arbor, Aube, Bubbie, Haetsal,
+  Hanul, Himari, Leher, Miko, Neer, Rindo, Rivage e Sonna.
+- Nenhum ID rejeitado/removido. Aceitação não comprova identidade ou qualidade perceptiva da voz.
+
+O controlador captura a escolha no início da chamada. Alterar a preferência não renegocia nem
+reinicia áudio; com a faixa visível, a tela informa **Vale a partir da próxima chamada**.
+
+`VoiceSignaling.createCall` só tenta outra voz após HTTP 400/422 com rejeição estruturada do campo
+`session.audio.output.voice` (ou código explícito `invalid_voice`/`unsupported_voice`). A ordem é a
+escolhida → Rio → Cove, sem repetir um ID já rejeitado. Mantém a mesma oferta, memória e lease;
+uma resposta válida usa a voz alternativa apenas nessa chamada. O toast informa a voz escolhida
+indisponível e a alternativa realmente aceita, por exemplo **A voz Viola não está disponível; usando Rio**.
+**A preferência salva nunca é alterada pelo fallback.** Se todas falharem, mostra o erro normal da
+chamada. Timeout, erro de rede, HTTP não relacionado e criação 201 malformada nunca repetem a criação.
+
+Verificação isolada: **OpenCode Voz Escolha** (`B0E8F258-19F2-42E8-B149-FFA462C7BD24`, iPhone 18 Pro/iOS 27),
+`ios-vozescolha-derived`. Após `build-for-testing COPY_PHASE_STRIP=NO`, rode
+`python3 packages/ios-custom/script/test-voice-picker.py` e repita com `OPENCODE_TEST_THEME=openchamber-light`.
+O runner passa URL/senha explícitas do sandbox 4177 em todos os launches e não cria sessões nem muda
+o serviço. A UI usa somente o fixture visual da faixa para o aviso de chamada ativa. Os testes Kit
+cobrem catálogo, padrão, persistência, payload, ordem/limite de fallback e erros sem retry; os hospedados
+cobrem captura por chamada, próxima chamada e toast sem sobrescrever a preferência.
+Para regressões de Você no mesmo destino, `script/test-settings.py` aceita
+`OPENCODE_SETTINGS_SIMULATOR`, `OPENCODE_SETTINGS_DERIVED` e `OPENCODE_SETTINGS_EVIDENCE`;
+os padrões existentes permanecem intactos. Execute os runners sequencialmente nesse simulador.
+
+O probe opcional exige `OPENCODE_TEST_LIVE_VOICE_CATALOG=1` e seleção exclusiva de
+`OpenCodeTests/VoiceControllerTests/testExplicitSilentVoiceCatalogSample`. Faz no máximo seis criações
+com Porto, Selva, Tinta, Sol, Maple e Juniper: oferta WebRTC nativa com trilha silenciada **antes** do POST,
+sem aplicar resposta/abrir mídia e DELETE imediato após fechar o transporte local. Não envia fala nem
+delega à mestra; verifica aceitação do ID, não qualidade. Não é executado pelas suítes normais.
+Capturas/xcresults: `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-vozescolha-prints/`.
+
+Resultado desta frente: **309 testes Kit Debug / 308 Release**, builds do app Debug/test e Release sem
+warnings, 13 testes de voz/seletor por tema (dois probes opt-in pulados) e os três casos existentes de
+Você aprovados em ambos os temas. Os casos de servidores/pareamento foram repetidos separadamente,
+com código novo, para não expirar durante o teste longo de temas. Os helpers de UI dispensam o alerta
+local que cobria Voltar, usam **Agora Não** do AutoFill e revelam a linha de servidor após a reconstrução,
+em vez de presumir que ela já está montada na primeira viewport. Não se alterou o comportamento do app
+para contornar esses testes. `verification.json` no diretório de evidências registra resultados e capturas.
 
 ## Transporte e áudio
 

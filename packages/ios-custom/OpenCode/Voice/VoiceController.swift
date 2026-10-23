@@ -5,6 +5,8 @@ import OpenCodeKit
 import OSLog
 
 @MainActor @Observable final class VoiceController {
+  let preferences: VoicePreferences
+  let toast = ToastCenter()
   private(set) var state = VoiceState()
   private(set) var detail = ""
   private(set) var connectedAt: Date?
@@ -50,10 +52,13 @@ import OSLog
     var memory: VoiceMemoryStore?
   }
   @ObservationIgnored private var testing: TestDependencies?
-  convenience init(testing: TestDependencies) { self.init(); self.testing = testing }
+  convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
+    self.init(preferences: preferences); self.testing = testing
+  }
   #endif
 
-  init() {
+  init(preferences: VoicePreferences = VoicePreferences()) {
+    self.preferences = preferences
     let config = URLSessionConfiguration.ephemeral
     config.timeoutIntervalForRequest = 8
     config.timeoutIntervalForResource = 30
@@ -66,6 +71,7 @@ import OSLog
   }
   func start(sessions: SessionStore) {
     guard !busy, !state.visible else { return }
+    let selectedVoice = preferences.voice
     let token = UUID()
     epoch = token; sessionID = token; ready = false; mediaConnected = false
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
@@ -135,13 +141,12 @@ import OSLog
         try await renew(signal, method: "POST")
         guard epoch == token else { return }
         beginRenewal(signal, token: token)
-        let request = try signal.offerRequest(sdp: await offer, history: await history)
-        let (data, response) = try await perform(request)
-        guard let response = response as? HTTPURLResponse else { throw VoiceWireError.invalidAnswer }
-        let answer = try VoiceSignaling.parseAnswer(data, response: response)
+        let answer = try await signal.createCall(sdp: await offer, voice: selectedVoice, history: await history,
+          request: { [self] in try await perform($0) })
         try Task.checkCancellation()
         guard epoch == token else { return }
-        try await transport.answer(answer)
+        try await transport.answer(answer.sdp)
+        if let notice = answer.fallbackNotice { toast.show(notice, kind: .error) }
         VoiceTransport.log.notice("phase=answer-applied")
       } catch {
         guard epoch == token, !Task.isCancelled else { return }

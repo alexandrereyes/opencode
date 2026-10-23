@@ -13,7 +13,7 @@ struct VoiceTests {
     #expect(request.value(forHTTPHeaderField: "x-gpt-live-generation") == signal.generation.uuidString)
     let body = try JSONDecoder().decode(JSONValue.self, from: #require(request.httpBody))
     #expect(body.object?["session"]?.object?["model"]?.string == "gpt-live-1-codex")
-    #expect(body.object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string == "cove")
+    #expect(body.object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string == "rio")
     #expect(body.object?["session"]?.object?["delegation"]?.object?["type"]?.string == "client")
   }
   @Test func leaseIdentityAndTimeAreValidated() throws {

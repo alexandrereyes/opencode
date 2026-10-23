@@ -19,12 +19,22 @@ import XCTest
     return app
   }
   private func shot(_ name: String) {
+    dismissAlert(XCUIApplication())
     let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
   }
+  private func dismissAlert(_ app: XCUIApplication) {
+    let close = app.buttons["Fechar alerta"].firstMatch
+    if close.exists && close.isHittable {
+      close.tap()
+      XCTAssertTrue(close.waitForNonExistence(timeout: 3))
+    }
+  }
   private func settings(_ app: XCUIApplication) {
+    dismissAlert(app)
+    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 5))
     app.tabBars.buttons["Você"].tap()
     for _ in 0..<3 {
       if app.navigationBars["Você"].exists { break }
@@ -51,7 +61,8 @@ import XCTest
     row.tap()
     XCTAssertTrue(row.isSelected)
     shot("themes-" + id)
-    app.navigationBars.buttons.firstMatch.tap()
+    app.navigationBars["Temas"].buttons.firstMatch.tap()
+    XCTAssertTrue(app.navigationBars["Temas"].waitForNonExistence(timeout: 5))
   }
   func testLiveThemesAndAppearancesAcrossScreens() throws {
     let app = try launch()
@@ -81,6 +92,7 @@ import XCTest
       XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 15))
       XCTAssertTrue(app.staticTexts["Confira a aparência desta conversa."].waitForExistence(timeout: 10))
       shot("conversation-" + name)
+      dismissAlert(app)
       app.buttons["Voltar"].tap()
       settings(app)
     }
@@ -91,6 +103,7 @@ import XCTest
     let mode = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
     let app = try launch(child: true, override: mode)
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
+    dismissAlert(app)
     app.buttons["Voltar"].tap()
     settings(app)
     reveal(app.buttons["settings-servers"], app: app)
@@ -114,7 +127,9 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Conectado"].waitForExistence(timeout: 15))
     shot("server-manual-active-" + mode)
     app.tabBars.buttons["Sessões"].tap()
-    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch.waitForExistence(timeout: 20))
+    let root = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch
+    app.revealSessionRow(root)
+    XCTAssertTrue(root.exists)
     settings(app)
     reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
@@ -186,13 +201,12 @@ import XCTest
     shot("server-add-" + (success ? "success-" : "failure-") + mode)
     app.buttons["server-save"].tap()
     XCTAssertTrue(app.navigationBars["Adicionar servidor"].waitForNonExistence(timeout: 5))
-    // AutoFill arrives after the app sheet dismisses and is outside its AX tree.
-    // Wait for it to block the visible back button before tapping "Agora Não".
+    // AutoFill arrives after dismissal; a temporarily blocked Back button is not proof it is ready.
     if success {
-      let blocked = expectation(for: NSPredicate(format: "hittable == false"),
-                                evaluatedWith: app.navigationBars["Servidores"].buttons.firstMatch)
-      if XCTWaiter.wait(for: [blocked], timeout: 5) == .completed {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.64)).tap()
+      let decline = app.buttons["Agora Não"].firstMatch
+      if decline.waitForExistence(timeout: 5) {
+        decline.tap()
+        XCTAssertTrue(decline.waitForNonExistence(timeout: 5))
       }
     }
     XCTAssertTrue(app.buttons["server-add"].waitForExistence(timeout: 10))
@@ -201,7 +215,7 @@ import XCTest
     let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'server-select-' AND label CONTAINS %@", title)).firstMatch
     reveal(row, app: app)
     row.tap()
-    XCTAssertTrue(app.buttons["settings-servers"].waitForExistence(timeout: 15))
+    XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 15))
     reveal(app.buttons["settings-servers"], app: app)
     app.buttons["settings-servers"].tap()
   }

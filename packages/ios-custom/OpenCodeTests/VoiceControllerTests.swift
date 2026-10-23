@@ -32,9 +32,16 @@ import XCTest
 
 private actor VoiceTestHTTP {
   var requests: [URLRequest] = []
+  let rejectedVoices: [String]
+  init(rejectedVoices: [String] = []) { self.rejectedVoices = rejectedVoices }
   func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
     requests.append(request)
     if request.url!.path.hasSuffix("/calls") {
+      let body = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(request.httpBody))
+      if rejectedVoices.contains(body.object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string ?? "") {
+        return (Data(#"{"error":{"type":"invalid_request_error","param":"session.audio.output.voice","code":"unsupported_value"}}"#.utf8),
+          HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+      }
       return (Data("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n".utf8),
         HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: ["Location": "/v1/live/test"])!)
     }
@@ -107,6 +114,55 @@ private actor LiveMemoryHTTP {
 }
 
 @MainActor final class VoiceControllerTests: XCTestCase {
+  func testSavedVoiceIsCapturedAtStartAndChangesOnlyTheNextCall() async throws {
+    let name = "voice-controller-" + UUID().uuidString
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let preferences = VoicePreferences(defaults: defaults)
+    preferences.voice = .viola
+    let transport = VoiceTestTransport()
+    let http = VoiceTestHTTP()
+    let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }), preferences: preferences)
+    let sessions = SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!))
+    let first = expectation(description: "first call")
+    transport.answered = { first.fulfill() }
+    controller.start(sessions: sessions)
+    preferences.voice = .cove
+    await fulfillment(of: [first], timeout: 3)
+    XCTAssertEqual(controller.state.phase, .listening)
+    await controller.end()
+    let second = expectation(description: "next call")
+    transport.answered = { second.fulfill() }
+    controller.start(sessions: sessions)
+    await fulfillment(of: [second], timeout: 3)
+    await controller.end()
+    let offers = await http.requests.filter { $0.url?.path.hasSuffix("/calls") == true }
+    let voices = try offers.map {
+      try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string
+    }
+    XCTAssertEqual(voices, ["viola", "cove"])
+    XCTAssertNil(controller.toast.message)
+  }
+  func testFallbackToastDoesNotOverwriteTheSavedPreference() async throws {
+    let name = "voice-controller-" + UUID().uuidString
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let preferences = VoicePreferences(defaults: defaults)
+    preferences.voice = .maple
+    let transport = VoiceTestTransport()
+    let http = VoiceTestHTTP(rejectedVoices: ["maple", "rio"])
+    let answered = expectation(description: "fallback call")
+    transport.answered = { answered.fulfill() }
+    let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }), preferences: preferences)
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    XCTAssertEqual(controller.state.phase, .listening)
+    XCTAssertEqual(controller.toast.message?.text, "A voz Maple não está disponível; usando Cove")
+    XCTAssertEqual(VoicePreferences(defaults: defaults).voice, .maple)
+    await controller.end()
+  }
   func testReadinessMuteInterruptionAndStaleCallbacks() async throws {
     let transport = VoiceTestTransport()
     let master = VoiceTestMaster()
@@ -279,6 +335,48 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(metrics.initialItems > 0 && metrics.initialItems <= 128)
     XCTAssertLessThanOrEqual(metrics.initialTokens, 8192)
     XCTAssertEqual(metrics.roles, ["assistant", "user"])
+    #else
+    throw XCTSkip("No physical device live probing in this suite.")
+    #endif
+  }
+
+  func testExplicitSilentVoiceCatalogSample() async throws {
+    #if targetEnvironment(simulator)
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["OPENCODE_TEST_LIVE_VOICE_CATALOG"] == "1",
+      environment["OPENCODE_TEST_SERVER_URL"] == "http://127.0.0.1:4177" else {
+      throw XCTSkip("Explicit six-call muted simulator catalog probe only.")
+    }
+    var results: [JSONValue] = []
+    for id in ["porto", "selva", "tinta", "sol", "maple", "juniper"] {
+      let voice = try XCTUnwrap(GPTLiveVoice(rawValue: id))
+      let transport = SilentLiveTransport(event: { _ in })
+      let signal = VoiceSignaling()
+      do {
+        let sdp = try await transport.offer()
+        let (lease, reservation) = try await URLSession.shared.data(for: signal.leaseRequest(method: "POST"))
+        _ = try signal.parseLease(lease, status: (reservation as? HTTPURLResponse)?.statusCode ?? 0)
+        let (data, result) = try await URLSession.shared.data(for: signal.offerRequest(sdp: sdp, voice: voice))
+        let response = try XCTUnwrap(result as? HTTPURLResponse)
+        let accepted = response.statusCode == 201
+        if accepted { _ = try VoiceSignaling.parseAnswer(data, response: response) }
+        let rejected = VoiceSignaling.rejectsVoice(data, response: response)
+        await transport.close()
+        let (_, release) = try await URLSession.shared.data(for: signal.leaseRequest(method: "DELETE"))
+        let released = (release as? HTTPURLResponse)?.statusCode ?? 0
+        results.append(.object(["voice": .string(id), "status": .number(Double(response.statusCode)),
+          "accepted": .bool(accepted), "voiceValidationRejected": .bool(rejected), "release": .number(Double(released))]))
+        let evidence = XCTAttachment(data: try JSONEncoder().encode(results), uniformTypeIdentifier: "public.json")
+        evidence.name = "voice-catalog-live"; evidence.lifetime = .keepAlways; add(evidence)
+        XCTAssertEqual(released, 204)
+        guard accepted || rejected else { XCTFail("Non-validation failure; stop without spending more calls"); return }
+      } catch {
+        await transport.close()
+        _ = try? await URLSession.shared.data(for: signal.leaseRequest(method: "DELETE"))
+        throw error
+      }
+    }
+    XCTAssertEqual(results.count, 6)
     #else
     throw XCTSkip("No physical device live probing in this suite.")
     #endif

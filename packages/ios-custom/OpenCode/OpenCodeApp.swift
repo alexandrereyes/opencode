@@ -142,6 +142,7 @@ private struct AppTabs: View {
     .environment(\.floatingVoice, floatingVoice)
     .onChange(of: runtime.voice.sessionID, initial: true) { _, id in floatingVoice.observe(id) }
     .background(theme.color(.background))
+    .toastOverlay(runtime.voice.toast)
     .sessionAlertOverlay(modal: false)
     .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in
       if let current = store.currentSessionID { store.drafts.draft(current).focused = false }

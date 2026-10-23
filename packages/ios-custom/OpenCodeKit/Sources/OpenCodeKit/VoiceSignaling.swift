@@ -29,7 +29,7 @@ public struct VoiceSignaling: Sendable {
     }
     return request
   }
-  public func offerRequest(sdp: String, history: VoiceMemoryContext? = nil) throws -> URLRequest {
+  public func offerRequest(sdp: String, voice: GPTLiveVoice = .defaultVoice, history: VoiceMemoryContext? = nil) throws -> URLRequest {
     guard sdp.hasPrefix("v=0"), sdp.utf8.count <= 256 * 1024 else { throw VoiceWireError.invalidAnswer }
     var url = Self.baseURL.appending(path: "backend-api/codex/realtime/calls")
     url.append(queryItems: [URLQueryItem(name: "intent", value: "quicksilver"),
@@ -44,7 +44,7 @@ public struct VoiceSignaling: Sendable {
     ].forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
     var session: [String: JSONValue] = [
         "model": .string("gpt-live-1-codex"), "instructions": .string(VoiceProtocol.instructions),
-        "audio": .object(["output": .object(["voice": .string("cove")])]),
+        "audio": .object(["output": .object(["voice": .string(voice.rawValue)])]),
         "delegation": .object(["type": .string("client")]),
     ]
     if let history, !history.initialItems.isEmpty {
@@ -53,6 +53,36 @@ public struct VoiceSignaling: Sendable {
     }
     request.httpBody = try JSONEncoder().encode(JSONValue.object(["sdp": .string(sdp), "session": .object(session)]))
     return request
+  }
+  public func createCall(sdp: String, voice: GPTLiveVoice, history: VoiceMemoryContext? = nil,
+    request: @Sendable (URLRequest) async throws -> (Data, URLResponse)) async throws -> VoiceCallAnswer {
+    let candidates = [voice] + [GPTLiveVoice.rio, .cove].filter { $0 != voice }
+    for candidate in candidates {
+      try Task.checkCancellation()
+      let (data, response) = try await request(offerRequest(sdp: sdp, voice: candidate, history: history))
+      try Task.checkCancellation()
+      guard let response = response as? HTTPURLResponse else { throw VoiceWireError.invalidAnswer }
+      // Only an explicit voice validation rejection proves creation did not happen.
+      // Timeouts, malformed 201s and unrelated HTTP errors must never create a second call.
+      if candidate != candidates.last && Self.rejectsVoice(data, response: response) { continue }
+      return VoiceCallAnswer(sdp: try Self.parseAnswer(data, response: response), voice: candidate,
+        fallbackNotice: candidate == voice ? nil : "A voz \(voice.title) não está disponível; usando \(candidate.title)")
+    }
+    throw VoiceWireError.invalidAnswer
+  }
+  static func rejectsVoice(_ data: Data, response: HTTPURLResponse) -> Bool {
+    guard [400, 422].contains(response.statusCode), data.count <= 256 * 1024,
+      let root = try? JSONDecoder().decode(JSONValue.self, from: data).object else { return false }
+    if let error = root["error"]?.object {
+      if ["invalid_voice", "unsupported_voice"].contains(error["code"]?.string ?? "") { return true }
+      if error["type"]?.string == "invalid_request_error",
+        ["session.audio.output.voice", "audio.output.voice", "voice"].contains(error["param"]?.string ?? "") { return true }
+    }
+    return root["detail"]?.array?.contains { error in
+      let path = error.object?["loc"]?.array?.compactMap(\.string) ?? []
+      return Array(path.suffix(4)) == ["session", "audio", "output", "voice"]
+        && ["enum", "literal_error", "value_error"].contains(error.object?["type"]?.string ?? "")
+    } == true
   }
   public func parseLease(_ data: Data, status: Int) throws -> VoiceLease {
     guard status == 200 else { throw VoiceWireError.unavailable(status) }
@@ -81,4 +111,10 @@ public struct VoiceSignaling: Sendable {
     }
     return sdp
   }
+}
+
+public struct VoiceCallAnswer: Sendable {
+  public let sdp: String
+  public let voice: GPTLiveVoice
+  public let fallbackNotice: String?
 }

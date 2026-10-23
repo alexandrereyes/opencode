@@ -568,6 +568,13 @@ overrides so other agents' simulators and services are untouched.
 
 ### Faixa de voz
 
+**Você → Conversa por voz → Voz** selects the next call's voice. Rio is the default when no choice
+was saved; Rio and Viola appear first in **Brasileiras**. `OpenCodeVoice` is a device-local
+UserDefaults preference, not a server preference. Changing it during a call never restarts audio.
+An explicit voice-validation rejection tries Rio, then Cove, without repeating IDs; a toast names
+the accepted fallback and the saved choice stays intact. There is no preview. The contract, catalog
+and isolated **OpenCode Voz Escolha** checks are in [`docs/voice.md`](docs/voice.md#escolha-da-voz).
+
 `FloatingVoiceBar` is a pure SwiftUI surface driven by `VoiceBarState`: phase, elapsed time, spoken line,
 master progress, mute, expansion, error and pending controls. The adapter in `FloatingVoicePresentation`
 reads the engine's `connectedAt`, `currentSpokenLine` and `masterProgressLine`; it owns only UI expansion.

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.floatingVoice) private var floatingVoice
   let runtime: AppRuntime
   let store: SessionStore
   @State private var proxyProvider: SubscriptionProvider?
@@ -41,6 +42,15 @@ struct SettingsView: View {
           Toggle("Recolher mensagens longas do usuário", isOn: $collapsibleUserMessages)
             .accessibilityIdentifier("settings-collapsible-user-messages")
         }.listRowBackground(theme.color(.surface))
+        Section {
+          NavigationLink {
+            VoicePicker(settings: runtime.voice.preferences)
+          } label: {
+            LabeledContent("Voz", value: runtime.voice.preferences.voice.title)
+          }.accessibilityIdentifier("settings-voice")
+        } header: { Text("Conversa por voz") } footer: {
+          if floatingVoice?.visible(runtime.voice) == true { Text("Vale a partir da próxima chamada") }
+        }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {
             ServerListView(runtime: runtime, store: store)
@@ -69,6 +79,36 @@ struct SettingsView: View {
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
       }
     }
+  }
+}
+
+private struct VoicePicker: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.voiceController) private var voice
+  @Environment(\.floatingVoice) private var floatingVoice
+  @Bindable var settings: VoicePreferences
+  var body: some View {
+    List {
+      Section { voices(GPTLiveVoice.brazilian) } header: { Text("Brasileiras") } footer: {
+        if floatingVoice?.visible(voice) == true { Text("Vale a partir da próxima chamada") }
+      }
+      Section("Outras vozes") { voices(GPTLiveVoice.others) }
+    }.settingsList(theme).navigationTitle("Voz").navigationBarTitleDisplayMode(.inline)
+  }
+  private func voices(_ voices: [GPTLiveVoice]) -> some View {
+    ForEach(voices) { voice in
+      Button {
+        settings.voice = voice
+        Haptics.play(.selection)
+      } label: {
+        HStack {
+          Text(voice.title).foregroundStyle(theme.color(.textStrong))
+          Spacer()
+          if settings.voice == voice { Image(systemName: "checkmark").foregroundStyle(theme.color(.primary)) }
+        }.contentShape(Rectangle())
+      }.accessibilityIdentifier("voice-choice-" + voice.rawValue)
+        .accessibilityAddTraits(settings.voice == voice ? .isSelected : [])
+    }.listRowBackground(theme.color(.surface))
   }
 }
 
