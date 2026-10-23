@@ -129,8 +129,8 @@ struct SessionAlertBanner: View {
                 SessionList.avatarColor(message.project, fallback: message.session.projectID))
               Text(
                 SessionList.monogram(
-                  message.project?.displayName
-                    ?? URL(fileURLWithPath: message.session.location.directory).lastPathComponent)
+                  message.project?.vcs != nil ? message.project?.displayName ?? message.session.displayTitle
+                    : message.session.displayTitle)
               )
               .font(.system(size: 13, weight: .medium)).foregroundStyle(colors.text)
               .frame(width: 38, height: 38).background(colors.background, in: Circle())

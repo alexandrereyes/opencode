@@ -14,6 +14,12 @@ public enum ThemeRole: Int, CaseIterable, Sendable {
   case agentAsk, agentLegacyBuild, agentDocs, agentLegacyPlan, agentInfo, agentSuccess
   case agentWarning, agentProperty, agentConstant, agentAdded, agentDeleted, agentLegacyWarning
   case composerFile, composerAgent, composerSession, composerSnippet, composerCommand, composerSkill
+  case markdownBody, markdownStrong, markdownHeading, markdownQuote, markdownQuoteBorder, markdownLink, markdownRule, markdownTask
+  case codeText, codeHeaderText, codeBorder, codeHeaderSeparator, codeGutterSeparator, codeLineNumber
+  case tableSurface, tableText, tableHeaderText, tableBorder, tableSeparator
+  case syntaxKeyword, syntaxString, syntaxComment, syntaxFunction, syntaxProperty, syntaxType, syntaxConstant, syntaxNumber,
+    syntaxVariable, syntaxPunctuation, syntaxOperator, syntaxAdded, syntaxRemoved
+  case diagramBackground, diagramText, diagramLine, diagramAccent, diagramMuted, diagramSurface, diagramBorder
 
   public var name: String { String(describing: self) }
 }

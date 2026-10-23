@@ -4,7 +4,7 @@ import SwiftUI
 private struct ConversationSection: Identifiable {
   let id: String
   let user: ConversationMessage?
-  var messages: [ConversationMessage]
+  var messages: [ConversationActivityMessage]
 }
 private struct ConversationScrollMetrics: Equatable {
   let height: CGFloat
@@ -15,37 +15,31 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
   let id: String
   let state: ConversationScrollState
   let color: UIColor
-  let update: (Bool) -> Void
   func makeUIView(context: Context) -> Probe {
-    Probe(id: id, state: state, color: color, update: update)
+    Probe(id: id, state: state, color: color)
   }
   func updateUIView(_ view: Probe, context: Context) {
-    let changed = view.id != id
     view.id = id
     view.state = state
     view.color = color
-    view.update = update
     view.attach()
-    view.refresh(force: changed)
+    view.refresh()
   }
   static func dismantleUIView(_ view: Probe, coordinator: ()) { view.fade.removeFromSuperlayer() }
   final class Probe: UIView {
-    var update: (Bool) -> Void
     var id: String
     var state: ConversationScrollState
     var color: UIColor
     weak var scroll: UIScrollView?
     weak var container: UICollectionReusableView?
     var observation: NSKeyValueObservation?
-    var pinned = false
     let fade = CAGradientLayer()
     init(
-      id: String, state: ConversationScrollState, color: UIColor, update: @escaping (Bool) -> Void
+      id: String, state: ConversationScrollState, color: UIColor
     ) {
       self.id = id
       self.state = state
       self.color = color
-      self.update = update
       super.init(frame: .zero)
       isOpaque = false
       fade.startPoint = CGPoint(x: 0.5, y: 0)
@@ -57,7 +51,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       observation = nil
       if window == nil { fade.removeFromSuperlayer() }
       attach()
-      refresh(force: true)
+      refresh()
     }
     override func didMoveToSuperview() {
       super.didMoveToSuperview()
@@ -88,7 +82,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       attach()
       refresh()
     }
-    func refresh(force: Bool = false) {
+    func refresh() {
       guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
       container.backgroundColor = color
       if let cell = container as? UICollectionViewListCell,
@@ -107,7 +101,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       // top edge is sticky, not every previously visited prompt.
       let next =
         scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
-        && frame.minY - scroll.bounds.minY <= 2 && frame.maxY > scroll.bounds.minY + 1
+        && frame.minY - scroll.contentOffset.y <= 2 && frame.maxY > scroll.bounds.minY + 1
       // The SwiftUI content is inset inside the native header. Its overlay starts
       // beneath opaque native padding, truncating most of the gradient. Draw from
       // the actual full-width header edge instead, without changing row geometry.
@@ -125,12 +119,6 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       ]
       fade.isHidden = !next
       CATransaction.commit()
-      guard force || next != pinned else { return }
-      pinned = next
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-        update(pinned)
-      }
     }
   }
 }
@@ -159,33 +147,51 @@ struct ConversationView: View {
   @State private var restorationTask: Task<Void, Never>?
   @State private var captureTask: Task<Void, Never>?
   @State private var captureRequested = false
-  @State private var unreadAbove = false
-  @State private var stickyHeight: CGFloat = 0
+  @State private var viewport = ConversationViewport()
   @State private var screenVisible = true
+  @State private var promptViewportHeight: CGFloat = 800
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
+  let master: Bool
 
-  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil) {
+  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil, master: Bool = false) {
     self.sessions = sessions
+    self.master = master
     self.parentOnStack = parentOnStack
     _requestedTool = State(initialValue: toolID)
     let position = sessions.reading.position(id)
     _savedPosition = State(initialValue: position)
     initialFollowTail = position?.target == nil || position?.target == .followTail
     _atBottom = State(initialValue: initialFollowTail && toolID == nil)
-    _conversation = State(
-      initialValue: ConversationStore(
+    let conversation = ConversationStore(
         id: id, client: sessions.client, hub: sessions.hub,
-        expansions: sessions.expansions, catalog: sessions.catalog))
+        expansions: sessions.expansions, catalog: sessions.catalog)
+    conversation.masterMode = master
+    _conversation = State(initialValue: conversation)
+  }
+  private var chat: Bool {
+    if master { return true }
+    guard let directory = conversation.session?.location.directory, let root = sessions.chatRoot else { return false }
+    return directory == root || directory.hasPrefix(root + "/")
+  }
+  private var showLocation: Bool { sessions.chatRoot != nil && !chat }
+  private var headerSubtitle: String {
+    if chat { return conversation.modelLabel(conversation.session?.model) }
+    // Do not expose a directory fallback before the managed-chat root has been resolved.
+    return conversation.located?.branch ?? (showLocation ? conversation.branch : "")
+  }
+  private var headerStatus: String {
+    conversation.waiting ? "aguardando você" : conversation.working ? "trabalhando…" : ""
   }
   private var sections: [ConversationSection] {
     var result = [ConversationSection(id: "leading", user: nil, messages: [])]
-    for message in conversation.messages {
+    for item in conversation.activity.messages {
+      let message = item.message
       if message.type == "user" {
         result.append(ConversationSection(id: message.id, user: message, messages: []))
       } else {
-        result[result.count - 1].messages.append(message)
+        result[result.count - 1].messages.append(item)
       }
     }
     return result
@@ -194,7 +200,7 @@ struct ConversationView: View {
     VStack(spacing: 0) {
       header
       if let notice = conversation.notice {
-        ConversationNoticeView(notice: notice) { Task { await conversation.refresh() } }
+        ConversationNoticeView(notice: notice, showDirectory: showLocation) { Task { await conversation.refresh() } }
       }
       if let error = conversation.error {
         Button {
@@ -215,6 +221,10 @@ struct ConversationView: View {
     }
     .background(theme.color(.background))
     .environment(conversation.toast)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { promptViewportHeight = $0 }
+    .environment(\.conversationImages, conversation.session.map {
+      ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
+    })
     .environment(\.conversationSearch, ConversationSearchHighlight(matches: search.matches, current: search.current?.id, align: {
       search.align($0, offset: $1, store: conversation)
     }))
@@ -244,7 +254,12 @@ struct ConversationView: View {
           conversation.sideQuestion = SideQuestionLaunch(text: SideQuestionRequest.quote(text))
         })
     )
-    .background(ConversationBackGesture(capture: leavePosition, appeared: { screenVisible = true }))
+    .background(ConversationBackGesture(capture: leavePosition, appeared: {
+      screenVisible = true
+      scrollState.setVisible(true)
+      if atBottom { scrollState.followToEnd() }
+      else { scrollState.correctAnchor() }
+    }))
     .toolbar(.hidden, for: .navigationBar, .tabBar)
     .sheet(isPresented: $agentsOpen) {
       ConversationAgentsSheet(store: conversation) { work in
@@ -261,9 +276,9 @@ struct ConversationView: View {
         }
       }.sessionAlertOverlay()
     }
-    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation).sessionAlertOverlay() }
+    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation, showLocation: showLocation).sessionAlertOverlay() }
     .sheet(isPresented: $detailsOpen) {
-      SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }) {
+      SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }, isChat: chat, showLocation: showLocation) {
         contextOpen = true
       }.sessionAlertOverlay()
     }
@@ -293,9 +308,13 @@ struct ConversationView: View {
       if search.open { search.update(conversation) }
     }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
-    .task(id: conversation.revision) { await conversation.presented() }
+    .task(id: conversation.session) {
+      if screenVisible { await conversation.presented() }
+    }
+    .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
       screenVisible = true
+      scrollState.setVisible(true)
       scrollState.correctAnchor()
     }
     .onDisappear {
@@ -333,6 +352,7 @@ struct ConversationView: View {
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
           ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
+            .disabled(!conversation.ready)
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6).background(
           theme.color(.background))
@@ -367,6 +387,7 @@ struct ConversationView: View {
       if let session = conversation.session {
         let project = sessions.projects.first { $0.id == session.projectID }
         let colors = theme.avatar(SessionList.avatarColor(project, fallback: session.projectID))
+        let monogram = SessionList.monogram(chat || project?.vcs == nil ? session.displayTitle : project?.displayName ?? session.displayTitle)
         Button {
           contextOpen = true
         } label: {
@@ -380,28 +401,33 @@ struct ConversationView: View {
                 )
                 .rotationEffect(.degrees(-90))
             }
-            Circle().fill(colors.background).padding(4)
-            Text(
-              SessionList.monogram(
-                project?.displayName
-                  ?? URL(fileURLWithPath: session.location.directory).lastPathComponent)
-            )
-            .font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+            Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
+            if master {
+              Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 18)).foregroundStyle(theme.color(.accent))
+            } else {
+              Text(monogram).font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+            }
           }.frame(width: 38, height: 38)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
           conversation.context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
             ?? "Contexto desconhecido")
+        .accessibilityIdentifier("conversation-header-avatar")
+        .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
       VStack(alignment: .leading, spacing: 4) {
-        Text(conversation.session?.displayTitle ?? "Conversa").font(
+        Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa").font(
           .system(size: 14, weight: .semibold)
         ).lineLimit(1)
-        Text(
-          "\(Text(conversation.branch))\(Text(conversation.waiting ? " · aguardando você" : conversation.working ? " · trabalhando…" : "").foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
-        )
-        .font(.system(size: 11)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+        if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
+          Text(
+            "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
+          )
+          .font(.system(size: 11)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+          .accessibilityIdentifier("conversation-header-subtitle")
+        }
       }.frame(maxWidth: .infinity, alignment: .leading)
       if conversation.runningCount > 0 {
         Button {
@@ -417,28 +443,37 @@ struct ConversationView: View {
           conversation.runningCount == 1
             ? "1 agente em execução" : "\(conversation.runningCount) agentes em execução")
       }
-      Menu {
-        Button("Buscar na conversa", systemImage: "magnifyingglass") {
+      if master {
+        Button {
+          sessions.drafts.draft(conversation.id).focused = false
+          Task { await sessions.resetMaster() }
+        } label: {
+          Image(systemName: "trash").frame(width: 36, height: 36)
+            .glassEffect(.regular.interactive(), in: .circle)
+        }.accessibilityLabel("Reiniciar Sessão mestra").accessibilityIdentifier("master-trash")
+          .disabled(sessions.busy.contains("master-reset"))
+      } else {
+      ConversationOptionsMenu(
+        sessionID: conversation.id, available: conversation.session != nil,
+        canArchive: conversation.session?.parentID == nil, archiving: conversation.acting.contains("archive"),
+        theme: theme,
+        actions: .init(search: {
           sessions.drafts.draft(conversation.id).focused = false
           capturePosition()
           search.open = true
-        }
-        Button("Renomear", systemImage: "pencil") {
+        }, rename: {
           renameTitle = conversation.session?.title ?? ""
           renameOpen = true
-        }.disabled(conversation.session == nil)
-        Button("Detalhes da sessão", systemImage: "info.circle") { detailsOpen = true }
-          .disabled(conversation.session == nil)
-        if conversation.session?.parentID == nil {
-          Divider()
-          Button("Arquivar", systemImage: "archivebox", role: .destructive) { archiveOpen = true }
-            .disabled(conversation.session == nil || conversation.acting.contains("archive"))
-        }
-      } label: {
-        Image(systemName: "ellipsis").font(.system(size: 19)).frame(width: 36, height: 36)
-          .glassEffect(.regular.interactive(), in: .circle)
+        }, details: {
+          #if DEBUG
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeMenuDiagnostics") {
+            NSLog("DETAILS action session=%@ child=%@", conversation.id, String(conversation.isChild))
+          }
+          #endif
+          detailsOpen = true
+        }, archive: { archiveOpen = true }))
+        .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
       }
-      .buttonStyle(.plain).accessibilityLabel("Mais opções")
     }
     .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
     .background(theme.color(.background))
@@ -466,26 +501,22 @@ struct ConversationView: View {
             conversation.paging || restoring
               ? "Carregando mensagens anteriores" : "Mensagens anteriores"
           )
-          .onAppear { if !search.open && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
+          .onAppear { if !search.open && !atBottom && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
         }
         ForEach(sections) { section in
+          if let user = section.user, showDay(user) {
+            day(user.time.created).padding(.vertical, 6)
+              .listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+              .listRowBackground(theme.color(.background))
+          }
           Section {
-            ForEach(section.messages) { message in
+            ForEach(section.messages) { item in
+              let message = item.message
               VStack(alignment: .leading, spacing: 16) {
-                if message.id
-                  == ConversationProjection.unread(
-                    conversation.messages, viewed: conversation.viewedBoundary)
-                {
-                  HStack {
-                    line
-                    Text("Novas mensagens").font(.system(size: 11))
-                    line
-                  }.foregroundStyle(theme.color(.primary))
-                }
                 if showDay(message) { day(message.time.created) }
                 ConversationMessageView(
                   message: message, footer: hasFooter(message), store: conversation,
-                  dividers: dividers
+                  dividers: dividers, rows: item.rows
                 ) { openChild($0) }
               }
               .padding(.vertical, 10)
@@ -498,11 +529,11 @@ struct ConversationView: View {
                 ConversationRowProbe(
                   state: scrollState, id: message.id, color: theme.uiColor(.background))
               )
-              .onGeometryChange(for: CGRect.self) {
-                $0.frame(in: .named("conversation-scroll"))
+              .onGeometryChange(for: CGSize.self) {
+                $0.size
               } action: { _, _ in
                 scrollState.correctAnchor()
-                updateUnread()
+                viewport.stickyHeight = scrollState.usableTop
               }
               .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
               .listRowSeparator(.hidden)
@@ -512,12 +543,8 @@ struct ConversationView: View {
             if let user = section.user {
               StickyUserHeader(
                 message: user.presented(isChild: conversation.isChild),
-                day: showDay(user) ? ConversationProjection.day(user.time.created) : nil,
                 scrollState: scrollState,
-                pinnedChanged: { _ in
-                  scrollState.correctAnchor()
-                  updateUnread()
-                }
+                maximumTextHeight: promptViewportHeight * 0.4
               )
               .listRowInsets(EdgeInsets())
               .textCase(nil)
@@ -527,11 +554,11 @@ struct ConversationView: View {
                 ConversationRowProbe(
                   state: scrollState, id: user.id, color: theme.uiColor(.background))
               )
-              .onGeometryChange(for: CGRect.self) {
-                $0.frame(in: .named("conversation-scroll"))
+              .onGeometryChange(for: CGSize.self) {
+                $0.size
               } action: { _, _ in
                 scrollState.correctAnchor()
-                updateUnread()
+                viewport.stickyHeight = scrollState.usableTop
               }
             }
           }
@@ -556,6 +583,7 @@ struct ConversationView: View {
             .id(form.id)
         }
         theme.color(.background).opacity(0).frame(height: 12).id("bottom")
+          .background(ConversationRowProbe(state: scrollState, id: "bottom", color: theme.uiColor(.background)))
           .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(
             theme.color(.background)
           )
@@ -584,6 +612,7 @@ struct ConversationView: View {
           cancelRestoration()
           userScrolling = true
           atBottom = false
+          if phase == .interacting { scrollState.nearBottom = false }
         }
         if phase == .idle {
           if userScrolling && !selectionPaused { atBottom = scrollState.nearBottom }
@@ -597,7 +626,13 @@ struct ConversationView: View {
           height: geometry.contentSize.height, offset: geometry.visibleRect.minY,
           viewport: geometry.visibleRect.height)
       } action: { old, new in
-        scrollState.nearBottom = new.height - new.offset - new.viewport < 80
+        let geometry = ConversationScrollPlan.Viewport(
+          height: new.height, offset: new.offset, viewport: new.viewport)
+        let arrived = geometry.arrivedAtEnd(from: .init(
+          height: old.height, offset: old.offset, viewport: old.viewport))
+        viewport.jumpToLatest = geometry.jumpToLatest
+        if !geometry.atEnd { scrollState.nearBottom = false }
+        if arrived { scrollState.nearBottom = true }
         let interacting =
           userScrolling
           || scrollState.view.map { $0.isTracking || $0.isDragging || $0.isDecelerating } == true
@@ -607,14 +642,15 @@ struct ConversationView: View {
           captureRequested = true
           scrollState.cancelAnchor()
         }
-        updateUnread()
-        if !search.open && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
+        viewport.stickyHeight = scrollState.usableTop
+        if arrived && !atBottom && !interacting && !selectionPaused && !firstLoad && !restoring
+          && !resumeOffered && screenVisible { resumeFollowing() }
+        if !search.open && !atBottom && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
-          && !restoring
+          && !restoring && screenVisible
         {
-          proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
-        } else if !interacting {
+        } else if !interacting && screenVisible {
           scrollState.correctAnchor()
         }
       }
@@ -634,7 +670,6 @@ struct ConversationView: View {
           && scrollState.view.map({ !$0.isTracking && !$0.isDragging && !$0.isDecelerating })
             != false
         {
-          proxy.scrollTo("bottom", anchor: .bottom)
           scrollState.followToEnd()
         }
       }
@@ -644,6 +679,9 @@ struct ConversationView: View {
         restore(
           ReadingPosition(.message(id: request.messageID, offset: request.offset)), proxy: proxy,
           explicit: true, persist: request.persist)
+      }
+      .onChange(of: conversation.submitted) { _, _ in
+        if screenVisible { resumeFollowing() }
       }
       .task(id: "\(conversation.ready):\(requestedTool ?? "")") {
         guard conversation.ready, let tool = requestedTool else { return }
@@ -669,45 +707,45 @@ struct ConversationView: View {
         requestedTool = nil
       }
       .overlay(alignment: .bottomTrailing) {
-        if !atBottom {
+        if viewport.jumpToLatest {
           Button {
-            cancelRestoration()
-            selectionPaused = false
-            userScrolling = false
-            atBottom = true
-            captureRequested = true
-            proxy.scrollTo("bottom", anchor: .bottom)
-            Task { @MainActor in
-              await Task.yield()
-              scrollState.followToEnd()
-            }
-            scheduleCapture()
+            resumeFollowing(animated: true)
           } label: {
             Image(systemName: "arrow.down").frame(width: 42, height: 42)
           }.buttonStyle(.glass).buttonBorderShape(.circle).padding(12).accessibilityLabel(
-            "Ir para o fim")
+            "Ir para a mais recente")
         }
       }
       .overlay(alignment: .top) {
-        VStack(spacing: 8) {
-          if resumeOffered {
-            Button("Retomar leitura") { restore(savedPosition, proxy: proxy) }
-              .buttonStyle(.glass)
-          }
-          if unreadAbove,
-            let id = ConversationProjection.unread(
-              conversation.messages, viewed: conversation.viewedBoundary)
-          {
-            Button("Novas mensagens ↑") {
-              conversation.revealMessage(id)
-            }.buttonStyle(.glass).accessibilityLabel("Ir às novas mensagens")
-          }
-        }.font(.caption).padding(.top, stickyHeight + 8)
+        ConversationViewportNotices(
+          viewport: viewport, offersResume: resumeOffered,
+          resume: { restore(savedPosition, proxy: proxy) })
       }
       .overlay { if conversation.loading { ProgressView("Carregando conversa…").font(.footnote) } }
+      #if DEBUG
+      .overlay(alignment: .bottomLeading) {
+        if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMeasureGrowth") {
+          ScrollGrowthMeasurement(store: conversation, state: scrollState).frame(width: 180, height: 40)
+        }
+      }
+      .background { ConversationOpeningProbe(id: conversation.id, ready: conversation.hasTranscript).frame(width: 1, height: 1) }
+      .overlay(alignment: .topTrailing) {
+        if ScrollFixtures.mode == "conversation", ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureFollow") {
+          ConversationFollowFixture(store: conversation, state: scrollState, color: theme.uiColor(.textStrong)).frame(width: 160, height: 40)
+        }
+      }
+      #endif
     }
   }
-  private var line: some View { Rectangle().fill(theme.color(.border)).frame(height: 0.5) }
+  private func resumeFollowing(animated: Bool = false) {
+    cancelRestoration()
+    selectionPaused = false
+    userScrolling = false
+    atBottom = true
+    captureRequested = true
+    scrollState.followToEnd(animated: animated)
+    scheduleCapture()
+  }
   private func openChild(_ id: String) {
     leavePosition()
     sessions.conversationPath.append(.init(id: id, parent: conversation.id))
@@ -718,6 +756,7 @@ struct ConversationView: View {
     guard screenVisible else { return }
     capturePosition()
     screenVisible = false
+    scrollState.setVisible(false)
   }
   private func cancelRestoration() {
     restorationTask?.cancel()
@@ -763,30 +802,6 @@ struct ConversationView: View {
       conversation.toast.show("Não foi possível guardar a posição de leitura.", kind: .error)
     }
   }
-  private func updateUnread() {
-    stickyHeight = scrollState.usableTop
-    guard
-      let unread = ConversationProjection.unread(
-        conversation.messages, viewed: conversation.viewedBoundary)
-    else {
-      unreadAbove = false
-      return
-    }
-    if let frame = scrollState.frames[unread] {
-      unreadAbove = frame.minY + 28 < scrollState.usableTop
-      return
-    }
-    let frames = scrollState.frames
-    let visible = conversation.messages.firstIndex {
-      guard let frame = frames[$0.id], !scrollState.pinned.contains($0.id) else { return false }
-      return frame.maxY > scrollState.usableTop
-        && frame.minY < (scrollState.view?.bounds.height ?? 0)
-    }
-    unreadAbove =
-      visible.map { index in
-        conversation.messages[..<index].contains { $0.id == unread }
-      } ?? false
-  }
   private func restore(_ position: ReadingPosition?, proxy: ScrollViewProxy, explicit: Bool = false, persist: Bool = true)
   {
     cancelRestoration()
@@ -830,10 +845,13 @@ struct ConversationView: View {
           scrollState.cancelAnchor()
           selectionPaused = false
           atBottom = true
-          proxy.scrollTo("bottom", anchor: .bottom)
-          await Task.yield()
-          guard !Task.isCancelled else { return }
           scrollState.followToEnd()
+          // Publishing restoration early lets List's estimated zero offset page
+          // backwards before the final cell has reached its real layout.
+          while !scrollState.tailSettled {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+          }
+          guard !Task.isCancelled else { return }
           restoring = false
           if position?.target != .followTail {
             let tail = ReadingPosition(.followTail)
@@ -841,24 +859,27 @@ struct ConversationView: View {
             sessions.reading.set(tail, sessionID: conversation.id)
             try? sessions.reading.flush()
           }
-          updateUnread()
+          viewport.stickyHeight = scrollState.usableTop
           return
         case .anchor(let id, let offset):
           await Task.yield()
           guard !Task.isCancelled else { return }
-          proxy.scrollTo(id, anchor: .top)
+          let anchorID = conversation.activity.anchors[id] ?? id
+          if scrollState.frames[anchorID] == nil || scrollState.pinned.contains(anchorID) {
+            proxy.scrollTo(anchorID, anchor: .top)
+          }
           scrollState.anchor = nil
-          scrollState.readingAnchor = (id, offset, position?.viewportTop)
+          scrollState.readingAnchor = (anchorID, offset, position?.viewportTop)
           // Materialize the recycled row, then correct using real TextKit/image geometry.
           // The anchor remains active for late measurements, rotation and Dynamic Type.
           for _ in 0..<12 {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-            if scrollState.frames[id] == nil { proxy.scrollTo(id, anchor: .top) }
+            if scrollState.frames[anchorID] == nil { proxy.scrollTo(anchorID, anchor: .top) }
             scrollState.correctAnchor()
           }
           guard !Task.isCancelled else { return }
           restoring = false
-          updateUnread()
+          viewport.stickyHeight = scrollState.usableTop
           return
         }
       }
@@ -916,18 +937,10 @@ struct ConversationView: View {
 private struct StickyUserHeader: View {
   @Environment(\.appTheme) private var theme
   let message: ConversationMessage
-  let day: String?
   let scrollState: ConversationScrollState
-  let pinnedChanged: (Bool) -> Void
-  @State private var pinned = false
+  let maximumTextHeight: CGFloat
   var body: some View {
-    VStack(spacing: 10) {
-      if let day, !pinned {
-        Text(day).font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary)).padding(6)
-          .background(theme.color(.codeSurface), in: Capsule())
-      }
-      UserBubble(message: message, compact: pinned)
-    }
+    UserBubble(message: message, maximumTextHeight: maximumTextHeight)
     .padding(.vertical, 6).padding(.horizontal, 16)
     .background {
       // Native List headers inset their SwiftUI content. Paint beyond those margins,
@@ -935,10 +948,7 @@ private struct StickyUserHeader: View {
       theme.color(.background).padding(.horizontal, -32)
     }
     .background(
-      PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background)) {
-        pinned = $0
-        pinnedChanged($0)
-      }
+      PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background))
     )
   }
 }
@@ -949,50 +959,24 @@ private struct ConversationMessageView: View {
   let footer: Bool
   let store: ConversationStore
   let dividers: Set<String>
+  let rows: [ConversationActivityRow]
   let openChild: (String) -> Void
-  private struct Chunk: Identifiable {
-    let id: String
-    let parts: [ConversationPart]
-    let text: String?
-  }
-  private var chunks: [Chunk] {
-    var result: [Chunk] = []
-    var activity: [ConversationPart] = []
-    var activityID = ""
-    for (index, part) in (message.content ?? []).enumerated() {
-      if part.suppressed { continue }
-      if part.type == "text" {
-        if !activity.isEmpty {
-          result.append(Chunk(id: "step:\(activityID)", parts: activity, text: nil))
-          activity = []
-        }
-        result.append(Chunk(id: message.partID(at: index)!, parts: [], text: part.text))
-      } else {
-        if activity.isEmpty { activityID = message.partID(at: index)! }
-        activity.append(part)
-      }
-    }
-    if !activity.isEmpty {
-      result.append(Chunk(id: "step:\(activityID)", parts: activity, text: nil))
-    }
-    return result
-  }
   var body: some View {
     VStack(alignment: .leading, spacing: 15) {
       if message.type == "assistant" {
-        ForEach(chunks) { chunk in
-          if let text = chunk.text, !text.isEmpty {
+        ForEach(rows) { row in
+          if row.kind == .text, let entry = row.parts.first {
             VStack(alignment: .leading, spacing: 12) {
-              if dividers.contains(chunk.id) {
+              if dividers.contains(entry.id) {
                 Rectangle().fill(theme.color(.borderStrong)).frame(height: 1)
                   .accessibilityHidden(true)
               }
-              ResponseMarkdown(text: text, messageID: message.id, partID: chunk.id)
+              ResponseMarkdown(text: entry.part.text ?? "", messageID: entry.messageID, partID: entry.id)
             }
-          } else if !chunk.parts.isEmpty {
+          } else if !row.parts.isEmpty {
             ConversationStep(
-              parts: chunk.parts, id: "\(message.id):\(chunk.id)", store: store,
-              openChild: openChild)
+              parts: row.parts.map(\.part), id: row.id, store: store,
+              openChild: openChild, references: row.parts, grouped: row.kind == .group, busy: row.pending)
           }
         }
         if let error = message.error {

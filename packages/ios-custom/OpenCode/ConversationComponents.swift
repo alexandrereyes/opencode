@@ -63,59 +63,63 @@ struct UserBubble: View {
   @Environment(\.appTheme) private var theme
   @Environment(ToastCenter.self) private var toast
   @Environment(\.conversationSearch) private var highlights
+  @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
+  @State private var expanded = false
+  @State private var truncated = false
   let message: ConversationMessage
-  var compact = false
+  let maximumTextHeight: CGFloat
   var body: some View {
     HStack {
       Spacer(minLength: 36)
       VStack(alignment: .trailing, spacing: 8) {
-        if !compact {
-          ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
-            if let object = file.object, object["mime"]?.string?.hasPrefix("image/") == true,
-              let encoded = object["data"]?.string
-            {
-              AttachmentPreview(encoded: encoded, name: object["name"]?.string ?? "Imagem anexada")
-            }
+        if message.masterOrigin != nil {
+          Text("Sessão mestra").font(.caption2).foregroundStyle(theme.color(.textSecondary))
+            .accessibilityIdentifier("master-origin-" + message.id)
+        }
+        ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
+          if let image = FeedImage.attachment(file) {
+            FeedImageView(source: image.source, name: image.name, compact: true)
           }
-          ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
-            _, quote in
-            VStack(alignment: .leading, spacing: 6) {
-              Text("Citação de uma resposta").font(.caption).foregroundStyle(
-                theme.color(.textSecondary))
-              Text(quote.object?["text"]?.string ?? "").font(.subheadline)
-              Text(quote.object?["comment"]?.string ?? "").font(.subheadline).fontWeight(.medium)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 10).overlay(
-              alignment: .leading
-            ) {
-              Rectangle().fill(theme.color(.primary)).frame(width: 2)
-            }
+        }
+        ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
+          _, quote in
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Citação de uma resposta").font(.caption).foregroundStyle(
+              theme.color(.textSecondary))
+            Text(quote.object?["text"]?.string ?? "").font(.subheadline)
+            Text(quote.object?["comment"]?.string ?? "").font(.subheadline).fontWeight(.medium)
+          }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 10).overlay(
+            alignment: .leading
+          ) {
+            Rectangle().fill(theme.color(.primary)).frame(width: 2)
           }
-          ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
-            _, comment in
-            Text(
-              [comment.object?["path"]?.string, comment.object?["comment"]?.string].compactMap {
-                $0
-              }.joined(separator: "\n")
-            ).font(.subheadline)
-          }
-          ForEach(Array((message.metadata?["attachments"]?.array ?? []).enumerated()), id: \.offset)
-          { _, attachment in
-            Label(attachment.object?["name"]?.string ?? "Arquivo anexado", systemImage: "doc")
-              .font(.caption).foregroundStyle(theme.color(.textSecondary))
-          }
+        }
+        ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
+          _, comment in
+          Text(
+            [comment.object?["path"]?.string, comment.object?["comment"]?.string].compactMap {
+              $0
+            }.joined(separator: "\n")
+          ).font(.subheadline)
+        }
+        ForEach(Array((message.metadata?["attachments"]?.array ?? []).enumerated()), id: \.offset)
+        { _, attachment in
+          Label(attachment.object?["name"]?.string ?? "Arquivo anexado", systemImage: "doc")
+            .font(.caption).foregroundStyle(theme.color(.textSecondary))
         }
         if !message.displayText.isEmpty {
-          if compact && !highlights.matches.contains(where: { $0.messageID == message.id }) {
-            CompactPrompt(text: message.displayText, theme: theme)
-          } else {
-            Text(promptText).font(.system(size: 16)).multilineTextAlignment(.leading).lineLimit(compact ? 2 : nil)
+          UserPrompt(
+            text: promptText, theme: theme, collapsed: collapsible && !expanded,
+            maximumHeight: maximumTextHeight, revealRange: searchRange,
+            truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
+          ).accessibilityIdentifier("user-prompt-\(message.id)")
+          if collapsible && (expanded || truncated) {
+            Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
+              setExpanded(!expanded)
+            }.font(.system(size: 14)).foregroundStyle(theme.color(.textSecondary))
+              .buttonStyle(.plain).accessibilityValue(expanded ? "Expandido" : "Recolhido")
+              .accessibilityIdentifier("user-prompt-toggle-\(message.id)")
           }
-        }
-        if compact && message.displayText.isEmpty {
-          Label(
-            message.files?.isEmpty == false ? "Imagem" : "Citação",
-            systemImage: message.files?.isEmpty == false ? "photo" : "quote.opening"
-          ).font(.subheadline)
         }
         Text(ConversationProjection.date(message.time.created, format: "HH:mm"))
           .font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary))
@@ -123,8 +127,27 @@ struct UserBubble: View {
       .foregroundStyle(theme.color(.userBubbleText))
       .padding(.horizontal, 13).padding(.vertical, 10)
       .background(theme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
-      .overlay { UserMessageCopyMenu(message: message, toast: toast) }
+      .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
     }
+    .onChange(of: collapsible) { _, value in if !value { setExpanded(false) } }
+    .onChange(of: highlights.current) { _, current in
+      if highlights.matches.contains(where: { $0.id == current && $0.messageID == message.id }) {
+        setExpanded(true)
+      }
+    }
+  }
+  private func setExpanded(_ value: Bool) {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) { expanded = value }
+  }
+  private var searchRange: NSRange? {
+    guard let match = highlights.matches.first(where: { $0.id == highlights.current && $0.messageID == message.id }) else { return nil }
+    let display = ((message.text ?? "") as NSString).range(of: message.displayText)
+    guard display.location != NSNotFound else { return nil }
+    let range = NSIntersectionRange(display, match.range)
+    guard range.length > 0 else { return nil }
+    return NSRange(location: range.location - display.location, length: range.length)
   }
   private var promptText: AttributedString {
     var text = AttributedString(message.displayText)
@@ -138,8 +161,8 @@ struct UserBubble: View {
           let lower = AttributedString.Index(range.lowerBound, within: text),
           let upper = AttributedString.Index(range.upperBound, within: text)
         {
-          text[lower..<upper].foregroundColor = theme.color(span.token.kind.role)
-          text[lower..<upper].backgroundColor = theme.color(span.token.kind.role).opacity(0.12)
+          text[lower..<upper].uiKit.foregroundColor = theme.uiColor(span.token.kind.role)
+          text[lower..<upper].uiKit.backgroundColor = theme.uiColor(span.token.kind.role).withAlphaComponent(0.12)
         }
       }
     }
@@ -151,7 +174,7 @@ struct UserBubble: View {
           let range = Range(NSRange(location: intersection.location - displayRange.location, length: intersection.length), in: message.displayText),
           let lower = AttributedString.Index(range.lowerBound, within: text),
           let upper = AttributedString.Index(range.upperBound, within: text) else { continue }
-        text[lower..<upper].backgroundColor = theme.color(.primary).opacity(match.id == highlights.current ? 0.3 : 0.1)
+        text[lower..<upper].uiKit.backgroundColor = theme.uiColor(.primary).withAlphaComponent(match.id == highlights.current ? 0.3 : 0.1)
       }
     }
     return text
@@ -164,58 +187,67 @@ struct ConversationStep: View {
   let id: String
   let store: ConversationStore
   let openChild: (String) -> Void
+  var references: [ConversationActivityPart] = []
+  var grouped = true
+  var busy = false
   @State private var outputs: [String: String] = [:]
-  private var expanded: Bool { store.expansionValues[id] ?? (pending || revealed) }
+  private var expanded: Bool { !grouped || (store.expansionValues[id] ?? (pending || revealed)) }
   private func detail(_ key: String) -> Bool {
-    store.expansionValues["\(id):detail:\(key)"] == true
+    store.expansionValues["activity:detail:\(key)"] == true
   }
   private func toggleDetail(_ key: String) {
-    store.expansionValues["\(id):detail:\(key)"] = !detail(key)
+    store.expansionValues["activity:detail:\(key)"] = !detail(key)
     if !detail(key) { outputs.removeValue(forKey: key) }
   }
   private var pending: Bool {
-    parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
+    busy || parts.contains { $0.running || $0.childID.map(store.active.contains) == true }
   }
   private var revealed: Bool { parts.contains { $0.id != nil && $0.id == store.revealedToolID } }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Button {
-        store.expansionValues[id] = !expanded
-      } label: {
-        HStack(spacing: 6) {
-          Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13)).lineLimit(1)
-          Image(systemName: expanded ? "chevron.down" : "chevron.right")
-            .font(
-              .system(size: 10))
-        }.foregroundStyle(theme.color(.textSecondary)).frame(
-          maxWidth: .infinity, alignment: .leading)
-      }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
+      if grouped {
+        Button {
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) { store.expansionValues[id] = !expanded }
+        } label: {
+          HStack(spacing: 6) {
+            if pending { ProgressView().controlSize(.mini) }
+            Text(ConversationProjection.stepLabel(parts)).font(.system(size: 13))
+            Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.system(size: 10))
+          }.foregroundStyle(theme.color(.textSecondary)).frame(
+            maxWidth: .infinity, alignment: .leading)
+        }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
+        .accessibilityValue(expanded ? "Expandido" : "Recolhido")
+        .accessibilityIdentifier("tool-group-\(id)")
+      }
       if expanded {
-        ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+        ForEach(entries) { entry in
+          let part = entry.part
           if part.type == "reasoning" {
-            let key = "reasoning:\(index)"
+            let key = entry.id
             Button {
               toggleDetail(key)
             } label: {
               HStack(spacing: 12) {
                 Image(systemName: "sparkles")
-                Text(
-                  "Pensou\(part.time?.completed.map { " \(ConversationProjection.duration($0 - (part.time?.created ?? $0)))" } ?? "")"
-                )
+                Text(entry.reasoningLabel)
                 Spacer()
                 Image(systemName: detail(key) ? "chevron.down" : "chevron.right").font(
                   .system(size: 10))
               }
             }.buttonStyle(.plain).font(.system(size: 14)).foregroundStyle(
               theme.color(.textSecondary))
+              .accessibilityLabel(entry.reasoningLabel)
+              .accessibilityIdentifier("reasoning-\(entry.id)")
             if detail(key) {
-              Text(part.text ?? "").font(.footnote).textSelection(.enabled)
+              ResponseMarkdown(text: part.text ?? "", messageID: entry.messageID, partID: entry.id)
             }
           } else if part.type == "tool", !part.suppressed {
-            if part.name == "subagent" {
+            if part.name == "subagent" || part.name == "task" {
               subagent(part)
             } else {
-              tool(part, key: part.id ?? "\(index)")
+              tool(part, key: entry.id)
             }
           } else if part.type != "tool" {
             Text("Conteúdo da sessão · \(part.type.description)").font(.footnote).foregroundStyle(
@@ -223,6 +255,12 @@ struct ConversationStep: View {
           }
         }
       }
+    }.onAppear {
+      // Remember the initial choice, including automatic expansion of running work.
+      // Finishing a tool must not collapse a group the person is reading.
+      if grouped && (pending || revealed) && store.expansionValues[id] == nil { store.expansionValues[id] = true }
+    }.onChange(of: pending) { _, running in
+      if grouped && running && store.expansionValues[id] == nil { store.expansionValues[id] = true }
     }.onChange(of: store.revealedToolID, initial: true) { _, id in
       guard let id else { return }
       if parts.contains(where: { $0.id == id }) {
@@ -232,6 +270,12 @@ struct ConversationStep: View {
     }
     .onChange(of: expanded) { _, open in if !open { outputs.removeAll() } }
     .onDisappear { outputs.removeAll() }
+  }
+  private var entries: [ConversationActivityPart] {
+    if !references.isEmpty { return references }
+    return parts.enumerated().map { index, part in
+      ConversationActivityPart(id: part.id ?? "\(id):\(index)", messageID: id, part: part)
+    }
   }
   private func subagent(_ part: ConversationPart) -> some View {
     let id = part.input["agent"]?.string ?? "subagent"
@@ -301,6 +345,8 @@ struct ConversationStep: View {
       if detail(key) {
         VStack(alignment: .leading, spacing: 8) {
           if let error = part.errorText { Text(error).foregroundStyle(theme.color(.error)) }
+          ToolOutputImages(part: part, messageID: references.first { $0.part.id == part.id }?.messageID
+            ?? store.messages.first { $0.content?.contains { $0.id == part.id } == true }?.id)
           if !part.diffs.isEmpty {
             ForEach(Array(part.diffs.enumerated()), id: \.offset) { _, file in
               Text(file["file"]?.string ?? "").fontWeight(.medium)

@@ -48,13 +48,20 @@ public enum ConversationSearch {
   }
   public static func renderedRanges(_ range: NSRange, block: MarkdownBlock) -> [NSRange] {
     var result: [NSRange] = []
-    for (index, offset) in block.runs.flatMap(\.offsets).enumerated() {
-      guard let offset, NSLocationInRange(offset, range) else { continue }
-      if let last = result.last, NSMaxRange(last) == index {
-        result[result.count - 1].length += 1
-      } else {
-        result.append(NSRange(location: index, length: 1))
+    var cursor = 0
+    for run in block.runs {
+      for (local, offset) in run.offsets.enumerated() {
+        guard let offset else { continue }
+        let length = run.sourceEnd.map { max(1, $0 - offset) } ?? 1
+        guard NSIntersectionRange(range, NSRange(location: offset, length: length)).length > 0 else { continue }
+        let index = cursor + local
+        if let last = result.last, NSMaxRange(last) == index {
+          result[result.count - 1].length += 1
+        } else {
+          result.append(NSRange(location: index, length: 1))
+        }
       }
+      cursor += run.text.utf16.count
     }
     return result
   }

@@ -288,8 +288,9 @@ describe("worktrees", () => {
         deleteRemoteBranch: true,
       }),
     )
-    expect(result.localBranch).toMatchObject({ name: "feature", deleted: false })
-    expect(result.localBranch?.error).toContain("not fully merged")
+    // Git diagnostics are localized; check the failure and preserved commit instead of its wording.
+    expect(result.localBranch).toMatchObject({ name: "feature", deleted: false, error: expect.stringMatching(/\S/) })
+    expect((await $`git log -1 --format=%s refs/heads/feature`.cwd(fixture.root).text()).trim()).toBe("feature")
     expect(result.remoteBranch).toMatchObject({ name: "feature", remote: "origin", deleted: false })
     expect(await Bun.file(fixture.linked).exists()).toBe(false)
   })
@@ -308,8 +309,8 @@ describe("worktrees", () => {
         deleteLocalBranch: true,
       }),
     )
-    expect(result.localBranch).toMatchObject({ name: "feature", deleted: false })
-    expect(result.localBranch?.error).toContain("used by worktree")
+    expect(result.localBranch).toMatchObject({ name: "feature", deleted: false, error: expect.stringMatching(/\S/) })
+    expect((await $`git rev-parse --abbrev-ref HEAD`.cwd(sibling).text()).trim()).toBe("feature")
     expect((await fs.stat(sibling)).isDirectory()).toBe(true)
   })
 })

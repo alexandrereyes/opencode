@@ -18,6 +18,31 @@ final class SessionStore {
   private(set) var loading = false
   private(set) var connected = false
   private(set) var serverVersion: String?
+  private(set) var masterAvailability = MasterAvailability.loading
+  var masterID: String? {
+    guard let id = preferences?.data.masterSessions?["local"],
+      !archived.contains(where: { $0.id == id }) else { return nil }
+    return id
+  }
+  func loadMaster() async {
+    do {
+      let info = try await client.masterInfo()
+      try Task.checkCancellation()
+      masterAvailability = info.version == 1 ? .available : .unsupported
+    } catch { if !Task.isCancelled { masterAvailability = .classify(error) } }
+  }
+  func adoptMaster(_ preferences: Preferences) { self.preferences = preferences }
+  func resetMaster() async {
+    guard let id = masterID, busy.insert("master-reset").inserted else { return }
+    defer { busy.remove("master-reset") }
+    do {
+      try await client.archive(id)
+      preferences = try await client.mutate(.masterClear)
+      toast.show("Sessão mestra arquivada")
+      Haptics.play(.light)
+    } catch { toast.show("Não foi possível reiniciar a Sessão mestra.", kind: .error) }
+    await reload()
+  }
   private(set) var busy: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
@@ -28,11 +53,18 @@ final class SessionStore {
     var parent: String? = nil
     var tool: String? = nil
     var newSession = false
+    var master = false
   }
-  var conversationPath: [ConversationRoute] = []
+  var conversationPath: [ConversationRoute] = [] {
+    didSet {
+      #if DEBUG
+      if let id = conversationPath.last?.id, id != oldValue.last?.id { ConversationOpeningMetrics.begin(id) }
+      #endif
+    }
+  }
   var selectedTab = 3
   var conversationOpen: Bool { !conversationPath.isEmpty }
-  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? conversationPath.last?.id : nil }
+  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
   let catalog: ModelCatalogCache
@@ -58,7 +90,12 @@ final class SessionStore {
 
   init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true) {
     self.acceptsLaunchSession = acceptsLaunchSession
+    #if DEBUG
+    let client = ScrollFixtures.mode == nil
+      ? OpenCodeClient(configuration: configuration) : .scrollFixture(configuration: configuration)
+    #else
     let client = OpenCodeClient(configuration: configuration)
+    #endif
     self.client = client
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
@@ -67,6 +104,23 @@ final class SessionStore {
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
+    #if DEBUG
+    if ScrollFixtures.mode != nil {
+      let fixture = ScrollFixtures.snapshot
+      entries = fixture.entries
+      projects = fixture.projects
+      preferences = fixture.preferences
+      active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
+      previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
+        var preview = SessionPreview()
+        preview.text = "Resultado sintético com ferramentas, Markdown e código de exemplo."
+        preview.activity = "lendo arquivo de exemplo"
+        return (entry.session.id, preview)
+      })
+      order.snapshot(entries, active: active)
+      return
+    }
+    #endif
     pruning = Task {
       await DraftPersistence.pruneMissingSessions(
         server: configuration.url.absoluteString, client: client)
@@ -75,13 +129,19 @@ final class SessionStore {
 
   var rows: [SessionRow] {
     SessionList.rows(
-      entries: entries, projects: projects, active: active,
+      entries: entries.filter { $0.session.id != masterID }, projects: projects, active: active,
       pins: preferences?.data.pinnedSessions ?? [], muted: preferences?.data.mutedSessions ?? [],
       autoApprove: preferences?.data.settings.autoApprove ?? false, ranks: order.ranks,
       chatRoot: chatRoot)
   }
   var filtered: [SessionRow] {
-    rows.filter {
+    #if DEBUG
+    if client.configuration.url.host == "127.0.0.1", ConversationOpeningMetrics.enabled,
+      let id = ProcessInfo.processInfo.environment["OPENCODE_OPENING_SESSION"] {
+      return rows.filter { $0.id == id }
+    }
+    #endif
+    return rows.filter {
       filter.includes($0) && (selectedProject == nil || $0.project?.id == selectedProject)
     }
   }
@@ -109,6 +169,20 @@ final class SessionStore {
   }
 
   func run() async {
+    #if DEBUG
+    if ScrollFixtures.mode != nil {
+      guard ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureUpdates") else { return }
+      var tick = 0
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+        let id = entries[(tick % 3) * 17].session.id
+        previews[id]?.text = "Resultado sintético atualizado · \(tick)"
+        previews[id]?.activity = "lendo arquivo de exemplo · \(tick)"
+        tick += 1
+      }
+      return
+    }
+    #endif
     if let runningTask { await runningTask.value }
     guard !Task.isCancelled else { return }
     let id = UUID()
@@ -159,9 +233,10 @@ final class SessionStore {
         connected = false
         alerts.disconnect()
       case .update(let event):
-        await alerts.receive(event, store: self)
         let type = event.type
         let id = event.data.owner
+        // The current master is an accessory-only destination, not a global alert shortcut.
+        if masterID == nil || id != masterID { await alerts.receive(event, store: self) }
         if type.hasPrefix("session.") || type.hasPrefix("permission.")
           || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
           || type.hasPrefix("worktree.")
@@ -208,16 +283,18 @@ final class SessionStore {
       async let requests = client.permissions()
       async let archives = client.archivedSessions()
       async let chats = try? client.chatRoot()
+      async let master: Void = loadMaster()
       let snapshot = try await (navigation, prefs, inventory, running, requests, archives)
       try Task.checkCancellation()
       entries = snapshot.0
-      preferences = snapshot.1
+      if snapshot.1.revision >= (preferences?.revision ?? -1) { preferences = snapshot.1 }
       projects = snapshot.2
       active = Set(snapshot.3.filter { $0.value.isRunning }.map(\.key))
       permissions = snapshot.4
       archived = snapshot.5.sorted { ($0.time.archived ?? 0) > ($1.time.archived ?? 0) }
       order.snapshot(entries, active: active)
       chatRoot = await chats
+      await master
       error = nil
       let pendingDirectories = Set(
         entries.filter { $0.questionAt != nil }.map { $0.session.location.directory })
@@ -272,6 +349,9 @@ final class SessionStore {
   }
 
   func show(_ session: Session) {
+    #if DEBUG
+    if ScrollFixtures.mode != nil { return }
+    #endif
     visible.insert(session.id)
     enqueuePreview(session.id)
   }

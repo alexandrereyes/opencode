@@ -175,7 +175,9 @@ export type SessionDomain = Pick<
   | "move"
   | "wait"
   | "context"
+  | "active"
 > & {
+  readonly form: Pick<SessionApi<unknown>["form"], "reply">
   readonly hook: ModelHooks<SessionHooks>
   readonly familyBoundaries: (
     input: SessionFamily.BoundariesInput,

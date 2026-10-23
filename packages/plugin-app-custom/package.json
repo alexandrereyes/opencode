@@ -27,6 +27,7 @@
     "./navigation/rpc": "./src/navigation/rpc.ts",
     "./archive/rpc": "./src/archive/rpc.ts",
     "./preferences/rpc": "./src/preferences/rpc.ts",
+    "./master/rpc": "./src/master/rpc.ts",
     "./chats/rpc": "./src/chats/rpc.ts",
     "./session-family/rpc": "./src/session-family/rpc.ts",
     "./transcript/rpc": "./src/transcript/rpc.ts"

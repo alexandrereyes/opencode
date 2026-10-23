@@ -7,7 +7,11 @@ import SwiftUI
 struct OpenCodeApp: App {
   var body: some Scene {
     WindowGroup {
+      #if DEBUG
+      if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
+      #else
       AppRoot()
+      #endif
     }
   }
 }
@@ -94,20 +98,28 @@ private struct AppTabs: View {
       }
     }
     .tabViewBottomAccessory(isEnabled: !store.conversationOpen) {
-      HStack(spacing: 8) {
-        Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(
-          theme.color(.accent))
-        Text("Sessão mestra").fontWeight(.medium)
-        Spacer(minLength: 4)
-        Text(store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
-          .foregroundStyle(theme.color(.textSecondary))
-        Image(systemName: "arrow.right").foregroundStyle(theme.color(.icon))
-      }
-      .font(.system(size: 13))
-      .foregroundStyle(theme.color(.textStrong))
-      .padding(.horizontal, 18)
-      .accessibilityElement(children: .combine)
-      .accessibilityHint("Em construção")
+      Button {
+        store.selectedTab = 3
+        store.conversationPath.append(.init(id: "master", master: true))
+      } label: {
+        HStack(spacing: 8) {
+          Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(
+            theme.color(.accent))
+          Text("Sessão mestra").fontWeight(.medium)
+          Spacer(minLength: 4)
+          Text(store.masterAvailability == .available
+            ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+            : store.masterAvailability.label)
+            .foregroundStyle(theme.color(.textSecondary))
+          Image(systemName: "arrow.right").foregroundStyle(theme.color(.icon))
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(theme.color(.textStrong))
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+      }.buttonStyle(.plain).accessibilityIdentifier("master-accessory")
     }
     .background(theme.color(.background))
     .sessionAlertOverlay(modal: false)

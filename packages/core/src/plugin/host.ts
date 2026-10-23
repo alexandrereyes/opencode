@@ -475,16 +475,16 @@ export const make = Effect.fn("PluginHost.make")(function* (
                 : Effect.fail(new Error(`Permission request not found: ${input.requestID}`)),
             ),
           ),
-      reply: (input) =>
-        permission
-          .get(input.requestID)
-          .pipe(
-            Effect.flatMap((request) =>
-              request?.sessionID === input.sessionID
-                ? permission.reply({ requestID: input.requestID, reply: input.decision, message: input.message })
-                : Effect.fail(new Error(`Permission request not found: ${input.requestID}`)),
-            ),
-          ),
+      reply: Effect.fn("PluginHost.permissionReply")(function* (input) {
+        const session = yield* sessions.get(input.sessionID)
+        return yield* Effect.gen(function* () {
+          const permission = yield* Permission.Service
+          const request = yield* permission.get(input.requestID)
+          if (request?.sessionID !== input.sessionID)
+            return yield* Effect.fail(new Error(`Permission request not found: ${input.requestID}`))
+          yield* permission.reply({ requestID: input.requestID, reply: input.decision, message: input.message })
+        }).pipe(Effect.provide(locations.get(session.location)))
+      }),
       // Plain rejections stay defects, as for built-in tools, so they end the step.
       assert: (input) =>
         permission.assert(input).pipe(
@@ -664,6 +664,22 @@ export const make = Effect.fn("PluginHost.make")(function* (
           .pipe(Effect.map((interrupted) => ({ interrupted }))),
       wait: (input) => sessions.wait(input.sessionID),
       context: (input) => sessions.context(input.sessionID),
+      active: () =>
+        sessions.active.pipe(
+          Effect.map((ids) => Object.fromEntries([...ids].map((id) => [id, { type: "running" as const }]))),
+        ),
+      form: {
+        reply: Effect.fn("PluginHost.formReply")(function* (input) {
+          const session = yield* sessions.get(Session.ID.make(input.sessionID))
+          return yield* Effect.gen(function* () {
+            const forms = yield* Form.Service
+            const form = yield* forms.get(input.formID)
+            if (form.sessionID !== input.sessionID)
+              return yield* Effect.fail(new Form.NotFoundError({ id: input.formID }))
+            yield* forms.reply({ id: input.formID, answer: input.answer })
+          }).pipe(Effect.provide(locations.get(session.location)))
+        }),
+      },
       familyBoundaries: Effect.fn(function* (input) {
         yield* sessions.get(input.sessionID)
         return yield* family.boundaries(input)

@@ -22,5 +22,8 @@
         <key>opencode2-mac.alexandrem.com.br</key><dict>
             <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
         </dict>
+        <key>seaweedfs-svc</key><dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+        </dict>
     </dict></dict>
 </dict></plist>

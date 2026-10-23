@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { Schema } from "effect"
 import { applyIntent, importProfile } from "../src/preferences"
 import { Preferences } from "../src/preferences/rpc"
+import { Session } from "@opencode/schema/session"
 
 const profile: Preferences.Profile = {
   version: 1,
@@ -28,6 +29,22 @@ test("preferences contract is versioned and typed", () => {
   )
   expect(Preferences.Definition.id).toBe("custom.preferences")
   expect(Object.keys(Preferences.Definition.methods)).toEqual(["get", "import", "mutate"])
+})
+
+test("master intents are per server, backward compatible and preserve project preferences", () => {
+  expect(() =>
+    Schema.decodeUnknownSync(Preferences.Intent)({ type: "master.set", server: "local", sessionID: "invalid" }),
+  ).toThrow()
+  expect(
+    Schema.decodeUnknownSync(Preferences.Profile)(Schema.encodeSync(Preferences.Profile)(profile)).data.masterSessions,
+  ).toBeUndefined()
+  const first = applyIntent(profile, { type: "master.set", server: "local", sessionID: Session.ID.make("ses_master") })
+  const second = applyIntent(first, { type: "master.set", server: "remote", sessionID: Session.ID.make("ses_remote") })
+  const cleared = applyIntent(second, { type: "master.clear", server: "local" })
+  expect(first.data.masterSessions).toEqual({ local: Session.ID.make("ses_master") })
+  expect(cleared.data.masterSessions).toEqual({ remote: Session.ID.make("ses_remote") })
+  expect(cleared.data.projects).toEqual(profile.data.projects)
+  expect(profile.data.masterSessions).toBeUndefined()
 })
 
 test("project intents preserve close history and unknown references", () => {

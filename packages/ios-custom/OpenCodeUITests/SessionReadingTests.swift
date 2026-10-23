@@ -6,10 +6,11 @@ import XCTest
   private func launch(_ role: String) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+      "-OpenCodeServerURL", environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    if environment["OPENCODE_TEST_MENU_DIAGNOSTICS"] == "1" { app.launchArguments.append("-OpenCodeMenuDiagnostics") }
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
@@ -84,7 +85,7 @@ import XCTest
   }
   func testSearchLoadedAndOlderPages() throws {
     var app = try launch("C")
-    if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+    if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
     app.buttons["Voltar"].tap()
     app.terminate()
     app = try launch("C")

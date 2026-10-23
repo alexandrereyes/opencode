@@ -45,7 +45,8 @@ extension ConversationProjection {
       for (ordinal, part) in (message.content ?? []).enumerated() {
         // Removed V1 tools are not projected activity, including their failures.
         if part.suppressed { continue }
-        if part.type == "text", part.text?.isEmpty != false { continue }
+        if part.type == .text || part.type == .reasoning,
+          part.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false { continue }
         guard part.type == "text", eligible, let id = message.partID(at: ordinal) else {
           delimiter()
           continue

@@ -2,6 +2,7 @@ export * as Preferences from "./rpc.js"
 
 import { Rpc } from "@opencode/plugin/rpc"
 import { optional } from "@opencode/schema/schema"
+import { Session } from "@opencode/schema/session"
 import { Schema } from "effect"
 
 const Project = Schema.Struct({ worktree: Schema.String, expanded: Schema.Boolean })
@@ -35,6 +36,7 @@ export const Data = Schema.Struct({
   sidebarOrder: Schema.Array(Schema.String),
   pinnedSessions: Schema.Array(Schema.String),
   mutedSessions: optional(Schema.Array(Schema.String)),
+  masterSessions: optional(Schema.Record(Schema.String, Session.ID)),
   models: Schema.Struct({
     user: Schema.Array(Model),
     variant: Schema.Record(Schema.String, Schema.mutableKey(Schema.String)),
@@ -56,6 +58,8 @@ export type Profile = typeof Profile.Type
 
 const ProjectTarget = { server: Schema.String, directory: Schema.String }
 export const Intent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("master.set"), server: Schema.String, sessionID: Session.ID }),
+  Schema.Struct({ type: Schema.Literal("master.clear"), server: Schema.String }),
   Schema.Struct({ type: Schema.Literal("project.open"), ...ProjectTarget }),
   Schema.Struct({ type: Schema.Literal("project.close"), ...ProjectTarget }),
   Schema.Struct({ type: Schema.Literal("project.remove"), ...ProjectTarget }),

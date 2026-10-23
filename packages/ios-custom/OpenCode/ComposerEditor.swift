@@ -50,7 +50,7 @@ struct ComposerEditor: View {
               return
             }
             models = item.token.id == "model"
-             agents = item.token.id == "agent" && !store.isChild
+             agents = item.token.id == "agent" && !store.isChild && !store.masterMode
             return
           }
           draft.insert(item.token, replacing: trigger.range)
@@ -211,7 +211,7 @@ struct ComposerEditor: View {
         Text(store.modelLabel(store.selectedModel(draft))).font(.system(size: 12)).lineLimit(1)
       }.accessibilityLabel("Modelo e esforço").accessibilityIdentifier("model-picker")
       Spacer(minLength: 2)
-      if store.isChild {
+      if store.isChild || store.masterMode {
         Text(store.childAgentName).font(.system(size: 12)).lineLimit(1)
           .accessibilityLabel("Agente: \(store.childAgentName)")
           .accessibilityIdentifier("child-agent")

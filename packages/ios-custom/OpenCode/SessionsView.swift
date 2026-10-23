@@ -80,6 +80,7 @@ struct SessionsView: View {
               directory: store.directoryLabel(row.session))
           }
           .buttonStyle(.plain)
+          .accessibilityIdentifier("session-row-" + row.id)
           .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 18))
           .listRowSeparatorTint(theme.color(.border))
           .listRowBackground(theme.color(.background))
@@ -191,7 +192,9 @@ struct SessionsView: View {
         }
       }
       .navigationDestination(for: SessionStore.ConversationRoute.self) { route in
-        if route.newSession {
+        if route.master {
+          MasterSessionView(sessions: store)
+        } else if route.newSession {
           NewSessionView(sessions: store)
             .id(route.id)
         } else {

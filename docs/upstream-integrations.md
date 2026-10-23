@@ -4,6 +4,10 @@ Each upstream revision integrated into `custom`, newest first: its baselines,
 integration points, and validation. Upstream overrides and their reconciliation
 live in `docs/upstream-overrides.md`.
 
+Feature-specific custom integration points added after the last upstream merge are documented separately:
+[Sessão mestra](custom-master-session.md) records the reusable Session active/form-reply plugin surfaces, target-Location
+permission routing, fixed-baseline overlap and parity tests.
+
 ## Upstream source branch
 
 Integrate from `upstream/dev`. Since 2.0.27 (2026-10-12), upstream publishes the

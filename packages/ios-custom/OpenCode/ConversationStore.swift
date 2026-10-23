@@ -6,6 +6,7 @@ import OpenCodeKit
   let id: String
   private(set) var session: Session?
   private(set) var messages: [ConversationMessage] = []
+  var activity = ConversationActivity.empty
   private(set) var models: [ModelInfo] = []
   private(set) var defaultModel: ModelInfo?
   private(set) var agents: [AgentInfo] = []
@@ -21,9 +22,12 @@ import OpenCodeKit
   private(set) var loading = false
   private(set) var paging = false
   private(set) var hasOlder = true
-  private(set) var viewedBoundary: Double?
+  private(set) var submitted = 0
   private(set) var ready = false
-  private(set) var revision = 0
+  private(set) var hasTranscript = false
+  private(set) var revision = 0 {
+    didSet { updateActivity() }
+  }
   private(set) var inbox: [InboxItem] = []
   private(set) var preferences: Preferences?
   private(set) var acting: Set<String> = []
@@ -46,9 +50,7 @@ import OpenCodeKit
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
   @ObservationIgnored private var batchTask: Task<Void, Never>?
   @ObservationIgnored private var pending: [ConversationEvent] = []
-  @ObservationIgnored private var acknowledged: Double?
-  @ObservationIgnored private var visible = false
-  @ObservationIgnored private var acknowledging = false
+  @ObservationIgnored private var requestedView: Double?
   @ObservationIgnored private var replaceHistory = false
   @ObservationIgnored private var snapshotSequence = 0
   @ObservationIgnored private var composerCatalog: ComposerSources?
@@ -58,6 +60,7 @@ import OpenCodeKit
   private var recentModels: [ModelReference] = []
   @ObservationIgnored var newSessionSubmit: ((ConversationDraft) async -> Void)?
   var isNewSession: Bool { newSessionSubmit != nil }
+  var masterMode = false
 
   func loadNewSession(directory: String, projectID: String, recent: [ModelReference]) async throws {
     ready = false
@@ -128,6 +131,7 @@ import OpenCodeKit
   var displayModels: [ModelInfo] { ModelCatalog.merging(models, fallback: catalog?.models ?? []) }
   var isChild: Bool { session?.parentID != nil }
   func selectedAgent(_ draft: ConversationDraft) -> String {
+    if masterMode { return "mestra" }
     if isChild { return session?.agent ?? "" }
     if isNewSession {
       return NewSessionProjection.agent(explicit: draft.agent,
@@ -136,7 +140,8 @@ import OpenCodeKit
     return draft.agent ?? session?.agent ?? "build"
   }
   var childAgentName: String {
-    agents.first { $0.id == session?.agent }?.name ?? session?.agent ?? "Subagente"
+    if masterMode { return "Mestra" }
+    return agents.first { $0.id == session?.agent }?.name ?? session?.agent ?? "Subagente"
   }
   var context: Double? { ConversationProjection.context(messages, models: displayModels) }
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
@@ -167,6 +172,7 @@ import OpenCodeKit
     ].compactMap { $0 }.joined(separator: " · ")
   }
   func selectedModel(_ draft: ConversationDraft) -> ModelReference? {
+    if masterMode, isNewSession { return draft.model }
     if isNewSession {
       let agent = agents.first { $0.id == selectedAgent(draft) }
       var configuredAgent = agent?.model
@@ -187,7 +193,7 @@ import OpenCodeKit
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
     if let newSessionSubmit { await newSessionSubmit(draft); return }
-    guard notice == nil else { return }
+    guard ready, notice == nil else { return }
     if let question = SideQuestionRequest.slashQuestion(draft.document) {
       sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
       draft.text = NSAttributedString()
@@ -243,8 +249,10 @@ import OpenCodeKit
       guard let submission = draft.submission else { return }
       switch ComposerDispatch.resolve(draft.document) {
       case .prompt:
+        submitted += 1
         try await submission.send(using: client)
       case .command(let name, _):
+        submitted += 1
         // Command callbacks have no idempotency key. Never automatically retry them.
         if delivery == .steer {
           if !isChild { try await client.selectAgent(agent, sessionID: id) }
@@ -368,6 +376,7 @@ import OpenCodeKit
   }
   func reply(_ form: PendingForm, answer: QuestionReply) async {
     await act(form.id, success: "Resposta enviada", feedback: .success) {
+      submitted += 1
       try await client.reply(form, answer: answer)
     }
   }
@@ -397,7 +406,46 @@ import OpenCodeKit
       separator: "\n\n")
   }
   func run() async {
-    visible = true
+    #if DEBUG
+    if ScrollFixtures.mode != nil {
+      let fixture = ScrollFixtures.snapshot
+      session = fixture.entries.first?.session
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureChild") {
+        var value = try! JSONDecoder().decode([String: JSONValue].self,
+          from: JSONEncoder().encode(fixture.entries[0].session))
+        value["parentID"] = .string("ses_fixture_parent")
+        session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
+      }
+      messages = fixture.messages
+      models = fixture.models
+      branch = "exemplo-sintetico"
+      hasOlder = false
+      hasTranscript = true
+      ready = true
+      revision += 1
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMenuUpdates") {
+        let source = messages
+        let updating = source.last { $0.type == "assistant" && !$0.responseText.isEmpty }?.id
+        var tick = 0
+        while !Task.isCancelled {
+          do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+          branch = "fixture-menu-\(tick)"
+          if !ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMenuHeaderOnly") {
+            messages = source.map { message in
+              guard message.id == updating,
+                let part = message.content?.lastIndex(where: { $0.type == "text" }) else { return message }
+              var updated = message
+              updated.content?[part].text = (message.content?[part].text ?? "") + "\n\nEstado sintético \(tick)."
+              return updated
+            }
+            revision += 1
+          }
+          tick += 1
+        }
+      }
+      return
+    }
+    #endif
     let events = hub.events()
     await refresh()
     for await frame in events {
@@ -426,12 +474,27 @@ import OpenCodeKit
         }
       }
     }
-    visible = false
     refreshTask?.cancel()
     refreshTask = nil
     batchTask?.cancel()
     batchTask = nil
   }
+  #if DEBUG
+  func growScrollFixture(_ iteration: Int) {
+    guard ScrollFixtures.mode == "conversation" else { return }
+    let rows = messages.filter { $0.type == "assistant" }.suffix(3).map(\.id)
+    guard !rows.isEmpty else { return }
+    let id = rows[min(iteration, rows.count - 1)]
+    messages = messages.map { message in
+      guard message.id == id, let part = message.content?.lastIndex(where: { $0.type == "text" }) else { return message }
+      var updated = message
+      updated.content?[part].text = (message.content?[part].text ?? "")
+        + "\n\n- [ ] Verificação \(iteration): altura variável durante o acompanhamento do fim."
+      return updated
+    }
+    revision += 1
+  }
+  #endif
   private func scheduleBatch() {
     guard batchTask == nil else { return }
     batchTask = Task {
@@ -458,12 +521,15 @@ import OpenCodeKit
     }
   }
   func refresh() async {
+    #if DEBUG
+    ConversationOpeningMetrics.mark("refresh", id: id)
+    #endif
     guard !refreshing else {
       dirty = true
       return
     }
     refreshing = true
-    loading = !ready
+    loading = !hasTranscript
     pending.removeAll()
     batchTask?.cancel()
     batchTask = nil
@@ -472,20 +538,27 @@ import OpenCodeKit
       loading = false
       snapshotSequence = hub.sequence
     }
-    var history: (Session, [ConversationMessage])?
     do {
-      _ = try await client.info()
+      async let health = client.info()
       async let info = client.session(id)
       async let page = client.conversation(id)
       async let running = client.active()
       async let queued = client.inbox(id)
       async let settings = client.preferences()
-      let (infoValue, pageValue, runningValue, queueValue, preferencesValue) = try await (
-        info, page, running, queued, settings
-      )
+      _ = try await health
+      #if DEBUG
+      ConversationOpeningMetrics.mark("health", id: id)
+      #endif
+      let infoValue = try await info
       try Task.checkCancellation()
-      if !ready {
-        viewedBoundary = infoValue.time.viewed
+      session = infoValue
+      if let renaming { session?.title = renaming.title }
+      let (pageValue, runningValue) = try await (page, running)
+      try Task.checkCancellation()
+      if !hasTranscript {
+        #if DEBUG
+        ConversationOpeningMetrics.mark("tail", id: id)
+        #endif
         cursor = pageValue.cursor?.next
         hasOlder = !pageValue.data.isEmpty && cursor != nil
       }
@@ -511,14 +584,18 @@ import OpenCodeKit
         replaceHistory = false
       }
       let directory = infoValue.location.directory
-      history = (infoValue, nextMessages)
+      active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
+      messages = nextMessages
+      hasTranscript = true
+      loading = false
+      revision += 1
+      error = nil
+      #if DEBUG
+      ConversationOpeningMetrics.mark("published", id: id)
+      #endif
+      // First content does not depend on Location boot, catalogs or family.
+      // Restoration and sending still wait for the stable runtime projection.
       if (try? await client.directoryAvailable(directory)) == false {
-        // Only the missing-Location path publishes history without runtime catalogs.
-        // Normal publication must stay atomic: restoration can prepend older pages
-        // as soon as ready changes, which a second initial snapshot would discard.
-        session = infoValue
-        if let renaming { session?.title = renaming.title }
-        messages = nextMessages
         ready = true
         revision += 1
         notice = .missingDirectory(directory)
@@ -526,11 +603,14 @@ import OpenCodeKit
         return
       }
       notice = nil
-      let nextModels = models.isEmpty ? try await client.models(directory: directory) : models
-      let nextDefault = defaultModel == nil ? try await client.defaultModel(directory: directory) : defaultModel
-      let nextAgents = agents.isEmpty ? try await client.agents(directory: directory) : agents
-      let nextProviders =
-        providers.isEmpty ? try await client.providers(directory: directory) : providers
+      #if DEBUG
+      ConversationOpeningMetrics.mark("directory", id: id)
+      #endif
+      async let nextModels = models.isEmpty ? client.models(directory: directory) : models
+      async let nextDefault = defaultModel == nil ? client.defaultModel(directory: directory) : defaultModel
+      async let nextAgents = agents.isEmpty ? client.agents(directory: directory) : agents
+      async let nextProviders =
+        providers.isEmpty ? client.providers(directory: directory) : providers
       async let familyValue = client.family(id)
       async let shellValue = client.shells(directory: directory)
       async let located = client.locate([directory])
@@ -547,17 +627,20 @@ import OpenCodeKit
         if let parent = infoValue.parentID {
           try await client.conversation(parent).data.reversed().map { $0 }
         } else { [ConversationMessage]() }
-      // Publish the transcript and runtime work snapshot together: the first visible
-      // subagent duration/count must use the same authoritative inputs as refreshes.
-      session = infoValue
-      if let renaming { session?.title = renaming.title }
-      messages = nextMessages
-      active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
-      models = nextModels
-      catalog?.remember(nextModels)
-      defaultModel = nextDefault
-      agents = nextAgents
-      providers = nextProviders
+      let (queueValue, preferencesValue) = try await (queued, settings)
+      let catalogs = try await (nextModels, nextDefault, nextAgents, nextProviders)
+      try Task.checkCancellation()
+      #if DEBUG
+      ConversationOpeningMetrics.mark("catalogs", id: id)
+      ConversationOpeningMetrics.mark("runtime", id: id)
+      #endif
+      // Never republish the earlier tail here: search/reading may have prepended
+      // older pages while these independent runtime reads were in flight.
+      models = catalogs.0
+      catalog?.remember(models)
+      defaultModel = catalogs.1
+      agents = catalogs.2
+      providers = catalogs.3
       family = snapshots.0
       children = members
       shells = snapshots.1
@@ -573,10 +656,8 @@ import OpenCodeKit
       error = nil
     } catch {
       if !Task.isCancelled {
-        if let notice = ConversationNotice.classify(error, directory: history?.0.location.directory ?? session?.location.directory) {
-          if case .missingDirectory = notice, let history {
-            session = history.0
-            messages = history.1
+        if let notice = ConversationNotice.classify(error, directory: session?.location.directory) {
+          if case .missingDirectory = notice, hasTranscript {
             ready = true
             revision += 1
           }
@@ -605,20 +686,19 @@ import OpenCodeKit
       }
     }
   }
-  /// Called after the updated transcript has reached the view, never at request start.
+  /// Route acknowledgement is independent of transcript layout, paging and catalogs.
   func presented() async {
-    guard let session, !acknowledging,
+    guard let session,
       let watermark = ConversationProjection.viewedWatermark(
-        idle: session.time.idle, viewed: session.time.viewed, acknowledged: acknowledged,
-        visible: visible && ready)
+        idle: session.time.idle, viewed: session.time.viewed, acknowledged: requestedView,
+        visible: true)
     else { return }
-    acknowledging = true
-    defer { acknowledging = false }
+    let previous = requestedView
+    requestedView = watermark
     do {
       try await client.markViewed(session)
-      acknowledged = watermark
     } catch {
-      if !Task.isCancelled { self.error = "Não foi possível marcar a conversa como lida." }
+      if requestedView == watermark { requestedView = previous }
     }
   }
   func shellOutput(_ part: ConversationPart) async throws -> String? {

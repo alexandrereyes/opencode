@@ -164,6 +164,9 @@ public struct ConversationPart: Codable, Sendable, Equatable {
   public var running: Bool { status == "running" || status == "streaming" }
   public var failed: Bool {
     if status == "error" { return true }
+    if name == "shell", status == "completed" {
+      return metadata["timeout"]?.bool == true || metadata["exit"]?.number.map { $0 != 0 } == true
+    }
     guard name == "execute" else { return false }
     return metadata["error"]?.bool == true
       || metadata["toolCalls"]?.array?.contains {
@@ -324,13 +327,11 @@ public enum ConversationProjection {
     let count = tools.isEmpty ? parts.filter { $0.type == "reasoning" }.count : tools.count
     if count == 0 { return "Atividade" }
     var names: [String] = []
-    for tool in tools where !names.contains(tool.category) { names.append(tool.category) }
+    for tool in tools where !names.contains(tool.groupTitle) { names.append(tool.groupTitle) }
     let list =
-      names.count > 3
-      ? names.prefix(3).joined(separator: ", ") + " e mais \(names.count - 3)"
-      : names.count > 1
+      names.count > 1
         ? names.dropLast().joined(separator: ", ") + " e " + names.last!
-        : names.first ?? "Raciocínio"
+        : names.first ?? (count == 1 ? "Raciocínio" : "Raciocínios")
     return "Usou \(count) · \(list)"
   }
   public static func footer(_ message: ConversationMessage, models: [ModelInfo]) -> String {
@@ -361,18 +362,6 @@ public enum ConversationProjection {
     if days == 1 { return "Ontem" }
     return self.date(milliseconds, format: days > 1 && days < 7 ? "EEEE" : "dd/MM/yyyy")
   }
-  public static func sticky(_ messages: [ConversationMessage], before visibleID: String?)
-    -> ConversationMessage?
-  {
-    guard let index = messages.firstIndex(where: { $0.id == visibleID }) else { return nil }
-    return messages[...index].last { $0.type == "user" }
-  }
-  public static func unread(_ messages: [ConversationMessage], viewed: Double?) -> String? {
-    guard let viewed else { return nil }
-    return messages.first {
-      $0.type == "assistant" && ($0.time.completed ?? $0.time.created) > viewed
-    }?.id
-  }
   public static func viewedWatermark(
     idle: Double?, viewed: Double?, acknowledged: Double?, visible: Bool
   ) -> Double? {
@@ -391,10 +380,6 @@ public enum ConversationProjection {
   public static func workStarted(child: Session, shells: [ShellInfo]) -> Double {
     shells.filter { $0.status == "running" && $0.metadata?["sessionID"]?.string == child.id }
       .map(\.time.started).min() ?? child.time.updated
-  }
-  public static func ellipsis(_ text: String, count: Int) -> String {
-    String(text.prefix(count)).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?… \n\r\t"))
-      + "…"
   }
   public static func merge(
     _ existing: [ConversationMessage], page: [ConversationMessage], older: Bool = false

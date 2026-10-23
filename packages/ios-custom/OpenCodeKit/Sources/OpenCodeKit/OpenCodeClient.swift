@@ -287,12 +287,21 @@ public struct OpenCodeClient: Sendable {
     request.httpMethod = "POST"
     request.httpBody = try JSONEncoder().encode(RPCInput(input: input))
     let data = try await data(request)
+    #if DEBUG
+    let started = ContinuousClock.now
+    defer { OpeningDiagnostics.record("DECODE_RPC", started: started, bytes: data.count) }
+    #endif
     return try JSONDecoder().decode(RPCOutput<Output>.self, from: data).output
   }
   func get<Output: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
     -> Output
   {
-    try JSONDecoder().decode(Output.self, from: await data(request(path, query: query)))
+    let data = try await data(request(path, query: query))
+    #if DEBUG
+    let started = ContinuousClock.now
+    defer { OpeningDiagnostics.record("DECODE_GET", started: started, bytes: data.count) }
+    #endif
+    return try JSONDecoder().decode(Output.self, from: data)
   }
   func post<Input: Encodable>(_ path: String, input: Input) async throws {
     var request = request(path)
@@ -309,12 +318,19 @@ public struct OpenCodeClient: Sendable {
     _ = try await data(request)
   }
   func data(_ request: URLRequest) async throws -> Data {
+    #if DEBUG
+    let started = ContinuousClock.now
+    try await OpeningDiagnostics.delay(request)
+    #endif
     let (data, response) =
       if let transport {
         try await transport(request)
       } else {
         try await session.data(for: request)
       }
+    #if DEBUG
+    OpeningDiagnostics.record("HTTP_" + (request.url?.lastPathComponent ?? "request"), started: started, bytes: data.count)
+    #endif
     if let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode),
       let value = try? JSONDecoder().decode(JSONValue.self, from: data)
     {

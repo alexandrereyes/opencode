@@ -32,6 +32,7 @@ public struct Preferences: Codable, Sendable {
     public let projects: [String: Library]
     public let pinnedSessions: [String]
     public let mutedSessions: [String]?
+    public let masterSessions: [String: String]?
     public let settings: Settings
     public let models: Models?
   }
@@ -68,6 +69,8 @@ public struct Preferences: Codable, Sendable {
 }
 
 public enum PreferenceIntent: Encodable, Sendable {
+  case masterSet(String)
+  case masterClear
   case pin(session: String, pinned: Bool)
   case mute(session: String, muted: Bool)
   case open(directory: String)
@@ -81,11 +84,18 @@ public enum PreferenceIntent: Encodable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case type, session, pinned, muted, server, directory, toIndex, providerID, modelID, favorite,
-      visibility, model, variant
+      visibility, model, variant, sessionID
   }
   public func encode(to encoder: any Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
     switch self {
+    case .masterSet(let id):
+      try values.encode("master.set", forKey: .type)
+      try values.encode("local", forKey: .server)
+      try values.encode(id, forKey: .sessionID)
+    case .masterClear:
+      try values.encode("master.clear", forKey: .type)
+      try values.encode("local", forKey: .server)
     case .modelVariant(let model):
       try values.encode("model.variant", forKey: .type)
       try values.encode(model.providerID, forKey: .providerID)

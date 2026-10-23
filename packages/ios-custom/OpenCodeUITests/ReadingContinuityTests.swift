@@ -28,6 +28,12 @@ import XCTest
   }
   private func openFromSessions(_ app: XCUIApplication, title: String) {
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+    // Other sandbox suites import recent histories concurrently; old seeds can be
+    // several screens below the freshly imported sessions.
+    for _ in 0..<20 {
+      if row.exists { break }
+      app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+    }
     app.revealSessionRow(row)
     row.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 15))
@@ -46,14 +52,6 @@ import XCTest
           for: [expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: editor)],
           timeout: 5) == .completed
     )
-  }
-  private func codeUnderHeader(_ snapshot: any XCUIElementSnapshot, cutoff: CGFloat) -> Bool {
-    if (snapshot.value as? String)?.contains("image: makeplane/plane:stable") == true,
-      snapshot.frame.height > 0, snapshot.frame.minY < cutoff, snapshot.frame.maxY > cutoff
-    {
-      return true
-    }
-    return snapshot.children.contains { codeUnderHeader($0, cutoff: cutoff) }
   }
   func testSoftwareReturnShiftAutoCapitalizationAndCapsLock() throws {
     let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
@@ -93,7 +91,7 @@ import XCTest
     let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
     let app = try launch("C", theme: theme)
     let transcript = app.collectionViews["conversation-transcript"]
-    if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+    if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
     for _ in 0..<20 { transcript.swipeDown(velocity: .slow) }
     for _ in 0..<4 { transcript.swipeUp(velocity: .slow) }
     // Let the reader's scroll-idle debounce and deferred native geometry settle.
@@ -142,28 +140,38 @@ import XCTest
       let app = try launch("A", theme: theme)
       let transcript = app.collectionViews["conversation-transcript"]
       for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
-      let step = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Usou 5'")).firstMatch
+      let step = app.buttons["Usou 1 · Ler"]
       XCTAssertTrue(step.waitForExistence(timeout: 10))
-      let child = app.buttons.matching(
-        NSPredicate(format: "label CONTAINS 'Comparar alternativas'")
-      )
-      .firstMatch
-      if child.exists { step.tap() }
-      step.tap()
+      if step.value as? String != "Expandido" { step.tap() }
       let read = app.buttons.matching(NSPredicate(format: "label CONTAINS '212 linhas'")).firstMatch
       XCTAssertTrue(read.waitForExistence(timeout: 5))
       read.tap()
       screenshot("expanded-before-child-" + theme)
-      app.buttons.matching(NSPredicate(format: "label CONTAINS 'agentes em execução'")).firstMatch
-        .tap()
-      app.buttons.matching(
-        NSPredicate(format: "label BEGINSWITH 'Explore' AND label CONTAINS 'Comparar alternativas'")
-      ).firstMatch.tap()
+      let agents = app.buttons.matching(NSPredicate(format: "label CONTAINS 'agentes em execução'")).firstMatch
+      if agents.exists {
+        agents.tap()
+        app.buttons.matching(
+          NSPredicate(format: "label BEGINSWITH 'Explore' AND label CONTAINS 'Comparar alternativas'")
+        ).firstMatch.tap()
+      } else {
+        // The seed's executions may have finished; the real child card remains navigable.
+        let child = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Comparar alternativas Linear'")).firstMatch
+        for _ in 0..<20 {
+          if child.exists && child.isHittable { break }
+          transcript.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(child.exists && child.isHittable)
+        child.tap()
+      }
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 10))
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
         .press(
           forDuration: 0.05,
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+      for _ in 0..<20 {
+        if step.exists && step.isHittable { break }
+        transcript.swipeDown(velocity: .fast)
+      }
       XCTAssertTrue(step.waitForExistence(timeout: 10))
       XCTAssertTrue(
         app.staticTexts.matching(
@@ -215,7 +223,7 @@ import XCTest
       }
       XCTAssertTrue(app.buttons["draft-quotes"].waitForExistence(timeout: 10))
       app.buttons["draft-quotes"].tap()
-      if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+      if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
       let permit = app.buttons["Permitir"].firstMatch
       XCTAssertTrue(permit.waitForExistence(timeout: 5))
       XCTAssertTrue(permit.isHittable)
@@ -224,19 +232,28 @@ import XCTest
       app.terminate()
     }
   }
-  func testUnreadJump() throws {
-    let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
-    let app = try launch("C", theme: theme)
-    let pill = app.buttons["Ir às novas mensagens"]
-    guard pill.waitForExistence(timeout: 5) else {
-      throw XCTSkip("Execute logo após seed-conversation.ts --reset; nunca retroceda o watermark.")
+  func testJumpToLatestWithoutUnreadStateInBothThemes() throws {
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let app = XCUIApplication()
+      app.launchArguments = [
+        "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+        "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "middle",
+      ]
+      app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+      app.launch()
+      XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 20))
+      waitForReading(app)
+      let latest = app.buttons["Ir para a mais recente"]
+      XCTAssertTrue(latest.waitForExistence(timeout: 5))
+      XCTAssertFalse(app.buttons["Ir às novas mensagens"].exists)
+      XCTAssertFalse(app.staticTexts["Novas mensagens"].exists)
+      screenshot("app-history-" + theme)
+      latest.tap()
+      let hidden = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: latest)
+      XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 20), .completed)
+      screenshot("app-tapped-" + theme)
+      app.terminate()
     }
-    screenshot("c-unread-above-" + theme)
-    pill.tap()
-    waitForReading(app)
-    XCTAssertTrue(app.staticTexts["Novas mensagens"].isHittable)
-    XCTAssertFalse(pill.exists)
-    screenshot("c-unread-divider-" + theme)
   }
   func testTokensInComments() throws {
     let app = try launch("COMMENT")
@@ -320,23 +337,5 @@ import XCTest
         )
       ).firstMatch.waitForExistence(timeout: 10))
     screenshot("comment-sent-openchamber-dark")
-  }
-  func testStickyBubbleOverCode() throws {
-    for theme in ["openchamber-dark", "openchamber-light"] {
-      let app = try launch("C", theme: theme)
-      if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
-      let transcript = app.collectionViews["conversation-transcript"]
-      let cutoff = transcript.frame.minY + 130
-      let beneathHeader = NSPredicate { _, _ in
-        // One immutable accessibility snapshot avoids resolving a recycled TextKit
-        // element again between exists/frame queries while the tail is measuring.
-        guard let snapshot = try? app.snapshot() else { return false }
-        return self.codeUnderHeader(snapshot, cutoff: cutoff)
-      }
-      XCTAssertEqual(
-        XCTWaiter.wait(for: [expectation(for: beneathHeader, evaluatedWith: app)], timeout: 15),
-        .completed)
-      screenshot("c-sticky-code-" + theme)
-    }
   }
 }

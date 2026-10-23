@@ -125,6 +125,49 @@ The web requests 40 messages for its compact preset, otherwise 20; older pages u
 pages to complete a leading partial group, without withholding the visible tail. iOS can use a fixed 40 to start.
 Do not fetch an entire long conversation on opening it.
 
+Native opening now starts health, Session metadata, execution activity and the 40-message tail together and publishes
+history as soon as
+those reads succeed. Directory availability, independent catalogs (in parallel), runtime work and family must not gate
+first content. `hasTranscript` controls the loading indicator; `ready` still gates sending, viewed acknowledgement and
+saved-position restoration, which needs the stable group/anchor projection. Runtime publication never replaces the
+transcript a second time, preserving concurrent
+search/history paging. The ordinary event-race revalidation remains unchanged, as do page sizes and both transports.
+Execution activity publishes with the tail, so running-group presentation never starts from a fabricated idle state.
+
+The PWA similarly renders an available tail independently of catalogs/family. Its server-scoped data store retains
+messages across navigation and deduplicates `sync` reads until invalidated; the home page's first-two prefetch warms
+Session metadata only, and row hover reveals directory metadata rather than prefetching transcripts. No corresponding
+native cache or old-server workaround was added: the measured newer-server bottleneck was the first-render dependency
+chain, not decoding or projection.
+
+At the installed `1de0005…` revision, the PWA uses `sdk.api` directly: `runtime/server/transcript.ts` does not yet exist,
+so it does not pay the native app's missing-RPC round trip at all. The current PWA source has the optional lean wrapper.
+
+Opening measurements (2026-10-22, iPhone 18 Pro simulator/iOS 27, existing sandbox history, actual row action → first
+transcript display frame; individual samples, not a device/network benchmark):
+
+| Transport | Before | After |
+| --- | ---: | ---: |
+| New backend, loopback | 724 ms | 167 ms |
+| New backend, DEBUG 400-ms delay per request | 4,204 ms | 538 ms |
+| Missing RPC + native GET, same DEBUG delay | 4,453 ms | 1,049 ms |
+
+On the real production hostname, three 40-message tails were **0.53 / 0.37 / 7.53 MB**, with median GET totals
+**916 / 532 / 1,117 ms**, offline Swift decode on the Mac **7.2 / 4.0 / 9.5 ms**, and grouping/merge projection
+**0.8 / 0.5 / 0.4 ms**.
+Health median was 432 ms, motivating the conservative 400-ms simulation. GET TTFB includes both routing and server work;
+the API does not expose their separate timings. Historical missing-RPC server spans had median 0 ms/p95 1 ms, but no
+production POST was replayed. Production tap-to-render was deliberately **not** exercised: all app launches used the
+sandbox; the old-path row above is explicitly emulated. Raw production responses were deleted after profiling.
+
+`$TMPDIR/opencode/ios-abertura-prints/{before,after}.png` and `timings.json` retain the simulator evidence. The timing
+runner isolates the real history row locally in DEBUG so unrelated fixture-list scrolling does not become the test.
+
+Final checks: 195 Swift Testing tests, 12 app-hosted tests (including early publication, concurrent paging, execution
+activity, partial failure and cancellation), all four SessionReading cases, all three RPC/native compatibility cases,
+and history/relaunch plus parent/child reading continuity pass. Debug and Release builds have zero warnings; opening
+diagnostic switches are absent from the Release executable. Verification imports are removed without changing seeds.
+
 Sources: `packages/plugin-app-custom/src/transcript/{rpc,index}.ts`,
 `packages/schema/src/session-message-page.ts`, `packages/core/src/session/store.ts`,
 `packages/app-custom/src/runtime/server/transcript.ts`, `packages/client/src/solid/data.ts`,
@@ -201,6 +244,24 @@ uses. Native single-message response is `{data:message}`. `message-full-tool-ima
 `transcript-history.json` demonstrates this distinction. The web falls back to native message listing on any
 non-abort lean-RPC error, so fallback may contain full media.
 
+Native image follow-up (2026-10-22): `FeedImageReference`, `FeedImageClient`, `FeedImageLoader` and `FeedImageView`
+cover Markdown/HTML references, user attachment `data`, and tool `{type:"file",uri,mime,name}` content. Absolute,
+tilde and relative paths normalize on the server side, then use basename + parent `location[directory]` exactly as
+`app-custom/src/runtime/server/image.ts` does. The file route streams binary, confines lexical/real paths to that
+requested Location, supports Range, and requires ordinary authentication; neither an image-only policy nor a size
+cap is imposed by the backend. Native loading requests a bounded range and applies a 32-MiB client limit.
+No backend or protocol change is required, including for existing temp files outside the Session directory.
+
+The read-only **Temas** audit found six relative Markdown images and 20 stored PNG tool parts, no user attachments;
+all files still existed. Shell output repeated six Markdown images and 12 HTML tags (six relative, six signed
+SeaweedFS links); 18 internal-URL occurrences represented six objects. Generic PWA tool output is text-only, while
+its read-image card reloads the path; Markdown local images use the file route. HTTP image links are not proxied.
+These implementations and the file route match installed `1de0005…`; its missing lean RPC cannot explain discarded
+stored images. The iOS decoder/resolver was also exercised directly on a GET-acquired real page, without launching
+the app against production; raw data was deleted afterwards. SeaweedFS needs separate WARP DNS/routing and a valid
+signature. Serving stable artifacts under an authenticated backend namespace would remove that dependency, but
+requires a separately approved backend/storage design rather than an arbitrary-URL proxy.
+
 ### Groups, sticky prompt, days and unread
 
 Web projection sources: `packages/session-ui-custom/src/timeline/{projection,detail,timeline-row}.ts`,
@@ -229,10 +290,12 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   They are not server messages and do not change text/quote part IDs.
 - Sticky prompt is the **same** latest user bubble positioned under the header and clamped to two lines, not a second
   message. Preserve identity and selection anchors while scrolling.
-- `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Capture the
-  unread boundary before acknowledging view. There is no unread-message count or persisted divider: use the observed
-  session's prior `time.viewed` and incoming assistant activity to place one `Novas mensagens` divider. No API
-  supports moving the viewed watermark backwards.
+- `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Like the custom
+  web, there is no unread-message count, frozen boundary, divider or upward jump. One ↓ **Ir para a mais recente**
+  control appears beyond `max(400, viewport height)` points from the bottom (overflow > 1). It resumes following the
+  end, not a message boundary; prompt submission also resumes following. Route entry acknowledges the session's
+  observed idle independently of position, transcript paging and catalogs, including child sessions, through the
+  unchanged `POST /api/session/:id/view` payload `{idle}` on installed `1de0005…`. No API moves viewed backwards.
 
 ## 2. Live updates — wave 1
 

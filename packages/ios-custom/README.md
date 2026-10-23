@@ -71,7 +71,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", and the list of archived sessions (read-only: the backend has no unarchive).
-- **Visual only for now:** voice, "Sessão mestra", "Selecionar sessões", "Configurações", and the other
+- **Visual only for now:** voice, "Selecionar sessões", "Configurações", and the other
   tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
@@ -108,17 +108,27 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   agents counter (animated 5×5 pixel grid and the number of active subagents and background tasks; tapping lists them
   and opens a child session; hidden when nothing runs) and a separate `…` button.
 - **Messages:** the user's messages are bubbles on the right with the time inside. The agent's text uses the full
-  width, without a bubble, and is rendered as Markdown (lists, inline code, fenced code blocks with a copy button; no
-  syntax highlighting yet).
-- **Steps:** each step is a group, `Usou 6 · Ler, Shell, Editar e Agente`. Inside it, in order: `Pensou 6s` (with its
-  sparkle icon), tool lines (`Leu docs/infra.md · 212 linhas`, `Rodou docker stack ls · 2s`, `Editou … +48 −0`, the
-  running one highlighted with its elapsed time), and subagents as discreet cards (agent icon and name in the agent's
-  color, description, time, `›`). The agent icon is the web app's: an animated pixel grid while running and the static
-  subagent icon when done. The running step is expanded; finished steps are collapsed into one line.
+  width, without a bubble, and is rendered as selectable Markdown with GFM tables/tasks, highlighted code,
+  formulas, diagrams and disclosures (see [Markdown rendering](#markdown-rendering)).
+- **Activity groups:** consecutive tools and nonempty reasoning share one `Usou N` disclosure **across backend steps**,
+  up to visible text, a user message, notice, error/retry or a standalone card. Summaries count tools (reasoning only
+  when there are no tools) and deduplicate localized tool titles in first-use order, without truncating categories.
+  Subagent/task cards, edit/write/patch tools (even before their diffs arrive) and question/permission interactions stay
+  outside the disclosure; removed `todowrite` and empty parts do not count or split it. Expanded content reuses the
+  native reasoning/tool details, retaining wire order, failed tools and the running tool's live elapsed time. Newly
+  running groups start open; completing/appending tools never overwrites the stored disclosure choice. Stable
+  member-based IDs and message anchors preserve expansion and reading during streaming and history prepend
+  (`ConversationActivity` in OpenCodeKit).
+  Compared with the PWA's configurable compact preset, this fixed native presentation keeps cards/diffs separate,
+  individual read details, and the approved Portuguese `Usou`/`Pensou` rather than untranslated English fallbacks.
 - **Response footer:** only when the response finishes, a discreet line with model, effort, date, and copy
   (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`).
-- **Sticky message:** the last user message sticks below the header, truncated to two lines, while its response
-  scrolls underneath, as in the web app. There is no other pinned banner.
+- **Sticky message:** the current turn's user message always sticks below the header. **Alexandre, 22/10: user bubble
+  like OpenChamber** — scrolling never collapses or expands it. **Você → Leitura → Recolher mensagens longas do usuário**
+  is on by default: overflow beyond two rendered lines offers **Mostrar mensagem completa** / **Mostrar menos**.
+  Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
+  fade. Only the text area has internal scrolling capped at 40% of the view; attachments, quotes, timestamp and copy
+  actions remain available. Sticky itself has no off switch in this native app. There is no other pinned banner.
 - **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
   free answer) cards inside the conversation.
 - **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
@@ -131,13 +141,45 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
   The side question (`/btw`) opens in a sheet that is not saved to the conversation.
-- **Other:** plain background, day chips (`Hoje`, `Ontem`), the `Novas mensagens` divider, and a scroll-to-bottom
-  button. The tab bar and the "Sessão mestra" accessory are hidden inside the conversation.
+- **Other:** plain background, day chips (`Hoje`, `Ontem`) and one ↓ **Ir para a mais recente** control, following the
+  custom web's geometry rather than an unread-message boundary. There is no new-message divider, count or ↑ pill.
+  The tab bar and the "Sessão mestra" accessory are hidden inside the conversation.
 - **Token colors** come from the theme, never from fixed values: dedicated semantic roles for context mentions,
   agent mentions, commands, skills, and snippets, generated by `script/generate-themes.ts` from the same web tokens the
   web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
   `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
   `accent` palette colors.
+
+### Jump to latest — 22 October
+
+**Alexandre, 22/10: novas mensagens como no web.** The custom web has no `Novas mensagens` divider or upward unread
+jump. `ConversationScrollPlan.Viewport` mirrors `app-custom/src/session/timeline/interaction.ts`: show ↓ only with
+more than 1 point of overflow and a distance from the bottom **strictly greater than `max(400 pt, viewport height)`**.
+This is independent of author, tool-only steps, streaming, watermark and parent/child status. Being near the bottom
+hides the button without silently resuming follow; arriving at the real end uses the web's 0.5-point tolerance.
+
+Tapping **Ir para a mais recente** clears reading restoration/selection pause and asks the existing single scroll
+owner for one end animation; later height changes follow without replaying it. Submitting a prompt/command or a
+question reply resumes the same follow mode before the request finishes, without an extra animation. Streaming while
+reading retains the bookmark. Dismissal is purely geometric, so scrolling up can show the button again without new
+messages. Per-session native reading persistence and parent/child return behavior remain independent of read receipts.
+
+Opening the route acknowledges that session's observed `time.idle` through `POST /api/session/:id/view` with `{idle}`,
+without waiting for catalogs, pagination, bottom or a visible response. Root and child acknowledge only themselves.
+The request/payload exist unchanged on installed `1de0005…`; there is no message-level receipt and no backward move.
+Deduplication remembers the requested watermark and releases it on failure, like the web. No `custom.preferences`
+write or local unread boundary is involved. The original wave notes below describe historical checks; unread skips
+and seed-reset instructions are superseded by the deterministic jump tests.
+
+Verification uses only **OpenCode Novas** (`66EA82DF-D048-4E54-85D0-FB32A02CEC20`), `ios-novas-derived`, and explicit
+sandbox launch arguments/password, including hosted tests. After `build-for-testing`, run
+`python3 packages/ios-custom/script/test-novas.py --label decisions-follow`; `--live` plus
+`OpenCodeUITests/NewMessagesTests` adds owned fake-repository parent/child scenarios with Luna 6/low. The runner never
+resets seeds, answers seeded requests, or changes the sandbox service. Its ledger lists retained owned sessions.
+Pure viewport tests cover thresholds, no overflow, bounce, growth, dismissal and end tolerance; hosted tests cover
+acknowledgement before catalogs and root/child isolation. The follow regression still requires zero backward movement
+and exactly one explicit end animation. Evidence and comparisons live in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-novas-prints/`.
 
 ### Waves
 
@@ -160,10 +202,104 @@ search navigates to messages and reuses wave 6's position restoration).
 | 7. Subagents and alerts  | Composer in child sessions, keeping the child's agent and with no notice; replies sent after the child delivered its result stay in the child (automatic delivery to the parent would need backend work and is out). In-app banner, tappable, when another session finishes, fails, or needs you, respecting mutes, ignoring child completions, deduplicated. Light haptics on explicit actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Out of scope for this screen for now: the microphone (visual only), "Alterações" and "Arquivos" in the `…` menu,
-syntax highlighting, and balloon actions such as fork and revert.
+and balloon actions such as fork and revert.
+
+Grouping verification uses **OpenCode Grupos** (iPhone 18 Pro / iOS 27) and `ios-grupos-derived`. After
+`build-for-testing`, run `python3 packages/ios-custom/script/test-groups.py`, then repeat with
+`OPENCODE_TEST_THEME=openchamber-light`. It supplies explicit sandbox credentials, imports/deletes only its own
+synthetic multi-step histories (no model calls), and includes the existing session-reading regressions. Native
+collapsed/expanded/running captures and headless PWA comparisons are in `$TMPDIR/opencode/ios-grupos-prints/`.
 
 Wave 1 must already render text in a way that supports a custom selection menu (wave 4), and the composer must be
 able to hold attributed tokens (wave 3), so later waves do not rewrite earlier ones.
+
+### Markdown rendering
+
+OpenChamber revision `801f59b5ba2cf4be0145edc8451c1593169898bb` is the visual/capability reference.
+`MarkdownBlocks` projects CommonMark/GFM plus footnotes, math and nested `<details>` into typed blocks while
+retaining rendered-to-source UTF-16 selection mappings. H1–H6 use 20/18/16/14/14/14 pt, body 16 pt/26 pt, code 14 pt;
+headings, list items and ordinary blocks have distinct spacing. Soft breaks remain spaces, explicit breaks remain
+newlines, and straight punctuation is not silently changed. Nested lists have hanging indents and depth-specific
+markers; disabled task checkboxes and nested quote borders retain their state/depth. General HTML, `<kbd>`, emoji
+shortcodes, `==highlight==` and GitHub-alert markers remain literal, as in the reference chat; the previously approved
+native HTML-image loader is preserved.
+
+Tables are native, horizontally scrollable grids with header styling, column alignment, wrapping, per-cell selection,
+CSV/TSV/Markdown copy and CSV/Markdown export through Files. Code cards retain one selectable TextKit 2 text view,
+including source-line numbers aligned to wrapped lines, a language header, wrap toggle and copy without the gutter.
+TextKit 2-backed caret geometry is cached; the legacy layout manager is never accessed. Inline-code backgrounds have
+native rounded drawing with compact 2.4 pt horizontal expansion rather than inserting invisible padding characters
+into selectable text. Links use a dedicated semantic role, not the primary-button color.
+
+Parsing, highlighting, math layout/rasterization and Mermaid SVG generation stay off the main actor. The existing
+bounded Markdown cache, row-remount retention and per-width text measurement cache remain. Table measurements are
+cached by width and invalidated only by changed content/style/wrapping. Formula geometry is known before publishing
+the parsed blocks, so bitmap arrival never changes their reserved dimensions. Footnote links open a native sheet;
+closing it preserves the reading position instead of coordinating a second DOM-like scroll owner. Definitions also
+remain at the end of the response. Math copies its original LaTeX, including when an inline attachment is selected.
+
+**Dependencies:** SwaTexRender 0.5.0 provides native CoreText/CoreGraphics math with Swift 6 value types and bundled
+KaTeX fonts. It is not literally every KaTeX feature (`\includegraphics`/DOM attributes are not supported). The local
+JavaScriptCore bundle uses highlight.js 11.11.1 grammars and beautiful-mermaid 1.1.3, the same diagram library as the
+reference. Rebuild it with `bun script/build-markdown-engines.ts`; no npm runtime, remote CDN or dynamic download is
+used by the app. Licenses/source links, including ELK EPL-2.0, are bundled under `Resources/Markdown`.
+
+Mermaid uses a fixed 384 pt viewport and starts only when its native scroll viewport becomes visible. A lazy,
+nonpersistent WKWebView displays the generated SVG because iOS has no built-in general SVG view; its JavaScript is
+disabled and CSP/navigation policy block external loads. Pan/pinch, zoom/reset, selectable ASCII, source, copy, fullscreen and SVG
+export remain available. Failed/oversized formulas and diagrams retain selectable source rather than blocking the
+reader. Highlighting falls back to plain text for unknown languages or more than 1200 lines/200k UTF-16 units;
+diagrams are bounded to 400 lines/20k units and formulas to 8k units with bounded matrix column counts/bitmap sizes.
+
+**Verification fixture:** Debug accepts `-OpenCodeScrollFixture conversation -OpenCodeMarkdownFixture
+-OpenCodeFixturePosition top` with the usual explicit sandbox URL/password. Its two-message transcript uses
+`OpenCode/Fixtures/markdown-fixture.md`, identical to `.agent-artifacts/formatacao/teste-formatacao.md`; the offline
+transport refuses every HTTP request. Release excludes both the fixture mode and its Markdown resource.
+Use only **OpenCode Formatacao** (`7C70FB07-A886-43BD-8A39-42D92E0C9937`, iPhone 18 Pro/iOS 27) and
+`$TMPDIR/opencode/ios-formatacao-derived`. After `build-for-testing`, run `python3 script/test-markdown.py --label …`;
+pass `--regressions OpenCodeUITests/SessionReadingTests` for disposable owned sandbox action/missing-directory
+histories, with no model calls or seed resets. `profile-scrolling.py` accepts this simulator/DerivedData/evidence
+directory for before/after frame measurements; `--markdown --frames` profiles the comprehensive document itself.
+`python3 script/capture-markdown.py` captures all 17 sections in both themes, using DEBUG-only native geometry
+positioning (`-OpenCodeMarkdownSection 0…16`) with the same full assistant message. It expands disclosures and fixes
+wrap settings only for those launches, retains geometry/source/binary hashes and warms cold simulator WebKit for the
+diagram shot. Functional XCTest uses real gestures/actions, independently of that capture driver.
+Source hashes, test results and both-theme reference/native captures
+are under `$TMPDIR/opencode/ios-formatacao-prints/`; the pinned, backend-free reference harness is documented in
+`.agent-artifacts/formatacao/reference/README.md`.
+
+Verified on the dedicated simulator: 223 Swift tests in Debug and optimized Release, seven UIKit/engine/cache tests,
+both complete Markdown UI cases, and conversation/follow/scroll regressions (the optional live replay is intentionally
+skipped without model calls). The 12-second 300-message conversation trace kept p95 at 16.67 ms; observed CPU changed
+from 4802 to 3549 ms and 60-Hz stall ratio from 11.42% to 6.71%. The document trace recorded 720/720 frames and
+16.67 ms maximum; sessions with preview updates recorded p95 16.67 ms. These are single local traces in a shared
+working tree, not a statistically isolated or physical-device performance claim.
+
+### Conversation images
+
+Markdown images and HTML `<img>` tags, user attachments, and expanded tool images share the authenticated native
+loader. Relative paths resolve against the Session directory; absolute paths, `file://` and `~` resolve on the server,
+never on the phone. Like the PWA, each resolved file uses `GET /api/fs/read/<filename>` scoped to its parent through
+`location[directory]`, so existing files outside the repository need no new backend route. The same route exists in
+installed `1de0005…`. Empty inline tool images from the lean RPC reload the read path or the canonical full message.
+
+ImageIO downsamples off the main actor. A server/credential/directory-scoped cache holds at most 32 MiB of decoded
+images and 128 MiB on disk (24-hour disk freshness); individual images are limited to 32 MiB. Tap opens a full-screen
+viewer. Failures show **Imagem indisponível no iPhone**, the path/URL without query credentials, and retry.
+HTTPS and base64 image data URLs retain their sources. Only loopback URLs naming the native file route are moved
+to the configured server; arbitrary localhost services cannot be proxied. `seaweedfs-svc` loads directly, with a
+host-specific HTTP ATS exception: the phone still needs its own authorized WARP DNS/route to port 8333, and signed
+URLs may expire. Other unapproved HTTP hosts and image formats unsupported by ImageIO fail explicitly.
+
+Verification uses only **OpenCode Imagens** and `ios-imagens-derived`; after `build-for-testing`, run
+`python3 packages/ios-custom/script/test-images.py` and repeat with `OPENCODE_TEST_THEME=openchamber-light`.
+The runner imports/deletes only its own fake-repository histories and image files, makes no model call, supplies the
+explicit sandbox URL/password on every launch, and saves evidence in `$TMPDIR/opencode/ios-imagens-prints/`.
+Internal-host reachability is a network dependency, not claimed by the synthetic unreachable-host failure case.
+Final image checks pass in both themes (three UI cases plus all thirteen app-hosted tests), with a warning-free build and
+194 Swift tests green. The four existing `SessionReadingTests` also pass together in light mode; the dark child
+Details case repeatedly missed its native menu tap and was left unchanged. The GET-only Temas audit separately
+decoded/resolved all six Markdown references and all 20 stored PNGs, then deleted its raw page.
 
 ## Language
 
@@ -411,6 +547,171 @@ cases also pass; the unread-jump check correctly skips after its viewed watermar
 reveal links displaced by the new section and wait for the delayed AutoFill overlay before cancelling it. Use the
 normal simulator signing configuration when running Keychain/server regressions, not `CODE_SIGNING_ALLOWED=NO`.
 
+## Offline scrolling fixtures and performance checks
+
+Debug builds accept `-OpenCodeScrollFixture conversation` or `-OpenCodeScrollFixture sessions`, optionally
+`-OpenCodeFixturePosition top|middle|tail`, `-OpenCodeTheme openchamber-light|openchamber-dark` and
+`-OpenCodeFixtureUpdates` (four local preview updates per second). This bypasses server setup, SSE and pruning;
+the fixture client's HTTP transport rejects every request. Never combine this mode with a live-server test.
+The bundled JSON has 300 messages/525 parts and 300 rows. Only sizes, Markdown structure and tool kinds came
+from three read-only, 100-message pages; every displayed string/identifier/path is synthetic. The raw pages were deleted.
+`script/generate-scroll-fixture.py` documents safe regeneration from temporary GET response files.
+Release builds exclude the fixture JSON and compile out its launch mode/client/driver.
+
+### Following a changing tail
+
+`ConversationScrollState` is the sole owner of tail and reading corrections. It coalesces row/revision/viewport
+notifications and requires matching native display-layout passes without restarting on each notification. It never
+combines `ScrollViewReader.scrollTo` with a tail offset. User scrolling, selection, reading restoration and navigation
+cancel following. An explicit request waits for existing tracking/deceleration, never fighting it. **Ir para o fim**
+requests one animation, then follows later growth without replaying it.
+Prompt expansion is manual and independent of native pinning; following never prepares or changes prompt height.
+Initial tail restoration remains active until the real final native cell is materialized and pinned; automatic
+history prepend is disabled while following, so a transient zero offset cannot page backwards during entry.
+Parsed blocks survive transient row disappearance; the shared bounded Markdown cache and size-only viewport
+observation remain unchanged. Returning from a child reuses a materialized reading anchor instead of first scrolling
+that message back to its top (pinned-header targets still materialize their original message).
+
+User-prompt parity has its own **OpenCode Bolha** simulator (`49BFE0E0-8D48-406C-A5D1-491DE91CA392`) and
+`ios-bolha-derived`. After `build-for-testing` for that destination, run `script/test-user-bubble.py` with Python:
+`--prepare` imports two owned synthetic histories, `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
+removes only those imports. No model call or seed reset is needed. The runner always supplies explicit sandbox-4177
+arguments/password and removes its private xctestrun file. Both themes cover manual expansion invariant under scrolling,
+the persisted Você option, short-message threshold, copy/quote menu and user-message search. `UserPromptTests` checks
+native line measurement, width changes and search reveal after viewport shrink. Research/source references are in
+`.agent-artifacts/bolha-usuario/OPENCHAMBER.md`; results and evidence paths are in `RESULTADO.md` beside it.
+
+Follow verification uses **OpenCode Follow** (`8291AAB6-DF26-4128-BE44-A459BAD14186`) and `ios-follow-derived`.
+After `build-for-testing` with that destination/DerivedData, run
+`python3 packages/ios-custom/script/test-follow.py --label follow`.
+The DEBUG-only `-OpenCodeFixtureFollow` control uses a four-message measured slice, grows three real Markdown rows in
+sequence, then continues growing the last row (24 updates per run). XCTest records native offsets at display cadence
+in both themes, requiring no backward step above 2 pt and a final gap
+within 2 pt. Pure `ConversationScrollPlan` tests cover coalescing, layout changes, exclusive reading ownership and
+cancellation; the UIKit-hosted check proves an explicit end request waits for existing deceleration and cannot run
+after navigation hides the reader. Empty-tail restoration and offline jump-to-latest navigation are also checked without
+resetting any viewed watermark. `--live` explicitly enables tiny read-only follow-ups in the two owned sandbox replay
+children; it never answers seeded requests. The runner supplies sandbox credentials even for the disconnected fixture client,
+records video/follow logs in `$TMPDIR/opencode/ios-follow-prints/`, and removes private xctestrun credentials.
+`--regressions` supplies disposable action/missing-directory imports for the existing `SessionReadingTests`.
+`profile-scrolling.py` accepts `--simulator`, `--derived` and `--evidence` to keep performance verification isolated.
+
+Device verification against shipped `63d8650d44` used the same offline JSON and DEBUG growth harness in a temporary
+local clone (no scrolling/rendering production code ported). On iPhone 14, five-iteration long-scroll XCTest results
+were **59.20 → 58.89 fps**, **1.31 → 0 ms/s hitches**, **4.62 → 4.58 s CPU**; three fresh-process driver runs had
+median p95 **16.682 → 16.680 ms**. For 60 edits at 100-ms cadence, median growth results were **49.60 → 49.50 fps**,
+**41.86 → 43.01 ms p95**, **3.74 → 3.70 s CPU**, with backward movement **35.33 → 0 pt**. An Animation Hitches
+capture bounded by the complete `FixtureGrowth` signpost measured **79.13 → 40.90 ms/s**. The simulator p95 increase
+did not reproduce as a perceptible device regression; the coalesced follow owner is retained.
+`script/compare-scroll-device.py --label <name>` records the comparison after a leased device build; `--growth-trace-only`
+adds an 8-second lead-in and Points of Interest instrumentation so the complete growth interval is captured.
+The final menu build was rechecked at **59.20 fps**, **0 ms/s**, **4.56 s CPU**, **16.686 ms p95** for the long scroll;
+growth medians were **49.93 fps**, **42.53 ms p95**, **3.68 s CPU**, still **0 pt backward**. Matched all-processes
+captures, filtered by app PID and the complete growth signpost, measured **131.57 → 66.98 ms/s**. Instrumented and
+uninstrumented frame runs are separate series. `--no-trace` avoids Instruments discovery for frame-only rechecks;
+`--trace-all-processes` works around CoreDevice's stale per-process discovery while exported hitches remain PID-filtered.
+
+### Menu interaction during updates
+
+`ConversationOptionsMenu` keeps one native UIButton/UIMenu and refreshes it only when command availability, Session
+identity or theme changes; handlers read the latest callbacks. Rebuilding SwiftUI menu content with unrelated header
+updates restarted native menu animations indefinitely in the 4-Hz offline stress fixture. The stable owner removes
+those quiescence stalls without sleeps, delayed actions or tap retries. Root/child archive availability is preserved.
+`ConversationMenuTests` exercises first-tap Details presentation during header-only and transcript updates; the UIKit
+test also asserts stable menu identity and fresh callbacks. Repeat the original real-sandbox check with
+`test-scrolling.py --sandbox --iterations 10 --label <unique> OpenCodeUITests/SessionReadingTests/testDetailsRootAndChild`,
+once per `OPENCODE_TEST_THEME=openchamber-dark` / `openchamber-light`. Logs and snapshots record the actual first tap.
+
+Use **OpenCode Fluidez** (`C960B2FA-F2AB-4E39-BF82-50050DF20A27`) and DerivedData
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-fluidez-derived`:
+
+```sh
+xcodebuild build-for-testing -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCode \
+  -destination 'platform=iOS Simulator,id=C960B2FA-F2AB-4E39-BF82-50050DF20A27' \
+  -derivedDataPath /private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-fluidez-derived
+python3 packages/ios-custom/script/test-scrolling.py --label current
+python3 packages/ios-custom/script/profile-scrolling.py --label current-conversation --template 'Time Profiler'
+```
+
+XCTest measures real swipes/deceleration (five iterations), CPU and, on physical iOS, Apple's hitch-time ratio.
+`--device iphone14` requires a separately acquired `aparelhos-fisicos` lease and a device `build-for-testing`;
+all device execution goes through `device-lease exec`. Simulator SwiftUI/Animation Hitches templates are unsupported
+by this Xcode runtime; Time Profiler/Hangs work there, and both additional templates work on the iPhone 14.
+The optional `-OpenCodeFixtureAutoScroll` driver records frame intervals and main-thread CPU over 12 seconds;
+its `stallRatio60Hz` is a display-link diagnostic, **not** Apple's hitch metric. Traces, screenshots, exported XCTest
+metrics and per-run HEAD/source-hash manifests go to the temporary `ios-fluidez-prints/` directory above.
+Use `profile-scrolling.py --frames` for the same driver without Instruments, or `--mode sessions --updates --frames`.
+
+October 22, 2026 measurements (Debug, HEAD `e6988007d3`, concurrent working-tree snapshots recorded in the manifests):
+
+| Conversation, iPhone 14 | Before | After |
+| --- | ---: | ---: |
+| XCTest frame rate | 27.36 fps | 58.87 fps |
+| XCTest hitch-time ratio | 452.08 ms/s | 0 ms/s |
+| XCTest process CPU / four-swipe batch | 11.88 s | 4.59 s |
+| 12-second driver: main-thread CPU | 12.15 s | 5.00 s |
+| Driver p50 / p95 frame interval | 137.61 / 382.33 ms | 16.69 / 16.69 ms |
+
+Simulator driver stages: baseline p95 **453 ms**, per-text-view measurement cache **398 ms**, isolated viewport
+observation/size-only row geometry **60.5 ms**, bounded Markdown reuse/compact-header measurement **37.7 ms**.
+These are directional stage comparisons, not isolated A/B tests: the other agents' concurrent source changes are
+recorded too. Static Sessões stays near **59.5 fps** (preview updates: **58.7 fps**); its device hitch ratio varies
+between iterations, so this does not establish a fix for every live-server Sessões hitch.
+
+## Sessão mestra
+
+The bottom accessory is the only entry to the current master. With no master it opens an empty conversation using the
+existing composer, keyboard focused, hidden **Mestra** agent and **Sol 6.1 ultrafast / medium** preselected. Nothing is
+allocated until the first send. The plugin's preferred model wins over personal new-session defaults; when unavailable,
+the server's default model is used. The existing model/effort picker remains available; the agent stays Mestra.
+
+The master header uses the accessory's icon inside its context ring, with model/status below the title. Ordinary managed
+chats use their conversation title for the avatar initials and the same model/status subtitle, never the allocation folder.
+Their Contexto/Detalhes sheets and missing-directory notice also hide the managed path; non-repository alert avatars use
+the conversation title too. Repository branch/directory presentation is unchanged.
+
+The plugin owns the short invisible agent instructions (including prompt-injection precautions and on-demand `opencode`
+skill guidance), typed control tools and their agent-only execution guard. It controls only other nonarchived root
+sessions, never itself or children. It executes Alexandre's explicit requests directly, without extra confirmations.
+Messages sent/created through the tools carry `custom.master: {sessionID}` metadata; target user bubbles show a small
+**Sessão mestra** marker. No web rendering changes are required.
+
+The Session lives in a managed `custom.chats` directory, not a repository. `custom.preferences.data.masterSessions.local`
+stores its ID in that backend's profile (separate backend persistence = separate server pointer). Old profiles decode
+unchanged. The current master is excluded from the Sessões projection and its **Precisa de você** counts, including any
+requests of its own; pending master requests remain actionable inside the master conversation. Its own events do not
+create global alert shortcuts, keeping entry through the accessory.
+
+The top-right trash immediately archives the current master, clears the pointer, and opens the empty composer. Its old
+transcript remains readable in **Arquivadas**. **Undo/unarchive is not implemented:** the backend has no native unarchive
+operation, so the optional toast action was intentionally omitted rather than simulating recovery or editing storage.
+Voice, autonomous notifications, opening summaries and subagent management are not included.
+
+This needs Alexandre to run **`custom:update`** before using the installed backend; release `1de0005…` has no master
+capability. The app probes `custom.master/info` independently of normal session loading. A missing RPC shows
+**Atualize o servidor para usar a Sessão mestra** in the accessory and its screen; network/auth failures are not mislabeled
+as old-server support. Other sessions and settings continue working.
+
+Verification is isolated to **OpenCode Mestra** (`EC672074-0EF6-47AB-9299-8AF7FE2658C1`), iOS 27, port **4179**, and
+`$TMPDIR/opencode/ios-mestra-derived`. After `build-for-testing`, run `python3 packages/ios-custom/script/test-master.py`
+and repeat with `OPENCODE_TEST_THEME=openchamber-light`. Every launch explicitly supplies the sandbox URL/password;
+private xctestrun credentials are removed afterwards. The old-server UI scenario is a DEBUG-only, 127.0.0.1:4179-gated
+missing-RPC injection; unit transport tests also cover the actual HTTP/RPC error shapes. Live tool verification uses
+`bun packages/plugin-app-custom/script/verify-master.ts` with fake repositories beneath that sandbox's home and Luna/low
+controlled targets. Evidence and the bounded conversation transcript are in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-mestra-prints/`.
+
+Verification: **205 Swift tests**, warning-free simulator build, three new master UI cases and all 18 app-hosted tests
+in both themes. `test-master.py --regressions` also passes the four existing `SessionReadingTests` in both themes using
+disposable imports under the owned fake repository; it supplies `OPENCODE_TEST_SERVER_URL=…:4179` and deletes only those
+imports afterwards. The action fixture has a short title because the existing rename test taps the field's middle before
+Backspace. The sandbox currently lacks Sol ultrafast, so the live/UI runs verified the honest server-default Astra
+fallback; plugin tests cover preferred Sol/medium registration. Every requested tool completed in the live transcript.
+
+Review-1 verification: `test-master.py --review-1` adds an ordinary managed-chat header/context/details check and saves
+captures into `ios-mestra-prints/review-1/`. All four master/chat UI cases and the current 26 app-hosted tests pass in both
+themes; simulator build and root `bun run check` pass. The runner deletes only its own ordinary-chat import/allocation.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with
@@ -467,9 +768,9 @@ iPhone (WARP, org alexandrerm, master@alexandrem.com.br)
   the route has buffering disabled, a one-hour read timeout, and WebSocket upgrades enabled. A WebSocket for events
   would require a new backend endpoint and bring no gain, so WebSocket is used only where the server already offers
   it (PTY, when terminals come into scope).
-- **App Transport Security:** allow plain HTTP only for `opencode2-mac.alexandrem.com.br`, through
-  `NSExceptionDomains` with `NSExceptionAllowsInsecureHTTPLoads`. Do not use `NSAllowsArbitraryLoads`. Traffic is
-  already encrypted by the WARP tunnel.
+- **App Transport Security:** allow plain HTTP only for `opencode2-mac.alexandrem.com.br` and the private image-storage
+  host `seaweedfs-svc`, through `NSExceptionDomains` with `NSExceptionAllowsInsecureHTTPLoads`. Do not use
+  `NSAllowsArbitraryLoads`. Traffic is already encrypted by the WARP tunnel; storage has its own DNS/route policy.
 - **Origin:** nginx rejects requests whose `Origin` is not on its list. `URLSession` sends no `Origin`, so do not
   add one.
 - **Availability:** the route depends on the Mac being on and awake and on the OrbStack containers being healthy.
@@ -570,6 +871,21 @@ The OpenAPI generator (`swift-openapi-generator`) was ruled out. The document ha
 discriminator, it describes the event payload only as an opaque JSON string, and it does not include the plugin RPCs.
 If manual maintenance becomes costly, the next step is to emit Swift from the same Effect contract that
 `packages/httpapi-codegen` already reflects, which would also cover the RPCs.
+
+### Opening a conversation
+
+Health, Session metadata, execution activity and the unchanged 40-message tail load concurrently. The tail is published
+before directory availability, catalogs and family reads; independent catalogs also load concurrently. Viewed
+acknowledgement only needs Session metadata; sending and saved-position restoration wait for the stable runtime projection. Late runtime results never
+overwrite history paged in meanwhile.
+This applies equally to lean and native transport: there is no missing-RPC capability memory, special fallback policy,
+smaller first page or new transcript cache.
+
+For sandbox-only timing, build for **OpenCode Abertura** (`3CD95181-75A3-4225-B919-6B1C4DCFA77E`) with DerivedData
+`$TMPDIR/opencode/ios-abertura-derived`, then run `python3 packages/ios-custom/script/test-session-opening.py after`.
+The runner always supplies the explicit sandbox URL/password. DEBUG-only probes time route commitment → first transcript
+frame; loopback-only delay/old-server emulation compares normal RPC, 400-ms/req RPC and 400-ms/req missing-RPC fallback.
+It reads existing histories without prompts, seed changes or service operations. Detailed measurements are in the contract.
 
 ### Older custom servers
 
@@ -890,15 +1206,15 @@ deltas that may already be included in it, preventing duplicate text during reco
 Response text is parsed off the main actor by swift-markdown 0.7.3 into blocks and displayed by non-editable,
 selectable TextKit 2 views. Each carries its message ID, type-specific part ID and rendered-to-source UTF-16 mapping.
 `ResponseTextView` adds the native comment/side-question edit menu; source text remains the authority (especially for
-selections spanning Markdown delimiters). Tables are deliberately simple rows, not an interactive spreadsheet; no syntax highlighting.
+selections spanning Markdown delimiters). The later [Markdown rendering](#markdown-rendering) work adds native table grids, highlighting and the extended formatting capabilities.
 Images are decoded through `CGImageSourceCreateThumbnailAtIndex` at the displayed pixel size, never as full-size
 bitmaps. Invalid images use a compact filename/“Imagem indisponível” placeholder. The seed image is now a valid
 96×64 PNG; tests retain the old corrupt sample to verify rejection before painting.
 
-The native pinned section header is the user bubble itself, not a duplicated overlay. It clamps to two lines only
-after reaching the top. Auto-follow stops on user scrolling; the round glass button resumes following the tail.
+The native pinned section header is the user bubble itself, not a duplicated overlay. Its optional two-line clamp
+and manual expansion are independent of reaching the top. Auto-follow stops on user scrolling; the round glass button resumes following the tail.
 Tests in `ConversationTests.swift` cover all 41 fixtures, paging, tool summaries/groups, model/context identity,
-agent counts, replayed SSE, dates/sticky/unread/viewed decisions and Markdown source mapping. Frame-health sampling
+agent counts, replayed SSE, dates/unread/viewed decisions and Markdown source mapping. Frame-health sampling
 is unavailable for iOS simulators in agent-device; do not report an inferred FPS figure.
 
 ### Conversation actions (wave 2)
@@ -1070,8 +1386,9 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   1,000/3,000 UTF-16 units (without splitting a surrogate). `POST /generate` is JSON, never a durable prompt or SSE.
   Parar cancels only its URLSession task and restores the question; closing discards the thread. Failure has both a
   retryable shared toast and a local retry button.
-- A native `UIContextMenuInteraction` overlay handles **Copiar** and **Copiar citação** even in List's sticky section
-  headers, where SwiftUI's `contextMenu` does not install an interaction. Copiar uses only `displayText`; the quote
+- A native `UIContextMenuInteraction` on the recycled header handles **Copiar** and **Copiar citação** even in List's sticky section
+  headers, where SwiftUI's `contextMenu` does not install an interaction. It does not intercept buttons, attachments or
+  internal prompt scrolling. Copiar uses only `displayText`; the quote
   action copies blockquoted passages and comments. Both confirm through the shared toast.
 
 `SelectionTests.swift` covers plain/emphasis/code/link/list/accent/emoji source mapping, generated markers, quote
@@ -1207,8 +1524,8 @@ against a captured viewport origin.
   actual group. Do not overwrite the reading store or the viewed watermark to navigate.
 - The entire composer/quotes/tray/queue region is a real sibling below the recycling List, not a bottom overlay.
   Its measured layout always reduces the transcript viewport, including while the keyboard is shown. A non-empty
-  response selection pauses following until **Ir para o fim** is tapped. **Novas mensagens ↑** is an explicit jump
-  when the captured unread boundary is above the viewport; it does not change viewed acknowledgement semantics.
+  response selection pauses following; **Ir para a mais recente** or submission resumes it. The button is independent
+  of viewed acknowledgement and only appears beyond the web's geometric threshold; there is no upward unread jump.
 - Step/detail expansion is stored as IDs and explicit booleans in a separate 16-session memory LRU. Outputs, parsed
   Markdown, images and views are never cached there. The native edge-pop recognizer is enabled for the hidden-bar
   conversation, with root/transition guards and its previous delegate restored on departure.
@@ -1236,8 +1553,8 @@ The scheme's test action also has the explicit sandbox URL, including the app-ho
 the dedicated Simulator and uses uniquely named, private xctestrun files. Select hosted tests with, for example,
 `python3 packages/ios-custom/script/test-reading.py OpenCodeTests/ComposerKeyCommandTests`.
 
-Run `testUnreadJump` immediately after `seed-conversation.ts --reset`; later opens correctly have no unread boundary
-after viewed acknowledgement, so that case skips rather than moving the watermark backwards. The B seed now includes
+`testJumpToLatestWithoutUnreadStateInBothThemes` replaces the old watermark-dependent `testUnreadJump`: its own
+offline state is repeatable and requires no seed reset or watermark rollback. The B seed includes
 one imported read before its existing Markdown answer: the former simple reply correctly had no final divider and
 could not exercise the requested after-tools screenshot. No web/backend implementation or Sessões request changes
 are needed. Wave 7 should keep child navigation on this same reading/expansion store and reuse the optional editor
@@ -1336,7 +1653,7 @@ includes all 54 owned sessions from preparatory and final runs, with none active
 The conversation seed's permission and question are still pending; no seed reset was needed.
 
 Still out of scope: automatic redelivery of later child replies to the parent (requires a backend observation
-contract), system notifications/APNs/background delivery, microphone, Changes/Files views, syntax highlighting,
+contract), system notifications/APNs/background delivery, microphone, Changes/Files views,
 fork/revert and offline editing. The earlier software-keyboard private-API/TestFlight caveat and physical-keyboard
 manual check remain unchanged.
 

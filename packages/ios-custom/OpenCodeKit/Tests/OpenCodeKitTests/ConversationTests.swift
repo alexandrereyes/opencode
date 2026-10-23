@@ -66,10 +66,10 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   let messages = try page("transcript-working")
   let imported = try #require(messages.first { $0.tools.count == 5 })
   #expect(
-    ConversationProjection.stepLabel(imported.content ?? []) == "Usou 5 · Leu, Agente e Editou")
+    ConversationProjection.stepLabel(imported.content ?? []) == "Usou 5 · Ler, Agente e Editar")
   #expect(
     ConversationProjection.stepLabel(imported.content?.filter { $0.type == "reasoning" } ?? [])
-      == "Usou 2 · Raciocínio")
+      == "Usou 2 · Raciocínios")
   #expect(imported.content?.filter { $0.type == "reasoning" }.first?.time?.completed != nil)
 }
 
@@ -199,13 +199,9 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   #expect(ConversationProjection.merge(merged, page: tail).count == 89)
 }
 
-@Test func dayStickyUnreadAndViewedDecisions() throws {
+@Test func dayUnreadAndViewedDecisions() throws {
   let messages = try page("transcript-history")
-  let session = try conversationFixture("session-history", DataResponse<Session>.self).data
-  #expect(ConversationProjection.unread(messages, viewed: session.time.viewed) != nil)
   let last = try #require(messages.last)
-  let user = try #require(messages.last { $0.type == "user" })
-  #expect(ConversationProjection.sticky(messages, before: last.id)?.id == user.id)
   let now = Date(timeIntervalSince1970: last.time.created / 1000)
   #expect(ConversationProjection.day(last.time.created, now: now) == "Hoje")
   #expect(ConversationProjection.day(last.time.created - 86_400_000, now: now) == "Ontem")
@@ -259,7 +255,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
     from: Data(
       #"{"id":"s","type":"shell","time":{"created":0,"completed":2000},"command":"printf OK","status":"completed","output":"OK","exit":0}"#
         .utf8))
-  #expect(ConversationProjection.stepLabel(shell.tools) == "Usou 1 · Rodou")
+  #expect(ConversationProjection.stepLabel(shell.tools) == "Usou 1 · Shell")
   #expect(shell.tools.first?.summary(now: 5000) == "Rodou printf OK · 2s")
   #expect(shell.tools.first?.output == "OK")
 }
@@ -307,7 +303,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
 
 @Test func compactToolKindsDurationsAndDetails() throws {
   let tools = try page("transcript-history").flatMap(\.tools)
-  #expect(ConversationProjection.stepLabel(tools) == "Usou 10 · Buscou, Pesquisou, Abriu e mais 5")
+  #expect(ConversationProjection.stepLabel(tools) == "Usou 10 · Glob, Grep, Pesquisa na web, Busca na web, Execute, Ler, Patch, Shell e Perguntas")
   #expect(tools.first { $0.name == "question" }?.summary(now: 0).hasPrefix("Perguntou: ") == true)
   #expect(tools.first { $0.name == "shell" }?.exitCode == 2)
   let diff = try #require(tools.first { $0.name == "patch" })
@@ -319,9 +315,6 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   ] {
     #expect(ConversationProjection.duration(milliseconds) == expected)
   }
-  #expect(
-    ConversationProjection.ellipsis("Hospedar no Swarm.... próximo", count: 20)
-      == "Hospedar no Swarm…")
   let unknown = ConversationPart(
     type: "tool", name: "future-tool",
     state: .object(["input": .object(["query": .string("uma busca")])]))

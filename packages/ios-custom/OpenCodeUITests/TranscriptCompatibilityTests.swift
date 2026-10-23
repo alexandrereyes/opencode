@@ -16,18 +16,18 @@ import XCTest
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
     wait(NSPredicate(format: "value != 'Restaurando leitura'"), on: transcript)
-    if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+    if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
     XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Não foi possível atualizar a conversa.'")).firstMatch.exists)
     return app
   }
   private func wait(_ predicate: NSPredicate, on element: XCUIElement) {
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: element)], timeout: 20), .completed)
   }
-  private func reveal(_ element: XCUIElement, app: XCUIApplication) {
+  private func reveal(_ element: XCUIElement, app: XCUIApplication, topInset: CGFloat = 0) {
     for _ in 0..<24 {
       let transcript = app.collectionViews["conversation-transcript"]
       if element.exists && element.isHittable,
-        element.frame.minY > transcript.frame.minY, element.frame.maxY < transcript.frame.maxY { return }
+        element.frame.minY > transcript.frame.minY + topInset, element.frame.maxY < transcript.frame.maxY { return }
       let forward = element.exists && element.frame.midY > transcript.frame.midY
       transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: forward ? 0.65 : 0.45))
         .press(forDuration: 0.05, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: forward ? 0.45 : 0.65)))
@@ -43,9 +43,12 @@ import XCTest
   func testToolsReasoningAndChildThroughBothTransports() throws {
     for native in [false, true] {
       let app = try launch("WORKING", native: native)
-      let group = app.buttons["Usou 5 · Leu, Agente e Editou"]
-      reveal(group, app: app)
-      if !app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Pensou'")).firstMatch.exists { group.tap() }
+      let group = app.buttons["Usou 1 · Ler"]
+      reveal(group, app: app, topInset: 140)
+      if group.value as? String != "Expandido" {
+        group.tap()
+        wait(NSPredicate(format: "value == 'Expandido'"), on: group)
+      }
       let reasoning = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Pensou'")).firstMatch
       reveal(reasoning, app: app)
       XCTAssertTrue(reasoning.exists)
@@ -78,7 +81,7 @@ import XCTest
       XCTAssertTrue(attachment.exists && attachment.isHittable)
       XCTAssertFalse(app.staticTexts["Imagem indisponível"].exists)
       shot("attachment", native: native)
-      if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+      if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
       // Start paging from a fresh tail, not pages already loaded while locating the image.
       app.buttons["Voltar"].tap()
       app.terminate()

@@ -27,7 +27,13 @@ const encode = Schema.encodeSync(Preferences.Profile)
 
 export function applyIntent(profile: Preferences.Profile, intent: Preferences.Intent): Preferences.Profile {
   const data = mutableData(profile.data)
-  if ("server" in intent) {
+  if (intent.type === "master.set") data.masterSessions = { ...data.masterSessions, [intent.server]: intent.sessionID }
+  if (intent.type === "master.clear") {
+    data.masterSessions = Object.fromEntries(
+      Object.entries(data.masterSessions ?? {}).filter(([server]) => server !== intent.server),
+    )
+  }
+  if ("directory" in intent) {
     const library = data.projects[intent.server] ?? { projects: [], recentlyClosed: [] }
     const project = library.projects.find((item) => item.worktree === intent.directory)
     if (intent.type === "project.open") {
@@ -163,6 +169,7 @@ function mutableData(data: Preferences.Data) {
     sidebarOrder: [...data.sidebarOrder],
     pinnedSessions: [...data.pinnedSessions],
     mutedSessions: data.mutedSessions && [...data.mutedSessions],
+    masterSessions: data.masterSessions && { ...data.masterSessions },
     models: {
       user: data.models.user.map((model) => ({ ...model })),
       variant: { ...data.models.variant },
