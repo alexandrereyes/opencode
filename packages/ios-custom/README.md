@@ -543,10 +543,28 @@ final answer. Ending the call does not interrupt work already submitted to OpenC
 
 See [`docs/voice.md`](docs/voice.md) for the exact proxy contract, WARP requirements, transport and
 background ownership, source revisions, limitations, and test commands. The DEBUG-only
-`-OpenCodeVoiceFixture` uses no microphone, model or proxy; `-OpenCodeVoiceFakeMaster` isolates the
-master during physical audio checks. Both require the explicit sandbox 4177 server arguments.
+`-OpenCodeVoiceFixture` uses no microphone, GPT Live or master inference (KV appends may trigger
+server compaction above its threshold); `-OpenCodeVoiceFakeMaster` isolates the
+master during physical audio checks. Both require explicit loopback sandbox arguments (4177 or 4180).
 `script/test-voice.py` uses the dedicated **OpenCode Voz** simulator and an owned disposable history.
 The TestFlight script also accepts `OPENCODE_DERIVED_DATA` for an isolated archive directory.
+
+Voice memory uses the plugin's KV record, **not an OpenCode Session**. Canonical
+`turn.done` text, roles, native IDs, timestamps and interruptions are written to an
+atomic protected local file before RPC append. Ordered pending operations survive
+crash/offline periods and replay on launch/call; end checks follow their turns.
+`custom.voice` version 2 context becomes `session.initial_items` with both roles,
+summary/master data labels and a client-enforced 128-item/8,192-estimated-token cap.
+Instructions remain behavior-only. Unsupported/older servers do not block voice;
+local turns remain queued. The master receives only explicit delegations, not the
+voice transcript. See [`docs/voice.md`](docs/voice.md) for persistence and fallback.
+
+The expanded bar's **Ver transcrição** opens the record read-only (summary and
+recent turns), observing local captures live without UI polling. It is rolling
+memory, not an unlimited verbatim archive; there is no composer or delete action.
+This integration uses **OpenCode Voz Memoria** and sandbox **4180**, with
+`ios-vozmem-derived` / `ios-vozmem-prints`; the voice runners honor `OPENCODE_VOICE_*`
+overrides so other agents' simulators and services are untouched.
 
 ### Faixa de voz
 
@@ -565,7 +583,7 @@ stay in the same header row. VoiceOver exposes one element with its state/durati
 Reduce Motion stops the waveform; long lines truncate and large Dynamic Type keeps the controls reachable.
 
 The independent DEBUG-only `-OpenCodeVoiceBarFixture <state>` requires explicit
-`-OpenCodeServerURL http://127.0.0.1:4177`. States: `listening`, `speaking`, `thinking`, `connecting`,
+`-OpenCodeServerURL http://127.0.0.1:4177` (or explicit 4180). States: `listening`, `speaking`, `thinking`, `connecting`,
 `reconnecting`, `muted`, `error`, `idle` (master idle), `long`, `interrupted`. It never starts the engine,
 microphone, Live Activity or proxy. `script/test-voice-bar.py` imports and deletes one owned history,
 leaves sandbox seeds untouched, and runs on **OpenCode Faixa Voz** (`41015785-0AB5-413B-8CEC-8C986E83BC1E`).

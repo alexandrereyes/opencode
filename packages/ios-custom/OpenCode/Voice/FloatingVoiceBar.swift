@@ -11,6 +11,7 @@ struct FloatingVoiceBar: View {
   let retry: () -> Void
   let resume: () -> Void
   let expand: (Bool) -> Void
+  var transcript: () -> Void = {}
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -64,6 +65,13 @@ struct FloatingVoiceBar: View {
             } else { ProgressView().controlSize(.mini).tint(theme.color(.accent)) }
           }.appFont(.footnote).contentShape(Rectangle()).onTapGesture { expand(false) }
         }
+        Button(action: transcript) {
+          Label("Ver transcrição", systemImage: "text.bubble")
+            .appFont(.secondary, weight: .medium)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+          .accessibilityIdentifier("voice-transcript-action")
       }
       if state.phase == .failed || state.phase == .interrupted {
         Button(action: state.phase == .failed ? retry : resume) {
@@ -96,6 +104,7 @@ struct FloatingVoiceBar: View {
       }
       if state.phase == .failed { Button("Tentar novamente", action: retry) }
       if state.phase == .interrupted { Button("Retomar áudio", action: resume) }
+      if state.expanded { Button("Ver transcrição", action: transcript) }
       Button("Encerrar conversa por voz", action: end)
     }
   }

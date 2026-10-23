@@ -277,7 +277,7 @@ public struct OpenCodeClient: Sendable {
   private struct RPCOutput<Value: Decodable>: Decodable { let output: Value }
 
   public func rpc<Input: Encodable, Output: Decodable>(
-    _ id: String, _ method: String, input: Input, directory: String? = nil
+    _ id: String, _ method: String, input: Input, directory: String? = nil, timeout: TimeInterval? = nil
   )
     async throws -> Output
   {
@@ -285,8 +285,22 @@ public struct OpenCodeClient: Sendable {
       "/api/rpc/\(id)/\(method)",
       query: directory.map { [URLQueryItem(name: "location[directory]", value: $0)] } ?? [])
     request.httpMethod = "POST"
+    if let timeout { request.timeoutInterval = timeout }
     request.httpBody = try JSONEncoder().encode(RPCInput(input: input))
-    let data = try await data(request)
+    let data: Data
+    if let timeout {
+      let pending = request
+      data = try await withThrowingTaskGroup(of: Data.self) { group in
+        group.addTask { try await self.data(pending) }
+        group.addTask {
+          try await Task.sleep(for: .seconds(timeout))
+          throw URLError(.timedOut)
+        }
+        defer { group.cancelAll() }
+        guard let completed = try await group.next() else { throw CancellationError() }
+        return completed
+      }
+    } else { data = try await self.data(request) }
     #if DEBUG
     let started = ContinuousClock.now
     defer { OpeningDiagnostics.record("DECODE_RPC", started: started, bytes: data.count) }

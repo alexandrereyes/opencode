@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owned sandbox history and fake voice only. Never calls GPT Live or a model."""
+"""Owned fake voice by default. A muted real probe requires explicit OPENCODE_TEST_LIVE_VOICE=1."""
 import base64
 import json
 import os
@@ -11,10 +11,14 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
+server = os.environ.get("OPENCODE_VOICE_SERVER_URL", "http://127.0.0.1:4177")
+address = urllib.parse.urlparse(server)
+assert address.hostname == "127.0.0.1" and address.port in (4177, 4180)
+home = Path(os.environ.get("OPENCODE_VOICE_HOME", temporary / f"custom-sandbox-{address.port}"))
 derived = Path(os.environ.get("OPENCODE_VOICE_DERIVED", temporary / "ios-voz-derived"))
 evidence = Path(os.environ.get("OPENCODE_VOICE_EVIDENCE", temporary / "ios-voz-prints"))
 device = os.environ.get("OPENCODE_VOICE_DEVICE", "04E24A66-5B1F-4231-BC0B-07AEE991CD10")
@@ -22,7 +26,7 @@ password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -59,11 +63,13 @@ try:
         if "TestConfigurations" in run else [value for key, value in run.items() if key != "__xctestrun_metadata__"])
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update({"OPENCODE_TEST_PASSWORD": password,
-            "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_VOICE_SESSION": session})
+            "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_VOICE_SESSION": session,
+            "OPENCODE_TEST_SERVER_URL": server,
+            "OPENCODE_TEST_LIVE_VOICE": os.environ.get("OPENCODE_TEST_LIVE_VOICE", "0")})
         for fixture in manifest["sessions"]:
             role = "CHILD" if fixture["role"] == "child-1" else fixture["role"].upper()
             target["EnvironmentVariables"]["OPENCODE_TEST_" + role] = fixture["id"]
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server, "-OpenCodeTheme", theme]
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     result = evidence / ("voice-" + theme + "-" + uuid.uuid4().hex[:8] + ".xcresult")
@@ -80,7 +86,12 @@ try:
             source = attachments / attachment["exportedFileName"]
             if source.suffix == ".png" and not attachment["isAssociatedWithFailure"]:
                 shutil.copyfile(source, evidence / (theme + "-" + attachment["suggestedHumanReadableName"].split("_0_")[0] + ".png"))
-    print(json.dumps({"status": status, "result": str(result), "modelCalls": 0}))
+            if "memory-live-probe" in attachment["suggestedHumanReadableName"]:
+                shutil.copyfile(source, evidence / (theme + "-memory-live-probe.json"))
+    print(json.dumps({"status": status, "result": str(result),
+        "voiceCalls": None if os.environ.get("OPENCODE_TEST_LIVE_VOICE") == "1" else 0,
+        "explicitLiveProbe": os.environ.get("OPENCODE_TEST_LIVE_VOICE") == "1",
+        "masterModelCalls": 0, "memory": "KV append/end; server may compact above its threshold"}))
     sys.exit(status)
 finally:
     configured.unlink(missing_ok=True)

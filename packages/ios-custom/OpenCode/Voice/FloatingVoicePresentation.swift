@@ -80,15 +80,20 @@ struct FloatingVoiceHost: View {
   @Environment(\.floatingVoice) private var presentation
   @Environment(\.voicePresentationID) private var presentationID
   var sessions: SessionStore? = nil
+  @State private var transcript = false
   var body: some View {
-    if let presentation, let sessions = sessions ?? contextSessions, presentation.visible(voice),
-      presentation.presentations.last == presentationID {
-      TimelineView(.periodic(from: .now, by: 1)) { context in
-        FloatingVoiceBar(state: presentation.snapshot(voice, now: context.date),
-          mute: { presentation.mute(voice) }, end: { presentation.end(voice) },
-          retry: { presentation.retry(voice, sessions: sessions) }, resume: { presentation.resume(voice) },
-          expand: { presentation.expanded = $0 })
+    Group {
+      if let presentation, let sessions = sessions ?? contextSessions, presentation.visible(voice),
+        presentation.presentations.last == presentationID {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          FloatingVoiceBar(state: presentation.snapshot(voice, now: context.date),
+            mute: { presentation.mute(voice) }, end: { presentation.end(voice) },
+            retry: { presentation.retry(voice, sessions: sessions) }, resume: { presentation.resume(voice) },
+            expand: { presentation.expanded = $0 }, transcript: { transcript = true })
+        }
       }
+    }.sheet(isPresented: $transcript) {
+      if let sessions = sessions ?? contextSessions { VoiceTranscriptView(memory: sessions.voiceMemory) }
     }
   }
 }

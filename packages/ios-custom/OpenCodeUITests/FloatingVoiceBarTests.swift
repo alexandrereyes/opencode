@@ -8,7 +8,7 @@ import XCTest
 
   private func launch(_ state: String, large: Bool = false, conversation: Bool = false) throws {
     let environment = ProcessInfo.processInfo.environment
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme",
+    app.launchArguments = ["-OpenCodeServerURL", environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177", "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeVoiceBarFixture", state]
     if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
     if conversation { app.launchArguments += ["-OpenCodeOpenSession", session] }
@@ -197,5 +197,50 @@ import XCTest
       capture(state + "-compact-conversation")
       app.terminate()
     }
+  }
+
+  func testReadOnlyTranscriptStaysLiveAndDismissesWithoutEndingTheCall() throws {
+    try launch("listening")
+    XCTAssertTrue((bar.value as? String)?.hasPrefix("Compacta") == true)
+    toggle()
+    XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
+    capture("memory-action-expanded")
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+      .withOffset(CGVector(dx: 0, dy: -28)).tap()
+    capture("memory-after-action")
+    XCTAssertTrue(app.collectionViews["voice-memory-transcript"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["voice-memory-summary"].exists)
+    XCTAssertTrue(app.staticTexts["Confira a sessão de demonstração."].exists)
+    XCTAssertTrue(app.staticTexts["Vou conferir e resumir o resultado."].exists)
+    XCTAssertTrue(app.staticTexts["Fala interrompida"].exists)
+    XCTAssertFalse(app.textViews["conversation-composer"].exists)
+    capture("memory-record-both-roles")
+    app.buttons["voice-memory-fixture-update"].tap()
+    let update = app.staticTexts["Atualização local recebida durante a chamada."]
+    XCTAssertTrue(update.waitForExistence(timeout: 5))
+    capture("memory-record-live-update")
+    app.buttons["Concluir"].tap()
+    XCTAssertTrue(bar.waitForExistence(timeout: 5))
+    XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
+    control(86)
+    XCTAssertTrue(bar.label.contains("microfone desligado"))
+    capture("memory-dismiss-preserves-call")
+    control(36)
+    XCTAssertTrue(bar.waitForNonExistence(timeout: 5))
+    app.terminate()
+  }
+
+  func testTranscriptWithAccessibleTextSize() throws {
+    try launch("listening", large: true)
+    toggle()
+    XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+      .withOffset(CGVector(dx: 0, dy: -28)).tap()
+    XCTAssertTrue(app.collectionViews["voice-memory-transcript"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Concluir"].isHittable)
+    capture("memory-record-accessibility")
+    app.buttons["Concluir"].tap()
+    XCTAssertTrue(bar.waitForExistence(timeout: 5))
+    app.terminate()
   }
 }

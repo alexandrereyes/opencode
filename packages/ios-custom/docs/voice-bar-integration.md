@@ -3,7 +3,7 @@
 ## Superfície
 
 - `OpenCode/Voice/FloatingVoiceBar.swift`: view pura. Recebe `VoiceBarState`, `mute`, `end`, `retry`,
-  `resume` e `expand(Bool)`. Não abre áudio, rede, tarefas da mestra ou Live Activity.
+  `resume`, `expand(Bool)` e `transcript`. Não abre áudio, rede, tarefas da mestra ou Live Activity.
 - `OpenCodeKit/Sources/OpenCodeKit/VoiceBarState.swift`: valor `Equatable & Sendable`, projeção das
   fases do motor, relógio e textos acessíveis pt-BR. `VoiceState.masterWorking + listening` vira
   `thinking`; progresso ausente quando a mestra está ociosa; mute deixa a onda plana.
@@ -56,6 +56,25 @@ Relógio, progresso e ícone de mute usam `glassSecondary`, derivada de cada fam
 nas superfícies e num limite conservador de luminância do vidro. O cálculo mantém a matiz do tema e não muda
 o material, o layout, a onda/estado `primary` nem a composição tonal de encerrar. O mapeamento e a auditoria
 estão em `script/generate-themes.ts` e `script/check-theme-contrast.ts`; nenhum hexadecimal entrou na view.
+
+## Leitor de memória KV
+
+**Ver transcrição** aparece somente na expansão, com ação nomeada equivalente no
+VoiceOver. `FloatingVoiceHost` apresenta `VoiceTranscriptView` fora do `TimelineView`,
+sem registrar outro `FloatingVoiceScope`: abrir o sheet não remove seu próprio host.
+O leitor usa o `VoiceMemoryStore` observável da conexão ativa, e não uma cópia do
+array ao abrir. Mostra resumo, roles, interrupção, pendências/indisponibilidade e
+recorte de contexto; não oferece envio nem exclusão. Fechar preserva voz e expansão.
+
+O fixture visual fornece memória sintética e uma ação DEBUG de atualização local
+para verificar o leitor aberto. O motor falso é separado e exercita buffer/RPCs
+reais no sandbox 4180. Os runners agora aceitam `OPENCODE_VOICE_DEVICE`,
+`OPENCODE_VOICE_DERIVED`, `OPENCODE_VOICE_EVIDENCE` e `OPENCODE_VOICE_SERVER_URL`.
+Esta frente usa **OpenCode Voz Memoria**, `ios-vozmem-derived` e `ios-vozmem-prints`.
+Quatro casos direcionados passaram por tema, incluindo leitor atualizado enquanto
+aberto e fechamento preservando expansão/chamada. O recorte do motor falso também
+passou nas duas variantes; a rodada não repetiu os 80 estados históricos nem a
+suíte completa. O hit target da nova ação cobre a linha inteira, não só os glifos.
 
 ## Verificação final
 

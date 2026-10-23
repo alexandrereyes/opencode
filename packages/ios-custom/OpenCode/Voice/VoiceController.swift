@@ -34,12 +34,20 @@ import OSLog
   @ObservationIgnored private var finalNarration = false
   @ObservationIgnored private var theme = AppTheme.selected
   @ObservationIgnored private let http: URLSession
+  @ObservationIgnored private var memory: VoiceMemoryStore?
+  @ObservationIgnored private var memoryEvents: Task<Void, Never>?
+  @ObservationIgnored private var inputItemID: String?
+  @ObservationIgnored private var outputItemID: String?
+  @ObservationIgnored private var interruptedAssistant = false
+  @ObservationIgnored private var interruptedUser = false
+  @ObservationIgnored private var capturedTurns: Set<String> = []
   #if DEBUG
   struct TestDependencies {
     let transport: (@escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting
     let master: (@escaping @MainActor (VoiceMasterUpdate) -> Void) -> any VoiceMasterServing
     let request: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     var permission = true
+    var memory: VoiceMemoryStore?
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies) { self.init(); self.testing = testing }
@@ -63,13 +71,19 @@ import OSLog
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
+    inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
+    #if DEBUG
+    memory = testing == nil ? sessions.voiceMemory : testing?.memory
+    #else
+    memory = sessions.voiceMemory
+    #endif
     let updates: @MainActor (VoiceMasterUpdate) -> Void = { [weak self] update in
       guard let self, self.epoch == token else { return }
       self.receive(update)
     }
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
-    let isolated = sessions.client.configuration.url.host == "127.0.0.1" && sessions.client.configuration.url.port == 4177
+    let isolated = sessions.client.configuration.url.host == "127.0.0.1" && [4177, 4180].contains(sessions.client.configuration.url.port ?? -1)
     let fixture = isolated && arguments.contains("-OpenCodeVoiceFixture")
     let fakeMaster = isolated && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))
     master = testing?.master(updates) ?? (fakeMaster ? VoiceFakeMaster(update: updates) : VoiceMaster(sessions: sessions, update: updates))
@@ -77,6 +91,15 @@ import OSLog
       connectedAt = .now; state.apply(.connected); detail = "Demonstração local"; publish()
       connection = Task { [weak self] in
         guard let self else { return }
+        _ = await memory?.prepare()
+        guard epoch == token else { return }
+        for json in [
+          #"{"type":"input_transcript.added","item":{"id":"fixture-user","text":"Confira a demonstração."}}"#,
+          #"{"type":"turn.done","turn":{"id":"fixture-user-turn","role":"user","transcript":"Confira a demonstração."}}"#,
+          #"{"type":"output_transcript.added","item":{"id":"fixture-assistant","text":"Vou conferir a demonstração."}}"#,
+          #"{"type":"input_transcript.added","item":{"id":"fixture-barge","text":"Uma correção."}}"#,
+          #"{"type":"turn.done","turn":{"id":"fixture-assistant-turn","role":"assistant","transcript":"Vou conferir a demonstração. Este é o texto canônico completo.","interrupted":true}}"#,
+        ] { if let event = try? VoiceProtocol.decode(Data(json.utf8)) { handle(event) } }
         try? await self.master?.ask(VoiceMasterRequest("Demonstração"))
       }
       return
@@ -108,10 +131,11 @@ import OSLog
         guard let transport else { throw VoiceWireError.invalidAnswer }
         // Local factory/audio setup overlaps the reservation, but no provider call is speculative.
         async let offer = transport.offer()
+        async let history = memory?.prepare()
         try await renew(signal, method: "POST")
         guard epoch == token else { return }
         beginRenewal(signal, token: token)
-        let request = try signal.offerRequest(sdp: await offer)
+        let request = try signal.offerRequest(sdp: await offer, history: await history)
         let (data, response) = try await perform(request)
         guard let response = response as? HTTPURLResponse else { throw VoiceWireError.invalidAnswer }
         let answer = try VoiceSignaling.parseAnswer(data, response: response)
@@ -175,8 +199,13 @@ import OSLog
       mediaConnected = true
       if ready { connected() }
     case .resumed: state.apply(.resume); publish()
-    case .interrupted: state.apply(.interruption); detail = "Toque em retomar após a interrupção"; publish()
+    case .interrupted:
+      if state.phase == .speaking { interruptedAssistant = true }
+      if inputItemID != nil { interruptedUser = true }
+      state.apply(.interruption); detail = "Toque em retomar após a interrupção"; publish()
     case .disconnected:
+      if state.phase == .speaking { interruptedAssistant = true }
+      if inputItemID != nil { interruptedUser = true }
       mediaConnected = false; state.apply(.reconnect); publish()
       armWatchdog(token: epoch, seconds: 10, message: "A conexão de áudio não se recuperou. Reconecte a chamada.")
     case .failed: Task { await fail("A conexão de áudio foi encerrada. Tente reconectar.") }
@@ -202,17 +231,21 @@ import OSLog
   private func handle(_ event: VoiceEvent) {
     switch event {
     case .ready: ready = true; if mediaConnected { connected() }
-    case .input:
+    case .input(let piece):
+      inputItemID = piece.id ?? inputItemID
+      if state.phase == .speaking { interruptedAssistant = true }
       VoiceTransport.log.notice("phase=input-transcript")
       state.apply(.bargeIn); userUntil = ProcessInfo.processInfo.systemUptime + 2
       publish()
-    case .output(let text):
+    case .output(let piece):
+      outputItemID = piece.id ?? outputItemID
       VoiceTransport.log.notice("phase=output-transcript")
-      currentSpokenLine = String((state.phase == .speaking ? currentSpokenLine + " " + text : text).suffix(2000))
+      currentSpokenLine = String((state.phase == .speaking ? currentSpokenLine + " " + piece.text : piece.text).suffix(2000))
       state.apply(.speech); publish()
-    case .turnDone(let assistant):
-      if assistant { state.apply(.silence) }
-      else { userUntil = ProcessInfo.processInfo.systemUptime + 1 }
+    case .turnDone(let turn):
+      capture(turn)
+      if turn.role == .assistant { state.apply(.silence); outputItemID = nil; interruptedAssistant = false }
+      else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
     case .failure: Task { await fail("O serviço de voz informou uma falha. Tente novamente mais tarde.") }
     case .delegation(let id, let text):
@@ -224,6 +257,21 @@ import OSLog
       handled.insert(id); delegationQueue.append((id, text))
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break
+    }
+  }
+  private func capture(_ turn: VoiceCompletedTurn) {
+    guard let memory, let callID = sessionID, let text = turn.text,
+      let nativeID = turn.id ?? turn.itemID ?? (turn.role == .assistant ? outputItemID : inputItemID),
+      !nativeID.isEmpty, capturedTurns.insert(nativeID).inserted else { return }
+    let itemID = turn.itemID ?? (turn.role == .assistant ? outputItemID : inputItemID) ?? nativeID
+    let sourceID = nativeID == itemID ? itemID : nativeID + ":" + itemID
+    let recorded = VoiceMemoryTurn(id: callID.uuidString + ":" + sourceID, role: turn.role, text: text,
+      at: Date.now.timeIntervalSince1970 * 1000,
+      interrupted: turn.interrupted || (turn.role == .assistant ? interruptedAssistant : interruptedUser))
+    let previous = memoryEvents
+    memoryEvents = Task {
+      await previous?.value
+      await memory.capture(recorded)
     }
   }
   private func pumpDelegations() async {
@@ -290,6 +338,8 @@ import OSLog
     busy = false
   }
   private func releaseResources() async {
+    let callID = sessionID
+    let memory = memory
     epoch = UUID()
     connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); narrationTask?.cancel(); delegationTask?.cancel()
     connection = nil; renewal = nil; watchdog = nil; narrationTask = nil; delegationTask = nil
@@ -301,6 +351,8 @@ import OSLog
       // Teardown precedes release. A failed DELETE is bounded by the proxy lease TTL.
       _ = try? await perform(request)
     }
+    await memoryEvents?.value; memoryEvents = nil
+    if let callID { await memory?.finish(callID) }
     sessionID = nil; await activity.end()
   }
   private func publish() {

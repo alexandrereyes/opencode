@@ -11,18 +11,22 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.parse
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-faixavoz-derived"
-evidence = temporary / "ios-faixavoz-prints"
-device = "41015785-0AB5-413B-8CEC-8C986E83BC1E"
+server = os.environ.get("OPENCODE_VOICE_SERVER_URL", "http://127.0.0.1:4177")
+address = urllib.parse.urlparse(server)
+assert address.hostname == "127.0.0.1" and address.port in (4177, 4180)
+home = Path(os.environ.get("OPENCODE_VOICE_HOME", temporary / f"custom-sandbox-{address.port}"))
+derived = Path(os.environ.get("OPENCODE_VOICE_DERIVED", temporary / "ios-faixavoz-derived"))
+evidence = Path(os.environ.get("OPENCODE_VOICE_EVIDENCE", temporary / "ios-faixavoz-prints"))
+device = os.environ.get("OPENCODE_VOICE_DEVICE", "41015785-0AB5-413B-8CEC-8C986E83BC1E")
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -55,8 +59,9 @@ try:
         if "TestConfigurations" in run else [value for key, value in run.items() if key != "__xctestrun_metadata__"])
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update({"OPENCODE_TEST_PASSWORD": password,
-            "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_VOICE_BAR_SESSION": session})
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme]
+            "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_VOICE_BAR_SESSION": session,
+            "OPENCODE_TEST_SERVER_URL": server})
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server, "-OpenCodeTheme", theme]
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi",

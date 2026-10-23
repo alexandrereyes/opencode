@@ -25,7 +25,8 @@ pelo WARP; não se publica essa origem na Internet.
    prazo são validados antes da negociação.
 2. `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas`, JSON com `sdp`
    completo e `session`: modelo `gpt-live-1-codex`, `audio.output.voice=cove`, instruções pt-BR e
-   `delegation.type=client`. Headers: `OpenAI-Alpha: quicksilver=v2`, `originator: a2a-chat`,
+   `delegation.type=client` e, quando disponível, `initial_items` com memória nas duas roles.
+   As instructions continuam curtas, somente com regras de comportamento. Headers: `OpenAI-Alpha: quicksilver=v2`, `originator: a2a-chat`,
    `session-id`, `thread-id`, `x-session-id` e `x-gpt-live-generation`. O proxy escolhe a conta e
    injeta credenciais. Só 201 com SDP e Location é aceito; criação ambígua não é repetida.
 3. `PUT /_gpt-live/sessions/{UUID}`, mesmo body, a cada cinco segundos. Timeout HTTP de oito
@@ -59,6 +60,49 @@ alto-falante padrão. Mudanças de rota revalidam ativação; iOS 27 usa `didBec
 e `resumptionRecommendationNotification`. Sem recomendação de retomada, o controle **Retomar
 áudio** é explícito. Media-services reset exige nova conexão. Uma troca de rede tem dez segundos
 para recuperar o peer; depois há erro honesto e reconexão manual, com novos UUIDs.
+
+## Memória da conversa (KV, sem Session de voz)
+
+`VoiceMemoryService` reconhece apenas `custom.voice` versão 2, `storage=kv` e
+`contextFormat=initial_items`. Sem essas capacidades, em falha de rede ou durante
+ativação do plugin, a chamada segue sem memória inicial. Os pedidos de info/context
+têm deadline de dois segundos por RPC (não somente timeout ocioso); não mudam
+lease, áudio ou delegação da mestra.
+
+Cada `turn.done` preserva o texto canônico completo (não a soma de deltas), role,
+timestamp, IDs nativos do turno/item e interrupção. Barge-in também marca a resposta
+interrompida, pois seu final pode não ter sido ouvido. Os IDs enviados ao servidor
+são qualificados pelo UUID da chamada. Deltas continuam sendo apenas apresentação.
+
+Antes de qualquer append HTTP, `VoiceMemoryBuffer` grava um arquivo JSON atômico
+por servidor em Application Support, com proteção até a primeira autenticação no
+iOS. O arquivo não contém senha. Mantém operações ordenadas, IDs já vistos, um
+cache de leitura e marcadores de fim. Só remove operações depois de confirmação;
+um crash entre aceitação remota e confirmação local repete os mesmos IDs.
+Buffer inválido não é sobrescrito silenciosamente. Erro de gravação aparece no leitor.
+
+O `SessionStore` retoma pendências no próximo lançamento/conexão; capturas e fim
+também iniciam sincronização. Falhas transitórias usam retry limitado a 3–30 s;
+servidor sem suporte só é sondado novamente ao preparar uma chamada/leitura. A fila
+envia lotes de turnos antes de seu marcador `end`, sem reordená-los. Encerrar fecha
+primeiro a mídia e libera a lease, aguarda as gravações locais e enfileira o check
+de compactação. Não fica com áudio aberto esperando o servidor. Não se promete
+execução após force-quit; o arquivo fica para o próximo lançamento.
+
+No início, contexto do servidor e pendências locais viram `session.initial_items`:
+user/`input_text`, assistant/`output_text`, resumo anterior como item user claramente
+rotulado como dado (conforme o contrato), e estado da mestra como outro item de dado.
+O cliente reaplica o teto de **128 itens / 8.192 tokens estimados**, incluindo labels
+e interrupções, usando `ceil(bytes UTF-8 / 3) + 8` por item. Não envia transcrição nas
+instructions, não usa `session.input` e não envia falas recentes à Sessão mestra.
+
+**Ver transcrição**, na faixa expandida e nas ações do VoiceOver, abre um leitor
+somente leitura com resumo, ambas as roles, interrupções e aviso de contexto
+limitado. Ele observa o mesmo buffer: falas locais finalizadas aparecem durante a
+chamada, mesmo offline, sem polling de UI nem outra subscrição SSE. Dismiss não
+encerra a chamada. Não há composer, Session de voz, filtro de listas ou botão de
+apagar. A memória do servidor é rolante: resumo e turnos recentes, não arquivo
+verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-session.md`.
 
 ## Sessão mestra
 
@@ -124,10 +168,45 @@ e Release sem warnings. O manifesto final da faixa está em
 
 `swift test` em `OpenCodeKit` cobre contrato, leases, estado, interrupções, UTF-8 e narração.
 Os testes hospedados `VoiceControllerTests` e `VoiceMasterTests` usam transporte/HTTP/mestra falsos.
-`script/test-voice.py` importa e remove apenas seu histórico no sandbox 4177, sem inferência, e roda
+`script/test-voice.py` importa e remove apenas seu histórico no sandbox explícito, sem inferência da mestra, e roda
 `VoiceUITests` com `-OpenCodeVoiceFixture`, nas duas variantes OpenChamber. Esse modo não abre o
 microfone nem o proxy. `-OpenCodeVoiceFakeMaster`, também DEBUG-only e restrito ao sandbox explícito,
 permite testar áudio real no iPhone sem alcançar o OpenCode de produção.
+O motor falso também passa turnos canônicos pelo buffer e pelos RPCs KV, quando
+disponíveis; muitas repetições podem alcançar o gatilho de resumo do plugin.
+O fixture puramente visual da faixa usa somente memória sintética local.
+
+Para esta frente, use somente **OpenCode Voz Memoria** (`31CE4E76-2902-4D64-A9C3-F069593B454F`),
+`OPENCODE_VOICE_SERVER_URL=http://127.0.0.1:4180`, `OPENCODE_VOICE_DERIVED=…/opencode/ios-vozmem-derived`
+e `OPENCODE_VOICE_EVIDENCE=…/opencode/ios-vozmem-prints`. Ambos os runners aceitam
+essas variáveis, mais `OPENCODE_VOICE_DEVICE`; não reutilize simuladores/DerivedData de outra frente.
+
+### Verificação da memória iOS — 23/10
+
+`swift test`: **299 testes** passaram. O recorte hospedado de voz/mestra/Activity e
+motor falso passou em ambos os temas: **11 passaram, um probe real foi pulado por
+padrão**, por tema. Quatro casos da faixa/leitor por tema cobrem abrir/atualizar/
+fechar sem encerrar voz, ambas as roles, interrupção, Dynamic Type máximo e os
+controles/insets existentes. Não foi rodada a suíte completa do app nesta frente.
+
+No sandbox 4180, o motor falso gravou texto canônico completo e IDs qualificados;
+contexto relido confirmou ambas as roles e interrupção. Os seeds temporários dos
+runners são removidos; o KV de teste sintético permanece no home privado do sandbox.
+
+Um único probe real no simulador passou pelo `VoiceController`/`VoiceSignaling`
+de produção: **20 initial_items**, roles user/assistant, **648 tokens estimados**,
+HTTP **201**, mídia/canal conectados e **session.started**, seguido de DELETE
+da lease **204**. O wrapper de teste desabilitou a trilha do microfone depois da
+oferta local e **antes** de sinalizar ao proxy; nenhuma fala humana foi enviada.
+Não se verificou recordação semântica nessa rodada, apenas transporte inicial e
+prontidão nativa. Não houve delegação à mestra. O teste fica desativado, exige
+simulador, sandbox 4180 e `OPENCODE_TEST_LIVE_VOICE=1` explícitos.
+
+Capturas/logs/xcresults:
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-vozmem-prints/`.
+`verification.json` registra os resultados finais e caminhos absolutos. Warnings
+do toolchain de teste sobre metadata de debugger/SDK não são warnings de compilação;
+os builds Debug e Release são checados separadamente.
 
 Para usar o simulador da faixa com a regressão do motor, configure
 `OPENCODE_VOICE_DEVICE=41015785-0AB5-413B-8CEC-8C986E83BC1E`,

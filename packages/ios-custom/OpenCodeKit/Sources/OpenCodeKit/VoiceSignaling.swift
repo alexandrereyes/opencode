@@ -29,7 +29,7 @@ public struct VoiceSignaling: Sendable {
     }
     return request
   }
-  public func offerRequest(sdp: String) throws -> URLRequest {
+  public func offerRequest(sdp: String, history: VoiceMemoryContext? = nil) throws -> URLRequest {
     guard sdp.hasPrefix("v=0"), sdp.utf8.count <= 256 * 1024 else { throw VoiceWireError.invalidAnswer }
     var url = Self.baseURL.appending(path: "backend-api/codex/realtime/calls")
     url.append(queryItems: [URLQueryItem(name: "intent", value: "quicksilver"),
@@ -42,13 +42,16 @@ public struct VoiceSignaling: Sendable {
       "session-id": sessionID.uuidString, "thread-id": sessionID.uuidString,
       "x-session-id": sessionID.uuidString, "x-gpt-live-generation": generation.uuidString
     ].forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-    request.httpBody = try JSONEncoder().encode(JSONValue.object([
-      "sdp": .string(sdp), "session": .object([
+    var session: [String: JSONValue] = [
         "model": .string("gpt-live-1-codex"), "instructions": .string(VoiceProtocol.instructions),
         "audio": .object(["output": .object(["voice": .string("cove")])]),
         "delegation": .object(["type": .string("client")]),
-      ]),
-    ]))
+    ]
+    if let history, !history.initialItems.isEmpty {
+      session["initial_items"] = try JSONDecoder().decode(JSONValue.self,
+        from: JSONEncoder().encode(history.initialItems))
+    }
+    request.httpBody = try JSONEncoder().encode(JSONValue.object(["sdp": .string(sdp), "session": .object(session)]))
     return request
   }
   public func parseLease(_ data: Data, status: Int) throws -> VoiceLease {

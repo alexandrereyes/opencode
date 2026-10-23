@@ -72,6 +72,7 @@ final class SessionStore {
   let catalog: ModelCatalogCache
 
   @ObservationIgnored let client: OpenCodeClient
+  let voiceMemory: VoiceMemoryStore
   @ObservationIgnored let hub: EventHub
   @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored let reading: ReadingPositionStore
@@ -109,6 +110,10 @@ final class SessionStore {
     let client = suppliedClient ?? OpenCodeClient(configuration: configuration)
     #endif
     self.client = client
+    voiceMemory = VoiceMemoryStore(client: client)
+    #if DEBUG
+    if VoiceBarFixtures.launchState != nil { voiceMemory.preview() }
+    #endif
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
@@ -208,6 +213,7 @@ final class SessionStore {
   }
 
   func stop() async {
+    await voiceMemory.stop()
     runningTask?.cancel()
     await runningTask?.value
     await quota.stop()
@@ -219,6 +225,7 @@ final class SessionStore {
   }
 
   private func consumeEvents() async {
+    voiceMemory.resume()
     quota.start()
     let events = hub.events()
     let connection = Task { await hub.run() }
@@ -236,6 +243,7 @@ final class SessionStore {
       if Task.isCancelled { break }
       switch frame.event {
       case .connected:
+        voiceMemory.resume()
         connected = true
         alerts.connect(at: frame.receivedAt)
         scheduleReload()
