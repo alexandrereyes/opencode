@@ -195,10 +195,7 @@ function selection(local: ReturnType<typeof useLocal>) {
 
 test("catalog additions stay hidden until explicitly enabled", () => {
   const f = fixture({ session: durable("a") })
-  f.setPreferences("user", [
-    { ...key("a"), visibility: "show" },
-    { ...key("b"), visibility: "hide" },
-  ])
+  f.setPreferences("user", [{ ...key("a"), visibility: "show" }, { ...key("b"), visibility: "hide" }])
   const { local } = f.mount()
   expect(local.model.visible(key("a"))).toBe(true)
   expect(local.model.visible(key("b"))).toBe(false)
@@ -219,39 +216,6 @@ test("catalog additions stay hidden until explicitly enabled", () => {
   expect(local.model.visible(key("new"))).toBe(true)
   local.model.setVisibility(key("new"), false)
   expect(local.model.visible(key("new"))).toBe(false)
-})
-
-test("internal voice models and hidden agents cannot enter web picker, saved-default or recent selection", () => {
-  const voice = { providerID: "voz-eco", modelID: "transcricao" }
-  const f = fixture({
-    session: { agent: "voz", model: { providerID: voice.providerID, id: voice.modelID } },
-    agents: [{ ...agent("voz", voice), hidden: true }, agent("build")],
-    config: "voz-eco/transcricao",
-  })
-  f.set("providers", (providers) => [{ ...providers[0], id: "voz-eco", name: "Voz" }, ...providers])
-  f.set("models", (models) => [
-    { ...models[0], id: voice.modelID, modelID: voice.modelID, providerID: voice.providerID },
-    ...models,
-  ])
-  f.setPreferences("user", [
-    { ...voice, visibility: "show" },
-    { ...key("b"), visibility: "show" },
-  ])
-  f.setPreferences("recent", [voice, key("b")])
-  f.setProfile("models", "default", voice)
-  const { local, composer } = f.mount(true)
-  if (!composer) throw new Error("missing draft composer")
-  expect(local.model.list().some((model) => model.provider.id === voice.providerID)).toBe(false)
-  expect(local.agent.list().map((agent) => agent.name)).toEqual(["build"])
-  expect(selection(local)).toEqual({ agent: "build", model: "b", variant: undefined })
-  local.model.set(voice)
-  expect(local.model.current()?.provider.id).not.toBe(voice.providerID)
-  local.model.cycle(1)
-  expect(local.model.current()?.id).toBe("b")
-  f.set("route", "id", undefined)
-  expect(composer.current()?.provider.id).not.toBe(voice.providerID)
-  composer.set(voice)
-  expect(composer.current()?.provider.id).not.toBe(voice.providerID)
 })
 
 test("restores durable agents even when the agent selector is hidden", () => {
@@ -530,11 +494,7 @@ test.each([1, -1] as const)("cycles %p from outside recents to the correct end a
 })
 
 test("the web default model and thinking win over agent and configured models in new sessions", () => {
-  const f = fixture({
-    agents: [agent("build", key("a"), "low"), agent("plan")],
-    config: "provider/b",
-    preferred: "low",
-  })
+  const f = fixture({ agents: [agent("build", key("a"), "low"), agent("plan")], config: "provider/b", preferred: "low" })
   f.setProfile("models", "default", { ...key("b"), variant: "high" })
   f.set("route", "id", undefined)
   const { local, composer } = f.mount(true)

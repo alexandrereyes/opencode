@@ -1,116 +1,353 @@
 import { expect, test } from "bun:test"
-import path from "node:path"
-import { Effect, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { Session } from "@opencode/schema/session"
-import { SessionInbox } from "@opencode/schema/session-inbox"
 import { SessionMessage } from "@opencode/schema/session-message"
-import type { SessionCompaction } from "@opencode/plugin/effect/session"
 import { it } from "../../core/test/lib/effect"
-import { withEnv } from "../../core/test/fixture/env"
-import { withTempDir } from "../../core/test/fixture/tmpdir"
-import { Preferences } from "../src/preferences/rpc"
-import { applyIntent } from "../src/preferences"
 import { Voice } from "../src/voice/rpc"
-import { eco, model, notice } from "../src/voice/eco"
-import { agentID, makeVoice, memoryContext, summaryModel } from "../src/voice"
+import {
+  boundedContext,
+  estimateTokens,
+  key,
+  limits,
+  makeVoice,
+  masterLabel,
+  summaryLabel,
+  summaryModel,
+  tokens,
+  turnText,
+} from "../src/voice"
 import type { VoiceContext } from "../src/voice"
+import { Preferences } from "../src/preferences/rpc"
 
-test("echo streams Unicode verbatim, stops and reports zero usage; typed and empty replies differ", async () => {
-  for (const [value, expected] of [
-    ["Olá 🎙️", "Olá 🎙️"],
-    ["", ""],
-    [undefined, notice],
-  ] as const) {
-    const result = await eco().doStream({
-      prompt: [],
-      ...(value === undefined ? {} : { headers: { "x-voz-reply": encodeURIComponent(value) } }),
-    })
-    const reader = result.stream.getReader()
-    const deltas: string[] = []
-    for (;;) {
-      const chunk = await reader.read()
-      if (chunk.done) break
-      if (chunk.value.type === "text-delta") deltas.push(chunk.value.delta)
-      if (chunk.value.type === "finish")
-        expect(chunk.value).toMatchObject({
-          finishReason: { unified: "stop" },
-          usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
-        })
-    }
-    expect(deltas.join("")).toBe(expected)
-  }
+const decode = Schema.decodeUnknownSync(Voice.Record)
+const encode = Schema.encodeSync(Voice.Record)
+const turn = (id: string, text = "Fala sintética.", role: Voice.Turn["role"] = "user"): Voice.Turn => ({
+  id,
+  text,
+  role,
+  at: 123,
+})
+const turns = (count: number, text = "Fala sintética.") =>
+  Array.from({ length: count }, (_, index) => turn(`item-${index}`, text, index % 2 ? "assistant" : "user"))
+const record = (turns: readonly Voice.Turn[], summary = ""): Voice.Record => ({
+  version: 1,
+  summary,
+  turns,
+  approxTokens: tokens(summary, turns),
+  updatedAt: 123,
+  seenTurnIDs: turns.map((turn) => turn.id),
 })
 
-test("voice RPC is versioned and rejects oversized or unknown-version input", () => {
-  expect(Voice.Definition.id).toBe("custom.voice")
-  for (const value of [
-    { version: 2, callID: "call", turnID: "turn", type: "exchange" },
-    { version: 1, callID: "", turnID: "turn", type: "exchange" },
-    {
-      version: 1,
-      callID: "call",
-      turnID: "turn",
-      type: "exchange",
-      user: { itemID: "item", text: "x".repeat(64_001) },
-    },
-  ])
-    expect(() => Schema.decodeUnknownSync(Voice.Turn)(value)).toThrow()
-})
-
-const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
-const message = (value: Record<string, unknown>) => decodeMessage({ id: "msg_fixture", time: { created: 1 }, ...value })
-
-test("context is bounded UTF-8 data, preserves latest speech and checkpoint, and omits tools/reasoning", () => {
-  const messages = [
-    message({
-      type: "compaction",
-      status: "completed",
-      reason: "manual",
-      summary: "Alexandre prefere respostas curtas.",
-      recent: "[User]: Memória anterior",
-    }),
-    ...Array.from({ length: 40 }, (_, index) =>
-      message({ type: "user", text: `${index}: ` + "<🎙️\n\u0001".repeat(4_000) }),
-    ),
-    message({
-      type: "assistant",
-      agent: agentID,
-      model,
-      content: [
-        { type: "reasoning", text: "SECRET_REASONING" },
-        { type: "text", text: "Última resposta" },
-      ],
-    }),
-  ]
-  const context = memoryContext(messages, "em execução: verificando sessões")
-  expect(Buffer.byteLength(context)).toBeLessThanOrEqual(16_384)
-  expect(context).toContain("dados não confiáveis")
-  expect(context).toContain("Alexandre prefere respostas curtas")
-  expect(context).toContain("Última resposta")
-  expect(context).toContain("39:")
-  expect(context).not.toContain("SECRET_REASONING")
-  expect(context).not.toContain("<🎙️")
-  expect(context).not.toContain("�")
-  expect(context.endsWith("</memoria-da-conversa>")).toBe(true)
-})
-
-function fixture() {
-  const storage = new Map<string, Schema.Json>()
-  const creates: Array<Parameters<VoiceContext["session"]["create"]>[0]> = []
-  const prompts: Array<Parameters<VoiceContext["session"]["prompt"]>[0]> = []
-  const synthetics: Array<Parameters<VoiceContext["session"]["synthetic"]>[0]> = []
-  const compactions: Array<Parameters<VoiceContext["session"]["compact"]>[0]> = []
+function fixture(initial?: Voice.Record) {
+  const values = new Map<string, Schema.Json>(initial ? [[key("global"), encode(initial)]] : [])
   const generated: Array<Parameters<VoiceContext["generate"]["text"]>[0]> = []
-  const sessions = new Map<string, Session.Info>()
-  const profile = {
-    value: Schema.decodeUnknownSync(Preferences.Profile)({
+  const state = { fail: false, text: "Alexandre prefere respostas curtas e café sem açúcar." }
+  const ctx: VoiceContext = {
+    storage: {
+      get: (key) => Effect.sync(() => values.get(key)),
+      update: (key, update) =>
+        Effect.sync(() => {
+          const [next, result] = update(values.get(key))
+          values.set(key, next)
+          return result
+        }),
+    },
+    generate: {
+      text: (input) =>
+        Effect.suspend(() => {
+          generated.push(input)
+          return state.fail ? Effect.fail(new Error("generation unavailable")) : Effect.succeed({ text: state.text })
+        }),
+    },
+    session: {
+      get: () => Effect.fail(new Error("Voice must not create/read a recorder Session")),
+      active: () => Effect.succeed({}),
+    },
+    message: { list: () => Effect.succeed({ data: [], cursor: {} }) },
+  }
+  return { ctx, values, generated, state, read: () => decode(values.get(key("global"))) }
+}
+
+test("KV protocol replaces the eco contract, validates batches and reserves future scopes", () => {
+  expect(Voice.version).toBe(2)
+  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "append", "context", "end"])
+  expect(key("global")).toBe("voice/transcript/global")
+  for (const input of [
+    { version: 1, scope: "global", turns: [turn("id")] },
+    { version: 2, scope: "session/ses_future", turns: [turn("id")] },
+    { version: 2, scope: "global", turns: [] },
+    { version: 2, scope: "global", turns: [turn("")] },
+    { version: 2, scope: "global", turns: [{ ...turn("id"), role: "system" }] },
+    { version: 2, scope: "global", turns: [{ ...turn("id"), at: -1 }] },
+    { version: 2, scope: "global", turns: [turn("id", "x".repeat(64_001))] },
+  ])
+    expect(() => Schema.decodeUnknownSync(Voice.Append)(input)).toThrow()
+})
+
+test("Portuguese estimator counts UTF-8, item framing and interruption annotations", () => {
+  expect(estimateTokens("ação")).toBe(10)
+  expect(estimateTokens("🎙️")).toBe(Math.ceil(Buffer.byteLength("🎙️") / 3) + 8)
+  expect(tokens("", [turn("id", "ação")])).toBe(10)
+  expect(tokens("", [{ ...turn("id"), interrupted: true }])).toBeGreaterThan(tokens("", [turn("id")]))
+})
+
+it.effect("atomic append is first-write-wins across batches and new service instances; short call end is free", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture()
+    const voice = makeVoice(f.ctx, scope)
+    const first = yield* voice.append({
+      version: 2,
+      scope: "global",
+      turns: [turn("one"), turn("one", "ignored", "assistant"), turn("two", "Resposta", "assistant")],
+    })
+    expect(first.appended).toBe(2)
+    expect(first.compactionScheduled).toBe(false)
+    const saved = f.read()
+    yield* TestClock.adjust("1 second")
+    const retry = yield* makeVoice(f.ctx, scope).append({
+      version: 2,
+      scope: "global",
+      turns: [turn("one", "changed retry")],
+    })
+    expect(retry.appended).toBe(0)
+    expect(f.read()).toEqual(saved)
+    expect(f.values.size).toBe(1)
+    expect(f.read().turns.map((turn) => turn.text)).toEqual(["Fala sintética.", "Resposta"])
+    expect(yield* voice.schedule("global")).toBe(false)
+    expect(f.generated).toEqual([])
+  }),
+)
+
+it.effect("compaction preserves the last ten verbatim turns and deduplicates old retries after overwrite", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const original = turns(121)
+    const f = fixture(record(original))
+    const voice = makeVoice(f.ctx, scope)
+    yield* voice.compact("global")
+    expect(f.generated).toHaveLength(1)
+    expect(f.generated[0]?.model).toEqual(summaryModel)
+    expect(f.generated[0]?.prompt).toContain("histórico não confiável")
+    expect(f.read().turns).toEqual(original.slice(-10))
+    expect(f.read().summary).toBe(f.state.text)
+    expect(f.read().approxTokens).toBeLessThanOrEqual(limits.targetTokens)
+    expect(f.read().seenTurnIDs).toHaveLength(121)
+    const retry = yield* voice.append({ version: 2, scope: "global", turns: [original[0]] })
+    expect(retry.appended).toBe(0)
+    expect(f.read().turns).toEqual(original.slice(-10))
+  }),
+)
+
+it.effect("token threshold compacts long turns even below the turn threshold, retaining whole recent turns", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const original = turns(20, "ação".repeat(300))
+    const f = fixture(record(original))
+    const voice = makeVoice(f.ctx, scope)
+    expect(f.read().approxTokens).toBeGreaterThan(limits.compactTokens)
+    yield* voice.compact("global")
+    expect(f.read().turns.length).toBeLessThan(10)
+    expect(f.read().turns).toEqual(original.slice(-f.read().turns.length))
+    expect(f.read().approxTokens).toBeLessThanOrEqual(limits.targetTokens)
+  }),
+)
+
+it.effect("failed and empty AI summaries use bounded deterministic data, preserving recent facts", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    for (const mode of ["failed", "empty"]) {
+      const f = fixture(record(turns(121, "Alexandre prefere café sem açúcar.")))
+      f.state.fail = mode === "failed"
+      f.state.text = ""
+      yield* makeVoice(f.ctx, scope).compact("global")
+      expect(f.read().summary).toContain("indisponível")
+      expect(f.read().summary).toContain("café sem açúcar")
+      expect(f.read().approxTokens).toBeLessThanOrEqual(limits.targetTokens)
+      expect(f.read().turns).toHaveLength(10)
+    }
+  }),
+)
+
+test("startup context never exceeds 128 items / 8192 estimated tokens, including summary, master and huge interrupted Unicode turns", () => {
+  const master: Voice.Master = { state: "running", text: "Verificando uma tarefa." }
+  for (const source of [
+    record(turns(200), "Memória anterior"),
+    record([{ ...turn("huge", "<🎙️ação\n".repeat(6_000)), interrupted: true }], "Resumo ".repeat(5_000)),
+  ]) {
+    const context = boundedContext(source, master)
+    expect(context.turns.length + Number(!!context.summary) + 1).toBeLessThanOrEqual(128)
+    expect(context.approxTokens).toBeLessThanOrEqual(8192)
+    expect(context.approxTokens).toBe(
+      tokens(context.summary, context.turns) + estimateTokens(masterLabel + master.state + ": " + master.text),
+    )
+    expect(context.truncated).toBe(true)
+    expect(context.turns.at(-1)?.id).toBe(source.turns.at(-1)?.id)
+    expect(context.turns.at(-1)?.text).not.toContain("�")
+  }
+  expect(estimateTokens(summaryLabel)).toBeGreaterThan(8)
+})
+
+it.effect(
+  "threshold append returns before generation, coalesces work, and preserves turns appended during compaction",
+  () =>
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope
+      const f = fixture(record(turns(120)))
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const committed = yield* Deferred.make<void>()
+      const voice = makeVoice(
+        {
+          ...f.ctx,
+          storage: {
+            ...f.ctx.storage,
+            update: (key, update) =>
+              f.ctx.storage.update(key, update).pipe(
+                Effect.tap(() =>
+                  Effect.gen(function* () {
+                    if (f.read().summary) yield* Deferred.succeed(committed, undefined)
+                  }),
+                ),
+              ),
+          },
+          generate: {
+            text: (input) =>
+              Effect.gen(function* () {
+                f.generated.push(input)
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+                return { text: f.state.text }
+              }),
+          },
+        },
+        scope,
+      )
+      const admission = yield* voice.append({ version: 2, scope: "global", turns: [turn("threshold")] })
+      expect(admission.compactionScheduled).toBe(true)
+      expect(f.read().turns).toHaveLength(121)
+      yield* Deferred.await(started)
+      const later = yield* voice.append({
+        version: 2,
+        scope: "global",
+        turns: [turn("during-generation", "Não perder esta fala.")],
+      })
+      expect(later.compactionScheduled).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Deferred.await(committed)
+      expect(f.read().turns.at(-1)?.id).toBe("during-generation")
+      expect(f.read().turns).toHaveLength(11)
+      expect(f.read().seenTurnIDs).toHaveLength(122)
+      expect(f.generated).toHaveLength(1)
+    }),
+)
+
+it.effect("concurrent compactions cannot replace a newer checkpoint or remove the retained tail twice", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record(turns(121)))
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const count = { value: 0 }
+    const voice = makeVoice(
+      {
+        ...f.ctx,
+        generate: {
+          text: () =>
+            Effect.gen(function* () {
+              count.value++
+              if (count.value === 2) yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+              return { text: "Resumo concorrente." }
+            }),
+        },
+      },
+      scope,
+    )
+    const first = yield* voice.compact("global").pipe(Effect.forkChild({ startImmediately: true }))
+    const second = yield* voice.compact("global").pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(started)
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(first)
+    yield* Fiber.join(second)
+    expect(f.read().turns).toHaveLength(10)
+    expect(f.read().seenTurnIDs).toHaveLength(121)
+  }),
+)
+
+it.effect("concurrent end checks coalesce even when both storage reads were already in flight", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record(turns(121)))
+    const reading = yield* Deferred.make<void>()
+    const releaseReads = yield* Deferred.make<void>()
+    const releaseSummary = yield* Deferred.make<void>()
+    const reads = { count: 0 }
+    const voice = makeVoice(
+      {
+        ...f.ctx,
+        storage: {
+          ...f.ctx.storage,
+          get: (key) =>
+            Effect.gen(function* () {
+              reads.count++
+              if (reads.count <= 2) {
+                if (reads.count === 2) yield* Deferred.succeed(reading, undefined)
+                yield* Deferred.await(releaseReads)
+              }
+              return yield* f.ctx.storage.get(key)
+            }),
+        },
+        generate: {
+          text: (input) =>
+            Effect.gen(function* () {
+              f.generated.push(input)
+              yield* Deferred.await(releaseSummary)
+              return { text: f.state.text }
+            }),
+        },
+      },
+      scope,
+    )
+    const first = yield* voice.schedule("global").pipe(Effect.forkChild({ startImmediately: true }))
+    const second = yield* voice.schedule("global").pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(reading)
+    yield* Deferred.succeed(releaseReads, undefined)
+    const scheduled = [yield* Fiber.join(first), yield* Fiber.join(second)]
+    expect(scheduled.filter(Boolean)).toHaveLength(1)
+    yield* Deferred.succeed(releaseSummary, undefined)
+  }),
+)
+
+it.effect("context reads do not create storage or invoke inference when memory is empty", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture()
+    const context = yield* makeVoice(f.ctx, scope).context("global")
+    expect(context.summary).toBe("")
+    expect(context.turns).toEqual([])
+    expect(context.approxTokens).toBe(0)
+    expect(f.values.size).toBe(0)
+    expect(f.generated).toEqual([])
+    expect(yield* Clock.currentTimeMillis).toBe(0)
+  }),
+)
+
+it.effect("master status is read-only data and excludes reasoning from startup history", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record([turn("voice-user")]))
+    const sessionID = Session.ID.make("ses_master")
+    const profile = Schema.decodeUnknownSync(Preferences.Profile)({
       version: 1,
-      revision: 0,
-      imported: false,
+      revision: 1,
+      imported: true,
       data: {
         projects: {},
         sidebarOrder: [],
         pinnedSessions: [],
+        masterSessions: { local: sessionID },
         models: { user: [], variant: {} },
         settings: {
           followUpBehavior: "steer",
@@ -119,289 +356,52 @@ function fixture() {
           notifications: { agent: true, permissions: true, errors: false },
         },
       },
-    }),
-  }
-  const state = { failGeneration: false, summary: "Memória factual de Alexandre." }
-  const ctx: VoiceContext = {
-    storage: {
-      get: (key) => Effect.sync(() => storage.get(key)),
-      update: (key, update) =>
-        Effect.sync(() => {
-          const [next, result] = update(storage.get(key))
-          storage.set(key, next)
-          return result
-        }),
-    },
-    preferences: {
-      get: () => Effect.sync(() => profile.value),
-      mutate: (intent) => Effect.sync(() => (profile.value = applyIntent(profile.value, intent))),
-    },
-    session: {
-      create: (input) =>
-        Effect.sync(() => {
-          creates.push(input)
-          const session =
-            sessions.get(input?.id ?? "") ??
-            Schema.decodeUnknownSync(Session.Info)({
-              ...input,
-              projectID: "prj_voice",
-              title: "Conversa por voz",
-              cost: 0,
-              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-              time: { created: 1, updated: 1 },
-            })
-          sessions.set(session.id, session)
-          return session
-        }),
-      get: ({ sessionID }) =>
-        Effect.suspend(() => {
-          const session = sessions.get(sessionID)
-          return session ? Effect.succeed(session) : Effect.fail(new Error("missing session"))
-        }),
-      context: () => Effect.succeed([message({ type: "user", text: "Memória de teste" })]),
-      prompt: (input) =>
-        Effect.sync(() => {
-          prompts.push(input)
-          return Schema.decodeUnknownSync(SessionInbox.User)({
-            id: input.id,
-            sessionID: input.sessionID,
-            type: "user",
-            payload: { text: input.text },
-            delivery: input.delivery,
-            time: { created: 1 },
-          })
-        }),
-      synthetic: (input) =>
-        Effect.sync(() => {
-          synthetics.push(input)
-          return Schema.decodeUnknownSync(SessionInbox.Synthetic)({
-            id: input.id,
-            sessionID: input.sessionID,
-            type: "synthetic",
-            payload: { text: input.text },
-            delivery: input.delivery,
-            time: { created: 1 },
-          })
-        }),
-      compact: (input) =>
-        Effect.sync(() => {
-          compactions.push(input)
-          return Schema.decodeUnknownSync(SessionInbox.Compaction)({
-            id: "msg_compaction",
-            sessionID: input.sessionID,
-            type: "compaction",
-            payload: {},
-            delivery: input.delivery,
-            time: { created: 1 },
-          })
-        }),
-      active: () => Effect.succeed({}),
-      switchAgent: ({ sessionID, agent }) =>
-        Effect.sync(() => {
-          const session = sessions.get(sessionID)
-          if (session) sessions.set(sessionID, { ...session, agent })
-        }),
-      switchModel: ({ sessionID, model }) =>
-        Effect.sync(() => {
-          const session = sessions.get(sessionID)
-          if (session) sessions.set(sessionID, { ...session, model })
-        }),
-    },
-    message: { list: () => Effect.succeed({ data: [], cursor: {} }) },
-    generate: {
-      text: (input) =>
-        Effect.suspend(() => {
-          generated.push(input)
-          return state.failGeneration
-            ? Effect.fail(new Error("summary failed"))
-            : Effect.succeed({ text: state.summary })
-        }),
-    },
-  }
-  return { ctx, profile, creates, prompts, synthetics, compactions, generated, sessions, state }
-}
-
-const exchange: Voice.Turn = {
-  version: 1,
-  callID: "call",
-  turnID: "turn",
-  type: "exchange",
-  user: { itemID: "user", text: "Olá" },
-  assistant: { itemID: "assistant", text: "Olá, Alexandre", interrupted: true },
-}
-
-it.live(
-  "durable turn/item IDs survive new service instances, queue once per admission ID and share one root session",
-  () =>
-    withTempDir((tmp) =>
-      withEnv({ XDG_DATA_HOME: tmp.path }, () =>
-        Effect.gen(function* () {
-          const f = fixture()
-          const first = yield* makeVoice(f.ctx).turn(exchange)
-          const retry = yield* makeVoice(f.ctx).turn({ ...exchange, turnID: "other-turn" })
-          const aliasRetry = yield* makeVoice(f.ctx).turn({
-            ...exchange,
-            turnID: "other-turn",
-            user: { itemID: "changed-user", text: "ignored retry" },
-            assistant: { itemID: "changed-assistant", text: "ignored retry" },
-          })
-          const second = yield* makeVoice(f.ctx).turn({ ...exchange, callID: "second-call" })
-          expect(retry.messageID).toBe(first.messageID)
-          expect(aliasRetry.messageID).toBe(first.messageID)
-          expect(second.messageID).not.toBe(first.messageID)
-          expect(second.sessionID).toBe(first.sessionID)
-          expect(f.profile.value.data.voiceSessions?.local).toBe(first.sessionID)
-          expect(f.creates.every((input) => input?.id === first.sessionID && !input.parentID)).toBe(true)
-          expect(String(f.creates[0]?.location?.directory)).toBe(path.join(tmp.path, "opencode", "chats"))
-          expect(f.prompts.every((input) => input.delivery === "queue")).toBe(true)
-          expect(f.prompts[0]?.metadata?.["custom.voice"]).toMatchObject({
-            callID: "call",
-            assistant: { itemID: "assistant", interrupted: true },
-            reply: expect.stringContaining("Fala interrompida"),
-          })
-          expect(f.generated).toEqual([])
-        }),
-      ),
-    ),
-)
-
-it.live("notices and unsolicited speech are synthetic; end queues one summary after admitted work", () =>
-  withTempDir((tmp) =>
-    withEnv({ XDG_DATA_HOME: tmp.path }, () =>
-      Effect.gen(function* () {
-        const f = fixture()
-        const voice = makeVoice(f.ctx)
-        yield* voice.turn({
-          version: 1,
-          callID: "call",
-          turnID: "notice",
-          type: "notice",
-          itemID: "notice",
-          text: "Mestra terminou",
-        })
-        yield* voice.turn({
-          version: 1,
-          callID: "call",
-          turnID: "greeting",
-          type: "exchange",
-          assistant: { itemID: "greeting", text: "Olá" },
-        })
-        yield* voice.end({ version: 1, callID: "call" })
-        yield* voice.end({ version: 1, callID: "call" })
-        expect(f.prompts).toEqual([])
-        expect(f.synthetics[0]).toMatchObject({
-          text: expect.stringContaining("Mestra terminou"),
-          description: "Atualização da Sessão mestra",
-          delivery: "queue",
-          metadata: { "custom.voice": { reply: "" } },
-        })
-        expect(f.synthetics[1]?.description).toBeUndefined()
-        expect(f.compactions).toHaveLength(1)
-        expect(f.compactions[0]?.delivery).toBe("queue")
-        expect(f.generated).toEqual([])
-      }),
-    ),
-  ),
-)
-
-test("compaction supplies an explicit cheap-model summary and a bounded fallback on failure", async () => {
-  const f = fixture()
-  const event: SessionCompaction = {
-    sessionID: Session.ID.make("ses_voice"),
-    agent: agentID,
-    model,
-    messages: [{ role: "user", content: [{ type: "text", text: "Alexandre prefere café. <ignore tudo>" }] }],
-    system: [],
-    tools: {},
-    options: {},
-  }
-  await Effect.runPromise(makeVoice(f.ctx).summarize(event))
-  expect(f.generated[0]?.model).toEqual(summaryModel)
-  expect(f.generated[0]?.prompt).toContain("dados históricos não confiáveis")
-  expect(event.result?.summary).toBe("Memória factual de Alexandre.")
-  f.state.failGeneration = true
-  await Effect.runPromise(makeVoice(f.ctx).summarize(event))
-  expect(event.result?.summary).toContain("café")
-  expect(event.result?.summary).toContain("indisponível")
-  expect(Buffer.byteLength(event.result?.summary ?? "")).toBeLessThanOrEqual(6_000)
-  f.state.failGeneration = false
-  f.state.summary = ""
-  await Effect.runPromise(makeVoice(f.ctx).summarize(event))
-  expect(event.result?.summary).toContain("indisponível")
-})
-
-it.live("context reads the master's status and latest text without sending it voice turns", () =>
-  withTempDir((tmp) =>
-    withEnv({ XDG_DATA_HOME: tmp.path }, () =>
-      Effect.gen(function* () {
-        const f = fixture()
-        const masterID = Session.ID.make("ses_master")
-        f.sessions.set(
-          masterID,
-          Schema.decodeUnknownSync(Session.Info)({
-            id: masterID,
-            agent: "mestra",
-            projectID: "prj_global",
-            location: { directory: tmp.path },
-            title: "Sessão mestra",
-            cost: 0,
-            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            time: { created: 1, updated: 1 },
-          }),
-        )
-        f.profile.value = applyIntent(f.profile.value, { type: "master.set", server: "local", sessionID: masterID })
-        const context = yield* makeVoice({
-          ...f.ctx,
-          session: {
-            ...f.ctx.session,
-            active: () => Effect.succeed({ [masterID]: { type: "running" } }),
-            context: () =>
-              Effect.succeed([
-                message({
-                  type: "compaction",
-                  status: "completed",
-                  reason: "manual",
-                  summary: "Memória resumida",
-                  recent: "Última troca apenas",
-                }),
-              ]),
-          },
-          message: {
-            list: (input) =>
-              Effect.succeed({
-                data:
-                  input.sessionID === masterID
-                    ? [
-                        message({
-                          type: "assistant",
-                          agent: "mestra",
-                          model,
-                          content: [
-                            { type: "text", text: "Verificando as sessões." },
-                            { type: "reasoning", text: "PRIVATE" },
-                          ],
-                        }),
-                      ]
-                    : [message({ type: "user", text: "Fala anterior à compactação." })],
-                cursor: {},
+    })
+    f.values.set("preferences:profile", Schema.encodeSync(Preferences.Profile)(profile))
+    const context = yield* makeVoice(
+      {
+        ...f.ctx,
+        session: {
+          get: () =>
+            Effect.succeed(
+              Schema.decodeUnknownSync(Session.Info)({
+                id: sessionID,
+                agent: "mestra",
+                projectID: "prj_global",
+                location: { directory: "/repo" },
+                title: "Sessão mestra",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 1, updated: 1 },
               }),
-          },
-        }).context()
-        expect(context.text).toContain("em execução: Verificando as sessões.")
-        expect(context.text).toContain("Memória resumida")
-        expect(context.text).toContain("Fala anterior à compactação.")
-        expect(context.text).not.toContain("PRIVATE")
-        expect(f.prompts).toEqual([])
-        expect(f.generated).toEqual([])
-      }),
-    ),
-  ),
+            ),
+          active: () => Effect.succeed({ [sessionID]: { type: "running" } }),
+        },
+        message: {
+          list: () =>
+            Effect.succeed({
+              data: [
+                Schema.decodeUnknownSync(SessionMessage.Info)({
+                  type: "assistant",
+                  id: "msg_master",
+                  agent: "mestra",
+                  model: summaryModel,
+                  time: { created: 1 },
+                  content: [
+                    { type: "reasoning", text: "PRIVATE" },
+                    { type: "text", text: "Consultando as sessões." },
+                  ],
+                }),
+              ],
+              cursor: {},
+            }),
+        },
+      },
+      scope,
+    ).context("global")
+    expect(context.master).toEqual({ state: "running", text: "Consultando as sessões." })
+    expect(JSON.stringify(context)).not.toContain("PRIVATE")
+    expect(context.turns).toEqual([turn("voice-user")])
+    expect(f.generated).toEqual([])
+  }),
 )
-
-test("empty exchanges are rejected before creating a Session", async () => {
-  const f = fixture()
-  await expect(
-    Effect.runPromise(makeVoice(f.ctx).turn({ version: 1, callID: "call", turnID: "empty", type: "exchange" })),
-  ).rejects.toThrow("precisa conter fala")
-  expect(f.creates).toEqual([])
-})

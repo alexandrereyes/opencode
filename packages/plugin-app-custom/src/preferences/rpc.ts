@@ -37,7 +37,6 @@ export const Data = Schema.Struct({
   pinnedSessions: Schema.Array(Schema.String),
   mutedSessions: optional(Schema.Array(Schema.String)),
   masterSessions: optional(Schema.Record(Schema.String, Session.ID)),
-  voiceSessions: optional(Schema.Record(Schema.String, Session.ID)),
   models: Schema.Struct({
     user: Schema.Array(Model),
     variant: Schema.Record(Schema.String, Schema.mutableKey(Schema.String)),
@@ -59,7 +58,6 @@ export type Profile = typeof Profile.Type
 
 const ProjectTarget = { server: Schema.String, directory: Schema.String }
 export const Intent = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("voice.set"), server: Schema.String, sessionID: Session.ID }),
   Schema.Struct({ type: Schema.Literal("master.set"), server: Schema.String, sessionID: Session.ID }),
   Schema.Struct({ type: Schema.Literal("master.clear"), server: Schema.String }),
   Schema.Struct({ type: Schema.Literal("project.open"), ...ProjectTarget }),

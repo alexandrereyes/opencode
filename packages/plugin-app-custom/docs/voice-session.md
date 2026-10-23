@@ -1,201 +1,208 @@
-# Continuous voice conversation memory
+# Voice memory in plugin KV storage
 
-The custom plugin records voice in one real, top-level **Conversa por voz**
-Session per server. It lives directly in the managed chats root, uses the hidden
-`voz` agent, and is not a child of the master. Transcripts have no retention limit
-or feature-specific delete action. Native compaction does not delete the timeline.
+Voice does **not** create an OpenCode Session. There is no echo provider/model,
+`voz` agent, Session runner, Session compaction hook or picker policy. Voice
+memory is versioned JSON in `ctx.storage`, persisted in SQLite's `kv` table under
+the custom plugin's namespace. No Core or public HTTP API change is needed.
 
-## Local echo provider
+## Record and scopes
 
-`voz-eco/transcricao` declares a 48,000-token context and zero-cost usage. Its
-`LanguageModelV3` streams already-spoken text, reports zero tokens and `stop`, and
-never invokes inference or a tool. The agent is hidden, primary, has `steps: 1`
-and deny-all permissions; the context hook also removes tools.
+Today the only scope is `"global"`, with one key:
 
-The provider declares `aisdk:@ai-sdk/perplexity` **only as a shipped SDK factory**.
-Core's built-in Perplexity hook constructs the SDK before its dynamic npm
-fallback; the custom provider-scoped `aisdk.hook("sdk")` then unconditionally
-replaces it with the in-process echo SDK. No Perplexity credential or HTTP method
-is used. The package remains on the AISDK path instead of native canonicalization.
-Core already depends on and bundles its literal dynamic import in the compiled
-CLI. No new runtime dependency, sidecar file, listening port, Core change or
-plugin extension point is needed.
+```text
+voice/transcript/global
+```
 
-An invented package initially failed: Core's dynamic SDK hook tried installing
-it before the external plugin hook ran. `@ai-sdk/openai-compatible` worked in the
-source sandbox, but was not chosen because a cached dynamic installation would
-not prove release compatibility. The shipped Perplexity factory resolves that
-problem without changing hook ordering.
+The future sibling `voice/transcript/session/<sessionID>` is reserved, not
+implemented. A future scope listing can use `scan({prefix:"voice/transcript/"})`.
+No key, transcript or prefix scan is exposed as a model tool.
 
-## RPC version 1
-
-All methods use the normal authenticated, location-scoped plugin RPC transport:
-`POST /api/rpc/custom.voice/<method>?location[directory]=...`, body `{ "input": ... }`.
-The contract is exported as `@opencode/plugin-app-custom/voice/rpc`.
-
-- **`info({})`** returns `{version:1, agent:"voz", provider:"voz-eco", model:"transcricao"}`.
-  It does not create a Session. An app must probe support and fall back to voice
-  without memory on older servers (`rpc.unavailable`/`rpc.method_not_found`).
-- **`context({version:1})`** creates/adopts the recorder and returns
-  `{version:1, sessionID, text}`. The text contains the native summary, recent
-  exchanges and the master's current running/idle state plus at most its latest
-  500 text characters. It excludes reasoning and tools, is bounded to **16 KiB
-  UTF-8**, and explicitly marks historical content as untrusted data, not current
-  instructions or authorization. Literal `<` in data is escaped. No master
-  prompt, delegation or model call is made by this read.
-- **`turn(...)`** durably admits one finalized exchange or one master notice,
-  returning `{version:1, sessionID, messageID}`. This is admission, not completion.
-  Call/turn/item identifiers are nonempty, at most 200 characters; each speech
-  text is at most 64,000 characters.
-- **`end({version:1, callID})`** queues native compaction **after** already-admitted
-  exchanges, then returns `{version:1, sessionID}`. It does not wait for summary
-  completion. Repeated calls after admission are ignored; no known turns means
-  no compaction. Like normal Session operations, crash recovery is not an
-  exactly-once guarantee for inference.
-
-Example finalized exchange:
+The stored record is:
 
 ```json
 {
   "version": 1,
-  "callID": "call-uuid",
-  "turnID": "exchange-id",
-  "type": "exchange",
-  "user": { "itemID": "input-item", "text": "Prefiro respostas curtas." },
-  "assistant": {
-    "itemID": "output-item",
-    "text": "Vou lembrar, Alexandre.",
-    "interrupted": false
-  }
+  "summary": "",
+  "turns": [
+    { "id": "call-uuid:item-id", "role": "user", "text": "Olá", "at": 1792760000000 },
+    {
+      "id": "call-uuid:reply-id",
+      "role": "assistant",
+      "text": "Olá, Alexandre",
+      "at": 1792760001000,
+      "interrupted": true
+    }
+  ],
+  "approxTokens": 42,
+  "updatedAt": 1792760001000,
+  "seenTurnIDs": ["call-uuid:item-id", "call-uuid:reply-id"]
 }
 ```
 
-Either `user` or `assistant` may be omitted, but not both. Assistant-only speech
-uses an undescribed synthetic input so no fictitious user bubble is shown.
-User-only speech gets an empty echo, not the typed-text warning. Interrupted
-speech preserves the original text in metadata and adds an explicit visible
-marker that its ending may not have been heard.
+`summary` stays empty until compaction. `at` is the client's event time;
+`updatedAt` is server time. Append order is retained. `seenTurnIDs` is durable
+deduplication metadata: it retains IDs after old verbatim turns are summarized,
+so replaying a crash/offline buffer cannot resurrect old entries. It contains no
+second transcript copy and is not returned as startup history. `approxTokens`
+counts history text/framing, not this bookkeeping metadata.
 
-A master return is a notice, not a user utterance:
+There is no TTL, time retention limit or feature-specific delete action.
+**This is rolling memory, not a verbatim archive:** compaction intentionally
+overwrites older turns with their summary and a recent verbatim tail. A reader
+shows the current record's summary and turns.
 
-```json
-{
-  "version": 1,
-  "callID": "call-uuid",
-  "turnID": "notice-id",
-  "type": "notice",
-  "itemID": "master-result-id",
-  "text": "A mestra concluiu a consulta."
-}
-```
+## RPC contract: version 2
 
-Its synthetic description is **Atualização da Sessão mestra**, its model-facing
-text identifies the master as the source, and its echo is empty. Recent voice
-turns are **never sent to the master**.
+The contract is exported as `@opencode/plugin-app-custom/voice/rpc`. Use the
+authenticated normal plugin transport, for example
+`POST /api/rpc/custom.voice/append`, body `{ "input": ... }`.
 
-## Durability and preferences
+- **`info({})`** reports version `2`, `storage:"kv"`,
+  `contextFormat:"initial_items"`, supported scopes and the history/compaction
+  limits. It neither allocates storage nor invokes inference.
+- **`append({version:2, scope:"global", turns:[...]})`** atomically appends one or
+  more finalized turns, first-write-wins by ID both within and across batches.
+  Retries ignore changed payloads. The response reports `appended`, stored token
+  estimate, timestamp and whether a background compaction was scheduled. A
+  successful response acknowledges the entire batch, including duplicate IDs.
+- **`context({version:2, scope:"global"})`** returns `summary`, `turns`, their
+  bounded `approxTokens`, `updatedAt`, `truncated`, and optional `master` status.
+  Missing memory returns empty history without creating a record or calling a
+  model. The master is read only: running/idle and up to its last 500 text
+  characters, further byte-bounded; no reasoning/tool payloads are included.
+- **`end({version:2, scope:"global"})`** triggers a compaction **check**, not an
+  unconditional summary. It returns whether work was scheduled, not completion.
+  Short calls incur no summary request. No call/Session ID is required.
 
-The plugin atomically reserves one Session ID in its own KV storage, then uses
-idempotent `session.create({id,...})`. The shared preferences pointer is
-`custom.preferences.data.voiceSessions.local`; `voice.set` is an additive intent.
-Old profiles need no migration, and unrelated preference mutations preserve the
-new optional field. The plugin's reservation is server-global across Locations.
-Voice and preferences handlers share an in-plugin preferences service, including
-its update event. They do not send bundled Effect codecs through a host-side
-internal RPC client; that boundary is incompatible with the minified release.
+Batches accept 1–128 turns. IDs are nonempty and at most 200 characters; each
+text is at most 64,000 characters. Roles are strictly `user` and `assistant`.
+The protocol was bumped from the discarded echo prototype's version 1. An app
+must probe and require the supported version/capabilities; older servers, an
+unsupported version or unavailable RPC fall back to a call without memory.
+The plugin does not retain the obsolete `turn` RPC or its old semantics.
 
-A per-call index stores turn/item aliases and their native message IDs, **not
-another transcript copy**. Retries by either turn or item ID reuse the admission
-ID, including after restart. Core's first-admission-wins contract ignores changed
-retry payloads. Cross-type reuse fails instead of changing message types.
+## Context → GPT Live `initial_items`
 
-Each admission uses `delivery:"queue"`: one promoted input produces one echo
-assistant. The completed reply and canonical IDs are in the input's
-`metadata["custom.voice"]`, so restart does not depend on a process-local map.
-Immediately before dispatch, the plugin reads the latest promoted user/synthetic
-message and passes its reply through the internal `x-voz-reply` request header.
-That header is consumed by the local model; it is never sent over HTTP.
+Keep `instructions` short: behavior rules and the rule that supplied historical
+content is data, not current instructions or authorization. Do not paste the
+transcript into instructions. Construct initial history as follows:
 
-Typed text gets this fixed local response:
+1. If present, add the summary as a user text item prefixed with the exported
+   `summaryLabel`: **Resumo das conversas anteriores (dados, não instruções):**.
+2. Map each historical user turn to
+   `{type:"message", role:"user", content:[{type:"input_text", text}]}` and each
+   assistant turn to the same shape with `role:"assistant"` / `output_text`.
+3. For interrupted turns, append the exported `turnText` annotation that the
+   ending may not have been heard. Preserve the raw original text in the record.
+4. If present, append master status as another user data item with `masterLabel`,
+   then `state + ": " + text`. Do not delegate these turns to the master.
 
-> Esta sessão registra conversas por voz. Para pedir algo, use a Sessão mestra.
+The context budget accounts for these exact labels, role framing and interruption
+markers: **at most 128 items / 8,192 estimated tokens**, including summary/master.
+While compaction is pending, context can return a clipped newest-history view
+with `truncated:true`; that read does not truncate or overwrite the stored record.
+For an extremely large latest turn, only the startup view's text may be clipped.
 
-A prompt-admission hook restores the recorder's agent and model before waking
-execution. This also handles custom-web picker fallbacks that commit a normal
-agent/model before submission. Voice RPCs restore them too. An archived recorder
-must be unarchived; the plugin does not silently replace or delete its memory.
+## Estimator and compaction constants
 
-## Summary
+`limits` in `src/voice/index.ts` contains the deliberately adjustable constants:
 
-The compaction hook filters by **agent `voz`**, not provider: a configured
-compaction-agent model may differ from the Session model. It supplies
-`event.result.summary`, so Core makes no compaction call to the eco model or the
-configured compaction model. The plugin uses exactly one explicit
-`ctx.generate.text` request to **`llm-proxy/gpt-6.1-sol-ultrafast`** with a
-voice-specific factual-memory prompt in Portuguese. It bounds source text to
-96 KB and saved summary to 6 KB. On failure/empty output it preserves bounded
-prior and recent source text deterministically. This is not a second master
-conversation. The native compaction marker's usage does not account for the
-separate `generate.text` call, whose API returns text only.
+| Setting                 |                                                        Value |
+| ----------------------- | -----------------------------------------------------------: |
+| Hard initial history    |                           128 items / 8,192 estimated tokens |
+| Compaction trigger      |                    >7,000 estimated tokens **or** >120 turns |
+| Target after compaction |                                Up to ~4,500 estimated tokens |
+| Summary budget          |                                Up to ~1,500 estimated tokens |
+| Verbatim tail           | Last up to 10 whole turns within the remaining ~3,000 tokens |
 
-Call end requests compaction; global automatic compaction remains unchanged as a
-safety net. No global `keep`, buffer or model settings are changed. Full turns
-remain available in native message pagination even when active context shrinks.
+The estimate is **ceil(UTF-8 bytes / 3) + 8 per item**. Unlike a character/4
+heuristic, it gives extra room for Portuguese accents. It is a conservative
+prose estimate, not a tokenizer, billing count or universal upper bound for
+arbitrary binary-like text. Summary labels and interruption annotations count
+toward the budget. Do not raise constants solely because a larger private
+payload returned 201.
 
-## Picker policy and Phase 3
+Append persists first, then schedules compaction without awaiting generation.
+Jobs are owned by the plugin's lifecycle scope, not the HTTP request, and repeated
+append/end checks coalesce while a job runs. On shutdown, interruption leaves
+the durable append intact; a later append/end can retry the check.
 
-The custom web provider facade excludes `voz-eco` from connected/paid choices,
-while retaining historical metadata in the full catalog. Existing hidden-agent
-filtering excludes `voz`. Saved defaults, visibility and recents cannot bring the
-model back. The voice transcript remains a normal navigable web Session. The
-upstream TUI may list the internal agent/model; typing still gets the fixed
-notice. Upstream-owned UI trees are unchanged.
+Compaction makes one `ctx.generate.text` request per summarized snapshot, using
+**`llm-proxy/gpt-6.1-sol-ultrafast`**, a voice-oriented factual pt-BR prompt and
+the previous summary plus older turns as untrusted JSON data. Empty/error output
+falls back to bounded previous memory plus recent labeled excerpts, explicitly
+marked as a non-AI fallback. A very large offline backlog can require another
+iteration; normal post-compaction history is below both thresholds.
 
-iOS integration is deliberately **not included yet**. The app needs to:
+Generation happens outside `storage.update`. Commit compares the old summary
+and exact summarized prefix IDs, then replaces only that prefix. All turns
+appended during generation and their dedup IDs survive. Concurrent plugin
+instances cannot overwrite a newer checkpoint; redundant generation across
+instances is possible, but not lost history. A long turn can require keeping
+fewer than ten whole turns to meet the target. There is no cluster ownership or
+exactly-once inference claim.
 
-1. Probe `info`, fetch `context` at call start and append it as data to GPT Live
-   instructions; failure must not prevent a call without memory.
-2. Retain canonical `turn.done` text and item IDs; serialize finalized exchange
-   admissions before `end`. Buffer the user's completed input until the matching
-   assistant turn ends, flushing user-only speech on interruption/call end. Send
-   assistant-only greetings separately. Never reuse an assistant item as both
-   an early partial reply and a later finalized exchange.
-3. Send narrated master returns as notices and preserve interruption flags.
-4. Hide/mute the recorder in Sessões and counts using the pointer/`voz` agent;
-   exclude its provider/agent from pickers. **Ver transcrição** opens it read-only
-   from the expanded voice bar. No retention/delete feature is requested.
+## Live measurements (2026-10-23)
 
-## Verification evidence (2026-10-23)
+Twenty synthetic private call creations, each torn down and its lease DELETE
+confirmed 204; plus one initial local recovering rejection without a created
+call. No admin mutations, account changes or real microphone input. One short
+synthetic audio question was used; the final successful probe was text-only.
 
-Only sandbox **4180** was used. No production/other sandbox service, physical
-device or GPT Live call was touched. The second spike completed well within its
-two-hour limit. Local evidence scripts/logs are in `.agent-artifacts/voz-sessao/`.
+- Both roles and their `input_text` / `output_text` content types reached started.
+- 128 items / 8,192 estimated tokens reached `session.started`.
+- Two 160-item trials returned 201 but never started (sideband 404). This is not
+  evidence that 201 validates the payload, nor a precise bound for 129–159.
+- Largest started history tested: 64 items, 94,464 text bytes / ~32k estimated
+  tokens. Its full retention was **not** verified; retain the official client cap.
+- Instructions at ~2k, 8k and 16k estimated tokens started. A ~32k estimate
+  returned an explicit error: **Instructions must not exceed 16384 tokens**.
+  The server's tokenizer limit is not identical to the byte heuristic.
+- Three ~2k histories: median answer **803.2 ms**, started **1293.2 ms**.
+  Three ~8k histories: **857.1 ms** / **1345.5 ms**. Small sequential sample,
+  uncontrolled route/account/cache: not an SLA or causal performance proof.
+- A text-only probe recovered **melancia-coral** from the seeded
+  **melancia-coral-739** fact; lexical history use is proven, exact numeric suffix
+  recall is not. That call took 5624.3 ms to started, illustrating variability.
 
-| Required mechanism          | Observed result                                                                                                                                                                                           |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Provider accepted and local | Enabled catalog model; three verbatim Unicode replies, `stop`, zero cost/tokens.                                                                                                                          |
-| Reply transport             | Different stored replies reached `doStream` through the internal header, in FIFO order.                                                                                                                   |
-| Manual/automatic compaction | Both completed for `voz`; each summary increased the plugin generation counter once, with **no additional eco stream**. Release auto fixture: two replies, one completed `reason:"auto"` checkpoint.      |
-| Queue and restart           | Three initial replies; parked a durable fourth input, restarted, retried old IDs and woke with a fifth input. Exactly five total assistants; restarted plugin counter was **two** streams, no duplicates. |
+Detailed results and limitations:
+`.agent-artifacts/voz-sessao/MEDICAO.md` in the implementation worktree. No more
+GPT Live creations are authorized by that measurement budget.
 
-The release-like proof ran the **compiled custom CLI + minified
-`custom-plugin.ts` bundle** outside the checkout, with **no `node_modules` and a
-fresh, still-empty dependency cache**. It used the same compiled-provider path
-as `custom-release.ts`, not merely the source sandbox's generated plugin JS.
-This was a dirty development fixture, not a signed/published production release.
-Its manual/automatic checkpoints used tiny bounded summary prompts. No runtime
-npm installation or Perplexity request was needed.
-The final bundled product RPCs also passed against a fresh database without
-copied credentials: first-use Session/pointer creation and Unicode echo completed
-with zero tokens. Against the persisted sandbox database, retrying after restart
-kept the same Session/admission IDs and did not duplicate a reply or summary.
+## Plugin verification
 
-Product RPC smoke evidence additionally covers concurrent duplicate requests,
-assistant-only speech, user-only speech, master notices, one continuous root
-Session, bounded context, and restoration from a deliberately invalid changed
-model/agent before a typed prompt: **five assistants, zero eco tokens/cost, fixed
-notice**. Unit tests cover schema limits, durable mapping, aliases, preference
-compatibility, summary/fallback and adversarial Unicode/escaped context budgets.
-The custom web model-selection fixture and headless Chrome picker check verify
-the internal model cannot be selected; no application service worker controls
-the sandbox page.
+Package tests drive atomic append, retries after overwrite, UTF-8/item/token
+bounds, deterministic fallback, lifecycle-owned background work and controlled
+append/compaction races without sleeps or paid requests. Sandbox 4180 additionally
+verified a real summary: threshold append returned in 7 ms in that sample, the
+background job kept a concurrently appended turn, and SQLite held one scoped
+record with 11 tail turns / 124 seen IDs. No Session was created; the old provider
+and agent were absent. This timing sample is not a performance guarantee.
+The compiled CLI plus minified plugin also passed persisted-ID retry and real
+background summarization without checkout dependencies. One initial cold catalog
+request returned 503 while Location plugins were not activated; after restarting
+only the owned fixture, all bundled checks passed. Treat transient activation
+errors like other unavailable-memory cases; no Core workaround was added.
+
+## Phase 3 handoff (not implemented)
+
+The iOS app must:
+
+1. Probe RPC version/capabilities and degrade gracefully to no memory on older
+   servers or failures. Always use scope `global` for now.
+2. Write each canonical finalized turn to a **local file buffer before sending**.
+   Keep stable call/item-based IDs, both roles, full `turn.done` text, timestamps
+   and interruption flags. Replay buffered batches in order after crashes or
+   offline periods; remove them only after a successful append acknowledgment.
+   Never append an early partial and later expect the same ID to replace it.
+3. At call start, fetch context and map it to **`session.initial_items`**, not
+   `session.input`; keep instructions short and behavior-only. Count labels,
+   master state and interruption annotations as above. Memory must not prevent
+   a voice call when unavailable.
+4. Flush queued local append requests, then call `end` for a compaction check.
+   Keep an offline end/check marker if needed; it is not an audio lease DELETE.
+5. Add read-only **Ver transcrição** from the expanded voice bar, rendering the
+   record's summary and current turns, interruption/truncation labels included.
+   No voice Session/list/count suppression, picker filters or `voz` agent exists.
+   No retention/delete UI is requested. The master never receives recent voice
+   turns with delegations.

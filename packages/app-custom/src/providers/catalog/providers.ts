@@ -66,7 +66,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
       return pipe(
         providers().all,
         Iterable.map(([, p]) => p),
-        Iterable.filter((p) => connected.has(p.id) && p.id !== "voz-eco"),
+        Iterable.filter((p) => connected.has(p.id)),
         (v) => Array.from(v),
       )
     },
@@ -77,7 +77,6 @@ export function useProviders(directory: Accessor<string | undefined>) {
           providers().all,
           ([id]) =>
             connected.has(id) &&
-            id !== "voz-eco" &&
             (id !== "opencode" || Object.values(providers().all.get(id)?.models ?? {}).some((m) => m.cost?.input)),
         ),
       ]
