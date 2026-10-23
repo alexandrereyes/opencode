@@ -6,6 +6,7 @@ struct SettingsView: View {
   let runtime: AppRuntime
   let store: SessionStore
   @State private var proxyProvider: SubscriptionProvider?
+  @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsibleUserMessages = true
   var body: some View {
     @Bindable var appearance = runtime.appearance
     NavigationStack {
@@ -35,6 +36,10 @@ struct SettingsView: View {
             Text("O tema desta execução foi definido na inicialização.")
               .font(.caption).foregroundStyle(theme.color(.textSecondary))
           }
+        }.listRowBackground(theme.color(.surface))
+        Section("Leitura") {
+          Toggle("Recolher mensagens longas do usuário", isOn: $collapsibleUserMessages)
+            .accessibilityIdentifier("settings-collapsible-user-messages")
         }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {

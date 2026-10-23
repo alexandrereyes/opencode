@@ -18,14 +18,15 @@ import SwiftUI
   func parse(_ source: String) async -> [MarkdownBlock] {
     if let blocks = cached(source) { return blocks }
     if let task = pending[source] { return await task.value }
-    let task = Task.detached(priority: .userInitiated) { MarkdownBlocks.parse(source) }
+    let task = Task.detached(priority: .userInitiated) {
+      let blocks = await ResponseEngines.shared.highlight(MarkdownBlocks.parse(source))
+      return await ResponseFormulas.shared.measure(blocks)
+    }
     pending[source] = task
     let blocks = await task.value
     values.setObject(
       Entry(blocks: blocks), forKey: source as NSString,
-      cost: source.utf16.count * 2 + blocks.reduce(0) { count, block in
-        count + block.runs.reduce(0) { $0 + $1.offsets.count * MemoryLayout<Int?>.stride + $1.text.utf16.count * 2 }
-      })
+      cost: source.utf16.count * 2 + blocks.reduce(0) { $0 + cost($1) })
     pending[source] = nil
     return blocks
   }
@@ -42,5 +43,10 @@ import SwiftUI
   private final class Entry {
     let blocks: [MarkdownBlock]
     init(blocks: [MarkdownBlock]) { self.blocks = blocks }
+  }
+  private func cost(_ block: MarkdownBlock) -> Int {
+    let runs = block.runs + (block.table?.rows.flatMap { $0.flatMap { $0 } } ?? [])
+    return runs.reduce(0) { $0 + $1.offsets.count * MemoryLayout<Int?>.stride + $1.text.utf16.count * 2 }
+      + block.children.reduce(0) { $0 + cost($1) }
   }
 }

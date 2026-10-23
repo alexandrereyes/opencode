@@ -109,6 +109,7 @@ struct ConversationContextSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   let store: ConversationStore
+  var showLocation = true
   private var details: ContextDetails { store.details }
   @State private var detent = PresentationDetent.medium
   var body: some View {
@@ -149,11 +150,13 @@ struct ConversationContextSheet: View {
         Section("Sessão") {
           row("Modelo", details.model?.name ?? details.reference?.id ?? "—")
           row("Provedor", details.reference?.providerID ?? "—")
-          row("Branch", store.branch)
-          VStack(alignment: .leading, spacing: 7) {
-            Text("Diretório").font(.subheadline)
-            Text(store.session?.location.directory ?? "—").font(.caption).textSelection(.enabled)
-              .foregroundStyle(theme.color(.textSecondary))
+          if showLocation {
+            row("Branch", store.branch)
+            VStack(alignment: .leading, spacing: 7) {
+              Text("Diretório").font(.subheadline)
+              Text(store.session?.location.directory ?? "—").font(.caption).textSelection(.enabled)
+                .foregroundStyle(theme.color(.textSecondary))
+            }
           }
         }
       }

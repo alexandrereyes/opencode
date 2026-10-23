@@ -199,13 +199,9 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   #expect(ConversationProjection.merge(merged, page: tail).count == 89)
 }
 
-@Test func dayStickyUnreadAndViewedDecisions() throws {
+@Test func dayUnreadAndViewedDecisions() throws {
   let messages = try page("transcript-history")
-  let session = try conversationFixture("session-history", DataResponse<Session>.self).data
-  #expect(ConversationProjection.unread(messages, viewed: session.time.viewed) != nil)
   let last = try #require(messages.last)
-  let user = try #require(messages.last { $0.type == "user" })
-  #expect(ConversationProjection.sticky(messages, before: last.id)?.id == user.id)
   let now = Date(timeIntervalSince1970: last.time.created / 1000)
   #expect(ConversationProjection.day(last.time.created, now: now) == "Hoje")
   #expect(ConversationProjection.day(last.time.created - 86_400_000, now: now) == "Ontem")
@@ -319,9 +315,6 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   ] {
     #expect(ConversationProjection.duration(milliseconds) == expected)
   }
-  #expect(
-    ConversationProjection.ellipsis("Hospedar no Swarm.... próximo", count: 20)
-      == "Hospedar no Swarm…")
   let unknown = ConversationPart(
     type: "tool", name: "future-tool",
     state: .object(["input": .object(["query": .string("uma busca")])]))

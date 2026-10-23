@@ -1,18 +1,54 @@
 import OpenCodeKit
 import SwiftUI
 
-/// List's pinned section headers do not install SwiftUI contextMenu interactions.
-/// Keep the native interaction on the bubble itself, with no retained transcript views.
+/// Install on the native header without an overlay that would intercept expansion,
+/// attachment taps or the prompt's internal scroll.
 struct UserMessageCopyMenu: UIViewRepresentable {
   let message: ConversationMessage
   let toast: ToastCenter
   func makeCoordinator() -> Coordinator { Coordinator(self) }
-  func makeUIView(context: Context) -> UIView {
-    let view = UIView()
-    view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
-    return view
+  func makeUIView(context: Context) -> Probe {
+    Probe(interaction: UIContextMenuInteraction(delegate: context.coordinator))
   }
-  func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+  func updateUIView(_ view: Probe, context: Context) {
+    context.coordinator.parent = self
+    view.attach()
+  }
+  static func dismantleUIView(_ view: Probe, coordinator: Coordinator) { view.detach() }
+  final class Probe: UIView {
+    let interaction: UIContextMenuInteraction
+    private weak var container: UICollectionReusableView?
+    init(interaction: UIContextMenuInteraction) {
+      self.interaction = interaction
+      super.init(frame: .zero)
+      isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { nil }
+    override func didMoveToWindow() {
+      super.didMoveToWindow()
+      if window == nil { detach(); return }
+      attach()
+    }
+    override func didMoveToSuperview() { super.didMoveToSuperview(); attach() }
+    func attach() {
+      guard window != nil else { return }
+      var parent = superview
+      while let current = parent {
+        if let cell = current as? UICollectionReusableView {
+          guard container !== cell else { return }
+          detach()
+          container = cell
+          cell.addInteraction(interaction)
+          return
+        }
+        parent = current.superview
+      }
+    }
+    func detach() {
+      container?.removeInteraction(interaction)
+      container = nil
+    }
+  }
   final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
     var parent: UserMessageCopyMenu
     init(_ parent: UserMessageCopyMenu) { self.parent = parent }

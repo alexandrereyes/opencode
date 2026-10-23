@@ -22,7 +22,7 @@ import OpenCodeKit
   private(set) var loading = false
   private(set) var paging = false
   private(set) var hasOlder = true
-  private(set) var viewedBoundary: Double?
+  private(set) var submitted = 0
   private(set) var ready = false
   private(set) var hasTranscript = false
   private(set) var revision = 0 {
@@ -50,9 +50,7 @@ import OpenCodeKit
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
   @ObservationIgnored private var batchTask: Task<Void, Never>?
   @ObservationIgnored private var pending: [ConversationEvent] = []
-  @ObservationIgnored private var acknowledged: Double?
-  @ObservationIgnored private var visible = false
-  @ObservationIgnored private var acknowledging = false
+  @ObservationIgnored private var requestedView: Double?
   @ObservationIgnored private var replaceHistory = false
   @ObservationIgnored private var snapshotSequence = 0
   @ObservationIgnored private var composerCatalog: ComposerSources?
@@ -62,6 +60,7 @@ import OpenCodeKit
   private var recentModels: [ModelReference] = []
   @ObservationIgnored var newSessionSubmit: ((ConversationDraft) async -> Void)?
   var isNewSession: Bool { newSessionSubmit != nil }
+  var masterMode = false
 
   func loadNewSession(directory: String, projectID: String, recent: [ModelReference]) async throws {
     ready = false
@@ -132,6 +131,7 @@ import OpenCodeKit
   var displayModels: [ModelInfo] { ModelCatalog.merging(models, fallback: catalog?.models ?? []) }
   var isChild: Bool { session?.parentID != nil }
   func selectedAgent(_ draft: ConversationDraft) -> String {
+    if masterMode { return "mestra" }
     if isChild { return session?.agent ?? "" }
     if isNewSession {
       return NewSessionProjection.agent(explicit: draft.agent,
@@ -140,7 +140,8 @@ import OpenCodeKit
     return draft.agent ?? session?.agent ?? "build"
   }
   var childAgentName: String {
-    agents.first { $0.id == session?.agent }?.name ?? session?.agent ?? "Subagente"
+    if masterMode { return "Mestra" }
+    return agents.first { $0.id == session?.agent }?.name ?? session?.agent ?? "Subagente"
   }
   var context: Double? { ConversationProjection.context(messages, models: displayModels) }
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
@@ -171,6 +172,7 @@ import OpenCodeKit
     ].compactMap { $0 }.joined(separator: " · ")
   }
   func selectedModel(_ draft: ConversationDraft) -> ModelReference? {
+    if masterMode, isNewSession { return draft.model }
     if isNewSession {
       let agent = agents.first { $0.id == selectedAgent(draft) }
       var configuredAgent = agent?.model
@@ -247,8 +249,10 @@ import OpenCodeKit
       guard let submission = draft.submission else { return }
       switch ComposerDispatch.resolve(draft.document) {
       case .prompt:
+        submitted += 1
         try await submission.send(using: client)
       case .command(let name, _):
+        submitted += 1
         // Command callbacks have no idempotency key. Never automatically retry them.
         if delivery == .steer {
           if !isChild { try await client.selectAgent(agent, sessionID: id) }
@@ -372,6 +376,7 @@ import OpenCodeKit
   }
   func reply(_ form: PendingForm, answer: QuestionReply) async {
     await act(form.id, success: "Resposta enviada", feedback: .success) {
+      submitted += 1
       try await client.reply(form, answer: answer)
     }
   }
@@ -413,7 +418,6 @@ import OpenCodeKit
       }
       messages = fixture.messages
       models = fixture.models
-      viewedBoundary = fixture.messages.dropFirst(fixture.messages.count / 3).first?.time.created
       branch = "exemplo-sintetico"
       hasOlder = false
       hasTranscript = true
@@ -442,7 +446,6 @@ import OpenCodeKit
       return
     }
     #endif
-    visible = true
     let events = hub.events()
     await refresh()
     for await frame in events {
@@ -471,7 +474,6 @@ import OpenCodeKit
         }
       }
     }
-    visible = false
     refreshTask?.cancel()
     refreshTask = nil
     batchTask?.cancel()
@@ -547,13 +549,16 @@ import OpenCodeKit
       #if DEBUG
       ConversationOpeningMetrics.mark("health", id: id)
       #endif
-      let (infoValue, pageValue, runningValue) = try await (info, page, running)
+      let infoValue = try await info
+      try Task.checkCancellation()
+      session = infoValue
+      if let renaming { session?.title = renaming.title }
+      let (pageValue, runningValue) = try await (page, running)
       try Task.checkCancellation()
       if !hasTranscript {
         #if DEBUG
         ConversationOpeningMetrics.mark("tail", id: id)
         #endif
-        viewedBoundary = infoValue.time.viewed
         cursor = pageValue.cursor?.next
         hasOlder = !pageValue.data.isEmpty && cursor != nil
       }
@@ -579,8 +584,6 @@ import OpenCodeKit
         replaceHistory = false
       }
       let directory = infoValue.location.directory
-      session = infoValue
-      if let renaming { session?.title = renaming.title }
       active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       messages = nextMessages
       hasTranscript = true
@@ -683,20 +686,19 @@ import OpenCodeKit
       }
     }
   }
-  /// Called after the updated transcript has reached the view, never at request start.
+  /// Route acknowledgement is independent of transcript layout, paging and catalogs.
   func presented() async {
-    guard let session, !acknowledging,
+    guard let session,
       let watermark = ConversationProjection.viewedWatermark(
-        idle: session.time.idle, viewed: session.time.viewed, acknowledged: acknowledged,
-        visible: visible && ready)
+        idle: session.time.idle, viewed: session.time.viewed, acknowledged: requestedView,
+        visible: true)
     else { return }
-    acknowledging = true
-    defer { acknowledging = false }
+    let previous = requestedView
+    requestedView = watermark
     do {
       try await client.markViewed(session)
-      acknowledged = watermark
     } catch {
-      if !Task.isCancelled { self.error = "Não foi possível marcar a conversa como lida." }
+      if requestedView == watermark { requestedView = previous }
     }
   }
   func shellOutput(_ part: ConversationPart) async throws -> String? {

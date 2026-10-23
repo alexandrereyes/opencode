@@ -625,6 +625,10 @@ export function fromPromise(plugin: Plugin) {
             move: adaptApiMethod(SessionEndpoints["session.move"], host.session.move),
             wait: adaptApiMethod(SessionEndpoints["session.wait"], host.session.wait),
             context: adaptApiMethod(SessionEndpoints["session.context"], host.session.context),
+            active: adaptApiMethod(SessionEndpoints["session.active"], host.session.active),
+            form: {
+              reply: adaptApiMethod(SessionEndpoints["session.form.reply"], host.session.form.reply),
+            },
             familyBoundaries: (input) =>
               run(
                 Schema.decodeUnknownEffect(SessionFamily.BoundariesInput)(input).pipe(

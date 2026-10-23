@@ -20,7 +20,7 @@ import XCTest
     app.terminate()
   }
 
-  func testUnreadPositioningInBothThemes() throws {
+  func testHistoryJumpToLatestInBothThemes() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = XCUIApplication()
       app.launchArguments = [
@@ -33,13 +33,15 @@ import XCTest
       XCTAssertTrue(transcript.waitForExistence(timeout: 20))
       let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
       XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
-      let unread = app.buttons["Ir às novas mensagens"]
-      XCTAssertTrue(unread.waitForExistence(timeout: 5))
-      unread.tap()
+      let latest = app.buttons["Ir para a mais recente"]
+      XCTAssertTrue(latest.waitForExistence(timeout: 5))
+      XCTAssertFalse(app.buttons["Ir às novas mensagens"].exists)
+      XCTAssertFalse(app.staticTexts["Novas mensagens"].exists)
+      latest.tap()
       let restored = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
       XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 20), .completed)
-      XCTAssertTrue(app.staticTexts["Novas mensagens"].isHittable)
-      XCTAssertFalse(unread.exists)
+      let hidden = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: latest)
+      XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
       app.terminate()
     }
   }
@@ -61,8 +63,8 @@ import XCTest
       XCTAssertTrue(driver.waitForExistence(timeout: 5))
       for cycle in 0..<2 {
         if cycle > 0 {
-          transcript.swipeDown(velocity: .slow)
-          let end = app.buttons["Ir para o fim"]
+          for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
+          let end = app.buttons["Ir para a mais recente"]
           XCTAssertTrue(end.waitForExistence(timeout: 5))
           end.tap()
           RunLoop.current.run(until: Date().addingTimeInterval(1))
@@ -75,7 +77,7 @@ import XCTest
         XCTAssertGreaterThan(try XCTUnwrap(report["samples"]), 30)
         XCTAssertGreaterThan(try XCTUnwrap(report["heightChanges"]), 10)
         XCTAssertGreaterThan(try XCTUnwrap(report["advance"]), 500)
-        XCTAssertLessThanOrEqual(try XCTUnwrap(report["backward"]), 2, json)
+        XCTAssertEqual(try XCTUnwrap(report["backward"]), 0, accuracy: 0.5, json)
         XCTAssertEqual(try XCTUnwrap(report["gap"]), 0, accuracy: 2, json)
         XCTAssertEqual(report["animations"], Double(cycle), json)
         let attachment = XCTAttachment(string: json)
@@ -122,7 +124,7 @@ import XCTest
       XCTAssertTrue((200..<300).contains(try XCTUnwrap(response as? HTTPURLResponse).statusCode))
       list.swipeDown(velocity: .slow)
       list.swipeUp(velocity: .slow)
-      if app.buttons["Ir para o fim"].waitForExistence(timeout: 4) { app.buttons["Ir para o fim"].tap() }
+      if app.buttons["Ir para a mais recente"].waitForExistence(timeout: 4) { app.buttons["Ir para a mais recente"].tap() }
       try await Task.sleep(for: .seconds(12))
       let capture = XCTAttachment(screenshot: app.screenshot())
       capture.name = "live-child-" + role

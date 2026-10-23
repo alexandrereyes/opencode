@@ -15,40 +15,31 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
   let id: String
   let state: ConversationScrollState
   let color: UIColor
-  let update: (Bool) -> Void
   func makeUIView(context: Context) -> Probe {
-    Probe(id: id, state: state, color: color, update: update)
+    Probe(id: id, state: state, color: color)
   }
   func updateUIView(_ view: Probe, context: Context) {
-    let changed = view.id != id
     view.id = id
     view.state = state
     view.color = color
-    view.update = update
     view.attach()
-    view.refresh(force: changed)
+    view.refresh()
   }
   static func dismantleUIView(_ view: Probe, coordinator: ()) { view.fade.removeFromSuperlayer() }
-  final class Probe: UIView, ConversationHeaderLayout {
-    var update: (Bool) -> Void
-    var id: String {
-      didSet { if oldValue != id { anticipatedOffset = nil } }
-    }
+  final class Probe: UIView {
+    var id: String
     var state: ConversationScrollState
     var color: UIColor
     weak var scroll: UIScrollView?
     weak var container: UICollectionReusableView?
     var observation: NSKeyValueObservation?
-    var pinned = false
-    private var anticipatedOffset: CGFloat?
     let fade = CAGradientLayer()
     init(
-      id: String, state: ConversationScrollState, color: UIColor, update: @escaping (Bool) -> Void
+      id: String, state: ConversationScrollState, color: UIColor
     ) {
       self.id = id
       self.state = state
       self.color = color
-      self.update = update
       super.init(frame: .zero)
       isOpaque = false
       fade.startPoint = CGPoint(x: 0.5, y: 0)
@@ -60,7 +51,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       observation = nil
       if window == nil { fade.removeFromSuperlayer() }
       attach()
-      refresh(force: true)
+      refresh()
     }
     override func didMoveToSuperview() {
       super.didMoveToSuperview()
@@ -91,13 +82,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       attach()
       refresh()
     }
-    func prepareForFollowing(offset: CGFloat) -> Bool {
-      guard !pinned, let scroll, offset > -scroll.adjustedContentInset.top + 1 else { return false }
-      anticipatedOffset = offset
-      refresh()
-      return pinned
-    }
-    func refresh(force: Bool = false) {
+    func refresh() {
       guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
       container.backgroundColor = color
       if let cell = container as? UICollectionViewListCell,
@@ -112,15 +97,11 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       }
       state.registerHeader(self, container: container, id: id)
       let frame = container.convert(container.bounds, to: scroll)
-      if !state.following || anticipatedOffset.map({ scroll.contentOffset.y >= $0 - 1 }) == true {
-        anticipatedOffset = nil
-      }
-      let offset = anticipatedOffset ?? scroll.contentOffset.y
       // List prefetches headers above the viewport; only the header crossing its
       // top edge is sticky, not every previously visited prompt.
       let next =
-        offset > -scroll.adjustedContentInset.top + 1
-        && frame.minY - offset <= 2 && (anticipatedOffset != nil || frame.maxY > scroll.bounds.minY + 1)
+        scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
+        && frame.minY - scroll.contentOffset.y <= 2 && frame.maxY > scroll.bounds.minY + 1
       // The SwiftUI content is inset inside the native header. Its overlay starts
       // beneath opaque native padding, truncating most of the gradient. Draw from
       // the actual full-width header edge instead, without changing row geometry.
@@ -138,12 +119,6 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       ]
       fade.isHidden = !next
       CATransaction.commit()
-      guard force || next != pinned else { return }
-      pinned = next
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-        update(pinned)
-      }
     }
   }
 }
@@ -174,22 +149,40 @@ struct ConversationView: View {
   @State private var captureRequested = false
   @State private var viewport = ConversationViewport()
   @State private var screenVisible = true
+  @State private var promptViewportHeight: CGFloat = 800
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
+  let master: Bool
 
-  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil) {
+  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil, master: Bool = false) {
     self.sessions = sessions
+    self.master = master
     self.parentOnStack = parentOnStack
     _requestedTool = State(initialValue: toolID)
     let position = sessions.reading.position(id)
     _savedPosition = State(initialValue: position)
     initialFollowTail = position?.target == nil || position?.target == .followTail
     _atBottom = State(initialValue: initialFollowTail && toolID == nil)
-    _conversation = State(
-      initialValue: ConversationStore(
+    let conversation = ConversationStore(
         id: id, client: sessions.client, hub: sessions.hub,
-        expansions: sessions.expansions, catalog: sessions.catalog))
+        expansions: sessions.expansions, catalog: sessions.catalog)
+    conversation.masterMode = master
+    _conversation = State(initialValue: conversation)
+  }
+  private var chat: Bool {
+    if master { return true }
+    guard let directory = conversation.session?.location.directory, let root = sessions.chatRoot else { return false }
+    return directory == root || directory.hasPrefix(root + "/")
+  }
+  private var showLocation: Bool { sessions.chatRoot != nil && !chat }
+  private var headerSubtitle: String {
+    if chat { return conversation.modelLabel(conversation.session?.model) }
+    // Do not expose a directory fallback before the managed-chat root has been resolved.
+    return conversation.located?.branch ?? (showLocation ? conversation.branch : "")
+  }
+  private var headerStatus: String {
+    conversation.waiting ? "aguardando você" : conversation.working ? "trabalhando…" : ""
   }
   private var sections: [ConversationSection] {
     var result = [ConversationSection(id: "leading", user: nil, messages: [])]
@@ -207,7 +200,7 @@ struct ConversationView: View {
     VStack(spacing: 0) {
       header
       if let notice = conversation.notice {
-        ConversationNoticeView(notice: notice) { Task { await conversation.refresh() } }
+        ConversationNoticeView(notice: notice, showDirectory: showLocation) { Task { await conversation.refresh() } }
       }
       if let error = conversation.error {
         Button {
@@ -228,6 +221,7 @@ struct ConversationView: View {
     }
     .background(theme.color(.background))
     .environment(conversation.toast)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { promptViewportHeight = $0 }
     .environment(\.conversationImages, conversation.session.map {
       ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
     })
@@ -282,9 +276,9 @@ struct ConversationView: View {
         }
       }.sessionAlertOverlay()
     }
-    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation).sessionAlertOverlay() }
+    .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation, showLocation: showLocation).sessionAlertOverlay() }
     .sheet(isPresented: $detailsOpen) {
-      SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }) {
+      SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }, isChat: chat, showLocation: showLocation) {
         contextOpen = true
       }.sessionAlertOverlay()
     }
@@ -314,7 +308,9 @@ struct ConversationView: View {
       if search.open { search.update(conversation) }
     }
     .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
-    .task(id: conversation.revision) { await conversation.presented() }
+    .task(id: conversation.session) {
+      if screenVisible { await conversation.presented() }
+    }
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
       screenVisible = true
@@ -391,6 +387,7 @@ struct ConversationView: View {
       if let session = conversation.session {
         let project = sessions.projects.first { $0.id == session.projectID }
         let colors = theme.avatar(SessionList.avatarColor(project, fallback: session.projectID))
+        let monogram = SessionList.monogram(chat || project?.vcs == nil ? session.displayTitle : project?.displayName ?? session.displayTitle)
         Button {
           contextOpen = true
         } label: {
@@ -404,28 +401,33 @@ struct ConversationView: View {
                 )
                 .rotationEffect(.degrees(-90))
             }
-            Circle().fill(colors.background).padding(4)
-            Text(
-              SessionList.monogram(
-                project?.displayName
-                  ?? URL(fileURLWithPath: session.location.directory).lastPathComponent)
-            )
-            .font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+            Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
+            if master {
+              Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 18)).foregroundStyle(theme.color(.accent))
+            } else {
+              Text(monogram).font(.system(size: 14, weight: .medium)).foregroundStyle(colors.text)
+            }
           }.frame(width: 38, height: 38)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
           conversation.context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
             ?? "Contexto desconhecido")
+        .accessibilityIdentifier("conversation-header-avatar")
+        .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
       VStack(alignment: .leading, spacing: 4) {
-        Text(conversation.session?.displayTitle ?? "Conversa").font(
+        Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa").font(
           .system(size: 14, weight: .semibold)
         ).lineLimit(1)
-        Text(
-          "\(Text(conversation.branch))\(Text(conversation.waiting ? " · aguardando você" : conversation.working ? " · trabalhando…" : "").foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
-        )
-        .font(.system(size: 11)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+        if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
+          Text(
+            "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
+          )
+          .font(.system(size: 11)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+          .accessibilityIdentifier("conversation-header-subtitle")
+        }
       }.frame(maxWidth: .infinity, alignment: .leading)
       if conversation.runningCount > 0 {
         Button {
@@ -441,6 +443,16 @@ struct ConversationView: View {
           conversation.runningCount == 1
             ? "1 agente em execução" : "\(conversation.runningCount) agentes em execução")
       }
+      if master {
+        Button {
+          sessions.drafts.draft(conversation.id).focused = false
+          Task { await sessions.resetMaster() }
+        } label: {
+          Image(systemName: "trash").frame(width: 36, height: 36)
+            .glassEffect(.regular.interactive(), in: .circle)
+        }.accessibilityLabel("Reiniciar Sessão mestra").accessibilityIdentifier("master-trash")
+          .disabled(sessions.busy.contains("master-reset"))
+      } else {
       ConversationOptionsMenu(
         sessionID: conversation.id, available: conversation.session != nil,
         canArchive: conversation.session?.parentID == nil, archiving: conversation.acting.contains("archive"),
@@ -461,6 +473,7 @@ struct ConversationView: View {
           detailsOpen = true
         }, archive: { archiveOpen = true }))
         .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
+      }
     }
     .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
     .background(theme.color(.background))
@@ -468,8 +481,6 @@ struct ConversationView: View {
   private var timeline: some View {
     ScrollViewReader { proxy in
       let dividers = ConversationProjection.finalAnswerDividers(conversation.messages)
-      let unread = ConversationProjection.unread(conversation.messages, viewed: conversation.viewedBoundary)
-        .map { conversation.activity.anchors[$0] ?? $0 }
       List {
         if conversation.hasOlder && conversation.ready && !resumeOffered {
           HStack {
@@ -493,17 +504,15 @@ struct ConversationView: View {
           .onAppear { if !search.open && !atBottom && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
         }
         ForEach(sections) { section in
+          if let user = section.user, showDay(user) {
+            day(user.time.created).padding(.vertical, 6)
+              .listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+              .listRowBackground(theme.color(.background))
+          }
           Section {
             ForEach(section.messages) { item in
               let message = item.message
               VStack(alignment: .leading, spacing: 16) {
-                if message.id == unread {
-                  HStack {
-                    line
-                    Text("Novas mensagens").font(.system(size: 11))
-                    line
-                  }.foregroundStyle(theme.color(.primary))
-                }
                 if showDay(message) { day(message.time.created) }
                 ConversationMessageView(
                   message: message, footer: hasFooter(message), store: conversation,
@@ -524,7 +533,7 @@ struct ConversationView: View {
                 $0.size
               } action: { _, _ in
                 scrollState.correctAnchor()
-                updateUnread()
+                viewport.stickyHeight = scrollState.usableTop
               }
               .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
               .listRowSeparator(.hidden)
@@ -534,12 +543,8 @@ struct ConversationView: View {
             if let user = section.user {
               StickyUserHeader(
                 message: user.presented(isChild: conversation.isChild),
-                day: showDay(user) ? ConversationProjection.day(user.time.created) : nil,
                 scrollState: scrollState,
-                pinnedChanged: { _ in
-                  scrollState.correctAnchor()
-                  updateUnread()
-                }
+                maximumTextHeight: promptViewportHeight * 0.4
               )
               .listRowInsets(EdgeInsets())
               .textCase(nil)
@@ -553,7 +558,7 @@ struct ConversationView: View {
                 $0.size
               } action: { _, _ in
                 scrollState.correctAnchor()
-                updateUnread()
+                viewport.stickyHeight = scrollState.usableTop
               }
             }
           }
@@ -607,6 +612,7 @@ struct ConversationView: View {
           cancelRestoration()
           userScrolling = true
           atBottom = false
+          if phase == .interacting { scrollState.nearBottom = false }
         }
         if phase == .idle {
           if userScrolling && !selectionPaused { atBottom = scrollState.nearBottom }
@@ -620,7 +626,13 @@ struct ConversationView: View {
           height: geometry.contentSize.height, offset: geometry.visibleRect.minY,
           viewport: geometry.visibleRect.height)
       } action: { old, new in
-        scrollState.nearBottom = new.height - new.offset - new.viewport < 80
+        let geometry = ConversationScrollPlan.Viewport(
+          height: new.height, offset: new.offset, viewport: new.viewport)
+        let arrived = geometry.arrivedAtEnd(from: .init(
+          height: old.height, offset: old.offset, viewport: old.viewport))
+        viewport.jumpToLatest = geometry.jumpToLatest
+        if !geometry.atEnd { scrollState.nearBottom = false }
+        if arrived { scrollState.nearBottom = true }
         let interacting =
           userScrolling
           || scrollState.view.map { $0.isTracking || $0.isDragging || $0.isDecelerating } == true
@@ -630,7 +642,9 @@ struct ConversationView: View {
           captureRequested = true
           scrollState.cancelAnchor()
         }
-        updateUnread()
+        viewport.stickyHeight = scrollState.usableTop
+        if arrived && !atBottom && !interacting && !selectionPaused && !firstLoad && !restoring
+          && !resumeOffered && screenVisible { resumeFollowing() }
         if !search.open && !atBottom && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
           && !restoring && screenVisible
@@ -666,6 +680,9 @@ struct ConversationView: View {
           ReadingPosition(.message(id: request.messageID, offset: request.offset)), proxy: proxy,
           explicit: true, persist: request.persist)
       }
+      .onChange(of: conversation.submitted) { _, _ in
+        if screenVisible { resumeFollowing() }
+      }
       .task(id: "\(conversation.ready):\(requestedTool ?? "")") {
         guard conversation.ready, let tool = requestedTool else { return }
         cancelRestoration()
@@ -690,25 +707,19 @@ struct ConversationView: View {
         requestedTool = nil
       }
       .overlay(alignment: .bottomTrailing) {
-        if !atBottom {
+        if viewport.jumpToLatest {
           Button {
-            cancelRestoration()
-            selectionPaused = false
-            userScrolling = false
-            atBottom = true
-            captureRequested = true
-            scrollState.followToEnd(animated: true)
-            scheduleCapture()
+            resumeFollowing(animated: true)
           } label: {
             Image(systemName: "arrow.down").frame(width: 42, height: 42)
           }.buttonStyle(.glass).buttonBorderShape(.circle).padding(12).accessibilityLabel(
-            "Ir para o fim")
+            "Ir para a mais recente")
         }
       }
       .overlay(alignment: .top) {
         ConversationViewportNotices(
-          viewport: viewport, offersResume: resumeOffered, unreadID: unread,
-          resume: { restore(savedPosition, proxy: proxy) }, reveal: { conversation.revealMessage($0) })
+          viewport: viewport, offersResume: resumeOffered,
+          resume: { restore(savedPosition, proxy: proxy) })
       }
       .overlay { if conversation.loading { ProgressView("Carregando conversa…").font(.footnote) } }
       #if DEBUG
@@ -726,7 +737,15 @@ struct ConversationView: View {
       #endif
     }
   }
-  private var line: some View { Rectangle().fill(theme.color(.border)).frame(height: 0.5) }
+  private func resumeFollowing(animated: Bool = false) {
+    cancelRestoration()
+    selectionPaused = false
+    userScrolling = false
+    atBottom = true
+    captureRequested = true
+    scrollState.followToEnd(animated: animated)
+    scheduleCapture()
+  }
   private func openChild(_ id: String) {
     leavePosition()
     sessions.conversationPath.append(.init(id: id, parent: conversation.id))
@@ -782,41 +801,6 @@ struct ConversationView: View {
     do { try sessions.reading.flush() } catch {
       conversation.toast.show("Não foi possível guardar a posição de leitura.", kind: .error)
     }
-  }
-  private func updateUnread() {
-    let top = scrollState.usableTop
-    viewport.stickyHeight = top
-    guard
-      let unread = ConversationProjection.unread(
-        conversation.messages, viewed: conversation.viewedBoundary)
-    else {
-      viewport.unreadAbove = false
-      return
-    }
-    // Prefetched native bounds can precede row attachment after restoration. The
-    // logical reading anchor already proves that an earlier message is above it.
-    if let anchor = scrollState.readingAnchor,
-      let index = conversation.messages.firstIndex(where: { $0.id == anchor.id }),
-      conversation.messages[..<index].contains(where: { $0.id == unread })
-    {
-      viewport.unreadAbove = true
-      return
-    }
-    let frames = scrollState.frames
-    if let frame = frames[conversation.activity.anchors[unread] ?? unread] {
-      viewport.unreadAbove = frame.minY + 28 < top
-      return
-    }
-    let pinned = scrollState.pinned
-    let visible = conversation.messages.firstIndex {
-      guard let frame = frames[$0.id], !pinned.contains($0.id) else { return false }
-      return frame.maxY > top
-        && frame.minY < (scrollState.view?.bounds.height ?? 0)
-    }
-    viewport.unreadAbove =
-      visible.map { index in
-        conversation.messages[..<index].contains { $0.id == unread }
-      } ?? false
   }
   private func restore(_ position: ReadingPosition?, proxy: ScrollViewProxy, explicit: Bool = false, persist: Bool = true)
   {
@@ -875,7 +859,7 @@ struct ConversationView: View {
             sessions.reading.set(tail, sessionID: conversation.id)
             try? sessions.reading.flush()
           }
-          updateUnread()
+          viewport.stickyHeight = scrollState.usableTop
           return
         case .anchor(let id, let offset):
           await Task.yield()
@@ -895,7 +879,7 @@ struct ConversationView: View {
           }
           guard !Task.isCancelled else { return }
           restoring = false
-          updateUnread()
+          viewport.stickyHeight = scrollState.usableTop
           return
         }
       }
@@ -953,18 +937,10 @@ struct ConversationView: View {
 private struct StickyUserHeader: View {
   @Environment(\.appTheme) private var theme
   let message: ConversationMessage
-  let day: String?
   let scrollState: ConversationScrollState
-  let pinnedChanged: (Bool) -> Void
-  @State private var pinned = false
+  let maximumTextHeight: CGFloat
   var body: some View {
-    VStack(spacing: 10) {
-      if let day, !pinned {
-        Text(day).font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary)).padding(6)
-          .background(theme.color(.codeSurface), in: Capsule())
-      }
-      UserBubble(message: message, compact: pinned)
-    }
+    UserBubble(message: message, maximumTextHeight: maximumTextHeight)
     .padding(.vertical, 6).padding(.horizontal, 16)
     .background {
       // Native List headers inset their SwiftUI content. Paint beyond those margins,
@@ -972,10 +948,7 @@ private struct StickyUserHeader: View {
       theme.color(.background).padding(.horizontal, -32)
     }
     .background(
-      PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background)) {
-        pinned = $0
-        pinnedChanged($0)
-      }
+      PinnedHeaderProbe(id: message.id, state: scrollState, color: theme.uiColor(.background))
     )
   }
 }

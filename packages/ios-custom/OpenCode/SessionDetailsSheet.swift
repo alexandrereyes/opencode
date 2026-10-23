@@ -6,18 +6,22 @@ struct SessionDetailsSheet: View {
   @Environment(\.dismiss) private var dismiss
   let store: ConversationStore
   let project: Project?
+  var isChat = false
+  var showLocation = true
   let context: () -> Void
   @State private var services: SessionServices?
   var body: some View {
     NavigationStack {
       List {
         Section("Sessão") {
-          LabeledContent("Projeto", value: project?.displayName ?? "Indisponível")
-          VStack(alignment: .leading, spacing: 5) {
-            Text("Diretório de trabalho").foregroundStyle(theme.color(.textSecondary))
-            Text(store.located?.worktree ?? store.session?.location.directory ?? "Indisponível").font(.footnote).textSelection(.enabled)
+          LabeledContent("Projeto", value: isChat ? "Sem repositório" : project?.displayName ?? "Indisponível")
+          if showLocation {
+            VStack(alignment: .leading, spacing: 5) {
+              Text("Diretório de trabalho").foregroundStyle(theme.color(.textSecondary))
+              Text(store.located?.worktree ?? store.session?.location.directory ?? "Indisponível").font(.footnote).textSelection(.enabled)
+            }
+            LabeledContent("Branch", value: services?.branch ?? (services == nil ? "Carregando…" : "Indisponível"))
           }
-          LabeledContent("Branch", value: services?.branch ?? (services == nil ? "Carregando…" : "Indisponível"))
           if let changes = services?.changes {
             HStack {
               Text("Alterações atuais")
@@ -75,6 +79,7 @@ struct SessionDetailsSheet: View {
 struct ConversationNoticeView: View {
   @Environment(\.appTheme) private var theme
   let notice: ConversationNotice
+  var showDirectory = true
   let retry: () -> Void
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -82,7 +87,7 @@ struct ConversationNoticeView: View {
         .font(.subheadline.weight(.semibold))
       if case .missingDirectory(let directory) = notice {
         Text("O diretório desta sessão não existe mais. O histórico continua disponível, mas não é possível enviar mensagens.")
-        Text(directory).font(.caption).textSelection(.enabled)
+        if showDirectory { Text(directory).font(.caption).textSelection(.enabled) }
       } else {
         Text("Este servidor não oferece a API do OpenCode V2. Atualize o servidor para continuar.")
       }

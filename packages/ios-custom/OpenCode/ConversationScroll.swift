@@ -1,10 +1,6 @@
 import OpenCodeKit
 import SwiftUI
 
-@MainActor protocol ConversationHeaderLayout: AnyObject {
-  func prepareForFollowing(offset: CGFloat) -> Bool
-}
-
 @MainActor final class ConversationScrollState: NSObject {
   private let probes = NSMapTable<NSString, UIView>(
     keyOptions: .strongMemory, valueOptions: .weakMemory)
@@ -153,9 +149,6 @@ import SwiftUI
     let target = max(
       -view.adjustedContentInset.top,
       min(second.bottom, second.height) - view.bounds.height + view.adjustedContentInset.bottom)
-    // Crossing a sticky prompt compacts it on the next SwiftUI layout. Resolve
-    // that height change before using its expanded height as the tail target.
-    if plan.following && prepareHeader(offset: target) { return }
     guard let action = plan.consume(second, interacting: false) else { return }
     link?.invalidate()
     link = nil
@@ -194,17 +187,6 @@ import SwiftUI
     let section = collection.numberOfSections - 1
     guard section >= 0, collection.numberOfItems(inSection: section) > 0 else { return false }
     return collection.cellForItem(at: IndexPath(item: collection.numberOfItems(inSection: section) - 1, section: section))?.window != nil
-  }
-  private func prepareHeader(offset: CGFloat) -> Bool {
-    guard let view else { return false }
-    let candidate = headers.keyEnumerator().allObjects.compactMap { item -> (probe: any ConversationHeaderLayout, y: CGFloat)? in
-      guard let probe = item as? UIView, probe.window != nil,
-        let layout = probe as? any ConversationHeaderLayout, let header = headers.object(forKey: probe)
-      else { return nil }
-      let y = header.convert(header.bounds, to: view).minY
-      return y <= offset + 2 ? (layout, y) : nil
-    }.max { $0.y < $1.y }
-    return candidate?.probe.prepareForFollowing(offset: offset) ?? false
   }
   private func measure(_ view: UIScrollView) -> ConversationScrollPlan.Layout? {
     view.layoutIfNeeded()

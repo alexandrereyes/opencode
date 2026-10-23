@@ -34,6 +34,7 @@ struct AppTheme: Sendable {
 
   func color(_ role: ThemeRole) -> Color { Color(definition.color(role)) }
   func uiColor(_ role: ThemeRole) -> UIColor { UIColor(color(role)) }
+  func value(_ role: ThemeRole) -> ThemeColor { definition.color(role) }
   func avatar(_ color: String) -> (background: Color, text: Color) {
     let avatar = definition.avatar(ThemeAvatar.allCases.first { $0.name == color } ?? .lime)
     return (Color(avatar.background), Color(avatar.text))

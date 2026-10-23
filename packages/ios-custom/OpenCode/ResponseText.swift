@@ -16,7 +16,21 @@ extension EnvironmentValues {
 final class ResponseTextView: UITextView {
   private(set) var measuredSizes: [CGFloat: CGSize] = [:]
   override var attributedText: NSAttributedString! {
-    didSet { measuredSizes.removeAll(keepingCapacity: true) }
+    didSet { invalidateMeasurement() }
+  }
+  var codeGutter = false
+  var inlineCodeRanges: [NSRange] = []
+  var inlineCodeColor = UIColor.clear
+  var gutterColor = UIColor.clear
+  var gutterBorderColor = UIColor.clear
+  var openNote: ((String) -> Void)?
+  private var decorationWidth: CGFloat?
+  private var inlineCodeRects: [CGRect] = []
+  private var lineRects: [CGRect] = []
+  func invalidateMeasurement() {
+    measuredSizes.removeAll(keepingCapacity: true)
+    decorationWidth = nil
+    setNeedsLayout()
   }
   func fittingSize(width: CGFloat) -> CGSize {
     if let size = measuredSizes[width] { return size }
@@ -26,7 +40,9 @@ final class ResponseTextView: UITextView {
     return size
   }
   override func copy(_ sender: Any?) {
-    super.copy(sender)
+    if let block = sourceBlock, block.runs.contains(where: { $0.formula != nil }) {
+      UIPasteboard.general.string = block.copyText(in: selectedRange)
+    } else { super.copy(sender) }
     Haptics.play(.selection)
   }
   var messageID = ""
@@ -40,6 +56,24 @@ final class ResponseTextView: UITextView {
   var searchAlign: ((ConversationMatch, Double) -> Void)?
   override func layoutSubviews() {
     super.layoutSubviews()
+    if decorationWidth != bounds.width {
+      decorationWidth = bounds.width
+      inlineCodeRects = inlineCodeRanges.flatMap { range -> [CGRect] in
+        guard let start = position(from: beginningOfDocument, offset: range.location),
+          let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end)
+        else { return [] }
+        return selectionRects(for: text).map(\.rect).filter { $0.width > 0 }
+      }
+      lineRects = []
+      if codeGutter {
+        let units = Array((attributedText?.string ?? "").utf16)
+        let starts = [0] + units.enumerated().compactMap { $0.element == 10 && $0.offset + 1 < units.count ? $0.offset + 1 : nil }
+        lineRects = starts.compactMap { offset in
+          position(from: beginningOfDocument, offset: offset).map { caretRect(for: $0) }
+        }
+      }
+      setNeedsDisplay()
+    }
     guard let match = searchMatch, let range = searchRange, let align = searchAlign,
       let start = position(from: beginningOfDocument, offset: range.location),
       let end = position(from: start, offset: range.length),
@@ -58,6 +92,23 @@ final class ResponseTextView: UITextView {
       parent = view.superview
     }
   }
+  override func draw(_ rect: CGRect) {
+    inlineCodeColor.setFill()
+    inlineCodeRects.forEach { UIBezierPath(roundedRect: $0.insetBy(dx: -2.4, dy: -1.6), cornerRadius: 6).fill() }
+    super.draw(rect)
+    guard codeGutter else { return }
+    gutterBorderColor.setFill()
+    UIBezierPath(rect: CGRect(x: 31, y: 0, width: 1, height: bounds.height)).fill()
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .right
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular),
+      .foregroundColor: gutterColor, .paragraphStyle: paragraph,
+    ]
+    for (index, line) in lineRects.enumerated() {
+      (String(index + 1) as NSString).draw(in: CGRect(x: 0, y: line.minY, width: 25, height: line.height + 2), withAttributes: attributes)
+    }
+  }
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
@@ -74,17 +125,25 @@ struct SelectableResponseText: UIViewRepresentable {
   var actions: ResponseSelectionActions? = nil
   var selectionChanged: (() -> Void)? = nil
   var highlights = ConversationSearchHighlight()
+  var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
+  var gutter = false
+  var wrap = true
+  var tableHeader = false
+  var openNote: ((String) -> Void)? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
   func makeUIView(context: Context) -> ResponseTextView {
+    makeView(coordinator: context.coordinator)
+  }
+  func makeView(coordinator: Coordinator) -> ResponseTextView {
     // The ObjC textViewUsingTextLayoutManager factory bypasses Swift subclass defaults.
     // The designated initializer uses TextKit 2 by default on our deployment target.
     let view = ResponseTextView(frame: .zero, textContainer: nil)
     view.isEditable = false
     view.isSelectable = true
     view.isScrollEnabled = false
-    view.delegate = context.coordinator
+    view.delegate = coordinator
     view.backgroundColor = theme.uiColor(.background).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
@@ -92,6 +151,9 @@ struct SelectableResponseText: UIViewRepresentable {
     return view
   }
   func updateUIView(_ view: ResponseTextView, context: Context) {
+    configure(view, coordinator: context.coordinator)
+  }
+  func configure(_ view: ResponseTextView, coordinator: Coordinator) {
     if view.messageID != messageID || view.partID != partID || view.sourceBlock != block {
       view.clearSelection()
     }
@@ -102,48 +164,33 @@ struct SelectableResponseText: UIViewRepresentable {
     view.source = source
     view.selectionActions = actions
     view.selectionChanged = selectionChanged
-    view.tintColor = theme.uiColor(.primary)
+    view.openNote = openNote
+    view.tintColor = theme.uiColor(.markdownLink)
     view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
     view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first }
     view.searchAlign = highlights.align
     let matches = highlights.matches.filter { $0.partID == partID }
     let rendering = Rendering(
       block: block, theme: theme.id, matches: matches,
-      current: matches.contains { $0.id == highlights.current } ? highlights.current : nil)
-    guard context.coordinator.rendering != rendering else { return }
-    context.coordinator.rendering = rendering
-    let text = NSMutableAttributedString()
-    let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
-    let codeBlock: Bool = { if case .code = block.kind { true } else { false } }()
-    for run in block.runs {
-      let size: CGFloat = heading.map { CGFloat(max(18, 27 - $0 * 2)) } ?? (codeBlock ? 14 : 16)
-      let base =
-        run.code || codeBlock
-        ? UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        : UIFont.systemFont(
-          ofSize: size, weight: heading != nil || run.strong ? .semibold : .regular)
-      let font =
-        run.emphasis
-        ? UIFont(
-          descriptor: base.fontDescriptor.withSymbolicTraits(.traitItalic) ?? base.fontDescriptor,
-          size: size) : base
-      let paragraph = NSMutableParagraphStyle()
-      paragraph.lineSpacing = codeBlock ? 3 : 4
-      var attributes: [NSAttributedString.Key: Any] = [
-        .font: font,
-        .foregroundColor: theme.uiColor(run.code && !codeBlock ? .inlineCode : .textStrong),
-        .paragraphStyle: paragraph,
-      ]
-      if run.code && !codeBlock {
-        attributes[.backgroundColor] = theme.uiColor(.inlineCodeBackground)
-      }
-      if let link = run.link, let url = URL(string: link),
-        ["http", "https", "mailto"].contains(url.scheme)
-      {
-        attributes[.link] = url
-      }
-      text.append(NSAttributedString(string: run.text, attributes: attributes))
+      current: matches.contains { $0.id == highlights.current } ? highlights.current : nil,
+      gutter: gutter, wrap: wrap, tableHeader: tableHeader,
+      formulas: block.runs.compactMap(\.formula).filter { rasters[ResponseFormulaKey($0)] != nil }.count)
+    guard coordinator.rendering != rendering else { return }
+    coordinator.rendering = rendering
+    view.codeGutter = gutter
+    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? 44 : 0, bottom: 0, right: 0)
+    view.textContainer.lineBreakMode = wrap ? .byWordWrapping : .byClipping
+    view.inlineCodeColor = theme.uiColor(.inlineCodeBackground).withAlphaComponent(0.5)
+    view.gutterColor = theme.uiColor(.codeLineNumber).withAlphaComponent(0.45)
+    view.gutterBorderColor = theme.uiColor(.codeGutterSeparator).withAlphaComponent(theme.value(.codeGutterSeparator).opacity * 0.5)
+    let fenced: Bool = { if case .code = block.kind { true } else { false } }()
+    var cursor = 0
+    view.inlineCodeRanges = block.runs.compactMap { run in
+      defer { cursor += run.text.utf16.count }
+      guard run.code, !fenced else { return nil }
+      return NSRange(location: cursor, length: run.text.utf16.count)
     }
+    let text = ResponseTextStyle.text(block, theme: theme, rasters: rasters, tableHeader: tableHeader)
     for match in matches {
       for range in ConversationSearch.renderedRanges(match.range, block: block) {
         text.addAttribute(.backgroundColor, value: theme.uiColor(.primary).withAlphaComponent(
@@ -151,15 +198,18 @@ struct SelectableResponseText: UIViewRepresentable {
       }
     }
     if view.attributedText != text { view.attributedText = text }
+    view.invalidateMeasurement()
+    view.accessibilityLabel = block.copyText
     view.linkTextAttributes = [
-      .foregroundColor: theme.uiColor(.primary), .underlineStyle: NSUnderlineStyle.single.rawValue,
+      .foregroundColor: theme.uiColor(.markdownLink), .underlineStyle: 0,
     ]
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ResponseTextView, context: Context)
     -> CGSize?
   {
     guard let width = proposal.width, width > 0 else { return nil }
-    return uiView.fittingSize(width: width)
+    let size = uiView.fittingSize(width: width)
+    return CGSize(width: size.width, height: max(gutter ? 26 : 0, size.height))
   }
   static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
     coordinator.rendering = nil
@@ -172,10 +222,19 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchMatch = nil
     view.searchRange = nil
     view.searchAlign = nil
+    view.openNote = nil
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate {
     var rendering: Rendering?
+    func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+      guard case .link(let url) = textItem.content, url.scheme == "opencode-markdown" else { return defaultAction }
+      return UIAction(title: "Abrir nota") { [weak textView] _ in
+        guard let view = textView as? ResponseTextView else { return }
+        view.selectionChanged?()
+        view.openNote?(String(url.path.dropFirst()).removingPercentEncoding ?? "")
+      }
+    }
     func textViewDidChangeSelection(_ textView: UITextView) {
       guard textView.selectedRange.length > 0 else { return }
       (textView as? ResponseTextView)?.selectionChanged?()
@@ -211,6 +270,10 @@ struct SelectableResponseText: UIViewRepresentable {
     let theme: String
     let matches: [ConversationMatch]
     let current: String?
+    let gutter: Bool
+    let wrap: Bool
+    let tableHeader: Bool
+    let formulas: Int
   }
 }
 
@@ -220,6 +283,7 @@ struct ResponseMarkdown: View {
   @Environment(\.responseSelection) private var selectionActions
   @Environment(\.responseSelectionChanged) private var selectionChanged
   @Environment(\.conversationSearch) private var highlights
+  @Environment(\.displayScale) private var displayScale
   let text: String
   let messageID: String
   let partID: String
@@ -227,6 +291,10 @@ struct ResponseMarkdown: View {
   @State private var measuredHeight: CGFloat?
   @State private var mounted = false
   @State private var parsing: Task<Void, Never>?
+  @State private var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
+  @State private var rasterTheme = ""
+  @State private var note: Note?
+  private struct Note: Identifiable { let id: String }
   init(text: String, messageID: String, partID: String) {
     self.text = text
     self.messageID = messageID
@@ -234,49 +302,8 @@ struct ResponseMarkdown: View {
     _blocks = State(initialValue: ResponseMarkdownCache.shared.cached(text) ?? [])
   }
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      ForEach(blocks) { block in
-        switch block.kind {
-        case .image(let source): FeedImageView(source: source, name: block.text)
-        case .rule: Divider().overlay(theme.color(.border))
-        case .code:
-          VStack(alignment: .leading, spacing: 8) {
-            HStack {
-              if case .code(let language) = block.kind { Text(language ?? "Código").font(.caption) }
-              Spacer()
-              Button {
-                UIPasteboard.general.string = block.text
-                Haptics.play(.selection)
-                toast.show("Código copiado")
-              } label: {
-                Image(systemName: "doc.on.doc")
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Copiar código")
-            }.foregroundStyle(theme.color(.textSecondary))
-            SelectableResponseText(
-              block: block, messageID: messageID, partID: partID, theme: theme,
-              selectionChanged: selectionChanged?.selected, highlights: highlights)
-          }
-          .padding(12).background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
-          .overlay {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.border), lineWidth: 0.5)
-          }
-        default:
-          HStack(alignment: .top, spacing: 10) {
-            if block.kind == .quote { Rectangle().fill(theme.color(.border)).frame(width: 3) }
-            SelectableResponseText(
-              block: block, messageID: messageID, partID: partID, theme: theme,
-              source: text, actions: selectionActions, selectionChanged: selectionChanged?.selected,
-              highlights: highlights)
-          }
-          .padding(.leading, CGFloat(max(0, block.depth - 1)) * 15)
-          .padding(block.kind == .table ? 8 : 0)
-          .background(
-            block.kind == .table ? theme.color(.codeSurface) : theme.color(.background).opacity(0))
-        }
-      }
-    }
+    ResponseBlocks(blocks: blocks, source: text, messageID: messageID, partID: partID,
+      rasters: rasterTheme == theme.id ? rasters : [:], openNote: { note = Note(id: $0) })
     .frame(minHeight: blocks.isEmpty ? measuredHeight : nil)
     .onGeometryChange(for: CGFloat.self) {
       $0.size.height
@@ -288,10 +315,24 @@ struct ResponseMarkdown: View {
       parse()
     }
     .onChange(of: text) { _, _ in if mounted { parse() } }
+    .onChange(of: theme.id) { _, _ in if mounted { parse() } }
     .onDisappear {
       mounted = false
       parsing?.cancel()
       // List can recycle a still-measured cell; clearing its blocks creates an empty layout pass.
+    }
+    .sheet(item: $note) { note in
+      if let block = blocks.first(where: { if case .footnote(let id, _) = $0.kind { id == note.id } else { false } }) {
+        NavigationStack {
+          ScrollView {
+            ResponseBlocks(blocks: block.children, source: text, messageID: messageID, partID: partID,
+              rasters: rasters, openNote: { self.note = Note(id: $0) }).padding(20)
+          }
+          .background(theme.color(.background))
+          .navigationTitle("Nota de rodapé").navigationBarTitleDisplayMode(.inline)
+          .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { self.note = nil } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+      }
     }
   }
   private func parse() {
@@ -300,11 +341,15 @@ struct ResponseMarkdown: View {
     // Recycling must not insert an empty row and then reflow it after another parse.
     if let cached = ResponseMarkdownCache.shared.cached(source) {
       blocks = cached
-      return
     }
+    let theme = theme
+    let scale = displayScale
     parsing = Task { @MainActor in
       let parsed = await ResponseMarkdownCache.shared.parse(source)
+      let images = await ResponseFormulas.shared.rasters(parsed, theme: theme.id, color: theme.value(.markdownBody), scale: scale)
       guard !Task.isCancelled, mounted else { return }
+      rasters = images
+      rasterTheme = theme.id
       blocks = parsed
     }
   }

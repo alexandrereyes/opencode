@@ -290,10 +290,12 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   They are not server messages and do not change text/quote part IDs.
 - Sticky prompt is the **same** latest user bubble positioned under the header and clamped to two lines, not a second
   message. Preserve identity and selection anchors while scrolling.
-- `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Capture the
-  unread boundary before acknowledging view. There is no unread-message count or persisted divider: use the observed
-  session's prior `time.viewed` and incoming assistant activity to place one `Novas mensagens` divider. No API
-  supports moving the viewed watermark backwards.
+- `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Like the custom
+  web, there is no unread-message count, frozen boundary, divider or upward jump. One ↓ **Ir para a mais recente**
+  control appears beyond `max(400, viewport height)` points from the bottom (overflow > 1). It resumes following the
+  end, not a message boundary; prompt submission also resumes following. Route entry acknowledges the session's
+  observed idle independently of position, transcript paging and catalogs, including child sessions, through the
+  unchanged `POST /api/session/:id/view` payload `{idle}` on installed `1de0005…`. No API moves viewed backwards.
 
 ## 2. Live updates — wave 1
 

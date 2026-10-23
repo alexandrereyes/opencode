@@ -16,7 +16,7 @@ import XCTest
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
     wait(NSPredicate(format: "value != 'Restaurando leitura'"), on: transcript)
-    if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+    if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
     XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Não foi possível atualizar a conversa.'")).firstMatch.exists)
     return app
   }
@@ -81,7 +81,7 @@ import XCTest
       XCTAssertTrue(attachment.exists && attachment.isHittable)
       XCTAssertFalse(app.staticTexts["Imagem indisponível"].exists)
       shot("attachment", native: native)
-      if app.buttons["Ir para o fim"].exists { app.buttons["Ir para o fim"].tap() }
+      if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
       // Start paging from a fresh tail, not pages already loaded while locating the image.
       app.buttons["Voltar"].tap()
       app.terminate()

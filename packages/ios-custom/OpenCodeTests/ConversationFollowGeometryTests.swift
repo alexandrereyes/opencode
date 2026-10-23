@@ -8,16 +8,6 @@ import XCTest
     var simulatedDeceleration = false
     override var isDecelerating: Bool { simulatedDeceleration }
   }
-  private final class Header: UIView, ConversationHeaderLayout {
-    weak var scroll: UIScrollView?
-    private var prepared = false
-    func prepareForFollowing(offset: CGFloat) -> Bool {
-      guard !prepared else { return false }
-      prepared = true
-      scroll?.contentSize.height -= 35
-      return true
-    }
-  }
 
   func testExplicitFollowWaitsForExistingDeceleration() throws {
     let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -55,7 +45,7 @@ import XCTest
     XCTAssertEqual(scroll.contentOffset.y, 800)
   }
 
-  func testHeaderCompactionSettlesBeforeFirstTailOffset() throws {
+  func testFollowingDoesNotResizeThePinnedPrompt() throws {
     let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
     let window = UIWindow(windowScene: scene)
     window.rootViewController = UIViewController()
@@ -63,8 +53,7 @@ import XCTest
     scroll.contentInsetAdjustmentBehavior = .never
     scroll.contentSize = CGSize(width: 400, height: 1400)
     let cell = UICollectionReusableView(frame: CGRect(x: 0, y: 0, width: 400, height: 100))
-    let header = Header(frame: .zero)
-    header.scroll = scroll
+    let header = UIView(frame: .zero)
     cell.addSubview(header)
     scroll.addSubview(cell)
     window.rootViewController?.view.addSubview(scroll)
@@ -76,11 +65,11 @@ import XCTest
     defer { state.cancelAnchor() }
     state.followToEnd()
     state.settle()
-    XCTAssertEqual(scroll.contentOffset.y, 0, "Do not visit the expanded prompt's stale end")
-    state.settle()
     XCTAssertEqual(scroll.contentOffset.y, 0)
     state.settle()
-    XCTAssertEqual(scroll.contentOffset.y, 765)
+    XCTAssertEqual(scroll.contentOffset.y, 800)
+    XCTAssertEqual(scroll.contentSize.height, 1400)
+    XCTAssertEqual(cell.bounds.height, 100)
     state.settle()
     state.settle()
     XCTAssertTrue(state.tailSettled)

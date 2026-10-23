@@ -44,16 +44,17 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Fixture desconhecida"].waitForExistence(timeout: 10))
     app.terminate()
   }
-  func testFixtureMiddleUnreadNoticeInBothThemes() {
+  func testFixtureHistoryJumpInBothThemes() {
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = launch("conversation", updates: false, theme: theme)
       let transcript = app.collectionViews["conversation-transcript"]
       XCTAssertTrue(transcript.waitForExistence(timeout: 20))
       let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
       XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
-      XCTAssertTrue(app.buttons["Ir às novas mensagens"].waitForExistence(timeout: 5))
+      XCTAssertTrue(app.buttons["Ir para a mais recente"].waitForExistence(timeout: 5))
+      XCTAssertFalse(app.buttons["Ir às novas mensagens"].exists)
       let screenshot = XCTAttachment(screenshot: app.screenshot())
-      screenshot.name = "fixture-middle-unread-" + theme
+      screenshot.name = "fixture-history-jump-" + theme
       screenshot.lifetime = .keepAlways
       add(screenshot)
       app.terminate()

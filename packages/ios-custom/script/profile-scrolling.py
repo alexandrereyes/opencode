@@ -16,6 +16,7 @@ parser.add_argument("--mode", choices=["conversation", "sessions"], default="con
 parser.add_argument("--template", choices=["Time Profiler", "SwiftUI", "Animation Hitches"])
 parser.add_argument("--theme", default="openchamber-dark")
 parser.add_argument("--updates", action="store_true")
+parser.add_argument("--markdown", action="store_true", help="Profile the server-free comprehensive Markdown fixture")
 parser.add_argument("--frames", action="store_true", help="Measure the display-link driver without Instruments")
 parser.add_argument("--simulator", default="C960B2FA-F2AB-4E39-BF82-50050DF20A27")
 parser.add_argument("--derived", type=Path)
@@ -32,9 +33,12 @@ root = Path(__file__).resolve().parents[1]
 state = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
          "fixtureSHA256": hashlib.sha256((root / "OpenCode/Fixtures/scroll-fixture.json").read_bytes()).hexdigest(),
          "binarySHA256": hashlib.sha256((derived / "Build/Products/Debug-iphonesimulator/OpenCode.app/OpenCode.debug.dylib").read_bytes()).hexdigest(),
-         "mode": args.mode, "theme": args.theme, "template": args.template, "runID": run_id,
-         "files": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-                   for p in sorted(root.rglob("*.swift")) if not any(part.startswith(".") for part in p.relative_to(root).parts)}}
+          "mode": args.mode, "theme": args.theme, "template": args.template, "runID": run_id,
+          "codeWrap": True, "tableWrap": True,
+          "files": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in sorted(root.rglob("*.swift")) if not any(part.startswith(".") for part in p.relative_to(root).parts)}}
+if args.markdown:
+    state["markdownSHA256"] = hashlib.sha256((root / "OpenCode/Fixtures/markdown-fixture.md").read_bytes()).hexdigest()
 (evidence / (args.label + "-state.json")).write_text(json.dumps(state, indent=2) + "\n")
 subprocess.run(["xcrun", "simctl", "install", device, str(derived / "Build/Products/Debug-iphonesimulator/OpenCode.app")], check=True)
 container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, bundle, "data"], text=True).strip())
@@ -43,6 +47,9 @@ if args.template or args.frames:
 subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
 arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
 arguments += ["-OpenCodeFixtureRunID", run_id]
+arguments += ["-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"]
+if args.markdown:
+    arguments.append("-OpenCodeMarkdownFixture")
 if args.updates:
     arguments.append("-OpenCodeFixtureUpdates")
 if args.template or args.frames:

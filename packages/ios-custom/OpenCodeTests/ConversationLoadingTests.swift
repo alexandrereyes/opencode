@@ -31,11 +31,20 @@ private actor OpeningReadProbe {
   let failsFamily: Bool
   private var running: Bool
   private var tails = 0
-  init(failsFamily: Bool = false, running: Bool = false) {
+  private var views: [Double] = []
+  private var idle: Double?
+  private let parentID: String?
+  private var failViewOnce: Bool
+  init(failsFamily: Bool = false, running: Bool = false, idle: Double? = nil, parentID: String? = nil, failViewOnce: Bool = false) {
     self.failsFamily = failsFamily
     self.running = running
+    self.idle = idle
+    self.parentID = parentID
+    self.failViewOnce = failViewOnce
   }
   func finishExecution() { running = false }
+  func viewed() -> [Double] { views }
+  func advanceIdle(_ value: Double) { idle = value }
 
   func response(_ request: URLRequest) async -> (Data, URLResponse) {
     let path = request.url!.path
@@ -44,7 +53,17 @@ private actor OpeningReadProbe {
     switch path {
     case "/api/info": body = #"{"version":"test"}"#
     case "/api/session/ses_open":
-      body = #"{"data":{"id":"ses_open","projectID":"global","location":{"directory":"/sandbox"},"time":{"created":1,"updated":3,"viewed":1}}}"#
+      let parent = parentID.map { #", "parentID":"\#($0)""# } ?? ""
+      let completion = idle.map { #", "idle":\#($0)"# } ?? ""
+      body = #"{"data":{"id":"ses_open","projectID":"global"\#(parent),"location":{"directory":"/sandbox"},"time":{"created":1,"updated":3,"viewed":1\#(completion)}}}"#
+    case "/api/session/ses_open/view":
+      let input = try! JSONDecoder().decode(JSONValue.self, from: request.httpBody!)
+      views.append(input.object?["idle"]?.number ?? -1)
+      if failViewOnce {
+        failViewOnce = false
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+      }
+      body = ""
     case "/api/rpc/custom.transcript/list":
       let input = (try? JSONDecoder().decode(JSONValue.self, from: request.httpBody!))?.object?["input"]?.object
       if input?["cursor"]?.string == "older" {
@@ -80,6 +99,48 @@ private actor OpeningReadProbe {
 }
 
 @MainActor final class ConversationLoadingTests: XCTestCase {
+  func testRouteAcknowledgesOwnIdleBeforeCatalogsForRootAndChild() async throws {
+    for parent in [nil, "ses_parent"] {
+      let probe = OpeningReadProbe(idle: 20, parentID: parent)
+      let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {
+        await probe.response($0)
+      }
+      let store = ConversationStore(id: "ses_open", client: client, hub: EventHub(client: client))
+      let loading = Task { await store.refresh() }
+      await probe.gate.waitForArrival()
+      XCTAssertFalse(store.ready)
+      await store.presented()
+      await store.presented()
+      let views = await probe.viewed()
+      XCTAssertEqual(views, [20])
+      await probe.gate.release()
+      await loading.value
+      await probe.advanceIdle(30)
+      await store.refresh()
+      await store.presented()
+      let advanced = await probe.viewed()
+      XCTAssertEqual(advanced, [20, 30])
+    }
+  }
+
+  func testFailedViewedRequestAllowsRetryWithoutBlockingTheReader() async throws {
+    let probe = OpeningReadProbe(idle: 20, failViewOnce: true)
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {
+      await probe.response($0)
+    }
+    let store = ConversationStore(id: "ses_open", client: client, hub: EventHub(client: client))
+    let loading = Task { await store.refresh() }
+    await probe.gate.waitForArrival()
+    await store.presented()
+    await store.presented()
+    await store.presented()
+    let views = await probe.viewed()
+    XCTAssertEqual(views, [20, 20])
+    XCTAssertNil(store.error)
+    await probe.gate.release()
+    await loading.value
+  }
+
   func testTailPublishesBeforeCatalogsAndDoesNotDiscardConcurrentOlderPage() async throws {
     let probe = OpeningReadProbe(running: true)
     let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {

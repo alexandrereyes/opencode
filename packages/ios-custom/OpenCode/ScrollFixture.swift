@@ -14,6 +14,9 @@ import SwiftUI
     let snapshot = try! JSONDecoder().decode(
       ScrollFixtureSnapshot.self,
       from: Data(contentsOf: Bundle.main.url(forResource: "scroll-fixture", withExtension: "json")!))
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMarkdownFixture") {
+      return MarkdownFixtures.snapshot(snapshot)
+    }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureEmpty") {
       return ScrollFixtureSnapshot(
         messages: [], entries: snapshot.entries, projects: snapshot.projects,
@@ -87,6 +90,7 @@ struct ScrollFixtureRoot: View {
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
     .background(ScrollFixtureDriver().frame(width: 0, height: 0))
+    .background(MarkdownFixtureCaptureDriver().frame(width: 0, height: 0))
     .task { await store.run() }
   }
 }
