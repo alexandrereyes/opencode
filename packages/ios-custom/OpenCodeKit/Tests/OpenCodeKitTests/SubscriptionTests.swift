@@ -81,6 +81,14 @@ private func project(_ accounts: [Subscriptions.Account], plan: String = "pro") 
   #expect(empty.balance == .empty && empty.equivalents == nil && empty.remaining == nil && empty.inventory == nil)
 }
 
+@Test func subscriptionRenewalDateShowsWeekdayInLocalTime() {
+  let saoPaulo = TimeZone(identifier: "America/Sao_Paulo")!
+  #expect(SubscriptionFormat.date(Subscriptions.date("2026-10-24T12:49:00Z"), timeZone: saoPaulo) == "sáb, 24/10 às 09:49")
+  #expect(SubscriptionFormat.date(Subscriptions.date("2026-10-29T13:59:00Z"), timeZone: saoPaulo) == "qui, 29/10 às 10:59")
+  #expect(SubscriptionFormat.date(Subscriptions.date("2026-10-27T02:30:00Z"), timeZone: saoPaulo) == "seg, 26/10 às 23:30")
+  #expect(SubscriptionFormat.date(nil) == "—")
+}
+
 @Test func subscriptionBothRenewalBoundariesAndMissingObservation() {
   for plan in ["pro", "promax", "prolite", "plus", "max20x", "max5x"] {
     for fiveHour in [false, true] {

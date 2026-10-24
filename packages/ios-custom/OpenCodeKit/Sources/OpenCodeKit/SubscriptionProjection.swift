@@ -140,12 +140,16 @@ public enum SubscriptionFormat {
   public static func resets(_ value: Double) -> String {
     "\(number(value, decimals: 0)) \(value == 1 ? "redefinição" : "redefinições")"
   }
-  public static func date(_ date: Date?) -> String {
+  public static func date(_ date: Date?, timeZone: TimeZone = .current) -> String {
     guard let date else { return "—" }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "pt_BR")
+    formatter.timeZone = timeZone
+    // pt_BR abbreviates weekdays with a period ("sáb."); drop it to keep the compact "sáb, 24/10" form.
+    formatter.dateFormat = "EEE"
+    let weekday = formatter.string(from: date).trimmingCharacters(in: CharacterSet(charactersIn: "."))
     formatter.dateFormat = "dd/MM 'às' HH:mm"
-    return formatter.string(from: date)
+    return weekday + ", " + formatter.string(from: date)
   }
   public static func countdown(_ date: Date?, now: Date) -> String {
     guard let date else { return "—" }

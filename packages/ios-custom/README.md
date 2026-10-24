@@ -1164,7 +1164,8 @@ The strip retains its existing styling; a selected account name truncates rather
   unsupported RPCs. Consumption has a **110-second HTTP timeout** for the proxy's 90-second path and is never retried
   automatically: an unconfirmed result may already have consumed inventory. Inventory/expiry/non-expiring counts and
   automation state are visible even when weekly capacity is unavailable. Theme roles and VoiceOver values convey state
-  independently of color; all dates use local pt-BR 24-hour time.
+  independently of color; all dates use local pt-BR 24-hour time with an abbreviated weekday
+  (`sáb, 24/10 às 09:49`), including renewals, the header's next renewal and inventory expirations.
 
 ### Safe verification
 
