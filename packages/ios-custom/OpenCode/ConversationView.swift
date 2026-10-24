@@ -34,6 +34,7 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
     weak var container: UICollectionReusableView?
     var observation: NSKeyValueObservation?
     let fade = CAGradientLayer()
+    private var styled: Style?
     init(
       id: String, state: ConversationScrollState, color: UIColor
     ) {
@@ -49,7 +50,10 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
     override func didMoveToWindow() {
       super.didMoveToWindow()
       observation = nil
-      if window == nil { fade.removeFromSuperlayer() }
+      if window == nil {
+        fade.removeFromSuperlayer()
+        styled = nil
+      }
       attach()
       refresh()
     }
@@ -67,9 +71,9 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
         if let view = current as? UIScrollView {
           if scroll !== view || observation == nil {
             scroll = view
-            observation = view.observe(\.contentOffset, options: [.initial, .new]) {
-              [weak self] _, _ in
-              Task { @MainActor [weak self] in self?.refresh() }
+            // Offsets change on the main thread; the fade must follow in the same frame.
+            observation = view.observe(\.contentOffset, options: [.initial, .new]) { [weak self] _, _ in
+              MainActor.assumeIsolated { self?.reposition() }
             }
           }
           return
@@ -83,12 +87,19 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       refresh()
     }
     func refresh() {
-      guard let scroll, let container, container.bounds.height > 0, window != nil else { return }
+      guard let container, container.bounds.height > 0, window != nil else { return }
+      style(container)
+      reposition()
+    }
+    /// Appearance depends only on the reused container, header and resolved color. Reapplying a cell
+    /// background configuration rebuilds UIKit's background view, so it must not run per offset.
+    private func style(_ container: UICollectionReusableView) {
+      let resolved = color.resolvedColor(with: container.traitCollection)
+      let key = Style(container: ObjectIdentifier(container), id: id, color: resolved.cgColor)
+      guard styled != key || fade.superlayer !== container.layer else { return }
+      styled = key
       container.backgroundColor = color
-      if let cell = container as? UICollectionViewListCell,
-        cell.backgroundConfiguration?.backgroundColor != color
-          || cell.backgroundConfiguration?.visualEffect != nil
-      {
+      if let cell = container as? UICollectionViewListCell {
         var background = UIBackgroundConfiguration.clear()
         background.backgroundColor = color
         background.backgroundInsets = .zero
@@ -96,12 +107,6 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
         cell.backgroundConfiguration = background
       }
       state.registerHeader(self, container: container, id: id)
-      let frame = container.convert(container.bounds, to: scroll)
-      // List prefetches headers above the viewport; only the header crossing its
-      // top edge is sticky, not every previously visited prompt.
-      let next =
-        scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
-        && frame.minY - scroll.contentOffset.y <= 2 && frame.maxY > scroll.bounds.minY + 1
       // The SwiftUI content is inset inside the native header. Its overlay starts
       // beneath opaque native padding, truncating most of the gradient. Draw from
       // the actual full-width header edge instead, without changing row geometry.
@@ -112,13 +117,30 @@ private struct PinnedHeaderProbe: UIViewRepresentable {
       container.clipsToBounds = false
       CATransaction.begin()
       CATransaction.setDisableActions(true)
-      fade.frame = CGRect(x: 0, y: container.bounds.maxY, width: container.bounds.width, height: 14)
-      fade.colors = [
-        color.resolvedColor(with: container.traitCollection).cgColor,
-        color.withAlphaComponent(0).resolvedColor(with: container.traitCollection).cgColor,
-      ]
+      fade.colors = [resolved.cgColor, resolved.withAlphaComponent(0).cgColor]
+      CATransaction.commit()
+    }
+    func reposition() {
+      guard let scroll, let container, container.bounds.height > 0, window != nil,
+        fade.superlayer === container.layer else { return }
+      let frame = container.convert(container.bounds, to: scroll)
+      // List prefetches headers above the viewport; only the header crossing its
+      // top edge is sticky, not every previously visited prompt.
+      let next =
+        scroll.contentOffset.y > -scroll.adjustedContentInset.top + 1
+        && frame.minY - scroll.contentOffset.y <= 2 && frame.maxY > scroll.bounds.minY + 1
+      let edge = CGRect(x: 0, y: container.bounds.maxY, width: container.bounds.width, height: 14)
+      guard fade.frame != edge || fade.isHidden == next else { return }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      fade.frame = edge
       fade.isHidden = !next
       CATransaction.commit()
+    }
+    private struct Style: Equatable {
+      let container: ObjectIdentifier
+      let id: String
+      let color: CGColor
     }
   }
 }
@@ -151,7 +173,6 @@ struct ConversationView: View {
   @State private var captureRequested = false
   @State private var viewport = ConversationViewport()
   @State private var screenVisible = true
-  @State private var promptViewport = CGSize(width: 440, height: 800)
   @State private var quoteDetail: ChatQuoteMark?
   @State private var quoteTarget: ChatQuoteMark?
   @State private var quoteAligned: String?
@@ -268,7 +289,8 @@ struct ConversationView: View {
             draft: sessions.drafts.draft(conversation.id))
         }
       }))
-    .onGeometryChange(for: CGSize.self) { $0.size } action: { promptViewport = $0 }
+    // Only pinned prompts read this size; it changes on every frame of a keyboard transition.
+    .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport.promptSize = $0 }
     .environment(\.conversationImages, conversation.session.map {
       ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
     })
@@ -492,7 +514,10 @@ struct ConversationView: View {
     }.background(theme.color(.background))
   }
   private var normalHeader: some View {
-    HStack(spacing: 9) {
+    // Both projections walk the transcript; the header reads each several times per update.
+    let context = conversation.context
+    let running = conversation.runningCount
+    return HStack(spacing: 9) {
       Button {
         leavePosition()
         dismiss()
@@ -511,7 +536,7 @@ struct ConversationView: View {
         } label: {
           ZStack {
             Circle().stroke(theme.color(.contextTrack), lineWidth: 2.5)
-            if let fraction = conversation.context {
+            if let fraction = context {
               Circle().trim(from: 0, to: min(1, max(0, fraction)))
                 .stroke(
                   theme.color(fraction > 0.8 ? .contextWarning : .contextFill),
@@ -531,7 +556,7 @@ struct ConversationView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
-          conversation.context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
+          context.map { "Contexto: \(Int(($0 * 100).rounded()))%" }
             ?? "Contexto desconhecido")
         .accessibilityIdentifier("conversation-header-avatar")
         .accessibilityValue(master ? "Sessão mestra" : monogram)
@@ -549,7 +574,6 @@ struct ConversationView: View {
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
       if !conversation.work.isEmpty {
-        let running = conversation.runningCount
         Button {
           leavePosition()
           sessions.conversationPath.append(.init(id: conversation.id, agents: true))
@@ -617,6 +641,7 @@ struct ConversationView: View {
   private var timeline: some View {
     ScrollViewReader { proxy in
       let dividers = ConversationProjection.finalAnswerDividers(conversation.messages)
+      let marks = TranscriptMarks(conversation.messages, working: conversation.working)
       List {
         if conversation.hasOlder && conversation.ready && !resumeOffered {
           HStack {
@@ -640,7 +665,7 @@ struct ConversationView: View {
           .onAppear { if !search.open && !atBottom && !firstLoad && !restoring && !resumeOffered { loadOlder() } }
         }
         ForEach(sections) { section in
-          if let user = section.user, showDay(user) {
+          if let user = section.user, marks.days.contains(user.id) {
             day(user.time.created).padding(.vertical, 6)
               .listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
               .listRowBackground(theme.color(.background))
@@ -649,11 +674,11 @@ struct ConversationView: View {
             ForEach(section.messages) { item in
               let message = item.message
               VStack(alignment: .leading, spacing: 16) {
-                if showDay(message) { day(message.time.created) }
+                if marks.days.contains(message.id) { day(message.time.created) }
                 ConversationMessageView(
-                  message: message, footer: hasFooter(message), store: conversation,
+                  message: message, footer: hasFooter(message, marks: marks), store: conversation,
                   dividers: dividers, rows: item.rows
-                ) { openChild($0) }
+                ) { openChild($0) }.equatable()
               }
               .padding(.vertical, 10)
               .background(theme.color(.background))
@@ -679,10 +704,8 @@ struct ConversationView: View {
             if let user = section.user {
               StickyUserHeader(
                 message: user.presented(isChild: conversation.isChild),
-                scrollState: scrollState,
-                maximumTextHeight: promptViewport.height * 0.4,
-                width: promptViewport.width
-              )
+                scrollState: scrollState, viewport: viewport
+              ).equatable()
               .listRowInsets(EdgeInsets())
               .textCase(nil)
               .id(user.id)
@@ -707,8 +730,7 @@ struct ConversationView: View {
         ForEach(conversation.pendingSteers) { item in
           Section {
           } header: {
-            PendingUserMessage(item: item, store: conversation, maximumTextHeight: promptViewport.height * 0.4,
-              width: promptViewport.width)
+            PendingUserMessage(item: item, store: conversation, viewport: viewport)
               .background { theme.color(.background).padding(.horizontal, -32) }
               .listRowInsets(EdgeInsets())
               .textCase(nil)
@@ -1070,14 +1092,6 @@ struct ConversationView: View {
       if conversation.messages.count == count { scrollState.anchor = nil }
     }
   }
-  private func showDay(_ message: ConversationMessage) -> Bool {
-    guard let index = conversation.messages.firstIndex(where: { $0.id == message.id }), index > 0
-    else { return true }
-    return !Calendar.current.isDate(
-      Date(timeIntervalSince1970: message.time.created / 1000),
-      inSameDayAs: Date(timeIntervalSince1970: conversation.messages[index - 1].time.created / 1000)
-    )
-  }
   private func day(_ milliseconds: Double) -> some View {
     Text(ConversationProjection.day(milliseconds)).appFont(.footnote, weight: .medium)
       .foregroundStyle(theme.color(.textSecondary))
@@ -1085,15 +1099,9 @@ struct ConversationView: View {
         theme.color(.codeSurface), in: Capsule()
       ).frame(maxWidth: .infinity)
   }
-  private func hasFooter(_ message: ConversationMessage) -> Bool {
-    guard message.type == "assistant", !message.responseText.isEmpty, message.time.completed != nil,
-      message.error == nil, message.retry == nil,
-      let index = conversation.messages.firstIndex(where: { $0.id == message.id })
-    else { return false }
-    let following = conversation.messages.dropFirst(index + 1).prefix { $0.type != "user" }
-    guard !following.contains(where: { !$0.responseText.isEmpty }) else { return false }
-    return conversation.messages.dropFirst(index + 1).contains { $0.type == "user" }
-      || !conversation.working
+  private func hasFooter(_ message: ConversationMessage, marks: TranscriptMarks) -> Bool {
+    message.type == "assistant" && marks.footers.contains(message.id) && message.time.completed != nil
+      && message.error == nil && message.retry == nil && !message.responseText.isEmpty
   }
 }
 
@@ -1108,16 +1116,18 @@ private struct DraftTriggerObserver: View {
   }
 }
 
-private struct StickyUserHeader: View {
+private struct StickyUserHeader: View, @MainActor Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.message == rhs.message && lhs.scrollState === rhs.scrollState && lhs.viewport === rhs.viewport
+  }
   @Environment(\.appTheme) private var theme
   let message: ConversationMessage
   let scrollState: ConversationScrollState
-  let maximumTextHeight: CGFloat
-  let width: CGFloat
+  let viewport: ConversationViewport
   var body: some View {
-    UserBubble(message: message, maximumTextHeight: maximumTextHeight)
+    UserBubble(message: message, maximumTextHeight: viewport.promptSize.height * 0.4)
     // Native section headers add device-dependent margins independently of row insets.
-    .frame(width: max(0, width - AppLayout.margin * 2))
+    .frame(width: max(0, viewport.promptSize.width - AppLayout.margin * 2))
     .padding(.vertical, 8).frame(maxWidth: .infinity)
     .background {
       // Native List headers inset their SwiftUI content. Paint beyond those margins,
@@ -1132,7 +1142,12 @@ private struct StickyUserHeader: View {
   }
 }
 
-private struct ConversationMessageView: View {
+/// Streaming republishes the whole transcript; unchanged rows must not re-render, so equality ignores
+/// the stable store and navigation handler.
+private struct ConversationMessageView: View, @MainActor Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.message == rhs.message && lhs.footer == rhs.footer && lhs.rows == rhs.rows && lhs.dividers == rhs.dividers
+  }
   @Environment(\.appTheme) private var theme
   let message: ConversationMessage
   let footer: Bool
@@ -1150,8 +1165,12 @@ private struct ConversationMessageView: View {
                 Rectangle().fill(theme.color(.borderStrong)).frame(height: 1)
                   .accessibilityHidden(true)
               }
+              // Text rows belong to their own message; reading `store.messages` here would make every
+              // visible row observe each streamed token.
               ResponseMarkdown(text: entry.part.text ?? "", messageID: entry.messageID, partID: entry.id)
-                .environment(\.responseFilesStable, store.messages.first { $0.id == entry.messageID }?.time.completed != nil)
+                .environment(\.responseFilesStable, entry.messageID == message.id
+                  ? message.time.completed != nil
+                  : store.messages.first { $0.id == entry.messageID }?.time.completed != nil)
             }
           } else if row.kind == .divider {
             Rectangle().fill(theme.color(.borderStrong)).frame(height: 1).accessibilityHidden(true)

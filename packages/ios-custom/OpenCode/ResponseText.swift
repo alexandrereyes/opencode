@@ -8,6 +8,13 @@ struct ResponseSelectionActions {
 struct ResponseSelectionObserver {
   let selected: () -> Void
 }
+/// Both handlers read the conversation's current state when invoked, so any two copies are interchangeable.
+extension ResponseSelectionActions: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+extension ResponseSelectionObserver: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
 extension EnvironmentValues {
   @Entry var responseSelection: ResponseSelectionActions? = nil
   @Entry var responseSelectionChanged: ResponseSelectionObserver? = nil
@@ -171,8 +178,8 @@ struct SelectableResponseText: UIViewRepresentable {
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  func makeUIView(context: Context) -> ResponseTextView {
-    makeView(coordinator: context.coordinator)
+  func makeUIView(context: Context) -> ResponseTextContainer {
+    ResponseTextContainer(makeView(coordinator: context.coordinator))
   }
   func makeView(coordinator: Coordinator) -> ResponseTextView {
     // The ObjC textViewUsingTextLayoutManager factory bypasses Swift subclass defaults.
@@ -191,8 +198,8 @@ struct SelectableResponseText: UIViewRepresentable {
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return view
   }
-  func updateUIView(_ view: ResponseTextView, context: Context) {
-    configure(view, coordinator: context.coordinator)
+  func updateUIView(_ container: ResponseTextContainer, context: Context) {
+    configure(container.text, coordinator: context.coordinator)
   }
   func configure(_ view: ResponseTextView, coordinator: Coordinator) {
     let category = contentSizeOverride ?? typeSize.uiCategory
@@ -267,14 +274,15 @@ struct SelectableResponseText: UIViewRepresentable {
     view.accessibilityValue = block.copyText
     view.linkTextAttributes = [:]
   }
-  func sizeThatFits(_ proposal: ProposedViewSize, uiView: ResponseTextView, context: Context)
+  func sizeThatFits(_ proposal: ProposedViewSize, uiView: ResponseTextContainer, context: Context)
     -> CGSize?
   {
     guard let width = proposal.width, width > 0 else { return nil }
-    let size = uiView.fittingSize(width: width)
+    let size = uiView.text.fittingSize(width: width)
     return CGSize(width: wrap ? width : size.width, height: max(gutter ? 26 : 0, size.height))
   }
-  static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
+  static func dismantleUIView(_ container: ResponseTextContainer, coordinator: Coordinator) {
+    let view = container.text
     coordinator.rendering = nil
     coordinator.fileTask?.cancel()
     coordinator.fileKey = nil
@@ -467,5 +475,29 @@ struct ResponseMarkdown: View {
       rasterTheme = theme.id
       blocks = parsed
     }
+  }
+}
+
+/// SwiftUI stacks query every hosted view for text baselines while placing children. A `UITextView`
+/// answers with a full TextKit layout on each pass, uncached by `fittingSize`; this neutral host has no
+/// baseline, so measurement remains the only text layout. Response blocks never align by baseline.
+final class ResponseTextContainer: UIView {
+  let text: ResponseTextView
+  init(_ text: ResponseTextView) {
+    self.text = text
+    super.init(frame: .zero)
+    isOpaque = false
+    addSubview(text)
+  }
+  required init?(coder: NSCoder) { nil }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    text.frame = bounds
+  }
+  override var forFirstBaselineLayout: UIView { self }
+  override var forLastBaselineLayout: UIView { self }
+  // Quote badges extend beyond the text bounds.
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    text.point(inside: convert(point, to: text), with: event)
   }
 }

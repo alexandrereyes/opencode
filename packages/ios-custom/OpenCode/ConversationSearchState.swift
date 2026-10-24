@@ -77,6 +77,10 @@ struct ConversationSearchHighlight {
   var current: String?
   var align: ((ConversationMatch, Double) -> Void)?
 }
+/// The alignment handler is stable for a conversation; matches and the current match are the rendered data.
+extension ConversationSearchHighlight: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.matches == rhs.matches && lhs.current == rhs.current }
+}
 extension EnvironmentValues {
   @Entry var conversationSearch = ConversationSearchHighlight()
 }

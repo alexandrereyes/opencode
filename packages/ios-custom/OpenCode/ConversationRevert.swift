@@ -8,6 +8,11 @@ struct UserMessageRevertAction {
   let revert: (String) -> Void
 }
 
+/// The handler resolves the message when invoked; only the pending state is rendered.
+extension UserMessageRevertAction: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.pending == rhs.pending }
+}
+
 extension EnvironmentValues {
   @Entry var userMessageRevert: UserMessageRevertAction? = nil
 }

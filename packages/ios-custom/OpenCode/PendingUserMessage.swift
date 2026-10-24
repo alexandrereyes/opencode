@@ -21,11 +21,11 @@ struct PendingUserMessage: View {
   @Environment(\.appTheme) private var theme
   let item: InboxItem
   let store: ConversationStore
-  let maximumTextHeight: CGFloat
-  let width: CGFloat
+  /// Read here, not by the transcript: the size changes on every frame of a keyboard transition.
+  let viewport: ConversationViewport
   var body: some View {
     let status = store.pendingStatus(item)
-    UserBubble(message: item.message, maximumTextHeight: maximumTextHeight)
+    UserBubble(message: item.message, maximumTextHeight: viewport.promptSize.height * 0.4)
       .environment(\.appTheme, theme.pendingUserBubble)
       .environment(\.userMessageUndelivered, true)
       .environment(\.userMessagePending, status.flatMap { status in
@@ -36,7 +36,7 @@ struct PendingUserMessage: View {
           remove: { Task { await store.deletePending(item) } })
       })
       // Like the pinned header, a definite width lets the bubble measure its wrapping attachments.
-      .frame(width: max(0, width - AppLayout.margin * 2))
+      .frame(width: max(0, viewport.promptSize.width - AppLayout.margin * 2))
       .padding(.vertical, 8).frame(maxWidth: .infinity)
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("pending-user-" + item.id)

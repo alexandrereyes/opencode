@@ -10,6 +10,10 @@ import WebKit
 struct FileOpenAction {
   let open: (String) -> Void
 }
+/// The handler only presents the host's viewer state, so any two copies are interchangeable.
+extension FileOpenAction: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
 extension EnvironmentValues {
   @Entry var openFile: FileOpenAction? = nil
 }

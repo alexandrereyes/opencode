@@ -118,3 +118,8 @@ public enum ChatQuoteAnchoring {
     return result
   }
 }
+
+/// Rows compare quote contexts while the transcript updates; every carried mark is also indexed by part.
+extension ChatQuoteIndex: Equatable {
+  public static func == (lhs: ChatQuoteIndex, rhs: ChatQuoteIndex) -> Bool { lhs.parts == rhs.parts }
+}

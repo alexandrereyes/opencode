@@ -2,9 +2,11 @@ import OpenCodeKit
 
 extension ConversationStore {
   func updateActivity() {
-    let boundary = reversion.boundary(session)
-    quoteIndex.update(messages.filter { message in boundary.map { message.id < $0 } ?? true })
-    activity = ConversationActivity.project(
-      messages.filter { message in boundary.map { message.id < $0 } ?? true }, previous: activity, executing: executing)
+    let visible = reversion.boundary(session).map { boundary in messages.filter { $0.id < boundary } } ?? messages
+    // Assigning an equal index publishes nothing; mutating it in place would invalidate every observer.
+    var index = quoteIndex
+    index.update(visible)
+    quoteIndex = index
+    activity = ConversationActivity.project(visible, previous: activity, executing: executing)
   }
 }

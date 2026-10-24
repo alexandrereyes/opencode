@@ -53,12 +53,14 @@ extension SelectableResponseText.Coordinator {
     guard let context else { return }
     if case .code = block.kind { return }
     let paths = Array(Set(block.runs.filter { $0.code && $0.link == nil }.compactMap { FileReference.inline($0.text) })).sorted()
-    let key = FeedImageLoader.cacheKey(paths.joined(separator: "\u{0}"), configuration: context.client.configuration, directory: context.directory)
+    // An in-memory identity of this lookup only; hashing it ran for every block on every update.
+    let key = paths.isEmpty ? nil : ([context.client.configuration.url.absoluteString, context.directory] + paths)
+      .joined(separator: "\u{0}")
     guard key != fileKey else { return }
     fileTask?.cancel()
     fileKey = key
     knownFiles = []
-    guard !paths.isEmpty else { return }
+    guard let key else { return }
     fileTask = Task { @MainActor [weak self, weak view] in
       for path in paths {
         let exists = await ResponseFileExistence.shared.exists(path, context: context)

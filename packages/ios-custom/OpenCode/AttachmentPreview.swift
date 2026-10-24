@@ -7,6 +7,14 @@ struct ConversationImageContext {
   let sessionID: String
 }
 
+extension ConversationImageContext: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.client.configuration.url == rhs.client.configuration.url
+      && lhs.client.configuration.password == rhs.client.configuration.password
+      && lhs.directory == rhs.directory && lhs.sessionID == rhs.sessionID
+  }
+}
+
 extension EnvironmentValues {
   @Entry var conversationImages: ConversationImageContext? = nil
 }

@@ -12,21 +12,32 @@ struct ResponseBlocks: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-        VStack(alignment: .leading, spacing: 8) {
-          if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
+        // Every stack level re-measures its children on each layout pass; most blocks need neither.
+        if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
+          VStack(alignment: .leading, spacing: 8) {
             Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
+            quoted(block)
           }
-          HStack(alignment: .top, spacing: 12.8) {
-            ForEach(0..<block.quoteDepth, id: \.self) { _ in
-              Rectangle().fill(theme.color(.markdownQuoteBorder)).frame(width: 2)
-            }
-            ResponseBlock(block: block, source: source, messageID: messageID, partID: partID, rasters: rasters, openNote: openNote)
-          }
-          .padding(.leading, block.indent)
+          .padding(.top, spacing(index))
+        } else {
+          quoted(block).padding(.top, spacing(index))
         }
-        .padding(.top, spacing(index))
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
+  }
+  @ViewBuilder private func quoted(_ block: MarkdownBlock) -> some View {
+    let content = ResponseBlock(block: block, source: source, messageID: messageID, partID: partID, rasters: rasters, openNote: openNote)
+    if block.quoteDepth > 0 {
+      HStack(alignment: .top, spacing: 12.8) {
+        ForEach(0..<block.quoteDepth, id: \.self) { _ in
+          Rectangle().fill(theme.color(.markdownQuoteBorder)).frame(width: 2)
+        }
+        content
+      }
+      .padding(.leading, block.indent)
+    } else {
+      content.padding(.leading, block.indent)
+    }
   }
   private func isFootnote(_ block: MarkdownBlock) -> Bool { if case .footnote = block.kind { true } else { false } }
   private func spacing(_ index: Int) -> CGFloat {

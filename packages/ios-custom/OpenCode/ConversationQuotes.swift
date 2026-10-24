@@ -27,6 +27,20 @@ struct ResponseQuoteContext {
   var align: ((String, String, Double) -> Void)?
 }
 
+// Handlers capture the conversation's state storage, so each body's copy behaves the same: comparing only
+// the rendered data keeps every visible response from re-rendering whenever the conversation updates.
+extension ConversationQuoteContext: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.index == rhs.index && lhs.pending == rhs.pending && lhs.dismissed == rhs.dismissed
+      && lhs.revealing == rhs.revealing && lhs.target == rhs.target && lhs.active == rhs.active
+  }
+}
+extension ResponseQuoteContext: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.highlights == rhs.highlights && lhs.target == rhs.target && lhs.active == rhs.active
+  }
+}
+
 extension EnvironmentValues {
   @Entry var conversationQuotes = ConversationQuoteContext()
   @Entry var responseQuotes = ResponseQuoteContext()

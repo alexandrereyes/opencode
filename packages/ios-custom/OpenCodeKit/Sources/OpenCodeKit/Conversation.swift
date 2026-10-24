@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public struct ModelReference: Codable, Sendable, Hashable {
   public var id: String
@@ -350,11 +351,20 @@ public enum ConversationProjection {
     ].compactMap { $0 }.joined(separator: " · ")
   }
   public static func date(_ milliseconds: Double, format: String) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "pt_BR")
-    formatter.dateFormat = format
-    return formatter.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
+    // Transcript rows format dates while scrolling; creating a formatter per call dominated their bodies.
+    formatters.withLock { cache in
+      let formatter = cache[format] ?? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = format
+        return formatter
+      }()
+      cache[format] = formatter
+      return formatter.string(from: Date(timeIntervalSince1970: milliseconds / 1000))
+    }
   }
+  private static let formatters = Mutex<[String: DateFormatter]>([:])
   public static func day(_ milliseconds: Double, now: Date = .now, calendar: Calendar = .current)
     -> String
   {
