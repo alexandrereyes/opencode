@@ -22,6 +22,7 @@ struct ComposerFixtureRoot: View {
   @State private var store: ConversationStore
   @State private var owner = UUID()
   @State private var restored = false
+  @State private var suggestionReturn = ComposerSuggestionReturn()
   init() {
     let client = OpenCodeClient.scrollFixture(configuration: .launch())
     _store = State(initialValue: ConversationStore(id: "fixture", client: client, hub: EventHub(client: client)))
@@ -31,9 +32,14 @@ struct ComposerFixtureRoot: View {
     NavigationStack {
       VStack(spacing: 12) {
         if let trigger = draft.trigger {
-          ComposerSuggestions(store: store, trigger: trigger) { draft.insert($0.token, replacing: trigger.range) }
+          ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn) {
+            draft.insert($0.token, replacing: trigger.range)
+          }
         }
-        ComposerTextView(draft: draft, theme: theme, expanded: true, owner: owner)
+        ComposerTextView(draft: draft, theme: theme, expanded: true, owner: owner, firstSuggestion: {
+          guard let trigger = draft.trigger, let first = suggestionReturn.first, first.trigger == trigger else { return nil }
+          return { draft.insert(first.item.token, replacing: trigger.range) }
+        })
           .frame(maxHeight: .infinity)
         Text("\(draft.document.validTokens.count) tokens").accessibilityIdentifier("fixture-tokens")
         Text(draft.document.text).lineLimit(1).accessibilityIdentifier("fixture-text")

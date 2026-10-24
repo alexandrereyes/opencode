@@ -65,7 +65,8 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
           $0.attachment.id == id && $0.attachment.quoteID == self.id
         })
       else { return part }
-      if item.inline != nil {
+      // Only images travel inline after the prompt's files (see `inlineIDs`); a PDF stays a staged path.
+      if item.inline != nil, object["type"]?.string == "image" {
         var value = object
         value["blob"] = .object(["id": .string(id), "url": .string("")])
         value.removeValue(forKey: "dataUrl")

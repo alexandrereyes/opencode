@@ -11,6 +11,8 @@ struct ComposerTextView: UIViewRepresentable {
   var identifier = "conversation-composer"
   var submit: (() -> Void)? = nil
   var canSubmit = false
+  /// Picks the open suggestion panel's first item, when it has loaded one for the current trigger.
+  var firstSuggestion: (() -> (() -> Void)?)? = nil
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
     let view = ComposerInputView(frame: .zero, textContainer: nil)
@@ -46,6 +48,7 @@ struct ComposerTextView: UIViewRepresentable {
     let focused = draft.focused && !draft.focusSuppressed && draft.editorOwner == owner
     view.requestFocus = focused
     view.submit = submit
+    view.firstSuggestion = firstSuggestion
     view.escape = { draft.dismissSuggestions() }
     view.canSubmit = canSubmit && draft.trigger == nil && draft.editorOwner == owner
     view.tintColor = theme.uiColor(.primary)
@@ -150,7 +153,9 @@ struct ComposerTextView: UIViewRepresentable {
       _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
     ) -> Bool {
       if text == "\n", let view = textView as? ComposerInputView {
-        if view.submittedHardwareReturn || view.submitSoftwareReturn() { return false }
+        if view.submittedHardwareReturn || view.selectSuggestionOnReturn() || view.submitSoftwareReturn() {
+          return false
+        }
       }
       return true
     }
@@ -247,6 +252,16 @@ final class ComposerInputView: UITextView {
     keyboardDismissal = nil
   }
   var escape: (() -> Void)?
+  var firstSuggestion: (() -> (() -> Void)?)?
+  func selectSuggestionOnReturn() -> Bool {
+    let pick = firstSuggestion?()
+    guard ComposerReturn.selectsSuggestion(
+      markedText: markedTextRange != nil, suggestionsOpen: querying, firstItemReady: pick != nil), let pick
+    else { return false }
+    // Like a custom replacement in shouldChangeTextIn: the token replaces the query and UIKit drops the Return.
+    pick()
+    return true
+  }
   var submit: (() -> Void)?
   var canSubmit = false
   private var hardwareSubmitted = false

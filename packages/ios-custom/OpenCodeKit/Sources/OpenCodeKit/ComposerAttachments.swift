@@ -22,6 +22,17 @@ public struct DraftAttachment: Codable, Sendable, Equatable, Identifiable {
     self.quoteID = quoteID
   }
 }
+extension DraftAttachment {
+  /// The web's comment attachment part; delivery makes it inline image bytes or a staged path.
+  public var commentPart: JSONValue {
+    var part: [String: JSONValue] = [
+      "type": .string(mime.hasPrefix("image/") ? "image" : "path"), "id": .string(id),
+      "filename": .string(name), "mime": .string(mime),
+    ]
+    if !mime.hasPrefix("image/") { part["path"] = .string(remotePath ?? "") }
+    return .object(part)
+  }
+}
 public struct DeliveredAttachment: Sendable {
   public let attachment: DraftAttachment
   public let path: String

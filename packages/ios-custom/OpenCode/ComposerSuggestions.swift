@@ -1,10 +1,17 @@
 import OpenCodeKit
 import SwiftUI
 
+/// The panel's first item once loaded for its trigger, for Return in the editor. Not observed:
+/// filling it must not re-render the composer.
+final class ComposerSuggestionReturn {
+  var first: (trigger: ComposerTrigger, item: ComposerSuggestion)?
+}
+
 struct ComposerSuggestions: View {
   @Environment(\.appTheme) private var theme
   let store: ConversationStore
   let trigger: ComposerTrigger
+  var ready: ComposerSuggestionReturn? = nil
   let select: (ComposerSuggestion) -> Void
   @State private var items: [ComposerSuggestion] = []
   @State private var loading = true
@@ -52,8 +59,7 @@ struct ComposerSuggestions: View {
                   ? theme.color(.text).opacity(0.07) : theme.color(.surface).opacity(0),
                 in: RoundedRectangle(cornerRadius: 9))
           }.buttonStyle(.plain).accessibilityIdentifier("suggestion-\(item.token.id)")
-            .disabled(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id))
-            .opacity(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id) ? 0.4 : 1)
+            .disabled(!selectable(item)).opacity(selectable(item) ? 1 : 0.4)
         }
       }.padding(6)
     }.frame(maxHeight: 250).fixedSize(horizontal: false, vertical: true)
@@ -62,6 +68,7 @@ struct ComposerSuggestions: View {
         RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7)
       }
       .task(id: trigger) {
+        ready?.first = nil
         loading = true
         failed = false
         do {
@@ -76,6 +83,7 @@ struct ComposerSuggestions: View {
           try Task.checkCancellation()
           items = next
           loading = false
+          ready?.first = next.first.flatMap { selectable($0) ? (trigger, $0) : nil }
         } catch {
           if !Task.isCancelled {
             failed = true
@@ -84,6 +92,10 @@ struct ComposerSuggestions: View {
           }
         }
       }
+      .onDisappear { ready?.first = nil }
+  }
+  private func selectable(_ item: ComposerSuggestion) -> Bool {
+    !(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id))
   }
   @ViewBuilder private func title(_ item: ComposerSuggestion) -> some View {
     if item.token.kind == .file, let slash = item.title.lastIndex(of: "/") {

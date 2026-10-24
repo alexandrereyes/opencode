@@ -56,6 +56,9 @@ struct DictationFixtureRoot: View {
           guard !loaded else { return }
           await draft.load()
           loaded = true
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeDictationComment") {
+            draft.commenting = ChatQuote(messageID: "fixture", partID: "fixture", text: "Trecho citado para ditar.")
+          }
           transcription.start()
         }
     }.environment(\.appTheme, theme).environment(\.locale, Locale(identifier: "pt_BR"))

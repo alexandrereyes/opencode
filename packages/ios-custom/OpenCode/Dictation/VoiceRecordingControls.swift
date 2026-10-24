@@ -62,6 +62,9 @@ struct DictationAction: View {
   let sending: Bool
   let available: Bool
   let submit: () -> Void
+  var submission = Submission.message
+  /// A quote comment's action commits it to the message draft rather than sending.
+  enum Submission { case message, comment }
   private var holding: Bool { recording.gesture.state == .holding }
   private var locked: Bool { recording.gesture.state == .locked && recording.capturing }
   var body: some View {
@@ -83,9 +86,9 @@ struct DictationAction: View {
         .frame(width: 44, height: 44)
         .disabled(locked ? recording.state == .authorizing : !canSubmit)
         .opacity(!available && !hasContent && !locked ? 0.45 : 1)
-        .accessibilityLabel(locked ? "Parar e transcrever" : hasContent ? "Enviar mensagem" : "Gravar para transcrever")
+        .accessibilityLabel(locked ? "Parar e transcrever" : hasContent ? submission == .message ? "Enviar mensagem" : "Concluir comentário" : "Gravar para transcrever")
         .accessibilityHint(!available && !hasContent && !locked ? "O microfone está indisponível no momento." : "")
-        .accessibilityIdentifier(locked ? "dictation-stop" : hasContent ? "composer-send" : "dictation-microphone-disabled")
+        .accessibilityIdentifier(locked ? "dictation-stop" : hasContent ? submission == .message ? "composer-send" : "comment-done" : "dictation-microphone-disabled")
       } else {
         face.opacity(available ? 1 : 0.45).accessibilityHidden(true)
       }
@@ -101,7 +104,7 @@ struct DictationAction: View {
   private var face: some View {
     Group {
       if sending || recording.state == .authorizing || recording.state == .pending { ProgressView().tint(theme.color(.onPrimary)) }
-      else { Image(systemName: locked ? "stop.fill" : hasContent && !recording.visible ? "arrow.up" : "mic.fill").appSymbol(.action) }
+      else { Image(systemName: locked ? "stop.fill" : hasContent && !recording.visible ? submission == .message ? "arrow.up" : "checkmark" : "mic.fill").appSymbol(.action) }
     }.foregroundStyle(theme.color(.onPrimary))
       .frame(width: holding ? 64 : 36, height: holding ? 64 : 36)
       .background(theme.color(.primary), in: Circle())

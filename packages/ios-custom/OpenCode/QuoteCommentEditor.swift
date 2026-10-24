@@ -69,6 +69,8 @@ struct DraftQuotesCard: View {
   }
 }
 
+/// The comment of one quote, written in the message composer's own editor (`ComposerEditor` with
+/// `ComposerComment`) over an ephemeral draft. Concluir is the only change to the message draft.
 struct QuoteCommentEditor: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
@@ -76,41 +78,26 @@ struct QuoteCommentEditor: View {
   let store: ConversationStore
   let draft: ConversationDraft
   @State private var editor: ConversationDraft
-  @State private var owner = UUID()
+  @State private var lent = false
+  @State private var committed = false
   init(quote: ChatQuote, store: ConversationStore, draft: ConversationDraft) {
     self.quote = quote
     self.store = store
     self.draft = draft
-    // This editor never loads or persists: Concluir is the only draft mutation.
-    let editor = ConversationDraft(server: "local", id: quote.id)
-    editor.text = quote.document.attributed
-    editor.selection = NSRange(location: editor.editorText.length, length: 0)
-    _editor = State(initialValue: editor)
+    _editor = State(initialValue: draft.commentEditor(quote))
   }
   var body: some View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
           QuotedPassage(text: quote.text).textSelection(.enabled)
-          if let trigger = editor.trigger, trigger.character != "/" {
-            ComposerSuggestions(store: store, trigger: trigger) { item in
-              editor.insert(item.token, replacing: trigger.range)
-            }
-          }
-          ComposerTextView(
-            draft: editor, theme: theme, expanded: false, owner: owner, label: "Comentário",
-            identifier: "comment-composer"
-          )
-          .overlay(alignment: .topLeading) {
-            if editor.isEmpty {
-              Text("Adicione um comentário sobre este trecho…").foregroundStyle(
-                theme.color(.textSecondary)
-              )
-              .allowsHitTesting(false)
-            }
-          }
-          .padding(12).frame(minHeight: 100, alignment: .top)
-          .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 12))
+          ComposerEditor(
+            store: store, draft: editor, expanded: false,
+            comment: ComposerComment(
+              placeholder: "Adicione um comentário…",
+              reservedBytes: draft.attachments.filter { $0.quoteID != quote.id }.reduce(0) { $0 + $1.size },
+              commit: commit)
+          ) {}
           Button("Remover", systemImage: "trash", role: .destructive) {
             draft.removeQuote(quote)
             dismiss()
@@ -121,22 +108,36 @@ struct QuoteCommentEditor: View {
         .toolbar {
           ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
           ToolbarItem(placement: .confirmationAction) {
-            Button("Concluir") {
-              var value = quote
-              value.document = editor.document
-              if let index = draft.quotes.firstIndex(where: { $0.id == quote.id }) {
-                draft.quotes[index] = value
-              } else {
-                draft.quotes.append(value)
-              }
-              dismiss()
-            }.fontWeight(.semibold)
+            Button("Concluir", action: commit).fontWeight(.semibold).disabled(editor.importing)
           }
         }
     }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-      .tint(theme.color(.primary)).onAppear {
-        editor.editorOwner = owner
+      .tint(theme.color(.primary))
+      .task {
+        guard !lent else { return }
+        lent = true
+        draft.lend(quote, to: editor)
+      }
+      .onAppear { editor.focused = true }
+      // A transcription lands in the comment, like the fullscreen review of the message composer.
+      .onChange(of: editor.dictationReview) { _, review in
+        guard review else { return }
+        editor.dictationReview = false
         editor.focused = true
       }
+      .onDisappear {
+        guard !committed else { return }
+        Task { try? await editor.discard() }
+      }
+  }
+  private func commit() {
+    guard !committed, !editor.importing else { return }
+    committed = true
+    editor.recording.suspend()
+    Task {
+      await draft.commit(quote, from: editor)
+      try? await editor.discard()
+    }
+    dismiss()
   }
 }

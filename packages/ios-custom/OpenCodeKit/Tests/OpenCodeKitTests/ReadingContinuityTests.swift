@@ -191,6 +191,18 @@ private let tool = ConversationPart(type: "tool", id: "tool", name: "read")
   #expect(memory.values("parent")["step"] == false)
 }
 
+@Test func returnPicksTheFirstSuggestionOnlyWhenLoadedAndNotComposing() {
+  for marked in [false, true] {
+    for open in [false, true] {
+      for ready in [false, true] {
+        #expect(
+          ComposerReturn.selectsSuggestion(markedText: marked, suggestionsOpen: open, firstItemReady: ready)
+            == (!marked && open && ready))
+      }
+    }
+  }
+}
+
 @Test func returnOnlyManualShiftCanSend() {
   for shifted in [false, true] {
     for automatic in [false, true] {

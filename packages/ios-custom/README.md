@@ -208,7 +208,8 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space, the agent (`build`), and a round button: send when
   there is text, microphone when the field is empty (WhatsApp style).
 - **Triggers:** `@` context (files, sessions, agents), `/` commands, `$` skills, and `#` snippets open a suggestion
-  panel above the composer; the chosen item becomes a colored token in the field.
+  panel above the composer; the chosen item becomes a colored token in the field. Return picks the panel's first
+  (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october)).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
   The side question (`/btw`) opens in a sheet that is not saved to the conversation.
@@ -283,6 +284,58 @@ main-thread CPU **2620 → 2986 ms**, and display-link stall ratio **4.72% → 3
 samples, not a claim of improved CPU or physical-device frame performance. Captures compare the real sandbox web
 renderer against the native production views. Both real-send checks also passed, with Luna/low, zero tool calls and
 marks retained after relaunch. No physical device, production mutation or new backend API was used.
+
+### Quote comment composer — 24 October
+
+**Alexandre, 24/10: o comentário usa o mesmo compositor.** The **Comentário** sheet hosts the message composer's own
+`ComposerEditor`, configured by `ComposerComment` (placeholder, the message draft's other attachment bytes for the
+shared 25 MiB limit, and the commit action), instead of a separate text field. It keeps the same card, `ComposerTextView`
+(label **Comentário**, identifier `comment-composer`), `@`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
+pending download; a finished transcription refocuses the comment) and the **+** menu with **Fotos** and **Arquivos**.
+It omits the model/effort, MCP and agent selectors (they belong to the message, as on the web, whose comment editor has
+none), `/` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
+and **Expandir compositor** (the sheet already rises to full height with the keyboard; a fullscreen cover over a sheet
+would add a second presentation for no extra room). The round action shows a checkmark, **Concluir comentário**
+(`comment-done`), when there is content; Shift+Return does the same. **Concluir** in the bar stays the only commit and
+**Cancelar**/swipe-down still discard everything.
+
+The sheet edits an ephemeral `ConversationDraft` (`commentEditor(_:)`) that never saves a snapshot; new attachment files
+wait in its own `tmp/QuoteComments/<uuid>` directory. Reopening a quote lends it clones of that quote's attachments
+(`lend(_:to:)`). Concluir (`commit(_:from:)`) moves new files into the message draft (`DraftPersistence.adopt`), stores
+them as `quoteID` attachments, writes web-shaped `commentPrompt` image/path parts and removes files the comment dropped;
+the editor's directory is then deleted. Sending is unchanged: images travel inline after the prompt's own files (or as
+staged paths for models without image input), other files as staged paths, so they appear in the bubble and in
+`Comments on earlier assistant messages`. A PDF in a comment is always a staged path now (the previous inline branch
+kept a `path` part with an empty path and never delivered its bytes). Multiple quotes, mark removal after an acknowledged
+send, rejected-send retention and the optimistic/pending bubble are unaffected. The web reference is
+`app-custom/src/composer/chat-quotes.tsx`, whose comment editor accepts pasted/dropped attachments but has no picker.
+
+Verification used **OpenCode Comentario** (iPhone 18 Pro/iOS 27), its own DerivedData and sandbox **4183** (the dictation
+fixture accepts only 4177/4183). `test-quotes.py` ran `OpenCodeUITests/QuoteHighlightTests` (now including
+`testCommentUsesTheComposerWithoutSelectorsAndCancelKeepsNothing`) and
+`QuoteSendingTests/testCommentPhotoFromPlusTravelsWithTheQuote` (one Luna 6/low send; it needs a photo added with
+`xcrun simctl addmedia`) in both themes, plus `DictationUITests` with
+`testCommentDictationLandsInTheCommentAndConcluirKeepsIt` (`-OpenCodeDictationComment`) and `ComposerEditingUITests`.
+Hosted `QuoteCommentTests` cover lending, adoption, dropped files, the never-saved editor and cancellation.
+`profile-composer.py` with the `comment-*` scenarios showed no regression (simulator, final build, two interleaved
+runs each on the shared Mac, medians before → after): plain busy p50/p95 7.7/10.3 → 7.1/9.9 ms, main CPU 1.60 → 1.47 s,
+no hitches; mentions 9.0/99.3 → 7.7/97.2 ms, 28 → 24 hitches (the keyboard trait relayout described above);
+suggestions 9.3/12.6 → 9.2/13.2 ms, one hitch each. An earlier batch varied by about ±1 ms p50 in both directions.
+Captures are in `$TMPDIR/opencode/ios-comment-composer/prints/`.
+
+**Return in suggestions (Alexandre, 24/10).** In both composers (message and comment), Return on the software or a
+hardware keyboard picks the suggestion panel's first, highlighted item for `@`, `$`, `#` and `/` exactly as a tap
+does, instead of a line break. `ComposerSuggestions` records that item in a non-observed `ComposerSuggestionReturn`
+once its results for the current trigger have loaded, so typing still does not re-render the composer.
+`ComposerReturn.selectsSuggestion` gates it: no marked text (composition keeps Return), panel open, and an item loaded
+for the trigger still being typed. With no panel, or while it is loading (the 180 ms debounce plus the request) or empty,
+Return keeps its previous meaning (line break; Shift+Return still sends). The web
+(`app-custom/src/composer/suggestions/machine.ts`) selects its active item on Enter/Tab too, but swallows Enter while its
+list is empty or loading; iOS deliberately keeps the line break there. Dictation inserts through the draft, not Return,
+and is unaffected. Covered by the Kit truth table, `ComposerEditingUITests/testReturnPicksTheLoadedFirstSuggestionAndOtherwiseBreaksTheLine`
+(`$` picked, line break without a panel, empty `#` list and an unloaded `@` query) and the comment/message checks in
+`testCommentUsesTheComposerWithoutSelectorsAndCancelKeepsNothing`. Interleaved profiles stayed flat (plain busy p50
+7.1 → 6.0 ms, suggestions 8.1 → 8.5 ms, mentions 8.3 → 8.0 ms).
 
 ### MCPs in the conversation — 23 October
 

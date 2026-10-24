@@ -401,13 +401,16 @@ import OpenCodeKit
     if composerCatalog == nil { composerCatalog = try await client.composerSources(directory: directory) }
     return composerCatalog?.newSessionDocument(document) ?? document
   }
-  func importAttachment(_ bytes: Data, name: String, mime: String, draft: ConversationDraft) async {
+  func importAttachment(
+    _ bytes: Data, name: String, mime: String, draft: ConversationDraft, reservedBytes: Int = 0
+  ) async {
     do {
       let (data, name, mime) = try await Task.detached(priority: .userInitiated) {
         try AttachmentEncoding.prepare(bytes, name: name, mime: mime)
       }.value
       guard
-        draft.attachments.reduce(0, { $0 + $1.size }) + data.count <= AttachmentEncoding.draftLimit
+        reservedBytes + draft.attachments.reduce(0, { $0 + $1.size }) + data.count
+          <= AttachmentEncoding.draftLimit
       else {
         throw AttachmentError.tooLarge
       }

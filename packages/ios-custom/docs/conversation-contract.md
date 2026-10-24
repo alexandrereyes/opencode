@@ -916,6 +916,9 @@ preview?,origin?:"review"|"file"}]`; send their file attachment and model-facing
 file-review comments. The web renders “Quoted from an earlier message”, quote, then comment in the user bubble; the
 native card may use `Citações · 1` before sending. Files/agents/skills embedded in a quote comment must be extracted
 into prompt arrays without the main text's mention offsets; quote inline files follow main files in quote order.
+Comment attachments are `commentPrompt` parts: `{type:"image",id,filename,mime}` becomes inline bytes plus
+`blob:{id,url:""}` when the model accepts images, otherwise a staged `{type:"path",id,filename,mime,path}`; other files
+(PDFs included) are always staged paths, listed as `File attached to this comment: \`…\``.
 
 Sources: `packages/app-custom/src/composer/chat-quote*.{ts,tsx}`, `src/composer/{comments,chat-quotes}.tsx`,
 `src/composer/{comment-note,request}.ts`, `packages/session-ui-custom/src/message/user-message-quote.tsx`.

@@ -99,6 +99,11 @@ public actor DraftPersistence {
     try createDirectory()
     try write(bytes, to: file(attachment))
   }
+  /// Moves a file another draft prepared (a quote comment's editor) into this draft.
+  public func adopt(_ attachment: DraftAttachment, from url: URL) throws {
+    try createDirectory()
+    try FileManager.default.moveItem(at: url, to: file(attachment))
+  }
   public func bytes(_ attachment: DraftAttachment) throws -> Data {
     try Data(contentsOf: file(attachment))
   }

@@ -90,6 +90,25 @@ import XCTest
     capture("largest-text-preview")
     app.buttons["dictation-discard"].tap()
   }
+  func testCommentDictationLandsInTheCommentAndConcluirKeepsIt() {
+    open(extra: ["-OpenCodeDictationComment"])
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    let microphone = app.buttons.matching(identifier: "dictation-microphone").allElementsBoundByIndex.last(where: \.isHittable)
+    XCTAssertNotNil(microphone, app.debugDescription)
+    microphone?.press(forDuration: 1.8)
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS 'Confira as sessões em andamento'"), evaluatedWith: editor)], timeout: 15), .completed)
+    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["Recolher"].exists)
+    capture("comment-dictation-review")
+    app.buttons["Concluir"].tap()
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["draft-quotes"].waitForExistence(timeout: 5))
+    XCTAssertFalse((app.textViews["conversation-composer"].value as? String ?? "").contains("Confira"))
+    app.buttons["draft-quotes"].tap()
+    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Confira as sessões em andamento'")).firstMatch.waitForExistence(timeout: 5))
+    capture("comment-dictation-committed")
+  }
   func testModelSettingsShowLocalStatusAndDeletionCanBeCancelled() {
     open()
     app.buttons["Modelo"].tap()

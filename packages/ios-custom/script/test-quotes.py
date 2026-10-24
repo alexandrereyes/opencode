@@ -158,7 +158,9 @@ try:
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(evidence / (args.label + "-attachments"))], check=True, stdout=subprocess.DEVNULL)
     if live and status == 0:
         messages = api("/api/session/" + pending["id"] + "/message?limit=20&order=desc", method="GET")["data"]
-        sent = next(message for message in messages if message["type"] == "user" and message.get("metadata", {}).get("quotes"))
+        # The comment-photo case may have sent after it; pick the synthetic comment's own message.
+        sent = next(message for message in messages if message["type"] == "user" and any(
+            quote.get("comment") == "Comentário sintético de verificação." for quote in message.get("metadata", {}).get("quotes", [])))
         assert sent["metadata"]["model"] == {"providerID": "llm-proxy", "modelID": "gpt-6-luna", "variant": "low"}
         assert sent["metadata"]["quotes"][0]["anchor"]["coordinate"] == "source"
         assert sent["metadata"]["quotes"][0]["comment"] == "Comentário sintético de verificação."

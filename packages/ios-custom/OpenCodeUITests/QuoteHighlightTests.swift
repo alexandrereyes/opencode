@@ -132,6 +132,66 @@ import XCTest
     XCTAssertFalse(marker(app).exists)
     screenshot("native-removable-reopened")
   }
+  func testCommentUsesTheComposerWithoutSelectorsAndCancelKeepsNothing() throws {
+    let app = try launch("PENDING")
+    defer { app.terminate() }
+    let response = try source(app, kind: "PENDING")
+    XCTAssertTrue(app.buttons["model-picker"].waitForExistence(timeout: 10))
+    // Live sends in this Session can push the source above the fold.
+    for _ in 0..<8 where !response.waitForExistence(timeout: 3) || !response.isHittable {
+      app.collectionViews["conversation-transcript"].swipeDown()
+    }
+    let pickers = ["model-picker", "agent-picker"].map { app.buttons.matching(identifier: $0).count }
+    let adders = app.buttons.matching(identifier: "Adicionar").count
+    response.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.15)).press(forDuration: 1)
+    let comment = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Comentar'")).firstMatch
+    XCTAssertTrue(comment.waitForExistence(timeout: 5))
+    comment.tap()
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    // The sheet adds its own "+" and microphone, but no model, MCP or agent selector.
+    XCTAssertEqual(app.buttons.matching(identifier: "Adicionar").count, adders + 1, app.debugDescription)
+    for (id, count) in zip(["model-picker", "agent-picker"], pickers) {
+      XCTAssertLessThanOrEqual(app.buttons.matching(identifier: id).count, count, id)
+    }
+    screenshot("comment-composer-empty")
+    // Commands only run from the message itself, like the web's comment editor.
+    editor.typeText("/")
+    XCTAssertFalse(app.staticTexts["Comandos"].waitForExistence(timeout: 3))
+    editor.typeText(XCUIKeyboardKey.delete.rawValue + "Comentário descartado $")
+    XCTAssertTrue(app.staticTexts["Skills"].waitForExistence(timeout: 10))
+    screenshot("comment-composer-skills")
+    // Return picks the first loaded suggestion instead of breaking the line.
+    editor.typeText("\n")
+    XCTAssertTrue(app.staticTexts["Skills"].waitForNonExistence(timeout: 5))
+    XCTAssertFalse((editor.value as? String ?? "").contains("\n"))
+    XCTAssertFalse((editor.value as? String ?? "").hasSuffix("$"))
+    editor.typeText("@")
+    let agent = app.buttons["suggestion-explore"]
+    XCTAssertTrue(agent.waitForExistence(timeout: 10))
+    agent.tap()
+    XCTAssertTrue(agent.waitForNonExistence(timeout: 5))
+    XCTAssertNotEqual(editor.value as? String, "Comentário descartado @")
+    XCTAssertTrue(app.buttons["comment-done"].waitForExistence(timeout: 5))
+    editor.typeText("\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    screenshot("comment-composer-typed")
+    app.buttons["Cancelar"].tap()
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["draft-quotes"].exists)
+    XCTAssertFalse(marker(app).exists)
+    // The message composer shares the Return pick.
+    let composer = app.textViews["conversation-composer"]
+    composer.tap()
+    composer.typeText("@explo")
+    XCTAssertTrue(app.buttons["suggestion-explore"].waitForExistence(timeout: 10))
+    composer.typeText("\n")
+    XCTAssertTrue(app.buttons["suggestion-explore"].waitForNonExistence(timeout: 5))
+    XCTAssertFalse((composer.value as? String ?? "").contains("\n"))
+    XCTAssertFalse((composer.value as? String ?? "").contains("@explo"))
+    screenshot("composer-return-picked")
+    composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
+  }
   func testRejectedSendKeepsDraftQuoteAndMark() throws {
     let app = XCUIApplication()
     let session = try XCTUnwrap(environment["OPENCODE_QUOTE_FAILING"])
@@ -300,5 +360,79 @@ import XCTest
     XCTAssertTrue(response.waitForExistence(timeout: 10))
     XCTAssertFalse(marker.exists)
     shoot("native-live-send-reopened")
+  }
+  /// Needs a photo in the simulator library (`xcrun simctl addmedia`).
+  func testCommentPhotoFromPlusTravelsWithTheQuote() throws {
+    continueAfterFailure = false
+    let environment = ProcessInfo.processInfo.environment
+    func shoot(_ name: String) {
+      let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+      shot.name = name + "-" + (environment["OPENCODE_TEST_THEME"] ?? "dark")
+      shot.lifetime = .keepAlways
+      add(shot)
+    }
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
+      environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession",
+      try XCTUnwrap(environment["OPENCODE_QUOTE_PENDING"])]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    let source = try XCTUnwrap(environment["OPENCODE_QUOTE_PENDING_SOURCE"])
+    let response = app.textViews["response-\(source)-\(source):text:0"]
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
+    XCTAssertTrue(app.buttons["model-picker"].waitForExistence(timeout: 10))
+    // Earlier live sends in this Session push the source above the fold.
+    for _ in 0..<8 where !response.waitForExistence(timeout: 3) || !response.isHittable {
+      app.collectionViews["conversation-transcript"].swipeDown()
+    }
+    response.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.15)).press(forDuration: 1)
+    let comment = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Comentar'")).firstMatch
+    XCTAssertTrue(comment.waitForExistence(timeout: 5))
+    comment.tap()
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.typeText("Comentário com foto.")
+    app.buttons.matching(identifier: "Adicionar").allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+    let photos = app.buttons["Fotos"]
+    XCTAssertTrue(photos.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Arquivos"].exists)
+    XCTAssertFalse(app.buttons["Expandir compositor"].exists)
+    shoot("comment-plus-menu")
+    photos.tap()
+    let photo = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+    XCTAssertTrue(photo.waitForExistence(timeout: 15), app.debugDescription)
+    photo.tap()
+    // The system picker's confirmation keeps the identifier Add in every language.
+    let confirm = app.buttons["Add"]
+    XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+    confirm.tap()
+    let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remover Foto-'")).firstMatch
+    XCTAssertTrue(chip.waitForExistence(timeout: 20))
+    shoot("comment-with-photo")
+    app.buttons["Concluir"].tap()
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+    let card = app.buttons["draft-quotes"]
+    XCTAssertTrue(card.waitForExistence(timeout: 10))
+    card.tap()
+    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Foto-'")).firstMatch.waitForExistence(timeout: 5))
+    // The photo belongs to the quote, not to the message's own attachment row.
+    XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remover Foto-'")).firstMatch.exists)
+    shoot("comment-photo-draft-card")
+    let composer = app.textViews["conversation-composer"]
+    composer.tap()
+    composer.typeText("Teste de interface: responda apenas OK, sem ferramentas e sem alterar arquivos.")
+    app.buttons["Enviar mensagem"].tap()
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: card)], timeout: 30), .completed)
+    // Bubbles carrying quotes start folded, hiding their images and source links until expanded.
+    let expand = app.buttons.matching(NSPredicate(format: "label == %@", "Mostrar mensagem completa"))
+    XCTAssertTrue(expand.firstMatch.waitForExistence(timeout: 30))
+    expand.allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+    let reverse = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-source-'")).firstMatch
+    XCTAssertTrue(reverse.waitForExistence(timeout: 10))
+    let image = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed-image-Foto-'")).firstMatch
+    XCTAssertTrue(image.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Comentário com foto.'")).firstMatch.exists)
+    shoot("comment-photo-sent-bubble")
   }
 }

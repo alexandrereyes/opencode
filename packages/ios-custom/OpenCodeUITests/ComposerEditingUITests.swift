@@ -46,6 +46,35 @@ import XCTest
     editor.typeText(" depois")
     expect("$sample inicio texto restaurado depois", app: app)
   }
+  func testReturnPicksTheLoadedFirstSuggestionAndOtherwiseBreaksTheLine() throws {
+    let app = try launch()
+    defer { app.terminate() }
+    app.buttons["Limpar"].tap()
+    let editor = app.textViews["conversation-composer"]
+    editor.tap()
+    editor.typeText("$re")
+    XCTAssertTrue(app.buttons["suggestion-review"].waitForExistence(timeout: 5))
+    editor.typeText("\n")
+    XCTAssertTrue(app.buttons["suggestion-review"].waitForNonExistence(timeout: 5))
+    expect("$review ", app: app)
+    XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
+    // No panel: Return keeps inserting a line break.
+    editor.typeText("fim\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "fim\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    // An empty list (no snippets in the fixture) keeps the line break too.
+    editor.typeText("#nada")
+    XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 5))
+    editor.typeText("\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "#nada\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    // Still loading (the panel waits 180 ms): Return keeps the line break.
+    editor.typeText("@REA\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "@REA\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
+    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    shot.name = "composer-return-suggestion"
+    shot.lifetime = .keepAlways
+    add(shot)
+  }
   func testNativeSelectAllAndUndo() throws {
     let app = try launch()
     defer { app.terminate() }

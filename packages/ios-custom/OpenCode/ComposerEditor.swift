@@ -3,6 +3,17 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// A quote comment edits its own ephemeral draft in this same editor (see QuoteCommentEditor):
+/// no model, MCP or agent selectors and no `/` commands, which only run from the message itself;
+/// no fullscreen (its sheet already rises with the keyboard), and submitting commits the comment
+/// to the quote instead of sending.
+struct ComposerComment {
+  let placeholder: String
+  /// Bytes of the message draft's other attachments, which share the draft's 25 MiB limit.
+  let reservedBytes: Int
+  let commit: () -> Void
+}
+
 struct ComposerEditor: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
@@ -11,6 +22,7 @@ struct ComposerEditor: View {
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
+  var comment: ComposerComment? = nil
   let expand: () -> Void
   @State private var models = false
   @State private var agents = false
@@ -19,42 +31,53 @@ struct ComposerEditor: View {
   @State private var selectedPhotos: [PhotosPickerItem] = []
   @State private var editorID = UUID()
   @State private var longText = false
-  private var showExpand: Bool { !expanded && (longText || !draft.attachments.isEmpty) }
+  @State private var suggestionReturn = ComposerSuggestionReturn()
+  private var showExpand: Bool { comment == nil && !expanded && (longText || !draft.attachments.isEmpty) }
   private var hasContent: Bool {
     draft.hasText
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
   private var canSubmit: Bool {
-    hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
+    guard comment == nil else { return hasContent && !draft.importing && !draft.recording.visible }
+    return hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
       && store.selectedModel(draft) != nil
   }
   private func submit() {
     guard canSubmit else { return }
+    if let comment { return comment.commit() }
     Task { await store.send(draft) }
+  }
+  private func choose(_ item: ComposerSuggestion, replacing trigger: ComposerTrigger) {
+    if item.token.kind == .command && item.token.value == "client"
+      && item.token.id != "compact"
+    {
+      draft.replace(trigger.range, with: NSAttributedString())
+      draft.focused = false
+      if item.token.id == "btw" {
+        let question = draft.document.expanded.text.trimmingCharacters(
+          in: .whitespacesAndNewlines)
+        store.sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
+        draft.text = NSAttributedString()
+        draft.selection = NSRange(location: 0, length: 0)
+        return
+      }
+      models = item.token.id == "model"
+      agents = item.token.id == "agent" && !store.isChild && !store.masterMode
+      return
+    }
+    draft.insert(item.token, replacing: trigger.range)
+  }
+  /// Return's pick: the panel's first item, only if it was loaded for the trigger still being typed.
+  private func firstSuggestion() -> (() -> Void)? {
+    guard let trigger = draft.trigger, comment == nil || trigger.character != "/",
+      let first = suggestionReturn.first, first.trigger == trigger
+    else { return nil }
+    return { choose(first.item, replacing: trigger) }
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if let trigger = draft.trigger {
-        ComposerSuggestions(store: store, trigger: trigger) { item in
-          if item.token.kind == .command && item.token.value == "client"
-            && item.token.id != "compact"
-          {
-            draft.replace(trigger.range, with: NSAttributedString())
-            draft.focused = false
-            if item.token.id == "btw" {
-              let question = draft.document.expanded.text.trimmingCharacters(
-                in: .whitespacesAndNewlines)
-              store.sideQuestion = SideQuestionLaunch(text: question, submit: !question.isEmpty)
-              draft.text = NSAttributedString()
-              draft.selection = NSRange(location: 0, length: 0)
-              return
-            }
-            models = item.token.id == "model"
-             agents = item.token.id == "agent" && !store.isChild && !store.masterMode
-            return
-          }
-          draft.insert(item.token, replacing: trigger.range)
-        }
+      if let trigger = draft.trigger, comment == nil || trigger.character != "/" {
+        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn) { choose($0, replacing: trigger) }
       }
       if draft.replacing != nil {
         HStack {
@@ -89,8 +112,15 @@ struct ComposerEditor: View {
         }
         ComposerTextView(
           draft: draft, theme: theme, expanded: expanded, owner: editorID,
-          submit: submit, canSubmit: canSubmit
+          label: comment == nil ? "Mensagem" : "Comentário",
+          identifier: comment == nil ? "conversation-composer" : "comment-composer",
+          submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion
         )
+        .overlay(alignment: .topLeading) {
+          if let comment, draft.isEmpty {
+            Text(comment.placeholder).appFont(.body).foregroundStyle(theme.color(.textSecondary)).allowsHitTesting(false)
+          }
+        }
         .onGeometryChange(for: Bool.self) {
           $0.size.height > UIFont.preferredFont(forTextStyle: .body).lineHeight * 3 + 2
         } action: {
@@ -99,7 +129,7 @@ struct ComposerEditor: View {
         .padding(.trailing, showExpand && draft.attachments.isEmpty ? 26 : 0)
         .simultaneousGesture(
           DragGesture(minimumDistance: 60).onEnded { value in
-            if !expanded && !draft.recording.visible && value.translation.height < -60 && abs(value.translation.width) < 70 { expand() }
+            if comment == nil && !expanded && !draft.recording.visible && value.translation.height < -60 && abs(value.translation.width) < 70 { expand() }
           })
         controls
       }
@@ -134,7 +164,10 @@ struct ComposerEditor: View {
       QuoteCommentEditor(quote: quote, store: store, draft: draft)
         .sessionAlertOverlay()
     }
-    .sheet(item: $store.sideQuestion) { launch in SideQuestionSheet(store: store, launch: launch).sessionAlertOverlay() }
+    // The message composer below the comment sheet presents the side question.
+    .sheet(item: comment == nil ? $store.sideQuestion : .constant(nil)) { launch in
+      SideQuestionSheet(store: store, launch: launch).sessionAlertOverlay()
+    }
     .photosPicker(
       isPresented: $photos, selection: $selectedPhotos, maxSelectionCount: 10, matching: .images
     )
@@ -154,7 +187,8 @@ struct ComposerEditor: View {
               data,
               name:
                 "Foto-\(UUID().uuidString.prefix(6)).\(type.preferredFilenameExtension ?? "jpg")",
-              mime: type.preferredMIMEType ?? "image/jpeg", draft: draft)
+              mime: type.preferredMIMEType ?? "image/jpeg", draft: draft,
+              reservedBytes: comment?.reservedBytes ?? 0)
           } catch { store.toast.show("Não foi possível importar a foto.", kind: .error) }
         }
       }
@@ -175,7 +209,8 @@ struct ComposerEditor: View {
               UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
               ?? "application/octet-stream"
             await store.importAttachment(
-              data, name: url.lastPathComponent, mime: mime, draft: draft)
+              data, name: url.lastPathComponent, mime: mime, draft: draft,
+              reservedBytes: comment?.reservedBytes ?? 0)
           }
         } catch { store.toast.show(error.localizedDescription, kind: .error) }
       }
@@ -213,9 +248,9 @@ struct ComposerEditor: View {
       }
       DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
         sending: draft.sending, available: !draft.sending && !draft.importing && voice?.sessionID == nil,
-        submit: submit)
+        submit: submit, submission: comment == nil ? .message : .comment)
         .contextMenu {
-          if hasContent && store.executing {
+          if comment == nil && hasContent && store.executing {
             Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
               Task { await store.send(draft, alternate: true) }
             }.disabled(!canSubmit)
@@ -226,7 +261,7 @@ struct ComposerEditor: View {
   private var controlRow: some View {
     HStack(spacing: 8) {
       Menu {
-        if !expanded {
+        if comment == nil && !expanded {
           Button(
             "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
           )
@@ -243,31 +278,34 @@ struct ComposerEditor: View {
         Image(systemName: "plus").appSymbol(.action).frame(width: 31, height: 36)
           .overlay { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
       }.menuOrder(.fixed).accessibilityLabel("Adicionar")
-      Button {
-        draft.focused = false
-        models = true
-      } label: {
-        Text(store.modelLabel(store.selectedModel(draft))).appFont(.chrome).lineLimit(1).minimumScaleFactor(0.75)
-      }.accessibilityLabel("Modelo e esforço")
-        .accessibilityValue(store.modelLabel(store.selectedModel(draft))).accessibilityIdentifier("model-picker")
-      if !expanded && !store.isNewSession && store.mcps.summary.visible {
-        ConversationMCPPill(store: store.mcps)
-      }
-      Spacer(minLength: 2)
-      if store.isChild || store.masterMode {
-        Text(store.childAgentName).appFont(.chrome).lineLimit(1)
-          .accessibilityLabel("Agente: \(store.childAgentName)")
-          .accessibilityIdentifier("child-agent")
-      } else {
-        Button {
-          draft.focused = false
-          agents = true
-        } label: {
-          Text(store.selectedAgent(draft)).appFont(.chrome).lineLimit(1)
-        }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
-      }
+      if comment == nil { selectors } else { Spacer(minLength: 2) }
     }.frame(minHeight: 36).foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(
       draft.sending || draft.importing)
+  }
+  @ViewBuilder private var selectors: some View {
+    Button {
+      draft.focused = false
+      models = true
+    } label: {
+      Text(store.modelLabel(store.selectedModel(draft))).appFont(.chrome).lineLimit(1).minimumScaleFactor(0.75)
+    }.accessibilityLabel("Modelo e esforço")
+      .accessibilityValue(store.modelLabel(store.selectedModel(draft))).accessibilityIdentifier("model-picker")
+    if !expanded && !store.isNewSession && store.mcps.summary.visible {
+      ConversationMCPPill(store: store.mcps)
+    }
+    Spacer(minLength: 2)
+    if store.isChild || store.masterMode {
+      Text(store.childAgentName).appFont(.chrome).lineLimit(1)
+        .accessibilityLabel("Agente: \(store.childAgentName)")
+        .accessibilityIdentifier("child-agent")
+    } else {
+      Button {
+        draft.focused = false
+        agents = true
+      } label: {
+        Text(store.selectedAgent(draft)).appFont(.chrome).lineLimit(1)
+      }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
+    }
   }
   private var attachmentRow: some View {
     ScrollView(.horizontal) {

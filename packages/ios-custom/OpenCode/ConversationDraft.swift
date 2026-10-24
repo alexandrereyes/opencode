@@ -134,7 +134,67 @@ extension ComposerTokenKind {
   @ObservationIgnored private var restoring = false
   @ObservationIgnored private var deleted = false
 
+  /// A quote comment's editor (QuoteCommentEditor) never saves a snapshot; Concluir commits it.
+  @ObservationIgnored private var ephemeral = false
+
   init(server: String, id: String) { persistence = DraftPersistence(server: server, sessionID: id) }
+  private init(comment quote: ChatQuote, recordingFactory: ((URL) -> VoiceRecordingComposer)?) {
+    // Its new attachment files wait in a temporary directory of its own until the comment is committed.
+    persistence = DraftPersistence(
+      server: "local", sessionID: UUID().uuidString,
+      root: FileManager.default.temporaryDirectory.appending(path: "QuoteComments", directoryHint: .isDirectory))
+    ephemeral = true
+    self.recordingFactory = recordingFactory
+    text = quote.document.attributed
+    selection = NSRange(location: editorText.length, length: 0)
+  }
+  func commentEditor(_ quote: ChatQuote) -> ConversationDraft {
+    ConversationDraft(comment: quote, recordingFactory: recordingFactory)
+  }
+  /// Gives a comment editor this draft's attachments of `quote`, as clones its chips and removals can use.
+  func lend(_ quote: ChatQuote, to editor: ConversationDraft) {
+    let lent = attachments.filter { $0.quoteID == quote.id }
+    try? FileManager.default.createDirectory(at: editor.persistence.directory, withIntermediateDirectories: true)
+    for attachment in lent {
+      try? FileManager.default.copyItem(at: persistence.file(attachment), to: editor.persistence.file(attachment))
+    }
+    editor.attachments = lent.map {
+      DraftAttachment(id: $0.id, name: $0.name, mime: $0.mime, size: $0.size, remotePath: $0.remotePath)
+    }
+  }
+  /// Commits the comment edited in `editor` to `quote`, adopting the attachment files it added.
+  func commit(_ quote: ChatQuote, from editor: ConversationDraft) async {
+    let previous = Set(attachments.filter { $0.quoteID == quote.id }.map(\.id))
+    var adopted: [DraftAttachment] = []
+    for attachment in editor.attachments {
+      let owned = DraftAttachment(
+        id: attachment.id, name: attachment.name, mime: attachment.mime, size: attachment.size,
+        remotePath: attachment.remotePath, quoteID: quote.id)
+      if !previous.contains(owned.id) {
+        do { try await persistence.adopt(owned, from: editor.persistence.file(attachment)) } catch {
+          persistenceError = "Não foi possível anexar \(attachment.name) ao comentário."
+          continue
+        }
+      }
+      adopted.append(owned)
+    }
+    let kept = Set(adopted.map(\.id))
+    var value = quote
+    // Parts without a local file (not shown in the editor) are kept as they were.
+    value.commentPrompt = quote.attachmentParts.filter { part in
+      guard let id = part.object?["id"]?.string, previous.contains(id) else { return true }
+      return kept.contains(id)
+    } + adopted.filter { !previous.contains($0.id) }.map(\.commentPart)
+    value.document = editor.document
+    attachments = attachments.filter { $0.quoteID != quote.id } + adopted
+    if let index = quotes.firstIndex(where: { $0.id == quote.id }) {
+      quotes[index] = value
+    } else {
+      quotes.append(value)
+    }
+    await persist()
+    try? await persistence.cleanAttachments(retaining: attachments)
+  }
   var document: ComposerDocument { _ = contentRevision; return ComposerDocument(editor: editorText) }
   var snapshot: DraftSnapshot {
     let document = self.document
@@ -189,7 +249,7 @@ extension ComposerTokenKind {
     } catch { persistenceError = "Não foi possível restaurar o rascunho." }
   }
   func persist() async {
-    guard !deleted else { return }
+    guard !deleted, !ephemeral else { return }
     saving?.cancel()
     do { try await persistence.save(snapshot) } catch {
       persistenceError = "Não foi possível salvar o rascunho."

@@ -189,6 +189,30 @@ private let selectionModel = ModelReference(
   #expect(try JSONDecoder().decode(DraftSnapshot.self, from: JSONEncoder().encode(saved)) == saved)
 }
 
+@Test func nativeCommentAttachmentsDeliverImagesInlineAndOtherFilesAsStagedPaths() throws {
+  let image = DraftAttachment(id: "img", name: "foto.jpg", mime: "image/jpeg", size: 1, quoteID: "q")
+  let pdf = DraftAttachment(id: "pdf", name: "nota.pdf", mime: "application/pdf", size: 1, quoteID: "q")
+  #expect(image.commentPart.object?["type"] == .string("image"))
+  #expect(pdf.commentPart.object?["type"] == .string("path"))
+  var quote = ChatQuote(id: "q", messageID: "m", partID: "p", text: "Trecho")
+  quote.commentPrompt = [image.commentPart, pdf.commentPart]
+  quote.document = .init(text: "Veja")
+  let request = PromptRequest(
+    document: .init(text: "Mensagem"), delivery: .steer, agent: "build", model: selectionModel,
+    attachments: [
+      .init(attachment: image, path: "/up/foto.jpg", inline: "data:image/jpeg;base64,AA=="),
+      .init(attachment: pdf, path: "/up/nota.pdf", inline: "data:application/pdf;base64,AQ=="),
+    ], quotes: [quote])
+  #expect(request.files?.compactMap { $0.object?["name"]?.string } == ["foto.jpg"])
+  let sent = try #require(ChatQuote.read(request.metadata["quotes"]).first)
+  #expect(sent.comment == "Veja")
+  #expect(sent.attachmentParts.first?.object?["blob"]?.object?["id"] == .string("img"))
+  #expect(sent.attachmentParts.last?.object?["type"] == .string("path"))
+  #expect(sent.attachmentParts.last?.object?["path"] == .string("/up/nota.pdf"))
+  #expect(request.text.contains("Image attached to this comment: foto.jpg"))
+  #expect(request.text.contains("File attached to this comment: `/up/nota.pdf`"))
+}
+
 @Test func sideQuestionsBuildExactPrefixAndBoundedLocalHistory() throws {
   let question = SideQuestionRequest.quote("Huly\nEPL-2.0") + "Permite uso comercial?"
   #expect(
