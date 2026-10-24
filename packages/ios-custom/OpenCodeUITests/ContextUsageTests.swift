@@ -165,7 +165,7 @@ import XCTest
     XCTAssertTrue(line.waitForExistence(timeout: 20))
     wait(NSPredicate(format: "label != %@ AND label CONTAINS 'cache'", before), on: line)
     shot("agents-updated")
-    app.buttons["Concluir"].tap()
+    app.navigationBars["Agentes e tarefas"].buttons.element(boundBy: 0).tap()
     app.terminate()
   }
 

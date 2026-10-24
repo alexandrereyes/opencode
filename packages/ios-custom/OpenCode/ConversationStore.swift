@@ -42,6 +42,8 @@ import OpenCodeKit
   private(set) var notice: ConversationNotice?
   @ObservationIgnored private var renaming: SessionRename?
   var revealedToolID: String?
+  /// A tool to reveal once the conversation is visible again, set from the agents screen.
+  var toolRequest: String?
   var sideQuestion: SideQuestionLaunch?
   var readingRequest: ConversationReadingRequest?
   var expansionValues: [String: Bool] = [:] {
@@ -196,13 +198,13 @@ import OpenCodeKit
   var details: ContextDetails {
     ContextDetails(messages: messages, models: displayModels, session: session, family: family)
   }
-  var runningWork: [RunningWork] {
-    ConversationProjection.runningWork(
+  var work: [SessionWork] {
+    ConversationProjection.work(
       ownerID: session?.parentID ?? id, viewedID: id,
       messages: session?.parentID == nil ? messages : ownerMessages,
       children: children, active: active, shells: shells)
   }
-  var runningCount: Int { runningWork.count }
+  var runningCount: Int { work.filter(\.running).count }
   func providerName(_ id: String) -> String { providers.first { $0.id == id }?.name ?? id }
   func modelLabel(_ ref: ModelReference?) -> String {
     [
@@ -460,7 +462,7 @@ import OpenCodeKit
       try await client.background(id)
     }
   }
-  func stop(_ work: RunningWork) async {
+  func stop(_ work: SessionWork) async {
     await act(work.id, success: "Tarefa interrompida") {
       if let child = work.sessionID { try await client.interrupt(child) }
       if let shell = work.shellID, let directory = session?.location.directory {

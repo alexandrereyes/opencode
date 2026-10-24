@@ -218,6 +218,12 @@ struct SessionsView: View {
       .navigationDestination(for: SessionStore.ConversationRoute.self) { route in
         if route.master {
           MasterSessionView(sessions: store)
+        } else if route.agents {
+          if let conversation = store.liveConversation(route.id) {
+            ConversationAgentsView(store: conversation, sessions: store)
+          } else {
+            Text("Conversa indisponível.").foregroundStyle(theme.color(.textSecondary))
+          }
         } else if route.newSession {
           NewSessionView(sessions: store, origin: route.origin, startInChats: route.startInChats)
             .id(route.id)

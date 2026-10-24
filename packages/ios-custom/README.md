@@ -925,8 +925,31 @@ container bottom safe area is extended, so the native keyboard still reduces the
 The header ring opens **Detalhes da sessão**, as a native sheet initially at the large detent. **Uso da sessão** sits
 above the existing details: context is the latest measured step, while cache counts/ratio, tokens and cost are Session
 totals; descendant and combined cost remain explicit. The existing detailed context breakdown stays available below.
-**Agentes e tarefas** reads each child's `context` from the already-loaded family page, retaining the clock, chevron
+[Agentes e tarefas](#agentes-e-tarefas) reads each child's `context` from the already-loaded family page, retaining the clock, chevron
 and stop action. Existing SSE invalidation refreshes those measurements without a transcript request per child.
+
+### Agentes e tarefas
+
+The header's agent button pushes **Agentes e tarefas** onto the conversation's own navigation stack, with the system
+back button, instead of a grabber sheet with **Concluir**. It is a `ConversationRoute` with `agents: true`; the screen
+reuses the live `ConversationStore` of the conversation below it (a weak registry in `SessionStore`) and keeps it
+listening while it covers that conversation, so counts, states and child context stay live without a second store.
+`ConversationProjection.work` lists **every** direct subagent of the owner, running or finished, plus running
+background shells, in one list ordered by start time, newest first (ties by ID); running work is not promoted. Each
+row has the same layout: agent, task title, state (Em execução with elapsed time, Concluído, Erro, Interrompido or
+Encerrado with duration), chevron and child context/cache line. Only running rows show the stop button (and swipe/menu
+stop); the column stays reserved so rows line up. State comes from `/session/active` first, then the child's
+`outcome`, then its `subagent` tool status. The header button appears whenever the list has an entry: green with the
+running count while something runs, neutral without a number otherwise.
+
+Opening a child pushes it above the list, so Back returns to the list and then to the conversation; **Voltar à sessão
+principal** returns straight to the parent conversation, skipping its agents screen. A shell row without a child pops
+back and reveals its tool. No other screen had an agent list (Detalhes da sessão shows only the descendants' cost),
+so there is a single list component. Verify after `build-for-testing` with
+`python3 packages/ios-custom/script/test-agents-screen.py --device … --derived … --home <sandbox> --server-url … --evidence …`
+(optionally `--theme openchamber-light`): it imports a parent with succeeded, failed and interrupted children plus one
+child made running by a Luna 6 / low `sleep`, runs `OpenCodeUITests/ConversationAgentsTests`, then interrupts and
+deletes the family.
 
 `ContextUsage` in OpenCodeKit owns the shared math, pt-BR abbreviations, VoiceOver wording and >80% warning threshold.
 A bounded store-local formatter cache is keyed by step ID, measured tokens and resolved context limit, so text/tool
@@ -2109,10 +2132,10 @@ is unavailable for iOS simulators in agent-device; do not report an inferred FPS
   other than string/multiselect are not implemented by this wave and are identified as unsupported rather than
   silently interpreted. Pending tool lines show “Aguardando permissão/resposta” without a ticking elapsed timer.
   Questions use the info role for their icon/title/border and pending tool line; permissions retain the error role.
-- The agents sheet and header share one running-work projection. It excludes foreground shells and the viewed
-  child, opens real child IDs, reveals a background shell's tool (expanding its group), and confirms individual
-  interruption, with a visible stop button as well as trailing swipe/context actions. Wave 3 sizes the sheet from
-  its measured rows. It colors the agent name and keeps elapsed time on the row. Context details start at medium height and expand
+- The agents screen and header share one work projection (see [Agentes e tarefas](#agentes-e-tarefas)). It excludes
+  foreground shells and the viewed child, opens real child IDs, reveals a background shell's tool (expanding its
+  group), and confirms individual interruption, with a visible stop button as well as trailing swipe/context actions.
+  It colors the agent name and keeps elapsed time on the row. Context details start at medium height and expand
   to large; they use the last measured assistant and its model, with token components, cache hit,
   session/descendant/total cost, model/provider, branch and directory. No extra child transcript is fetched for usage.
 - The transcript is still a recycling `List`. An empty older-page response no longer keeps a top anchor during
@@ -2193,7 +2216,7 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
   25 MiB total per draft; missing/oversized restored bytes are dropped with a toast. Removing/sending cleans bytes;
   launch cleanup deletes a session's draft only after an authoritative HTTP 404 (not a missing navigation row).
   Materialized inline files restored from the queue become local bytes again, never invalid prompt-input objects.
-- The model picker uses only the “Padrão” badge (no extra pin icon), and the running-agents sheet follows its content.
+- The model picker uses only the “Padrão” badge (no extra pin icon), and the running-agents sheet followed its content (now a pushed screen).
 
 `ComposerTests.swift` adds trigger, catalog filtering/precedence, UTF-16/emoji/accent/newline serialization, snippet
 offset shifts, command/skill dispatch, session instructions, inline/staged attachment rules, real image downscaling,

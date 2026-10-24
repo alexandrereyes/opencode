@@ -377,10 +377,10 @@ public enum ConversationProjection {
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
     active: Set<String>, shells: [ShellInfo]
   ) -> Int {
-    runningWork(
+    work(
       ownerID: ownerID, viewedID: viewedID, messages: messages, children: children,
       active: active, shells: shells
-    ).count
+    ).filter(\.running).count
   }
   public static func workStarted(child: Session, shells: [ShellInfo]) -> Double {
     shells.filter { $0.status == "running" && $0.metadata?["sessionID"]?.string == child.id }

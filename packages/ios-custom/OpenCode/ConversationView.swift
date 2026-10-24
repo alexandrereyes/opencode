@@ -135,7 +135,6 @@ struct ConversationView: View {
   @State private var userScrolling = false
   @State private var firstLoad = true
   @State private var scrollState = ConversationScrollState()
-  @State private var agentsOpen = false
   @State private var contextOpen = false
   @State private var detailsOpen = false
   @State private var renameOpen = false
@@ -312,20 +311,11 @@ struct ConversationView: View {
     .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in
       conversation.updateActivity()
     }
-    .sheet(isPresented: $agentsOpen) {
-      ConversationAgentsSheet(store: conversation) { work in
-        if let id = work.sessionID {
-          openChild(id)
-        } else if let tool = work.toolID {
-          if let parent = conversation.session?.parentID {
-            leavePosition()
-            sessions.conversationPath.append(.init(id: parent, parent: conversation.id, tool: tool))
-          } else {
-            conversation.revealedToolID = tool
-            requestedTool = tool
-          }
-        }
-      }.sessionAlertOverlay()
+    .onChange(of: conversation.toolRequest, initial: true) { _, tool in
+      guard let tool else { return }
+      conversation.toolRequest = nil
+      conversation.revealedToolID = tool
+      requestedTool = tool
     }
     .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation, showLocation: showLocation).sessionAlertOverlay() }
     .sheet(item: $quoteDetail, onDismiss: {
@@ -425,6 +415,7 @@ struct ConversationView: View {
     .onChange(of: sessions.drafts.draft(conversation.id).trigger) { _, _ in conversation.mcps.close() }
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
+      sessions.register(conversation)
       screenVisible = true
       scrollState.setVisible(true)
       scrollState.correctAnchor()
@@ -462,7 +453,10 @@ struct ConversationView: View {
             Button("Voltar à sessão principal") {
               if parentOnStack == parent {
                 leavePosition()
-                dismiss()
+                // The parent may sit below its agents screen; return to the conversation itself.
+                if let index = sessions.conversationPath.lastIndex(where: { $0.id == parent && !$0.agents && !$0.newSession }) {
+                  sessions.conversationPath.removeSubrange((index + 1)...)
+                } else { dismiss() }
               } else { openChild(parent) }
             }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
           }
@@ -554,19 +548,21 @@ struct ConversationView: View {
           .accessibilityIdentifier("conversation-header-subtitle")
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
-      if conversation.runningCount > 0 {
+      if !conversation.work.isEmpty {
+        let running = conversation.runningCount
         Button {
-          agentsOpen = true
+          leavePosition()
+          sessions.conversationPath.append(.init(id: conversation.id, agents: true))
         } label: {
           HStack(spacing: 6) {
-            AgentPixels(color: theme.color(.success), size: 16)
-            Text("\(conversation.runningCount)").appFont(.secondary).monospacedDigit()
+            AgentPixels(color: theme.color(running > 0 ? .success : .textSecondary), size: 16, running: running > 0)
+            if running > 0 { Text("\(running)").appFont(.secondary).monospacedDigit() }
           }
-          .padding(.horizontal, 9).frame(height: 36).glassEffect(
+          .padding(.horizontal, 9).frame(minWidth: 36).frame(height: 36).glassEffect(
             .regular.interactive(), in: .capsule)
         }.buttonStyle(.plain).accessibilityLabel(
-          conversation.runningCount == 1
-            ? "1 agente em execução" : "\(conversation.runningCount) agentes em execução")
+          running == 0 ? "Agentes e tarefas" : running == 1 ? "1 agente em execução" : "\(running) agentes em execução")
+          .accessibilityIdentifier("conversation-agents")
       }
       if master {
         Button {

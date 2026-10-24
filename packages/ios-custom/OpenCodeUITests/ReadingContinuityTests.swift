@@ -201,7 +201,7 @@ import XCTest
         ).firstMatch
         if child.waitForExistence(timeout: 5) { child.tap(); return }
         // A background task can keep the counter visible after this child finishes.
-        app.buttons["Concluir"].tap()
+        app.navigationBars["Agentes e tarefas"].buttons.element(boundBy: 0).tap()
         openTranscriptChild()
       }
       openChild()
@@ -212,6 +212,9 @@ import XCTest
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
       screenshot("parent-edge-swipe-" + theme)
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForNonExistence(timeout: 5))
+      // A child opened from the agents screen returns to it first.
+      let agentsBar = app.navigationBars["Agentes e tarefas"]
+      if agentsBar.waitForExistence(timeout: 2) { agentsBar.buttons.element(boundBy: 0).tap() }
       reveal(step)
       XCTAssertTrue(step.waitForExistence(timeout: 10))
       XCTAssertEqual(step.value as? String, "Expandido")

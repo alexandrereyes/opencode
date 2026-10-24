@@ -1,13 +1,33 @@
 import Foundation
 
-public struct RunningWork: Identifiable, Sendable {
+/// A subagent or background shell of the conversation's owner, running or finished.
+public struct SessionWork: Identifiable, Sendable, Equatable {
+  public enum State: Sendable, Equatable {
+    case running, completed, failed, interrupted, ended
+    public var label: String {
+      switch self {
+      case .running: "Em execução"
+      case .completed: "Concluído"
+      case .failed: "Erro"
+      case .interrupted: "Interrompido"
+      case .ended: "Encerrado"
+      }
+    }
+  }
   public let id: String
   public let sessionID: String?
   public let shellID: String?
   public let toolID: String?
   public let agent: String?
   public let title: String
+  public let state: State
+  /// When this work began; the list's stable newest-first order.
+  public let created: Double
+  /// The running elapsed-time origin: the current busy period of a resumed child.
   public let started: Double
+  /// Total duration of finished work, when known.
+  public let duration: Double?
+  public var running: Bool { state == .running }
 }
 
 public struct ContextDetails: Sendable {
@@ -42,30 +62,34 @@ public struct ContextDetails: Sendable {
 }
 
 extension ConversationProjection {
-  public static func runningWork(
+  /// Every subagent of the owner, running or finished, plus its running background shells, newest start first.
+  public static func work(
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
     active: Set<String>, shells: [ShellInfo]
-  ) -> [RunningWork] {
+  ) -> [SessionWork] {
     let tools = messages.flatMap(\.tools)
-    var work: [RunningWork] = children.filter {
-      $0.parentID == ownerID && $0.id != viewedID && active.contains($0.id)
-    }.map { child in
+    var work: [SessionWork] = children.filter { $0.parentID == ownerID && $0.id != viewedID }.map { child in
       let tool = tools.first { $0.name == "subagent" && $0.childID == child.id }
-      return RunningWork(
+      let created = tool?.time?.ran ?? tool?.time?.created ?? child.time.created
+      let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: tool?.status)
+      return SessionWork(
         id: child.id, sessionID: child.id, shellID: nil, toolID: tool?.id,
         agent: tool?.input["agent"]?.string ?? child.agent,
-        title: tool?.input["description"]?.string ?? child.displayTitle,
-        started: workStarted(child: child, shells: shells))
+        title: tool?.input["description"]?.string ?? child.displayTitle, state: state, created: created,
+        started: workStarted(child: child, shells: shells),
+        duration: state == .running ? nil : (child.time.idle ?? child.time.updated) - child.time.created)
     }
-    for tool in tools where tool.name == "subagent" && tool.running {
+    for tool in tools where tool.name == "subagent" && (tool.running || tool.status == "error") {
       let id = tool.childID ?? tool.id ?? "starting"
       guard id != viewedID, !work.contains(where: { $0.id == id }) else { continue }
+      let created = tool.time?.ran ?? tool.time?.created ?? 0
       work.append(
-        RunningWork(
+        SessionWork(
           id: id, sessionID: tool.childID, shellID: nil, toolID: tool.id,
           agent: tool.input["agent"]?.string,
           title: tool.input["description"]?.string ?? "Iniciando agente…",
-          started: tool.time?.ran ?? tool.time?.created ?? 0))
+          state: tool.running ? .running : .failed, created: created, started: created,
+          duration: tool.time?.completed.map { $0 - created }))
     }
     var foreground = Set(
       tools.filter { $0.name == "shell" && $0.running }.compactMap {
@@ -86,12 +110,22 @@ extension ConversationProjection {
       $0.status == "running" && $0.metadata?["sessionID"]?.string == ownerID
         && !foreground.contains($0.id)
     }.map { shell in
-      RunningWork(
+      SessionWork(
         id: shell.id, sessionID: nil, shellID: shell.id,
         toolID: tools.first { $0.metadata["shellID"]?.string == shell.id || $0.id == shell.id }?.id,
-        agent: nil, title: shell.command, started: shell.time.started)
+        agent: nil, title: shell.command, state: .running, created: shell.time.started,
+        started: shell.time.started, duration: nil)
     }
-    return work
+    return work.sorted { $0.created != $1.created ? $0.created > $1.created : $0.id < $1.id }
+  }
+
+  private static func finishedState(_ outcome: Session.Outcome?, tool: String?) -> SessionWork.State {
+    switch outcome {
+    case .succeeded: .completed
+    case .failed: .failed
+    case .interrupted: .interrupted
+    case .unknown, nil: tool == "error" ? .failed : tool == "completed" ? .completed : .ended
+    }
   }
 
   public static func pendingTool(

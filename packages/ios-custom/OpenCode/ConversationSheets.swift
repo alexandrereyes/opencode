@@ -1,97 +1,130 @@
 import OpenCodeKit
 import SwiftUI
 
-struct ConversationAgentsSheet: View {
+/// The owner's subagents and background shells, running and finished alike, as a pushed screen.
+struct ConversationAgentsView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.scenePhase) private var scenePhase
   let store: ConversationStore
-  let open: (RunningWork) -> Void
-  @State private var stopping: RunningWork?
-  @State private var rowHeights: [String: CGFloat] = [:]
+  let sessions: SessionStore
+  @State private var stopping: SessionWork?
   var body: some View {
-    NavigationStack {
-      List {
-        ForEach(store.runningWork) { work in
-          HStack(alignment: .top, spacing: 8) {
-            Button {
-              dismiss()
-              open(work)
-            } label: {
-              VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 12) {
-                  let agent = store.agents.first { $0.id == work.agent }
-                  if let id = work.agent {
-                    AgentPixels(color: theme.agentColor(agent, id: id))
-                  } else {
-                    Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
-                  }
-                  VStack(alignment: .leading, spacing: 5) {
-                    Text(agent?.name ?? "Shell em background")
-                      .font(.subheadline.weight(.medium)).foregroundStyle(
-                        work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
-                    Text(work.title).font(.caption).foregroundStyle(theme.color(.textSecondary))
-                      .lineLimit(2)
-                  }
-                  Spacer(minLength: 3)
-                  TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(ConversationProjection.duration(context.date.timeIntervalSince1970 * 1000 - work.started))
-                      .font(.caption2).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-                      .fixedSize()
-                  }
-                  Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.color(.icon))
-                }
-                if let usage = store.childUsage(work.sessionID) {
-                  ContextUsageLine(usage: usage, compact: true).padding(.leading, 30)
-                    .accessibilityIdentifier("child-usage-" + work.id)
-                }
-              }.padding(.vertical, 5)
-            }.buttonStyle(.plain).disabled(work.sessionID == nil && work.shellID == nil)
-            Button {
-              stopping = work
-            } label: {
-              Image(systemName: "stop.circle").font(.title3).foregroundStyle(theme.color(.error))
-                .frame(width: 32, height: 40)
-            }.buttonStyle(.borderless).accessibilityLabel("Parar \(work.title)")
-          }
-          .onGeometryChange(for: CGFloat.self) {
-            $0.size.height
-          } action: { height in
-            rowHeights[work.id] = height
-          }
-          .swipeActions { Button("Parar", role: .destructive) { stopping = work } }
+    List {
+      ForEach(store.work) { work in
+        row(work)
+          .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
           .contextMenu {
-            Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work }
+            if work.running { Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work } }
           }
           .listRowBackground(theme.color(.surface))
-        }
-        if store.runningWork.isEmpty {
-          Text("Nenhuma tarefa em execução.").foregroundStyle(theme.color(.textSecondary))
-        }
       }
-      .scrollContentBackground(.hidden).background(theme.color(.background))
-      .toastOverlay(store.toast)
-      .navigationTitle("Agentes e tarefas").navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } } }
-      .confirmationDialog(
-        "Parar esta tarefa?",
-        isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
-        titleVisibility: .visible
-      ) {
-        if let stopping {
-          Button("Parar", role: .destructive) { Task { await store.stop(stopping) } }
-          Button("Cancelar", role: .cancel) {}
-        }
-      } message: {
-        Text(stopping?.title ?? "")
+      if store.work.isEmpty {
+        Text("Nenhum agente nesta sessão.").foregroundStyle(theme.color(.textSecondary))
+          .listRowBackground(theme.color(.surface))
       }
-    }.presentationDetents([
-      .height(
-        min(
-           580, max(180, store.runningWork.reduce(0) {
-             $0 + (rowHeights[$1.id] ?? (store.childUsage($1.sessionID) == nil ? 64 : 96)) + 16
-           } + 112)))
-    ]).presentationDragIndicator(.visible).tint(
-      theme.color(.primary))
+    }
+    .scrollContentBackground(.hidden).background(theme.color(.background))
+    .foregroundStyle(theme.color(.textStrong))
+    .navigationTitle("Agentes e tarefas").navigationBarTitleDisplayMode(.inline)
+    .toolbar(.visible, for: .navigationBar)
+    .toolbar(.hidden, for: .tabBar)
+    .tint(theme.color(.primary))
+    .toastOverlay(store.toast)
+    .sessionAlertOverlay()
+    // The conversation below stops listening while covered; keep this list live.
+    .task(id: scenePhase) { if scenePhase == .active { await store.run() } }
+    .confirmationDialog(
+      "Parar esta tarefa?",
+      isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
+      titleVisibility: .visible
+    ) {
+      if let stopping {
+        Button("Parar", role: .destructive) { Task { await store.stop(stopping) } }
+        Button("Cancelar", role: .cancel) {}
+      }
+    } message: {
+      Text(stopping?.title ?? "")
+    }
+  }
+  private func row(_ work: SessionWork) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Button {
+        open(work)
+      } label: {
+        VStack(alignment: .leading, spacing: 6) {
+          HStack(spacing: 12) {
+            let agent = store.agents.first { $0.id == work.agent }
+            if let id = work.agent {
+              AgentPixels(color: theme.agentColor(agent, id: id), running: work.running)
+            } else {
+              Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+              Text(agent?.name ?? work.agent ?? "Shell em background")
+                .appFont(.secondary, weight: .medium).foregroundStyle(
+                  work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+              Text(work.title).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+                .lineLimit(2)
+              state(work)
+            }
+            Spacer(minLength: 3)
+            Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(theme.color(.icon))
+          }
+          if let usage = store.childUsage(work.sessionID) {
+            ContextUsageLine(usage: usage, compact: true).padding(.leading, 30)
+              .accessibilityIdentifier("child-usage-" + work.id)
+          }
+        }.padding(.vertical, 5).contentShape(.rect)
+      }
+      .buttonStyle(.plain).disabled(work.sessionID == nil && work.toolID == nil)
+      .accessibilityValue(work.state.label)
+      .accessibilityIdentifier("agent-work-" + work.id)
+      // Finished rows keep the stop column so every row lines up.
+      if work.running {
+        Button {
+          stopping = work
+        } label: {
+          Image(systemName: "stop.circle").appSymbol(.action).foregroundStyle(theme.color(.error))
+            .frame(width: 32, height: 40)
+        }.buttonStyle(.borderless).accessibilityLabel("Parar \(work.title)")
+      } else {
+        Color.clear.frame(width: 32, height: 40).accessibilityHidden(true)
+      }
+    }
+  }
+  private func state(_ work: SessionWork) -> some View {
+    HStack(spacing: 5) {
+      switch work.state {
+      case .running: Circle().fill(theme.color(.success)).frame(width: 7, height: 7)
+      case .completed: Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.color(.success))
+      case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(theme.color(.error))
+      case .interrupted: Image(systemName: "stop.circle.fill").foregroundStyle(theme.color(.warning))
+      case .ended: Image(systemName: "minus.circle.fill").foregroundStyle(theme.color(.textWeak))
+      }
+      Text(work.state.label)
+      if work.running {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          Text("· " + ConversationProjection.duration(context.date.timeIntervalSince1970 * 1000 - work.started))
+            .monospacedDigit()
+        }
+      } else if let duration = work.duration {
+        Text("· " + ConversationProjection.duration(duration)).monospacedDigit()
+      }
+    }.appFont(.micro).foregroundStyle(theme.color(.textSecondary))
+  }
+  private func open(_ work: SessionWork) {
+    if let child = work.sessionID {
+      sessions.conversationPath.append(.init(id: child, parent: store.id))
+      return
+    }
+    guard let tool = work.toolID else { return }
+    if let parent = store.session?.parentID {
+      sessions.conversationPath.append(.init(id: parent, parent: store.id, tool: tool))
+      return
+    }
+    store.toolRequest = tool
+    dismiss()
   }
 }
 

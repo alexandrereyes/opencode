@@ -392,29 +392,58 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
     ContextDetails(messages: [], models: models, session: session, family: family).fraction == nil)
 }
 
-@Test func runningListSharesCounterRulesAndLinksOnlyRealChildren() throws {
+@Test func workListSharesCounterRulesAndLinksOnlyRealChildren() throws {
   let messages = try actionFixture("transcript-working", ActionRPC<ConversationPage>.self).output
     .data
   let children = try actionFixture("family-page", ActionRPC<FamilyPage>.self).output.data
   let active = Set(try actionFixture("active", DataResponse<[String: ActiveState]>.self).data.keys)
   let shells = try actionFixture("shells", DataResponse<[ShellInfo]>.self).data
   let owner = try actionFixture("session-working", DataResponse<Session>.self).data.id
-  let work = ConversationProjection.runningWork(
+  let all = ConversationProjection.work(
     ownerID: owner, viewedID: owner, messages: messages, children: children, active: active,
     shells: shells)
+  let work = all.filter(\.running)
   #expect(work.count == 2)
   #expect(
     Set(work.compactMap(\.sessionID)) == Set(children.filter { active.contains($0.id) }.map(\.id)))
   #expect(work.allSatisfy { $0.shellID == nil })
+  // Finished direct children stay in the same list with their own state.
+  #expect(Set(all.compactMap(\.sessionID)) == Set(children.filter { $0.parentID == owner }.map(\.id)))
+  #expect(all.map(\.created) == all.map(\.created).sorted(by: >))
   #expect(
-    ConversationProjection.runningWork(
+    ConversationProjection.work(
       ownerID: owner, viewedID: work[0].id, messages: messages, children: children, active: active,
       shells: shells
-    ).count == 1)
-  let noTools = ConversationProjection.runningWork(
+    ).filter(\.running).count == 1)
+  let noTools = ConversationProjection.work(
     ownerID: owner, viewedID: owner, messages: [], children: children, active: active,
     shells: shells)
   #expect(noTools.contains { $0.shellID != nil })
+}
+
+@Test func workStatesFollowActivityThenOutcomeAndOrderByStartNewestFirst() throws {
+  func child(_ id: String, created: Double, outcome: String?) throws -> Session {
+    try JSONDecoder().decode(Session.self, from: Data("""
+      {"id":"\(id)","parentID":"ses_owner","projectID":"global","title":"\(id)","agent":"explore",
+       "location":{"directory":"/repo"},\(outcome.map { #""outcome":"\#($0)","# } ?? "")
+       "time":{"created":\(created),"updated":\(created + 90_000),"idle":\(created + 60_000)}}
+      """.utf8))
+  }
+  let children = [
+    try child("ses_done", created: 1_000, outcome: "succeeded"),
+    try child("ses_failed", created: 4_000, outcome: "failed"),
+    try child("ses_running", created: 2_000, outcome: "succeeded"),
+    try child("ses_stopped", created: 3_000, outcome: "interrupted"),
+    try child("ses_unknown", created: 500, outcome: nil),
+  ]
+  let work = ConversationProjection.work(
+    ownerID: "ses_owner", viewedID: "ses_owner", messages: [], children: children, active: ["ses_running"],
+    shells: [])
+  #expect(work.map(\.id) == ["ses_failed", "ses_stopped", "ses_running", "ses_done", "ses_unknown"])
+  #expect(work.map(\.state) == [.failed, .interrupted, .running, .completed, .ended])
+  #expect(work.first { $0.id == "ses_done" }?.duration == 60_000)
+  #expect(work.first { $0.id == "ses_running" }?.duration == nil)
+  #expect(work.map(\.state.label) == ["Erro", "Interrompido", "Em execução", "Concluído", "Encerrado"])
 }
 
 @Test func catalogPreferencesUseProviderPairVisibilityAndFavorites() throws {

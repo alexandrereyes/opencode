@@ -61,6 +61,8 @@ final class SessionStore {
     var master = false
     var origin: NewSessionOrigin? = nil
     var startInChats = false
+    /// The conversation's "Agentes e tarefas" screen, pushed above it.
+    var agents = false
   }
   var conversationPath: [ConversationRoute] = [] {
     didSet {
@@ -70,6 +72,10 @@ final class SessionStore {
     }
   }
   var selectedTab = 3
+  /// Conversations currently on a navigation stack, so screens pushed above one share its live store.
+  @ObservationIgnored private let liveConversations = NSMapTable<NSString, ConversationStore>.strongToWeakObjects()
+  func register(_ conversation: ConversationStore) { liveConversations.setObject(conversation, forKey: conversation.id as NSString) }
+  func liveConversation(_ id: String) -> ConversationStore? { liveConversations.object(forKey: id as NSString) }
   var conversationOpen: Bool { !conversationPath.isEmpty }
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
