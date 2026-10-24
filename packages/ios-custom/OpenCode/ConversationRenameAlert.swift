@@ -29,16 +29,22 @@ struct ConversationRenameAlert: UIViewControllerRepresentable {
     alert.addTextField { field in
       field.text = title
       field.placeholder = "Título"
+      field.keyboardType = .default
       field.autocapitalizationType = .sentences
-      field.autocorrectionType = .no
-      field.spellCheckingType = .no
+      field.autocorrectionType = .yes
+      field.spellCheckingType = .yes
+      field.inlinePredictionType = .yes
+      field.returnKeyType = .done
     }
     alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in isPresented = false })
-    alert.addAction(UIAlertAction(title: "Salvar", style: .default) { [weak alert] _ in
+    let confirm = UIAlertAction(title: "Salvar", style: .default) { [weak alert] _ in
       let value = alert?.textFields?.first?.text ?? ""
       isPresented = false
       save(value)
-    })
+    }
+    alert.addAction(confirm)
+    // Return in the field triggers the preferred action.
+    alert.preferredAction = confirm
     // UIAlertController focuses its field while presenting and leaves the caret at the end; selecting in the
     // completion runs after that, so typing replaces the whole title.
     controller.present(alert, animated: true) { [weak alert] in

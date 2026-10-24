@@ -62,16 +62,14 @@ import XCTest
     shot("trailing-actions")
     app.buttons["Renomear"].tap()
     XCTAssertTrue(app.alerts["Renomear sessão"].waitForExistence(timeout: 5))
-    app.assertRenameTitleSelected()
-    let field = app.alerts.textFields.firstMatch
-    let old = field.value as? String ?? ""
-    field.tap()
-    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + "Deslize renomeada")
-    // As in SessionReadingTests: restore the keyboard before resolving the moving alert button.
-    field.tap()
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    // Evidence of the QuickType bar and Return key before typing hides the software keyboard.
+    shot("rename-keyboard")
+    app.assertRenameTitleSelected()
+    app.typeText(XCUIKeyboardKey.delete.rawValue + "Deslize renomeada")
     shot("rename")
-    app.alerts.buttons["Salvar"].tap()
+    // Return confirms like Salvar.
+    app.typeText("\n")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"),
       evaluatedWith: app.alerts["Renomear sessão"])], timeout: 5), .completed)
     XCTAssertTrue(app.staticTexts["Sessão renomeada"].waitForExistence(timeout: 10))
