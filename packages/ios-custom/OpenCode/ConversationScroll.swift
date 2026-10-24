@@ -9,6 +9,17 @@ import SwiftUI
   private let headerIDs = NSMapTable<UIView, NSString>(
     keyOptions: .weakMemory, valueOptions: .strongMemory)
   weak var view: UIScrollView?
+  #if DEBUG
+  /// The offline driver's virtual finger: programmatic offsets never report tracking or dragging.
+  var simulatedTouch = false
+  #endif
+  /// A finger or fling currently owns the offset.
+  var touching: Bool {
+    #if DEBUG
+    if simulatedTouch { return true }
+    #endif
+    return view.map { $0.isTracking || $0.isDecelerating } == true
+  }
   var nearBottom = true
   var following: Bool { plan.following }
   private(set) var tailSettled = false
@@ -142,6 +153,9 @@ import SwiftUI
   @objc func settle() {
     guard active, let view, view.window != nil else { stop(); return }
     guard !view.isDragging else { cancelAnchor(); return }
+    #if DEBUG
+    if simulatedTouch { cancelAnchor(); return }
+    #endif
     if view.isTracking || view.isDecelerating { return }
     // Require a coherent native layout and a matching display pass. Repeated
     // notifications retain the pending sample instead of starving a stream.
@@ -204,7 +218,7 @@ import SwiftUI
       height: view.contentSize.height, width: view.bounds.width, viewport: view.bounds.height, bottom: bottom)
   }
   private func applyCorrection() {
-    guard let view, !view.isTracking, !view.isDragging, !view.isDecelerating else { return }
+    guard let view, !view.isTracking, !view.isDragging, !view.isDecelerating, !touching else { return }
     let frames = frames
     let correction: CGFloat
     if let readingAnchor, let frame = frames[readingAnchor.id] {

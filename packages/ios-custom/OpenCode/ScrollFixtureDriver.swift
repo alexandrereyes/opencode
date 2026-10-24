@@ -21,6 +21,22 @@ struct ScrollFixtureDriver: UIViewRepresentable {
     private var startMainCPU: Double = 0
     private var origin: CGFloat = 0
     private var distance: CGFloat = 0
+    private let mode: Mode = {
+      let arguments = ProcessInfo.processInfo.arguments
+      return arguments.contains("-OpenCodeFixtureHold") ? .hold
+        : arguments.contains("-OpenCodeFixtureFlings") ? .flings
+        : arguments.contains("-OpenCodeFixtureScrollUp") ? .up : .oscillate
+    }()
+    private var rows: [String: CGRect] = [:]
+    private var applied: CGFloat = 0
+    private var jumps: [CGFloat] = []
+    private var lastOffset: CGFloat?
+    private var backward: CGFloat = 0
+    private var replaced = 0
+    /// `oscillate` replays absolute offsets; `up` moves like a finger through unmeasured history;
+    /// `flings` alternates 0.9 s of that touch with 0.5 s at rest, when held history pages are admitted;
+    /// `hold` never scrolls, so following and streaming own every offset change.
+    private enum Mode { case oscillate, up, flings, hold }
 
     override func didMoveToWindow() {
       super.didMoveToWindow()
@@ -32,7 +48,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         for _ in 0..<200 {
           if let window, let scroll = findScroll(window) {
             self.scroll = scroll
-            ScrollFixtures.scrollState?.cancelAnchor()
+            if mode != .hold { ScrollFixtures.scrollState?.cancelAnchor() }
             startCPU = cpuTime()
             startMainCPU = mainThreadCPUTime()
             origin = scroll.contentOffset.y
@@ -62,12 +78,53 @@ struct ScrollFixtureDriver: UIViewRepresentable {
       guard elapsed < 12 else { finish(); return }
       let top = -scroll.adjustedContentInset.top
       let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-      let phase = elapsed.truncatingRemainder(dividingBy: 6)
-      let offset = origin + CGFloat(phase < 3 ? phase : 6 - phase) * 1440
-      let target = min(bottom, max(top, offset))
+      // Unrequested on-screen movement of the visible rows (prepends, self-sizing, corrections).
+      let state = ScrollFixtures.scrollState
+      let pinned = state?.pinned ?? []
+      let current = state?.frames ?? [:]
+      let viewport = CGRect(origin: .zero, size: scroll.bounds.size)
+      let moves = current.compactMap { id, frame in
+        // Only rows on screen in both samples: List parks prefetched cells far outside the viewport
+        // and lays them out lazily, and a recycled probe briefly reports another message's cell.
+        rows[id].flatMap { previous in
+          pinned.contains(id) || abs(previous.height - frame.height) > 1
+            || !previous.intersects(viewport) || !frame.intersects(viewport) ? nil : frame.minY - previous.minY + applied
+        }
+      }.sorted()
+      if !moves.isEmpty { jumps.append(abs(moves[moves.count / 2])) }
+      // A small scroll step that shows none of the previous rows replaced the content (an uncorrected prepend).
+      let shown = { (frames: [String: CGRect]) in Set(frames.filter { !pinned.contains($0.key) && $0.value.intersects(viewport) }.keys) }
+      let before = shown(rows)
+      let after = shown(current)
+      if !before.isEmpty, !after.isEmpty, before.isDisjoint(with: after), abs(applied) < viewport.height / 2 { replaced += 1 }
+      rows = current
+      if let lastOffset { backward = max(backward, lastOffset - scroll.contentOffset.y) }
+      lastOffset = scroll.contentOffset.y
+      let interval = CGFloat(samples.last ?? 0) / 1000
+      let target: CGFloat
+      switch mode {
+      case .hold: applied = 0; return
+      case .flings where elapsed.truncatingRemainder(dividingBy: 1.4) >= 0.9:
+        state?.simulatedTouch = false
+        applied = 0
+        return
+      case .flings:
+        // Each fling begins a new pan, which cancels anchors; resting admits held pages.
+        if state?.simulatedTouch == false { state?.cancelAnchor() }
+        state?.simulatedTouch = true
+        target = max(top, scroll.contentOffset.y - 1500 * interval)
+      case .up:
+        // A real pan cancels reading and history anchors as it begins; programmatic offsets do not.
+        state?.cancelAnchor()
+        target = max(top, scroll.contentOffset.y - 1500 * interval)
+      case .oscillate:
+        let phase = elapsed.truncatingRemainder(dividingBy: 6)
+        target = min(bottom, max(top, origin + CGFloat(phase < 3 ? phase : 6 - phase) * 1440))
+      }
       distance += abs(scroll.contentOffset.y - target)
-      scroll.setContentOffset(
-        CGPoint(x: 0, y: target), animated: false)
+      applied = target - scroll.contentOffset.y
+      lastOffset = target
+      scroll.setContentOffset(CGPoint(x: 0, y: target), animated: false)
     }
 
     private func finish() {
@@ -87,6 +144,11 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         "p50FrameMS": sorted.isEmpty ? 0 : sorted[sorted.count / 2],
         "p95FrameMS": sorted.isEmpty ? 0 : sorted[Int(Double(sorted.count - 1) * 0.95)],
         "maxFrameMS": sorted.last ?? 0,
+        "over33": samples.filter { $0 > 33.4 }.count, "over50": samples.filter { $0 > 50 }.count,
+        "over100": samples.filter { $0 > 100 }.count,
+        "jumpMaxPoints": jumps.max() ?? 0, "jumpTotalPoints": jumps.reduce(0, +),
+        "backwardPoints": backward, "replacedFrames": replaced,
+        "tailGapPoints": scroll.map { max(0, $0.contentSize.height + $0.adjustedContentInset.bottom - $0.bounds.height - $0.contentOffset.y) } ?? 0,
         "stallRatio60Hz": samples.reduce(0) { $0 + max(0, $1 - 1000 / 60) } / max(1, samples.reduce(0, +)),
       ]
       if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -119,6 +181,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
     }
 
     func stop() {
+      ScrollFixtures.scrollState?.simulatedTouch = false
       startup?.cancel()
       startup = nil
       link?.invalidate()

@@ -67,6 +67,8 @@ struct ScrollFixtureRoot: View {
     let target: ReadingPosition.Target =
       position == "top" ? .message(id: messages[0].id, offset: 0)
       : position == "middle" ? .message(id: messages[messages.count / 2].id, offset: 0)
+      // A reading bookmark above the tail: history above it has never been measured.
+      : position == "nearTail" ? .message(id: messages[messages.count - 3].id, offset: 0)
       : .followTail
     store.reading.set(ReadingPosition(target), sessionID: "ses_scroll_0000")
     _store = State(initialValue: store)

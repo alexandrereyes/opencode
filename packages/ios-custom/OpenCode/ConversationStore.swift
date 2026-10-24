@@ -56,6 +56,7 @@ import OpenCodeKit
   private let catalog: ModelCatalogCache?
   @ObservationIgnored let usageCache = ContextUsageCache()
   @ObservationIgnored private var cursor: String?
+  @ObservationIgnored private var fixtureHistory: [ConversationMessage] = []
   @ObservationIgnored private var refreshing = false
   @ObservationIgnored private var dirty = false
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -518,13 +519,23 @@ import OpenCodeKit
         value["parentID"] = .string("ses_fixture_parent")
         session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
       }
-      messages = fixture.messages
+      let arguments = ProcessInfo.processInfo.arguments
+      let paged = arguments.contains("-OpenCodeFixturePaged")
+      // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
+      fixtureHistory = paged ? Array(fixture.messages.dropLast(Self.fixturePage)) : []
+      messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages
       models = fixture.models
       branch = "exemplo-sintetico"
-      hasOlder = false
+      hasOlder = !fixtureHistory.isEmpty
       hasTranscript = true
       ready = true
       revision += 1
+      if let index = arguments.firstIndex(of: "-OpenCodeFixtureStream"), arguments.indices.contains(index + 1),
+        let interval = Int(arguments[index + 1])
+      {
+        await streamScrollFixture(every: interval)
+        return
+      }
       if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureMenuUpdates") {
         let source = messages
         let updating = source.last { $0.type == "assistant" && !$0.responseText.isEmpty }?.id
@@ -582,6 +593,32 @@ import OpenCodeKit
     batchTask = nil
   }
   #if DEBUG
+  static let fixturePage = 30
+  /// Token-sized growth of the newest response at the event batch cadence, while the Session executes.
+  private func streamScrollFixture(every interval: Int) async {
+    guard let target = messages.last(where: { $0.type == "assistant" && !$0.responseText.isEmpty })?.id else { return }
+    active = [id]
+    var tick = 0
+    while !Task.isCancelled {
+      do { try await Task.sleep(for: .milliseconds(interval)) } catch { return }
+      guard let index = messages.firstIndex(where: { $0.id == target }),
+        let part = messages[index].content?.lastIndex(where: { $0.type == "text" }) else { return }
+      messages[index].time.completed = nil
+      messages[index].content?[part].text?.append(tick % 20 == 0 ? "\n\nParágrafo sintético \(tick)." : " token\(tick)")
+      revision += 1
+      tick += 1
+    }
+  }
+  private func olderScrollFixture() async {
+    guard !paging, hasOlder else { return }
+    paging = true
+    defer { paging = false }
+    do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+    messages = fixtureHistory.suffix(Self.fixturePage) + messages
+    fixtureHistory.removeLast(min(Self.fixturePage, fixtureHistory.count))
+    hasOlder = !fixtureHistory.isEmpty
+    revision += 1
+  }
   func growScrollFixture(_ iteration: Int) {
     guard ScrollFixtures.mode == "conversation" else { return }
     let rows = messages.filter { $0.type == "assistant" }.suffix(3).map(\.id)
@@ -788,6 +825,9 @@ import OpenCodeKit
     }
   }
   func older() async {
+    #if DEBUG
+    if ScrollFixtures.mode != nil { return await olderScrollFixture() }
+    #endif
     guard !paging, hasOlder, let cursor else { return }
     paging = true
     defer { paging = false }

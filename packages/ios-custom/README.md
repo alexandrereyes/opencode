@@ -1405,6 +1405,21 @@ from three read-only, 100-message pages; every displayed string/identifier/path 
 `script/generate-scroll-fixture.py` documents safe regeneration from temporary GET response files.
 Release builds exclude the fixture JSON and compile out its launch mode/client/driver.
 
+Scroll regression scenarios add `-OpenCodeFixturePosition nearTail` (a bookmark three messages above the end, so
+the history above it was never measured), `-OpenCodeFixtureStream <ms>` (token-sized growth of the newest response
+at the event batch cadence while the Session executes), `-OpenCodeFixturePaged` (only the newest 30 messages; each
+`older()` prepends 30 more after 400 ms, like a cursor read) and two `-OpenCodeFixtureAutoScroll` driver modes:
+`-OpenCodeFixtureScrollUp` moves 1,500 pt/s upward relative to the current offset, as a finger would,
+`-OpenCodeFixtureFlings` alternates 0.9 s of that touch (a virtual finger the scroll owner treats as dragging) with
+0.5 s at rest, and `-OpenCodeFixtureHold` never scrolls, so following owns every offset change. Besides frame intervals and CPU the
+report counts frames over 33/50/100 ms, the unrequested on-screen movement of rows visible in consecutive frames
+(`jumpMaxPoints`/`jumpTotalPoints`), frames whose small step shows none of the previous rows
+(`replacedFrames`, an uncorrected prepend), the largest unrequested backward step and the final distance from the end.
+`script/measure-scroll.py --app base=<A.app> --app candidate=<B.app>` alternates builds over the five scenarios
+(`read`, `history-up`, `stream-reading`, `stream-follow`, `paged-up`) on a simulator or, with
+`--device iphone14` and a lease acquired from the same worktree, on the iPhone 14. Build Debug with
+`SWIFT_OPTIMIZATION_LEVEL=-O` for representative numbers.
+
 ### Following a changing tail
 
 `ConversationScrollState` is the sole owner of tail and reading corrections. It coalesces row/revision/viewport
