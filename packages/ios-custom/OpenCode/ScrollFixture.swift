@@ -93,6 +93,7 @@ struct ScrollFixtureRoot: View {
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
     .background(ScrollFixtureDriver().frame(width: 0, height: 0))
+    .background(ComposerTypingDriver().frame(width: 0, height: 0))
     .background(MarkdownFixtureCaptureDriver().frame(width: 0, height: 0))
     .task { await store.run() }
   }

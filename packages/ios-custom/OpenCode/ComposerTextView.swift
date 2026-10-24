@@ -27,7 +27,8 @@ struct ComposerTextView: UIViewRepresentable {
     return view
   }
   func updateUIView(_ view: ComposerInputView, context: Context) {
-    _ = draft.contentRevision
+    // Native edits deliberately do not update this view; see ConversationDraft.editorRefresh.
+    _ = draft.editorRefresh
     context.coordinator.parent = self
     view.composerOwner = owner
     context.coordinator.updating = true
@@ -78,6 +79,8 @@ struct ComposerTextView: UIViewRepresentable {
         view.restyle()
       }
       resetTyping(view)
+    } else {
+      view.deferredUpdate = true
     }
     if focused && !view.isFirstResponder && view.window != nil {
       // Like resigning below: becoming first responder reloads the keyboard's input views,
@@ -129,12 +132,19 @@ struct ComposerTextView: UIViewRepresentable {
       guard let view = textView as? ComposerInputView else { return }
       parent.draft.receiveEditor(view)
       parent.resetTyping(textView)
+      resumeDeferredUpdate(view)
     }
     func textViewDidChangeSelection(_ textView: UITextView) {
       guard !updating, parent.draft.editorOwner == parent.owner else { return }
-      guard (textView as? ComposerInputView)?.representedDraft === parent.draft else { return }
+      guard let view = textView as? ComposerInputView, view.representedDraft === parent.draft else { return }
       parent.draft.selection = textView.selectedRange
       parent.resetTyping(textView)
+      resumeDeferredUpdate(view)
+    }
+    private func resumeDeferredUpdate(_ view: ComposerInputView) {
+      guard view.deferredUpdate, view.markedTextRange == nil else { return }
+      view.deferredUpdate = false
+      parent.draft.refreshEditor()
     }
     func textView(
       _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String
@@ -157,6 +167,8 @@ final class ComposerInputView: UITextView {
   weak var representedDraft: ConversationDraft?
   var composerOwner: UUID?
   var representedRevision = -1
+  // An update arrived during composition and skipped loading, restyling or keyboard traits.
+  var deferredUpdate = false
   var composerTheme = AppTheme.selected
   var composerFont = AppTypography.font(.body)
   var plainAttributes: [NSAttributedString.Key: Any] {

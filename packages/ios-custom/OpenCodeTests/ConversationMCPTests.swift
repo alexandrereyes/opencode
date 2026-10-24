@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import XCTest
 
 @testable import OpenCode
@@ -69,6 +70,25 @@ private actor MCPTestHTTP {
       URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems == [.init(name: "location[directory]", value: "/child with space")]
     })
     XCTAssertNil(toast.message)
+  }
+  func testClosingAClosedPanelDoesNotNotifyObservers() async throws {
+    let http = MCPTestHTTP()
+    let store = ConversationMCPStore(client: OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {
+      try await http.respond($0)
+    }, toast: ToastCenter())
+    await store.load(directory: "/repo")
+    final class Flag: @unchecked Sendable { var raised = false }
+    let closed = Flag()
+    // The conversation closes the panel on every composer trigger change and observes isOpen.
+    withObservationTracking { _ = store.isOpen } onChange: { closed.raised = true }
+    store.close()
+    XCTAssertFalse(closed.raised)
+    store.open()
+    let open = Flag()
+    withObservationTracking { _ = store.isOpen } onChange: { open.raised = true }
+    store.close()
+    XCTAssertTrue(open.raised)
+    XCTAssertFalse(store.isOpen)
   }
   func testLoginDoesNotRequestOAuthAndUnsupportedIsSilent() async throws {
     let http = MCPTestHTTP()

@@ -36,17 +36,19 @@ extension ComposerDocument {
   }
 
   @MainActor init(editor: NSAttributedString) {
-    var text = ""
+    // One bridged string and NSString lengths keep long, token-heavy drafts linear.
+    let source = editor.string as NSString
+    let text = NSMutableString()
     var tokens: [ComposerSpan] = []
     editor.enumerateAttribute(.attachment, in: NSRange(location: 0, length: editor.length)) { value, range, _ in
       guard let attachment = value as? ComposerTokenAttachment else {
-        text += (editor.string as NSString).substring(with: range)
+        text.append(source.substring(with: range))
         return
       }
-      let start = text.utf16.count
-      text += attachment.token.text
-      tokens.append(.init(start: start, end: text.utf16.count, token: attachment.token))
+      let start = text.length
+      text.append(attachment.token.text)
+      tokens.append(.init(start: start, end: text.length, token: attachment.token))
     }
-    self.init(text: text, tokens: tokens)
+    self.init(text: text as String, tokens: tokens)
   }
 }

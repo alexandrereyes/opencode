@@ -90,9 +90,10 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
   }
   public var validTokens: [ComposerSpan] {
     var end = 0
+    let source = text as NSString
     return tokens.sorted { $0.start < $1.start }.filter { span in
-      guard span.start >= end, span.end > span.start, span.end <= text.utf16.count,
-        (text as NSString).substring(with: span.range) == span.token.text
+      guard span.start >= end, span.end > span.start, span.end <= source.length,
+        source.substring(with: span.range) == span.token.text
       else { return false }
       end = span.end
       return true

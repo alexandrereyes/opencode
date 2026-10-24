@@ -55,20 +55,25 @@ extension ComposerTokenKind {
   // Native edits publish contentRevision without echoing storage/selection back into TextKit.
   private(set) var sourceRevision = 0
   private(set) var contentRevision = 0
+  // Re-runs the editor's SwiftUI update after work it deferred (composition, stale storage),
+  // without making every keystroke an update of the composer and its ancestors.
+  private(set) var editorRefresh = 0
+  func refreshEditor() { editorRefresh += 1 }
   var text: NSAttributedString {
     get { document.attributed }
     set {
       editorText = ComposerDocument(attributed: newValue).editorAttributed()
       sourceRevision += 1
       contentRevision += 1
+      refreshEditorState()
       changed()
     }
   }
-  var hasText: Bool {
-    _ = contentRevision
-    return (editorText.string as NSString).rangeOfCharacter(from: .whitespacesAndNewlines.inverted).location != NSNotFound
-  }
-  var isEmpty: Bool { _ = contentRevision; return editorText.length == 0 }
+  // Derived from each edit but published only when they change: views reading them
+  // (the composer card, the conversation screen) must not re-render on every keystroke.
+  private(set) var hasText = false
+  private(set) var isEmpty = true
+  private(set) var trigger: ComposerTrigger?
   var model: ModelReference? { didSet { changed() } }
   var newSession: NewSessionContext? { didSet { changed() } }
   var agent: String? { didSet { changed() } }
@@ -77,8 +82,8 @@ extension ComposerTokenKind {
   var revertedContext: RevertedContext? { didSet { changed() } }
   var commenting: ChatQuote?
   // Editor UTF-16 offsets; snapshots convert the cursor to the persisted label offsets.
-  var selection = NSRange(location: 0, length: 0)
-  var focused = false
+  var selection = NSRange(location: 0, length: 0) { didSet { refreshTrigger() } }
+  var focused = false { didSet { refreshTrigger() } }
   // Presentation is runtime-only, including transfer after a failed new-session send.
   var expanded = false
   var dictationReview = false
@@ -114,7 +119,7 @@ extension ComposerTokenKind {
   var focusSuppressed = false
   @ObservationIgnored weak var input: ComposerInputView?
   var editorOwner: UUID?
-  var dismissedTrigger: ComposerTrigger?
+  var dismissedTrigger: ComposerTrigger? { didSet { refreshTrigger() } }
   var editing: InboxItem?
   var replacing: String? { didSet { changed() } }
   var sending = false
@@ -138,11 +143,22 @@ extension ComposerTokenKind {
       cursor: document.documentOffset(selection.location), replacing: replacing, quotes: quotes, newSession: newSession,
       revertedContext: revertedContext, dictationPending: dictationPending ? true : nil)
   }
-  var trigger: ComposerTrigger? {
-    guard focused, selection.length == 0, input?.markedTextRange == nil else { return nil }
-    _ = contentRevision
-    let trigger = ComposerTrigger.detect(in: editorText.string as NSString, cursor: selection.location)
-    return trigger == dismissedTrigger ? nil : trigger
+  private func refreshEditorState() {
+    // CFAttributedStringGetString reads the live TextKit string; bridging `string` copies it on every edit.
+    let string = CFAttributedStringGetString(editorText) as NSString
+    if isEmpty != (string.length == 0) { isEmpty = string.length == 0 }
+    let text = string.rangeOfCharacter(from: .whitespacesAndNewlines.inverted).location != NSNotFound
+    if hasText != text { hasText = text }
+    refreshTrigger()
+  }
+  private func refreshTrigger() {
+    let next: ComposerTrigger? = {
+      guard focused, selection.length == 0, input?.markedTextRange == nil else { return nil }
+      let trigger = ComposerTrigger.detect(
+        in: CFAttributedStringGetString(editorText) as NSString, cursor: selection.location)
+      return trigger == dismissedTrigger ? nil : trigger
+    }()
+    if trigger != next { trigger = next }
   }
   func load() async {
     guard !restored, !deleted else { return }
@@ -229,12 +245,13 @@ extension ComposerTokenKind {
   func dismissSuggestions() { dismissedTrigger = trigger }
   func receiveEditor(_ view: ComposerInputView) {
     guard view.representedDraft === self, view.representedRevision == sourceRevision else {
-      contentRevision += 1
+      editorRefresh += 1
       return
     }
     editorText = view.textStorage
     selection = view.selectedRange
     contentRevision += 1
+    refreshEditorState()
     changed()
   }
   func replace(_ range: NSRange, with value: NSAttributedString) {
@@ -250,6 +267,7 @@ extension ComposerTokenKind {
     selection = NSRange(location: range.location + value.length, length: 0)
     sourceRevision += 1
     contentRevision += 1
+    refreshEditorState()
     changed()
   }
   func remove(_ attachment: DraftAttachment) {

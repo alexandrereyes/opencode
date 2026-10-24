@@ -368,6 +368,32 @@ sends use Luna 6/low, and `comment-wire.json` verifies the received file/skill p
 Marked text, adjacent replacements and theme changes during composition are exercised through native text-input
 APIs. Microphone/audio dictation was not exercised; no physical device was needed to reproduce the bug.
 
+**Typing without re-rendering the conversation — 24 October.** A keystroke used to bump `contentRevision`, which
+`ComposerTextView.updateUIView`, `hasText`, `isEmpty` and `trigger` all read: every key re-evaluated the composer card,
+`ConversationComposer` and `ConversationView` (via its trigger `onChange`), diffed the transcript `List` and remeasured
+its text views' baselines (`UITextView._baselineOffsetsAtSize`). Now `hasText`, `isEmpty` and `trigger` are stored and
+published only when their value changes; the editor observes only `editorRefresh`, bumped when an update deferred
+during composition must run, or when stale storage must reload. The conversation observes the trigger in a leaf view,
+and `ConversationMCPStore.close()` no longer notifies when already closed. `ComposerDocument(editor:)` and
+`validTokens` bridge the string once. Highlighting, tokens, suggestions, dictation, focus and fullscreen are unchanged;
+the comment sheet (`QuoteCommentEditor`) shares the fix.
+
+The DEBUG `-OpenCodeFixtureAutoType idle|plain|mentions|suggestions|long` driver (offline conversation fixture) types
+200 steps through `UITextInput` at 100 ms and records main-run-loop busy time per keystroke and display-link frames;
+`script/profile-composer.py --simulator <udid>|--physical --derived … --evidence …` runs it (`--trace` adds Instruments).
+iPhone 14, `-O` Debug build, medians of two runs, before → after:
+
+| Scenario | Busy p50 / p95 per key | Main CPU (200 keys) | Frames > 25 ms | Hitch time |
+| --- | ---: | ---: | ---: | ---: |
+| Plain prose | 36.4 / 39.6 → 11.9 / 14.1 ms | 7.37 → 2.49 s | 228 → 0 | 186 → 0 ms/s |
+| `@file` + `$skill` tokens | 36.3 / 98.3 → 14.5 / 100.6 ms | 8.31 → 4.61 s | 186 → 46 | 200 → 77 ms/s |
+| Suggestion panel open | 48.2 / 49.2 → 15.6 / 18.5 ms | 9.70 → 3.23 s | 214 → 2 | 303 → 3 ms/s |
+| 200-line draft, 200 tokens | 36.6 / 38.5 → 13.7 / 16.3 ms | 7.38 → 2.83 s | 214 → 0 | 170 → 0 ms/s |
+
+The remaining mention p95 is the keyboard itself: opening/closing a query toggles autocorrection/QuickType traits,
+whose keyboard-height change relayouts the screen (~100 ms on the iPhone 14). Deferring `reloadInputViews` out of the
+SwiftUI update did not change it; keeping the traits stable would change mention behavior and was left as is.
+
 Changing the editor's editability during send is deferred outside SwiftUI's graph update and applied only when its
 value changes and the UIKit view still represents that draft. `UITextView.setEditable(false)` can synchronously resign
 focus and ask the hosting view for its next responder; doing that inside `updateUIView` reenters AttributeGraph and

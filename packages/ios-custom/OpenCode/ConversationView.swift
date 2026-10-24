@@ -412,7 +412,7 @@ struct ConversationView: View {
       conversation.mcps.close()
     }
     .onChange(of: sessions.drafts.draft(conversation.id).expanded) { _, _ in conversation.mcps.close() }
-    .onChange(of: sessions.drafts.draft(conversation.id).trigger) { _, _ in conversation.mcps.close() }
+    .background(DraftTriggerObserver(draft: sessions.drafts.draft(conversation.id)) { conversation.mcps.close() })
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
       sessions.register(conversation)
@@ -1094,6 +1094,17 @@ struct ConversationView: View {
     guard !following.contains(where: { !$0.responseText.isEmpty }) else { return false }
     return conversation.messages.dropFirst(index + 1).contains { $0.type == "user" }
       || !conversation.working
+  }
+}
+
+/// Observes the composer trigger in a leaf, so a suggestion query typed in the composer
+/// does not re-render the conversation and diff its transcript list.
+private struct DraftTriggerObserver: View {
+  let draft: ConversationDraft
+  let changed: () -> Void
+  var body: some View {
+    Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+      .onChange(of: draft.trigger) { _, _ in changed() }
   }
 }
 

@@ -67,7 +67,9 @@ struct ComposerSuggestions: View {
         do {
           try await Task.sleep(for: .milliseconds(180))
           #if DEBUG
-          let next = ComposerFixtures.enabled ? ComposerFixtures.suggestions(trigger) : try await store.suggestions(trigger)
+          let next = ComposerFixtures.enabled ? ComposerFixtures.suggestions(trigger)
+            : ComposerTypingDriver.scenario != nil ? ComposerTypingDriver.suggestions(trigger)
+            : try await store.suggestions(trigger)
           #else
           let next = try await store.suggestions(trigger)
           #endif

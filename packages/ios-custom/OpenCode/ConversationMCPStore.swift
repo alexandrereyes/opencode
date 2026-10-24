@@ -39,7 +39,9 @@ import OpenCodeKit
     await refresh()
   }
   func open() { order.open(servers) }
-  func close() { order.close() }
+  // Mutating `order` notifies observers even when already closed; the conversation
+  // calls this on every composer trigger change and would re-render its transcript.
+  func close() { if order.visible { order.close() } }
   func refresh() async {
     guard let directory else { return }
     loading = true

@@ -1,3 +1,4 @@
+import Observation
 import OpenCodeKit
 import SwiftUI
 import XCTest
@@ -226,6 +227,43 @@ import XCTest
     input.undoManager?.redo()
     try await settle()
     XCTAssertEqual(draft.document.validTokens.count, 3)
+  }
+
+  func testTypingPublishesDerivedComposerStateOnlyWhenItChanges() async throws {
+    let (draft, window) = try mount(.init())
+    defer { window.isHidden = true }
+    try await settle()
+    let input = try XCTUnwrap(draft.input)
+    final class Flag: @unchecked Sendable { var raised = false }
+    // The composer card and the conversation observe these; a plain keystroke must not invalidate them.
+    func publishes(_ action: () -> Void) -> Bool {
+      let flag = Flag()
+      withObservationTracking { _ = (draft.hasText, draft.isEmpty, draft.trigger) } onChange: { flag.raised = true }
+      action()
+      return flag.raised
+    }
+    XCTAssertTrue(publishes { input.insertText("O") })
+    XCTAssertTrue(draft.hasText)
+    XCTAssertFalse(draft.isEmpty)
+    XCTAssertFalse(publishes { input.insertText("lá, mundo") })
+    XCTAssertFalse(publishes { input.deleteBackward() })
+    XCTAssertTrue(publishes { input.insertText(" @RE") })
+    XCTAssertEqual(draft.trigger?.character, "@")
+    XCTAssertEqual(draft.trigger?.query, "RE")
+    XCTAssertTrue(publishes { input.insertText("A") })
+    XCTAssertEqual(draft.trigger?.query, "REA")
+    XCTAssertTrue(publishes { draft.dismissSuggestions() })
+    XCTAssertNil(draft.trigger)
+    input.insertText("D")
+    XCTAssertEqual(draft.trigger?.query, "READ")
+    XCTAssertTrue(publishes { draft.focused = false })
+    XCTAssertNil(draft.trigger)
+    draft.focused = true
+    XCTAssertEqual(draft.trigger?.query, "READ")
+    XCTAssertTrue(publishes { draft.text = NSAttributedString(string: "  \n") })
+    XCTAssertFalse(draft.hasText)
+    XCTAssertFalse(draft.isEmpty)
+    XCTAssertNil(draft.trigger)
   }
 
   func testCollapsedEditorGrowsAndExternalReplacementWaitsForComposition() async throws {
