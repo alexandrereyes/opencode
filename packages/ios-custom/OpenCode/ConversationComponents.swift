@@ -63,6 +63,7 @@ struct UserBubble: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.userMessageRevert) private var reversion
   @Environment(\.userMessagePending) private var pendingInput
+  @Environment(\.userMessageUndelivered) private var undelivered
   @Environment(ToastCenter.self) private var toast
   @Environment(\.conversationSearch) private var highlights
   @Environment(\.conversationQuotes) private var quoteContext
@@ -144,7 +145,7 @@ struct UserBubble: View {
               .accessibilityLabel("Redefinir para este ponto")
               .accessibilityIdentifier("user-revert-" + message.id)
           }
-          if pendingInput?.status.waiting == true {
+          if undelivered {
             Text("Pendente ·").appFont(.bubbleMeta).accessibilityIdentifier("user-pending-" + message.id)
           }
           Text(ConversationProjection.date(message.time.created, format: "HH:mm"))

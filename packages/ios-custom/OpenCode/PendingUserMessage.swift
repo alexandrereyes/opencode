@@ -11,9 +11,12 @@ struct UserMessagePendingAction {
 
 extension EnvironmentValues {
   @Entry var userMessagePending: UserMessagePendingAction? = nil
+  @Entry var userMessageUndelivered = false
 }
 
 /// An undelivered steer below the transcript. Queued items live in the tray instead.
+/// Unlike the web, which keeps the sent accent while `starting`, every undelivered bubble uses
+/// the pending style and label from the tap until delivery (Alexandre, 24/10).
 struct PendingUserMessage: View {
   @Environment(\.appTheme) private var theme
   let item: InboxItem
@@ -23,7 +26,8 @@ struct PendingUserMessage: View {
   var body: some View {
     let status = store.pendingStatus(item)
     UserBubble(message: item.message, maximumTextHeight: maximumTextHeight)
-      .environment(\.appTheme, status?.waiting == true ? theme.pendingUserBubble : theme)
+      .environment(\.appTheme, theme.pendingUserBubble)
+      .environment(\.userMessageUndelivered, true)
       .environment(\.userMessagePending, status.flatMap { status in
         guard status.actions else { return nil }
         return UserMessagePendingAction(
@@ -36,6 +40,6 @@ struct PendingUserMessage: View {
       .padding(.vertical, 8).frame(maxWidth: .infinity)
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("pending-user-" + item.id)
-      .accessibilityValue(status?.waiting == true ? "Pendente" : "")
+      .accessibilityValue("Pendente")
   }
 }

@@ -452,11 +452,13 @@ The custom web is the reference (`session-ui-custom/src/actions.ts`, `message/me
 user **steers** render as user bubbles below the transcript, in admission order; queued items stay in the tray.
 `PendingInputs.status` ports the web's `DataPendingStatus`: `starting` (promoted at the next idle boundary),
 `steering` (behind input this execution already delivered), `stranded` (an execution ended without it) and `queued`.
-Like the web, `steering`/`stranded` drop the sent-message accent (`userBubblePending*` roles, generated from
-`v2-background-bg-layer-02`/`v2-text-text-base`) and prefix the time with **Pendente**; every non-queued status
+The web drops the sent-message accent only while `steering`/`stranded`. **Intentional difference (Alexandre, 24/10):**
+iOS uses the pending style (`userBubblePending*` roles, generated from `v2-background-bg-layer-02`/`v2-text-text-base`)
+and the **Pendente** time prefix for every undelivered bubble, including `starting`, optimistic and child rows, from the
+tap until delivery. Actions still follow the web: every non-queued status
 replaces **Redefinir para este ponto** with **Mover para a fila** (`PATCH …/inbox/:id` `{delivery:"queue"}`) and
 **Excluir** (`DELETE …/inbox/:id`), in the meta row and the long-press menu, without confirmation. Child sessions show
-their pending steers without actions or styling, as the web passes no pending actions there. Delivery turns the row into
+their pending steers without actions, as the web passes no pending actions there. Delivery turns the row into
 the ordinary sticky bubble with the same ID. The web has no "back to composer" action on the bubble; a steer moved to
 the queue can be edited from the tray. Its English copy (`Pending`, `Move to queue`, `Delete`) has no pt-BR keys.
 

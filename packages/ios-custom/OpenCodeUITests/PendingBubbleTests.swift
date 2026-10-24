@@ -102,14 +102,15 @@ import XCTest
     _ = try await request("/api/session/\(session)/inbox/\(queued)", method: "DELETE")
   }
 
-  func testStartingSteerKeepsSentStyleWithPendingActions() async throws {
+  func testStartingSteerUsesPendingStyleWithPendingActions() async throws {
     let session = try XCTUnwrap(environment["OPENCODE_TEST_PENDING_START"])
     let starting = try await admit(session, "Pendente iniciando · \(theme)")
     let app = launch(session)
     let bubble = element(app, "pending-user-" + starting)
     XCTAssertTrue(bubble.waitForExistence(timeout: 20))
-    XCTAssertEqual(bubble.value as? String ?? "", "", "A starting steer keeps the sent-message style")
-    XCTAssertFalse(element(app, "user-pending-" + starting).exists)
+    // Unlike the web, a starting steer already uses the pending style and label.
+    XCTAssertEqual(bubble.value as? String, "Pendente")
+    XCTAssertTrue(element(app, "user-pending-" + starting).exists)
     XCTAssertTrue(app.buttons["user-pending-queue-" + starting].exists)
     XCTAssertTrue(app.buttons["user-pending-delete-" + starting].exists)
     shot(app, "pending-starting")
@@ -154,6 +155,11 @@ import XCTest
     let sent = sendMeasured(app, text)
     XCTAssertLessThan(sent.seconds, 4.5, "The bubble appears before the 5-second admission answers")
     XCTAssertEqual(app.textViews["conversation-composer"].value as? String ?? "", "")
+    // The optimistic row is pending-styled from the tap, before the server knows it.
+    XCTAssertTrue(app.descendants(matching: .any).matching(
+      NSPredicate(format: "identifier BEGINSWITH 'pending-user-' AND value == 'Pendente'")).firstMatch.exists)
+    XCTAssertTrue(app.descendants(matching: .any).matching(
+      NSPredicate(format: "identifier BEGINSWITH 'user-pending-'")).firstMatch.exists)
     shot(app, "optimistic-before-admission")
     var admitted: String?
     for _ in 0..<60 where admitted == nil {
