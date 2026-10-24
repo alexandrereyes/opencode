@@ -29,12 +29,10 @@ final class ResponseTextView: UITextView {
   var quoteHighlights: [ResponseQuoteHighlight] = []
   var quoteRects: [(ChatQuoteMark, [CGRect])] = []
   var quoteButtons: [UIButton] = []
-  var quoteRail: UIScrollView?
+  var quoteInsertions: [ResponseQuoteInsertion] = []
   var quoteFill = UIColor.clear
   var quoteLine = UIColor.clear
   var quoteBadge = UIColor.clear
-  var quoteText = UIColor.clear
-  var quoteSurface = UIColor.clear
   var openQuote: ((ChatQuoteMark) -> Void)?
   var quoteTarget: String?
   var quoteActive: String?
@@ -56,8 +54,8 @@ final class ResponseTextView: UITextView {
     return size
   }
   override func copy(_ sender: Any?) {
-    if let block = sourceBlock, block.runs.contains(where: { $0.formula != nil }) {
-      UIPasteboard.general.string = block.copyText(in: selectedRange)
+    if let block = sourceBlock, !quoteInsertions.isEmpty || block.runs.contains(where: { $0.formula != nil }) {
+      UIPasteboard.general.string = block.copyText(in: originalRange(selectedRange))
     } else { super.copy(sender) }
     Haptics.play(.selection)
   }
@@ -128,7 +126,18 @@ final class ResponseTextView: UITextView {
       (String(index + 1) as NSString).draw(in: CGRect(x: 0, y: line.minY, width: gutterWidth * 25 / 44, height: line.height + 2), withAttributes: attributes)
     }
   }
-  var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: selectedRange) }
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    super.point(inside: point, with: event) || quoteButtons.contains { $0.frame.contains(point) }
+  }
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden, alpha > 0.01, isUserInteractionEnabled else { return nil }
+    if selectedRange.length == 0, let button = quoteButtons.filter({ $0.frame.contains(point) }).min(by: {
+      pow($0.frame.midX - point.x, 2) + pow($0.frame.midY - point.y, 2)
+        < pow($1.frame.midX - point.x, 2) + pow($1.frame.midY - point.y, 2)
+    }) { return button }
+    return super.hitTest(point, with: event)
+  }
+  var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: originalRange(selectedRange)) }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
     resignFirstResponder()
@@ -209,7 +218,7 @@ struct SelectableResponseText: UIViewRepresentable {
     }
     view.tintColor = theme.uiColor(.markdownLink)
     view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
-    view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first }
+    view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first.map(view.displayRange) }
     view.searchAlign = highlights.align
     let matches = highlights.matches.filter { $0.partID == partID }
     let rendering = Rendering(
@@ -217,13 +226,14 @@ struct SelectableResponseText: UIViewRepresentable {
       current: matches.contains { $0.id == highlights.current } ? highlights.current : nil,
       gutter: gutter, wrap: wrap, tableHeader: tableHeader,
       contentSize: category.rawValue,
+      quotes: view.quoteHighlights,
       formulas: block.runs.compactMap(\.formula).filter { rasters[ResponseFormulaKey($0)] != nil }.count)
     guard coordinator.rendering != rendering else { return }
     coordinator.rendering = rendering
     view.codeGutter = gutter
     view.gutterWidth = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 44,
       compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
-    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? view.gutterWidth : 0, bottom: 0, right: view.quoteHighlights.isEmpty ? 0 : 28)
+    view.textContainerInset = UIEdgeInsets(top: 0, left: gutter ? view.gutterWidth : 0, bottom: 0, right: 0)
     view.textContainer.lineBreakMode = wrap ? .byWordWrapping : .byClipping
     view.inlineCodeColor = theme.uiColor(.inlineCodeBackground).withAlphaComponent(0.5)
     view.gutterColor = theme.uiColor(.codeLineNumber)
@@ -243,10 +253,18 @@ struct SelectableResponseText: UIViewRepresentable {
           match.id == highlights.current ? 0.3 : 0.1), range: range)
       }
     }
-    if view.attributedText != text { view.attributedText = text }
+    let selection = view.originalRange(view.selectedRange)
+    view.renderQuoteMarkers(in: text, traits: UITraitCollection(preferredContentSizeCategory: category))
+    if view.attributedText != text {
+      view.attributedText = text
+      view.selectedRange = view.displayRange(selection)
+    }
+    view.inlineCodeRanges = view.inlineCodeRanges.flatMap(view.displayRanges)
+    view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first.map(view.displayRange) }
     view.applyFileLinks(coordinator.knownFiles)
     view.invalidateMeasurement()
     view.accessibilityLabel = block.copyText
+    view.accessibilityValue = block.copyText
     view.linkTextAttributes = [:]
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ResponseTextView, context: Context)
@@ -254,7 +272,7 @@ struct SelectableResponseText: UIViewRepresentable {
   {
     guard let width = proposal.width, width > 0 else { return nil }
     let size = uiView.fittingSize(width: width)
-    return CGSize(width: size.width, height: max(gutter ? 26 : 0, size.height))
+    return CGSize(width: wrap ? width : size.width, height: max(gutter ? 26 : 0, size.height))
   }
   static func dismantleUIView(_ view: ResponseTextView, coordinator: Coordinator) {
     coordinator.rendering = nil
@@ -278,8 +296,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.quoteRects = []
     view.quoteButtons.forEach { $0.removeFromSuperview() }
     view.quoteButtons = []
-    view.quoteRail?.removeFromSuperview()
-    view.quoteRail = nil
+    view.quoteInsertions = []
     view.delegate = nil
   }
   final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
@@ -323,7 +340,7 @@ struct SelectableResponseText: UIViewRepresentable {
       guard let view = textView as? ResponseTextView, let actions = view.selectionActions,
         let block = view.sourceBlock,
         let quote = ChatQuote.selection(
-          source: view.source, block: block, range: range,
+          source: view.source, block: block, range: view.originalRange(range),
           messageID: view.messageID, partID: view.partID)
       else { return UIMenu(children: suggestedActions) }
       let custom = UIMenu(
@@ -351,6 +368,7 @@ struct SelectableResponseText: UIViewRepresentable {
     let wrap: Bool
     let tableHeader: Bool
     let contentSize: String
+    let quotes: [ResponseQuoteHighlight]
     let formulas: Int
   }
 }

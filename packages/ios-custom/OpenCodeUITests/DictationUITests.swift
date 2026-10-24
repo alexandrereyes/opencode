@@ -5,7 +5,7 @@ import XCTest
   override func setUp() { continueAfterFailure = false }
   override func tearDown() async throws { app.terminate() }
   private func open(extra: [String] = []) {
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeDictationFixture", "fake",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeDictationFixture", "fake",
       "-OpenCodeTheme", ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"] + extra
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"]
     app.launch()

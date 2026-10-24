@@ -5,7 +5,7 @@ import XCTest
   private func launch(_ mode: String = "conversation") throws -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
       "-OpenCodeMCPFixture", mode]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
@@ -152,7 +152,7 @@ import XCTest
   func testLiveOnlySafariDisconnectAndReconnect() throws {
     let env = ProcessInfo.processInfo.environment
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
       "-OpenCodeOpenSession", try XCTUnwrap(env["OPENCODE_MCP_LIVE_SESSION"])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(env["OPENCODE_TEST_PASSWORD"])
     app.launch()

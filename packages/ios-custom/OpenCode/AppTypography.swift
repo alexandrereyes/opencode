@@ -3,26 +3,32 @@ import UIKit
 
 enum AppTextStyle: CaseIterable, Sendable {
   case largeTitle, title, heading, body, message, preview, secondary, caption, footnote, micro
+  case path, navigation, chrome, bubbleMeta, mcp, metrics
 
   var size: CGFloat {
     switch self {
-    case .largeTitle: 37
-    case .title: 22
-    case .heading, .body: 18.5
-    case .message: 17.5
-    case .preview: 16.5
-    case .secondary: 15.25
-    case .caption: 14.25
-    case .footnote: 13.25
-    case .micro: 11.5
+    case .largeTitle: 34
+    case .title: 20
+    case .heading, .body, .message, .navigation: 17
+    case .preview, .secondary: 15
+    case .caption, .path: 13
+    case .footnote, .chrome, .bubbleMeta: 12
+    case .micro, .mcp: 11
+    case .metrics: 9
     }
   }
 
   var lineHeight: CGFloat {
     switch self {
-    case .body: 28.5
-    case .message: 24
+    case .body, .message: 22.5
     default: size * 1.3
+    }
+  }
+
+  var maximumSize: CGFloat? {
+    switch self {
+    case .navigation, .chrome, .bubbleMeta, .mcp, .metrics: size
+    default: nil
     }
   }
 
@@ -30,13 +36,13 @@ enum AppTextStyle: CaseIterable, Sendable {
     switch self {
     case .largeTitle: .largeTitle
     case .title: .title2
-    case .heading: .headline
+    case .heading, .navigation: .headline
     case .body, .message: .body
     case .preview: .callout
     case .secondary: .subheadline
-    case .caption: .footnote
-    case .footnote: .caption
-    case .micro: .caption2
+    case .caption, .path: .footnote
+    case .footnote, .chrome, .bubbleMeta: .caption
+    case .micro, .mcp, .metrics: .caption2
     }
   }
 
@@ -44,13 +50,13 @@ enum AppTextStyle: CaseIterable, Sendable {
     switch self {
     case .largeTitle: .largeTitle
     case .title: .title2
-    case .heading: .headline
+    case .heading, .navigation: .headline
     case .body, .message: .body
     case .preview: .callout
     case .secondary: .subheadline
-    case .caption: .footnote
-    case .footnote: .caption1
-    case .micro: .caption2
+    case .caption, .path: .footnote
+    case .footnote, .chrome, .bubbleMeta: .caption1
+    case .micro, .mcp, .metrics: .caption2
     }
   }
 }
@@ -61,11 +67,13 @@ enum AppTextStyle: CaseIterable, Sendable {
     let base = monospaced
       ? UIFont.monospacedSystemFont(ofSize: style.size, weight: weight)
       : UIFont.systemFont(ofSize: style.size, weight: weight)
-    return UIFontMetrics(forTextStyle: style.uiStyle).scaledFont(for: base, compatibleWith: traits)
+    return UIFontMetrics(forTextStyle: style.uiStyle).scaledFont(for: base,
+      maximumPointSize: style.maximumSize ?? .greatestFiniteMagnitude, compatibleWith: traits)
   }
 
   static func lineHeight(_ style: AppTextStyle, compatibleWith traits: UITraitCollection? = nil) -> CGFloat {
-    UIFontMetrics(forTextStyle: style.uiStyle).scaledValue(for: style.lineHeight, compatibleWith: traits)
+    let height = UIFontMetrics(forTextStyle: style.uiStyle).scaledValue(for: style.lineHeight, compatibleWith: traits)
+    return style.maximumSize == nil ? height : min(height, style.lineHeight)
   }
 }
 
@@ -93,15 +101,17 @@ private struct AppFont: ViewModifier {
   @ScaledMetric private var size: CGFloat
   let weight: Font.Weight
   let design: Font.Design
+  let maximumSize: CGFloat?
 
   init(_ style: AppTextStyle, weight: Font.Weight, design: Font.Design) {
     _size = ScaledMetric(wrappedValue: style.size, relativeTo: style.relativeTo)
     self.weight = weight
     self.design = design
+    maximumSize = style.maximumSize
   }
 
   func body(content: Content) -> some View {
-    content.font(.system(size: size, weight: weight, design: design))
+    content.font(.system(size: min(size, maximumSize ?? .greatestFiniteMagnitude), weight: weight, design: design))
   }
 }
 
@@ -113,8 +123,9 @@ extension View {
 }
 
 enum AppLayout {
-  static let margin: CGFloat = 20
-  static let avatar: CGFloat = 48
+  static let margin: CGFloat = 16
+  static let composerMargin: CGFloat = 12
+  static let avatar: CGFloat = 44
   static let avatarGap: CGFloat = 12
   static let rowTextInset = avatar + avatarGap
 }

@@ -38,10 +38,11 @@ extension ResponseTextView {
     for run in block.runs {
       defer { offset += run.text.utf16.count }
       guard run.code, run.link == nil, let path = FileReference.inline(run.text), paths.contains(path) else { continue }
-      text.addAttribute(.link, value: FileReference.link(path), range: NSRange(location: offset, length: run.text.utf16.count))
-      text.addAttributes([.underlineStyle: NSUnderlineStyle.single.rawValue,
-        .underlineColor: (text.attribute(.foregroundColor, at: offset, effectiveRange: nil) as? UIColor ?? tintColor).withAlphaComponent(0.4)],
-        range: NSRange(location: offset, length: run.text.utf16.count))
+      for range in displayRanges(NSRange(location: offset, length: run.text.utf16.count)) {
+        text.addAttribute(.link, value: FileReference.link(path), range: range)
+        text.addAttributes([.underlineStyle: NSUnderlineStyle.single.rawValue,
+          .underlineColor: (text.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor ?? tintColor).withAlphaComponent(0.4)], range: range)
+      }
     }
     if attributedText != text { attributedText = text }
   }

@@ -133,7 +133,7 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   "digitando…" (`neon-mountain · trabalhando…`, `aguardando você`); on the right, a glass capsule with the running
   agents counter (animated 5×5 pixel grid and the number of active subagents and background tasks; tapping lists them
   and opens a child session; hidden when nothing runs) and a separate `…` button.
-- **Messages:** the user's messages are bubbles on the right with the time inside. The agent's text uses the full
+- **Messages:** the user's messages are bubbles on the right, with undo/time in a right-aligned meta row below the bubble. The agent's text uses the full
   width, without a bubble, and is rendered as selectable Markdown with GFM tables/tasks, highlighted code,
   formulas, diagrams and disclosures (see [Markdown rendering](#markdown-rendering)).
 - **Activity groups:** follow the custom web's default **compact** preset. Consecutive tools, edits, subagents,
@@ -186,8 +186,10 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
 ### Quote marks — 23 October
 
 Selected assistant text remains marked with the web's focus-token background (12%; 28% while its details are open),
-one-point underline (40%) and an outlined numbered circle at the last marked block's trailing edge. Numbering follows
-draft order; overlapping badges pack into a small independently scrollable rail. The existing **Citações · N** tray
+one-point underline (40%) and a small raised inline number at each marked range's end. Numbering follows
+draft order. Markers use `quoteBadge`, add only their own inline advance and never reserve a right-hand column;
+marked and unmarked wrapped blocks use the same full text width. A transparent 44 pt hit target opens the existing
+details without changing layout, and VoiceOver announces **Citação 1** plus draft/sent state. The existing **Citações · N** tray
 retains comments, editing and removal, now with numbered items and **Ir ao trecho citado**. Text taps and badge taps
 open a compact native quote/comment sheet; links and active text selections retain their original behavior. Code and
 table selections use the same source mappings. No font scale, transcript margins or user metadata-row changes belong
@@ -202,9 +204,10 @@ New native anchors retain exact UTF-16 source coordinates with an optional `coor
 untagged old native anchors remain readable, and web rendered-text anchors use the existing Markdown source mapping.
 Exact offsets must still match: streaming append survives, edits before/inside the quote do not silently relocate it.
 Unanchored legacy text resolves only when unique. The metadata index caches decoded user quotes independently of text
-streaming; only changed marks/parsed blocks recompute range projections. TextKit draws decorations without modifying
-attributed text or its typography. Only adding/removing the quote gutter invalidates measured text widths; comment
-edits and active-state changes reuse measurements. Explicit source jumps reuse the sole reading/scroll owner and its
+streaming; only changed marks/parsed blocks recompute range projections. TextKit draws the background/underline;
+the inline numbers participate in native wrapping with a capped 12 pt font and raised baseline. A rendered/original
+UTF-16 map excludes those decoration characters from copy, source selection, comments, search and file-link ranges.
+Adding/removing markers invalidates measured geometry, while active-state changes reuse measurements. Explicit source jumps reuse the sole reading/scroll owner and its
 five-page continuation affordance; unavailable/changed sources retain the comment and report a pt-BR notice.
 Session IDs are local to each conversation, including children; there is no invented cross-session source identity.
 
@@ -220,6 +223,9 @@ explicit sandbox credentials, and deletes private xctestrun files. Finish with `
 device or production request is needed for those fixtures. Explicitly selecting `OpenCodeUITests/QuoteSendingTests`
 adds one tiny real Luna-6/low send per theme in the worker's owned Session; the runner verifies the persisted comment,
 model and exact anchor from the backend afterward. `profile-scrolling.py --server-url … --home …` accepts this sandbox.
+The quotation runner also accepts `--server-url`, `--home`, `--derived`, `--evidence` and `--content-size` for an
+isolated worker. It validates sandbox ownership before importing data. Inline-marker checks compare marked/unmarked
+text widths, independent markers in one paragraph, the 44 pt targets, and original UTF-16 copy/selection offsets.
 Both-theme web/native captures and result bundles live under `$TMPDIR/opencode/ios-citacoes-prints/`.
 The five quote UI cases pass in both themes; five focused UIKit/cache tests and all 320 Kit tests pass. Debug/Release
 builds are warning-free. The existing five-iteration conversation scrolling test passes (3.155 s mean process CPU).
@@ -443,7 +449,7 @@ able to hold attributed tokens (wave 3), so later waves do not rewrite earlier o
 OpenChamber revision `801f59b5ba2cf4be0145edc8451c1593169898bb` is the visual/capability reference.
 `MarkdownBlocks` projects CommonMark/GFM plus footnotes, math and nested `<details>` into typed blocks while
 retaining rendered-to-source UTF-16 selection mappings. H1–H6 use the shared title/heading/message/secondary styles;
-body uses the larger 18.5 pt/28.5 pt baseline and code the 15.25 pt secondary style (UIKit rounds scaled sizes);
+body uses the 17 pt/22.5 pt baseline and code the 15 pt secondary style (UIKit rounds scaled sizes);
 headings, list items and ordinary blocks have distinct spacing. Soft breaks remain spaces, explicit breaks remain
 newlines, and straight punctuation is not silently changed. Nested lists have hanging indents and depth-specific
 markers; disabled task checkboxes and nested quote borders retain their state/depth. General HTML, `<kbd>`, emoji
@@ -751,7 +757,7 @@ directory includes `verification.json` with absolute paths to all 80 state captu
 ## Context and cache usage
 
 One fixed, left-aligned line below the conversation composer shows a compact context ring, used/limit tokens and
-cache-hit percentage with monospaced digits and the shared micro typography. It uses this conversation's latest
+cache-hit percentage with monospaced digits and the capped 9 pt metrics role. It uses this conversation's latest
 measured assistant step (including the cache ratio), retaining it while a new step streams without measurements.
 Child and master conversations use their own store; there is no line before any measurement or on Nova sessão.
 Answer footers contain only the existing model/date and copy action. An unknown limit keeps tokens without a percentage.
@@ -759,6 +765,9 @@ Answer footers contain only the existing model/date and copy action. An unknown 
 The fixed line opens **Uso da sessão** in the existing Details sheet. It is a normal bottom-stack child, not an overlay:
 its height reduces the transcript viewport, stays above the keyboard and below the composer, and disappears in the
 fullscreen composer. The voice bar reserves its own height above the composer without sharing this line's inset.
+The composer is 12 pt from each side. The 40 pt usage hit area owns the bottom home-indicator band, with its text
+centered 20 pt above the edge; without measurements, an equal empty band preserves the input's position. Only the
+container bottom safe area is extended, so the native keyboard still reduces the available viewport.
 
 The header ring opens **Detalhes da sessão**, as a native sheet initially at the large detent. **Uso da sessão** sits
 above the existing details: context is the latest measured step, while cache counts/ratio, tokens and cost are Session
@@ -795,24 +804,31 @@ variant independently of the family; Sistema follows device changes live. Family
 
 ### Typography and readable roles
 
-`OpenCode/AppTypography.swift` owns the shared SF scale. Its larger baseline incorporates the approved ~9% text
-increase once, rather than multiplying individual views again. At the default Dynamic Type size the styles are:
+`OpenCode/AppTypography.swift` owns the shared SF scale. The approved size adjustment restores Apple-default bases,
+without the earlier blanket ~9% increase. At the default Dynamic Type size the styles are:
 
 | Style | Points | Use |
 | --- | ---: | --- |
-| `largeTitle` | 37 | Native large navigation title |
-| `title` | 22 | Major response headings |
-| `heading` / `body` | 18.5 | Row/header titles and response prose (28.5 pt line height) |
-| `message` | 17.5 | User/composer text (24 pt line height) |
-| `preview` | 16.5 | Session previews and section labels |
-| `secondary` | 15.25 | Paths, row times, controls and chips |
-| `caption` | 14.25 | Response footer and compact metadata |
-| `footnote` | 13.25 | Bubble time and small counts |
-| `micro` | 11.5 | Avatar badges |
+| `largeTitle` | 34 | Native large navigation title |
+| `title` | 20 | H1 response headings |
+| `heading` / `body` / `message` | 17 | Row titles, H2–H3, prose and user/composer text (22.5 pt body/message line height) |
+| `preview` / `secondary` | 15 | Session previews, row times, controls and code |
+| `caption` / `path` | 13 | Response footer, paths and regular-weight message expansion control |
+| `footnote` | 12 | Small counts |
+| `micro` | 11 | Avatar badges |
+| `navigation` | 17, capped | Native/custom bar titles; conversation title is regular |
+| `chrome` / `bubbleMeta` | 12, capped | Composer model/agent and undo/time below user bubbles |
+| `mcp` | 11, capped | MCP pill (20 pt high, 6 pt horizontal padding, 5 pt dot) |
+| `metrics` | 9, capped | Composer usage line (8 pt ring) |
+
+The quotation tray label and its raised inline numbers also use the capped 12 pt `chrome` role. Quoted
+passages/comments keep their reading styles and Dynamic Type growth; the quote decoration/theme/selection pipeline
+remains shared with the integrated quotation implementation.
 
 SwiftUI uses `appFont`; TextKit uses `AppTypography.font`/`lineHeight`, with the same Dynamic Type category and
-named styles. Icons have a separate optical scale (`appSymbol`) rather than borrowing text sizes. The list uses
-20 pt side margins, a 48 pt avatar plus 12 pt gap, 14 pt row padding and native pixel-aligned separators.
+named styles. Capped roles stop growing at the default (`large`) category in both SwiftUI and UIKit; reading text
+continues through accessibility sizes. Icons have a separate optical scale (`appSymbol`). The list uses
+16 pt side margins, a 44 pt avatar plus 12 pt gap, 14 pt row padding and native pixel-aligned separators.
 Rows and quota labels reflow at accessibility sizes. Native fixed-height tab captions are bounded by the caption
 style; the master accessory fits its full labels onto one line instead of drawing text outside the system capsule.
 
@@ -831,10 +847,9 @@ conservative palette-derived glass luminance bound in addition to ordinary surfa
 voice waveform/state's `primary` color nor the tonal destructive button. The response text, user bubble and
 composer share the named scale; rendered-text and table measurement keys include the Dynamic Type category,
 and changing the attributed font clears cached widths/heights. Numbered lists retain hanging indents with a
-24 pt minimum marker column, semibold items and 10 pt between items; prose uses 14 pt paragraph spacing.
+24 pt minimum marker column, regular body/markers (strong spans remain semibold) and 10 pt between items; prose uses 14 pt paragraph spacing.
 Context/cache stays in the fixed, left-aligned line below the composer, never repeated in response footers.
-The collapsed-bubble regression derives its expected height from two scaled 24 pt message lines; the old
-45 pt cap described the previous font. The footnote UI selector likewise measures the larger body font before
+The collapsed-bubble regression derives its expected height from two scaled 22.5 pt message lines. The footnote UI selector measures the body font before
 tapping its inline reference, while the copy/selection/expansion behavior assertions remain unchanged.
 The Sessões test helper searches unmounted rows with fast swipes, then uses slow adjustment once mounted;
 it retains the same 60-second budget and requires the whole target row above the native accessory/tab bar.
@@ -855,6 +870,33 @@ all 76 contrast variants, including OpenChamber, Dracula and GitHub in dark/ligh
 The 12-second simulator trace measured p95 frame times of 16.67 → 16.67 ms for Sessões, 16.67 → 16.67 ms with
 preview updates, and 18.46 → 16.67 ms for the conversation. CPU totals were 2413 → 2220, 3546 → 2303 and
 4682 → 3138 ms respectively. These are single local samples on a shared Mac, not isolated or device benchmarks.
+
+#### Approved size/viewport adjustment — 23 October
+
+The size pass uses **OpenCode Tamanhos 1/2/3** (440 pt iPhone 17 Pro Max and two iPhone 18 Pro simulators), isolated
+`ios-tamanhos-derived*` products, sandbox **4183**, and a separately owned master/quotation sandbox. The conversation
+owns a 40 pt bottom band for usage; Nova sessão and the empty master instead retain the native home-indicator safe
+area plus 6 pt padding. Extending their container bottom interfered with keyboard restoration after interactive
+selector dismissal, so their native safe-area ownership is deliberate.
+
+Final coverage: **320 Kit tests**, **86 hosted cases** (84 passed, two opt-in real-audio/proxy probes skipped), and
+**132 UI methods** (131 passed, the explicit opt-in live-child replay skipped). The full three-simulator sweep took
+**36m52s**, followed by focused fixes/reruns for real viewport bounds, native menu readiness, fixture registration,
+two-line heights and interactive selector focus. No assertion of behavior was replaced by a tap retry. The leased
+iPhone 14 passed both complete Markdown documents and the growth fixture; AssistiveTouch was moved out of the way,
+restored afterwards, and the private automation daemon/device lease released.
+
+The matching 12-second simulator drivers kept p95 at **16.67 → 16.67 ms** in Sessões, preview updates and the
+conversation. Process CPU was **2084 → 2403**, **2407 → 2501** and **2880 → 3455 ms** respectively: this is not a CPU
+improvement claim, and the smaller scale exposes more text per viewport. The three direct iPhone runs had median
+long-scroll p95 **16.68 ms**; growth had **36.34 fps / 82.46 ms p95 / 0 pt backward**. XCTest-video growth samples are
+recorded separately rather than compared with the direct driver. These are shared-machine samples, not an isolated
+benchmark or a guarantee. Debug/Release builds and the 76-theme contrast audit are warning-free/passing.
+
+Both-theme/default/xxxLarge comparisons (`hoje · ajustada (mockup) · implementada`), accessibility captures, inline
+quotation before/after images, xcresults, source/binary manifests and cleanup records live under
+`$TMPDIR/opencode/ios-tamanhos-prints/`. The approved single dark mockup is reused unchanged as layout guidance in
+the comparison's center column; the native captures, not generated mockup pixels, establish sizes and theme behavior.
 
 ## Third screen: Você (wave 8)
 
@@ -1181,6 +1223,8 @@ The optional `-OpenCodeFixtureAutoScroll` driver records frame intervals and mai
 its `stallRatio60Hz` is a display-link diagnostic, **not** Apple's hitch metric. Traces, screenshots, exported XCTest
 metrics and per-run HEAD/source-hash manifests go to the temporary `ios-fluidez-prints/` directory above.
 Use `profile-scrolling.py --frames` for the same driver without Instruments, or `--mode sessions --updates --frames`.
+`compare-scroll-device.py --frames-only --no-trace --derived … --evidence … --server-url …` measures the same
+server-free device drivers without XCTest's automatic video; acquire/release the iPhone lease separately.
 
 October 22, 2026 measurements (Debug, HEAD `e6988007d3`, concurrent working-tree snapshots recorded in the manifests):
 

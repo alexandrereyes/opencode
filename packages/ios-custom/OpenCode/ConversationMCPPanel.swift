@@ -4,19 +4,18 @@ import SwiftUI
 struct ConversationMCPPill: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
-  @ScaledMetric(relativeTo: .caption) private var height = 30.0
   let store: ConversationMCPStore
   var body: some View {
     Button {
       if store.isOpen { store.close() } else { store.open() }
     } label: {
-      HStack(spacing: 5) {
+      HStack(spacing: 4) {
         Circle().fill(theme.color(store.summary.connected > 0 ? .success : .textWeak))
-          .frame(width: 7, height: 7)
-        Text(store.summary.label).appFont(.footnote).monospacedDigit()
+          .frame(width: 5, height: 5)
+        Text(store.summary.label).appFont(.mcp).monospacedDigit()
         Image(systemName: store.isOpen ? "chevron.up" : "chevron.down")
-          .appSymbol(.disclosure)
-      }.foregroundStyle(theme.color(.glassSecondary)).padding(.horizontal, 8).frame(minHeight: height)
+          .appFont(.mcp)
+      }.foregroundStyle(theme.color(.glassSecondary)).padding(.horizontal, 6).frame(height: 20)
         .glassEffect(.regular.interactive(), in: .capsule)
         .overlay { Capsule().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
     }.buttonStyle(.plain).fixedSize().accessibilityLabel(store.summary.accessibilityLabel)
@@ -45,11 +44,11 @@ struct ConversationMCPOverlay: ViewModifier {
         if store.isOpen, let composer {
           let frame = geometry[composer]
           ConversationMCPPanel(store: store)
-            .frame(width: max(0, geometry.size.width - 40))
+            .frame(width: max(0, geometry.size.width - AppLayout.margin * 2))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, geometry.size.height - frame.minY + 8)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, AppLayout.margin)
         }
       }
     }

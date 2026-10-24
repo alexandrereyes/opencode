@@ -8,6 +8,7 @@ import plistlib
 import subprocess
 import time
 import uuid
+import urllib.parse
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--label", required=True)
@@ -16,10 +17,16 @@ parser.add_argument("--frames-only", action="store_true")
 parser.add_argument("--growth-trace-only", action="store_true", help="Capture the entire growth signpost with an 8-second launch lead-in")
 parser.add_argument("--no-trace", action="store_true", help="Collect frame reports without attaching Instruments")
 parser.add_argument("--trace-all-processes", action="store_true", help="Avoid CoreDevice's stale single-process discovery; filter exported hitches by app PID")
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-products = temporary / "ios-fluidez-derived/Build/Products"
-evidence = temporary / "ios-fluidez-review"
+url = urllib.parse.urlparse(args.server_url)
+if url.scheme != "http" or url.hostname not in ["127.0.0.1", "localhost"] or url.port in [None, 4096, 4178]:
+    parser.error("Physical verification requires an explicit isolated loopback URL")
+products = (args.derived or temporary / "ios-fluidez-derived") / "Build/Products"
+evidence = args.evidence or temporary / "ios-fluidez-review"
 evidence.mkdir(exist_ok=True)
 device = "00008110-00065DA13A78401E"
 lease = [str(Path.home() / ".agents/skills/aparelhos-fisicos/scripts/device-lease"), "exec", "iphone14", "--"]
@@ -37,7 +44,9 @@ if not args.frames_only and not args.growth_trace_only:
     targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]]
                if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
     for target in targets:
-        target["CommandLineArguments"] = ["-OpenCodeScrollFixture", "sessions"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", args.server_url, "-OpenCodeScrollFixture", "sessions"]
+        target.setdefault("EnvironmentVariables", {}).update(OPENCODE_TEST_SERVER_URL=args.server_url,
+            OPENCODE_TEST_PASSWORD="offline-fixtures-only", OPENCODE_SERVER_PASSWORD="offline-fixtures-only")
     configured = products / ("Comparison-" + args.label + ".xctestrun")
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
@@ -62,10 +71,11 @@ for mode in (["growth"] if args.growth_trace_only else ["conversation", "growth"
     for iteration in range(1 if args.growth_trace_only else 3):
         label = f"{args.label}-{mode}-{iteration}"
         launch = evidence / (label + "-launch.json")
-        arguments = ["-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "middle" if mode == "conversation" else "tail",
+        arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "middle" if mode == "conversation" else "tail",
                      "-OpenCodeTheme", "openchamber-dark", "-OpenCodeFixtureRunID", uuid.uuid4().hex]
         arguments += (["-OpenCodeFixtureAutoScroll"] if mode == "conversation" else
-                      ["-OpenCodeFixtureFollow", "-OpenCodeFixtureMeasureGrowth", "-OpenCodeFixtureAutoGrowth"])
+                       ["-OpenCodeFixtureFollow", "-OpenCodeFixtureMeasureGrowth", "-OpenCodeFixtureAutoGrowth"])
+        arguments += ["-OpenCodeCollapsibleUserMessages", "YES", "-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"]
         if args.growth_trace_only:
             arguments += ["-OpenCodeFixtureGrowthDelay", "8"]
         subprocess.run(lease + ["xcrun", "devicectl", "device", "process", "launch", "--device", device,

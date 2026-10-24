@@ -28,7 +28,7 @@ private struct EmptyMasterView: View {
           Image(systemName: "chevron.left").frame(width: 36, height: 36)
             .glassEffect(.regular.interactive(), in: .circle)
         }.accessibilityLabel("Voltar").disabled(store.draft.sending)
-        Text("Sessão mestra").font(.system(size: 20, weight: .semibold))
+        Text("Sessão mestra").appFont(.navigation)
         Spacer()
       }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
       if store.sessions.masterAvailability == .available {
@@ -43,7 +43,7 @@ private struct EmptyMasterView: View {
         }
         FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 8)
         ConversationComposer(store: store.composer, draft: store.draft)
-          .padding(.horizontal, 12).padding(.bottom, 6)
+          .padding(.horizontal, AppLayout.composerMargin).padding(.bottom, 6)
       } else {
         ContentUnavailableView {
           Label("Sessão mestra", systemImage: "point.3.connected.trianglepath.dotted")

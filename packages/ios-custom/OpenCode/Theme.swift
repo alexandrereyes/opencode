@@ -86,7 +86,7 @@ struct ThemeChrome: UIViewRepresentable {
     navigation.configureWithDefaultBackground()
     navigation.titleTextAttributes = [
       .foregroundColor: theme.uiColor(.textStrong),
-      .font: AppTypography.font(.heading, weight: .semibold, compatibleWith: traits),
+      .font: AppTypography.font(.navigation, weight: .semibold, compatibleWith: traits),
     ]
     navigation.largeTitleTextAttributes = [
       .foregroundColor: theme.uiColor(.textStrong),

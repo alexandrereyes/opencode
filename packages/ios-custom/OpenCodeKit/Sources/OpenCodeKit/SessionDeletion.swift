@@ -35,7 +35,7 @@ public struct SessionDeletionPlan: Sendable {
 extension OpenCodeClient {
   #if DEBUG
   public static func deletionFailureFixture(configuration: ServerConfiguration, sessionID: String) -> Self {
-    precondition(configuration.url.absoluteString == "http://127.0.0.1:4177")
+    precondition(["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(configuration.url.absoluteString))
     return Self(configuration: configuration) { request in
       if request.httpMethod == "DELETE", request.url?.path == "/api/session/\(sessionID)" {
         return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)

@@ -1,6 +1,12 @@
 import OpenCodeKit
 import UIKit
 
+struct ResponseQuoteInsertion {
+  let mark: ChatQuoteMark
+  let offset: Int
+  let range: NSRange
+}
+
 extension ResponseTextView {
   func configureQuotes(_ context: ResponseQuoteContext, block: MarkdownBlock, theme: AppTheme) {
     let highlights = context.highlights.compactMap { highlight -> ResponseQuoteHighlight? in
@@ -18,78 +24,80 @@ extension ResponseTextView {
     quoteFill = theme.uiColor(.quoteHighlight).withAlphaComponent(0.12)
     quoteLine = theme.uiColor(.quoteUnderline).withAlphaComponent(0.4)
     quoteBadge = theme.uiColor(.quoteBadge)
-    quoteText = theme.uiColor(.text)
-    quoteSurface = theme.uiColor(.quoteBadgeSurface)
     if quoteHighlights != highlights {
-      let gutterChanged = quoteHighlights.isEmpty != highlights.isEmpty
       quoteHighlights = highlights
       quoteGeometryDirty = true
-      if gutterChanged {
-        textContainerInset.right = highlights.isEmpty ? 0 : 28
-        invalidateMeasurement()
-      }
-    }
-    quoteButtons.forEach {
-      $0.setTitleColor(theme.uiColor(.text), for: .normal)
-      $0.layer.borderColor = quoteBadge.cgColor
-      $0.backgroundColor = quoteSurface
     }
     setNeedsLayout()
     setNeedsDisplay()
   }
+
+  func renderQuoteMarkers(in text: NSMutableAttributedString, traits: UITraitCollection) {
+    let markers = quoteHighlights.filter(\.badge).compactMap { highlight -> (ChatQuoteMark, Int)? in
+      highlight.ranges.last.map { (highlight.mark, NSMaxRange($0)) }
+    }.sorted { $0.1 == $1.1 ? $0.0.number < $1.0.number : $0.1 < $1.1 }
+    quoteInsertions = markers.enumerated().map { index, entry in
+      let previous = markers.prefix(index).reduce(0) { $0 + String($1.0.number).utf16.count }
+      return ResponseQuoteInsertion(mark: entry.0, offset: entry.1,
+        range: NSRange(location: entry.1 + previous, length: String(entry.0.number).utf16.count))
+    }
+    for insertion in quoteInsertions {
+      text.insert(NSAttributedString(string: String(insertion.mark.number), attributes: [
+        .font: AppTypography.font(.chrome, compatibleWith: traits), .baselineOffset: 6,
+        .foregroundColor: quoteBadge,
+      ]), at: insertion.range.location)
+    }
+  }
+
+  // Marker characters participate in native line breaking, never in authored/source offsets.
+  func originalRange(_ range: NSRange) -> NSRange {
+    func offset(_ value: Int) -> Int {
+      value - quoteInsertions.reduce(0) { $0 + min($1.range.length, max(0, value - $1.range.location)) }
+    }
+    return NSRange(location: offset(range.location), length: offset(NSMaxRange(range)) - offset(range.location))
+  }
+  func displayRange(_ range: NSRange) -> NSRange {
+    let start = range.location + quoteInsertions.filter { $0.offset <= range.location }.reduce(0) { $0 + $1.range.length }
+    let end = NSMaxRange(range) + quoteInsertions.filter { $0.offset < NSMaxRange(range) }.reduce(0) { $0 + $1.range.length }
+    return NSRange(location: start, length: max(0, end - start))
+  }
+  func displayRanges(_ range: NSRange) -> [NSRange] {
+    let offsets = [range.location] + quoteInsertions.map(\.offset).filter { $0 > range.location && $0 < NSMaxRange(range) } + [NSMaxRange(range)]
+    return zip(offsets, offsets.dropFirst()).compactMap { start, end in
+      guard end > start else { return nil }
+      return displayRange(NSRange(location: start, length: end - start))
+    }
+  }
+
   func layoutQuoteDecorations() {
     guard !quoteHighlights.isEmpty else {
-      quoteRail?.isHidden = true
+      quoteButtons.forEach { $0.removeFromSuperview() }
+      quoteButtons = []
       quoteRects = []
       return
     }
-    let rail = quoteRail ?? UIScrollView()
-    if quoteRail == nil {
-      rail.showsVerticalScrollIndicator = false
-      rail.bounces = false
-      rail.backgroundColor = .clear
-      addSubview(rail)
-      quoteRail = rail
-    }
-    rail.frame = CGRect(x: bounds.width - 28, y: 0, width: 28, height: bounds.height)
     if quoteGeometryDirty {
       quoteGeometryDirty = false
       quoteRects = quoteHighlights.map { highlight in
-        (highlight.mark, highlight.ranges.flatMap { range -> [CGRect] in
-          guard let start = position(from: beginningOfDocument, offset: range.location),
-            let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end) else { return [] }
-          return selectionRects(for: text).map(\.rect).filter { $0.width > 0 && $0.height > 0 }
-        })
+        (highlight.mark, highlight.ranges.flatMap(displayRanges).flatMap(textRects))
       }
       quoteButtons.forEach { $0.removeFromSuperview() }
-      quoteButtons = []
-      var bottom: CGFloat = 0
-      for (index, entry) in quoteRects.enumerated() {
-        let (mark, rects) = entry
-        guard quoteHighlights[index].badge else { continue }
-        guard let rect = rects.last else { continue }
+      quoteButtons = quoteInsertions.compactMap { insertion in
+        guard let rect = textRects(insertion.range).first else { return nil }
         let button = UIButton(type: .custom)
-        button.setTitle(String(mark.number), for: .normal)
-        button.titleLabel?.font = AppTypography.font(.caption)
-        button.setTitleColor(quoteText, for: .normal)
-        button.backgroundColor = quoteSurface
-        button.layer.borderColor = quoteBadge.cgColor
-        button.layer.borderWidth = 1
-        button.layer.cornerRadius = 12
-        let y = max(bottom, rect.midY - 12)
-        button.frame = CGRect(x: 4, y: y, width: 24, height: 24)
-        bottom = y + 28
-        button.accessibilityLabel = "Citação \(mark.number)" + (mark.pending ? ", rascunho" : ", enviada")
-        button.accessibilityIdentifier = "quote-marker-" + mark.id
+        // The transparent target is larger than the superscript and adds no layout width/height.
+        button.frame = CGRect(x: rect.midX - 22, y: rect.midY - 22, width: 44, height: 44)
+        button.accessibilityLabel = "Citação \(insertion.mark.number)"
+        button.accessibilityValue = insertion.mark.pending ? "rascunho" : "enviada"
+        button.accessibilityIdentifier = "quote-marker-" + insertion.mark.id
         button.addAction(UIAction { [weak self] _ in
-          self?.selectionChanged?()
-          self?.openQuote?(mark)
+          guard let self, selectedRange.length == 0 else { return }
+          selectionChanged?()
+          openQuote?(insertion.mark)
         }, for: .touchUpInside)
-        rail.addSubview(button)
-        quoteButtons.append(button)
+        addSubview(button)
+        return button
       }
-      rail.contentSize = CGSize(width: 28, height: max(bounds.height, bottom))
-      rail.isHidden = quoteButtons.isEmpty
       setNeedsDisplay()
     }
     guard let target = quoteTarget, let entry = quoteRects.first(where: { $0.0.id == target }),
@@ -107,6 +115,11 @@ extension ResponseTextView {
       }
       parent = view.superview
     }
+  }
+  private func textRects(_ range: NSRange) -> [CGRect] {
+    guard let start = position(from: beginningOfDocument, offset: range.location),
+      let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end) else { return [] }
+    return selectionRects(for: text).map(\.rect).filter { $0.width > 0 && $0.height > 0 }
   }
   func drawQuoteDecorations() {
     for (mark, rects) in quoteRects {

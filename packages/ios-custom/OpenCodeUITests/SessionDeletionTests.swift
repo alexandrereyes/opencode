@@ -8,7 +8,7 @@ import XCTest
   }
   private func launch(_ session: String? = nil, failure: String? = nil) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
     if let session { app.launchArguments += ["-OpenCodeOpenSession", session] }
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])

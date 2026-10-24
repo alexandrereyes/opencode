@@ -2,14 +2,12 @@ import XCTest
 import UIKit
 
 @MainActor final class MarkdownRenderingTests: XCTestCase {
-  private var visibleTop: CGFloat = 240
-  private var visibleBottom: CGFloat = 720
+  private let app = XCUIApplication()
   func testDocumentDark() throws { try document("openchamber-dark") }
   func testDocumentLight() throws { try document("openchamber-light") }
 
   private func document(_ theme: String) throws {
     continueAfterFailure = false
-    let app = XCUIApplication()
     app.launchArguments = ["-OpenCodeServerURL", ProcessInfo.processInfo.environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
       "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top", "-OpenCodeMarkdownFixture"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
@@ -19,10 +17,6 @@ import UIKit
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
     let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
     XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed)
-    visibleTop = app.buttons["Voltar"].firstMatch.frame.maxY + 132
-    let pinned = app.otherElements["conversation-pinned-user"]
-    if pinned.exists { visibleTop = max(visibleTop, pinned.frame.maxY + 12) }
-    visibleBottom = app.textViews["conversation-composer"].frame.minY - 20
     let title = app.textViews.matching(NSPredicate(format: "value == %@", "✨ Formatação no OpenChamber")).firstMatch
     reveal(title, transcript: transcript)
     capture(app, "native-\(theme)-section-00")
@@ -59,9 +53,9 @@ import UIKit
         // The note wraps on the narrower iPhone 14; a single-line prefix width
         // otherwise taps outside the text view instead of its inline reference.
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = UIFontMetrics(forTextStyle: .body).scaledValue(for: 28.5)
+        paragraph.minimumLineHeight = UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5)
         let storage = NSTextStorage(string: try XCTUnwrap(reference.value as? String), attributes: [
-          .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: 18.5)),
+          .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: 17)),
           .paragraphStyle: paragraph,
         ])
         let layout = NSLayoutManager()
@@ -110,13 +104,20 @@ import UIKit
     let deadline = Date().addingTimeInterval(45)
     while Date() < deadline {
       let frame = element.exists ? element.frame : .zero
+      let viewport = app.transcriptViewport(transcript)
       // Hittable alone includes buttons overlapped by the pinned prompt/composer.
-      let visible = frame.minY >= visibleTop && frame.minY + min(40, frame.height) <= visibleBottom
-      if element.exists && element.isHittable && visible && (!align || frame.minY <= visibleBottom - 120) { return }
-      let above = frame.height > 0 && frame.minY < visibleTop
-      let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.45 : 0.78))
-      let end = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.78 : 0.45))
-      start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.15)
+      let visible = frame.minY >= viewport.minY && frame.minY + min(40, frame.height) <= viewport.maxY
+      // TextKit exposes readable headings without an AX activation point on devices.
+      // Their native text rect must be visible; actual controls must also accept taps.
+      if element.exists && visible && (!align || frame.minY <= viewport.maxY - 120)
+        && (element.elementType == .textView || element.isHittable) { return }
+      let above = frame.height > 0 && frame.minY < viewport.minY
+      let distance = min(viewport.height * 0.7, max(70, abs(frame.minY - viewport.midY)))
+      let start = transcript.coordinate(withNormalizedOffset: .zero)
+        .withOffset(CGVector(dx: viewport.midX, dy: viewport.midY + (above ? -distance / 2 : distance / 2) - transcript.frame.minY))
+      let end = transcript.coordinate(withNormalizedOffset: .zero)
+        .withOffset(CGVector(dx: viewport.midX, dy: viewport.midY + (above ? distance / 2 : -distance / 2) - transcript.frame.minY))
+      start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
     XCTFail("Elemento de Markdown não ficou visível: \(element.debugDescription)")
   }

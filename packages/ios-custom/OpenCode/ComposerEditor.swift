@@ -115,6 +115,13 @@ struct ComposerEditor: View {
       .overlay {
         RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale)
       }
+      .background {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-OpenCodeSizingDiagnostics") {
+          LayoutBoundsProbe(id: "composer-card")
+        }
+        #endif
+      }
       .overlay(alignment: .topTrailing) {
         if showExpand {
           Button(
@@ -223,7 +230,7 @@ struct ComposerEditor: View {
     }.frame(minHeight: 44)
   }
   private var controlRow: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 8) {
       Menu {
         Menu("Imagens e arquivos", systemImage: "photo") {
           Button("Fotos", systemImage: "photo.on.rectangle") {
@@ -250,14 +257,15 @@ struct ComposerEditor: View {
         draft.focused = false
         models = true
       } label: {
-        Text(store.modelLabel(store.selectedModel(draft))).appFont(.caption).lineLimit(1).minimumScaleFactor(0.75)
-      }.accessibilityLabel("Modelo e esforço").accessibilityIdentifier("model-picker")
+        Text(store.modelLabel(store.selectedModel(draft))).appFont(.chrome).lineLimit(1).minimumScaleFactor(0.75)
+      }.accessibilityLabel("Modelo e esforço")
+        .accessibilityValue(store.modelLabel(store.selectedModel(draft))).accessibilityIdentifier("model-picker")
       if !expanded && !store.isNewSession && store.mcps.summary.visible {
         ConversationMCPPill(store: store.mcps)
       }
       Spacer(minLength: 2)
       if store.isChild || store.masterMode {
-        Text(store.childAgentName).appFont(.caption).lineLimit(1)
+        Text(store.childAgentName).appFont(.chrome).lineLimit(1)
           .accessibilityLabel("Agente: \(store.childAgentName)")
           .accessibilityIdentifier("child-agent")
       } else {
@@ -265,7 +273,7 @@ struct ComposerEditor: View {
           draft.focused = false
           agents = true
         } label: {
-          Text(store.selectedAgent(draft)).appFont(.caption).lineLimit(1)
+          Text(store.selectedAgent(draft)).appFont(.chrome).lineLimit(1)
         }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
       }
     }.frame(minHeight: 36).foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(

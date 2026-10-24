@@ -12,7 +12,7 @@ for await (const file of new Bun.Glob("*-*.json").scan(root)) {
   const ratios = Object.fromEntries([
     ...["text", "textStrong", "textSecondary", "textMuted", "textPreview", "textAccent", "markdownBody",
       "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink", "inlineCode", "codeText", "codeHeaderText",
-      "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "success", "info", "error"].map((role) =>
+       "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "success", "info", "error", "quoteBadge"].map((role) =>
       [role, Math.min(...surfaces.map((surface) => contrast(colors[role]!, surface)))],
     ),
     ...Object.keys(colors).filter((role) => role.startsWith("syntax") || role.startsWith("composer") || role === "diffAdd" || role === "diffDelete")

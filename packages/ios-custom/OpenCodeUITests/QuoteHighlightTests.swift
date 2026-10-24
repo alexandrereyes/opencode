@@ -5,10 +5,13 @@ import XCTest
   override func setUp() { continueAfterFailure = false }
   private func launch(_ kind: String) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4184", "-OpenCodeTheme",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession",
       try XCTUnwrap(environment["OPENCODE_QUOTE_" + kind])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    if let size = environment["OPENCODE_TEST_CONTENT_SIZE"] {
+      app.launchArguments += ["-UIPreferredContentSizeCategoryName", size]
+    }
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
@@ -33,6 +36,7 @@ import XCTest
     defer { app.terminate() }
     let response = try source(app, kind: "PENDING")
     XCTAssertTrue(response.waitForExistence(timeout: 15))
+    let unmarkedWidth = response.frame.width
     response.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.15)).press(forDuration: 1)
     let selectAll = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Selecionar Tudo'")).firstMatch
     if selectAll.exists { selectAll.tap() }
@@ -45,6 +49,10 @@ import XCTest
     app.buttons["Concluir"].tap()
     XCTAssertTrue(app.buttons["draft-quotes"].waitForExistence(timeout: 10))
     XCTAssertTrue(marker(app).waitForExistence(timeout: 10))
+    XCTAssertEqual(response.frame.width, unmarkedWidth, accuracy: 1)
+    XCTAssertEqual(response.frame.width, app.frame.width - 32, accuracy: 1)
+    XCTAssertEqual(marker(app).frame.width, 44, accuracy: 0.5)
+    XCTAssertEqual(marker(app).frame.height, 44, accuracy: 0.5)
     screenshot("native-pending-mark")
     response.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.15)).tap()
     XCTAssertTrue(app.staticTexts["quote-detail-comment"].waitForExistence(timeout: 5))
@@ -111,11 +119,19 @@ import XCTest
     defer { app.terminate() }
     XCTAssertTrue(marker(app).waitForExistence(timeout: 15))
     XCTAssertTrue(app.buttons["draft-quotes"].exists)
+    XCTAssertLessThanOrEqual(app.buttons["draft-quotes"].frame.height, 18)
+    XCTAssertEqual(marker(app).frame.width, 44, accuracy: 1)
     screenshot("native-full-pending-mark")
     app.buttons["draft-quotes"].tap()
     XCTAssertTrue(app.staticTexts["Citação 1"].waitForExistence(timeout: 5))
     screenshot("native-full-pending-tray")
     app.buttons["draft-quotes"].tap()
+    var previous: CGRect?
+    XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      let frame = self.marker(app).frame
+      defer { previous = frame }
+      return previous == frame && self.marker(app).isHittable
+    }, object: nil)], timeout: 5), .completed)
     marker(app).tap()
     XCTAssertTrue(app.buttons["quote-edit"].waitForExistence(timeout: 5))
     screenshot("native-full-pending-details")
@@ -125,6 +141,26 @@ import XCTest
     XCTAssertTrue(marker(app).waitForExistence(timeout: 25))
     screenshot("native-full-pending-reopened")
   }
+  func testSeveralInlineMarkersKeepFullWidthAndOpenTheirOwnComments() throws {
+    let app = try launch("MULTIPLE")
+    defer { app.terminate() }
+    let response = try source(app, kind: "MULTIPLE")
+    let unmarked = app.textViews.matching(NSPredicate(format: "value == 'Decisão registrada.'")).firstMatch
+    XCTAssertTrue(response.waitForExistence(timeout: 15))
+    XCTAssertTrue(unmarked.exists)
+    XCTAssertEqual(response.frame.width, unmarked.frame.width, accuracy: 1)
+    XCTAssertEqual(response.frame.width, app.frame.width - 32, accuracy: 1)
+    for (number, comment) in [(1, "Primeiro comentário."), (2, "Segundo comentário.")] {
+      let inline = app.buttons.matching(NSPredicate(format: "label == %@", "Citação \(number)")).firstMatch
+      XCTAssertTrue(inline.waitForExistence(timeout: 10))
+      XCTAssertEqual(inline.frame.width, 44, accuracy: 0.5)
+      inline.tap()
+      XCTAssertTrue(app.staticTexts["quote-detail-comment"].waitForExistence(timeout: 5))
+      XCTAssertEqual(app.staticTexts["quote-detail-comment"].label, comment)
+      app.buttons["Fechar"].tap()
+    }
+    screenshot("native-inline-multiple-full-width")
+  }
 }
 
 @MainActor final class QuoteSendingTests: XCTestCase {
@@ -132,7 +168,7 @@ import XCTest
     continueAfterFailure = false
     let environment = ProcessInfo.processInfo.environment
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4184", "-OpenCodeTheme",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession",
       try XCTUnwrap(environment["OPENCODE_QUOTE_PENDING"])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
@@ -161,7 +197,7 @@ import XCTest
     reverse.tap()
     let marker = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
     XCTAssertTrue(marker.waitForExistence(timeout: 20))
-    XCTAssertTrue(marker.label.contains("enviada"))
+    XCTAssertEqual(marker.value as? String, "enviada")
     app.terminate()
     app.launch()
     XCTAssertTrue(marker.waitForExistence(timeout: 25))

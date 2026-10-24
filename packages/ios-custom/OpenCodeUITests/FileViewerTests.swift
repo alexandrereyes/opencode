@@ -6,7 +6,7 @@ import XCTest
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private func launch(_ role: String) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
       "-OpenCodeMarkdownTableWrap", "YES",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_FILE_" + role])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])

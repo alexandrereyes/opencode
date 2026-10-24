@@ -26,7 +26,7 @@ import XCTest
   override func setUp() { continueAfterFailure = false }
 
   private func request(_ path: String, prompt: String? = nil) async throws -> Data {
-    var request = URLRequest(url: URL(string: "http://127.0.0.1:4177" + path)!)
+    var request = URLRequest(url: URL(string: TestSandbox.url + path)!)
     let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
     if let prompt {
@@ -74,7 +74,7 @@ import XCTest
       let root = try XCTUnwrap(environment["OPENCODE_NOVAS_ROOT_" + key])
       let childID = try XCTUnwrap(environment["OPENCODE_NOVAS_CHILD_" + key])
       let app = XCUIApplication()
-      app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme, "-OpenCodeOpenSession", root]
+      app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme, "-OpenCodeOpenSession", root]
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
       app.launch()
       let transcript = app.collectionViews["conversation-transcript"]

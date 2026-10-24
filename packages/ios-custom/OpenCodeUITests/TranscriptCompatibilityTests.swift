@@ -7,7 +7,7 @@ import XCTest
   private func launch(_ role: String, native: Bool) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
+      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     if native { app.launchArguments.append("-OpenCodeNativeTranscript") }
@@ -89,8 +89,7 @@ import XCTest
       app.buttons["Voltar"].tap()
       app.terminate()
       app = try launch("HISTORY", native: native)
-      app.buttons["Mais opções"].tap()
-      app.buttons["Buscar na conversa"].tap()
+      app.openConversationOptions(expect: "Buscar na conversa").tap()
       let search = app.textFields["conversation-search"]
       XCTAssertTrue(search.waitForExistence(timeout: 5))
       search.tap()

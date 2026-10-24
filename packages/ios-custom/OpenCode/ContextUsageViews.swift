@@ -4,14 +4,15 @@ import SwiftUI
 struct ContextUsageRing: View {
   @Environment(\.appTheme) private var theme
   let usage: ContextUsage
+  var size: CGFloat = 12
   var body: some View {
     ZStack {
-      Circle().stroke(theme.color(.contextTrack), lineWidth: 2)
+      Circle().stroke(theme.color(.contextTrack), lineWidth: size / 6)
       Circle().trim(from: 0, to: usage.drawnFraction)
         .stroke(theme.color(usage.warning ? .contextWarning : .contextFill),
-          style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          style: StrokeStyle(lineWidth: size / 6, lineCap: .round))
         .rotationEffect(.degrees(-90))
-    }.frame(width: 12, height: 12).accessibilityHidden(true)
+    }.frame(width: size, height: size).accessibilityHidden(true)
   }
 }
 
@@ -19,28 +20,29 @@ struct ContextUsageLine: View {
   @Environment(\.appTheme) private var theme
   let usage: ContextUsage
   var compact = false
+  var style: AppTextStyle = .caption
   var body: some View {
     ViewThatFits(in: .horizontal) {
       line
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 5) {
-          ContextUsageRing(usage: usage)
+          ContextUsageRing(usage: usage, size: style == .metrics ? 8 : 12)
           Text(compact ? usage.shortContextLabel : usage.contextLabel)
           if !compact { Text("· " + usage.tokenLabel) }
         }
         Label(usage.cacheLabel, systemImage: "bolt.fill")
       }
     }
-    .appFont(.caption).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
+    .appFont(style).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
     .accessibilityElement(children: .ignore).accessibilityLabel(usage.accessibilityLabel)
   }
   private var line: some View {
     HStack(spacing: 5) {
-      ContextUsageRing(usage: usage)
+      ContextUsageRing(usage: usage, size: style == .metrics ? 8 : 12)
       Text(compact ? usage.shortContextLabel : usage.contextLabel)
       if !compact { Text("· " + usage.tokenLabel) }
       Text("·")
-      Image(systemName: "bolt.fill").appSymbol(.disclosure)
+      Image(systemName: "bolt.fill").appFont(style)
       Text(usage.cacheLabel)
     }.fixedSize(horizontal: true, vertical: false)
   }

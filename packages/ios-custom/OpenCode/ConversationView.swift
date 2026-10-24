@@ -152,7 +152,7 @@ struct ConversationView: View {
   @State private var captureRequested = false
   @State private var viewport = ConversationViewport()
   @State private var screenVisible = true
-  @State private var promptViewportHeight: CGFloat = 800
+  @State private var promptViewport = CGSize(width: 440, height: 800)
   @State private var quoteDetail: ChatQuoteMark?
   @State private var quoteTarget: ChatQuoteMark?
   @State private var quoteAligned: String?
@@ -235,6 +235,8 @@ struct ConversationView: View {
       bottomArea
     }
     .background(theme.color(.background))
+    // The bottom stack owns the home-indicator band; keyboard avoidance remains native.
+    .ignoresSafeArea(.container, edges: .bottom)
     .modifier(ConversationMCPOverlay(store: conversation.mcps))
     .modifier(FileViewerHost())
     .environment(conversation.toast)
@@ -257,7 +259,7 @@ struct ConversationView: View {
             draft: sessions.drafts.draft(conversation.id))
         }
       }))
-    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { promptViewportHeight = $0 }
+    .onGeometryChange(for: CGSize.self) { $0.size } action: { promptViewport = $0 }
     .environment(\.conversationImages, conversation.session.map {
       ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
     })
@@ -432,7 +434,7 @@ struct ConversationView: View {
         Text("Envio indisponível até resolver o aviso acima.").appFont(.caption)
           .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
       } else {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
           if let parent = conversation.session?.parentID {
             Button("Voltar à sessão principal") {
               if parentOnStack == parent {
@@ -442,14 +444,17 @@ struct ConversationView: View {
             }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
+            .padding(.bottom, 8)
           ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
             .anchorPreference(key: MCPComposerAnchorKey.self, value: .bounds) { $0 }
             .disabled(!conversation.ready)
           if !sessions.drafts.draft(conversation.id).expanded, let usage = conversation.sessionUsage {
             ConversationUsageBar(usage: usage) { detailsOpen = true }
+          } else {
+            Color.clear.frame(height: 40).accessibilityHidden(true)
           }
         }
-        .padding(.horizontal, AppLayout.margin).padding(.top, 8).padding(.bottom, 6).background(
+        .padding(.horizontal, AppLayout.composerMargin).padding(.top, 8).padding(.bottom, 0).background(
           theme.color(.background))
       }
     }
@@ -514,9 +519,10 @@ struct ConversationView: View {
         .accessibilityIdentifier("conversation-header-avatar")
         .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 2) {
         Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa")
-          .appFont(.heading, weight: .semibold).lineLimit(1)
+          .appFont(.navigation).lineLimit(1)
+          .accessibilityIdentifier("conversation-header-title")
         if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
           Text(
             "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
@@ -576,7 +582,7 @@ struct ConversationView: View {
         .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
       }
     }
-    .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 12)
+    .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 6)
     .background(theme.color(.background))
   }
   private var timeline: some View {
@@ -645,7 +651,8 @@ struct ConversationView: View {
               StickyUserHeader(
                 message: user.presented(isChild: conversation.isChild),
                 scrollState: scrollState,
-                maximumTextHeight: promptViewportHeight * 0.4
+                maximumTextHeight: promptViewport.height * 0.4,
+                width: promptViewport.width
               )
               .listRowInsets(EdgeInsets())
               .textCase(nil)
@@ -1048,9 +1055,12 @@ private struct StickyUserHeader: View {
   let message: ConversationMessage
   let scrollState: ConversationScrollState
   let maximumTextHeight: CGFloat
+  let width: CGFloat
   var body: some View {
     UserBubble(message: message, maximumTextHeight: maximumTextHeight)
-    .padding(.vertical, 8).padding(.horizontal, AppLayout.margin)
+    // Native section headers add device-dependent margins independently of row insets.
+    .frame(width: max(0, width - AppLayout.margin * 2))
+    .padding(.vertical, 8).frame(maxWidth: .infinity)
     .background {
       // Native List headers inset their SwiftUI content. Paint beyond those margins,
       // otherwise the pinned backdrop cuts a rectangular hole in the response below.

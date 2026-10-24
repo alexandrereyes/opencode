@@ -49,7 +49,8 @@ if args.template or args.frames:
 subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
 arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeScrollFixture", args.mode, "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", args.theme]
 arguments += ["-OpenCodeFixtureRunID", run_id]
-arguments += ["-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES"]
+arguments += ["-OpenCodeMarkdownCodeWrap", "YES", "-OpenCodeMarkdownTableWrap", "YES",
+    "-OpenCodeCollapsibleUserMessages", "YES"]
 if args.markdown:
     arguments.append("-OpenCodeMarkdownFixture")
 if args.updates:

@@ -24,7 +24,7 @@ struct NewSessionView: View {
           Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium))
             .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
         }.buttonStyle(.plain).accessibilityLabel("Voltar").disabled(store.draft.sending)
-        Text("Nova sessão").font(.system(size: 20, weight: .semibold))
+        Text("Nova sessão").appFont(.navigation)
         Spacer()
       }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
       if let project = store.project {
@@ -59,7 +59,7 @@ struct NewSessionView: View {
           }
           FloatingVoiceHost(sessions: store.sessions)
           ConversationComposer(store: store.composer, draft: store.draft)
-        }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+        }.padding(.horizontal, AppLayout.composerMargin).padding(.top, 8).padding(.bottom, 6)
       } else if !store.initialized {
         ProgressView("Carregando projetos…").frame(maxWidth: .infinity, maxHeight: .infinity)
         FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)

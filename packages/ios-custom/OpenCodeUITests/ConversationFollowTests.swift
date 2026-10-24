@@ -6,7 +6,7 @@ import XCTest
   func testEmptyTailRestorationCompletes() throws {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
+      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
       "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureEmpty",
       "-OpenCodeTheme", ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
     ]
@@ -24,7 +24,7 @@ import XCTest
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = XCUIApplication()
       app.launchArguments = [
-        "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
+        "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
         "-OpenCodeFixturePosition", "middle", "-OpenCodeTheme", theme,
       ]
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
@@ -50,7 +50,7 @@ import XCTest
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = XCUIApplication()
       app.launchArguments = [
-        "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
+        "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
         "-OpenCodeTheme", theme, "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureFollow", "-OpenCodeScrollDiagnostics",
       ]
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
@@ -94,7 +94,7 @@ import XCTest
     guard environment["OPENCODE_FOLLOW_LIVE"] == "1" else { throw XCTSkip("Explicit live replay only") }
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollDiagnostics",
+      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollDiagnostics",
       "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_FOLLOW_PARENT"]),
     ]
@@ -114,7 +114,7 @@ import XCTest
       XCTAssertTrue(child.waitForExistence(timeout: 10))
       child.tap()
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 15))
-      var request = URLRequest(url: URL(string: "http://127.0.0.1:4177/api/session/" + id + "/prompt")!)
+      var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/" + id + "/prompt")!)
       request.httpMethod = "POST"
       request.setValue("Basic " + Data(("opencode:" + (environment["OPENCODE_TEST_PASSWORD"] ?? "")).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -133,7 +133,7 @@ import XCTest
       capture.lifetime = .keepAlways
       add(capture)
       var active = request
-      active.url = URL(string: "http://127.0.0.1:4177/api/session/active")
+      active.url = URL(string: TestSandbox.url + "/api/session/active")
       active.httpMethod = "GET"
       active.httpBody = nil
       for attempt in 0..<120 {

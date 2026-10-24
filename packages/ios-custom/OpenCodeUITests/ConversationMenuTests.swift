@@ -15,7 +15,7 @@ import XCTest
 
   private func exercise(child: Bool, headerOnly: Bool) {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
       "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureMenuUpdates", "-OpenCodeMenuDiagnostics",
       "-OpenCodeTheme", ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
     if child { app.launchArguments.append("-OpenCodeFixtureChild") }

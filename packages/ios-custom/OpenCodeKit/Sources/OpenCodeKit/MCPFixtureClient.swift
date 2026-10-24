@@ -69,6 +69,10 @@ private actor MCPFixtureHTTP {
       case "/api/rpc/custom.session-family/page": json = #"{"output":{"data":[]}}"#
       case "/api/rpc/custom.transcript/list":
         json = #"{"output":{"data":[{"id":"msg_mcp_assistant","type":"assistant","time":{"created":1792742460000,"completed":1792742470000},"finish":"stop","content":[{"id":"part_mcp","type":"text","text":"Os MCPs ficam disponíveis no campo de mensagem.\n\nToque na pílula para ver todos os servidores deste diretório, sem sair da conversa.\n\nO texto e o teclado permanecem no lugar."}]},{"id":"msg_mcp_user","type":"user","time":{"created":1792742400000},"text":"Quero pequenos chips dos MCPs aqui na conversa."}]}}"#
+          .replacingOccurrences(of: #""finish":"stop""#,
+            with: scenario == "sizing"
+              ? #""finish":"stop","model":{"id":"opus","providerID":"fixture"},"tokens":{"input":6000,"output":7000,"reasoning":0,"cache":{"read":63000,"write":0}}"#
+              : #""finish":"stop""#)
       default: throw URLError(.notConnectedToInternet)
       }
     }

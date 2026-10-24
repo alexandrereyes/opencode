@@ -4,11 +4,13 @@ import argparse
 import base64
 import json
 import hashlib
+import os
 from pathlib import Path
 import plistlib
 import subprocess
 import time
 import urllib.request
+import urllib.parse
 import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -16,18 +18,29 @@ parser.add_argument("action", choices=["prepare", "test", "cleanup"])
 parser.add_argument("--theme", default="openchamber-dark")
 parser.add_argument("--device", default="C8FF24A6-89EE-42D4-B7E2-4BEDBE5E5060")
 parser.add_argument("--label", default="quotes-dark")
+parser.add_argument("--server-url", default=os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4184"))
+parser.add_argument("--home", type=Path)
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
+parser.add_argument("--content-size")
 parser.add_argument("tests", nargs="*")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4184"
-evidence = temporary / "ios-citacoes-prints"
+url = urllib.parse.urlparse(args.server_url)
+if url.scheme != "http" or url.hostname not in ["127.0.0.1", "localhost"] or url.port in [None, 4096, 4178]:
+    parser.error("Quotation verification requires an isolated loopback sandbox")
+server_url = args.server_url.rstrip("/")
+home = args.home or Path(os.environ.get("OPENCODE_TEST_HOME", temporary / ("custom-sandbox-" + str(url.port))))
+owner = json.loads((home / "sandbox.json").read_text())
+assert Path(owner["home"]).resolve() == home.resolve() and owner["port"] == url.port
+evidence = args.evidence or Path(os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-citacoes-prints"))
 evidence.mkdir(parents=True, exist_ok=True)
 ledger = evidence / "owned-sessions.json"
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4184" + path,
+    request = urllib.request.Request(server_url + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -43,7 +56,7 @@ if args.action == "prepare":
     model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
     source = "Uma escolha que deixei como está: a consultora também recebe o botão Meu negócio. Faz sentido se ela também vender outra marca; se preferir esconder o botão, é uma condição a mais no Core."
     for theme in ["dark", "light", "web"]:
-        for kind in ["pending", "sent", "paged", "missing"]:
+        for kind in ["pending", "sent", "paged", "missing", "multiple"]:
             token = uuid.uuid4().hex
             session = "ses_" + token
             def mid(n): return "msg_" + token + f"{n:04d}"
@@ -59,7 +72,10 @@ if args.action == "prepare":
                 messages += [item for n in range(2, 64, 2) for item in [user(n, "Pedido sintético " + str(n)), assistant(n + 1, "Resposta sintética " + str(n))]]
             if kind != "pending":
                 if kind == "missing": quote["messageID"] = "msg_missing"; quote["partID"] = "msg_missing:text:0"
-                messages += [user(70, "Comentário enviado.", {"displayText": "Comentário enviado.", "comments": [], "quotes": [quote]}), assistant(71, "Decisão registrada.")]
+                quotes = [quote] if kind != "multiple" else [
+                    {**quote, "id": quote["id"] + "-1", "text": "Uma escolha que deixei como está:", "comment": "Primeiro comentário."},
+                    {**quote, "id": quote["id"] + "-2", "text": "Faz sentido se ela também vender outra marca;", "comment": "Segundo comentário."}]
+                messages += [user(70, "Comentário enviado.", {"displayText": "Comentário enviado.", "comments": [], "quotes": quotes}), assistant(71, "Decisão registrada.")]
             api("/api/experimental/session/import", {"info": {"id": session, "title": "Citações " + theme + " " + kind,
                 "projectID": "global", "location": {"directory": str(directory)}, "agent": "build", "model": model,
                 "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
@@ -79,12 +95,12 @@ if args.action == "cleanup":
     print("Removed", len(owned), "owned histories")
     raise SystemExit()
 
-products = temporary / "ios-citacoes-derived/Build/Products"
+products = (args.derived or Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-citacoes-derived"))) / "Build/Products"
 restored = next(item for item in owned if item["theme"] == "web" and item["kind"] == "pending")
 subprocess.run(["xcrun", "simctl", "terminate", args.device, "br.com.alexandrem.opencode"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(["xcrun", "simctl", "install", args.device, str(products / "Debug-iphonesimulator/OpenCode.app")], check=True)
 container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", args.device, "br.com.alexandrem.opencode", "data"], text=True).strip())
-draft = container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(b"http://127.0.0.1:4184").hexdigest() / restored["id"] / "draft.json"
+draft = container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(server_url.encode()).hexdigest() / restored["id"] / "draft.json"
 draft.parent.mkdir(parents=True, exist_ok=True)
 draft.write_text(json.dumps({"document": {"text": "", "tokens": []}, "attachments": [], "cursor": 0,
     "agent": "build", "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}, "quotes": [restored["quote"]]}))
@@ -103,7 +119,8 @@ targets = ([target for config in run["TestConfigurations"] for target in config[
 for target in targets:
     environment = target.setdefault("EnvironmentVariables", {})
     environment.update(OPENCODE_TEST_PASSWORD=password, OPENCODE_SERVER_PASSWORD=password,
-        OPENCODE_TEST_THEME=args.theme, OPENCODE_TEST_SERVER_URL="http://127.0.0.1:4184")
+        OPENCODE_TEST_THEME=args.theme, OPENCODE_TEST_SERVER_URL=server_url)
+    if args.content_size: environment["OPENCODE_TEST_CONTENT_SIZE"] = args.content_size
     environment.update(OPENCODE_QUOTE_RESTORED=restored["id"], OPENCODE_QUOTE_RESTORED_SOURCE=restored["source"])
     for item in owned:
         if item["theme"] == ("light" if args.theme.endswith("light") else "dark"):
@@ -111,7 +128,7 @@ for target in targets:
             environment[key] = item["id"]
             environment[key + "_SOURCE"] = item["source"]
             environment[key + "_CARRIER"] = item["carrier"]
-    arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4184", "-OpenCodeTheme", args.theme]
+    arguments = ["-OpenCodeServerURL", server_url, "-OpenCodeTheme", args.theme]
     target["CommandLineArguments"] = arguments
     target["UITargetAppCommandLineArguments"] = arguments
     target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password

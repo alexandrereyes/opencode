@@ -10,7 +10,7 @@ import XCTest
   private var removableName: String { "Local removível · " + run }
   private func launch(child: Bool = false, override: String? = nil) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url]
     if let override { app.launchArguments += ["-OpenCodeTheme", override] }
     if child { app.launchArguments += ["-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_CHILD"])] }
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
@@ -42,12 +42,13 @@ import XCTest
       app.navigationBars.buttons.firstMatch.tap()
     }
     XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 10))
-    if appearance { reveal(app.buttons["settings-themes"], app: app) }
+    if appearance { reveal(app.descendants(matching: .any)["settings-themes"].firstMatch, app: app) }
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
     let list = app.collectionViews.firstMatch
     let top = app.navigationBars.firstMatch.frame.maxY
     let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 60 : app.frame.maxY
+    if !element.exists { list.swipeDown(velocity: .fast) }
     for _ in 0..<20 {
       let frame = element.exists ? element.frame : .zero
       if frame.height > 0 && frame.minY >= top && frame.maxY < bottom && element.isHittable { return }
@@ -60,8 +61,8 @@ import XCTest
     XCTAssertTrue(element.exists && element.isHittable)
   }
   private func chooseTheme(_ id: String, app: XCUIApplication) {
-    reveal(app.buttons["settings-themes"], app: app)
-    app.buttons["settings-themes"].tap()
+    reveal(app.descendants(matching: .any)["settings-themes"].firstMatch, app: app)
+    app.descendants(matching: .any)["settings-themes"].firstMatch.tap()
     let row = app.buttons["theme-" + id]
     reveal(row, app: app)
     row.tap()
@@ -81,7 +82,7 @@ import XCTest
       if family != "openchamber" { chooseTheme(family, app: app) }
       app.segmentedControls["settings-appearance"].buttons[mode].tap()
       shot("voce-" + name)
-      app.buttons["settings-themes"].tap()
+      app.descendants(matching: .any)["settings-themes"].firstMatch.tap()
       reveal(app.buttons["theme-" + family], app: app)
       shot("theme-picker-" + name)
       app.navigationBars.buttons.firstMatch.tap()
@@ -112,12 +113,12 @@ import XCTest
     dismissAlert(app)
     app.buttons["Voltar"].tap()
     settings(app)
-    reveal(app.buttons["settings-servers"], app: app)
-    app.buttons["settings-servers"].tap()
+    reveal(app.descendants(matching: .any)["settings-servers"].firstMatch, app: app)
+    app.descendants(matching: .any)["settings-servers"].firstMatch.tap()
     cleanPreviousTestServers(app)
     reveal(app.descendants(matching: .any)["server-add"].firstMatch, app: app)
     shot("servers-initial-" + mode)
-    addServer(app, name: manualName, address: "http://127.0.0.1:4177",
+    addServer(app, name: manualName, address: TestSandbox.url,
               password: try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"]), success: true, mode: mode)
     addServer(app, name: offlineName, address: "http://127.0.0.1:9", password: nil, success: false, mode: mode)
     selectServer(offlineName, app: app)
@@ -215,6 +216,8 @@ import XCTest
         XCUIApplication(bundleIdentifier: "com.apple.SafariViewService").buttons["Agora Não"]]
         .first { $0.waitForExistence(timeout: 5) }
       if let decline {
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "hittable == true"),
+          evaluatedWith: decline)], timeout: 5), .completed)
         decline.tap()
         XCTAssertTrue(decline.waitForNonExistence(timeout: 5))
       }

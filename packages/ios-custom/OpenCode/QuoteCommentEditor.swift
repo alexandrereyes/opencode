@@ -25,7 +25,7 @@ struct DraftQuotesCard: View {
           Label("Citações · \(draft.quotes.count)", systemImage: "bubble.left")
           Spacer()
           Image(systemName: expanded ? "chevron.up" : "chevron.down")
-        }.font(.subheadline).foregroundStyle(theme.color(.textSecondary)).contentShape(Rectangle())
+        }.appFont(.chrome).foregroundStyle(theme.color(.textSecondary)).contentShape(Rectangle())
       }.buttonStyle(.plain).accessibilityIdentifier("draft-quotes")
       if expanded {
         ScrollView {

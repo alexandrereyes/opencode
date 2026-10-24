@@ -95,11 +95,12 @@ final class SessionStore {
   init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil) {
     self.acceptsLaunchSession = acceptsLaunchSession
     #if DEBUG
-    let failure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+    let isolated = ["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(configuration.url.absoluteString)
+    let failure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_DELETE_FAILURE"] : nil
-    let composerFailure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+    let composerFailure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_COMPOSER_FAILURE"] : nil
-    let revertFailure = configuration.url.absoluteString == "http://127.0.0.1:4177"
+    let revertFailure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_REVERT_FAILURE"] : nil
     let client = suppliedClient ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
       ?? composerFailure.map { OpenCodeClient.composerSubmissionFailure(configuration: configuration, sessionID: $0) }

@@ -32,7 +32,7 @@ public struct ChatAllocation: Codable, Sendable {
 extension OpenCodeClient {
   public func masterInfo() async throws -> MasterSessionInfo {
     #if DEBUG
-    if configuration.url.host == "127.0.0.1", configuration.url.port == 4179,
+    if configuration.url.host == "127.0.0.1", [4179, 4193].contains(configuration.url.port ?? -1),
       ProcessInfo.processInfo.environment["OPENCODE_MASTER_OLD_SERVER"] == "1" {
       throw ClientError.rpc("rpc.unavailable")
     }

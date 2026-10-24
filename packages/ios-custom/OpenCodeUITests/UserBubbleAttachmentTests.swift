@@ -8,7 +8,7 @@ import UIKit
   private func launch(_ role: String, collapsing: Bool = true) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
+      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
       "-OpenCodeCollapsibleUserMessages", collapsing ? "YES" : "NO",
     ]
@@ -33,7 +33,7 @@ import UIKit
   }
 
   func testAttachmentsAndContextFollowSourceWhenCollapsedExpandedAndDisabled() throws {
-    let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 24) * 2
+    let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5) * 2
     for placement in ["LIST", "PINNED"] {
       for kind in ["IMAGE", "FILE", "QUOTE", "PLAIN", "MIXED"] {
         let role = "REVIEW_" + kind + "_" + placement

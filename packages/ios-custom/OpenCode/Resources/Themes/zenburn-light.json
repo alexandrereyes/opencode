@@ -114,7 +114,7 @@
     "diagramBorder": "#d0d0c8",
     "quoteHighlight": "#abcfe2",
     "quoteUnderline": "#abcfe2",
-    "quoteBadge": "#abcfe2",
+    "quoteBadge": "#5c707b",
     "quoteBadgeSurface": "#f6f6eb"
   },
   "avatars": {
@@ -255,7 +255,7 @@
     "diagramBorder": "border-base",
     "quoteHighlight": "v2-border-border-focus",
     "quoteUnderline": "v2-border-border-focus",
-    "quoteBadge": "v2-border-border-focus",
+    "quoteBadge": "ios-derived-quoteBadge",
     "quoteBadgeSurface": "v2-background-bg-layer-01"
   }
 }

@@ -6,7 +6,7 @@ import XCTest
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private func launch(_ id: String) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
       "-OpenCodeOpenSession", id]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
@@ -96,7 +96,7 @@ import XCTest
 
   func testVoiceBarAndUsageLineReserveSpaceAroundComposer() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
       "-OpenCodeVoiceBarFixture", "speaking", "-OpenCodeOpenSession",
       try XCTUnwrap(environment["OPENCODE_TEST_USAGE_COMPLETE"])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
@@ -137,7 +137,7 @@ import XCTest
 
   func testNewSessionHasNoUsageLine() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme]
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 25))
@@ -172,7 +172,7 @@ import XCTest
   private func update(_ child: String) async throws {
     let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     func api(_ path: String, body: [String: String]) async throws {
-      var request = URLRequest(url: URL(string: "http://127.0.0.1:4177" + path)!)
+      var request = URLRequest(url: URL(string: TestSandbox.url + path)!)
       request.httpMethod = "POST"
       request.httpBody = try JSONEncoder().encode(body)
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -182,7 +182,7 @@ import XCTest
     }
     try await api("/api/session/" + child + "/interrupt", body: [:])
     func active() async throws -> Bool {
-      var request = URLRequest(url: URL(string: "http://127.0.0.1:4177/api/session/active")!)
+      var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/active")!)
       request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
       let (data, _) = try await URLSession.shared.data(for: request)
       return ((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [String: Any])?[child] != nil
@@ -194,7 +194,7 @@ import XCTest
     let stillRunning = try await active()
     XCTAssertFalse(stillRunning)
     func state() async throws -> (Double, String?) {
-      var request = URLRequest(url: URL(string: "http://127.0.0.1:4177/api/session/" + child)!)
+      var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/" + child)!)
       request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
       let (data, _) = try await URLSession.shared.data(for: request)
       let value = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [String: Any]

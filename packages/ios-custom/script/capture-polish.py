@@ -11,30 +11,33 @@ import time
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--label", required=True)
 parser.add_argument("--live", action="store_true", help="Read the sandbox Sessões list instead of offline fixtures")
+parser.add_argument("--simulator", default="4FB557F1-6CF3-4478-B33F-CBAB25F04A24")
+parser.add_argument("--derived", type=Path)
+parser.add_argument("--evidence", type=Path)
+parser.add_argument("--home", type=Path)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--sizes", nargs="+", default=["large", "extra-extra-extra-large", "accessibility-large"])
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-evidence = temporary / "ios-polimento-prints"
+evidence = args.evidence or temporary / "ios-polimento-prints"
 evidence.mkdir(exist_ok=True)
-device = "4FB557F1-6CF3-4478-B33F-CBAB25F04A24"
-app = temporary / "ios-polimento-derived/Build/Products/Debug-iphonesimulator/OpenCode.app"
+device = args.simulator
+app = (args.derived or temporary / "ios-polimento-derived") / "Build/Products/Debug-iphonesimulator/OpenCode.app"
 bundle = "br.com.alexandrem.opencode"
-environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": (temporary / "custom-sandbox-4177/password").read_text().strip()}
+environment = os.environ | {"SIMCTL_CHILD_OPENCODE_SERVER_PASSWORD": ((args.home or temporary / "custom-sandbox-4177") / "password").read_text().strip()}
 subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
 subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi",
     "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4",
     "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
 captures = []
 try:
-    for theme, size in [("openchamber-dark", "large"), ("openchamber-light", "large"),
-                        ("dracula-dark", "large"), ("github-light", "large"),
-                        ("openchamber-dark", "accessibility-large")]:
+    for theme, size in [(theme, size) for theme in ["openchamber-dark", "openchamber-light"] for size in args.sizes]:
         subprocess.run(["xcrun", "simctl", "ui", device, "content_size", size], check=True)
         for mode in (["sessions"] if args.live else ["sessions", "conversation"]):
-            arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme]
+            arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeTheme", theme,
+                "-OpenCodeCollapsibleUserMessages", "YES"]
             if not args.live:
                 arguments += ["-OpenCodeScrollFixture", mode, "-OpenCodeFixturePosition", "top"]
-            if mode == "conversation" and not args.live:
-                arguments.append("-OpenCodeMarkdownFixture")
             subprocess.run(["xcrun", "simctl", "launch", "--terminate-running-process", device, bundle] + arguments,
                 env=environment, check=True, stdout=subprocess.DEVNULL)
             time.sleep(6)

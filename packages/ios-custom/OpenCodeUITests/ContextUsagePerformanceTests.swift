@@ -3,7 +3,7 @@ import XCTest
 @MainActor final class ContextUsagePerformanceTests: XCTestCase {
   func testMeasuredConversationScrolling() {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeScrollFixture", "conversation",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
       "-OpenCodeFixturePosition", "middle", "-OpenCodeContextUsageFixture", "-OpenCodeTheme", "openchamber-dark"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"]
     app.launch()

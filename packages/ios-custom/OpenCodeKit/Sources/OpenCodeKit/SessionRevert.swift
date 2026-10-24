@@ -117,7 +117,7 @@ public enum SessionRevert {
 extension OpenCodeClient: SessionRevertActions {
   #if DEBUG
   public static func revertFailureFixture(configuration: ServerConfiguration, sessionID: String) -> Self {
-    precondition(configuration.url.absoluteString == "http://127.0.0.1:4177")
+    precondition(["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(configuration.url.absoluteString))
     return Self(configuration: configuration) { request in
       if request.httpMethod == "POST", request.url?.path == "/api/session/\(sessionID)/revert/stage" {
         return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)

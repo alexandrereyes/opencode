@@ -7,7 +7,7 @@ import XCTest
     for delay in [0, 400] {
       for old in [false, true] where delay > 0 || !old {
         let app = XCUIApplication()
-        app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", "openchamber-dark",
+        app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", "openchamber-dark",
           "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_HISTORY"])]
         app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
         app.launchEnvironment["OPENCODE_OPENING_TRACE"] = "1"

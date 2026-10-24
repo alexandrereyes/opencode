@@ -28,9 +28,9 @@ import XCTest
   }
   func testMenuRenameAndArchiveOwnSession() throws {
     let app = try launch("SESSION_ACTIONS")
-    app.buttons["Mais opções"].tap()
+    let rename = app.openConversationOptions(expect: "Renomear")
     screenshot("menu")
-    app.buttons["Renomear"].tap()
+    rename.tap()
     XCTAssertTrue(app.alerts["Renomear sessão"].waitForExistence(timeout: 5))
     screenshot("rename")
     let field = app.alerts.textFields.firstMatch
@@ -52,8 +52,7 @@ import XCTest
     screenshot("renamed-list")
     renamed.tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
-    app.buttons["Mais opções"].tap()
-    app.buttons["Arquivar"].tap()
+    app.openConversationOptions(expect: "Arquivar").tap()
     screenshot("archive-confirmation")
     app.buttons["Arquivar"].tap()
     XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 15))
@@ -113,8 +112,7 @@ import XCTest
     app.buttons["Voltar"].tap()
     app.terminate()
     app = try launch("C")
-    app.buttons["Mais opções"].tap()
-    app.buttons["Buscar na conversa"].tap()
+    app.openConversationOptions(expect: "Buscar na conversa").tap()
     let field = app.textFields["conversation-search"]
     XCTAssertTrue(field.waitForExistence(timeout: 5))
     field.tap()
@@ -133,7 +131,14 @@ import XCTest
     wait(NSPredicate(format: "label == '1 de 1'"), on: counter)
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Revisão 1 concluída'")).firstMatch.waitForExistence(timeout: 10))
     screenshot("search-older-result")
-    app.buttons["conversation-search-close"].tap()
+    let close = app.buttons["conversation-search-close"]
+    var previous: CGRect?
+    XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      let frame = close.frame
+      defer { previous = frame }
+      return previous == frame && close.isHittable
+    }, object: nil)], timeout: 5), .completed)
+    close.tap()
     XCTAssertTrue(field.waitForNonExistence(timeout: 5))
     screenshot("search-closed-position")
     app.buttons["Voltar"].tap()

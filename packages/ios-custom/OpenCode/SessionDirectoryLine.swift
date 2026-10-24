@@ -14,7 +14,7 @@ struct SessionDirectoryLine: View {
           Text(branch).lineLimit(1).truncationMode(.tail).foregroundStyle(theme.color(.textSecondary))
         }
       }
-      .appFont(.secondary)
+      .appFont(.path)
       .foregroundStyle(theme.color(.textMuted))
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(label.accessibilityLabel)

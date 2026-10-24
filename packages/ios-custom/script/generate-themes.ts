@@ -192,7 +192,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
       colors[role] = readable(mode === "dark" ? mix(colors[role]!, colors.textStrong!, 0.12) : colors[role]!)
     }
     for (const role of ["markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink",
-      "inlineCode", "codeText", "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment"] as const) {
+      "inlineCode", "codeText", "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "quoteBadge"] as const) {
       colors[role] = readable(colors[role]!)
     }
     for (const role of Object.keys(roles).filter((role) => role.startsWith("syntax") || role.startsWith("composer"))) {
@@ -218,7 +218,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     for (const role of ["textStrong", "text", "textSecondary", "textMuted", "textPreview", "textAccent", "glassSecondary", "success", "info", "error",
       "markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink", "inlineCode", "codeText",
       "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "userBubbleText", "userBubbleSecondary",
-      "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder"]) {
+      "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder", "quoteBadge"]) {
       exportedRoles[role] = `ios-derived-${role}`
     }
     for (const [role, value] of Object.entries(colors)) {

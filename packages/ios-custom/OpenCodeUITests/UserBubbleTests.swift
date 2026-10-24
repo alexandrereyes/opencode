@@ -8,7 +8,7 @@ import UIKit
   private func launch(_ role: String = "BUBBLE", theme: String? = nil, preference: Bool? = true) throws -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme ?? environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
+      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme ?? environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_TEST_" + role]),
     ]
     if let preference { app.launchArguments += ["-OpenCodeCollapsibleUserMessages", preference ? "YES" : "NO"] }
@@ -55,8 +55,7 @@ import UIKit
       XCTAssertEqual(control.value as? String, "Recolhido")
       let height = text.frame.height
       let y = text.frame.minY
-      // AppTextStyle.message uses a 24 pt line height at the larger baseline.
-      let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 24) * 2
+      let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5) * 2
       XCTAssertEqual(height, ceil(twoLines), accuracy: 1)
       shot(app, "app-collapsed-" + theme)
       for up in [false, true, false] {

@@ -18,6 +18,9 @@ parser.add_argument("--label", required=True)
 parser.add_argument("--physical", action="store_true")
 parser.add_argument("--dictation-fixture", action="store_true", help="Use the offline fake transcription engine for the hosted launch")
 parser.add_argument("--theme", default="openchamber-dark")
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--home", type=Path)
+parser.add_argument("--environment", type=Path, help="Private JSON with prepared test fixture IDs")
 parser.add_argument("tests", nargs="+")
 args = parser.parse_args()
 if args.dictation_fixture and any(test.startswith("OpenCodeUITests/") and not test.startswith("OpenCodeUITests/DictationUITests") for test in args.tests):
@@ -50,15 +53,17 @@ started = time.time()
 if args.physical:
     subprocess.run([str(device_lease), "acquire", "iphone14", "--owner", "ios-custom: offline fixtures", "--pid", str(os.getpid())], check=True)
 try:
-    password = "offline-fixtures-only" if args.physical else (Path(
-        "/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/custom-sandbox-4177/password").read_text().strip())
+    password = "offline-fixtures-only" if args.physical else ((args.home or Path(
+        "/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/custom-sandbox-4177")) / "password").read_text().strip()
     run = plistlib.loads(next(args.derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     targets = ([target for config in run["TestConfigurations"] for target in config["TestTargets"]]
         if "TestConfigurations" in run else [value for key, value in run.items() if key != "__xctestrun_metadata__"])
     for target in targets:
+        if args.environment:
+            target.setdefault("EnvironmentVariables", {}).update(json.loads(args.environment.read_text()))
         target.setdefault("EnvironmentVariables", {}).update(OPENCODE_TEST_PASSWORD=password,
-            OPENCODE_SERVER_PASSWORD=password, OPENCODE_TEST_THEME=args.theme)
-        arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", args.theme]
+            OPENCODE_SERVER_PASSWORD=password, OPENCODE_TEST_THEME=args.theme, OPENCODE_TEST_SERVER_URL=args.server_url)
+        arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeTheme", args.theme]
         if args.physical:
             arguments += ["-OpenCodeScrollFixture", "conversation"]
         if args.dictation_fixture:

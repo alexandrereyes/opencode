@@ -7,7 +7,7 @@ import XCTest
     let id = try XCTUnwrap(environment["OPENCODE_TEST_AGENT_SESSION"])
     let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url,
       "-OpenCodeOpenSession", id, "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = password
     app.launch()
@@ -63,7 +63,7 @@ import XCTest
     struct Active: Decodable { let data: [String: State] }
     struct State: Decodable { let type: String }
     for _ in 0..<240 {
-      var request = URLRequest(url: URL(string: "http://127.0.0.1:4177/api/session/active")!)
+      var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/active")!)
       request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
       let (data, _) = try await URLSession.shared.data(for: request)
       if try JSONDecoder().decode(Active.self, from: data).data[id] == nil { return }
@@ -73,7 +73,7 @@ import XCTest
   }
   private func messages(_ id: String, password: String) async throws -> [Message] {
     struct Page: Decodable { let data: [Message] }
-    var request = URLRequest(url: URL(string: "http://127.0.0.1:4177/api/session/\(id)/message?limit=100")!)
+    var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/\(id)/message?limit=100")!)
     request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
     let (data, response) = try await URLSession.shared.data(for: request)
     XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)

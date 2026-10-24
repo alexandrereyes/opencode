@@ -6,7 +6,7 @@ import XCTest
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private func id(_ role: String) throws -> String { try XCTUnwrap(environment["OPENCODE_TEST_" + role]) }
   private func api(_ path: String, body: [String: Any]? = nil, method: String = "POST") async throws -> [String: Any] {
-    var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:4177" + path)))
+    var request = URLRequest(url: try XCTUnwrap(URL(string: TestSandbox.url + path)))
     request.httpMethod = method
     request.setValue("Basic " + Data(("opencode:" + (try id("PASSWORD"))).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -34,7 +34,7 @@ import XCTest
   }
   private func launch(_ role: String) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme, "-OpenCodeOpenSession", try id(role)]
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme, "-OpenCodeOpenSession", try id(role)]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try id("PASSWORD")
     app.launch()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))

@@ -3,7 +3,7 @@ import XCTest
 @MainActor final class ScrollComparisonTests: XCTestCase {
   func testGrowingTailPerformance() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177",
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url,
       "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "tail",
       "-OpenCodeFixtureFollow", "-OpenCodeFixtureMeasureGrowth", "-OpenCodeTheme", "openchamber-dark"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(

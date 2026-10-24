@@ -9,7 +9,7 @@ import XCTest
     let app = XCUIApplication()
     let session = try XCTUnwrap(environment["OPENCODE_TEST_" + role])
     app.launchArguments = [
-      "-OpenCodeServerURL", "http://127.0.0.1:4177",
+      "-OpenCodeServerURL", TestSandbox.url,
       "-OpenCodeTheme", theme, "-OpenCodeOpenSession", session,
     ]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(
@@ -185,19 +185,26 @@ import XCTest
         screenshot("expanded-prompt-before-child-" + theme)
       }
       let agents = app.buttons.matching(NSPredicate(format: "label CONTAINS 'agentes em execução'")).firstMatch
-      if agents.exists {
-        agents.tap()
-        app.buttons.matching(
-          NSPredicate(format: "label BEGINSWITH 'Explore' AND label CONTAINS 'Comparar alternativas'")
-        ).firstMatch.tap()
-      } else {
-        // The seed's executions may have finished; the real child card remains navigable.
+      func openTranscriptChild() {
         let child = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Comparar alternativas Linear'")).firstMatch
         reveal(child, forward: true)
         XCTAssertTrue(child.exists && child.isHittable)
         screenshot("child-card-visible-" + theme)
         child.tap()
       }
+      func openChild() {
+        guard agents.exists else { openTranscriptChild(); return }
+        agents.tap()
+        XCTAssertTrue(app.navigationBars["Agentes e tarefas"].waitForExistence(timeout: 5))
+        let child = app.buttons.matching(
+          NSPredicate(format: "label BEGINSWITH 'Explore' AND label CONTAINS 'Comparar alternativas'")
+        ).firstMatch
+        if child.waitForExistence(timeout: 5) { child.tap(); return }
+        // A background task can keep the counter visible after this child finishes.
+        app.buttons["Concluir"].tap()
+        openTranscriptChild()
+      }
+      openChild()
       XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 10))
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
         .press(
@@ -258,6 +265,12 @@ import XCTest
       app.buttons["draft-quotes"].tap()
       if app.buttons["Ir para a mais recente"].exists { app.buttons["Ir para a mais recente"].tap() }
       let permit = app.buttons["Permitir"].firstMatch
+      for _ in 0..<8 {
+        let viewport = app.transcriptViewport(transcript)
+        if permit.exists && permit.frame.minY >= viewport.minY && permit.frame.maxY <= viewport.maxY
+          && permit.isHittable { break }
+        app.dragTranscript(transcript, viewport: viewport, delta: -120)
+      }
       XCTAssertTrue(permit.waitForExistence(timeout: 5))
       XCTAssertTrue(permit.isHittable)
       XCTAssertLessThan(permit.frame.maxY, app.buttons["draft-quotes"].frame.minY)
@@ -269,7 +282,7 @@ import XCTest
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = XCUIApplication()
       app.launchArguments = [
-        "-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+        "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
         "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "middle",
       ]
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])

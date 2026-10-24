@@ -73,67 +73,79 @@ struct UserBubble: View {
   var body: some View {
     HStack {
       Spacer(minLength: 36)
-      VStack(alignment: .trailing, spacing: 8) {
-        if message.masterOrigin != nil {
-          Text("Sessão mestra").appFont(.footnote).foregroundStyle(theme.color(.userBubbleSecondary))
-            .accessibilityIdentifier("master-origin-" + message.id)
-        }
-        UserMessageContent(maximumHeight: maximumTextHeight) {
-          ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
-            index, quote in
-            UserMessageContextCard(
-              summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
-              comment: quote.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
-              id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
-            if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
-              Button("Ir ao trecho citado", systemImage: "text.quote") {
-                quoteContext.source?(mark.quote)
-              }.appFont(.caption).buttonStyle(.plain).foregroundStyle(theme.color(.userBubbleSecondary))
-                .accessibilityIdentifier("quote-source-\(message.id)-\(index)")
+      VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .trailing, spacing: 8) {
+          if message.masterOrigin != nil {
+            Text("Sessão mestra").appFont(.footnote).foregroundStyle(theme.color(.userBubbleSecondary))
+              .accessibilityIdentifier("master-origin-" + message.id)
+          }
+          UserMessageContent(maximumHeight: maximumTextHeight) {
+            ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
+              index, quote in
+              UserMessageContextCard(
+                summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
+                comment: quote.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
+                id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
+              if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
+                Button("Ir ao trecho citado", systemImage: "text.quote") {
+                  quoteContext.source?(mark.quote)
+                }.appFont(.caption).buttonStyle(.plain).foregroundStyle(theme.color(.userBubbleSecondary))
+                  .accessibilityIdentifier("quote-source-\(message.id)-\(index)")
+              }
             }
+            ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
+              index, comment in
+              UserMessageContextCard(
+                summary: comment.object?["path"]?.string ?? "Comentário em arquivo", text: "",
+                comment: comment.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
+                id: "\(message.id)-comment-\(index)", expand: { setExpanded(true) })
+            }
+            if !message.displayText.isEmpty {
+              UserPrompt(
+                text: promptText, theme: theme, collapsed: collapsible && !expanded,
+                maximumHeight: maximumTextHeight, revealRange: searchRange,
+                truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
+              ).accessibilityIdentifier("user-prompt-\(message.id)")
+            }
+          }.accessibilityIdentifier("user-content-\(message.id)")
+          UserMessageAttachmentsView(attachments: UserMessageAttachments(message))
+          if collapsible && (expanded || truncated) {
+            Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
+              setExpanded(!expanded)
+            }.appFont(.path).foregroundStyle(theme.color(.userBubbleSecondary))
+              .buttonStyle(.plain).accessibilityValue(expanded ? "Expandido" : "Recolhido")
+              .accessibilityIdentifier("user-prompt-toggle-\(message.id)")
           }
-          ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
-            index, comment in
-            UserMessageContextCard(
-              summary: comment.object?["path"]?.string ?? "Comentário em arquivo", text: "",
-              comment: comment.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
-              id: "\(message.id)-comment-\(index)", expand: { setExpanded(true) })
-          }
-          if !message.displayText.isEmpty {
-            UserPrompt(
-              text: promptText, theme: theme, collapsed: collapsible && !expanded,
-              maximumHeight: maximumTextHeight, revealRange: searchRange,
-              truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
-            ).accessibilityIdentifier("user-prompt-\(message.id)")
-          }
-        }.accessibilityIdentifier("user-content-\(message.id)")
-        UserMessageAttachmentsView(attachments: UserMessageAttachments(message))
-        if collapsible && (expanded || truncated) {
-          Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
-            setExpanded(!expanded)
-          }.appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.userBubbleSecondary))
-            .buttonStyle(.plain).accessibilityValue(expanded ? "Expandido" : "Recolhido")
-            .accessibilityIdentifier("user-prompt-toggle-\(message.id)")
         }
-        HStack(spacing: 10) {
+        .foregroundStyle(theme.color(.userBubbleText))
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(theme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
+        .background {
+          #if DEBUG
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeSizingDiagnostics") {
+            LayoutBoundsProbe(id: "user-bubble-" + message.id)
+          }
+          #endif
+        }
+        .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
+        HStack(spacing: 8) {
           if let reversion {
             Button {
               reversion.revert(message.id)
             } label: {
-              Image(systemName: "arrow.uturn.backward").appSymbol(.inline)
+              Image(systemName: "arrow.uturn.backward").appFont(.bubbleMeta)
                 .frame(width: 28, height: 24).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(reversion.pending)
               .accessibilityLabel("Redefinir para este ponto")
               .accessibilityIdentifier("user-revert-" + message.id)
           }
           Text(ConversationProjection.date(message.time.created, format: "HH:mm"))
-            .appFont(.footnote).monospacedDigit()
-        }.foregroundStyle(theme.color(.userBubbleSecondary))
+            .appFont(.bubbleMeta).monospacedDigit()
+            .accessibilityIdentifier("user-time-" + message.id)
+        }.foregroundStyle(theme.color(.textSecondary))
+          .accessibilityElement(children: .contain)
+          .accessibilityIdentifier("user-meta-" + message.id)
       }
-      .foregroundStyle(theme.color(.userBubbleText))
-      .padding(.horizontal, 14).padding(.vertical, 12)
-      .background(theme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
-      .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
     }
     .onChange(of: collapsible) { _, value in if !value { setExpanded(false) } }
     .onChange(of: highlights.current) { _, current in

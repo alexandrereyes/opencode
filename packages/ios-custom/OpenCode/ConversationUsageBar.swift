@@ -7,11 +7,11 @@ struct ConversationUsageBar: View {
   let open: () -> Void
   var body: some View {
     Button(action: open) {
-      ContextUsageLine(usage: usage)
-      .appFont(.caption).monospacedDigit()
+      ContextUsageLine(usage: usage, style: .metrics)
+      .monospacedDigit()
       .foregroundStyle(theme.color(.textSecondary))
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.vertical, 3)
+      .frame(height: 40)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

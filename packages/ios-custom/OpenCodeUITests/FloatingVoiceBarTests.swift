@@ -96,7 +96,8 @@ import XCTest
     try launch("error")
     bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
       .withOffset(CGVector(dx: 0, dy: -28)).tap()
-    XCTAssertTrue(bar.label.contains("ouvindo"))
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'ouvindo'"),
+      evaluatedWith: bar)], timeout: 5), .completed)
     app.terminate()
   }
 

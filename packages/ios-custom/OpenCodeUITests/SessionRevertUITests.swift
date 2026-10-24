@@ -4,11 +4,12 @@ import XCTest
   private var env: [String: String] { ProcessInfo.processInfo.environment }
   override func setUp() { continueAfterFailure = false }
   private func value(_ key: String) throws -> String { try XCTUnwrap(env["OPENCODE_REVERT_" + key]) }
-  private func launch(_ session: String, failure: Bool = false) throws -> XCUIApplication {
+  private func launch(_ session: String, failure: Bool = false, category: String? = nil) throws -> XCUIApplication {
     let app = XCUIApplication()
-    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeOpenSession", session,
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeOpenSession", session,
       "-OpenCodeTheme", env["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(env["OPENCODE_TEST_PASSWORD"])
+    if let category { app.launchArguments += ["-UIPreferredContentSizeCategoryName", category, "-OpenCodeSizingDiagnostics"] }
     if failure { app.launchEnvironment["OPENCODE_TEST_REVERT_FAILURE"] = session }
     app.launch()
     XCTAssertTrue(app.textViews["conversation-composer"].waitForExistence(timeout: 30))
@@ -113,12 +114,16 @@ import XCTest
   }
 
   func testPinnedHeaderUndoRestoresPromptAndRedo() throws {
-    let app = try launch(value("STICKY"))
+    for category in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryXXXL"] {
+    let app = try launch(value("STICKY"), category: category)
     defer { app.terminate() }
     let id = try value("STICKY_MESSAGE")
     let undo = app.buttons["user-revert-" + id]
     XCTAssertTrue(undo.waitForExistence(timeout: 15))
-    XCTAssertLessThan(undo.frame.maxY, app.collectionViews["conversation-transcript"].frame.minY + 180)
+    let bubble = app.descendants(matching: .any)["user-bubble-" + id].firstMatch
+    let header = app.descendants(matching: .any)["conversation-pinned-user"].firstMatch
+    XCTAssertGreaterThanOrEqual(undo.frame.minY, bubble.frame.maxY)
+    XCTAssertLessThanOrEqual(undo.frame.maxY, header.frame.maxY)
     shot("sticky-before")
     undo.tap()
     restored("Pedido fixado para desfazer.", app: app)
@@ -126,5 +131,6 @@ import XCTest
     shot("sticky-undone")
     app.buttons["revert-redo"].tap()
     XCTAssertTrue(undo.waitForExistence(timeout: 30))
+    }
   }
 }
