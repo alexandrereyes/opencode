@@ -58,7 +58,7 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
       if !cancelledAnchor { ScrollFixtures.scrollState?.cancelAnchor(); cancelledAnchor = true }
       let top = -scroll.adjustedContentInset.top
       let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-      guard let heading = findHeading(window, section: section), heading.bounds.height > 0 else {
+      guard let (view, rect) = findHeading(window, section: section), view.bounds.height > 0 else {
         status = "Aguardando a materialização do título \(section)"
         searchFrames += 1
         if searchFrames >= 4 {
@@ -69,23 +69,28 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
       }
       status = "Alinhando a geometria do título \(section)"
       let requestedTop = UserDefaults.standard.double(forKey: "OpenCodeMarkdownCaptureTop")
-      let delta = heading.convert(heading.bounds, to: window).minY - (requestedTop > 0 ? requestedTop : 240)
+      let delta = view.convert(rect, to: window).minY - (requestedTop > 0 ? requestedTop : 240)
       let target = min(bottom, max(top, scroll.contentOffset.y + delta))
       ScrollFixtures.scrollState?.cancelAnchor()
       scroll.setContentOffset(CGPoint(x: 0, y: target), animated: false)
       scroll.layoutIfNeeded()
-      finish(offset: scroll.contentOffset.y, headingTop: heading.convert(heading.bounds, to: window).minY,
+      finish(offset: scroll.contentOffset.y, headingTop: view.convert(rect, to: window).minY,
         readingBottom: scroll.convert(scroll.bounds, to: window).maxY)
     }
     private func findScroll(_ view: UIView) -> UICollectionView? {
       if let scroll = view as? UICollectionView, scroll.bounds.height > 200 { return scroll }
       return view.subviews.lazy.compactMap { self.findScroll($0) }.first
     }
-    private func findHeading(_ view: UIView, section: Int) -> ResponseTextView? {
+    /// The text view and the rect of the matching block, which may be one segment of joined prose.
+    private func findHeading(_ view: UIView, section: Int) -> (ResponseTextView, CGRect)? {
       if let text = view as? ResponseTextView, let block = text.sourceBlock {
-        if let captureText { return block.copyText.contains(captureText) ? text : nil }
-        if section == 0 && block.kind == .heading(1) && block.copyText == "✨ Formatação no OpenChamber" { return text }
-        if section > 0 && block.kind == .heading(2) && block.copyText.hasPrefix("\(section). ") { return text }
+        let blocks = text.prose?.segments ?? [block]
+        let index = blocks.firstIndex { block in
+          if let captureText { return block.copyText.contains(captureText) }
+          if section == 0 { return block.kind == .heading(1) && block.copyText == "✨ Formatação no OpenChamber" }
+          return block.kind == .heading(2) && block.copyText.hasPrefix("\(section). ")
+        }
+        if let index { return (text, text.prose == nil ? text.bounds : text.segmentRect(index) ?? text.bounds) }
       }
       return view.subviews.lazy.compactMap { self.findHeading($0, section: section) }.first
     }

@@ -45,9 +45,15 @@ final class ResponseTextView: UITextView {
   var quoteActive: String?
   var quoteAlign: ((String, String, Double) -> Void)?
   var quoteGeometryDirty = false
+  /// Prose segments joined into this text; quotation borders and rules are drawn per segment.
+  var prose: MarkdownProse?
+  var quoteBorderColor = UIColor.clear
+  var ruleColor = UIColor.clear
   private var decorationWidth: CGFloat?
   private var inlineCodeRects: [CGRect] = []
   private var lineRects: [CGRect] = []
+  private var borderRects: [CGRect] = []
+  private var ruleRects: [CGRect] = []
   func invalidateMeasurement() {
     measuredSizes.removeAll(keepingCapacity: true)
     decorationWidth = nil
@@ -61,7 +67,9 @@ final class ResponseTextView: UITextView {
     return size
   }
   override func copy(_ sender: Any?) {
-    if let block = sourceBlock, !quoteInsertions.isEmpty || block.runs.contains(where: { $0.formula != nil }) {
+    // Formulas, generated separators and quote markers copy their source text, not their glyphs.
+    if let block = sourceBlock,
+      !quoteInsertions.isEmpty || block.runs.contains(where: { $0.formula != nil || $0.copy != nil }) {
       UIPasteboard.general.string = block.copyText(in: originalRange(selectedRange))
     } else { super.copy(sender) }
     Haptics.play(.selection)
@@ -86,6 +94,7 @@ final class ResponseTextView: UITextView {
         else { return [] }
         return selectionRects(for: text).map(\.rect).filter { $0.width > 0 }
       }
+      layoutProseDecorations()
       lineRects = []
       if codeGutter {
         let units = Array((attributedText?.string ?? "").utf16)
@@ -118,6 +127,10 @@ final class ResponseTextView: UITextView {
   override func draw(_ rect: CGRect) {
     inlineCodeColor.setFill()
     inlineCodeRects.forEach { UIBezierPath(roundedRect: $0.insetBy(dx: -2.4, dy: -1.6), cornerRadius: 6).fill() }
+    quoteBorderColor.setFill()
+    borderRects.forEach { UIBezierPath(rect: $0).fill() }
+    ruleColor.setFill()
+    ruleRects.forEach { UIBezierPath(rect: $0).fill() }
     drawQuoteDecorations()
     super.draw(rect)
     guard codeGutter else { return }
@@ -145,6 +158,28 @@ final class ResponseTextView: UITextView {
     return super.hitTest(point, with: event)
   }
   var selectionSourceRange: NSRange? { sourceBlock?.sourceRange(for: originalRange(selectedRange)) }
+  /// The laid-out rect of one prose segment, for alignment and fixtures.
+  func segmentRect(_ index: Int) -> CGRect? {
+    guard let prose, prose.ranges.indices.contains(index) else { return nil }
+    let rects = displayRanges(prose.ranges[index]).flatMap(textRects)
+    guard let first = rects.first else { return nil }
+    return rects.dropFirst().reduce(first) { $0.union($1) }
+  }
+  private func layoutProseDecorations() {
+    borderRects = []
+    ruleRects = []
+    guard let prose else { return }
+    for (index, segment) in prose.segments.enumerated() {
+      guard segment.quoteDepth > 0 || segment.kind == .rule, let rect = segmentRect(index) else { continue }
+      if segment.kind == .rule {
+        ruleRects.append(CGRect(x: segment.indent, y: rect.midY - 0.5, width: bounds.width - segment.indent, height: 1))
+        continue
+      }
+      borderRects += (0..<segment.quoteDepth).map {
+        CGRect(x: segment.indent + CGFloat($0) * ResponseTextStyle.quoteLevel, y: rect.minY, width: 2, height: rect.height)
+      }
+    }
+  }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
     resignFirstResponder()
@@ -161,6 +196,8 @@ struct SelectableResponseText: UIViewRepresentable {
   let messageID: String
   let partID: String
   let theme: AppTheme
+  /// Set for joined prose; `block` is then `prose.block`.
+  var prose: MarkdownProse? = nil
   var source = ""
   var actions: ResponseSelectionActions? = nil
   var selectionChanged: (() -> Void)? = nil
@@ -210,6 +247,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.accessibilityIdentifier = "response-\(messageID)-\(partID)"
     view.partID = partID
     view.sourceBlock = block
+    view.prose = prose
     view.source = source
     view.selectionActions = actions
     view.selectionChanged = selectionChanged
@@ -229,7 +267,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchAlign = highlights.align
     let matches = highlights.matches.filter { $0.partID == partID }
     let rendering = Rendering(
-      block: block, theme: theme.id, matches: matches,
+      block: block, prose: prose, theme: theme.id, matches: matches,
       current: matches.contains { $0.id == highlights.current } ? highlights.current : nil,
       gutter: gutter, wrap: wrap, tableHeader: tableHeader,
       contentSize: category.rawValue,
@@ -245,6 +283,8 @@ struct SelectableResponseText: UIViewRepresentable {
     view.inlineCodeColor = theme.uiColor(.inlineCodeBackground).withAlphaComponent(0.5)
     view.gutterColor = theme.uiColor(.codeLineNumber)
     view.gutterBorderColor = theme.uiColor(.codeGutterSeparator)
+    view.quoteBorderColor = theme.uiColor(.markdownQuoteBorder)
+    view.ruleColor = theme.uiColor(.markdownRule)
     let fenced: Bool = { if case .code = block.kind { true } else { false } }()
     var cursor = 0
     view.inlineCodeRanges = block.runs.compactMap { run in
@@ -252,8 +292,10 @@ struct SelectableResponseText: UIViewRepresentable {
       guard run.code, !fenced, FileReference.inlineURL(run.text) == nil else { return nil }
       return NSRange(location: cursor, length: run.text.utf16.count)
     }
-    let text = ResponseTextStyle.text(block, theme: theme, rasters: rasters, tableHeader: tableHeader,
-      traits: UITraitCollection(preferredContentSizeCategory: category))
+    let traits = UITraitCollection(preferredContentSizeCategory: category)
+    let text = prose.map { ResponseTextStyle.text($0, theme: theme, rasters: rasters, traits: traits) }
+      ?? ResponseTextStyle.text(block, theme: theme, rasters: rasters, tableHeader: tableHeader, traits: traits)
+    assert(text.length == block.text.utf16.count, "Rendered prose must match its source mapping")
     for match in matches {
       for range in ConversationSearch.renderedRanges(match.range, block: block) {
         text.addAttribute(.backgroundColor, value: theme.uiColor(.primary).withAlphaComponent(
@@ -290,6 +332,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.clearSelection()
     view.attributedText = nil
     view.sourceBlock = nil
+    view.prose = nil
     view.source = ""
     view.selectionActions = nil
     view.selectionChanged = nil
@@ -369,6 +412,7 @@ struct SelectableResponseText: UIViewRepresentable {
   }
   struct Rendering: Equatable {
     let block: MarkdownBlock
+    let prose: MarkdownProse?
     let theme: String
     let matches: [ConversationMatch]
     let current: String?

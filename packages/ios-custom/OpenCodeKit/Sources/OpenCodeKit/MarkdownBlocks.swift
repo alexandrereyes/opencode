@@ -13,6 +13,8 @@ public struct MarkdownRun: Sendable, Equatable {
   public var syntax: MarkdownSyntax? = nil
   public var superscript = false
   public var sourceEnd: Int? = nil
+  /// Copied in place of the displayed text, for generated separators between prose blocks.
+  public var copy: String? = nil
   /// One source UTF-16 offset per displayed UTF-16 unit; nil denotes generated list markers.
   public var offsets: [Int?]
 }
@@ -38,7 +40,7 @@ public struct MarkdownBlock: Sendable, Identifiable, Equatable {
   public var alignment: MarkdownTable.Alignment = .leading
   public var children: [MarkdownBlock] = []
   public var text: String { runs.map(\.text).joined() }
-  public var copyText: String { runs.map { $0.formula?.source ?? $0.text }.joined() }
+  public var copyText: String { runs.map { $0.formula?.source ?? $0.copy ?? $0.text }.joined() }
   public var codeDisplay: MarkdownBlock {
     guard case .code = kind, let last = runs.indices.last, runs[last].text.hasSuffix("\n") else { return self }
     var result = self
@@ -53,7 +55,7 @@ public struct MarkdownBlock: Sendable, Identifiable, Equatable {
       defer { cursor += run.text.utf16.count }
       let range = NSIntersectionRange(selection, NSRange(location: cursor, length: run.text.utf16.count))
       guard range.length > 0 else { return "" }
-      return run.formula?.source
+      return run.formula?.source ?? run.copy
         ?? (run.text as NSString).substring(with: NSRange(location: range.location - cursor, length: range.length))
     }.joined()
   }

@@ -17,11 +17,15 @@ import UIKit
     XCTAssertTrue(transcript.waitForExistence(timeout: 25))
     let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
     XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed)
-    let title = app.textViews.matching(NSPredicate(format: "value == %@", "✨ Formatação no OpenChamber")).firstMatch
+    // Consecutive paragraphs, headings, lists, quotations and rules form one selectable text.
+    let title = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH %@", "✨ Formatação no OpenChamber")).firstMatch
+    XCTAssertTrue(title.waitForExistence(timeout: 10))
+    XCTAssertTrue((title.value as? String ?? "").contains("\n\n1. Destaques no texto\n\n"))
     reveal(title, transcript: transcript)
     capture(app, "native-\(theme)-section-00")
     for section in 1...16 {
-      let heading = app.textViews.matching(NSPredicate(format: "value BEGINSWITH %@", "\(section). ")).firstMatch
+      let heading = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND (value BEGINSWITH %@ OR value CONTAINS %@)",
+        "\(section). ", "\n\n\(section). ")).firstMatch
       reveal(heading, transcript: transcript)
       capture(app, String(format: "native-%@-section-%02d", theme, section))
       if section == 5 {
@@ -42,19 +46,35 @@ import UIKit
         copy.tap()
         XCTAssertTrue(app.staticTexts["Código copiado"].waitForExistence(timeout: 5))
         for (index, name) in ["JavaScript", "JSON", "Terminal", "Swift", "Python", "Texto sem destaque de linguagem", "Linha longa e linguagem desconhecida"].enumerated() {
-          let language = app.textViews.matching(NSPredicate(format: "value == %@", name)).firstMatch
+          let language = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND (value == %@ OR value ENDSWITH %@)", name, "\n\n" + name)).firstMatch
           reveal(language, transcript: transcript)
           capture(app, "native-\(theme)-code-\(index)")
         }
       }
       if section == 11 {
-        let reference = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'Uma afirmação com uma nota explicativa'")).firstMatch
-        reveal(reference, transcript: transcript, align: true)
+        // The note paragraph is one segment of a joined text, so the fixture driver aligns that
+        // segment's top at y = 240 and the note glyph is located within the paragraph alone.
+        app.terminate()
+        app.launchArguments += ["-OpenCodeMarkdownSection", "11", "-OpenCodeMarkdownCaptureText",
+          "Uma afirmação com uma nota explicativa", "-OpenCodeMarkdownCaptureTop", "240"]
+        app.launch()
+        XCTAssertTrue(transcript.waitForExistence(timeout: 25))
+        let reference = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value CONTAINS 'Uma afirmação com uma nota explicativa'")).firstMatch
+        XCTAssertTrue(reference.waitForExistence(timeout: 20))
+        // The driver aligns three seconds after the transcript settles.
+        Thread.sleep(forTimeInterval: 4)
+        var aligned = CGRect.null
+        for _ in 0..<40 where aligned != reference.frame {
+          aligned = reference.frame
+          Thread.sleep(forTimeInterval: 0.5)
+        }
+        let paragraphText = try XCTUnwrap((reference.value as? String)?.components(separatedBy: "\n\n")
+          .first { $0.hasPrefix("Uma afirmação com uma nota explicativa") })
         // The note wraps on the narrower iPhone 14; a single-line prefix width
         // otherwise taps outside the text view instead of its inline reference.
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5)
-        let storage = NSTextStorage(string: try XCTUnwrap(reference.value as? String), attributes: [
+        let storage = NSTextStorage(string: paragraphText, attributes: [
           .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: 17)),
           .paragraphStyle: paragraph,
         ])
@@ -65,7 +85,8 @@ import UIKit
         storage.addLayoutManager(layout)
         let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: "Uma afirmação com uma nota explicativa".utf16.count, length: 1), actualCharacterRange: nil)
         let note = layout.boundingRect(forGlyphRange: glyphs, in: container)
-        reference.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: note.midX, dy: note.midY)).tap()
+        app.coordinate(withNormalizedOffset: .zero)
+          .withOffset(CGVector(dx: reference.frame.minX + note.midX, dy: 240 + note.midY)).tap()
         XCTAssertTrue(app.navigationBars["Nota de rodapé"].waitForExistence(timeout: 10))
         capture(app, "native-\(theme)-footnote-sheet")
         app.buttons["Fechar"].tap()

@@ -77,6 +77,54 @@ import UIKit
     return result
   }
 
+  /// Width of one quotation level: its 2 pt border and the 12.8 pt gap before the text.
+  static let quoteLevel: CGFloat = 14.8
+
+  /// Prose segments joined as paragraphs of one text, matching `prose.block` unit for unit. Spacing,
+  /// nesting and quotation levels become paragraph attributes; borders and rules are drawn by the view.
+  static func text(_ prose: MarkdownProse, theme: AppTheme,
+    rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:], traits: UITraitCollection? = nil) -> NSMutableAttributedString {
+    let result = NSMutableAttributedString()
+    for (index, segment) in prose.segments.enumerated() {
+      let part = segment.kind == .rule ? rule(traits: traits) : text(segment, theme: theme, rasters: rasters, traits: traits)
+      let extra = segment.indent + CGFloat(segment.quoteDepth) * quoteLevel
+      let first = (part.string as NSString).range(of: "\n").location
+      let lead = NSRange(location: 0, length: first == NSNotFound ? part.length : first + 1)
+      part.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: part.length)) { value, range, _ in
+        guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+        style.firstLineHeadIndent += extra
+        style.headIndent += extra
+        style.tabStops = style.tabStops.map { NSTextTab(textAlignment: $0.alignment, location: $0.location + extra) }
+        part.addAttribute(.paragraphStyle, value: style, range: range)
+      }
+      if index > 0, lead.length > 0 {
+        part.enumerateAttribute(.paragraphStyle, in: lead) { value, range, _ in
+          guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+          style.paragraphSpacingBefore = prose.spacing[index]
+          part.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+      }
+      if index > 0 {
+        // The separator ends the previous paragraph and keeps its attributes.
+        let attributes = result.length > 0 ? result.attributes(at: result.length - 1, effectiveRange: nil)
+          : part.length > 0 ? part.attributes(at: 0, effectiveRange: nil) : [.font: AppTypography.font(.body, compatibleWith: traits)]
+        result.append(NSAttributedString(string: "\n", attributes: attributes))
+      }
+      result.append(part)
+    }
+    return result
+  }
+
+  /// A one-point line box; the view draws the rule through it.
+  private static func rule(traits: UITraitCollection?) -> NSMutableAttributedString {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.minimumLineHeight = 1
+    paragraph.maximumLineHeight = 1
+    return NSMutableAttributedString(string: " ", attributes: [
+      .font: AppTypography.font(.body, compatibleWith: traits).withSize(1), .paragraphStyle: paragraph,
+    ])
+  }
+
   private static func syntaxRole(_ syntax: MarkdownSyntax) -> ThemeRole {
     switch syntax {
     case .keyword: .syntaxKeyword

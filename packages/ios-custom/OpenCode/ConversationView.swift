@@ -1212,6 +1212,7 @@ private struct ConversationMessageView: View, @MainActor Equatable {
               // Text rows belong to their own message; reading `store.messages` here would make every
               // visible row observe each streamed token.
               ResponseMarkdown(text: entry.part.text ?? "", messageID: entry.messageID, partID: entry.id)
+                .environment(\.responseProse, true)
                 .environment(\.responseFilesStable, entry.messageID == message.id
                   ? message.time.completed != nil
                   : store.messages.first { $0.id == entry.messageID }?.time.completed != nil)

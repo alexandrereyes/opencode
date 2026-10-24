@@ -1,8 +1,15 @@
 import OpenCodeKit
 import SwiftUI
 
+extension EnvironmentValues {
+  /// Agent responses join consecutive prose blocks into one selectable text.
+  @Entry var responseProse = false
+}
+
 struct ResponseBlocks: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.responseProse) private var joinsProse
+  @Environment(\.responseFilesStable) private var stable
   let blocks: [MarkdownBlock]
   let source: String
   let messageID: String
@@ -11,19 +18,32 @@ struct ResponseBlocks: View {
   let openNote: (String) -> Void
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-        // Every stack level re-measures its children on each layout pass; most blocks need neither.
-        if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
-            quoted(block)
+      ForEach(sections) { section in
+        switch section {
+        case .prose(let prose):
+          ResponseProseText(prose: prose, source: source, messageID: messageID, partID: partID, rasters: rasters,
+            openNote: openNote)
+            .padding(.top, prose.spacing.first ?? 0)
+        case .block(let block):
+          let index = blocks.firstIndex { $0.id == block.id } ?? 0
+          let spacing = MarkdownBlocks.spacing(block, after: index > 0 ? blocks[index - 1] : nil)
+          // Every stack level re-measures its children on each layout pass; most blocks need neither.
+          if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
+              quoted(block)
+            }
+            .padding(.top, spacing)
+          } else {
+            quoted(block).padding(.top, spacing)
           }
-          .padding(.top, spacing(index))
-        } else {
-          quoted(block).padding(.top, spacing(index))
         }
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
+  }
+  /// Prose joins once the response completes; while it streams, each block keeps its own text.
+  private var sections: [MarkdownSection] {
+    joinsProse ? MarkdownBlocks.sections(blocks, streaming: !stable) : blocks.map { .block($0) }
   }
   @ViewBuilder private func quoted(_ block: MarkdownBlock) -> some View {
     let content = ResponseBlock(block: block, source: source, messageID: messageID, partID: partID, rasters: rasters, openNote: openNote)
@@ -40,12 +60,25 @@ struct ResponseBlocks: View {
     }
   }
   private func isFootnote(_ block: MarkdownBlock) -> Bool { if case .footnote = block.kind { true } else { false } }
-  private func spacing(_ index: Int) -> CGFloat {
-    guard index > 0 else { return 0 }
-    if case .heading = blocks[index].kind { return 20 }
-    if blocks[index].marker != nil && blocks[index - 1].marker != nil { return 10 }
-    if isFootnote(blocks[index]) && !isFootnote(blocks[index - 1]) { return 20 }
-    return 14
+}
+
+/// Paragraphs, headings, list items, quotations and rules of one part as a single text, so a
+/// selection, copy or quotation can span them; indentation and borders are part of the text.
+private struct ResponseProseText: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.responseSelection) private var actions
+  @Environment(\.responseSelectionChanged) private var selection
+  @Environment(\.conversationSearch) private var highlights
+  let prose: MarkdownProse
+  let source: String
+  let messageID: String
+  let partID: String
+  let rasters: [ResponseFormulaKey: ResponseFormulaRaster]
+  let openNote: (String) -> Void
+  var body: some View {
+    SelectableResponseText(block: prose.block, messageID: messageID, partID: partID, theme: theme, prose: prose,
+      source: source, actions: actions, selectionChanged: selection?.selected,
+      highlights: highlights, rasters: rasters, openNote: openNote)
   }
 }
 
@@ -162,17 +195,39 @@ private struct ResponseFormulaBlock<Fallback: View>: View {
             }
           }
           .frame(minWidth: geometry.size.width, minHeight: metrics.height)
+          .background(ResponseFormulaMenu { copy(formula) })
         }
       }
       .frame(height: metrics.height).padding(.vertical, 6.5)
       .accessibilityElement(children: .ignore).accessibilityLabel("Fórmula: " + formula.source)
-      .contextMenu {
-        Button("Copiar fórmula") {
-          UIPasteboard.general.string = formula.source
-          Haptics.play(.selection)
-          toast.show("Fórmula copiada")
-        }
-      }
+      .accessibilityAction(named: "Copiar fórmula") { copy(formula) }
     } else { fallback }
+  }
+  private func copy(_ formula: MarkdownFormula) {
+    UIPasteboard.general.string = formula.source
+    Haptics.play(.selection)
+    toast.show("Fórmula copiada")
+  }
+}
+
+/// A context menu on the formula alone. SwiftUI's `.contextMenu` inside a List row claims the whole
+/// cell, so a long press anywhere in the response opened it instead of selecting text.
+private struct ResponseFormulaMenu: UIViewRepresentable {
+  let copy: () -> Void
+  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeUIView(context: Context) -> UIView {
+    let view = UIView()
+    view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+    return view
+  }
+  func updateUIView(_ view: UIView, context: Context) { context.coordinator.copy = copy }
+  final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+    var copy: (() -> Void)?
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+      configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+      UIContextMenuConfiguration(actionProvider: { [weak self] _ in
+        UIMenu(children: [UIAction(title: "Copiar fórmula", image: UIImage(systemName: "doc.on.doc")) { _ in self?.copy?() }])
+      })
+    }
   }
 }

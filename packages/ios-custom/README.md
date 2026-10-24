@@ -213,6 +213,14 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
   The side question (`/btw`) opens in a sheet that is not saved to the conversation.
+  Consecutive paragraphs, headings, list items, quotations and rules of a completed response are one
+  `UITextView` (`MarkdownProse`), so a selection, copy (Markdown paragraphs, one list item per line) or comment
+  spans them; spacing, nesting and quotation levels are paragraph attributes, and borders and rules are drawn by the
+  view. The joined runs keep every source offset, so quotation anchors, search, file links and notes are unchanged.
+  Code, tables, media, display formulas, disclosures and notes stay separate views, and a selection stops at them.
+  While a response streams, each block keeps its own text until the message completes. A display formula's
+  `Copiar fórmula` menu is a UIKit interaction on the formula itself: SwiftUI's `.contextMenu` inside a List row
+  claimed the whole response and blocked text selection.
 - **Other:** plain background, day chips (`Hoje`, `Ontem`) and one ↓ **Ir para a mais recente** control, following the
   custom web's geometry rather than an unread-message boundary. There is no new-message divider, count or ↑ pill.
   The tab bar and the "Sessão mestra" accessory are hidden inside the conversation.

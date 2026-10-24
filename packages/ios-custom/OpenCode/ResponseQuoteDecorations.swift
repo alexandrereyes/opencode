@@ -116,7 +116,7 @@ extension ResponseTextView {
       parent = view.superview
     }
   }
-  private func textRects(_ range: NSRange) -> [CGRect] {
+  func textRects(_ range: NSRange) -> [CGRect] {
     guard let start = position(from: beginningOfDocument, offset: range.location),
       let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end) else { return [] }
     return selectionRects(for: text).map(\.rect).filter { $0.width > 0 && $0.height > 0 }
