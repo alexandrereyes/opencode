@@ -243,6 +243,14 @@ import OpenCodeKit
       children: children, active: active, shells: shells)
   }
   var runningCount: Int { work.filter(\.running).count }
+  /// The child session of one of this conversation's `subagent` calls, including a reloaded running call
+  /// whose part does not carry the child's ID.
+  func subagentChild(_ part: ConversationPart) -> String? {
+    if let child = part.childID { return child }
+    guard part.name == "subagent", let id = part.id else { return nil }
+    return ConversationProjection.subagentLinks(
+      tools: messages.flatMap(\.tools), children: children, ownerID: self.id)[id]
+  }
   func providerName(_ id: String) -> String { providers.first { $0.id == id }?.name ?? id }
   func modelLabel(_ ref: ModelReference?) -> String {
     [

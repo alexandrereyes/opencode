@@ -1082,6 +1082,16 @@ stop); the column stays reserved so rows line up. State comes from `/session/act
 `outcome`, then its `subagent` tool status. The header button appears whenever the list has an entry: green with the
 running count while something runs, neutral without a number otherwise.
 
+One row is one child session. A `subagent` call's child ID reaches its part only through ephemeral
+`session.tool.progress` and the final result, so a reloaded **running** call has `metadata: {}`. Production showed
+such a call as a second "Em execução" row without context that opened the root. `ConversationProjection.subagentLinks`
+now links calls to children: the part's `sessionID`, a continuation's `input.sessionID`, or else the first unclaimed
+child of the owner with the same agent created within 5 s before to 60 s after the call ran. A linked call only feeds
+its child's row (the running call's start is that row's elapsed time); the transcript's subagent card opens the same
+child. A running call with no child yet is shown as **Iniciando**, without chevron, stop or navigation, and only while
+the owner is active; stale running parts and failed calls without a child stay in the transcript only. The header
+count uses the same deduplicated rows; the "Respondeu · N agentes rodando" banner already counts active sessions.
+
 Opening a child pushes it above the list, so Back returns to the list and then to the conversation; **Voltar à sessão
 principal** returns straight to the parent conversation, skipping its agents screen. A shell row without a child pops
 back and reveals its tool. No other screen had an agent list (Detalhes da sessão shows only the descendants' cost),

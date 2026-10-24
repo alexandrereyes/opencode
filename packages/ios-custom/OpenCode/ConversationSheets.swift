@@ -69,7 +69,9 @@ struct ConversationAgentsView: View {
               state(work)
             }
             Spacer(minLength: 3)
-            Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(theme.color(.icon))
+            if work.sessionID != nil || work.toolID != nil {
+              Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(theme.color(.icon))
+            }
           }
           if let usage = store.childUsage(work.sessionID) {
             ContextUsageLine(usage: usage, compact: true).padding(.leading, 30)
@@ -96,6 +98,7 @@ struct ConversationAgentsView: View {
   private func state(_ work: SessionWork) -> some View {
     HStack(spacing: 5) {
       switch work.state {
+      case .starting: Image(systemName: "hourglass").foregroundStyle(theme.color(.textSecondary))
       case .running: Circle().fill(theme.color(.success)).frame(width: 7, height: 7)
       case .completed: Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.color(.success))
       case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(theme.color(.error))

@@ -475,3 +475,71 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
       $0.identity == model.identity
     } == (model.enabled != false))
 }
+
+/// Production case: a reloaded running `subagent` part has `metadata: {}` (its child ID only travels in
+/// ephemeral progress), so it listed beside its own active child and opened the root.
+@Test func reloadedRunningSubagentCallMergesIntoItsChildAndNeverOpensTheOwner() throws {
+  func call(_ id: String, status: String, ran: Double, agent: String = "opushigh", extra: String = "",
+    metadata: String = "{}") -> String {
+    let result = status == "completed" ? #","content":[{"type":"text","text":"ok"}]"# : ""
+    return """
+      {"type":"tool","id":"\(id)","name":"subagent","time":{"created":\(ran - 10),"ran":\(ran)},
+       "state":{"status":"\(status)","input":{"agent":"\(agent)","description":"Corrigir alerta"\(extra)},
+       "metadata":\(metadata)\(result)}}
+      """
+  }
+  func message(_ parts: [String]) throws -> ConversationMessage {
+    try JSONDecoder().decode(ConversationMessage.self, from: Data("""
+      {"id":"msg_\(UUID().uuidString)","type":"assistant","agent":"build","time":{"created":1},
+       "content":[\(parts.joined(separator: ","))]}
+      """.utf8))
+  }
+  func child(_ id: String, created: Double, agent: String = "opushigh") throws -> Session {
+    try JSONDecoder().decode(Session.self, from: Data("""
+      {"id":"\(id)","parentID":"ses_root","projectID":"p","title":"Corrigir alerta","agent":"\(agent)",
+       "location":{"directory":"/repo"},"time":{"created":\(created),"updated":\(created + 1)}}
+      """.utf8))
+  }
+  let shell = try JSONDecoder().decode(ShellInfo.self, from: Data("""
+    {"id":"sh_child","status":"running","command":"sleep 240","metadata":{"sessionID":"ses_child"},"time":{"started":5000}}
+    """.utf8))
+  let messages = [try message([call("toolu_live", status: "running", ran: 1_000)])]
+  let children = [try child("ses_child", created: 1_033)]
+  let work = ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: messages, children: children,
+    active: ["ses_root", "ses_child"], shells: [shell])
+  #expect(work.count == 1)
+  #expect(work.first?.id == "ses_child" && work.first?.sessionID == "ses_child")
+  #expect(work.first?.toolID == "toolu_live" && work.first?.state == .running)
+  // Elapsed time is the call's run, not the child's own foreground shell.
+  #expect(work.first?.started == 1_000)
+  #expect(ConversationProjection.runningCount(
+    ownerID: "ses_root", viewedID: "ses_root", messages: messages, children: children,
+    active: ["ses_root", "ses_child"], shells: [shell]) == 1)
+
+  // A continuation names its child; a new call claims only an unclaimed child of the same agent.
+  let mixed = [try message([
+    call("toolu_first", status: "completed", ran: 100, metadata: #"{"sessionID":"ses_old"}"#),
+    call("toolu_again", status: "running", ran: 9_000, extra: #","sessionID":"ses_old""#),
+    call("toolu_other", status: "running", ran: 9_100, agent: "explore"),
+  ])]
+  let family = [try child("ses_old", created: 110), try child("ses_new", created: 9_120, agent: "explore")]
+  let links = ConversationProjection.subagentLinks(
+    tools: mixed.flatMap(\.tools), children: family, ownerID: "ses_root")
+  #expect(links == ["toolu_first": "ses_old", "toolu_again": "ses_old", "toolu_other": "ses_new"])
+  let merged = ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: mixed, children: family,
+    active: ["ses_root", "ses_old", "ses_new"], shells: [])
+  #expect(Set(merged.map(\.id)) == ["ses_old", "ses_new"])
+  #expect(merged.first { $0.id == "ses_old" }?.started == 9_000)
+
+  // Without a child: shown as starting, with nothing to open, only while the owner runs it.
+  let orphan = [try message([call("toolu_orphan", status: "running", ran: 1_000), call("toolu_failed", status: "error", ran: 900)])]
+  let starting = ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: orphan, children: [], active: ["ses_root"], shells: [])
+  #expect(starting.map(\.id) == ["toolu_orphan"])
+  #expect(starting.first?.state == .starting && starting.first?.sessionID == nil && starting.first?.toolID == nil)
+  #expect(starting.allSatisfy { !$0.running })
+  #expect(ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: orphan, children: [], active: [], shells: []).isEmpty)
+}

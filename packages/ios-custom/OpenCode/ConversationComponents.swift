@@ -331,10 +331,11 @@ struct ConversationStep: View {
   private func subagent(_ part: ConversationPart) -> some View {
     let id = part.input["agent"]?.string ?? "subagent"
     let agent = store.agents.first { $0.id == id }
-    let running = part.childID.map(store.active.contains) ?? part.running
-    let child = store.children.first { $0.id == part.childID }
+    let childID = store.subagentChild(part)
+    let running = childID.map(store.active.contains) ?? part.running
+    let child = store.children.first { $0.id == childID }
     return Button {
-      if let child = part.childID { openChild(child) }
+      if let childID { openChild(childID) }
     } label: {
       TimelineView(.periodic(from: running ? .now : .distantFuture, by: 1)) { context in
         HStack(spacing: 9) {
@@ -358,7 +359,7 @@ struct ConversationStep: View {
             theme.color(.icon))
         }.padding(10).background(theme.color(.toolSurface), in: RoundedRectangle(cornerRadius: 9))
       }
-    }.buttonStyle(.plain).disabled(part.childID == nil)
+    }.buttonStyle(.plain).disabled(childID == nil)
   }
   private func tool(_ part: ConversationPart, key: String) -> some View {
     let waiting = store.pendingTool(part)

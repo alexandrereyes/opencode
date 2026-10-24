@@ -3,9 +3,10 @@ import Foundation
 /// A subagent or background shell of the conversation's owner, running or finished.
 public struct SessionWork: Identifiable, Sendable, Equatable {
   public enum State: Sendable, Equatable {
-    case running, completed, failed, interrupted, ended
+    case starting, running, completed, failed, interrupted, ended
     public var label: String {
       switch self {
+      case .starting: "Iniciando"
       case .running: "Em execução"
       case .completed: "Concluído"
       case .failed: "Erro"
@@ -68,28 +69,32 @@ extension ConversationProjection {
     active: Set<String>, shells: [ShellInfo]
   ) -> [SessionWork] {
     let tools = messages.flatMap(\.tools)
+    let links = subagentLinks(tools: tools, children: children, ownerID: ownerID)
     var work: [SessionWork] = children.filter { $0.parentID == ownerID && $0.id != viewedID }.map { child in
-      let tool = tools.first { $0.name == "subagent" && $0.childID == child.id }
+      let linked = tools.filter { $0.name == "subagent" && $0.id.flatMap { links[$0] } == child.id }
+      let tool = linked.first
+      let current = linked.last { $0.running }
       let created = tool?.time?.ran ?? tool?.time?.created ?? child.time.created
-      let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: tool?.status)
+      let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: linked.last?.status)
       return SessionWork(
         id: child.id, sessionID: child.id, shellID: nil, toolID: tool?.id,
         agent: tool?.input["agent"]?.string ?? child.agent,
         title: tool?.input["description"]?.string ?? child.displayTitle, state: state, created: created,
-        started: workStarted(child: child, shells: shells),
+        started: current.flatMap { $0.time?.ran ?? $0.time?.created } ?? workStarted(child: child, shells: shells),
         duration: state == .running ? nil : (child.time.idle ?? child.time.updated) - child.time.created)
     }
-    for tool in tools where tool.name == "subagent" && (tool.running || tool.status == "error") {
-      let id = tool.childID ?? tool.id ?? "starting"
-      guard id != viewedID, !work.contains(where: { $0.id == id }) else { continue }
-      let created = tool.time?.ran ?? tool.time?.created ?? 0
-      work.append(
-        SessionWork(
-          id: id, sessionID: tool.childID, shellID: nil, toolID: tool.id,
-          agent: tool.input["agent"]?.string,
-          title: tool.input["description"]?.string ?? "Iniciando agente…",
-          state: tool.running ? .running : .failed, created: created, started: created,
-          duration: tool.time?.completed.map { $0 - created }))
+    // A call whose child does not exist yet is only shown while the owner is still running it; it has
+    // nothing to open. Stale running parts and failures without a child stay in the transcript only.
+    if active.contains(ownerID) {
+      for tool in tools where tool.name == "subagent" && tool.running {
+        guard let id = tool.id, links[id] == nil else { continue }
+        let created = tool.time?.ran ?? tool.time?.created ?? 0
+        work.append(
+          SessionWork(
+            id: id, sessionID: nil, shellID: nil, toolID: nil, agent: tool.input["agent"]?.string,
+            title: tool.input["description"]?.string ?? "Iniciando agente…", state: .starting,
+            created: created, started: created, duration: nil))
+      }
     }
     var foreground = Set(
       tools.filter { $0.name == "shell" && $0.running }.compactMap {
@@ -117,6 +122,35 @@ extension ConversationProjection {
         started: shell.time.started, duration: nil)
     }
     return work.sorted { $0.created != $1.created ? $0.created > $1.created : $0.id < $1.id }
+  }
+
+  /// Links each `subagent` call to its child session. The child's ID reaches the part only through
+  /// ephemeral progress and the final result, so a reloaded running call has no `sessionID`: a
+  /// continuation names it in its input, and a new call is matched to the first unclaimed child of the
+  /// owner created right after the call began, with the same agent.
+  public static func subagentLinks(tools: [ConversationPart], children: [Session], ownerID: String)
+    -> [String: String]
+  {
+    let calls = tools.filter { $0.name == "subagent" && $0.id != nil }
+    var links: [String: String] = [:]
+    for call in calls {
+      if let child = call.childID ?? call.input["sessionID"]?.string { links[call.id!] = child }
+    }
+    var claimed = Set(links.values)
+    let candidates = children.filter { $0.parentID == ownerID }.sorted { $0.time.created < $1.time.created }
+    for call in calls where links[call.id!] == nil {
+      guard let start = call.time?.ran ?? call.time?.created else { continue }
+      let agent = call.input["agent"]?.string
+      guard
+        let child = candidates.first(where: {
+          !claimed.contains($0.id) && $0.time.created >= start - 5_000 && $0.time.created <= start + 60_000
+            && (agent == nil || $0.agent == nil || $0.agent == agent)
+        })
+      else { continue }
+      links[call.id!] = child.id
+      claimed.insert(child.id)
+    }
+    return links
   }
 
   private static func finishedState(_ outcome: Session.Outcome?, tool: String?) -> SessionWork.State {
