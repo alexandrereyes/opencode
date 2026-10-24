@@ -10,6 +10,7 @@ struct ConversationUsageBar: View {
       ContextUsageLine(usage: usage, style: .metrics)
       .monospacedDigit()
       .foregroundStyle(theme.color(.textSecondary))
+      .padding(.leading, 8)
       .frame(maxWidth: .infinity, alignment: .leading)
       .frame(height: 40)
       .contentShape(Rectangle())
