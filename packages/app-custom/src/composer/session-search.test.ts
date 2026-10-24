@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionInfo } from "@opencode/client/promise"
-import { createSessionSearch } from "./session-search"
+import { caseVariants, createSessionSearch } from "./session-search"
 
 const session = (id: string, archived = false, parentID?: string) =>
   ({
@@ -84,5 +84,31 @@ describe("composer session search", () => {
 
     expect(await search.load("child")).toEqual([])
     expect(await search.load(child.id)).toEqual([])
+  })
+
+  test("asks again with the case of non-ASCII letters changed and merges by recency", async () => {
+    expect(caseVariants("Commit")).toEqual(["Commit"])
+    expect(caseVariants("SESSÃO")).toEqual(["SESSÃO", "sessão", "Sessão"])
+    expect(caseVariants("índice")).toEqual(["índice", "ÍNDICE", "Índice"])
+    const titles = [
+      { id: "ses_lower", title: "Sessão de revisão", updated: 2 },
+      { id: "ses_upper", title: "SESSÃO ANTIGA", updated: 1 },
+    ]
+    const calls: string[] = []
+    const search = createSessionSearch({
+      list: async (query) => {
+        calls.push(query)
+        // SQLite LIKE: only ASCII letters ignore case.
+        const pattern = query.replace(/[A-Za-z]/g, (char) => char.toLowerCase())
+        return titles
+          .filter((item) => item.title.replace(/[A-Za-z]/g, (char) => char.toLowerCase()).includes(pattern))
+          .map((item) => ({ ...session(item.id), title: item.title, time: { created: 1, updated: item.updated } }))
+      },
+      get: async (id) => session(id),
+      current: () => undefined,
+      debounce: 0,
+    })
+    expect((await search.load("SESSÃO")).map((item) => item.id)).toEqual(["ses_lower", "ses_upper"])
+    expect(calls).toEqual(["SESSÃO", "sessão", "Sessão"])
   })
 })

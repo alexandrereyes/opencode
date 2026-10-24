@@ -29,7 +29,14 @@ export function createSessionSearch(input: {
       }
       if (current.signal.aborted) return []
       const [listed, exact] = await Promise.all([
-        input.list(query, current.signal).catch(() => []),
+        Promise.all(caseVariants(query).map((variant) => input.list(variant, current.signal).catch(() => []))).then(
+          (lists) =>
+            lists.length === 1
+              ? lists[0]
+              : [...new Map(lists.flat().map((session) => [session.id, session] as const)).values()].toSorted(
+                  (a, b) => b.time.updated - a.time.updated,
+                ),
+        ),
         looksLikeSessionID(query)
           ? input
               .get(query, current.signal)
@@ -47,4 +54,13 @@ export function createSessionSearch(input: {
       abort?.abort()
     },
   }
+}
+
+// The server matches titles with SQLite LIKE, which ignores case only for ASCII letters. When the query
+// has other cased letters (Ã, Í, Ç…), also ask with them lowered, uppercased and capitalized, so
+// "SESSÃO" finds "Sessão" and "índice" finds "Índice". Accents are matched as typed.
+export function caseVariants(query: string) {
+  if (![...query].some((char) => char > "\u007f" && char.toLowerCase() !== char.toUpperCase())) return [query]
+  const lower = query.toLocaleLowerCase()
+  return [...new Set([query, lower, query.toLocaleUpperCase(), lower.charAt(0).toLocaleUpperCase() + lower.slice(1)])]
 }
