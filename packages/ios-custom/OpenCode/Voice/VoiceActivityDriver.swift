@@ -7,6 +7,7 @@ import OpenCodeKit
   private var updates: Task<Void, Never>?
   private var last: VoiceActivityAttributes.ContentState?
   private var unavailable = false
+  var active: Bool { sessionID != nil }
   init() {
     let leftovers = Self.existingIDs()
     updates = Task { await Self.finish(leftovers) }

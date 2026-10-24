@@ -139,8 +139,8 @@ configurável.
 - **Falhas antes da primeira conexão** continuam encerrando com erro, sem retry (deadline de 45 s).
 - **Feedback:** faixa e Live Activity mostram **Reconectando…** ou **Sem conexão**. `VoiceCuePlayer`
   toca dois tons descendentes na perda, um tique suave a cada 3 s durante a recuperação, dois tons
-  ascendentes ao voltar e dois graves ao desistir, com hápticos `warning`/`success` quando o app está
-  em primeiro plano. O tique é áudio real que segura um crédito do `RTCAudioSession` enquanto não há
+  ascendentes ao voltar e dois graves ao desistir. As vibrações vêm de `VoiceFeedback` (abaixo):
+  `warning` na perda e `success` na volta; ao desistir só o `fail()` vibra, uma vez. O tique é áudio real que segura um crédito do `RTCAudioSession` enquanto não há
   WebRTC, para o modo de áudio em background continuar legítimo e o app não ser suspenso no bolso;
   termina na reconexão, na desistência ou no encerramento.
 - **Estados para superfícies compactas:** `VoiceIndicator` (Kit) resume `VoiceState` em conectando,
@@ -234,6 +234,70 @@ exibem ouvindo/falando/trabalho da mestra, reconectando e sem conexão (rótulo 
 do app. Tema é um snapshot de roles tipados. O driver mantém instâncias ActivityKit fora da MainActor
 durante chamadas assíncronas e limpa apenas atividades desse tipo deixadas por uma execução anterior.
 Live Activity negada pelo sistema não derruba áudio. Ela não contém transcrição pessoal.
+
+## Início pelo Botão de Ação, Controles e Atalhos
+
+`StartVoiceIntent` (`VoiceShared`) inicia a mesma chamada do botão de onda sem trazer o app para a
+frente: aparece só a Live Activity existente, com tempo, estado, silenciar e encerrar. Ele é exposto
+como Control `VoiceStartControl` (extensão `VoiceActivity`: Botão de Ação, Central de Controle e Tela
+Bloqueada) e como App Shortcut **Falar com a mestra** (`OpenCodeShortcuts`: Atalhos, Spotlight, Siri
+e Botão de Ação → Atalho). Configurar o Botão de Ação: **Ajustes → Botão de Ação → Controles →
+Falar com a mestra**.
+
+- **Conformidades:** `AudioRecordingIntent` + `LiveActivityIntent`, `supportedModes =
+  [.background, .foreground(.dynamic)]` e `allowedExecutionTargets = .main`: o intent roda sempre no
+  processo do app (nunca na extensão), que pode iniciar Live Activity e microfone. "Target is not
+  foreground" aparece quando a atividade é pedida fora desse contexto; aqui `Activity.request` acontece
+  de forma síncrona dentro do `perform()`, antes de qualquer ativação de áudio (`VoiceController.start`
+  publica antes de a conexão pedir permissão e montar o WebRTC).
+- **Desbloqueio:** `authenticationPolicy = .requiresAuthentication`. Com o iPhone bloqueado o sistema
+  pede Face ID/código antes de rodar; cancelado, nada acontece. Uma chamada já ativa continua com o
+  telefone bloqueado (silenciar/encerrar pela Live Activity), como antes.
+- **Estado do app:** `AppRuntime.shared` guarda servidores, `SessionStore` e `VoiceController` fora da
+  cena. `AppVoiceLauncher` (registrado em `OpenCodeApp.init`) constrói o store com `prepare()` — o mesmo
+  que a cena usa, sem trocar um store já válido nem derrubar a chamada — e, sem cena, mantém o
+  `SessionStore.run()` (eventos da mestra) até a chamada acabar. O `perform()` aguarda até 30 s pela
+  chamada ficar pronta ou falhar, para o processo não ser suspenso antes do áudio.
+- **Decisão (`VoiceLaunch.plan`, Kit):** chamada já ativa, conectando ou encerrando → só vibra
+  (`warning`), sem segunda chamada; falha anterior → nova chamada. O app vem para a frente
+  (`continueInForeground`, sem confirmação) quando o microfone ainda não foi autorizado ou foi negado
+  (o pedido/explicação só aparece com o app visível), quando Atividades ao Vivo estão desligadas, quando
+  o sistema recusa a Live Activity em segundo plano (a chamada iniciada é desfeita e recomeça em primeiro
+  plano) ou quando não há servidor/credenciais. Se o contexto não puder abrir o app, o intent falha com
+  uma mensagem pedindo para abrir o OpenCode.
+- **Feedback:** `VoiceFeedback` vibra `success` quando a chamada fica pronta pela primeira vez e
+  `error` na falha. Em primeiro plano usa `UINotificationFeedbackGenerator`; em segundo plano (onde os
+  geradores do UIKit não tocam) usa a vibração do sistema. O transporte ativa
+  `allowHapticsAndSystemSoundsDuringRecording` para a vibração não ser suprimida pelo microfone.
+- **Diagnóstico:** `VoiceLaunchLog` registra fases sem conteúdo (`launch-request`, `launch-background`,
+  `launch-foreground reason=…`, `launch-acknowledged`, `start`, `ready`, `failed`, `end`) no os_log
+  `VoiceStartup`; builds DEBUG também as gravam em `Library/Caches/voice-launch.log`, lido do container
+  do app no aparelho com `xcrun devicectl device copy from`.
+
+### Verificação — 24/10
+
+Simulador **OpenCode Botao Acao** (`E834089D-E702-428E-B778-FDB9073EB9A3`, iPhone 18 Pro/iOS 27),
+servidor e llm-proxy alcançáveis: em todos os casos o app ficou atrás, só a Live Activity apareceu e a
+chamada ficou **pronta** (de `launch-request` a `ready`):
+
+| Gatilho | App | Resultado | Até pronto |
+| --- | --- | --- | --- |
+| Botão de Ação (`agent-device action-button`) → Control | encerrado | segundo plano, Live Activity | 2,3 s |
+| Botão de Ação de novo, com chamada ativa | — | só vibra (`launch-acknowledged`) | — |
+| Central de Controle → Control | suspenso | segundo plano | 2,0 s |
+| Central de Controle sobre o app aberto | aberto | chamada no app, sem segunda tela | 1,5 s |
+| Atalhos → **Falar com a mestra** | encerrado | segundo plano | 1,9–2,5 s |
+| Atalhos | suspenso | segundo plano | 1,5 s |
+| Atalhos, microfone não decidido | encerrado | app vem para a frente e pede o microfone | — |
+
+Encerrar pelo X da Live Activity e pela faixa funcionou. iPhone 14 físico (sem Botão de Ação),
+sem resolver `llm-proxy-svc` (o mesmo limite de rede descrito abaixo): Central de Controle com o app
+encerrado, suspenso e aberto, e Atalhos com o app encerrado, iniciaram em segundo plano — a Live
+Activity foi aceita, a sessão `playAndRecord` e a trilha do microfone abriram (`offer-start` em
+~0,1 s, `offer-ready` em ~0,2 s) — e falharam honestamente no DNS do proxy, com vibração de erro e a
+faixa **Falha na conexão** ao abrir o app. Não houve conversa real nem delegação à mestra. Bloqueio e
+Face ID não foram exercitados remotamente; a política fica no metadata do intent
+(`authenticationPolicy` explícito).
 
 ## Referências e limites
 

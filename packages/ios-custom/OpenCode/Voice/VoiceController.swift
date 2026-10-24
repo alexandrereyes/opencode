@@ -17,6 +17,8 @@ import OSLog
   private(set) var busy = false
   /// Set when automatic recovery gave up; the UI offers "Tentar de novo".
   private(set) var alert: String?
+  /// Whether this call's Live Activity was accepted; background recording stops without it.
+  var liveActivityActive: Bool { activity.active }
   @ObservationIgnored private var transport: (any VoiceTransporting)?
   @ObservationIgnored private var master: (any VoiceMasterServing)?
   @ObservationIgnored private var signaling: VoiceSignaling?
@@ -167,7 +169,7 @@ import OSLog
     if state.muted { transport.mute(true) }
     let signal = VoiceSignaling()
     signaling = signal
-    VoiceTransport.log.notice("phase=start")
+    VoiceLaunchLog.record("start")
     detail = recovery.active ? "Reconectando ao serviço privado" : "Conectando ao serviço privado"; publish()
     // Turns heard before a loss must be buffered before the next call reads memory.
     await memoryEvents?.value
@@ -277,14 +279,14 @@ import OSLog
     }
   }
   private func connected() {
-    if connectedAt == nil { connectedAt = .now }
+    if connectedAt == nil { connectedAt = .now; VoiceFeedback.ready() }
     watchdog?.cancel(); watchdog = nil
     if recovery.active {
       recovery.restore(); cues.play(.restored)
       VoiceTransport.log.notice("phase=recovered")
     }
     state.apply(.connected); detail = "Pode falar com a Sessão mestra"; publish()
-    VoiceTransport.log.notice("phase=ready")
+    VoiceLaunchLog.record("ready")
     if narrationTask == nil {
       narrationTask = Task { [weak self] in
         while !Task.isCancelled {
@@ -387,13 +389,24 @@ import OSLog
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
   func resume() { transport?.resume() }
-  func end() async { alert = nil; await retire(); state.apply(.end); detail = ""; publish() }
+  func end() async { alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end") }
   func retry(sessions: SessionStore) async { await end(); start(sessions: sessions) }
   func dismissAlert() { alert = nil }
+  /// Waits until a starting call listens or fails, so an intent keeps the process alive meanwhile.
+  func settled(within limit: Duration) async {
+    let watch = Task { [weak self] in
+      guard let self else { return }
+      for await phase in Observations({ self.state.phase }) where phase != .connecting { return }
+    }
+    let deadline = Task { try? await Task.sleep(for: limit); watch.cancel() }
+    await watch.value
+    deadline.cancel()
+  }
   private func fail(_ message: String) async {
     guard state.visible, state.phase != .failed, !busy else { return }
-    VoiceTransport.log.notice("phase=failed")
+    VoiceLaunchLog.record("failed", detail: message)
     await retire(); state.apply(.failure(message)); detail = message; publish()
+    VoiceFeedback.failed()
   }
 
   // MARK: Network recovery

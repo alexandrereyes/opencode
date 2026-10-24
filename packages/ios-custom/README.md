@@ -869,6 +869,13 @@ Audio continues in the background after microphone consent. Real actions and ans
 to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
 final answer. Ending the call does not interrupt work already submitted to OpenCode.
 
+The same call starts without opening the app from the **Falar com a mestra** Control (Action
+button, Control Center, Lock Screen) or the App Shortcut of the same name: only the Live Activity
+appears. It requires an unlocked iPhone, only vibrates when a call is already running, and brings the
+app forward when iOS needs it (microphone prompt, Live Activities off or refused, no server). Set it up
+in **Ajustes → Botão de Ação → Controles**. See
+[`docs/voice.md`](docs/voice.md#início-pelo-botão-de-ação-controles-e-atalhos).
+
 See [`docs/voice.md`](docs/voice.md) for the exact proxy contract, WARP requirements, transport and
 background ownership, source revisions, limitations, and test commands. The DEBUG-only
 `-OpenCodeVoiceFixture` uses no microphone, GPT Live or master inference (KV appends may trigger

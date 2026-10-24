@@ -77,7 +77,8 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
       }
       self.channel = channel
       channel.delegate = self
-      Self.log.notice("phase=offer-start")
+      // Logged after the playAndRecord session is active and the microphone track exists.
+      VoiceLaunchLog.record("offer-start")
       peer.offer(for: RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true",
         "OfferToReceiveVideo": "false"], optionalConstraints: nil)) { [weak self] offer, error in
         guard let self else { return }
@@ -101,7 +102,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
 
   private func finishGathering() {
     guard !closed, peer?.iceGatheringState == .complete, let sdp = peer?.localDescription?.sdp else { return }
-    Self.log.notice("phase=offer-ready")
+    VoiceLaunchLog.record("offer-ready")
     pending?.resume(returning: sdp); pending = nil
   }
   private func failOffer() {
@@ -168,6 +169,8 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     RTCAudioSessionConfiguration.setWebRTC(configuration)
     audio.ignoresPreferredAttributeConfigurationErrors = true
     try audio.setConfiguration(configuration)
+    // Lets VoiceFeedback vibrate when the call is ready or fails while the microphone records.
+    try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
     try audio.setActive(true)
     activations += 1
   }

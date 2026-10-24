@@ -6,7 +6,10 @@ import SwiftUI
 @main
 struct OpenCodeApp: App {
   @UIApplicationDelegateAdaptor(TranscriptionAppDelegate.self) private var delegate
-  init() { FilePreviewStorage.clean() }
+  init() {
+    FilePreviewStorage.clean()
+    VoiceLaunchRouter.launcher = AppVoiceLauncher()
+  }
   var body: some Scene {
     WindowGroup {
       #if DEBUG
@@ -21,7 +24,9 @@ struct OpenCodeApp: App {
   }
 }
 
+/// App-wide state, shared by the scene and by intents that run without one (Action button, Controls).
 @MainActor @Observable final class AppRuntime {
+  static let shared = AppRuntime()
   let servers = ServerStore(launchOverride: .override())
   let appearance = AppearanceSettings()
   let voice = VoiceController()
@@ -30,7 +35,32 @@ struct OpenCodeApp: App {
   var appliedRevision = -1
   var switching = false
   var error: String?
-  func rebuild() async {
+  @ObservationIgnored private var building: Task<Void, Never>?
+  @ObservationIgnored private var voiceSessions: Task<Void, Never>?
+  /// Builds the store for the active server only when it is missing or stale; the scene and an
+  /// intent arriving together share one build, so neither replaces the other's call.
+  @discardableResult func prepare() async -> SessionStore? {
+    if let building { await building.value }
+    if store != nil, appliedRevision == servers.revision { return store }
+    let task = Task { await rebuild() }
+    building = task
+    await task.value
+    building = nil
+    return appliedRevision == servers.revision ? store : nil
+  }
+  /// AppTabs runs the store only with a scene; a call started without one still needs the
+  /// event stream for Sessão mestra progress, until that call ends.
+  func keepSessionsRunning(_ store: SessionStore) {
+    guard voiceSessions == nil else { return }
+    voiceSessions = Task {
+      let run = Task { await store.run() }
+      for await id in Observations({ self.voice.sessionID }) where id == nil { break }
+      run.cancel()
+      await run.value
+      voiceSessions = nil
+    }
+  }
+  private func rebuild() async {
     switching = true
     defer { switching = false }
     let previous = store
@@ -54,7 +84,7 @@ struct OpenCodeApp: App {
 private struct AppRoot: View {
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.colorScheme) private var systemScheme
-  @State private var runtime = AppRuntime()
+  private let runtime = AppRuntime.shared
   var body: some View {
     let theme = runtime.appearance.theme(systemDark: systemScheme == .dark)
     Group {
@@ -67,7 +97,7 @@ private struct AppRoot: View {
         ContentUnavailableView {
           Label("Credenciais indisponíveis", systemImage: "key")
         } description: { Text(error) } actions: {
-          Button("Tentar novamente") { Task { await runtime.rebuild() } }.disabled(runtime.switching)
+          Button("Tentar novamente") { Task { await runtime.prepare() } }.disabled(runtime.switching)
         }
       } else { ProgressView("Conectando…") }
     }
@@ -76,7 +106,7 @@ private struct AppRoot: View {
     .preferredColorScheme(runtime.appearance.colorScheme)
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
-    .task(id: runtime.servers.revision) { await runtime.rebuild() }
+    .task(id: runtime.servers.revision) { await runtime.prepare() }
     .task { TranscriptionController.shared.start() }
     .onChange(of: scenePhase, initial: true) { _, phase in TranscriptionController.shared.setActive(phase == .active) }
     .onChange(of: theme.id, initial: true) { runtime.voice.setTheme(theme) }

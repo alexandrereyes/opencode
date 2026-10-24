@@ -5,7 +5,25 @@ import SwiftUI
 import WidgetKit
 
 @main struct VoiceActivityBundle: WidgetBundle {
-  var body: some Widget { VoiceActivityWidget() }
+  var body: some Widget {
+    VoiceActivityWidget()
+    VoiceStartControl()
+  }
+}
+
+/// Assignable to the Action button, Control Center and the Lock Screen. The intent runs in the app
+/// process and asks for authentication on a locked iPhone.
+struct VoiceStartControl: ControlWidget {
+  var body: some ControlWidgetConfiguration {
+    StaticControlConfiguration(kind: "br.com.alexandrem.opencode.voice-start") {
+      ControlWidgetButton(action: StartVoiceIntent()) {
+        Label("Falar com a mestra", systemImage: "waveform")
+          .controlWidgetActionHint("Falar com a Sessão mestra")
+      }
+    }
+    .displayName("Falar com a mestra")
+    .description("Inicia a conversa por voz sem abrir o OpenCode. Exige o iPhone desbloqueado.")
+  }
 }
 
 struct VoiceActivityWidget: Widget {

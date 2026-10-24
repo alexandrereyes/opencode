@@ -689,4 +689,37 @@ private actor LiveMemoryHTTP {
     throw XCTSkip("No physical device live probing in this suite.")
     #endif
   }
+
+  // StartVoiceIntent keeps the process alive with settled(within:) until the call can listen.
+  func testLaunchSettlesWhenTheCallListens() async {
+    let transport = VoiceTestTransport()
+    let http = VoiceTestHTTP()
+    let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    XCTAssertEqual(controller.state.phase, .connecting)
+    await controller.settled(within: .seconds(5))
+    XCTAssertEqual(controller.state.phase, .listening)
+    XCTAssertFalse(controller.liveActivityActive, "fakes never request a Live Activity")
+    await controller.end()
+  }
+  func testLaunchSettlesOnFailureAndOnItsDeadline() async {
+    let http = VoiceTestHTTP()
+    let denied = VoiceController(testing: .init(transport: { _ in VoiceTestTransport() },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }, permission: false))
+    denied.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await denied.settled(within: .seconds(5))
+    XCTAssertEqual(denied.state.phase, .failed)
+    await denied.end()
+
+    let silent = VoiceTestTransport()
+    let stalled = VoiceController(testing: .init(transport: { _ in silent },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }))
+    stalled.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let started = ContinuousClock.now
+    await stalled.settled(within: .milliseconds(300))
+    XCTAssertLessThan(ContinuousClock.now - started, .seconds(3))
+    XCTAssertEqual(stalled.state.phase, .connecting)
+    await stalled.end()
+  }
 }

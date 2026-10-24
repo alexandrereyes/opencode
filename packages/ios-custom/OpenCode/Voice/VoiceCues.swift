@@ -25,16 +25,16 @@ enum VoiceCue: Sendable { case lost, restored, failed }
   func play(_ cue: VoiceCue) {
     switch cue {
     case .lost:
-      Haptics.play(.warning)
+      VoiceFeedback.lost()
       guard start() else { return }
       waiting = true; finishing = false
       schedule(Self.tone([(660, 0.12), (440, 0.18)]))
       schedule(Self.tone([(880, 0.05), (0, 2.95)], level: 0.08), options: .loops)
     case .restored:
-      Haptics.play(.success)
+      VoiceFeedback.restored()
       finish(Self.tone([(440, 0.1), (660, 0.14)]))
     case .failed:
-      Haptics.play(.warning)
+      // No vibration here: the controller's fail() always follows and vibrates once.
       finish(Self.tone([(392, 0.18), (294, 0.32)]))
     }
   }
