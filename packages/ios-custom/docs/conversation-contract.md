@@ -884,6 +884,8 @@ Sources: `packages/app-custom/src/composer/attachments/{deliver,destination}.ts`
 ## 14. Selection, comments and side questions — wave 4
 
 Copy is local. “Comentar” adds a local draft quote, sent with the next message; no quote endpoint exists.
+Hiding a sent quote's response mark (after an acknowledged send or “Remover marcação”) is also local to the device and
+never rewrites `metadata.quotes`.
 
 ```ts
 type ChatQuote = {

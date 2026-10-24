@@ -226,10 +226,19 @@ open a compact native quote/comment sheet; links and active text selections reta
 table selections use the same source mappings. No font scale, transcript margins or user metadata-row changes belong
 to this feature.
 
-The web currently marks **draft quotes only**. Persistent sent marks, **Ir à mensagem com o comentário** and reverse
+The web currently marks **draft quotes only**. Sent marks, **Ir à mensagem com o comentário** and reverse
 source navigation are requested native additions, not claims of web parity. Sent marks reconstruct from ordinary
 `metadata.quotes` on loaded user messages, including old sessions; no formatted-prompt parsing, annotation RPC or
 thread service is introduced. Sent comments remain immutable; whole-message undo retains its existing behavior.
+
+**Alexandre, 24/10: citou e enviou, remove.** Once the server acknowledges a prompt or command (successful admission,
+including queued delivery; not the send tap), its quote IDs join a per-server, per-Session local list
+(`Application Support/OpenCode/QuoteMarks`, 200 Sessions, cleared by Session deletion) and their response marks
+disappear. A rejected send keeps the draft quotes and marks. Sent marks from older sessions or other clients stay until
+**Remover marcação**, a destructive, unconfirmed action in the sent **Citação · N** sheet. Neither path rewrites
+`metadata.quotes` or uses a server API, so the web is unaffected. The bubble's quote card and **Ir ao trecho citado**
+remain: navigation briefly draws the dismissed passage's background (no number, so no reflow) for three seconds.
+Restoring a queued or undone message puts its quotes back into the draft, where they are marked again.
 
 New native anchors retain exact UTF-16 source coordinates with an optional `coordinate: "source"` discriminator;
 untagged old native anchors remain readable, and web rendered-text anchors use the existing Markdown source mapping.
@@ -253,7 +262,9 @@ histories in its fake repository, restores only an owned simulator draft for ful
 explicit sandbox credentials, and deletes private xctestrun files. Finish with `cleanup`. No model call, physical
 device or production request is needed for those fixtures. Explicitly selecting `OpenCodeUITests/QuoteSendingTests`
 adds one tiny real Luna-6/low send per theme in the worker's owned Session; the runner verifies the persisted comment,
-model and exact anchor from the backend afterward. `profile-scrolling.py --server-url … --home …` accepts this sandbox.
+model and exact anchor from the backend afterward, and the test checks that the acknowledged quote leaves no mark,
+also after relaunch. The rejected-send case uses the DEBUG prompt-failure transport, so run the sandbox on **4183**
+(`--server-url http://127.0.0.1:4183 --home …`); the runner resets only its removable fixtures' local dismissals. `profile-scrolling.py --server-url … --home …` accepts this sandbox.
 The quotation runner also accepts `--server-url`, `--home`, `--derived`, `--evidence` and `--content-size` for an
 isolated worker. It validates sandbox ownership before importing data. Inline-marker checks compare marked/unmarked
 text widths, independent markers in one paragraph, the 44 pt targets, and original UTF-16 copy/selection offsets.

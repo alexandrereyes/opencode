@@ -56,6 +56,37 @@ import Testing
   #expect(index.marks(messageID: "source", partID: "source:text:0").isEmpty)
 }
 
+@Test @MainActor func dismissedSentMarksLeaveResponsesButKeepTheCarrierRecord() throws {
+  let first = ChatQuote(id: "q1", messageID: "source", partID: "source:text:0", text: "Primeiro")
+  let second = ChatQuote(id: "q2", messageID: "source", partID: "source:text:0", text: "Segundo")
+  let metadata = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode([first, second]))
+  let message = try JSONDecoder().decode(ConversationMessage.self, from: JSONEncoder().encode(JSONValue.object([
+    "id": .string("carrier"), "type": .string("user"), "text": .string("Pedido"),
+    "time": .object(["created": .number(1)]), "metadata": .object(["quotes": metadata]),
+  ])))
+  var index = ChatQuoteIndex()
+  index.update([message])
+  let visible = index.marks(messageID: "source", partID: "source:text:0", dismissed: ["q1"])
+  #expect(visible.map(\.quote.id) == ["q2"] && visible.first?.number == 2)
+  // Source navigation from the bubble may still reveal a dismissed mark; drafts are never dismissed.
+  #expect(index.marks(messageID: "source", partID: "source:text:0", dismissed: ["q1"], revealing: "carrier:q1").count == 2)
+  #expect(index.marks(messageID: "source", partID: "source:text:0", pending: [first], dismissed: ["q1", "q2"]).map(\.pending) == [true])
+  #expect(index.carried(by: "carrier").count == 2)
+
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let store = ChatQuoteDismissals(server: "http://127.0.0.1:4183", root: root, capacity: 2)
+  try store.dismiss(["q1"], sessionID: "A")
+  try store.dismiss(["q2"], sessionID: "A")
+  try store.dismiss([], sessionID: "B")
+  #expect(ChatQuoteDismissals(server: "http://127.0.0.1:4183", root: root).values("A") == ["q1", "q2"])
+  #expect(ChatQuoteDismissals(server: "http://other", root: root).values("A").isEmpty)
+  try store.dismiss(["q3"], sessionID: "B")
+  try store.dismiss(["q4"], sessionID: "C")
+  #expect(ChatQuoteDismissals(server: "http://127.0.0.1:4183", root: root).values("A").isEmpty)
+  #expect(store.values("C") == ["q4"])
+}
+
 @Test func quotationAnchorAndStructuredCommentSerializationRoundTrip() throws {
   var quote = ChatQuote(messageID: "source", partID: "source:text:0", text: "Ação 😀",
     anchor: .init(start: 3, end: 10, exact: "Ação 😀", coordinate: "source"))

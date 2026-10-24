@@ -80,6 +80,7 @@ final class SessionStore {
   @ObservationIgnored let hub: EventHub
   @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored let reading: ReadingPositionStore
+  @ObservationIgnored let quoteDismissals: ChatQuoteDismissals
   @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored private var order = RecentOrder()
@@ -124,6 +125,7 @@ final class SessionStore {
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
+    quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
     #if DEBUG
@@ -492,6 +494,7 @@ final class SessionStore {
     Haptics.play(.success)
     var cleanupFailed = false
     do { try reading.remove(plan.ids) } catch { cleanupFailed = true }
+    do { try quoteDismissals.remove(plan.ids) } catch { cleanupFailed = true }
     do { try await drafts.remove(plan.ids) } catch { cleanupFailed = true }
     do {
       let current = try await client.preferences()

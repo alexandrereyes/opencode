@@ -14,7 +14,7 @@ extension ResponseTextView {
       let ending = highlight.ranges.last.map {
         !ConversationSearch.renderedRanges(NSRange(location: NSMaxRange($0) - 1, length: 1), block: block).isEmpty
       } ?? false
-      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: highlight.mark, ranges: ranges, badge: ending)
+      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: highlight.mark, ranges: ranges, badge: highlight.badge && ending)
     }
     guard !highlights.isEmpty || !quoteHighlights.isEmpty else { return }
     openQuote = context.open

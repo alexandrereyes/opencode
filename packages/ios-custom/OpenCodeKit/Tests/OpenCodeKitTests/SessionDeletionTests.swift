@@ -75,6 +75,11 @@ private func deletionSession(_ id: String, parent: String? = nil) throws -> Sess
   #expect(reading.position("ses_keep") != nil)
   #expect(expansions.values("ses_delete").isEmpty)
   #expect(expansions.values("ses_keep") == ["tool": true])
+  let quotes = ChatQuoteDismissals(server: "sandbox", root: root.appendingPathComponent("QuoteMarks"))
+  for id in ["ses_delete", "ses_keep"] { try quotes.dismiss(["quote"], sessionID: id) }
+  try quotes.remove(["ses_delete"])
+  #expect(ChatQuoteDismissals(server: "sandbox", root: root.appendingPathComponent("QuoteMarks")).values("ses_delete").isEmpty)
+  #expect(quotes.values("ses_keep") == ["quote"])
   var alerts = SessionAlertPolicy(claims: ["sandbox\u{0}ses_delete\u{0}succeeded\u{0}1", "sandbox\u{0}ses_keep\u{0}succeeded\u{0}2"])
   alerts.remove(["ses_delete"])
   #expect(alerts.claims == ["sandbox\u{0}ses_keep\u{0}succeeded\u{0}2"])

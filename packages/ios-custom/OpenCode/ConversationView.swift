@@ -158,6 +158,8 @@ struct ConversationView: View {
   @State private var quoteAligned: String?
   @State private var quoteEditing: ChatQuote?
   @State private var quoteValidation: Task<Void, Never>?
+  @State private var quoteRevealed: String?
+  @State private var quoteRevealTask: Task<Void, Never>?
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
@@ -175,7 +177,8 @@ struct ConversationView: View {
     let conversation = ConversationStore(
         id: id, client: sessions.client, hub: sessions.hub,
         expansions: sessions.expansions, catalog: sessions.catalog,
-        reversion: sessions.reversions.value(id, client: sessions.client))
+        reversion: sessions.reversions.value(id, client: sessions.client),
+        quoteDismissals: sessions.quoteDismissals)
     conversation.masterMode = master
     _conversation = State(initialValue: conversation)
   }
@@ -242,12 +245,19 @@ struct ConversationView: View {
     .environment(conversation.toast)
     .environment(\.conversationQuotes, ConversationQuoteContext(
       index: conversation.quoteIndex, pending: sessions.drafts.draft(conversation.id).quotes,
+      dismissed: conversation.dismissedQuotes, revealing: quoteRevealed,
       open: { quoteDetail = $0 }, source: { revealQuote($0) }, target: quoteTarget?.id, active: quoteDetail?.id,
       align: { id, message, offset in
         guard quoteTarget?.id == id, quoteAligned != id else { return }
         quoteAligned = id
         quoteTarget = nil
         conversation.revealMessage(message, offset: max(0, offset - 24), persist: false)
+        // A dismissed mark is drawn only long enough to show where the source passage is.
+        quoteRevealTask?.cancel()
+        quoteRevealTask = Task { @MainActor in
+          do { try await Task.sleep(for: .seconds(3)) } catch { return }
+          if quoteRevealed == id { quoteRevealed = nil }
+        }
       }))
     .environment(\.userMessageRevert, conversation.isChild ? nil : UserMessageRevertAction(
       pending: sessions.drafts.draft(conversation.id).sending
@@ -330,8 +340,14 @@ struct ConversationView: View {
         draft.focused = false
         quoteEditing = draft.quotes.first { $0.id == mark.quote.id }
       }, remove: {
-        sessions.drafts.draft(conversation.id).removeQuote(mark.quote)
         quoteDetail = nil
+        guard !mark.pending else {
+          sessions.drafts.draft(conversation.id).removeQuote(mark.quote)
+          return
+        }
+        if !conversation.dismissQuotes([mark.quote.id]) {
+          conversation.toast.show("A marcação foi removida, mas não pôde ser salva no iPhone.", kind: .error)
+        }
       }, source: {
         quoteDetail = nil
         revealQuote(mark.quote, mark: mark)
@@ -380,6 +396,7 @@ struct ConversationView: View {
           let source = entry.element.text else {
           conversation.toast.show("O trecho citado não está mais disponível.")
           quoteTarget = nil
+          quoteRevealed = nil
           return
         }
         let blocks = await ResponseMarkdownCache.shared.parse(source)
@@ -387,6 +404,7 @@ struct ConversationView: View {
         if ChatQuoteAnchoring.sourceRanges(mark.quote, source: source, blocks: blocks).isEmpty {
           conversation.toast.show("O trecho citado foi alterado e não pode ser marcado.")
           quoteTarget = nil
+          quoteRevealed = nil
         }
       }
     }
@@ -410,6 +428,8 @@ struct ConversationView: View {
     }
     .onDisappear {
       quoteValidation?.cancel()
+      quoteRevealTask?.cancel()
+      quoteRevealed = nil
       conversation.mcps.close()
       search.cancelPaging()
       leavePosition()
@@ -869,6 +889,8 @@ struct ConversationView: View {
     quoteAligned = nil
     quoteTarget = mark ?? conversation.quoteIndex.marks(messageID: quote.messageID, partID: quote.partID)
       .first { $0.quote.id == quote.id } ?? ChatQuoteMark(quote: quote, number: 1)
+    quoteRevealTask?.cancel()
+    quoteRevealed = quoteTarget?.id
     conversation.revealMessage(quote.messageID, persist: false)
   }
   private func openChild(_ id: String) {

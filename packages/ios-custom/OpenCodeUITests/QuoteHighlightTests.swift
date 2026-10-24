@@ -78,6 +78,7 @@ import XCTest
     marker(app).tap()
     XCTAssertTrue(app.buttons["quote-go-message"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons["quote-remove"].exists)
+    XCTAssertTrue(app.buttons["quote-dismiss"].exists)
     screenshot("native-sent-details")
     app.buttons["quote-go-message"].tap()
     let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_SENT_CARRIER"])
@@ -89,6 +90,67 @@ import XCTest
     app.launch()
     XCTAssertTrue(marker(app).waitForExistence(timeout: 25))
     screenshot("native-sent-reopened")
+  }
+  func testRemovingSentMarkKeepsBubbleRecordAndSourceNavigation() throws {
+    let app = try launch("REMOVABLE")
+    defer { app.terminate() }
+    XCTAssertTrue(marker(app).waitForExistence(timeout: 15))
+    marker(app).tap()
+    let dismiss = app.buttons["quote-dismiss"]
+    XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+    XCTAssertEqual(dismiss.label, "Remover marcação")
+    screenshot("native-removable-details")
+    dismiss.tap()
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: marker(app))], timeout: 10), .completed)
+    let response = try source(app, kind: "REMOVABLE")
+    XCTAssertTrue(response.exists)
+    screenshot("native-removable-removed")
+    let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_REMOVABLE_CARRIER"])
+    let reverse = app.buttons["quote-source-\(carrier)-0"]
+    XCTAssertTrue(reverse.waitForExistence(timeout: 10))
+    reverse.tap()
+    XCTAssertTrue(response.waitForExistence(timeout: 15))
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: response)], timeout: 10), .completed)
+    XCTAssertFalse(marker(app).exists)
+    screenshot("native-removable-source-revealed")
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(app.buttons["quote-source-\(carrier)-0"].waitForExistence(timeout: 25))
+    XCTAssertTrue(response.waitForExistence(timeout: 10))
+    XCTAssertFalse(marker(app).exists)
+    screenshot("native-removable-reopened")
+  }
+  func testRejectedSendKeepsDraftQuoteAndMark() throws {
+    let app = XCUIApplication()
+    let session = try XCTUnwrap(environment["OPENCODE_QUOTE_FAILING"])
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
+      environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession", session]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    // DEBUG transport, restricted to 4177/4183: only this Session's prompt endpoint answers 400.
+    app.launchEnvironment["OPENCODE_TEST_COMPOSER_FAILURE"] = session
+    app.launch()
+    defer { app.terminate() }
+    let response = try source(app, kind: "FAILING")
+    XCTAssertTrue(response.waitForExistence(timeout: 25))
+    XCTAssertTrue(app.buttons["model-picker"].waitForExistence(timeout: 10))
+    response.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.15)).press(forDuration: 1)
+    let comment = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Comentar'")).firstMatch
+    XCTAssertTrue(comment.waitForExistence(timeout: 5))
+    comment.tap()
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.typeText("Comentário que não será aceito.")
+    app.buttons["Concluir"].tap()
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    composer.tap()
+    composer.typeText("Envio recusado de propósito.")
+    app.buttons["Enviar mensagem"].tap()
+    XCTAssertTrue(app.staticTexts["send-error"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["draft-quotes"].exists)
+    XCTAssertTrue(marker(app).exists)
+    XCTAssertEqual(marker(app).value as? String, "rascunho")
+    screenshot("native-rejected-send-kept")
   }
   func testSourceJumpLoadsOlderPages() throws {
     let app = try launch("PAGED")
@@ -164,9 +226,15 @@ import XCTest
 }
 
 @MainActor final class QuoteSendingTests: XCTestCase {
-  func testNativeSendPersistsSourceAnchorAndReopensSentMark() throws {
+  func testAcknowledgedSendRemovesResponseMarkAndKeepsSourceNavigation() throws {
     continueAfterFailure = false
     let environment = ProcessInfo.processInfo.environment
+    func shoot(_ name: String) {
+      let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+      shot.name = name + "-" + (environment["OPENCODE_TEST_THEME"] ?? "dark")
+      shot.lifetime = .keepAlways
+      add(shot)
+    }
     let app = XCUIApplication()
     app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession",
@@ -190,20 +258,25 @@ import XCTest
     XCTAssertTrue(composer.waitForExistence(timeout: 10))
     composer.tap()
     composer.typeText("Teste de interface: responda apenas OK, sem ferramentas e sem alterar arquivos.")
+    let marker = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
+    XCTAssertTrue(marker.waitForExistence(timeout: 10))
+    XCTAssertEqual(marker.value as? String, "rascunho")
+    shoot("native-live-send-before")
     app.buttons["Enviar mensagem"].tap()
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["draft-quotes"])], timeout: 30), .completed)
     let reverse = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-source-'")).firstMatch
     XCTAssertTrue(reverse.waitForExistence(timeout: 30))
+    XCTAssertFalse(marker.exists)
+    shoot("native-live-send-acknowledged")
     reverse.tap()
-    let marker = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
-    XCTAssertTrue(marker.waitForExistence(timeout: 20))
-    XCTAssertEqual(marker.value as? String, "enviada")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: response)], timeout: 20), .completed)
+    XCTAssertFalse(marker.exists)
+    shoot("native-live-send-source-revealed")
     app.terminate()
     app.launch()
-    XCTAssertTrue(marker.waitForExistence(timeout: 25))
-    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-    shot.name = "native-live-send-reopened-" + (environment["OPENCODE_TEST_THEME"] ?? "dark")
-    shot.lifetime = .keepAlways
-    add(shot)
+    XCTAssertTrue(reverse.waitForExistence(timeout: 25))
+    XCTAssertTrue(response.waitForExistence(timeout: 10))
+    XCTAssertFalse(marker.exists)
+    shoot("native-live-send-reopened")
   }
 }

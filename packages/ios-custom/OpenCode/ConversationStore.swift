@@ -8,6 +8,7 @@ import OpenCodeKit
   private(set) var messages: [ConversationMessage] = []
   var activity = ConversationActivity.empty
   var quoteIndex = ChatQuoteIndex()
+  private(set) var dismissedQuotes: Set<String> = []
   private(set) var models: [ModelInfo] = []
   private(set) var defaultModel: ModelInfo?
   private(set) var agents: [AgentInfo] = []
@@ -44,6 +45,7 @@ import OpenCodeKit
     didSet { expansionMemory?.set(expansionValues, sessionID: id) }
   }
   @ObservationIgnored private let expansionMemory: ConversationExpansionMemory?
+  @ObservationIgnored private let quoteDismissals: ChatQuoteDismissals?
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let hub: EventHub
   private let catalog: ModelCatalogCache?
@@ -91,7 +93,7 @@ import OpenCodeKit
   init(
     id: String, client: OpenCodeClient, hub: EventHub,
     expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil,
-    reversion: ConversationRevert? = nil
+    reversion: ConversationRevert? = nil, quoteDismissals: ChatQuoteDismissals? = nil
   ) {
     self.id = id
     self.client = client
@@ -101,6 +103,15 @@ import OpenCodeKit
     self.catalog = catalog
     expansionMemory = expansions
     expansionValues = expansions?.values(id) ?? [:]
+    self.quoteDismissals = quoteDismissals
+    dismissedQuotes = quoteDismissals?.values(id) ?? []
+  }
+  /// Hides sent quote marks in responses on this device; `metadata.quotes` is never rewritten.
+  @discardableResult func dismissQuotes(_ ids: Set<String>) -> Bool {
+    guard !ids.isSubset(of: dismissedQuotes) else { return true }
+    dismissedQuotes.formUnion(ids)
+    guard let quoteDismissals else { return true }
+    return (try? quoteDismissals.dismiss(ids, sessionID: id)) != nil
   }
   /// Explicit navigation takes priority over the saved reading position (search/reveal, wave 5).
   func revealMessage(_ id: String, offset: Double = 0, persist: Bool = true) {
@@ -276,6 +287,8 @@ import OpenCodeKit
         guard name == "compact" else { return }
         try await client.compact(id, id: submission.request.id)
       }
+      // Admission was acknowledged: the carrying bubble now records the quote, so the response mark goes.
+      dismissQuotes(Set(ChatQuote.read(submission.request.metadata["quotes"]).map(\.id)))
       draft.didSend()
       await draft.clear()
       catalog?.committed(submission.model)

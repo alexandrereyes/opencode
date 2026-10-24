@@ -33,8 +33,14 @@ public struct ChatQuoteIndex: Sendable {
     saved = next
     self.parts = parts
   }
-  public func marks(messageID: String, partID: String, pending: [ChatQuote] = []) -> [ChatQuoteMark] {
-    (parts[partID] ?? []).filter { $0.quote.messageID == messageID }
+  /// Dismissed sent quotes stay out of responses unless source navigation is revealing that mark.
+  public func marks(
+    messageID: String, partID: String, pending: [ChatQuote] = [], dismissed: Set<String> = [],
+    revealing: String? = nil
+  ) -> [ChatQuoteMark] {
+    (parts[partID] ?? []).filter {
+      $0.quote.messageID == messageID && (!dismissed.contains($0.quote.id) || $0.id == revealing)
+    }
       + pending.enumerated().compactMap {
         $0.element.messageID == messageID && $0.element.partID == partID
           ? ChatQuoteMark(quote: $0.element, number: $0.offset + 1) : nil

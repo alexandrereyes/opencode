@@ -4,6 +4,8 @@ import SwiftUI
 struct ConversationQuoteContext {
   var index = ChatQuoteIndex()
   var pending: [ChatQuote] = []
+  var dismissed: Set<String> = []
+  var revealing: String?
   var open: ((ChatQuoteMark) -> Void)?
   var source: ((ChatQuote) -> Void)?
   var target: String?
@@ -57,6 +59,9 @@ struct QuoteDetailsSheet: View {
           } else {
             Button("Ir à mensagem com o comentário", systemImage: "bubble.left", action: message)
               .accessibilityIdentifier("quote-go-message")
+            // Hides only this device's response mark; the sent comment and its bubble remain.
+            Button("Remover marcação", systemImage: "trash", role: .destructive, action: remove)
+              .foregroundStyle(theme.color(.error)).accessibilityIdentifier("quote-dismiss")
           }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
       }.background(theme.color(.background)).foregroundStyle(theme.color(.text))

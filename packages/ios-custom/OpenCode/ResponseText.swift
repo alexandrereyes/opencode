@@ -406,6 +406,7 @@ struct ResponseMarkdown: View {
     .environment(\.responseQuotes, ResponseQuoteContext(highlights: quoteHighlights,
       open: quotes.open, target: quotes.target, active: quotes.active, align: quotes.align))
     .onChange(of: marks, initial: true) { _, _ in resolveQuotes() }
+    .onChange(of: quotes.dismissed) { _, _ in resolveQuotes() }
     .onChange(of: blocks) { _, _ in resolveQuotes() }
     .onGeometryChange(for: CGFloat.self) {
       $0.size.height
@@ -438,12 +439,15 @@ struct ResponseMarkdown: View {
     }
   }
   private var marks: [ChatQuoteMark] {
-    quotes.index.marks(messageID: messageID, partID: partID, pending: quotes.pending)
+    quotes.index.marks(messageID: messageID, partID: partID, pending: quotes.pending,
+      dismissed: quotes.dismissed, revealing: quotes.revealing)
   }
   private func resolveQuotes() {
     quoteHighlights = marks.compactMap { mark in
       let ranges = ChatQuoteAnchoring.sourceRanges(mark.quote, source: text, blocks: blocks)
-      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: mark, ranges: ranges)
+      // A revealed dismissed mark only draws its background: no marker reflows the text.
+      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: mark, ranges: ranges,
+        badge: mark.pending || !quotes.dismissed.contains(mark.quote.id))
     }
   }
   private func parse() {

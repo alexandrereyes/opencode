@@ -56,7 +56,7 @@ if args.action == "prepare":
     model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
     source = "Uma escolha que deixei como está: a consultora também recebe o botão Meu negócio. Faz sentido se ela também vender outra marca; se preferir esconder o botão, é uma condição a mais no Core."
     for theme in ["dark", "light", "web"]:
-        for kind in ["pending", "sent", "paged", "missing", "multiple"]:
+        for kind in ["pending", "sent", "paged", "missing", "multiple", "removable", "failing"]:
             token = uuid.uuid4().hex
             session = "ses_" + token
             def mid(n): return "msg_" + token + f"{n:04d}"
@@ -70,7 +70,7 @@ if args.action == "prepare":
                 "text": source, "comment": "Confira esta decisão antes de continuar."}
             if kind == "paged":
                 messages += [item for n in range(2, 64, 2) for item in [user(n, "Pedido sintético " + str(n)), assistant(n + 1, "Resposta sintética " + str(n))]]
-            if kind != "pending":
+            if kind not in ["pending", "failing"]:
                 if kind == "missing": quote["messageID"] = "msg_missing"; quote["partID"] = "msg_missing:text:0"
                 quotes = [quote] if kind != "multiple" else [
                     {**quote, "id": quote["id"] + "-1", "text": "Uma escolha que deixei como está:", "comment": "Primeiro comentário."},
@@ -105,8 +105,20 @@ draft.parent.mkdir(parents=True, exist_ok=True)
 draft.write_text(json.dumps({"document": {"text": "", "tokens": []}, "attachments": [], "cursor": 0,
     "agent": "build", "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}, "quotes": [restored["quote"]]}))
 draft.chmod(0o600)
+theme = "light" if args.theme.endswith("light") else "dark"
+# Removal and rejected-send cases must start from their imported state on every run.
+marks = container / "Library/Application Support/OpenCode/QuoteMarks" / (hashlib.sha256(server_url.encode()).hexdigest() + ".json")
+removable = {item["id"] for item in owned if item["kind"] == "removable"}
+if marks.exists():
+    marks.write_text(json.dumps([entry for entry in json.loads(marks.read_text()) if entry["sessionID"] not in removable]))
+failing = next(item for item in owned if item["theme"] == theme and item["kind"] == "failing")
+failing_draft = draft.parent.parent / failing["id"] / "draft.json"
+failing_draft.parent.mkdir(parents=True, exist_ok=True)
+failing_draft.write_text(json.dumps({"document": {"text": "", "tokens": []}, "attachments": [], "cursor": 0,
+    "agent": "build", "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}, "quotes": []}))
+failing_draft.chmod(0o600)
 live = any(case == "OpenCodeUITests/QuoteSendingTests" for case in args.tests)
-pending = next(item for item in owned if item["theme"] == ("light" if args.theme.endswith("light") else "dark") and item["kind"] == "pending")
+pending = next(item for item in owned if item["theme"] == theme and item["kind"] == "pending")
 if live:
     live_draft = draft.parent.parent / pending["id"] / "draft.json"
     live_draft.parent.mkdir(parents=True, exist_ok=True)
