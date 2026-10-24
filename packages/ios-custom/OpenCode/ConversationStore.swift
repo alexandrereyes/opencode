@@ -142,8 +142,8 @@ import OpenCodeKit
     }
   }
   func services() async -> SessionServices {
-    guard let directory = session?.location.directory else { return SessionServices() }
-    return await client.sessionServices(directory: directory)
+    guard let session else { return SessionServices() }
+    return await client.sessionServices(sessionID: session.id, directory: session.location.directory)
   }
   var displayModels: [ModelInfo] { ModelCatalog.merging(models, fallback: catalog?.models ?? []) }
   func usageLimit(_ model: ModelReference?) -> Double? {

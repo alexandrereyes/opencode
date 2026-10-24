@@ -90,8 +90,8 @@ import XCTest
       screenshot("details-" + role.lowercased())
       scroll()
       screenshot("details-services-" + role.lowercased())
-      for (label, name) in [("Plugins", "plugins"), ("Skills", "skills"), ("LSP · configuração", "lsp")] {
-        let section = app.staticTexts[label].firstMatch
+      for name in ["mcp", "skills", "plugins"] {
+        let section = app.descendants(matching: .any)["session-details-\(name)-header"].firstMatch
         for _ in 0..<30 {
           if visible(section) { break }
           if section.exists && section.frame.minY < app.navigationBars["Detalhes da sessão"].frame.maxY {

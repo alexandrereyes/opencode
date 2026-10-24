@@ -722,6 +722,26 @@ change dots of the legacy tree and file drag. Verify after `build-for-testing` w
 --evidence …` (optionally `--theme openchamber-light`); it owns a temporary git checkout and an imported session,
 and deletes both.
 
+### Session details sections
+
+**Detalhes da sessão** lists Uso da sessão, Sessão, MCP, Skills and Plugins, in that order; LSP is no longer shown.
+
+- **MCP** starts expanded. Each server is a native toggle bound to the conversation's `ConversationMCPStore`, the
+  same live state, `POST /api/experimental/mcp/:name/{connect,disconnect}` call, verification, pending pulse, login
+  toast and error toast as the composer's `MCP · N/M` panel; toggling here updates that pill. Rows stay in name order
+  while toggling and show the status (and the server error for failed/needs-login servers).
+- **Skills** are the skills this session **loaded**, not the catalog: `custom.transcript/skills` (plugin) reduces direct
+  activations, prompt-attached skills and completed `skill` tool calls server-side into `{ id, name }` in first-load
+  order. An empty session says **Nenhuma skill carregada**; an older server without the method says **Indisponível**.
+- **Skills** and **Plugins** start collapsed to their first five rows with **Mostrar todos (N)** / **Mostrar menos**;
+  the header chevron toggles the same state (MCP's hides the section's rows). **Atualizar** moved to the toolbar.
+
+After `build-for-testing`, `python3 packages/ios-custom/script/test-session-details.py --device … --derived … --home
+<sandbox> --server-url … --evidence …` (optionally `--theme openchamber-light`) owns a git checkout with seven fixture
+skills and six fixture plugins, loads skills for real (one Luna 6 / low `skill` tool call, two prompt attachments,
+four direct activations), runs `OpenCodeUITests/SessionDetailsTests`, toggles a connected MCP off and back on, and
+deletes the session and checkout.
+
 ## Voice conversation
 
 ### Composer dictation (independent of GPT Live calls)
@@ -2273,10 +2293,10 @@ refresh Sessões. Archive reuses `custom.archive/archive` and the Sessões confi
 the backend owns interruption and cascading to descendants. Neither action retries automatically.
 
 - The medium/large details sheet joins the existing project catalog and `custom.worktrees/locate` checkout root.
-  It reads `/api/vcs`, `/api/vcs/diff?mode=working`, `/api/mcp`, `/api/plugin`, `/api/skill` and `/api/config` with the
-  session's Location. The +/− is **current working-copy changes**, as on the web, not a sum of historical tool edits.
-  Built-in plugins are omitted. Independent read failures say **Indisponível**, never “none”. LSP shows merged
-  configuration only, explicitly identifying runtime connection status as unavailable. Usage links to wave 2.
+  It reads `/api/vcs`, `/api/vcs/diff?mode=working` and `/api/plugin` with the session's Location. The +/− is
+  **current working-copy changes**, as on the web, not a sum of historical tool edits. Built-in plugins are omitted.
+  Independent read failures say **Indisponível**, never “none”. Usage links to wave 2. The current sections are
+  described in [Session details sections](#session-details-sections).
 - `ConversationSearch` searches raw user text and assistant text parts in loaded sequence/part/occurrence order,
   excluding reasoning and tools. Literal non-overlapping matching folds case and accents and retains original
   UTF-16 ranges, including emoji. Source ranges map onto visible Markdown runs for translucent primary highlights;
@@ -2299,7 +2319,7 @@ the backend owns interruption and cascading to descendants. Neither action retri
   composer is replaced by an explanation; retry rechecks availability. Choosing/moving directories remains out of scope.
 
 `SessionReadingTests.swift` in OpenCodeKit covers matching, source highlights, order/counter, the older-page budget,
-rename/rollback, removed tools, HTTP methods/Location scoping, independent service errors, LSP precedence and notice
+rename/rollback, removed tools, HTTP methods/Location scoping, independent service errors and notice
 classification. The package has **106 passing Swift tests**. The warning-free simulator build and four app-hosted
 tests pass. The existing seven UI cases pass with the expected already-viewed unread skip; the four new Wave-5 UI
 cases pass in both themes, including the Sessões rename event, root/child details, two-page older search, an unchanged

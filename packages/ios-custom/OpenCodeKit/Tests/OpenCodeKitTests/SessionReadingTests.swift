@@ -90,34 +90,45 @@ import Testing
 @Test func detailsReadEachServiceInTheSessionsLocationAndPreserveUnavailable() async {
   let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "http://localhost:4177")!)) { request in
     let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+    #expect(!["/api/mcp", "/api/skill", "/api/config"].contains(request.url?.path))
+    if request.url?.path.hasPrefix("/api/rpc/") == true {
+      return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+    }
     #expect(query?.first { $0.name == "location[directory]" }?.value == "/test/checkout")
     let body: String = switch request.url?.path {
-    case "/api/mcp": """
-      {"data":[{"name":"Docs","status":{"status":"needs_auth","error":"Login"}}]}
-      """
     case "/api/plugin": """
       {"data":[{"source":{"type":"builtin"},"state":{"status":"active"}},
        {"id":"custom","source":{"type":"local","path":"/plugin"},"state":{"status":"active"}}]}
-      """
-    case "/api/config": """
-      [{"type":"document","info":{"lsp":{"swift":{"disabled":true},"ts":{"disabled":false}}}},
-       {"type":"document","info":{"lsp":false}},
-       {"type":"document","info":{"lsp":{"swift":{"disabled":false}}}}]
       """
     case "/api/vcs": #"{"data":{"branch":{"current":"review"}}}"#
     case "/api/vcs/diff": #"{"data":[{"file":"test.swift","additions":12,"deletions":3}]}"#
     default: "{}"
     }
-    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: request.url?.path == "/api/skill" ? 503 : 200, httpVersion: nil, headerFields: nil)!)
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
   }
-  let details = await client.sessionServices(directory: "/test/checkout")
+  let details = await client.sessionServices(sessionID: "ses_test", directory: "/test/checkout")
   #expect(details.branch == "review")
   #expect(details.changes?.first?.additions == 12)
   #expect(details.plugins?.map(\.id) == ["custom"])
-  #expect(details.mcp?.first?.label == "Requer autenticação")
+  #expect(details.plugins?.first?.label == "Ativo")
   #expect(details.skills == nil)
-  #expect(details.lsp?.map(\.id) == ["swift"])
-  #expect(details.lsp?.first?.label == "Configurado")
+}
+
+@Test func detailsReadSkillsLoadedIntoTheSessionFromTheTranscriptRPC() async {
+  let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "http://localhost:4177")!)) { request in
+    guard request.url?.path == "/api/rpc/custom.transcript/skills" else {
+      return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+    }
+    #expect(request.httpMethod == "POST")
+    #expect(request.url?.query == nil)
+    let payload = try? JSONDecoder().decode(JSONValue.self, from: request.httpBody!)
+    #expect(payload == .object(["input": .object(["sessionID": .string("ses_test")])]))
+    return (Data(#"{"output":{"data":[{"id":"docx","name":"docx"},{"id":"effect","name":"Effect v4"}]}}"#.utf8),
+      HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+  let details = await client.sessionServices(sessionID: "ses_test", directory: "/test/checkout")
+  #expect(details.skills == [LoadedSkill(id: "docx", name: "docx"), LoadedSkill(id: "effect", name: "Effect v4")])
+  #expect(details.plugins == nil && details.branch == nil && details.changes == nil)
 }
 
 @Test func missingDirectoryHTTPReadsTypedBodyAndAvailabilityUsesDefaultLocation() async throws {

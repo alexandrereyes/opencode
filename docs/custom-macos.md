@@ -463,6 +463,12 @@ Type-filtered reads use the endpoint directly. A server without the plugin, or a
 read, falls back to the endpoint, which also reports its canonical errors (missing session,
 invalid cursor). The agent dashboard's three-message previews still use the endpoint.
 
+`custom.transcript/skills` returns only `{ id, name }` for the skills a session loaded, deduplicated
+in first-load order: direct activations (`skill` messages), skills attached to prompts and completed
+`skill` tool calls. The plugin pages the type-filtered messages in-process, so the iOS details sheet
+never downloads a transcript to find them. A server without this method shows the section as
+unavailable.
+
 Measured on the isolated 4177 runtime with a synthetic 32-message session holding 90 image reads
 (325 MB stored): the endpoint served 214.6 MB for 20 messages while the RPC served 41 KB. Opening the
 session in Chrome loaded 324.6 MB in 2.9 s and reached a 722 MB JS heap through the endpoint, against

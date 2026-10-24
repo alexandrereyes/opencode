@@ -18,12 +18,24 @@ export const Page = Schema.Struct({
   cursor: Schema.Struct({ previous: optional(Schema.String), next: optional(Schema.String) }),
 })
 
+export const SkillsInput = Schema.Struct({ sessionID: Session.ID })
+
+/** Skills loaded into the session, deduplicated by ID in the order they were first loaded. */
+export const Skills = Schema.Struct({
+  data: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+})
+
 export const Definition = Rpc.define({
   id: "custom.transcript",
   methods: {
     list: {
       input: Schema.toStandardSchemaV1(ListInput),
       output: Schema.toStandardSchemaV1(Schema.toEncoded(Page)),
+      errors: { read_failed: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })) },
+    },
+    skills: {
+      input: Schema.toStandardSchemaV1(SkillsInput),
+      output: Schema.toStandardSchemaV1(Skills),
       errors: { read_failed: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Session.ID })) },
     },
   },

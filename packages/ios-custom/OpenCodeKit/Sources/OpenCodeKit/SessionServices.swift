@@ -15,7 +15,7 @@ public enum ConversationNotice: Sendable, Equatable {
 }
 
 public struct SessionService: Sendable, Identifiable {
-  public enum State: Sendable { case active, disabled, pending, needsAuth, failed, configured, unavailable }
+  public enum State: Sendable { case active, disabled, pending, needsAuth, failed, unavailable }
   public let id: String
   public let state: State
   public var label: String {
@@ -25,18 +25,25 @@ public struct SessionService: Sendable, Identifiable {
     case .pending: "Conectando"
     case .needsAuth: "Requer autenticação"
     case .failed: "Falhou"
-    case .configured: "Configurado"
     case .unavailable: "Indisponível"
     }
   }
 }
 
+/// A skill loaded into the session, by direct activation, a prompt attachment or a completed `skill` tool call.
+public struct LoadedSkill: Codable, Sendable, Identifiable, Equatable {
+  public let id: String
+  public let name: String
+  public init(id: String, name: String) {
+    self.id = id
+    self.name = name
+  }
+}
+
 public struct SessionServices: Sendable {
   public var branch: String?
-  public var mcp: [SessionService]?
   public var plugins: [SessionService]?
-  public var skills: [SessionService]?
-  public var lsp: [SessionService]?
+  public var skills: [LoadedSkill]?
   public var changes: [WorkingChange]?
   public init() {}
 }
@@ -57,18 +64,14 @@ extension OpenCodeClient {
     struct Input: Encodable { let directory: String }
     return try await rpc("custom.worktrees", "available", input: Input(directory: directory))
   }
-  public func sessionServices(directory: String) async -> SessionServices {
-    async let mcp = try? serviceList("mcp", directory: directory)
-    async let plugins = try? serviceList("plugin", directory: directory)
-    async let skills = try? serviceList("skill", directory: directory)
-    async let lsp = try? lspConfiguration(directory: directory)
+  public func sessionServices(sessionID: String, directory: String) async -> SessionServices {
+    async let plugins = try? pluginList(directory: directory)
+    async let skills = try? loadedSkills(sessionID: sessionID)
     async let changes = try? workingChanges(directory: directory)
     async let branch = try? currentBranch(directory: directory)
     var value = SessionServices()
-    value.mcp = await mcp
     value.plugins = await plugins
     value.skills = await skills
-    value.lsp = await lsp
     value.changes = await changes
     value.branch = await branch
     return value
@@ -90,50 +93,32 @@ extension OpenCodeClient {
     ])
     return response.data
   }
-  private func serviceList(_ kind: String, directory: String) async throws -> [SessionService] {
-    let response: DataResponse<[JSONValue]> = try await get("/api/\(kind)", query: [
+  /// Reduced on the server by the custom plugin, so the phone never pages the transcript to find them.
+  private func loadedSkills(sessionID: String) async throws -> [LoadedSkill] {
+    struct Input: Encodable { let sessionID: String }
+    struct Output: Decodable { let data: [LoadedSkill] }
+    let output: Output = try await rpc("custom.transcript", "skills", input: Input(sessionID: sessionID))
+    return output.data
+  }
+  private func pluginList(directory: String) async throws -> [SessionService] {
+    let response: DataResponse<[JSONValue]> = try await get("/api/plugin", query: [
       URLQueryItem(name: "location[directory]", value: directory)
     ])
     return response.data.compactMap { value -> SessionService? in
       guard let item = value.object else { return nil }
-      if kind == "plugin", item["source"]?.object?["type"]?.string == "builtin" { return nil }
+      if item["source"]?.object?["type"]?.string == "builtin" { return nil }
       guard let name = item["name"]?.string ?? item["id"]?.string
         ?? item["source"]?.object?["target"]?.string ?? item["source"]?.object?["path"]?.string
         ?? item["source"]?.object?["type"]?.string else { return nil }
-      let status = (kind == "plugin" ? item["state"] : item["status"])?.object?["status"]?.string
-      let state: SessionService.State = switch status {
+      let state: SessionService.State = switch item["state"]?.object?["status"]?.string {
       case "connected", "active": .active
       case "disabled": .disabled
       case "pending": .pending
       case "needs_auth": .needsAuth
       case "failed": .failed
-      default: kind == "skill" ? .active : .unavailable
+      default: .unavailable
       }
       return SessionService(id: name, state: state)
     }.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
-  }
-  private func lspConfiguration(directory: String) async throws -> [SessionService] {
-    let values: [JSONValue] = try await get("/api/config", query: [
-      URLQueryItem(name: "location[directory]", value: directory)
-    ])
-    var disabled = false
-    var servers: [String: Bool] = [:]
-    for value in values {
-      guard let lsp = value.object?["info"]?.object?["lsp"] else { continue }
-      if let flag = lsp.bool {
-        disabled = !flag
-        servers.removeAll()
-      }
-      if let entries = lsp.object {
-        disabled = false
-        for (name, config) in entries {
-          servers[name] = config.object?["disabled"]?.bool ?? servers[name] ?? false
-        }
-      }
-    }
-    if disabled { return [SessionService(id: "LSP", state: .disabled)] }
-    return servers.sorted { $0.key < $1.key }.map {
-      SessionService(id: $0.key, state: $0.value ? .disabled : .configured)
-    }
   }
 }
