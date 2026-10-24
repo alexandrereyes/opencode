@@ -80,7 +80,9 @@ import XCTest
     chip.tap()
     openNewSession(app)
     ready(app)
-    XCTAssertTrue(app.buttons["new-project"].label.contains("abacato-v2"))
+    // The Sessões "+" starts in Chats, even with a repository filter.
+    XCTAssertTrue(app.buttons["new-project"].label.contains("Chats"))
+    chooseProject("abacato-v2", app)
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
     if app.buttons["Continuar"].exists { app.buttons["Continuar"].tap() }
@@ -306,6 +308,7 @@ import XCTest
     submit("Responda apenas OK, sem ferramentas. Onda 9 existente.", app)
     openNewSession(app)
     ready(app)
+    chooseProject("abacato-v2", app)
     chooseDestination("new-create", app)
     app.buttons["new-base"].tap()
     XCTAssertTrue(app.buttons["base-feat/redesign-identidade"].waitForExistence(timeout: 10))

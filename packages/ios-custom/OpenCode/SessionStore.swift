@@ -60,6 +60,7 @@ final class SessionStore {
     var newSession = false
     var master = false
     var origin: NewSessionOrigin? = nil
+    var startInChats = false
   }
   var conversationPath: [ConversationRoute] = [] {
     didSet {

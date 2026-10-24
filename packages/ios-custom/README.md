@@ -1063,10 +1063,12 @@ the master) has no visible placeholder; its text view keeps the VoiceOver label 
 `OpenCodeUITests/NewSessionTypographyTests` checks that and captures project, Chats and, when the isolated sandbox
 has no selected projects, the empty state (otherwise it skips).
 
-- **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
-  its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
-  project. The Projeto sheet lists **Chats** first (when the server has `custom.chats`), then preserves saved selection
-  order and searches display names without sorting; see [Chats](#chats-destination) below. The `+` in the Projeto
+- **Project:** the Sessões `+` starts in **Chats**, even with a repository filter active, unless the restored
+  new-session draft is project work in progress (text or attachments). Otherwise an active Sessões repository filter
+  takes precedence, then an explicitly restored draft keeps its project; a fresh draft uses
+  `custom.preferences.data.projects["local"].lastProject`, then the first selected project. The conversation menu's
+  Nova sessão still inherits its origin (Chats for a chat). The Projeto sheet lists **Chats** first (when the server
+  has `custom.chats`), then preserves saved selection order and searches display names without sorting; see [Chats](#chats-destination) below. The `+` in the Projeto
   header ("Adicionar projeto") opens the folder explorer described below; selecting/opening the draft's
   project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state,
   and an empty Projeto list points to that `+`.
@@ -1140,17 +1142,22 @@ containing `alvo/` (the test creates `criado/`); the second case adds the server
 
 Like the web's project selector (`packages/app-custom/src/new-session/project/selector.tsx`), Nova sessão offers
 **Chats**: a session without a repository in a managed `custom.chats/<date>/session-<uuid>` directory. It is listed
-first in Projeto (speech bubble, filtered by its label), offered by the no-project empty state, preselected by an active
-Chats chip in Sessões, and kept by a restored chat draft unless a repository filter is active. The directory selector is
+first in Projeto, before every project (speech bubble, filtered by its label), the default of the Sessões `+` (see
+Project above), offered by the no-project empty state, preselected by an active Chats chip in Sessões, and kept by a
+restored chat draft unless a repository filter is active. The directory selector is
 hidden. Nothing is allocated until Send, as for the master: catalogs and MCP defaults load from the chats root, and MCP
 taps only record intent (“Vale quando o chat for criado”). Send allocates (or reuses the draft's
 allocation) → `claim` with the draft's fixed Session ID → MCP intents on the allocated directory → create Session →
 `confirm` (ignored on failure, as on the web; the plugin reconciles pending claims) → prompt. Failures before Session
 creation keep the allocation in the protected draft, so a retry claims the same directory instead of allocating another.
 
-`NewSessionChatsTests` (UI) chooses Chats in the sheet, sends a Luna 6/low prompt, checks Recentes is unchanged and the
-Chats chip lists the new row, and that the chip preselects Chats. Run it against an isolated sandbox with one selected
-project; it creates one real chat per run.
+`NewSessionChatsTests` (UI) checks the Sessões `+` opens in Chats, Chats stays first in Projeto (also while searching
+"chat"), sends a Luna 6/low prompt, checks Recentes is unchanged and the Chats chip lists the new row and preselects
+Chats. Its second case checks the `+` with a repository filter, a restored project draft with text, and an emptied one.
+Run it against an isolated sandbox with one selected project (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`) and an
+empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts
+`OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`, `OPENCODE_TEST_SIMULATOR` and
+`OPENCODE_TEST_EVIDENCE` to run `NewSessionTests` against another isolated sandbox and simulator.
 
 `NewSessionView`/`NewSessionStore` own presentation and navigation; selectors live in `NewSessionSelectors.swift`.
 `OpenCodeKit/NewSession.swift` owns projections and the narrow typed HTTP contracts, and

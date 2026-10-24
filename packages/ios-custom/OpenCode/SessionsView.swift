@@ -203,7 +203,9 @@ struct SessionsView: View {
           .accessibilityLabel(floatingVoice?.visible(voice) == true ? "Encerrar conversa por voz" : "Conversar por voz")
           .accessibilityIdentifier("voice-start")
           Button {
-            store.conversationPath.append(.init(id: "draft_" + UUID().uuidString, newSession: true))
+            // Sessões starts new work in Chats; projects and worktrees remain one tap away.
+            store.conversationPath.append(
+              .init(id: "draft_" + UUID().uuidString, newSession: true, startInChats: true))
           } label: {
             Image(systemName: "plus").appSymbol(.header).foregroundStyle(theme.color(.onPrimary))
           }
@@ -217,7 +219,7 @@ struct SessionsView: View {
         if route.master {
           MasterSessionView(sessions: store)
         } else if route.newSession {
-          NewSessionView(sessions: store, origin: route.origin)
+          NewSessionView(sessions: store, origin: route.origin, startInChats: route.startInChats)
             .id(route.id)
         } else {
           ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)

@@ -20,9 +20,12 @@ import urllib.request
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-sessoes-derived"
-evidence = temporary / "ios-onda9-prints"
+# Overrides let a separate agent use its own sandbox, simulator and build.
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-sessoes-derived"))
+simulator = os.environ.get("OPENCODE_TEST_SIMULATOR", "OpenCode Sessoes")
+evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-onda9-prints"))
 evidence.mkdir(parents=True, exist_ok=True)
 lease = (temporary / "ios-sessoes-test.lock").open("a")
 fcntl.flock(lease, fcntl.LOCK_EX)
@@ -34,7 +37,7 @@ configured = derived / ("Build/Products/NewSession-" + token + ".xctestrun")
 report = {"theme": theme, "runs": [], "sessions": [], "worktrees": [], "production": "never used"}
 
 def api(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read()
@@ -87,10 +90,10 @@ def cleanup_worktrees():
             report["worktrees"].append(verification)
             ledger_path.write_text(json.dumps(ledger, indent=2))
 devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == "OpenCode Sessoes")
+device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == simulator)
 def draft_path():
     container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, "br.com.alexandrem.opencode", "data"], text=True).strip())
-    return container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(b"http://127.0.0.1:4177").hexdigest() / "new-session/draft.json"
+    return container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(server.encode()).hexdigest() / "new-session/draft.json"
 
 def run_case(case):
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
@@ -98,11 +101,12 @@ def run_case(case):
     targets = [t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"]
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
+        target["EnvironmentVariables"]["OPENCODE_TEST_SERVER_URL"] = server
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     result = temporary / ("onda9-" + case + "-" + token + ".xcresult")
-    command = ["xcodebuild", "test-without-building", "-xctestrun", str(configured), "-destination", "platform=iOS Simulator,name=OpenCode Sessoes",
+    command = ["xcodebuild", "test-without-building", "-xctestrun", str(configured), "-destination", "platform=iOS Simulator,id=" + device,
         "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES",
         "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result), "-only-testing:OpenCodeUITests/NewSessionTests/" + case]
     status = subprocess.call(command)

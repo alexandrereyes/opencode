@@ -24,10 +24,15 @@ import OpenCodeKit
   private let memoryKey: String
   private var categories: [String: String]
   private let origin: NewSessionOrigin?
+  private let startInChats: Bool
 
-  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, defaults: UserDefaults = .standard) {
+  init(
+    sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false,
+    defaults: UserDefaults = .standard
+  ) {
     self.sessions = sessions
     self.origin = origin
+    self.startInChats = startInChats
     self.defaults = defaults
     let server = sessions.client.configuration.url.absoluteString
     draft = sessions.drafts.draft("new-session")
@@ -93,12 +98,16 @@ import OpenCodeKit
     await draft.load()
     if sessions.preferences == nil { await sessions.reload() }
     let inherited = origin.flatMap { origin in projects.first { $0.id == origin.projectID } }
-    // An originating session wins. Otherwise, like a repository filter, the Chats filter wins,
-    // and a restored chat draft stays a chat.
+    // A restored draft with text or attachments is work in progress, not a default to replace.
+    let restoredWork =
+      !chat && draft.newSession != nil && (!draft.isEmpty || !draft.attachments.isEmpty)
+    // An originating session wins. The Sessões "+" defaults to Chats, even over a repository
+    // filter, unless it restores work in progress. Otherwise, like a repository filter, the Chats
+    // filter wins, and a restored chat draft stays a chat.
     if chatsAvailable
       && (origin?.chat == true
         || (inherited == nil
-          && (sessions.chatsSelected
+          && ((startInChats && !restoredWork) || sessions.chatsSelected
             || (chat && !projects.contains { $0.id == sessions.selectedProject }))))
     {
       if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
