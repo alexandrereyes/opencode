@@ -1052,6 +1052,17 @@ same monogram/color projection as Sessões. MCP chips wrap centrally above the r
 second selector and an open keyboard, the avatar/question compact slightly to keep all chips and the preview note
 visible; with the keyboard hidden, the introduction is centered in the available space.
 
+Typography uses the shared scale (see [Typography and readable roles](#typography-and-readable-roles)): the bar title
+is `navigation` with the conversation's `appSymbol(.navigation)` back chevron and 16 pt margin; the question is
+`title`; the 44 pt avatar uses the Sessões monogram (`message`, medium) or an `action` Chats symbol; MCP chips use
+`caption` (growing from a 32 pt minimum height), with `caption` loading/empty/error lines and a `footnote` preview note;
+project/directory/base selectors use `secondary` with `disclosure` chevrons and a `micro` monogram in their 23 pt avatar.
+The Projeto sheet's 38 pt avatars use `secondary`/`action`. The no-project state keeps the native
+`ContentUnavailableView`, like Sessões and Arquivadas. The shared composer (Nova sessão, conversations, children and
+the master) has no visible placeholder; its text view keeps the VoiceOver label **Mensagem**.
+`OpenCodeUITests/NewSessionTypographyTests` checks that and captures project, Chats and, when the isolated sandbox
+has no selected projects, the empty state (otherwise it skips).
+
 - **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
   its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
   project. The Projeto sheet lists **Chats** first (when the server has `custom.chats`), then preserves saved selection

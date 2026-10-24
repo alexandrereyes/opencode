@@ -91,12 +91,6 @@ struct ComposerEditor: View {
           draft: draft, theme: theme, expanded: expanded, owner: editorID,
           submit: submit, canSubmit: canSubmit
         )
-        .overlay(alignment: .topLeading) {
-           if draft.isEmpty {
-            Text("Mensagem").appFont(.body).foregroundStyle(theme.color(.textMuted))
-              .allowsHitTesting(false)
-          }
-        }
         .onGeometryChange(for: Bool.self) {
           $0.size.height > UIFont.preferredFont(forTextStyle: .body).lineHeight * 3 + 2
         } action: {

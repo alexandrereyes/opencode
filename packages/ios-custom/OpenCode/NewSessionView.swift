@@ -23,12 +23,12 @@ struct NewSessionView: View {
           store.draft.focused = false
           dismiss()
         } label: {
-          Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium))
+          Image(systemName: "chevron.left").appSymbol(.navigation)
             .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
         }.buttonStyle(.plain).accessibilityLabel("Voltar").disabled(store.draft.sending)
         Text("Nova sessão").appFont(.navigation)
         Spacer()
-      }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
+      }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 8)
       if store.chat || store.project != nil {
         GeometryReader { geometry in
           let compact = geometry.size.height < 275
@@ -36,14 +36,14 @@ struct NewSessionView: View {
             VStack(spacing: compact ? 10 : 20) {
               VStack(spacing: compact ? 8 : 13) {
                 if let project = store.project {
-                  ProjectAvatar(project: project, size: compact ? 48 : 56)
+                  ProjectAvatar(project: project, size: AppLayout.avatar, style: .message)
                 } else {
-                  ChatsAvatar(size: compact ? 48 : 56)
+                  ChatsAvatar(size: AppLayout.avatar, symbol: .action)
                 }
                 Text(
                   store.project.map { "No que vamos trabalhar\nem \($0.displayName)?" }
                     ?? "Sobre o que vamos\nconversar?")
-                  .font(.system(size: compact ? 22 : 24)).multilineTextAlignment(.center)
+                  .appFont(.title).multilineTextAlignment(.center)
                   .foregroundStyle(theme.color(.textStrong)).fixedSize(
                     horizontal: false, vertical: true
                   )
@@ -62,7 +62,7 @@ struct NewSessionView: View {
               store.retry()
             } label: {
               Label(error + " Tentar novamente", systemImage: "arrow.clockwise")
-                .font(.caption).foregroundStyle(theme.color(.error))
+                .appFont(.caption).foregroundStyle(theme.color(.error))
             }
           }
           FloatingVoiceHost(sessions: store.sessions)
@@ -165,9 +165,9 @@ struct NewSessionView: View {
         } label: {
           HStack(spacing: 7) {
             if let project = store.project {
-              ProjectAvatar(project: project, size: 23)
+              ProjectAvatar(project: project, size: 23, style: .micro)
             } else {
-              ChatsAvatar(size: 23)
+              ChatsAvatar(size: 23, symbol: .inline)
             }
             Text(store.project?.displayName ?? "Chats").lineLimit(1)
             chevron
@@ -191,7 +191,7 @@ struct NewSessionView: View {
           }.accessibilityIdentifier("new-base")
         }
       }
-    }.font(.system(size: 14)).foregroundStyle(theme.color(.text)).buttonStyle(.plain)
+    }.appFont(.secondary).foregroundStyle(theme.color(.text)).buttonStyle(.plain)
       .padding(.horizontal, 6).disabled(store.draft.sending || store.loading || presentingSelector)
   }
   private var directorySelector: some View {
@@ -209,21 +209,21 @@ struct NewSessionView: View {
       "new-directory")
   }
   private var chevron: some View {
-    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium)).foregroundStyle(
+    Image(systemName: "chevron.down").appSymbol(.disclosure).foregroundStyle(
       theme.color(.textSecondary))
   }
   private var mcpChips: some View {
     VStack(spacing: 7) {
       if store.mcpLoading {
-        ProgressView("Carregando MCPs…").font(.caption).tint(theme.color(.textSecondary))
+        ProgressView("Carregando MCPs…").appFont(.caption).tint(theme.color(.textSecondary))
       } else if store.mcpError {
         Button {
           store.retry()
         } label: {
-          Text("Não foi possível carregar MCPs · Tentar novamente").font(.caption)
+          Text("Não foi possível carregar MCPs · Tentar novamente").appFont(.caption)
         }.foregroundStyle(theme.color(.textSecondary))
       } else if store.chips.isEmpty {
-        Text("Nenhum MCP configurado").font(.caption).foregroundStyle(theme.color(.textSecondary))
+        Text("Nenhum MCP configurado").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
       } else {
         MCPFlowLayout(spacing: 7) {
           ForEach(store.chips) { server in
@@ -235,7 +235,7 @@ struct NewSessionView: View {
       }
       if store.preview {
         Text(store.chat ? "Vale quando o chat for criado" : "Vale quando a worktree for criada")
-          .font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary))
+          .appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
       }
     }
   }
@@ -245,12 +245,12 @@ struct ProjectAvatar: View {
   @Environment(\.appTheme) private var theme
   let project: Project
   let size: CGFloat
+  let style: AppTextStyle
   var body: some View {
     let colors = theme.avatar(SessionList.avatarColor(project, fallback: project.id))
-    Text(SessionList.monogram(project.displayName)).font(
-      .system(size: size * 0.39, weight: .medium)
-    )
-    .foregroundStyle(colors.text).frame(width: size, height: size)
+    Text(SessionList.monogram(project.displayName)).appFont(style, weight: .medium)
+      .minimumScaleFactor(0.6).lineLimit(1)
+      .foregroundStyle(colors.text).frame(width: size, height: size)
     .background(colors.background, in: Circle()).accessibilityHidden(true)
   }
 }
@@ -259,8 +259,9 @@ struct ProjectAvatar: View {
 struct ChatsAvatar: View {
   @Environment(\.appTheme) private var theme
   let size: CGFloat
+  let symbol: AppSymbolSize
   var body: some View {
-    Image(systemName: "bubble.left").font(.system(size: size * 0.42, weight: .medium))
+    Image(systemName: "bubble.left").appSymbol(symbol)
       .foregroundStyle(theme.color(.icon)).frame(width: size, height: size)
       .background(theme.color(.highlight), in: Circle()).accessibilityHidden(true)
   }
@@ -304,9 +305,9 @@ struct MCPChip: View {
       HStack(spacing: 7) {
         Circle().fill(theme.color(dotRole)).frame(width: 7, height: 7)
           .opacity(pending && pulse ? 0.3 : 1)
-        Text(server.name).font(.system(size: 13)).lineLimit(1).frame(maxWidth: 184)
+        Text(server.name).appFont(.caption).lineLimit(1).frame(maxWidth: 184)
           .foregroundStyle(theme.color(disabled ? .textWeak : .text))
-      }.padding(.horizontal, 12).frame(height: 32)
+      }.padding(.horizontal, 12).frame(minHeight: 32)
         .overlay {
           Capsule().strokeBorder(
             theme.color(.border), style: StrokeStyle(lineWidth: 0.8, dash: disabled ? [4, 3] : []))

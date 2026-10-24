@@ -19,7 +19,7 @@ struct NewSessionProjectSheet: View {
               dismiss()
             } label: {
               HStack(spacing: 14) {
-                ChatsAvatar(size: 38)
+                ChatsAvatar(size: 38, symbol: .action)
                 Text("Chats").foregroundStyle(theme.color(.text))
                 Spacer()
                 if store.chat { Image(systemName: "checkmark") }
@@ -39,7 +39,7 @@ struct NewSessionProjectSheet: View {
               }
             } label: {
               HStack(spacing: 14) {
-                ProjectAvatar(project: project, size: 38)
+                ProjectAvatar(project: project, size: 38, style: .secondary)
                 Text(project.displayName).foregroundStyle(theme.color(.text))
                 Spacer()
                 if store.project?.id == project.id { Image(systemName: "checkmark") }
