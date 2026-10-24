@@ -108,7 +108,9 @@ struct UserBubble: View {
               ).accessibilityIdentifier("user-prompt-\(message.id)")
             }
           }.accessibilityIdentifier("user-content-\(message.id)")
-          UserMessageAttachmentsView(attachments: UserMessageAttachments(message))
+          // Truncated bubbles omit image thumbnails; their expansion control below reveals them.
+          UserMessageAttachmentsView(attachments: UserMessageAttachments(
+            message, includesImages: !(collapsible && !expanded && truncated)))
           if collapsible && (expanded || truncated) {
             Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
               setExpanded(!expanded)

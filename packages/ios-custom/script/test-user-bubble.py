@@ -49,7 +49,7 @@ if args.prepare:
     now = int(time.time() * 1000)
     sessions = []
     roles = (["REVIEW_" + kind + "_" + placement for kind in ["IMAGE", "FILE", "QUOTE", "PLAIN", "MIXED"]
-        for placement in ["LIST", "PINNED"]] if args.review_attachments else ["BUBBLE", "SHORT"])
+        for placement in ["LIST", "PINNED"]] if args.review_attachments else ["BUBBLE", "SHORT", "IMAGE_LONG", "IMAGE_SHORT"])
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 60, 180, 8, 2, 0, 0, 0))
@@ -59,13 +59,17 @@ if args.prepare:
     for role in roles:
         session = "ses_" + uuid.uuid4().hex
         user = "msg_" + uuid.uuid4().hex
-        text = "Primeira linha.\nSegunda linha." if role == "SHORT" else "Pedido longo de comparação.\n" + "\n".join(
+        text = "Primeira linha.\nSegunda linha." if role in ["SHORT", "IMAGE_SHORT"] else "Pedido longo de comparação.\n" + "\n".join(
             f"Detalhe {n}: preserve a leitura da resposta e o contexto do pedido sintético." for n in range(1, 25)) + "\nDetalhe final exclusivo."
         answer = "\n\n".join(f"## Etapa {n}\n\nResposta sintética para conferir a rolagem. O pedido fica fixado sem mudar de tamanho por conta própria.\n\n- Leitura preservada.\n- Expansão apenas manual."
             for n in range(1, 35))
         files = []
         metadata = {"quotes": [{"id": "quote-bolha", "messageID": "msg_quote_bolha", "partID": "part_quote_bolha", "text": "Citação sintética preservada.", "comment": "Comentário preservado."}],
             "attachments": [{"name": "nota-sintetica.txt"}]} if role == "BUBBLE" else {}
+        if role.startswith("IMAGE_"):
+            files.append({"mime": "image/png", "name": image_name,
+                "data": base64.b64encode(png).decode(), "source": {"type": "inline"}})
+            metadata = {"attachments": [{"name": image_name}]}
         if args.review_attachments:
             kind = role.split("_")[1]
             text = "Pedido sintético " + kind.lower() + ".\n" + "\n".join(

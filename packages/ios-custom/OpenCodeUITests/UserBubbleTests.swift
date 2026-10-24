@@ -97,6 +97,32 @@ import UIKit
     app.terminate()
   }
 
+  func testTruncatedPromptHidesImagesUntilExpandedInBothThemes() throws {
+    let image = "feed-image-captura-sintetica-com-nome-muito-longo.png"
+    let anyImage = NSPredicate(format: "identifier BEGINSWITH 'feed-image-'")
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      var app = try launch("IMAGE_LONG", theme: theme)
+      let control = app.buttons["user-prompt-toggle-" + (try XCTUnwrap(environment["OPENCODE_TEST_IMAGE_LONG_MESSAGE"]))]
+      XCTAssertTrue(control.waitForExistence(timeout: 10))
+      XCTAssertEqual(control.value as? String, "Recolhido")
+      XCTAssertFalse(app.buttons.matching(anyImage).firstMatch.exists)
+      shot(app, "app-image-collapsed-" + theme)
+      control.tap()
+      wait(NSPredicate(format: "value == 'Expandido'"), on: control)
+      XCTAssertTrue(app.buttons[image].waitForExistence(timeout: 10))
+      shot(app, "app-image-expanded-" + theme)
+      control.tap()
+      wait(NSPredicate(format: "value == 'Recolhido'"), on: control)
+      XCTAssertFalse(app.buttons.matching(anyImage).firstMatch.exists)
+      app.terminate()
+      app = try launch("IMAGE_SHORT", theme: theme)
+      XCTAssertTrue(app.buttons[image].waitForExistence(timeout: 10))
+      XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'user-prompt-toggle-'")).firstMatch.exists)
+      shot(app, "app-image-short-" + theme)
+      app.terminate()
+    }
+  }
+
   func testPromptTextIsAccessibleSeparatelyFromExpansionInBothThemes() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = try launch(theme: theme)

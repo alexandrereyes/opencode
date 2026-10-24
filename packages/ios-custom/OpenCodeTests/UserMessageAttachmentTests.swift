@@ -48,6 +48,21 @@ import XCTest
     XCTAssertEqual(message.metadata?["attachments"]?.array?.count, 3)
   }
 
+  func testCollapsedBubbleOmitsOnlyImagesWithoutRepeatingTheirNamesAsFiles() throws {
+    let message = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"""
+      {"id":"msg_collapsed","type":"user","time":{"created":0},"text":"Mensagem",
+       "files":[{"mime":"image/png","name":"captura.png","data":"abc"},
+                {"mime":"application/pdf","name":"relatorio.pdf","data":"def"}],
+       "metadata":{"attachments":[{"name":"captura.png"},{"name":"relatorio.pdf"},{"name":"nota.txt"}]}}
+      """#.utf8))
+    let collapsed = UserMessageAttachments(message, includesImages: false)
+    XCTAssertTrue(collapsed.images.isEmpty)
+    XCTAssertEqual(collapsed.files, ["relatorio.pdf", "nota.txt"])
+    let expanded = UserMessageAttachments(message)
+    XCTAssertEqual(expanded.images.map(\.name), ["captura.png"])
+    XCTAssertEqual(expanded.files, collapsed.files)
+  }
+
   func testAttachmentOnlyMessagesKeepEveryDistinctImageAndFile() throws {
     let message = try JSONDecoder().decode(ConversationMessage.self, from: Data(#"""
       {"id":"msg_files","type":"user","time":{"created":0},

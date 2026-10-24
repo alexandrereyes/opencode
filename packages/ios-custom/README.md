@@ -159,8 +159,12 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   is on by default: overflow beyond two rendered lines offers **Mostrar mensagem completa** / **Mostrar menos**.
   Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
   fade. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
-  actions stay outside it. OpenChamber keeps attachments visible in both states: 48-point square image thumbnails in
-  a horizontal strip, no repeated image filename, and wrapping one-line file chips (filename up to 140 points).
+  actions stay outside it. Attachments use 48-point square image thumbnails in a horizontal strip, no repeated image
+  filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the text is
+  truncated (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
+  chips stay visible in both states, and a message that never truncates (short or image-only) always shows its images.
+  This deliberately differs from the custom web, which hides every attachment until expanded and makes any message
+  with attachments or context expandable, even when its text is short.
   Quotes/comments collapse to a caption/comment line; expanding reveals the quote's separate four-line/full disclosure.
   Collapsing off shows the content immediately. VoiceOver retains full filenames and announces attached context.
   The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
@@ -1174,10 +1178,11 @@ that message back to its top (pinned-header targets still materialize their orig
 
 User-prompt parity has its own **OpenCode Bolha** simulator (`49BFE0E0-8D48-406C-A5D1-491DE91CA392`) and
 `ios-bolha-derived`. After `build-for-testing` for that destination, run `script/test-user-bubble.py` with Python:
-`--prepare` imports two owned synthetic histories, `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
+`--prepare` imports four owned synthetic histories (two with an image), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
 removes only those imports. No model call or seed reset is needed. The runner always supplies explicit sandbox-4177
 arguments/password and removes its private xctestrun file. Both themes cover manual expansion invariant under scrolling,
-the persisted Você option, short-message threshold, copy/quote menu and user-message search. `UserPromptTests` checks
+the persisted Você option, short-message threshold, copy/quote menu, user-message search and image thumbnails hidden
+only while the prompt is truncated. `UserPromptTests` checks
 native line measurement, width changes and search reveal after viewport shrink. Research/source references are in
 `.agent-artifacts/bolha-usuario/OPENCHAMBER.md`; results and evidence paths are in `RESULTADO.md` beside it.
 

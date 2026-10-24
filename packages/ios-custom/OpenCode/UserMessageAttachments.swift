@@ -19,11 +19,12 @@ struct UserMessageAttachments {
   let images: [FeedImage]
   let files: [String]
 
-  init(_ message: ConversationMessage) {
-    images = (message.files ?? []).compactMap { file in
+  init(_ message: ConversationMessage, includesImages: Bool = true) {
+    let images = (message.files ?? []).compactMap { file -> FeedImage? in
       guard let image = FeedImage.attachment(file) else { return nil }
       return FeedImage(source: image.source, name: file.object?["name"]?.string ?? file.object?["filename"]?.string ?? image.name)
     }
+    self.images = includesImages ? images : []
     let otherFiles = (message.files ?? []).filter {
       !($0.object?["mime"]?.string ?? $0.object?["mimeType"]?.string ?? "").hasPrefix("image/")
         && $0.object?["type"]?.string != "image"
