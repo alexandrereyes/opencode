@@ -1434,6 +1434,38 @@ Parsed blocks survive transient row disappearance; the shared bounded Markdown c
 observation remain unchanged. Returning from a child reuses a materialized reading anchor instead of first scrolling
 that message back to its top (pinned-header targets still materialize their original message).
 
+### Transcript update and history paging cost
+
+Streamed deltas republish the whole message list; rows must not re-render because of it. Conversation environment
+contexts and transcript rows compare by rendered data (their handlers capture the view's state storage), rows
+never read `store.messages`, and day chips/usage footers come from one `TranscriptMarks` pass. Each response
+`UITextView` sits in a neutral `ResponseTextContainer`: SwiftUI stacks query hosted views for text baselines on
+every layout pass, and a text view answers each query with a fresh TextKit layout. Pinned prompts style their
+native header once per container/color and follow offsets synchronously; they read the 40% cap from
+`ConversationViewport`, so keyboard transitions do not re-render the transcript. While a finger or fling owns the
+transcript, deltas publish every 120 ms instead of 32 ms. The follow owner measures once per display tick; its
+plan still requires two consecutive matching layouts.
+
+An older page fetched during a touch or fling is held until scrolling settles. It is then admitted with its
+anchor captured at that moment and corrected in the same transaction (forcing the hosting layout, and revealing
+the anchor by identity if a tall page pushed it out of the materialized rows); later passes in which List
+re-estimates the inserted rows are corrected in the frame they occur. Fetching earlier than 40 pt from the top
+was measured and rejected: pages then land mid-history, where those re-estimations show.
+
+`measure-scroll.py` on the iPhone 14, 24 October (Debug `-O`, medians of three alternating 12-second runs;
+frames of 720 / p95 / main-thread CPU):
+
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| `stream-follow` | 95 / 146.6 ms / 12.1 s | 720 / 16.7 ms / 6.4 s |
+| `stream-reading` | 330 / 54.9 ms / 11.7 s | 690 / 16.7 ms / 5.0 s |
+| `read` | 679 / 16.7 ms / 4.8 s | 678 / 16.7 ms / 4.4 s |
+| `history-up` (frames over 50 ms) | 668 (11) | 668 (10) |
+| `paged-up` (replaced frames, over 100 ms) | 577 (1, 10) | 652 (0, 5) |
+
+Materializing rows never shown before is unchanged: a message is one List cell holding a `UITextView` per
+Markdown block, and creating, styling and sizing those views still produces 100–190 ms frames.
+
 User-prompt parity has its own **OpenCode Bolha** simulator (`49BFE0E0-8D48-406C-A5D1-491DE91CA392`) and
 `ios-bolha-derived`. After `build-for-testing` for that destination, run `script/test-user-bubble.py` with Python:
 `--prepare` imports four owned synthetic histories (two with an image), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`

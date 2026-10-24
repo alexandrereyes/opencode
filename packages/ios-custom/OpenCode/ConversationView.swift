@@ -777,11 +777,13 @@ struct ConversationView: View {
       )
       .coordinateSpace(name: "conversation-scroll")
       .onAppear {
+        scrollState.reveal = { proxy.scrollTo($0, anchor: .top) }
         if !firstLoad && conversation.ready && requestedTool == nil {
           restore(savedPosition, proxy: proxy)
         }
       }
       .onScrollPhaseChange { _, phase in
+        conversation.scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
         // Tracking also includes taps on the overlaid controls, not just scrolling.
         if phase == .interacting || phase == .decelerating {
           conversation.mcps.close()
@@ -821,12 +823,16 @@ struct ConversationView: View {
         viewport.stickyHeight = scrollState.usableTop
         if arrived && !atBottom && !interacting && !selectionPaused && !firstLoad && !restoring
           && !resumeOffered && screenVisible { resumeFollowing() }
+        // Fetching earlier admits pages while the reader is mid-history, where List's re-estimation of the
+        // inserted rows shows; at the top, the held page lands where the reader expects it.
         if !search.open && !atBottom && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
         if (old.height != new.height || old.viewport != new.viewport) && atBottom && !interacting
           && !restoring && screenVisible
         {
           scrollState.followToEnd()
         } else if !interacting && screenVisible {
+          // A prepended page keeps re-estimating rows above the reader; hold the anchor in this frame.
+          if old.height != new.height { scrollState.holdHistoryAnchor() }
           scrollState.correctAnchor()
         }
       }
@@ -1074,22 +1080,29 @@ struct ConversationView: View {
     guard conversation.ready, conversation.hasOlder, !conversation.paging, !restoring,
       !resumeOffered
     else { return }
-    // Retain a row's actual screen coordinate, including a partially visible page, not just its ID.
-    if !atBottom,
-      let anchor = scrollState.frames.filter({
-        $0.value.maxY > scrollState.usableTop && !scrollState.pinned.contains($0.key)
-      })
-      .min(by: { $0.value.minY < $1.value.minY })
-    {
-      scrollState.readingAnchor = nil
-      scrollState.anchor = (anchor.key, anchor.value.minY)
-    }
     Task {
       let count = conversation.messages.count
-      await conversation.older()
+      await conversation.older {
+        // Like the web, a page fetched during a touch or fling waits until scrolling settles:
+        // correcting a moving offset fights the gesture, and inserting without it jumps the rows.
+        while scrollState.touching {
+          do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+        }
+        // Retain a row's actual screen coordinate, including a partially visible page, not just its ID.
+        if !atBottom,
+          let anchor = scrollState.frames.filter({
+            $0.value.maxY > scrollState.usableTop && !scrollState.pinned.contains($0.key)
+          })
+          .min(by: { $0.value.minY < $1.value.minY })
+        {
+          scrollState.readingAnchor = nil
+          scrollState.anchor = (anchor.key, anchor.value.minY)
+        }
+      }
       // An empty history page has no prepended geometry to preserve. In particular,
       // do not pin the top while the initial Markdown is still acquiring its height.
       if conversation.messages.count == count { scrollState.anchor = nil }
+      scrollState.correctAnchorNow()
     }
   }
   private func day(_ milliseconds: Double) -> some View {

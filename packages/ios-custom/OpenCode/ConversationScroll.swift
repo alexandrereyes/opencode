@@ -27,6 +27,8 @@ import SwiftUI
     Set(activeHeaders.map(\.id))
   }
   var anchor: (id: String, y: CGFloat)?
+  /// Scrolls a row to the top by identity (the transcript's `ScrollViewReader`).
+  var reveal: ((String) -> Void)?
   var readingAnchor: (id: String, offset: Double, viewportTop: Double?)?
   private var plan = ConversationScrollPlan()
   private var link: CADisplayLink?
@@ -157,13 +159,13 @@ import SwiftUI
     if simulatedTouch { cancelAnchor(); return }
     #endif
     if view.isTracking || view.isDecelerating { return }
-    // Require a coherent native layout and a matching display pass. Repeated
-    // notifications retain the pending sample instead of starving a stream.
-    guard let first = measure(view), let second = measure(view), first == second else { return }
+    // Require a coherent native layout matching the previous display pass (the plan compares
+    // consecutive samples). Repeated notifications retain the pending sample instead of starving a stream.
+    guard let layout = measure(view) else { return }
     let target = max(
       -view.adjustedContentInset.top,
-      min(second.bottom, second.height) - view.bounds.height + view.adjustedContentInset.bottom)
-    guard let action = plan.consume(second, interacting: false) else { return }
+      min(layout.bottom, layout.height) - view.bounds.height + view.adjustedContentInset.bottom)
+    guard let action = plan.consume(layout, interacting: false) else { return }
     link?.invalidate()
     link = nil
     if case .reading = action { applyCorrection(); return }
@@ -243,6 +245,26 @@ import SwiftUI
       #endif
       view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: false)
     }
+  }
+  /// Applies a pending anchor before the frame is drawn: the transcript was just republished, so it is
+  /// laid out now and corrected in the same transaction. Late measurements still settle as usual.
+  func correctAnchorNow() {
+    guard active, anchor != nil || readingAnchor != nil, let view, let window = view.window, !touching
+    else { return }
+    window.layoutIfNeeded()
+    // A tall page can push the anchor out of the materialized rows; bring it back by identity first.
+    if let id = anchor?.id ?? readingAnchor?.id, frames[id] == nil, let reveal {
+      reveal(id)
+      window.layoutIfNeeded()
+    }
+    applyCorrection()
+    correctAnchor()
+  }
+  /// Corrects a history-page anchor from the layout that just changed, without waiting for the
+  /// display link: List re-estimates the inserted rows for several passes after a prepend.
+  func holdHistoryAnchor() {
+    guard active, anchor != nil, readingAnchor == nil, !plan.following, !touching else { return }
+    applyCorrection()
   }
   func followToEnd(animated: Bool = false) {
     guard active else { return }

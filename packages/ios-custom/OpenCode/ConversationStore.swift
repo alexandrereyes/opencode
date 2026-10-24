@@ -57,6 +57,8 @@ import OpenCodeKit
   @ObservationIgnored let usageCache = ContextUsageCache()
   @ObservationIgnored private var cursor: String?
   @ObservationIgnored private var fixtureHistory: [ConversationMessage] = []
+  /// A finger or fling owns the transcript; streamed deltas then publish at a calmer cadence.
+  @ObservationIgnored var scrolling = false
   @ObservationIgnored private var refreshing = false
   @ObservationIgnored private var dirty = false
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -609,11 +611,12 @@ import OpenCodeKit
       tick += 1
     }
   }
-  private func olderScrollFixture() async {
+  private func olderScrollFixture(admitting admit: () async -> Void) async {
     guard !paging, hasOlder else { return }
     paging = true
     defer { paging = false }
     do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+    await admit()
     messages = fixtureHistory.suffix(Self.fixturePage) + messages
     fixtureHistory.removeLast(min(Self.fixturePage, fixtureHistory.count))
     hasOlder = !fixtureHistory.isEmpty
@@ -637,7 +640,7 @@ import OpenCodeKit
   private func scheduleBatch() {
     guard batchTask == nil else { return }
     batchTask = Task {
-      do { try await Task.sleep(for: .milliseconds(32)) } catch { return }
+      do { try await Task.sleep(for: .milliseconds(scrolling ? 120 : 32)) } catch { return }
       let events = pending
       pending.removeAll()
       batchTask = nil
@@ -824,9 +827,10 @@ import OpenCodeKit
       }
     }
   }
-  func older() async {
+  /// Publishes the next older page once `admit` returns, so a reader can hold it until scrolling settles.
+  func older(admitting admit: () async -> Void = {}) async {
     #if DEBUG
-    if ScrollFixtures.mode != nil { return await olderScrollFixture() }
+    if ScrollFixtures.mode != nil { return await olderScrollFixture(admitting: admit) }
     #endif
     guard !paging, hasOlder, let cursor else { return }
     paging = true
@@ -834,6 +838,7 @@ import OpenCodeKit
     do {
       let page = try await client.conversation(id, cursor: cursor)
       try Task.checkCancellation()
+      await admit()
       messages = ConversationProjection.merge(messages, page: page.data.reversed(), older: true)
       self.cursor = page.cursor?.next
       hasOlder = !page.data.isEmpty && self.cursor != nil && self.cursor != cursor
