@@ -2690,12 +2690,35 @@ result or secretly wakes the parent.
   when a signal is suppressed. The last 500 claims are persisted in server-scoped local preferences. Reconnection
   establishes a fresh live-time boundary; old signals and all reconciliation snapshots are silent. In-flight lookups
   cannot deliver after disconnection or into a new connection generation. No missed-event backfill is attempted.
-- One replaceable glass banner shows the repository monogram, session title and **Concluída**, **Falhou** or
-  **Precisa de você**. It dismisses after six seconds, has a close action and announces once to VoiceOver. A shared
+- One replaceable glass banner shows the repository monogram, session title and **Concluída**, **Respondeu**,
+  **Falhou** or **Precisa de você**. It dismisses after six seconds, has a close action and announces once to VoiceOver. A shared
   typed conversation path makes tapping push the target from Sessões, another conversation or another tab, without
   discarding the underlying reader. App-owned sheets also present the banner; only the top presentation draws it,
   and tapping closes the modal chain before exposing the destination. The central timer/listener is not duplicated
   by these presentation overlays. System dialogs and file/photo pickers retain control of their own UI.
+- **Respondeu vs Concluída (Alexandre, 24/10).** A root execution success is not necessarily the end of the work: an
+  orchestrator may answer while its subagents run in the background. On an admitted `session.execution.succeeded`,
+  `SessionAlertCenter` reads, from the server at that instant, `custom.session-family/snapshot` (`active`: the
+  native process-global active set restricted to the root's descendants) and `GET /api/shell` for the root's
+  directory. `SessionAlertWork` counts as **agents** the active descendants whose parent is not itself active (a
+  running child and its running grandchild count once, like the header's agents capsule; a still running grandchild
+  of an idle child still counts) and as **tasks** the root's running shells (a finished root has no foreground
+  tools, so they are background shells, again like the header). Anything running gives **Respondeu · 1 agente
+  rodando**, **· 2 agentes**, **· 1 tarefa**, or **· 1 agente e 1 tarefa rodando**, with a speech-bubble icon in the
+  neutral `textSecondary` role; nothing running gives **Concluída** with the ✓ in `success`. Reading after the
+  event avoids the race between the root's event and its children's events: the server's state when the read
+  runs is the label, never this device's possibly stale list (`store.active`) or another session's messages. If
+  the family read fails or takes longer than **2 s**, the banner says only **Respondeu**: completion is only claimed
+  when nothing is known to run. A failed shell read (for example, a missing directory) counts no tasks.
+  **Falhou** and **Precisa de você** are unchanged and never wait.
+- **Reply preview.** **Respondeu** and **Concluída** banners show one truncated line under the label: the first
+  nonblank line of the latest assistant text, verbatim, from the same `client.preview(id)` (`custom.transcript/list`,
+  three messages) and `SessionPreview` the Sessões rows use (`SessionPreview.reply`). It is absent when the user wrote
+  last, when the response has no text, or when the read fails or exceeds **1.5 s**. The family, shell and preview
+  reads run concurrently, so a completion banner appears at most about 2 s after the session/preference lookup;
+  this lookup runs off the event loop and a newer alert, deletion or reconnection discards it. Its VoiceOver label
+  and announcement include the label and preview. There are no system notifications, push or Live Activities for
+  session alerts, so no other surface uses these labels.
 - `Haptics` uses UIKit's system-respecting semantic generators: light on successful send/archive/pin/mute, success on
   permission allow/question answer, warning on denial/dismissal, selection on explicit copies, soft on banner arrival.
   Side-question submissions also give light feedback. Streaming and ordinary snapshot changes never trigger it.
@@ -2712,6 +2735,13 @@ encoding/delivery without an agent switch and catalog fallback/default-Location 
 python3 packages/ios-custom/script/test-subagents-alerts.py
 OPENCODE_TEST_THEME=openchamber-light python3 packages/ios-custom/script/test-subagents-alerts.py
 ```
+
+The runner accepts `--server-url`, `--home`, `--derived`, `--device` (simulator name or UUID) and `--evidence` for an
+isolated worker (never 4096/4178), plus test identifiers. It also imports an orchestrator and a background-shell
+root: `testRootReplyWhileWorkRunsSaysRepliedThenConcluded` has the orchestrator start one background General child
+that runs `sleep 30`, expects **Respondeu · 1 agente rodando** with the reply line, then **Concluída** with the reply it
+gives once notified of the child's completion; the other root starts one background `sleep 30` shell and expects
+**Respondeu · 1 tarefa rodando**. Cleanup interrupts both roots' children too.
 
 The sandbox-only runner creates its own Luna 6 / low parent and genuine General child in the fake conversation repo,
 checks a native child send and exact preservation of the parent's completed subagent part, exercises all banner kinds

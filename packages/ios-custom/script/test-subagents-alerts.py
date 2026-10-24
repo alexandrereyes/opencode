@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Sandbox-only wave 7 checks, real delegated child and live SSE alerts. Never touches seed requests."""
+import argparse
 import base64
 import fcntl
 import json
@@ -15,9 +16,19 @@ import urllib.error
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-sessoes-derived"
-lease = (temporary / "ios-sessoes-test.lock").open("a")
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--server-url", default="http://127.0.0.1:4177")
+parser.add_argument("--home", type=Path, default=temporary / "custom-sandbox-4177")
+parser.add_argument("--derived", type=Path, default=temporary / "ios-sessoes-derived")
+parser.add_argument("--device", default="OpenCode Sessoes", help="Simulator name or UUID")
+parser.add_argument("--evidence", type=Path, default=temporary / "ios-conversa-prints/onda7")
+parser.add_argument("tests", nargs="*")
+args = parser.parse_args()
+port = int(args.server_url.rsplit(":", 1)[1].split("/")[0])
+assert args.server_url.startswith(("http://127.0.0.1:", "http://localhost:")) and port not in (4096, 4178), "Use an isolated loopback sandbox"
+home = args.home
+derived = args.derived
+lease = (temporary / ("ios-alerts-test-" + str(port) + ".lock")).open("a")
 fcntl.flock(lease, fcntl.LOCK_EX)
 password = (home / "password").read_text().strip()
 directory = str(home / "repos/ios-conversation")
@@ -30,10 +41,10 @@ created = []
 children = []
 configuration = derived / ("Build/Products/SubagentAlerts-" + token + ".xctestrun")
 result = temporary / ("onda7-" + theme + "-" + token + ".xcresult")
-evidence = temporary / "ios-conversa-prints/onda7"
+evidence = args.evidence
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path, data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
+    request = urllib.request.Request(args.server_url + path, data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
             data = response.read()
@@ -49,7 +60,7 @@ def tools(session):
 
 try:
     now = int(time.time() * 1000)
-    for role, title in [("PARENT", "sessão principal"), ("SUCCESS", "conclusão"), ("FAILURE", "falha"), ("PERMISSION", "permissão"), ("PERMISSION2", "outra permissão"), ("QUESTION", "pergunta"), ("MUTED", "silenciada"), ("MISSING", "diretório ausente")]:
+    for role, title in [("PARENT", "sessão principal"), ("SUCCESS", "conclusão"), ("FAILURE", "falha"), ("PERMISSION", "permissão"), ("PERMISSION2", "outra permissão"), ("QUESTION", "pergunta"), ("MUTED", "silenciada"), ("MISSING", "diretório ausente"), ("ORCHESTRATOR", "orquestradora"), ("TASKS", "tarefa em segundo plano")]:
         session = "ses_" + uuid.uuid4().hex
         own[role] = session
         location = {"directory": directory + "/onda7-ausente-" + token if role == "MISSING" else directory}
@@ -75,19 +86,19 @@ try:
     own["CHILD"] = children[0]
     before = tools(own["PARENT"])
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
-    environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_TEST_THEME": theme, **{"OPENCODE_TEST_" + role: session for role, session in own.items()}}
+    environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_TEST_SERVER_URL": args.server_url, **{"OPENCODE_TEST_" + role: session for role, session in own.items()}}
     targets = [target for c in run["TestConfigurations"] for target in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"]
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
         target["EnvironmentVariables"]["OPENCODE_SERVER_PASSWORD"] = password
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", args.server_url]
     configuration.write_bytes(plistlib.dumps(run))
     configuration.chmod(0o600)
     devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-    device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == "OpenCode Sessoes")
+    device = next(d["udid"] for group in devices["devices"].values() for d in group if args.device in (d["name"], d["udid"]))
     subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
-    command = ["xcodebuild", "test-without-building", "-xctestrun", str(configuration), "-destination", "platform=iOS Simulator,name=OpenCode Sessoes", "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result)]
-    for method in sys.argv[1:] or ["OpenCodeUITests/SubagentAlertTests"]:
+    command = ["xcodebuild", "test-without-building", "-xctestrun", str(configuration), "-destination", "platform=iOS Simulator,id=" + device, "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result)]
+    for method in args.tests or ["OpenCodeUITests/SubagentAlertTests"]:
         command.append("-only-testing:" + method)
     status = subprocess.call(command)
     evidence.mkdir(parents=True, exist_ok=True)
@@ -110,6 +121,9 @@ finally:
     configuration.unlink(missing_ok=True)
     if "MUTED" in own:
         api("/api/rpc/custom.preferences/mutate", {"input": {"type": "sidebar.mute", "session": own["MUTED"], "muted": False}})
+    for role in ["ORCHESTRATOR", "TASKS"]:
+        if role in own:
+            children += [session["id"] for session in api("/api/rpc/custom.session-family/page", {"input": {"sessionID": own[role], "limit": 100}})["output"]["data"]]
     for session in dict.fromkeys([s for s in created if s != own.get("MISSING")] + children):
         api("/api/session/" + session + "/interrupt", {})
     deadline = time.monotonic() + 30

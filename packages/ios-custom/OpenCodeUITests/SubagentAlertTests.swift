@@ -79,6 +79,8 @@ import XCTest
         let banner = app.buttons["session-alert-open"]
         XCTAssertTrue(banner.waitForExistence(timeout: 90), role)
         XCTAssertTrue(banner.label.contains(state))
+        // Completion with nothing else running shows the reply's first line; other kinds show none.
+        XCTAssertEqual(banner.label.contains("Concluido"), role == "SUCCESS", banner.label)
         screenshot("banner-" + role.lowercased() + "-" + screen)
         app.buttons["Fechar alerta"].tap()
         XCTAssertTrue(banner.waitForNonExistence(timeout: 8))
@@ -93,6 +95,31 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Onda 7 — pergunta"].waitForExistence(timeout: 15))
     XCTAssertTrue(app.collectionViews["conversation-transcript"].exists)
     screenshot("banner-opened-question")
+  }
+  private func banner(_ app: XCUIApplication, containing texts: [String], timeout: TimeInterval = 150) -> XCUIElement {
+    let predicates = [NSPredicate(format: "identifier == 'session-alert-open'")]
+      + texts.map { NSPredicate(format: "label CONTAINS %@", $0) }
+    let banner = app.buttons.matching(NSCompoundPredicate(andPredicateWithSubpredicates: predicates)).firstMatch
+    XCTAssertTrue(banner.waitForExistence(timeout: timeout), texts.joined(separator: " · "))
+    return banner
+  }
+  func testRootReplyWhileWorkRunsSaysRepliedThenConcluded() async throws {
+    let app = try launch("PARENT")
+    try await prompt("ORCHESTRATOR", #"Chame a ferramenta subagent uma unica vez com agent="general", description="Esperar", model="llm-proxy/gpt-6-luna#low", background=true, prompt="Use a ferramenta shell para executar exatamente sleep 30. Depois responda apenas: Filho pronto.". Logo depois responda apenas: Aguardando o subagente. Quando for notificado de que ele terminou, responda apenas: Tudo concluido."#)
+    var shown = banner(app, containing: ["Respondeu · 1 agente rodando", "Aguardando o subagente"])
+    XCTAssertFalse(shown.label.contains("Concluída"))
+    screenshot("banner-replied-agent")
+    app.buttons["Fechar alerta"].tap()
+    // The model sometimes accents its reply ("concluído"); the preview is verbatim either way.
+    shown = banner(app, containing: ["Concluída", "Tudo conclu"])
+    XCTAssertFalse(shown.label.contains("Respondeu"))
+    screenshot("banner-concluded-after-agent")
+    app.buttons["Fechar alerta"].tap()
+    try await prompt("TASKS", "Use a ferramenta shell uma unica vez com background=true para executar exatamente sleep 30. Logo depois responda apenas: Tarefa iniciada.")
+    shown = banner(app, containing: ["Respondeu · 1 tarefa rodando", "Tarefa iniciada"])
+    XCTAssertFalse(shown.label.contains("agente"))
+    screenshot("banner-replied-task")
+    app.buttons["Fechar alerta"].tap()
   }
   func testBannerOpensFromAnotherTabAndPresentedSheet() async throws {
     var app = try launch("PARENT")

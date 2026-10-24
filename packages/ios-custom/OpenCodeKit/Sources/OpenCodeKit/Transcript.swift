@@ -111,6 +111,9 @@ public struct SessionPreview: Sendable, Equatable {
   public var text = ""
   public var image = false
   public var activity: String?
+  /// The first nonblank line of `text` when the latest message with text is the assistant's;
+  /// `nil` when the user wrote last. Session alerts show it verbatim, without summarizing.
+  public var reply: String?
 
   public init(messages: [TranscriptMessage] = []) {
     let ordered = messages.sorted { $0.created > $1.created }
@@ -126,6 +129,9 @@ public struct SessionPreview: Sendable, Equatable {
       case .assistant(let value):
         text = value.content.compactMap { if case .text(let text) = $0 { text } else { nil } }
           .joined(separator: " ")
+        reply = text.split(whereSeparator: \.isNewline)
+          .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+          .map { String($0.prefix(240)) }
         if text.isEmpty,
           value.content.contains(where: {
             if case .tool(let tool) = $0 {

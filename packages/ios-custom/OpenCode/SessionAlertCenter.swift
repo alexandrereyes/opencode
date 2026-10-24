@@ -7,12 +7,15 @@ import SwiftUI
     let id = UUID()
     let session: Session
     let project: Project?
-    let kind: SessionAlertKind
+    let content: SessionAlertContent
   }
   private(set) var message: Message?
   private(set) var navigationID = UUID()
   private(set) var presentations: [UUID] = []
   @ObservationIgnored private var dismissal: Task<Void, Never>?
+  @ObservationIgnored private var enrichment: Task<Void, Never>?
+  /// Admission order: a slower completion lookup never replaces a newer alert.
+  @ObservationIgnored private var sequence = 0
   @ObservationIgnored private var policy: SessionAlertPolicy
   @ObservationIgnored private let server: String
   @ObservationIgnored private let storageKey: String
@@ -25,6 +28,8 @@ import SwiftUI
   func connect(at time: Double) { policy.connect(at: time) }
   func disconnect() {
     policy.disconnect()
+    enrichment?.cancel()
+    enrichment = nil
     dismissal?.cancel()
     dismissal = nil
     message = nil
@@ -53,18 +58,66 @@ import SwiftUI
         autoApprove: latest?.data.settings.autoApprove ?? false)
       UserDefaults.standard.set(policy.claims, forKey: storageKey)
       guard admitted else { return }
-      message = Message(
-        session: root, project: store.projects.first { $0.id == root.projectID }, kind: signal.kind)
-      dismissal?.cancel()
-      let id = message?.id
-      dismissal = Task { [weak self] in
-        do { try await Task.sleep(for: .seconds(6)) } catch { return }
-        if let id { self?.dismiss(id) }
+      sequence += 1
+      let order = sequence
+      let project = store.projects.first { $0.id == root.projectID }
+      guard signal.kind == .succeeded else {
+        present(Message(session: root, project: project, content: SessionAlertContent(kind: signal.kind)))
+        return
       }
-      Haptics.play(.soft)
-      AccessibilityNotification.Announcement("\(root.displayTitle), \(signal.kind.label)").post()
+      // The root's execution ended; read what of its family still runs at this instant, from
+      // the server rather than this device's possibly stale snapshot. The event stream keeps
+      // this lookup off its path, and newer alerts win over a slower one.
+      let client = store.client
+      let target = root
+      enrichment = Task { [weak self] in
+        async let work = Self.within(.seconds(2)) { try await Self.work(of: target, client: client) }
+        async let preview = Self.within(.milliseconds(1500)) { try await client.preview(target.id).reply }
+        let content = SessionAlertContent(kind: .succeeded, work: await work, preview: await preview ?? nil)
+        guard let self, !Task.isCancelled, self.sequence == order, store.hub.connected,
+          store.hub.connection == connection, !store.deletedIDs.contains(target.id)
+        else { return }
+        self.present(Message(session: target, project: project, content: content))
+      }
     } catch {
       // A missing session/ancestry or failed mute read cannot safely produce an alert.
+    }
+  }
+  private func present(_ next: Message) {
+    message = next
+    dismissal?.cancel()
+    let id = next.id
+    dismissal = Task { [weak self] in
+      do { try await Task.sleep(for: .seconds(6)) } catch { return }
+      self?.dismiss(id)
+    }
+    Haptics.play(.soft)
+    AccessibilityNotification.Announcement(
+      [next.session.displayTitle, next.content.label, next.content.preview].compactMap { $0 }
+        .joined(separator: ", ")
+    ).post()
+  }
+  nonisolated private static func work(of root: Session, client: OpenCodeClient) async throws
+    -> SessionAlertWork
+  {
+    async let family = client.family(root.id)
+    // A missing directory has no shells; the family read alone decides whether work is known.
+    async let shells = try? client.shells(directory: root.location.directory)
+    return SessionAlertWork(root: root.id, active: try await family.active, shells: await shells ?? [])
+  }
+  /// `nil` when the read fails or exceeds `limit`; the alert then shows without that detail.
+  nonisolated private static func within<Value: Sendable>(
+    _ limit: Duration, _ operation: @escaping @Sendable () async throws -> Value
+  ) async -> Value? {
+    await withTaskGroup(of: Value?.self) { group in
+      group.addTask { try? await operation() }
+      group.addTask {
+        try? await Task.sleep(for: limit)
+        return nil
+      }
+      let first = await group.next()
+      group.cancelAll()
+      return first ?? nil
     }
   }
   func dismiss(_ id: UUID) { if message?.id == id { message = nil } }
@@ -145,14 +198,19 @@ struct SessionAlertBanner: View {
               VStack(alignment: .leading, spacing: 3) {
                 Text(message.session.displayTitle).font(.subheadline.weight(.semibold))
                   .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
-                Label(message.kind.label, systemImage: icon(message.kind)).font(.caption)
-                  .foregroundStyle(theme.color(role(message.kind)))
+                Label(message.content.label, systemImage: icon(message.content)).font(.caption)
+                  .foregroundStyle(theme.color(role(message.content.tone)))
+                if let preview = message.content.preview {
+                  Text(preview).font(.caption).foregroundStyle(theme.color(.textPreview)).lineLimit(1)
+                }
               }
               Spacer(minLength: 0)
               Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.color(.icon))
             }.contentShape(Rectangle())
           }.buttonStyle(.plain)
-            .accessibilityLabel("\(message.session.displayTitle), \(message.kind.label)")
+            .accessibilityLabel(
+              [message.session.displayTitle, message.content.label, message.content.preview]
+                .compactMap { $0 }.joined(separator: ", "))
             .accessibilityIdentifier("session-alert-open")
           Button("Fechar alerta", systemImage: "xmark") { center.dismiss(message.id) }
             .labelStyle(.iconOnly).font(.caption).foregroundStyle(theme.color(.textSecondary))
@@ -165,15 +223,17 @@ struct SessionAlertBanner: View {
     }
     .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: center.message?.id)
   }
-  private func role(_ kind: SessionAlertKind) -> ThemeRole {
-    switch kind {
-    case .succeeded: .success
-    case .failed, .permission: .error
-    case .question: .info
+  private func role(_ tone: SessionAlertContent.Tone) -> ThemeRole {
+    switch tone {
+    case .success: .success
+    case .neutral: .textSecondary
+    case .error: .error
+    case .info: .info
     }
   }
-  private func icon(_ kind: SessionAlertKind) -> String {
-    switch kind {
+  private func icon(_ content: SessionAlertContent) -> String {
+    if content.replied { return "bubble.left" }
+    return switch content.kind {
     case .succeeded: "checkmark.circle"
     case .failed: "exclamationmark.circle"
     case .permission: "hand.raised"

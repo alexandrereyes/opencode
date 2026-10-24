@@ -92,6 +92,70 @@ private func alertEvent(_ type: String = "session.execution.succeeded", owner: S
   #expect(policy.admit(try #require(SessionAlertSignal(alertEvent("permission.asked", id: "req_two"))), server: "a", session: root, root: root, current: nil, muted: []) == true)
 }
 
+private func alertShell(_ id: String, owner: String, status: String = "running") throws -> ShellInfo {
+  try JSONDecoder().decode(ShellInfo.self, from: Data("""
+    {"id":"\(id)","status":"\(status)","command":"sleep 60","metadata":{"sessionID":"\(owner)"},"time":{"started":1}}
+    """.utf8))
+}
+
+@Test func rootCompletionSaysRepliedWhileItsFamilyStillRuns() throws {
+  let root = try alertSession()
+  let child = try alertSession("ses_child", parent: root.id)
+  let other = try alertSession("ses_child2", parent: root.id)
+  let grandchild = try alertSession("ses_grand", parent: child.id)
+  func label(_ active: [Session], _ shells: [ShellInfo] = []) -> SessionAlertContent {
+    SessionAlertContent(kind: .succeeded, work: SessionAlertWork(root: root.id, active: active, shells: shells))
+  }
+  #expect(label([]).label == "Concluída")
+  #expect(label([]).tone == .success)
+  #expect(label([]).replied == false)
+  #expect(label([child]).label == "Respondeu · 1 agente rodando")
+  #expect(label([child]).tone == .neutral)
+  // A running orchestrator child and its running child count once, like the header.
+  #expect(label([child, grandchild]).label == "Respondeu · 1 agente rodando")
+  #expect(label([child, other]).label == "Respondeu · 2 agentes rodando")
+  // An idle child's still running child keeps the root from being done.
+  #expect(label([grandchild]).label == "Respondeu · 1 agente rodando")
+  let shell = try alertShell("sh_one", owner: root.id)
+  #expect(label([], [shell]).label == "Respondeu · 1 tarefa rodando")
+  #expect(label([], [shell, try alertShell("sh_two", owner: root.id)]).label == "Respondeu · 2 tarefas rodando")
+  #expect(label([child], [shell]).label == "Respondeu · 1 agente e 1 tarefa rodando")
+  // Finished shells and shells of other sessions are not this root's background work.
+  #expect(label([], [try alertShell("sh_done", owner: root.id, status: "exited"), try alertShell("sh_child", owner: child.id)]).label == "Concluída")
+  // Unknown remaining work never claims completion.
+  let unknown = SessionAlertContent(kind: .succeeded)
+  #expect(unknown.label == "Respondeu")
+  #expect(unknown.tone == .neutral)
+  for (kind, text, tone) in [(SessionAlertKind.failed, "Falhou", SessionAlertContent.Tone.error), (.permission, "Precisa de você", .error), (.question, "Precisa de você", .info)] {
+    let content = SessionAlertContent(kind: kind, work: SessionAlertWork(agents: 2, tasks: 1), preview: "Ignorada")
+    #expect(content.label == text)
+    #expect(content.tone == tone)
+    #expect(content.preview == nil)
+  }
+}
+
+@Test func alertPreviewIsTheLatestReplyFirstLineOrNothing() throws {
+  func preview(_ messages: String) throws -> SessionPreview {
+    SessionPreview(messages: try JSONDecoder().decode([TranscriptMessage].self, from: Data(messages.utf8)))
+  }
+  let reply = try preview("""
+    [{"id":"msg_u","type":"user","text":"Faça","time":{"created":1}},
+     {"id":"msg_a","type":"assistant","time":{"created":2},"content":[{"type":"text","text":"\\n  Pronto, terminei.  \\nSegunda linha"}]}]
+    """)
+  #expect(reply.reply == "Pronto, terminei.")
+  #expect(SessionAlertContent(kind: .succeeded, work: SessionAlertWork(agents: 0, tasks: 0), preview: reply.reply).preview == "Pronto, terminei.")
+  let userLast = try preview("""
+    [{"id":"msg_a","type":"assistant","time":{"created":1},"content":[{"type":"text","text":"Antes"}]},
+     {"id":"msg_u","type":"user","text":"Outra coisa","time":{"created":2}}]
+    """)
+  #expect(userLast.reply == nil)
+  #expect(SessionAlertContent(kind: .succeeded, work: nil, preview: userLast.reply).preview == nil)
+  let long = try preview("""
+    [{"id":"msg_a","type":"assistant","time":{"created":1},"content":[{"type":"text","text":"\(String(repeating: "a", count: 300))"}]}]
+    """)
+  #expect(long.reply?.count == 240)
+}
+
 private actor ChildActions: ConversationActions {
   var calls: [String] = []
   var bodies: [PromptRequest] = []
