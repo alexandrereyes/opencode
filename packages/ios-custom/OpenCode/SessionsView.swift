@@ -13,7 +13,6 @@ struct SessionsView: View {
   @State private var projectAction: ProjectAction?
   @State private var showProjects = false
   @State private var showArchived = false
-  @State private var moreSession: SessionRow?
   @State private var appliedLaunch = false
   @State private var proxyProvider: SubscriptionProvider?
 
@@ -99,11 +98,11 @@ struct SessionsView: View {
               Label("Excluir", systemImage: "trash")
             }.tint(theme.color(.error))
             Button {
-              moreSession = row
+              Task { await store.pin(row) }
             } label: {
-              Label("Mais", systemImage: "ellipsis")
-            }
-            .tint(theme.color(.textWeak))
+              Label(
+                row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin")
+            }.tint(theme.color(.info))
             Button {
               archiveCandidate = row
             } label: {
@@ -278,14 +277,6 @@ struct SessionsView: View {
         Button("Cancelar", role: .cancel) { projectAction = nil }
       } message: {
         Text("Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
-      }
-      .confirmationDialog(
-        moreSession?.session.displayTitle ?? "Sessão",
-        isPresented: Binding(get: { moreSession != nil }, set: { if !$0 { moreSession = nil } }),
-        titleVisibility: .visible
-      ) {
-        if let row = moreSession { rowActions(row) }
-        Button("Cancelar", role: .cancel) { moreSession = nil }
       }
     }
     .sessionRowTimeline(active: store.selectedTab == 3 && !store.conversationOpen && !showArchived)
