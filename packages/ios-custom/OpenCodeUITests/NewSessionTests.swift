@@ -96,7 +96,7 @@ import XCTest
     shot("n2-project")
     app.buttons["Adicionar projeto"].tap()
     XCTAssertTrue(app.navigationBars["Adicionar repositório"].waitForExistence(timeout: 5))
-    app.buttons["Concluir"].tap()
+    app.buttons["Cancelar"].tap()
     ready(app)
     app.buttons["new-project"].tap()
     app.buttons["new-project-opencode2"].tap()

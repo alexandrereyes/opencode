@@ -454,6 +454,13 @@ final class SessionStore {
       if removedSelection { selectedProject = nil }
     }
   }
+  /// Like the web explorer, any folder can be opened; resolving its Location registers the server project.
+  func addProject(directory: String) async throws -> Project? {
+    try await client.location(directory: directory)
+    projects = try await client.projects()
+    preferences = try await client.mutate(.open(directory: directory))
+    return selectedProjects.first { $0.directory == directory }?.project
+  }
   func touchProject(_ directory: String) async throws {
     preferences = try await client.mutate(.touch(directory: directory))
   }

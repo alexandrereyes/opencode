@@ -1,48 +1,6 @@
 import OpenCodeKit
 import SwiftUI
 
-struct AddProjectPicker: View {
-  @Environment(\.appTheme) private var theme
-  @Environment(\.dismiss) private var dismiss
-  let store: SessionStore
-  var selected: ((Project) async -> Void)?
-  var body: some View {
-    NavigationStack {
-      List {
-        let selectedIDs = Set(store.selectedProjects.map { $0.project.id })
-        ForEach(
-          store.projects.filter { !selectedIDs.contains($0.id) && $0.canonical != store.chatRoot }
-        ) { project in
-          Button {
-            Task {
-              await store.mutate(.open(directory: project.canonical))
-              if store.selectedProjects.contains(where: { $0.project.id == project.id }) {
-                await selected?(project)
-                dismiss()
-              }
-            }
-          } label: {
-            Label(project.displayName, systemImage: "folder.badge.plus").foregroundStyle(
-              theme.color(.textStrong))
-          }.listRowBackground(theme.color(.surface))
-        }
-        if store.projects.allSatisfy({
-          selectedIDs.contains($0.id) || $0.canonical == store.chatRoot
-        }) {
-          Text("Todos os repositórios já estão nos filtros.").foregroundStyle(
-            theme.color(.textSecondary)
-          )
-          .listRowBackground(theme.color(.surface))
-        }
-      }.scrollContentBackground(.hidden).background(theme.color(.background))
-        .navigationTitle("Adicionar repositório").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } }
-        }
-    }.tint(theme.color(.primary))
-  }
-}
-
 struct NewSessionProjectSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
@@ -89,13 +47,19 @@ struct NewSessionProjectSheet: View {
             }.accessibilityIdentifier("new-project-" + project.displayName)
               .listRowBackground(theme.color(.surface))
           }
-        }
-        Section {
-          Button("Adicionar projeto", systemImage: "plus", action: add).listRowBackground(
-            theme.color(.surface))
+          if store.projects.isEmpty {
+            Text("Nenhum projeto adicionado. Toque em + para escolher uma pasta.")
+              .foregroundStyle(theme.color(.textSecondary)).listRowBackground(theme.color(.surface))
+          }
         }
       }.scrollContentBackground(.hidden).background(theme.color(.background))
         .navigationTitle("Projeto").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button("Adicionar projeto", systemImage: "plus", action: add)
+              .accessibilityIdentifier("new-project-add")
+          }
+        }
         .listSectionSpacing(12).contentMargins(.top, 12, for: .scrollContent)
     }.presentationDetents([.height(520), .large]).presentationDragIndicator(.visible).tint(
       theme.color(.primary))
@@ -130,11 +94,31 @@ struct NewSessionDirectorySheet: View {
               Text("Nenhuma worktree encontrada").foregroundStyle(theme.color(.textSecondary))
                 .listRowBackground(theme.color(.surface))
             }
-            choice("Nova worktree", destination: .create)
+          }
+          if store.destination == .create {
+            Text("Nova worktree selecionada: ela será criada ao enviar.")
+              .font(.footnote).foregroundStyle(theme.color(.textSecondary))
+              .listRowBackground(theme.color(.surface))
           }
         }
       }.scrollContentBackground(.hidden).background(theme.color(.background))
         .navigationTitle("Diretório").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          // Nova worktree is a destination, not just an action: the selected state stays filled.
+          if store.git {
+            ToolbarItem(placement: .topBarTrailing) {
+              let selected = store.destination == .create
+              let button = Button(
+                selected ? "Nova worktree selecionada" : "Nova worktree",
+                systemImage: selected ? "checkmark" : "plus"
+              ) {
+                store.selectDestination(.create)
+                dismiss()
+              }.accessibilityIdentifier("new-create")
+              if selected { button.buttonStyle(.glassProminent) } else { button }
+            }
+          }
+        }
         .listSectionSpacing(12).contentMargins(.top, 12, for: .scrollContent)
     }.presentationDetents([
       .height(min(700, max(360, CGFloat(store.worktrees.count) * 54 + 320))), .large,
@@ -147,18 +131,13 @@ struct NewSessionDirectorySheet: View {
       dismiss()
     } label: {
       HStack(spacing: 14) {
-        Group {
-          if destination == .create { Image(systemName: "plus") } else { GitBranchIcon() }
-        }.frame(width: 20).foregroundStyle(theme.color(destination == .create ? .primary : .icon))
-        Text(title).foregroundStyle(theme.color(destination == .create ? .primary : .text))
-          .lineLimit(1)
+        GitBranchIcon().frame(width: 20).foregroundStyle(theme.color(.icon))
+        Text(title).foregroundStyle(theme.color(.text)).lineLimit(1)
         Spacer()
         if store.destination == destination { Image(systemName: "checkmark") }
       }.padding(.vertical, 5)
     }.listRowBackground(theme.color(.surface))
-      .accessibilityIdentifier(
-        destination == .root
-          ? "new-root" : destination == .create ? "new-create" : "new-worktree-" + title)
+      .accessibilityIdentifier(destination == .root ? "new-root" : "new-worktree-" + title)
   }
 }
 

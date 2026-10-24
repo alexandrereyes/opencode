@@ -1035,13 +1035,28 @@ visible; with the keyboard hidden, the introduction is centered in the available
 - **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
   its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
   project. The Projeto sheet lists **Chats** first (when the server has `custom.chats`), then preserves saved selection
-  order and searches display names without sorting; see [Chats](#chats-destination) below. "Adicionar projeto" reuses Sessões' server-project picker and `project.open`; selecting/opening the draft's
-  project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state.
+  order and searches display names without sorting; see [Chats](#chats-destination) below. The `+` in the Projeto
+  header ("Adicionar projeto") opens the folder explorer described below; selecting/opening the draft's
+  project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state,
+  and an empty Projeto list points to that `+`.
+- **Adicionar repositório:** shared by Projeto and Sessões' repository filters, it ports the web's project explorer
+  (`app-custom/src/workspaces/selection/explorer.tsx`, single selection). It starts at `~/Dev/`, resolved from the
+  server home reported by `custom.directories/home` (the server's default Location when unavailable). The path field
+  doubles as location and prefix filter (`~/Dev/op`); tapping a folder enters it, and `..` at the top of the list
+  goes up while not filtering. Hidden folders appear with **Mostrar ocultas** or a `.` filter. Rows list only folders
+  from `GET /api/fs/list`, already selected projects show **Adicionado**, and the home and `/` are never offered.
+  The action under the path adds the current or exactly named folder, or **Criar e adicionar** creates its final
+  segment with `custom.directories/create`; each row's `+` adds that folder. Adding resolves `GET /api/location` for
+  the folder (registering the server project, as the web's sidebar does) and then sends `project.open`. The web's
+  batch selection (sidebar/home) and keyboard hints are not ported. A folder inside another repository is saved like
+  on the web but, as before, iOS lists only saved folders that match a server project root or sandbox.
 - **Directory:** `GET /api/worktree?projectID=…`, known project worktrees and sandboxes are merged in that order,
   deduplicated and stripped of the root. `custom.worktrees/branches` labels each checkout without booting every
   Location; the folder name is the fallback. The root uses its current branch (VCS, then the branches RPC), never the
   `main` sentinel as a guessed branch. Search appears only with ten or more existing worktrees. Non-Git projects keep
-  their principal directory and explain that worktrees are unavailable.
+  their principal directory and explain that worktrees are unavailable. **Nova worktree** is the `+` in the Diretório
+  header: it selects that destination and closes the sheet; while selected it is filled with a checkmark, no list row
+  is checked and a note says it will be created on send. The main selector then shows "+ Nova worktree" plus "a partir de …".
   Projeto and Diretório wait for the composer's real keyboard dismissal before presentation. Closing a selector,
   including a swipe without changes, restores composer focus; the base-branch sheet instead owns its search keyboard
   while presented. The shared editor suppresses background focus restoration until the selector has closed.
@@ -1083,6 +1098,12 @@ visible; with the keyboard hidden, the introduction is centered in the available
   and attachment storage as conversations. Its snapshot includes project, destination, base branch, MCP intent maps,
   document/token ranges, cursor, attachments, model/variant and agent. It persists while editing, on leaving and on
   background/server switch, restores after relaunch, and is excluded from missing-Session pruning.
+
+`ProjectExplorerTests` (Swift Testing) cover the explorer's query, `..`, filtering, blocking and submission rules and
+the `fs.list` path resolution. `AddProjectTests` (UI) start at `~/Dev/`, go up, filter, quick-add an existing folder,
+create and add another, and check the Nova worktree header choice, its selected state and per-project memory. Run them
+with `script/test-isolated.py --environment <json>` whose `OPENCODE_TEST_ADD_PROJECT_DIR` is an isolated folder
+containing `alvo/` (the test creates `criado/`); the second case adds the server home's `Dev/opencode2` if needed.
 
 ### Chats destination
 
