@@ -232,27 +232,23 @@ struct ComposerEditor: View {
   private var controlRow: some View {
     HStack(spacing: 8) {
       Menu {
-        Menu("Imagens e arquivos", systemImage: "photo") {
-          Button("Fotos", systemImage: "photo.on.rectangle") {
-            draft.focused = false
-            photos = true
-          }
-          Button("Arquivos", systemImage: "folder") {
-            draft.focused = false
-            files = true
-          }
-        }
-        Button("Comandos", systemImage: "slash.circle") { draft.insertTrigger("/") }
-        Button("Contexto", systemImage: "at") { draft.insertTrigger("@") }
         if !expanded {
           Button(
             "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
           )
         }
+        Button("Fotos", systemImage: "photo.on.rectangle") {
+          draft.focused = false
+          photos = true
+        }
+        Button("Arquivos", systemImage: "folder") {
+          draft.focused = false
+          files = true
+        }
       } label: {
         Image(systemName: "plus").appSymbol(.action).frame(width: 31, height: 36)
           .overlay { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
-      }.accessibilityLabel("Adicionar")
+      }.menuOrder(.fixed).accessibilityLabel("Adicionar")
       Button {
         draft.focused = false
         models = true

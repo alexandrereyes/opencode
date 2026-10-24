@@ -215,14 +215,6 @@ extension ComposerTokenKind {
     submissionDocument = nil
     try await persistence.remove()
   }
-  func insertTrigger(_ marker: String) {
-    let position = marker == "/" ? 0 : min(selection.location, editorText.length)
-    let separator =
-      position > 0 && (editorText.string as NSString).character(at: position - 1) != 32 ? " " : ""
-    replace(NSRange(location: position, length: 0), with: NSAttributedString(string: separator + marker, attributes: input?.plainAttributes))
-    focused = true
-    dismissedTrigger = nil
-  }
   func dismissSuggestions() { dismissedTrigger = trigger }
   func receiveEditor(_ view: ComposerInputView) {
     guard view.representedDraft === self, view.representedRevision == sourceRevision else {

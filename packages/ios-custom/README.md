@@ -1966,7 +1966,8 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
   remain prompts. `/model` and `/agent` open local pickers; `/compact` admits manual compaction. Unsupported client
   commands and shell mode are not advertised. Ordinary prompt admission retains the wave-2 exact-ID retry, including
   when only the cursor moved after a failed send.
-- `+` → **Imagens e arquivos** opens the system multi-photo or document picker. Images are decoded off the main actor;
+- The `+` menu lists **Expandir compositor** (only while compact), **Fotos** and **Arquivos** directly, in fixed
+  order; the last two open the system multi-photo or document picker. Images are decoded off the main actor;
   HEIC/HEIF becomes JPEG and oversized supported images are scaled to a maximum side of 2048 px. Every blob is staged
   as raw bytes under the server's `paths.tmp/uploads/<uuid>/<name>`. PNG/JPEG/GIF/WebP/PDF additionally travel inline
   only up to 20 MiB and when the selected model advertises the matching input. Other files remain path references
