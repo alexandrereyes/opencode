@@ -39,6 +39,11 @@ struct ConversationRenameAlert: UIViewControllerRepresentable {
       isPresented = false
       save(value)
     })
-    controller.present(alert, animated: true)
+    // UIAlertController focuses its field while presenting and leaves the caret at the end; selecting in the
+    // completion runs after that, so typing replaces the whole title.
+    controller.present(alert, animated: true) { [weak alert] in
+      guard let field = alert?.textFields?.first, field.isFirstResponder || field.becomeFirstResponder() else { return }
+      field.selectedTextRange = field.textRange(from: field.beginningOfDocument, to: field.endOfDocument)
+    }
   }
 }

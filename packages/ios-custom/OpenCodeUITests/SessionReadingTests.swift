@@ -33,6 +33,7 @@ import XCTest
     rename.tap()
     XCTAssertTrue(app.alerts["Renomear sessão"].waitForExistence(timeout: 5))
     screenshot("rename")
+    app.assertRenameTitleSelected()
     let field = app.alerts.textFields.firstMatch
     let old = field.value as? String ?? ""
     field.tap()

@@ -62,6 +62,7 @@ import XCTest
     shot("trailing-actions")
     app.buttons["Renomear"].tap()
     XCTAssertTrue(app.alerts["Renomear sessão"].waitForExistence(timeout: 5))
+    app.assertRenameTitleSelected()
     let field = app.alerts.textFields.firstMatch
     let old = field.value as? String ?? ""
     field.tap()
@@ -76,6 +77,14 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Sessão renomeada"].waitForExistence(timeout: 10))
     wait(row, label: "Deslize renomeada,", present: true)
     shot("renamed")
+
+    app.revealSessionRow(row)
+    row.press(forDuration: 1)
+    app.buttons["Renomear"].tap()
+    app.assertRenameTitleSelected()
+    shot("long-press-rename")
+    app.alerts.buttons["Cancelar"].tap()
+    wait(row, label: "Deslize renomeada,", present: true)
   }
 
   private func assertBelowAnchor(_ row: XCUIElement, _ anchor: XCUIElement) {
