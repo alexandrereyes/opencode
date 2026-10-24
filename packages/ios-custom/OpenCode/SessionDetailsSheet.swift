@@ -18,9 +18,21 @@ struct SessionDetailsSheet: View {
         Section("Sessão") {
           LabeledContent("Projeto", value: isChat ? "Sem repositório" : project?.displayName ?? "Indisponível")
           if showLocation {
-            VStack(alignment: .leading, spacing: 5) {
-              Text("Diretório de trabalho").foregroundStyle(theme.color(.textSecondary))
-              Text(store.located?.worktree ?? store.session?.location.directory ?? "Indisponível").font(.footnote).textSelection(.enabled)
+            let directory = store.located?.worktree ?? store.session?.location.directory
+            if let directory {
+              NavigationLink(value: FileExplorerRoute(path: directory)) {
+                VStack(alignment: .leading, spacing: 5) {
+                  Text("Diretório de trabalho").foregroundStyle(theme.color(.textSecondary))
+                  Text(directory).font(.footnote)
+                }
+              }
+              .contextMenu {
+                Button("Copiar caminho", systemImage: "doc.on.doc") { UIPasteboard.general.string = directory }
+              }
+              .accessibilityHint("Abre os arquivos deste diretório")
+              .accessibilityIdentifier("session-details-directory")
+            } else {
+              LabeledContent("Diretório de trabalho", value: "Indisponível")
             }
             LabeledContent("Branch", value: services?.branch ?? (services == nil ? "Carregando…" : "Indisponível"))
           }
@@ -50,7 +62,14 @@ struct SessionDetailsSheet: View {
       .foregroundStyle(theme.color(.textStrong))
       .navigationTitle("Detalhes da sessão").navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { dismiss() } } }
+      .navigationDestination(for: FileExplorerRoute.self) { route in
+        FileExplorerView(path: route.path, changes: FileExplorer.changes(services?.changes ?? [],
+          root: store.located?.worktree ?? store.session?.location.directory ?? ""))
+          .onAppear { detent = .large }
+      }
     }
+    // The conversation's viewer cannot present over this sheet, so files open from here.
+    .modifier(FileViewerHost())
     .tint(theme.color(.primary)).presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.visible)
     .task { services = await store.services() }
   }

@@ -360,6 +360,9 @@ struct ConversationView: View {
       SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }, isChat: chat, showLocation: showLocation) {
         contextOpen = true
       }.sessionAlertOverlay()
+        .environment(\.conversationImages, conversation.session.map {
+          ConversationImageContext(client: sessions.client, directory: $0.location.directory, sessionID: $0.id)
+        })
     }
     .background(ConversationRenameAlert(isPresented: $renameOpen, title: renameTitle, theme: theme) { title in
       Task { await conversation.rename(title) }

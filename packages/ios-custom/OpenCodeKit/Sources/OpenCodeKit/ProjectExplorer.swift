@@ -161,21 +161,8 @@ extension OpenCodeClient {
   }
 
   public func directories(at path: String) async throws -> [ProjectExplorer.Entry] {
-    struct Response: Decodable {
-      let location: ResolvedLocation
-      let data: [Item]
-      struct Item: Decodable {
-        let path: String
-        let type: String
-      }
-    }
-    let response: Response = try await get(
-      "/api/fs/list", query: [URLQueryItem(name: "path", value: path)])
-    // Entry paths stay relative to the server's default Location, including `../` for outside folders.
-    return response.data.filter { $0.type == "directory" }.map {
-      let absolute = ProjectExplorer.canonical(response.location.directory + "/" + $0.path)
-      return ProjectExplorer.Entry(
-        name: URL(fileURLWithPath: absolute).lastPathComponent, absolute: absolute)
+    try await listDirectory(path).filter { $0.kind == .directory }.map {
+      ProjectExplorer.Entry(name: $0.name, absolute: $0.absolute)
     }
   }
 

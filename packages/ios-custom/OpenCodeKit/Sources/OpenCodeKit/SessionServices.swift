@@ -45,6 +45,7 @@ public struct WorkingChange: Codable, Sendable {
   public let file: String
   public let additions: Int
   public let deletions: Int
+  public var status: String?
 }
 
 extension OpenCodeClient {

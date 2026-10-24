@@ -641,6 +641,26 @@ Media tables size each row independently with intrinsic-height, top-aligned cell
 header to share an image row's height. Plain UIKit tables also top-align short and multiline cells. Geometry UI checks
 cover media/plain/wide tables and the four literal tables extracted from the formatting fixture, in both themes.
 
+### Session file explorer
+
+In **Detalhes da sessão**, the **Diretório de trabalho** row (chevron; long press copies the path) pushes a native
+explorer of the session's checkout on the server. It ports the web's session file tree (`app-custom/src/session/files`)
+as folder navigation: `GET /api/fs/list` with the Session's Location and an absolute `path`, in server order
+(directories first, then files, each by `localeCompare`), including dotfiles and omitting symlinks, as the web does;
+the web marks no ignored entries either. The current path heads the list. Folders push a new level and Back returns.
+`../` also pushes the parent and, unlike the web tree, keeps going above the session directory up to `/`; listing
+outside a Location never switches it. Files show the web tree's **A/M** markers from the working-copy diff already
+loaded by the sheet (paths relative to the checkout root). Search is the web's: ranked `GET /api/fs/find` across the
+session directory (`type=file`, `limit=200`, ignore-aware), shown as a flat list while the field has text. Tapping a file
+opens the existing `FileViewer` with its absolute path, from a `FileViewerHost` on the sheet, because the
+conversation's own host cannot present over it. Missing folders (404) and unreadable ones (permission, 500) show an
+explicit message with retry. `OpenCodeClient.listDirectory(_:location:)` is the shared listing; the project explorer's
+`directories(at:)` filters it. Not ported: the web's expandable tree/tabs, the separate "Alterados" view, ancestor
+change dots of the legacy tree and file drag. Verify after `build-for-testing` with
+`python3 packages/ios-custom/script/test-file-explorer.py --device … --derived … --home <sandbox> --server-url …
+--evidence …` (optionally `--theme openchamber-light`); it owns a temporary git checkout and an imported session,
+and deletes both.
+
 ## Voice conversation
 
 ### Composer dictation (independent of GPT Live calls)
