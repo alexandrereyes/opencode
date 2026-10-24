@@ -671,6 +671,31 @@ logs, binary/source hashes and captures are in `$TMPDIR/opencode/ios-arquivos-co
 DerivedData are removed after comparison. Debug test builds use `COPY_PHASE_STRIP=NO` to avoid the new signed
 VoiceActivity extension's copy/strip warning. No backend, seed, model or production mutation was performed.
 
+#### Viewer zoom, sibling paging and file kinds — 24 October
+
+- **Zoom reset on touch:** UIKit's double tap accepted two quick touches that each moved up to ~10 points, so two
+  small nudges of a zoomed image counted as a double tap and fitted it again. `StrictDoubleTapRecognizer` accepts
+  only nearly still (≤ 6 pt), brief (≤ 0.3 s) taps and ignores a touch that stops a moving or zooming image.
+  A viewport change keeps a zoomed image's relative zoom and visible center (a fitted image re-fits), and a
+  status-bar tap no longer scrolls it. Pinch and a real double tap remain the explicit zoom gestures.
+- **Siblings:** a server file (chat link, feed image, explorer entry) pages through files in its own directory,
+  inside or above the Session directory, in `listDirectory` order: the server's `fs.list` order, which is also the
+  web file tree's (directories first, then `localeCompare`). Folders and kinds the viewer cannot preview are
+  skipped (the open file always stays). Glass ‹/› buttons appear only when a neighbour exists on that side; data:
+  and remote images, or a directory that cannot be listed, show none. A horizontal swipe pages only when it
+  starts outside controls, a zoomed image, a text selection or content that can still scroll horizontally
+  (zoomed PDF/SVG); a new file always starts fitted. Quick Look content (Office/iWork, CSV fallback) runs out of
+  process, so only the buttons page over it.
+- **Kinds:** PNG/JPEG/HEIC/WebP and animated GIF/APNG (frame by frame through `CGAnimateImageAtURLWithBlock`) use the
+  zoom view; Markdown renders with the response renderer (no quote/comment actions); text/code/JSON up to 2 MiB
+  use a selectable native text view; PDF uses PDFKit; SVG uses a JavaScript-free WKWebView with an `<img>` data
+  URL under a CSP; audio/video keep AVPlayer. Larger or non-UTF-8 text keeps Quick Look. Unsupported files show
+  **Pré-visualização indisponível** with Share (which includes “Abrir em…”).
+
+Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
+`OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
+and removes its own fixture directory and sessions (no model calls).
+
 Media tables size each row independently with intrinsic-height, top-aligned cells; grid borders no longer force the
 header to share an image row's height. Plain UIKit tables also top-align short and multiline cells. Geometry UI checks
 cover media/plain/wide tables and the four literal tables extracted from the formatting fixture, in both themes.

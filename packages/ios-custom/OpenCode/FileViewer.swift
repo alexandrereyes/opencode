@@ -1,8 +1,11 @@
 import AVKit
+import ImageIO
 import OpenCodeKit
+import PDFKit
 import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 struct FileOpenAction {
   let open: (String) -> Void
@@ -42,12 +45,18 @@ struct FileViewerHost: ViewModifier {
   var cancelled = false
   var kind: FileViewerKind = .unknown
   var choices: [String] = []
+  var text: String?
+  var markdown = false
+  static let textLimit: Int64 = 2 * 1024 * 1024
+  /// Feed images and siblings name one exact path; chat links may still need a workspace search.
+  let exact: Bool
   private var task: Task<Void, Never>?
   private let transfer = FileTransfer()
-  init(source: String, context: ConversationImageContext, name: String? = nil) {
+  init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     self.source = source
     self.context = context
     suggestedName = name
+    self.exact = exact
   }
   var name: String { suggestedName ?? URL(fileURLWithPath: path ?? source).lastPathComponent }
   func start(confirmed: Bool = false) {
@@ -72,6 +81,10 @@ struct FileViewerHost: ViewModifier {
           return
         }
         if case .remote(let url) = FeedImageReference(source) { path = url.path }
+        if path == nil, exact {
+          let home = source.hasPrefix("~") ? try await context.client.serverHome() : nil
+          path = try FeedImageReference(source).path(directory: context.directory, home: home)
+        }
         if path == nil {
           choices = try await context.client.fileLinkMatches(source, directory: context.directory)
           try Task.checkCancellation()
@@ -107,15 +120,24 @@ struct FileViewerHost: ViewModifier {
         }
         if Task.isCancelled { try? FileManager.default.removeItem(at: downloaded); return }
         let stored = try FilePreviewStorage.store(downloaded, name: URL(fileURLWithPath: path).lastPathComponent)
-        file = stored
+        let ext = stored.pathExtension.lowercased()
         // Some source extensions (notably .ts) have a registered media UTI, not a code preview.
-        if kind == .preview, stored.pathExtension.isEmpty
-          || ["md", "markdown", "json", "csv", "tsv", "swift", "ts", "tsx", "js", "jsx", "py", "rb", "rs", "go", "sh", "yaml", "yml", "toml", "log", "sql", "html", "css", "xml", "c", "h", "cpp"].contains(stored.pathExtension.lowercased())
-          || metadata?.mime == "text/plain" && stored.pathExtension.lowercased() != "txt" {
-          let text = stored.deletingLastPathComponent().appendingPathComponent("prévia.txt")
-          try FileManager.default.copyItem(at: stored, to: text)
-          preview = text
+        let textual = kind == .preview && (ext.isEmpty
+          || ["md", "markdown", "json", "csv", "tsv", "swift", "ts", "tsx", "js", "jsx", "py", "rb", "rs", "go", "sh", "yaml", "yml", "toml", "log", "sql", "html", "css", "xml", "c", "h", "cpp"].contains(ext)
+          || metadata?.mime == "text/plain" && ext != "txt")
+        if textual {
+          let copy = stored.deletingLastPathComponent().appendingPathComponent("prévia.txt")
+          try FileManager.default.copyItem(at: stored, to: copy)
+          preview = copy
         } else { preview = stored }
+        // Text is drawn in-process, so it can render Markdown and take part in horizontal paging;
+        // large or non-UTF-8 files keep Quick Look.
+        if textual || ext == "txt",
+          Int64((try? stored.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max) <= FileViewerStore.textLimit {
+          text = await Task.detached { try? String(contentsOf: stored, encoding: .utf8) }.value
+          markdown = ["md", "markdown"].contains(ext)
+        }
+        file = stored
         loading = false
       } catch {
         guard !Task.isCancelled else { return }
@@ -134,6 +156,7 @@ struct FileViewerHost: ViewModifier {
     if let file { FilePreviewStorage.remove(file) }
     file = nil
     preview = nil
+    text = nil
   }
 }
 
@@ -203,8 +226,21 @@ struct FileViewer: View {
   @State private var store: FileViewerStore
   @State private var sharing = false
   @State private var copied = false
-  init(source: String, context: ConversationImageContext) {
-    _store = State(initialValue: FileViewerStore(source: source, context: context))
+  @State private var siblings: [String]?
+  init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
+    _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
+  }
+  private var position: Int? { store.path.flatMap { siblings?.firstIndex(of: $0) } }
+  private func neighbor(_ step: Int) -> String? {
+    guard let position, let siblings, siblings.indices.contains(position + step) else { return nil }
+    return siblings[position + step]
+  }
+  private func page(_ step: Int) {
+    guard let next = neighbor(step) else { return }
+    store.close()
+    store = FileViewerStore(source: next, context: store.context, exact: true)
+    copied = false
+    store.start()
   }
   var body: some View {
     NavigationStack {
@@ -240,6 +276,21 @@ struct FileViewer: View {
           }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // A new file always starts with fresh viewer state, including zoom.
+      .id(store.source)
+      .gesture(FilePageSwipe(previous: neighbor(-1) != nil, next: neighbor(1) != nil, page: page))
+      .overlay {
+        HStack {
+          if neighbor(-1) != nil {
+            pageButton(-1, symbol: "chevron.left", label: "Arquivo anterior", identifier: "file-previous")
+          }
+          Spacer(minLength: 0)
+          if neighbor(1) != nil {
+            pageButton(1, symbol: "chevron.right", label: "Próximo arquivo", identifier: "file-next")
+          }
+        }.padding(.horizontal, 10)
+      }
       .background(theme.color(.background)).foregroundStyle(theme.color(.text))
       .navigationTitle(store.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -258,7 +309,23 @@ struct FileViewer: View {
     .tint(theme.color(.primary))
     .sheet(isPresented: $sharing) { if let file = store.file { FileShareSheet(file: file) } }
     .task { store.start() }
+    .task(id: store.path) {
+      // The opened file's directory defines the sequence; paging keeps it.
+      guard siblings == nil, let path = store.path, case .local = FeedImageReference(store.source) else { return }
+      let listed = try? await store.context.client.fileSiblings(of: path, location: store.context.directory)
+      guard !Task.isCancelled, store.path == path else { return }
+      siblings = listed
+    }
     .onDisappear { store.close() }
+  }
+  private func pageButton(_ step: Int, symbol: String, label: String, identifier: String) -> some View {
+    Button { page(step) } label: {
+      Image(systemName: symbol).font(.title3.weight(.semibold)).frame(width: 44, height: 44)
+    }
+    .buttonStyle(.glass).buttonBorderShape(.circle)
+    .accessibilityLabel(label)
+    .accessibilityValue(position.map { "\($0 + 1 + step) de \(siblings?.count ?? 0)" } ?? "")
+    .accessibilityIdentifier(identifier)
   }
   @ViewBuilder private func loaded(_ file: URL) -> some View {
     switch store.kind {
@@ -268,7 +335,15 @@ struct FileViewer: View {
     case .audiovisual:
       FileAVPlayer(file: file).accessibilityIdentifier("file-player")
     case .preview:
-      FileQuickLook(file: store.preview ?? file, name: store.name).accessibilityIdentifier("file-preview")
+      ZStack {
+        if let text = store.text, store.markdown { FileMarkdownPreview(text: text, path: store.path ?? store.source) }
+        else if let text = store.text { FileTextPreview(text: text, code: file.pathExtension.lowercased() != "txt") }
+        else if file.pathExtension.lowercased() == "pdf" { FilePDFPreview(file: file) }
+        else if file.pathExtension.lowercased() == "svg" || store.metadata?.mime == "image/svg+xml",
+          (store.metadata?.size ?? 0) <= FileViewerStore.textLimit { FileSVGPreview(file: file) }
+        else { FileQuickLook(file: store.preview ?? file, name: store.name) }
+      }
+      .accessibilityElement(children: .contain).accessibilityIdentifier("file-preview")
     case .unknown:
       if UTType(filenameExtension: file.pathExtension)?.isDeclared == true,
         QLPreviewController.canPreview(file as NSURL) {
@@ -277,6 +352,7 @@ struct FileViewer: View {
         VStack(spacing: 16) {
           Image(systemName: "doc").font(.largeTitle)
           Text(store.name).font(.headline)
+          Text("Pré-visualização indisponível").accessibilityIdentifier("file-unsupported")
           if let size = store.metadata?.size { Text(size.formatted(.byteCount(style: .file))) }
           Text(store.path ?? store.source).font(.caption).textSelection(.enabled)
           Button("Compartilhar arquivo", systemImage: "square.and.arrow.up") { sharing = true }
@@ -292,10 +368,11 @@ private struct FileImagePreview: View {
   let dismiss: () -> Void
   let retry: () -> Void
   @State private var image: CGImage?
+  @State private var animated = false
   @State private var failed = false
   var body: some View {
     Group {
-      if let image { ZoomableImageView(image: image, name: name, dismiss: dismiss) }
+      if let image { ZoomableImageView(image: image, name: name, animation: animated ? file : nil, dismiss: dismiss) }
       else if failed {
         VStack(spacing: 12) {
           Text("Não foi possível exibir a imagem")
@@ -305,14 +382,102 @@ private struct FileImagePreview: View {
       else { ProgressView("Carregando imagem…") }
     }
     .task(id: file) {
-      let image = await Task.detached(priority: .userInitiated) {
-        (try? Data(contentsOf: file, options: .mappedIfSafe)).flatMap { AttachmentImage.thumbnail($0, maxPixelSize: nil) }
+      let decoded = await Task.detached(priority: .userInitiated) {
+        let data = try? Data(contentsOf: file, options: .mappedIfSafe)
+        let frames = data.flatMap { CGImageSourceCreateWithData($0 as CFData, nil) }.map(CGImageSourceGetCount) ?? 0
+        return (data.flatMap { AttachmentImage.thumbnail($0, maxPixelSize: nil) }, frames > 1)
       }.value
       guard !Task.isCancelled else { return }
-      self.image = image
-      failed = image == nil
+      animated = decoded.1
+      self.image = decoded.0
+      failed = decoded.0 == nil
     }
   }
+}
+
+private struct FileTextPreview: UIViewRepresentable {
+  @Environment(\.appTheme) private var theme
+  let text: String
+  let code: Bool
+  func makeUIView(context: Context) -> UITextView {
+    let view = UITextView()
+    view.isEditable = false
+    view.backgroundColor = .clear
+    view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 24, right: 12)
+    view.adjustsFontForContentSizeCategory = true
+    view.font = AppTypography.font(code ? .caption : .body, monospaced: code)
+    view.text = text
+    return view
+  }
+  func updateUIView(_ view: UITextView, context: Context) {
+    view.textColor = UIColor(theme.color(.text))
+    view.tintColor = UIColor(theme.color(.primary))
+  }
+}
+
+private struct FileMarkdownPreview: View {
+  let text: String
+  let path: String
+  @State private var toast = ToastCenter()
+  var body: some View {
+    ScrollView {
+      ResponseMarkdown(text: text, messageID: "file-preview", partID: path)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+    }
+    .toastOverlay(toast)
+    .environment(toast)
+    // A file is not a chat message: no quote, comment or side-question actions.
+    .environment(\.responseSelection, nil)
+    .environment(\.responseSelectionChanged, nil)
+    .environment(\.conversationQuotes, ConversationQuoteContext())
+    .environment(\.conversationSearch, ConversationSearchHighlight())
+  }
+}
+
+/// iOS has no native SVG view and Quick Look does not draw it. As an `<img>`, the SVG cannot run scripts or load
+/// anything external; JavaScript is off and the CSP allows only the inline data URL.
+private struct FileSVGPreview: UIViewRepresentable {
+  let file: URL
+  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeUIView(context: Context) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    view.isOpaque = false
+    view.backgroundColor = .clear
+    view.scrollView.backgroundColor = .clear
+    view.navigationDelegate = context.coordinator
+    let encoded = ((try? Data(contentsOf: file)) ?? Data()).base64EncodedString()
+    view.loadHTMLString("""
+      <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>html,body{margin:0;height:100%;background:transparent}body{display:flex;align-items:center;justify-content:center}img{max-width:100%;max-height:100%;object-fit:contain}</style></head><body><img alt="" src="data:image/svg+xml;base64,\(encoded)"></body></html>
+      """, baseURL: nil)
+    return view
+  }
+  func updateUIView(_ view: WKWebView, context: Context) {}
+  static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+    view.stopLoading()
+    view.navigationDelegate = nil
+  }
+  final class Coordinator: NSObject, WKNavigationDelegate {
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+      navigationAction.request.url?.scheme == "about" ? .allow : .cancel
+    }
+  }
+}
+
+private struct FilePDFPreview: UIViewRepresentable {
+  let file: URL
+  func makeUIView(context: Context) -> PDFView {
+    let view = PDFView()
+    view.autoScales = true
+    view.displayMode = .singlePageContinuous
+    view.displayDirection = .vertical
+    view.backgroundColor = .clear
+    view.document = PDFDocument(url: file)
+    return view
+  }
+  func updateUIView(_ view: PDFView, context: Context) {}
 }
 
 private struct FileAVPlayer: UIViewControllerRepresentable {
@@ -354,6 +519,57 @@ private struct FileQuickLook: UIViewControllerRepresentable {
     init(file: URL, name: String) { previewItemURL = file; previewItemTitle = name }
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { self }
+  }
+}
+
+/// Horizontal swipe between sibling files. It never starts on a control, inside a zoomed image or on any other
+/// content that can still scroll horizontally, so panning keeps priority over paging.
+private struct FilePageSwipe: UIGestureRecognizerRepresentable {
+  let previous: Bool
+  let next: Bool
+  let page: (Int) -> Void
+  func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+  func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+    let pan = UIPanGestureRecognizer()
+    pan.maximumNumberOfTouches = 1
+    pan.delegate = context.coordinator
+    return pan
+  }
+  func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+    context.coordinator.previous = previous
+    context.coordinator.next = next
+  }
+  func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+    guard recognizer.state == .ended, let view = recognizer.view else { return }
+    let distance = recognizer.translation(in: view).x
+    let speed = recognizer.velocity(in: view).x
+    guard abs(distance) > 60 || abs(speed) > 600 && abs(distance) > 20 else { return }
+    let step = distance < 0 ? 1 : -1
+    if step == 1 ? next : previous { page(step) }
+  }
+  final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    var previous = false
+    var next = false
+    func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+      guard let pan = recognizer as? UIPanGestureRecognizer, let view = pan.view else { return false }
+      let velocity = pan.velocity(in: view)
+      guard abs(velocity.x) > abs(velocity.y) * 1.5, velocity.x < 0 ? next : previous else { return false }
+      var current = view.hitTest(pan.location(in: view), with: nil)
+      while let candidate = current, candidate !== view {
+        if candidate is UIControl { return false }
+        if let zoom = candidate as? ImageZoomScrollView, !zoom.pageable { return false }
+        // Dragging a selection handle is not a page swipe.
+        if let text = candidate as? UITextView, text.selectedRange.length > 0 { return false }
+        if let scroll = candidate as? UIScrollView, scroll.isScrollEnabled,
+          scroll.contentSize.width + scroll.adjustedContentInset.left + scroll.adjustedContentInset.right > scroll.bounds.width + 1 {
+          return false
+        }
+        current = candidate.superview
+      }
+      return true
+    }
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
   }
 }
 

@@ -112,9 +112,16 @@ struct FeedImageView: View {
       }
     }
     .fullScreenCover(isPresented: $open) {
-      FeedImageFullscreen(source: source, name: name).environment(\.conversationImages, context)
-        .floatingVoiceInset()
-        .modifier(FloatingVoiceScope())
+      Group {
+        // Server files open in the file viewer, which can page through their directory.
+        if case .local = FeedImageReference(source), let context {
+          FileViewer(source: source, context: context, name: ["", "Imagem"].contains(name) ? nil : name, exact: true)
+        } else {
+          FeedImageFullscreen(source: source, name: name).environment(\.conversationImages, context)
+        }
+      }
+      .floatingVoiceInset()
+      .modifier(FloatingVoiceScope())
     }
     .onDisappear { image = nil }
   }

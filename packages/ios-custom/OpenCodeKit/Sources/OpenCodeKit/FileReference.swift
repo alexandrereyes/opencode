@@ -56,7 +56,8 @@ public enum FileViewerKind: Sendable, Equatable {
   case image, audiovisual, preview, unknown
   public init(path: String, mime: String? = nil) {
     let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-    if ["ts", "tsx"].contains(ext) { self = .preview; return }
+    // ImageIO cannot draw SVG, although its MIME type is image/*.
+    if ["ts", "tsx", "svg"].contains(ext) || mime == "image/svg+xml" { self = .preview; return }
     if mime?.hasPrefix("image/") == true || ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif", "bmp", "tiff", "ico"].contains(ext) {
       self = .image; return
     }

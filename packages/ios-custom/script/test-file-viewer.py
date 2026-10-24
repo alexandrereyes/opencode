@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""File viewer zoom, sibling navigation and file kinds against an owned sandbox directory; no model calls.
+
+Usage (after `xcodebuild … build-for-testing`):
+  OPENCODE_SANDBOX_HOME=<sandbox home> OPENCODE_TEST_SERVER_URL=http://127.0.0.1:<port> \
+  OPENCODE_TEST_DEVICE=<simulator UDID> OPENCODE_TEST_DERIVED=<DerivedData> OPENCODE_TEST_EVIDENCE=<dir> \
+  python3 packages/ios-custom/script/test-file-viewer.py [OpenCodeUITests/FileViewerNavigationTests/testName …]
+"""
+import base64
+import json
+import os
+from pathlib import Path
+import plistlib
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+import uuid
+import zlib
+
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+
+url = os.environ["OPENCODE_TEST_SERVER_URL"]
+parsed = urllib.parse.urlparse(url)
+assert parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in {None, 4096, 4178}
+home = Path(os.environ["OPENCODE_SANDBOX_HOME"]).resolve()
+assert json.loads((home / "sandbox.json").read_text())["port"] == parsed.port
+derived = Path(os.environ["OPENCODE_TEST_DERIVED"])
+device = os.environ["OPENCODE_TEST_DEVICE"]
+evidence = Path(os.environ["OPENCODE_TEST_EVIDENCE"])
+evidence.mkdir(parents=True, exist_ok=True)
+password = (home / "password").read_text().strip()
+headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
+
+def api(path, body=None, method="POST"):
+    request = urllib.request.Request(url + path, data=json.dumps(body).encode() if body is not None else None,
+        headers=headers, method=method)
+    with urllib.request.urlopen(request, timeout=30) as response:
+        data = response.read()
+        return json.loads(data) if data else None
+
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+def png(width, height, tint):
+    rows = b"".join(b"\0" + b"".join(bytes((tint, 60 + (y * 150) // height, 230 if (x // 60 + y // 60) % 2 else 90))
+        for x in range(width)) for y in range(height))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) \
+        + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+def pdf():
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    stream = b"BT /F1 20 Tf 40 220 Td (OpenCode - visualizador PDF) Tj ET"
+    objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
+    data = b"%PDF-1.4\n"
+    offsets = []
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += str(number).encode() + b" 0 obj\n" + obj + b"\nendobj\n"
+    start = len(data)
+    data += b"xref\n0 6\n0000000000 65535 f \n" + b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    return data + b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + str(start).encode() + b"\n%%EOF\n"
+
+token = uuid.uuid4().hex[:10]
+root = home / "repos" / ("file-viewer-" + token)
+folder = root / "fixtures"
+outside = home / "repos" / ("file-viewer-outside-" + token)
+folder.mkdir(parents=True)
+(folder / "subpasta").mkdir()
+outside.mkdir(parents=True)
+created = []
+configured = derived / ("Build/Products/FileViewer-" + token + ".xctestrun")
+theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
+environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
+    "OPENCODE_TEST_SERVER_URL": url}
+try:
+    # Server order (directories first, then localeCompare) is the same as the web file tree.
+    (folder / "a-imagem.png").write_bytes(png(1200, 800, 40))
+    (folder / "subpasta" / "interna.txt").write_text("Arquivo dentro de uma subpasta.\n", encoding="utf8")
+    subprocess.run(["sips", "-s", "format", "jpeg", str(folder / "a-imagem.png"), "--out", str(folder / "b-foto.jpg")], check=True, capture_output=True)
+    subprocess.run(["sips", "-s", "format", "heic", str(folder / "a-imagem.png"), "--out", str(folder / "d-foto.heic")], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=8", "-t", "2", str(folder / "c-animacao.gif")], check=True)
+    (folder / "e-vetor.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"><rect width="300" height="200" fill="#3366cc"/><text x="20" y="110" font-size="28" fill="white">SVG do visualizador</text></svg>\n', encoding="utf8")
+    (folder / "f-notas.md").write_text("# Notas do visualizador\n\n- Markdown **preservado**\n- Segundo item\n", encoding="utf8")
+    (folder / "g-dados.json").write_text('{"visualizador": "JSON preservado", "itens": [1, 2, 3]}\n', encoding="utf8")
+    (folder / "h-codigo.ts").write_text('export const visualizador = "TypeScript preservado"\n', encoding="utf8")
+    (folder / "i-documento.pdf").write_bytes(pdf())
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24", "-t", "30", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(folder / "j-video.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "30", str(folder / "k-audio.wav")], check=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660", "-t", "30", "-c:a", "aac", str(folder / "l-audio.m4a")], check=True)
+    (folder / "m-binario.opaque").write_bytes(bytes(range(256)))
+    (folder / "n-texto.txt").write_text("Texto simples do visualizador.\n", encoding="utf8")
+    # Above the Session directory, reachable through the session file explorer's `../`.
+    (root / "acima.png").write_bytes(png(600, 400, 160))
+    (root / "acima.txt").write_text("Arquivo acima da sessão.\n", encoding="utf8")
+    (outside / "fora.png").write_bytes(png(600, 400, 200))
+    (outside / "fora-2.png").write_bytes(png(600, 400, 120))
+    data_uri = "data:image/png;base64," + base64.b64encode(png(300, 200, 90)).decode()
+    links = {"PNG": "a-imagem.png", "JPG": "b-foto.jpg", "GIF": "c-animacao.gif", "HEIC": "d-foto.heic", "SVG": "e-vetor.svg",
+        "MD": "f-notas.md", "JSON": "g-dados.json", "TS": "h-codigo.ts", "PDF": "i-documento.pdf", "MP4": "j-video.mp4",
+        "WAV": "k-audio.wav", "M4A": "l-audio.m4a", "OPAQUE": "m-binario.opaque", "TXT": "n-texto.txt"}
+    text = "Arquivos do visualizador:\n\n" + "\n".join("- [Abrir " + key + "](" + value + ")" for key, value in links.items()) \
+        + "\n- [Abrir externo](" + str(outside / "fora.png") + ")"
+    messages = {"LINKS": text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
+    now = int(time.time() * 1000)
+    for role, body in messages.items():
+        session = "ses_" + uuid.uuid4().hex
+        api("/api/experimental/session/import", {"info": {"id": session, "title": "Visualizador · " + role, "projectID": "global",
+            "location": {"directory": str(folder)}, "agent": "build", "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
+            "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}, "outcome": "succeeded",
+            "time": {"created": now, "updated": now, "idle": now, "viewed": now}}, "location": {"directory": str(folder)},
+            "messages": [{"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Verificação isolada do visualizador.", "time": {"created": now - 1000}},
+                {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
+                 "time": {"created": now - 900, "completed": now - 600}, "finish": "stop", "content": [{"type": "text", "text": body}]}]})
+        created.append(session)
+        environment["OPENCODE_VIEWER_" + role] = session
+    run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
+    targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
+    for target in targets:
+        target.setdefault("EnvironmentVariables", {}).update(environment)
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", url]
+        target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", url]
+        target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
+    configured.write_bytes(plistlib.dumps(run))
+    configured.chmod(0o600)
+    subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4", "--batteryState", "discharging", "--batteryLevel", "100"], check=True)
+    result = evidence / ("file-viewer-" + theme + "-" + token + ".xcresult")
+    command = ["xcodebuild", "test-without-building", "-xctestrun", str(configured), "-destination", "platform=iOS Simulator,id=" + device,
+        "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES",
+        "-maximum-test-execution-time-allowance", "600", "-resultBundlePath", str(result)]
+    for test in sys.argv[1:] or ["OpenCodeUITests/FileViewerNavigationTests"]:
+        command.append("-only-testing:" + test)
+    status = subprocess.call(command)
+    exported = evidence / ("attachments-" + token)
+    subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(exported)], check=True)
+    for test in json.loads((exported / "manifest.json").read_text()):
+        for attachment in test["attachments"]:
+            source = exported / attachment["exportedFileName"]
+            if source.suffix == ".png":
+                prefix = "failure-" if attachment["isAssociatedWithFailure"] else ""
+                shutil.copyfile(source, evidence / (prefix + attachment["suggestedHumanReadableName"].split("_0_")[0] + ".png"))
+    shutil.rmtree(exported)
+    print(json.dumps({"status": status, "result": str(result), "ownedSessions": len(created)}))
+    sys.exit(status)
+finally:
+    configured.unlink(missing_ok=True)
+    for session in created:
+        api("/api/session/" + session, method="DELETE")
+    shutil.rmtree(root, ignore_errors=True)
+    shutil.rmtree(outside, ignore_errors=True)

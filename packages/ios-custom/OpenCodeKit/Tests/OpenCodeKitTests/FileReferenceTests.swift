@@ -29,6 +29,8 @@ import Testing
   #expect(FileViewerKind(path: "/repo/Dockerfile") == .preview)
   #expect(FileViewerKind(path: "/repo/.gitignore") == .preview)
   #expect(FileViewerKind(path: "/repo/source.ts", mime: "video/mp2t") == .preview)
+  #expect(FileViewerKind(path: "/repo/icon.svg", mime: "image/svg+xml") == .preview)
+  #expect(FileViewerKind(path: "/repo/icon", mime: "image/svg+xml") == .preview)
   #expect(FileViewerKind(path: "no-extension", mime: "video/mp4") == .audiovisual)
   #expect(!FileViewerKind.requiresConfirmation(nil))
   #expect(!FileViewerKind.requiresConfirmation(50 * 1024 * 1024))
@@ -72,6 +74,26 @@ import Testing
   #expect(try await client.fileLinkMatches("/private/tmp/missing.mp4", directory: "/repo").isEmpty)
   #expect(try await client.fileLinkMatches("docs/a.md", directory: "/repo") == ["/repo/docs/a.md"])
   #expect(try await client.fileLinkMatches("a.md", directory: "/repo") == ["/repo/docs/a.md", "/repo/other/docs/a.md"])
+}
+
+@Test func fileSiblingsKeepServerOrderSkipFoldersAndUnviewableKindsInsideOrOutsideTheSession() async throws {
+  let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "https://server.test")!)) { request in
+    #expect(request.url?.path == "/api/fs/list")
+    let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+    #expect(query.contains(URLQueryItem(name: "location[directory]", value: "/repo")))
+    let folder = query.first { $0.name == "path" }!.value!
+    let prefix = folder == "/repo/shots" ? "shots/" : "../tmp/"
+    // fs.list order: directories first, then localeCompare; paths stay relative to the Session Location.
+    return (Data(#"{"location":{"directory":"/repo"},"data":[{"path":"\#(prefix)nested/","type":"directory"},{"path":"\#(prefix)a.png","type":"file"},{"path":"\#(prefix).DS_Store","type":"file"},{"path":"\#(prefix)B.md","type":"file"},{"path":"\#(prefix)blob.opaque","type":"file"},{"path":"\#(prefix)c.mp4","type":"file"}]}"#.utf8),
+      HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+  #expect(try await client.fileSiblings(of: "/repo/shots/B.md", location: "/repo")
+    == ["/repo/shots/a.png", "/repo/shots/B.md", "/repo/shots/c.mp4"])
+  #expect(try await client.fileSiblings(of: "/repo/shots/blob.opaque", location: "/repo")
+    == ["/repo/shots/a.png", "/repo/shots/B.md", "/repo/shots/blob.opaque", "/repo/shots/c.mp4"])
+  #expect(try await client.fileSiblings(of: "/repo/shots/gone.png", location: "/repo") == nil)
+  #expect(try await client.fileSiblings(of: "/tmp/c.mp4", location: "/repo")
+    == ["/tmp/a.png", "/tmp/B.md", "/tmp/c.mp4"])
 }
 
 @Test func filePreviewStorageKeepsOriginalNameAndDeletesOnlyOwnedFiles() throws {

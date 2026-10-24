@@ -22,6 +22,13 @@ import XCTest
       view.contentOffset = CGPoint(x: 60, y: 100)
       view.layoutIfNeeded()
       XCTAssertEqual(view.contentOffset.y, 100, accuracy: 0.01)
+      // A zoomed image keeps its relative zoom when the viewport changes; a fitted one re-fits.
+      view.frame = CGRect(x: 0, y: 0, width: 400, height: 740)
+      view.layoutIfNeeded()
+      XCTAssertEqual(view.zoomScale / view.minimumZoomScale, 5, accuracy: 0.01)
+      XCTAssertFalse(view.pageable)
+      view.setZoomScale(view.minimumZoomScale, animated: false)
+      XCTAssertTrue(view.pageable)
       view.frame = CGRect(x: 0, y: 0, width: 800, height: 400)
       view.layoutIfNeeded()
       XCTAssertEqual(view.zoomScale, view.minimumZoomScale)
