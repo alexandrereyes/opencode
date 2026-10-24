@@ -28,7 +28,7 @@ struct TranscriptionSettingsView: View {
           Button("Apagar modelo", role: .destructive) { remove = true }.disabled(!transcription.canRemove)
         }
       } header: { Text("Parakeet Ultra") } footer: {
-        Text("25 idiomas, incluindo português. A detecção é automática. A primeira preparação pode levar cerca de 15 segundos. O áudio nunca sai do iPhone; só o texto entra no rascunho. Revise e envie quando quiser.")
+        Text("25 idiomas, incluindo português. A detecção é automática. Depois do download e a cada atualização do app, o iPhone otimiza o modelo uma vez (cerca de 15 segundos), em segundo plano. O áudio nunca sai do iPhone; só o texto entra no rascunho. Revise e envie quando quiser.")
       }.listRowBackground(theme.color(.surface))
       Section("Licenças") {
         Text("FluidAudio 0.17.7 · Apache 2.0\nParakeet Ultra · moondream / NVIDIA\nConversão CoreML · FluidInference\nModelo · CC BY 4.0")

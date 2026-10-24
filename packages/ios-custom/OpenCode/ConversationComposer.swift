@@ -34,7 +34,9 @@ struct ConversationComposer: View {
                 draft.expanded = false
               }
             }
-          }.toastOverlay(store.toast).onAppear { draft.focused = true }
+          }.toastOverlay(store.toast)
+          // Raising the keyboard while the cover is still being presented stalled the main thread.
+          .background(ComposerCoverAppearance { draft.focused = true }.frame(width: 0, height: 0))
       }.tint(theme.color(.primary)).sessionAlertOverlay(voice: false)
         .onAppear {
           expandedNavigationID = alerts?.center.navigationID
@@ -57,8 +59,29 @@ struct ConversationComposer: View {
   private func reviewDictation() {
     guard draft.dictationReview, scenePhase == .active, (visible || draft.expanded), !draft.focusSuppressed else { return }
     draft.dictationReview = false
+    if draft.expanded { draft.focused = true; return }
+    // The cover focuses its editor once presented; focusing here would raise the keyboard mid-presentation.
     draft.expanded = true
-    draft.focused = true
+  }
+}
+
+/// Runs once, after the fullscreen cover's presentation transition, unlike SwiftUI's `onAppear`.
+/// Each presentation builds a new controller, so reappearing under a dismissed picker does not refocus.
+private struct ComposerCoverAppearance: UIViewControllerRepresentable {
+  let appeared: () -> Void
+  func makeUIViewController(context: Context) -> Controller { Controller(appeared: appeared) }
+  func updateUIViewController(_ controller: Controller, context: Context) { controller.appeared = appeared }
+  final class Controller: UIViewController {
+    var appeared: () -> Void
+    private var done = false
+    init(appeared: @escaping () -> Void) { self.appeared = appeared; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+    override func viewDidAppear(_ animated: Bool) {
+      super.viewDidAppear(animated)
+      guard !done else { return }
+      done = true
+      appeared()
+    }
   }
 }
 

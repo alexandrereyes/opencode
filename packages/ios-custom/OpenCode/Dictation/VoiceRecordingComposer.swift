@@ -80,12 +80,19 @@ import UIKit
       guard willUseAudio() else { discard(); return }
       do {
         try TranscriptionModelFiles.prepare(file.deletingLastPathComponent())
-        try capture.start(at: file)
+        try await capture.start(at: file)
+        // discard() during activation already stopped the capture.
+        guard !Task.isCancelled, ticket == generation else { return }
         elapsed = 0; levels = Array(repeating: 0, count: 40); state = .recording
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         announce("Gravando para transcrever")
         startMeter()
-      } catch { discard(); self.error = "Não foi possível iniciar a gravação." }
+        // The first load after an install compiles for the Neural Engine; overlap it with speech.
+        transcription.prewarm()
+      } catch {
+        guard ticket == generation else { return }
+        discard(); self.error = "Não foi possível iniciar a gravação."
+      }
     }
   }
   private func startMeter() {
@@ -107,11 +114,22 @@ import UIKit
     makePreview()
   }
   func resume() {
-    guard state == .paused, willUseAudio() else { return }
+    guard state == .paused, task == nil, willUseAudio() else { return }
     if Self.audioOwner !== self { Self.audioOwner?.suspend(); Self.audioOwner = self }
     clearPreview()
-    do { try capture.resume(); state = .recording; announce("Gravação retomada"); startMeter() }
-    catch { self.error = "Não foi possível retomar a gravação."; makePreview() }
+    let ticket = generation
+    task = Task {
+      do {
+        try await capture.resume()
+        guard !Task.isCancelled, ticket == generation, state == .paused else { return }
+        state = .recording; announce("Gravação retomada"); startMeter()
+      } catch {
+        // finish() or discard() during activation stopped the capture and changed the state.
+        guard ticket == generation, state == .paused else { return }
+        task = nil
+        self.error = "Não foi possível retomar a gravação."; makePreview()
+      }
+    }
   }
   func suspend() {
     if state == .recording, gesture.state == .locked { pause() }
@@ -231,24 +249,31 @@ import UIKit
     if previewPlaying { pausePreview(); return }
     guard willUseAudio() else { return }
     if Self.audioOwner !== self { Self.audioOwner?.suspend(); Self.audioOwner = self }
-    do {
-      if previewPlayer == nil { previewPlayer = try AVAudioPlayer(contentsOf: previewFile) }
-      guard let player = previewPlayer else { return }
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.playback, mode: .default); try session.setActive(true); previewSession = true
-      if previewPosition >= previewDuration { previewPosition = 0 }
-      player.currentTime = previewPosition
-      guard player.play() else { throw TranscriptionError.integrity }
-      previewPlaying = true
-      previewTicker = Task { [weak self] in
+    // Playing from the first tap lets a second tap cancel a pending activation.
+    previewPlaying = true
+    previewSession = true
+    previewTicker = Task { [weak self] in
+      do {
+        guard let self else { return }
+        if previewPlayer == nil { previewPlayer = try AVAudioPlayer(contentsOf: previewFile) }
+        guard let player = previewPlayer else { return }
+        if previewPosition >= previewDuration { previewPosition = 0 }
+        player.currentTime = previewPosition
+        let queued = QueuedAudio(value: player)
+        try await DictationAudioSession.activate(.playback) { queued.value.play() }
+        // pausePreview() during the activation already queued the deactivation.
+        guard !Task.isCancelled, previewPlaying, state == .paused else { player.pause(); return }
         while !Task.isCancelled {
           do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-          guard let self, let player = previewPlayer else { return }
+          guard let player = previewPlayer else { return }
           if !player.isPlaying { pausePreview(); previewPosition = 0; return }
           previewPosition = player.currentTime
         }
+      } catch {
+        guard let self, !Task.isCancelled else { return }
+        pausePreview(); self.error = "Não foi possível ouvir a gravação."
       }
-    } catch { pausePreview(); self.error = "Não foi possível ouvir a gravação." }
+    }
   }
   func seekPreview(fraction: Double) {
     guard state == .paused, previewReady else { return }
@@ -258,7 +283,7 @@ import UIKit
   func pausePreview() {
     if previewPlaying { previewPosition = previewPlayer?.currentTime ?? previewPosition }
     previewPlayer?.pause(); previewPlaying = false; previewTicker?.cancel(); previewTicker = nil
-    if previewSession { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); previewSession = false }
+    if previewSession { DictationAudioSession.deactivate(); previewSession = false }
   }
   private func clearPreview() {
     pausePreview(); previewPlayer = nil; previewTask?.cancel(); previewTask = nil

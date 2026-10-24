@@ -101,11 +101,11 @@ actor DictationFixtureEngine: TranscriptionEngine {
   private var accumulated: TimeInterval = 0
   private var file: URL?
   func authorize() async -> Bool { true }
-  func start(at file: URL) throws { self.file = file; accumulated = 0; started = ProcessInfo.processInfo.systemUptime; try writePCM() }
+  func start(at file: URL) async throws { self.file = file; accumulated = 0; started = ProcessInfo.processInfo.systemUptime; try writePCM() }
   var elapsed: TimeInterval { accumulated + (started.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0) }
   var level: Float { MicrophoneVoiceCapture.displayLevel(decibels: Float(-30 + 18 * sin(elapsed * 8))) }
   func pause() { accumulated = elapsed; started = nil; try? writePCM() }
-  func resume() throws { started = ProcessInfo.processInfo.systemUptime }
+  func resume() async throws { started = ProcessInfo.processInfo.systemUptime }
   func stop() { try? writePCM(); started = nil; accumulated = 0; file = nil }
   private func writePCM() throws {
     guard let file, let fixture = Bundle.main.url(forResource: "dictation-fixture", withExtension: "caf") else { throw TranscriptionError.integrity }

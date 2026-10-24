@@ -191,6 +191,82 @@ import os
     XCTAssertEqual(received, "Texto transcrito")
     XCTAssertFalse(FileManager.default.fileExists(atPath: recording.file.path))
   }
+  private func warmup(build: String, engine: DictationWarmupEngine, defaults: UserDefaults) -> (TranscriptionController, DictationTestSource) {
+    let source = DictationTestSource()
+    source.install()
+    addTeardownBlock { try? FileManager.default.removeItem(at: source.files.root) }
+    return (TranscriptionController(source: source, engine: engine, defaults: defaults, monitorsNetwork: false,
+      build: build, warmupDelay: .zero, decode: { _ in [0.25] }), source)
+  }
+  private func suite() throws -> UserDefaults {
+    let name = "dictation-warmup-\(UUID().uuidString)"
+    addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+    return try XCTUnwrap(UserDefaults(suiteName: name))
+  }
+  func testRecordingPrewarmSharesOneLoadWithTheQueuedRecording() async throws {
+    let engine = DictationWarmupEngine(gated: true)
+    let (transcription, _) = warmup(build: "build-a", engine: engine, defaults: try suite())
+    transcription.prewarm(); transcription.prewarm()
+    try await wait { await engine.waiting }
+    XCTAssertEqual(transcription.status, .preparing)
+    XCTAssertTrue(transcription.optimizing)
+    XCTAssertEqual(transcription.label, "Otimizando o modelo para este iPhone (uma vez por atualização)…")
+    var received: [String] = []
+    let job = DictationJob(file: URL(fileURLWithPath: "/unused")) { received.append($0) }
+    transcription.enqueue(job)
+    XCTAssertEqual(job.state, .waiting)
+    XCTAssertFalse(transcription.canRemove)
+    await engine.open()
+    try await wait { received == ["Texto aquecido"] && transcription.canRemove }
+    let loads = await engine.loads
+    XCTAssertEqual(loads, 1)
+    XCTAssertFalse(transcription.optimizing)
+    transcription.setActive(false)
+    try await wait { await engine.unloads == 1 }
+    transcription.setActive(true)
+    transcription.prewarm()
+    XCTAssertFalse(transcription.optimizing, "The same build was already compiled")
+    try await wait { await engine.loads == 2 && transcription.status == .ready }
+  }
+  func testBackgroundingDuringPrewarmUnloadsOnlyAfterTheLoadFinishes() async throws {
+    let engine = DictationWarmupEngine(gated: true)
+    let (transcription, _) = warmup(build: "build-a", engine: engine, defaults: try suite())
+    transcription.prewarm()
+    try await wait { await engine.waiting }
+    transcription.setActive(false)
+    await Task.yield()
+    let early = await engine.unloads
+    XCTAssertEqual(early, 0)
+    await engine.open()
+    try await wait { await engine.unloads == 1 && transcription.status == .ready }
+    let loads = await engine.loads
+    XCTAssertEqual(loads, 1)
+  }
+  func testLaunchPrewarmRunsOnceAfterEachUpdateOrDownload() async throws {
+    let defaults = try suite()
+    let first = DictationWarmupEngine(gated: false)
+    let (launch, _) = warmup(build: "build-a", engine: first, defaults: defaults)
+    launch.start()
+    try await wait { await first.loads == 1 && launch.status == .ready }
+    let same = DictationWarmupEngine(gated: false)
+    let (relaunch, _) = warmup(build: "build-a", engine: same, defaults: defaults)
+    relaunch.start()
+    try await Task.sleep(for: .milliseconds(200))
+    let skipped = await same.loads
+    XCTAssertEqual(skipped, 0)
+    let updated = DictationWarmupEngine(gated: false)
+    let (update, _) = warmup(build: "build-b", engine: updated, defaults: defaults)
+    update.start()
+    try await wait { await updated.loads == 1 }
+    let downloaded = DictationWarmupEngine(gated: false)
+    let source = DictationTestSource()
+    defer { try? FileManager.default.removeItem(at: source.files.root) }
+    let download = TranscriptionController(source: source, engine: downloaded, defaults: defaults, monitorsNetwork: false,
+      build: "build-b", warmupDelay: .zero)
+    download.download(cellular: false)
+    source.install()
+    try await wait { await downloaded.loads == 1 }
+  }
 }
 
 actor DictationTestEngine: TranscriptionEngine {
@@ -225,7 +301,7 @@ final class DictationTestSource: TranscriptionModelSource, @unchecked Sendable {
   var starts = 0
   var pauses = 0
   func authorize() async -> Bool { waits ? await withCheckedContinuation { permission = $0 } : true }
-  func start(at file: URL) throws {
+  func start(at file: URL) async throws {
     starts += 1
     if writesFixture {
       try FileManager.default.copyItem(at: XCTUnwrap(Bundle.main.url(forResource: "dictation-fixture", withExtension: "caf")), to: file)
@@ -234,6 +310,21 @@ final class DictationTestSource: TranscriptionModelSource, @unchecked Sendable {
   var elapsed: TimeInterval { 2 }
   var level: Float { 0.5 }
   func pause() { pauses += 1 }
-  func resume() throws {}
+  func resume() async throws {}
   func stop() {}
+}
+actor DictationWarmupEngine: TranscriptionEngine {
+  private(set) var loads = 0
+  private(set) var unloads = 0
+  private var gated: Bool
+  private var gate: CheckedContinuation<Void, Never>?
+  init(gated: Bool) { self.gated = gated }
+  var waiting: Bool { gate != nil }
+  func open() { gated = false; gate?.resume(); gate = nil }
+  func load(from directory: URL) async throws {
+    loads += 1
+    if gated { await withCheckedContinuation { gate = $0 } }
+  }
+  func transcribe(_ samples: [Float]) async throws -> String { "Texto aquecido" }
+  func unload() async { unloads += 1 }
 }

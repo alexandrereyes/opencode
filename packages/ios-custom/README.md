@@ -660,7 +660,14 @@ An active GPT Live call disables dictation with an explanation; these paths shar
 
 **Você → Transcrição** shows model status/progress, download/disk size, retry, deletion and redownload. First use
 asks before downloading **632,162,964 bytes** (632 MB / 603 MiB), recommends Wi-Fi and explains the roughly 15-second
-first-device preparation. Recording remains usable while missing/downloading; audio waits locally. The download
+Neural Engine optimization. Core ML caches it per installed bundle and iOS build, so it recurs after every install,
+TestFlight update or iOS update. `TranscriptionController` therefore prewarms once shortly after such a launch or a
+finished download (`.medium`; `.utility` took 38 s on the iPhone 14) and again when a recording starts, so the
+compilation overlaps speech. All callers share one load, serialized after any pending unload; idle unload is unchanged.
+While it runs, the pending row says "Otimizando o modelo para este iPhone (uma vez por atualização)…".
+AVAudioSession activation/deactivation, `AVAudioRecorder.record()` and preview `play()` (which activate internally)
+run on one serial queue off the main thread, and the expanded composer raises the keyboard only after its cover
+finishes presenting. Recording remains usable while missing/downloading; audio waits locally. The download
 uses background URLSession, resumable files, exact byte counts and SHA-256 before atomic installation. Inference
 starts only on-device in the foreground, one recording at a time, with the CPU preprocessor and Neural Engine;
 the model unloads after idle time. Download continuation is not a promise of background inference.

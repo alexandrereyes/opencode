@@ -79,7 +79,14 @@ struct ComposerTextView: UIViewRepresentable {
       }
       resetTyping(view)
     }
-    if focused && !view.isFirstResponder && view.window != nil { view.becomeFirstResponder() }
+    if focused && !view.isFirstResponder && view.window != nil {
+      // Like resigning below: becoming first responder reloads the keyboard's input views,
+      // which must not run inside this graph update (attribute cycle and a ~0.4 s hang).
+      DispatchQueue.main.async { [weak view] in
+        guard let view, view.requestFocus, !view.isFirstResponder, view.window != nil else { return }
+        view.becomeFirstResponder()
+      }
+    }
     if !focused && view.isFirstResponder {
       // UIKit asks the SwiftUI host for its next responder. Doing that during a
       // graph update can cycle when the floating voice controls are present.
@@ -249,7 +256,13 @@ final class ComposerInputView: UITextView {
     }
     // Install the public guide before focus changes so dismissal can inspect real visibility.
     _ = window.keyboardLayoutGuide
-    if requestFocus { becomeFirstResponder() }
+    // Insertion happens during SwiftUI/UIKit hierarchy updates; focus on the next turn.
+    if requestFocus {
+      DispatchQueue.main.async { [weak self] in
+        guard let self, requestFocus, !isFirstResponder, self.window != nil else { return }
+        becomeFirstResponder()
+      }
+    }
   }
   @discardableResult override func resignFirstResponder() -> Bool {
     hardwareSubmitted = false
