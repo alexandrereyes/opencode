@@ -15,17 +15,32 @@ import OSLog
   var elapsed: TimeInterval { connectedAt.map { max(0, Date.now.timeIntervalSince($0)) } ?? 0 }
   private(set) var sessionID: UUID?
   private(set) var busy = false
+  /// Set when automatic recovery gave up; the UI offers "Tentar de novo".
+  private(set) var alert: String?
   @ObservationIgnored private var transport: (any VoiceTransporting)?
   @ObservationIgnored private var master: (any VoiceMasterServing)?
   @ObservationIgnored private var signaling: VoiceSignaling?
   @ObservationIgnored private var connection: Task<Void, Never>?
   @ObservationIgnored private var renewal: Task<Void, Never>?
   @ObservationIgnored private var watchdog: Task<Void, Never>?
+  @ObservationIgnored private var leaseDeadline: Task<Void, Never>?
+  @ObservationIgnored private var recoveryTask: Task<Void, Never>?
   @ObservationIgnored private var narrationTask: Task<Void, Never>?
   @ObservationIgnored private var delegationTask: Task<Void, Never>?
   @ObservationIgnored private var retirement: Task<Void, Never>?
   @ObservationIgnored private var activity = VoiceActivityDriver()
   @ObservationIgnored private var epoch = UUID()
+  /// One GPT Live call inside the conversation; a new link after each network recovery.
+  @ObservationIgnored private var link = UUID()
+  @ObservationIgnored private var lease = VoiceLeaseClock()
+  @ObservationIgnored private var recovery = VoiceRecovery()
+  @ObservationIgnored private var policy = VoiceRecoveryPolicy()
+  @ObservationIgnored private var network: any VoicePathMonitoring = VoicePathMonitor()
+  @ObservationIgnored private var cues: any VoiceCueing = VoiceCuePlayer()
+  @ObservationIgnored private var makeTransport: (@escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting = {
+    VoiceTransport(event: $0)
+  }
+  @ObservationIgnored private var callVoice = GPTLiveVoice.defaultVoice
   @ObservationIgnored private var ready = false
   @ObservationIgnored private var mediaConnected = false
   @ObservationIgnored private var currentDelegation: String?
@@ -50,10 +65,16 @@ import OSLog
     let request: @Sendable (URLRequest) async throws -> (Data, URLResponse)
     var permission = true
     var memory: VoiceMemoryStore?
+    var policy = VoiceRecoveryPolicy()
+    var network: (any VoicePathMonitoring)?
+    var cues: (any VoiceCueing)?
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
     self.init(preferences: preferences); self.testing = testing
+    policy = testing.policy; makeTransport = testing.transport
+    if let network = testing.network { self.network = network }
+    if let cues = testing.cues { self.cues = cues }
   }
   #endif
 
@@ -71,9 +92,10 @@ import OSLog
   }
   func start(sessions: SessionStore) {
     guard !busy, !state.visible else { return }
-    let selectedVoice = preferences.voice
+    callVoice = preferences.voice
     let token = UUID()
     epoch = token; sessionID = token; ready = false; mediaConnected = false
+    recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
@@ -113,46 +135,57 @@ import OSLog
     #else
     master = VoiceMaster(sessions: sessions, update: updates)
     #endif
-    let events: @MainActor @Sendable (VoiceTransportEvent) -> Void = { [weak self] event in
+    network.start { [weak self] path in
       guard let self, self.epoch == token else { return }
-      self.receive(event)
+      self.pathChanged(path)
     }
-    #if DEBUG
-    transport = testing?.transport(events) ?? VoiceTransport(event: events)
-    #else
-    transport = VoiceTransport(event: events)
-    #endif
-    let signal = VoiceSignaling()
-    signaling = signal
     connection = Task { [weak self] in
       guard let self else { return }
+      let allowed = await permission()
+      guard epoch == token, !Task.isCancelled else { return }
+      guard allowed else { await fail("Permita o microfone nos Ajustes para conversar por voz."); return }
       do {
-        let allowed = await permission()
-        try Task.checkCancellation()
-        guard epoch == token else { return }
-        guard allowed else { throw ClientError.operation("Permita o microfone nos Ajustes para conversar por voz.") }
-        armWatchdog(token: token, seconds: 45, message: "A conexão de voz demorou demais. Confira o WARP e tente novamente.")
-        VoiceTransport.log.notice("phase=start")
-        detail = "Conectando ao serviço privado"; publish()
-        guard let transport else { throw VoiceWireError.invalidAnswer }
-        // Local factory/audio setup overlaps the reservation, but no provider call is speculative.
-        async let offer = transport.offer()
-        async let history = memory?.prepare()
-        try await renew(signal, method: "POST")
-        guard epoch == token else { return }
-        beginRenewal(signal, token: token)
-        let answer = try await signal.createCall(sdp: await offer, voice: selectedVoice, history: await history,
-          request: { [self] in try await perform($0) })
-        try Task.checkCancellation()
-        guard epoch == token else { return }
-        try await transport.answer(answer.sdp)
-        if let notice = answer.fallbackNotice { toast.show(notice, kind: .error) }
-        VoiceTransport.log.notice("phase=answer-applied")
+        try await open(token: token, timeout: 45, message: "A conexão de voz demorou demais. Confira o WARP e tente novamente.")
       } catch {
-        guard epoch == token, !Task.isCancelled else { return }
+        guard epoch == token, !Task.isCancelled, !(error is CancellationError) else { return }
         await fail(error.localizedDescription)
       }
     }
+  }
+  /// Opens one GPT Live call: transport, lease reservation and offer, resuming memory as initial items.
+  /// Readiness arrives later through `connected()`, before `timeout` or the link is lost.
+  private func open(token: UUID, timeout: Double, message: String) async throws {
+    let current = UUID()
+    link = current; ready = false; mediaConnected = false; lease = VoiceLeaseClock()
+    armWatchdog(token: token, seconds: timeout, message: message)
+    let events: @MainActor @Sendable (VoiceTransportEvent) -> Void = { [weak self] event in
+      guard let self, self.epoch == token, self.link == current else { return }
+      self.receive(event)
+    }
+    let transport = makeTransport(events)
+    self.transport = transport
+    if state.muted { transport.mute(true) }
+    let signal = VoiceSignaling()
+    signaling = signal
+    VoiceTransport.log.notice("phase=start")
+    detail = recovery.active ? "Reconectando ao serviço privado" : "Conectando ao serviço privado"; publish()
+    // Turns heard before a loss must be buffered before the next call reads memory.
+    await memoryEvents?.value
+    guard epoch == token, link == current else { throw CancellationError() }
+    // Local factory/audio setup overlaps the reservation, but no provider call is speculative.
+    async let offer = transport.offer()
+    async let history = memory?.prepare()
+    try await renew(signal, method: "POST")
+    guard epoch == token, link == current else { throw CancellationError() }
+    beginRenewal(signal, token: token, link: current)
+    let answer = try await signal.createCall(sdp: await offer, voice: callVoice, history: await history,
+      request: { [self] in try await perform($0) })
+    try Task.checkCancellation()
+    guard epoch == token, link == current else { throw CancellationError() }
+    callVoice = answer.voice
+    try await transport.answer(answer.sdp)
+    if let notice = answer.fallbackNotice { toast.show(notice, kind: .error) }
+    VoiceTransport.log.notice("phase=answer-applied")
   }
   private func permission() async -> Bool {
     #if DEBUG
@@ -168,34 +201,57 @@ import OSLog
     return try await http.data(for: request)
   }
   private func renew(_ signal: VoiceSignaling, method: String) async throws {
-    let started = ProcessInfo.processInfo.systemUptime
+    let current = link
+    let started = Self.now
     let (data, response) = try await perform(signal.leaseRequest(method: method))
-    let lease = try signal.parseLease(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
-    guard lease.remaining - (ProcessInfo.processInfo.systemUptime - started) > 10 else {
+    let confirmed = try signal.parseLease(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+    guard link == current else { throw CancellationError() }
+    guard lease.confirm(confirmed, requestedAt: started, now: Self.now) else {
       throw ClientError.operation("A autorização temporária da voz expirou. Reconecte.")
     }
+    armLeaseDeadline(token: epoch, link: current)
   }
-  private func beginRenewal(_ signal: VoiceSignaling, token: UUID) {
+  /// A renewal may fail transiently while the confirmed lease still covers the call. Audio stops when the
+  /// lease minus its safety margin ends, even with a renewal still in flight; refusals end the call at once.
+  private func beginRenewal(_ signal: VoiceSignaling, token: UUID, link current: UUID) {
     renewal = Task { [weak self] in
       guard let self else { return }
-      do {
-        while !Task.isCancelled {
-          try await Task.sleep(for: .seconds(5))
-          guard epoch == token else { return }
+      var delay = policy.renewal
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+        guard epoch == token, link == current else { return }
+        do {
           try await renew(signal, method: "PUT")
+          delay = policy.renewal
+        } catch {
+          guard epoch == token, link == current, !Task.isCancelled, !(error is CancellationError) else { return }
+          guard VoiceLeaseClock.isTransient(error) else {
+            await fail("A autorização da voz não pôde ser renovada. A chamada foi encerrada por segurança.")
+            return
+          }
+          VoiceTransport.log.notice("phase=renewal-retry")
+          guard lease.valid(at: Self.now) else { return }
+          delay = min(policy.renewalRetry, max(0, lease.validUntil - Self.now))
         }
-      } catch {
-        guard epoch == token, !Task.isCancelled else { return }
-        await fail("A autorização da voz não pôde ser renovada. A chamada foi encerrada por segurança.")
       }
     }
   }
-  private func armWatchdog(token: UUID, seconds: Int, message: String) {
+  private func armLeaseDeadline(token: UUID, link current: UUID) {
+    leaseDeadline?.cancel()
+    let remaining = lease.validUntil - Self.now
+    leaseDeadline = Task { [weak self] in
+      do { try await Task.sleep(for: .seconds(max(0, remaining))) } catch { return }
+      guard let self, epoch == token, link == current else { return }
+      lose("A autorização da voz expirou sem rede. Reconectando…")
+    }
+  }
+  private func armWatchdog(token: UUID, seconds: Double, message: String) {
     watchdog?.cancel()
+    let current = link
     watchdog = Task { [weak self] in
       do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
-      guard let self, epoch == token else { return }
-      await fail(message)
+      guard let self, epoch == token, link == current else { return }
+      lose(message)
     }
   }
   private func receive(_ event: VoiceTransportEvent) {
@@ -211,9 +267,10 @@ import OSLog
     case .disconnected:
       if state.phase == .speaking { interruptedAssistant = true }
       if inputItemID != nil { interruptedUser = true }
-      mediaConnected = false; state.apply(.reconnect); publish()
-      armWatchdog(token: epoch, seconds: 10, message: "A conexão de áudio não se recuperou. Reconecte a chamada.")
-    case .failed: Task { await fail("A conexão de áudio foi encerrada. Tente reconectar.") }
+      mediaConnected = false; state.apply(network.current.satisfied ? .reconnect : .offline); publish()
+      // WebRTC may restore the same path by itself; after the grace the call is rebuilt.
+      armWatchdog(token: epoch, seconds: policy.mediaGrace, message: "A conexão de áudio não se recuperou.")
+    case .failed: lose("A conexão de áudio foi encerrada.")
     case .data(let data):
       do { handle(try VoiceProtocol.decode(data)) }
       catch { Task { await fail(error.localizedDescription) } }
@@ -222,6 +279,10 @@ import OSLog
   private func connected() {
     if connectedAt == nil { connectedAt = .now }
     watchdog?.cancel(); watchdog = nil
+    if recovery.active {
+      recovery.restore(); cues.play(.restored)
+      VoiceTransport.log.notice("phase=recovered")
+    }
     state.apply(.connected); detail = "Pode falar com a Sessão mestra"; publish()
     VoiceTransport.log.notice("phase=ready")
     if narrationTask == nil {
@@ -326,13 +387,111 @@ import OSLog
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
   func resume() { transport?.resume() }
-  func end() async { await retire(); state.apply(.end); detail = ""; publish() }
+  func end() async { alert = nil; await retire(); state.apply(.end); detail = ""; publish() }
   func retry(sessions: SessionStore) async { await end(); start(sessions: sessions) }
+  func dismissAlert() { alert = nil }
   private func fail(_ message: String) async {
     guard state.visible, state.phase != .failed, !busy else { return }
     VoiceTransport.log.notice("phase=failed")
     await retire(); state.apply(.failure(message)); detail = message; publish()
   }
+
+  // MARK: Network recovery
+
+  /// The current link is gone. An established conversation rebuilds the call with memory, within the
+  /// recovery window; a call that never connected fails as before.
+  private func lose(_ reason: String) {
+    guard state.visible, state.phase != .failed, !busy else { return }
+    guard connectedAt != nil else { Task { await fail(reason) }; return }
+    let token = epoch
+    let first = !recovery.active
+    recovery.lose(at: Self.now)
+    VoiceTransport.log.notice("phase=lost")
+    // Invalidate every callback of the old call before tearing it down.
+    link = UUID()
+    if state.phase == .speaking { interruptedAssistant = true }
+    if inputItemID != nil { interruptedUser = true }
+    // Delegation items belong to the old call; the next call learns the master's state from memory.
+    currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
+    ready = false; mediaConnected = false
+    connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); leaseDeadline?.cancel()
+    connection = nil; renewal = nil; watchdog = nil; leaseDeadline = nil
+    state.apply(network.current.satisfied ? .reconnect : .offline)
+    detail = network.current.satisfied ? "Reconectando a voz…" : "Sem conexão. Aguardando a rede…"
+    publish()
+    // The waiting tone holds the audio session before the old transport releases its own credit.
+    if first { cues.play(.lost) }
+    let transport = transport; self.transport = nil
+    let signal = signaling; signaling = nil
+    recoveryTask?.cancel()
+    recoveryTask = Task { [weak self] in
+      await transport?.close()
+      guard let self else { return }
+      if let signal, let request = try? signal.leaseRequest(method: "DELETE") {
+        // Best effort without blocking recovery; an unreachable proxy expires the lease itself.
+        Task { _ = try? await self.perform(request) }
+      }
+      await reconnect(token: token)
+    }
+  }
+
+  private func reconnect(token: UUID) async {
+    while epoch == token, !Task.isCancelled {
+      if !network.current.satisfied {
+        if state.phase != .offline { state.apply(.offline); detail = "Sem conexão. Aguardando a rede…"; publish() }
+        guard recovery.remaining(at: Self.now) > 0 else { break }
+        do { try await Task.sleep(for: .seconds(policy.networkPoll)) } catch { return }
+        continue
+      }
+      guard let delay = recovery.next(at: Self.now) else { break }
+      state.apply(.reconnect); detail = "Reconectando a voz…"; publish()
+      do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+      guard epoch == token, network.current.satisfied else { continue }
+      VoiceTransport.log.notice("phase=reconnect-attempt")
+      do {
+        try await open(token: token, timeout: policy.attemptTimeout, message: "A nova conexão de voz não ficou pronta.")
+        return
+      } catch {
+        guard epoch == token, !Task.isCancelled, !(error is CancellationError) else { return }
+        guard VoiceLeaseClock.isTransient(error) else { await fail(error.localizedDescription); return }
+        await closeLink()
+      }
+    }
+    guard epoch == token, !Task.isCancelled else { return }
+    let message = "Não consegui reconectar a voz em \(Int(policy.window)) segundos. Confira a rede e o WARP."
+    VoiceTransport.log.notice("phase=recovery-exhausted")
+    cues.play(.failed)
+    alert = message
+    await fail(message)
+  }
+
+  /// Tears down a failed attempt so the next one starts from a clean link.
+  private func closeLink() async {
+    link = UUID()
+    watchdog?.cancel(); renewal?.cancel(); leaseDeadline?.cancel()
+    watchdog = nil; renewal = nil; leaseDeadline = nil
+    let transport = transport; self.transport = nil
+    let signal = signaling; signaling = nil
+    await transport?.close()
+    if let signal, let request = try? signal.leaseRequest(method: "DELETE") {
+      Task { [self] in _ = try? await perform(request) }
+    }
+  }
+
+  private func pathChanged(_ path: VoicePath) {
+    guard state.visible, state.phase != .failed else { return }
+    if !path.satisfied {
+      if state.phase == .reconnecting { state.apply(.offline); detail = "Sem conexão. Aguardando a rede…"; publish() }
+      return
+    }
+    if state.phase == .offline { state.apply(.reconnect); detail = "Reconectando a voz…"; publish() }
+    // A disconnected peer will not migrate to a new interface; rebuild without waiting for the grace.
+    if !recovery.active, connectedAt != nil, !mediaConnected, transport != nil {
+      lose("A rede mudou. Reconectando a voz…")
+    }
+  }
+
+  private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
   private func retire() async {
     if let retirement { await retirement.value; return }
     busy = true
@@ -345,9 +504,12 @@ import OSLog
   private func releaseResources() async {
     let callID = sessionID
     let memory = memory
-    epoch = UUID()
+    epoch = UUID(); link = UUID()
+    network.stop(); recovery.restore(); cues.stop()
     connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); narrationTask?.cancel(); delegationTask?.cancel()
+    leaseDeadline?.cancel(); recoveryTask?.cancel()
     connection = nil; renewal = nil; watchdog = nil; narrationTask = nil; delegationTask = nil
+    leaseDeadline = nil; recoveryTask = nil
     delegationQueue = []; master?.stop(); master = nil
     let transport = transport; self.transport = nil
     let signal = signaling; signaling = nil

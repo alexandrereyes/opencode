@@ -1,7 +1,7 @@
 import Foundation
 
 public enum VoicePhase: String, Codable, Sendable {
-  case idle, connecting, listening, speaking, interrupted, reconnecting, failed
+  case idle, connecting, listening, speaking, interrupted, reconnecting, offline, failed
   public var label: String {
     switch self {
     case .idle: "Conversa encerrada"
@@ -10,6 +10,7 @@ public enum VoicePhase: String, Codable, Sendable {
     case .speaking: "Falando"
     case .interrupted: "Áudio interrompido"
     case .reconnecting: "Reconectando…"
+    case .offline: "Sem conexão"
     case .failed: "Voz indisponível"
     }
   }
@@ -17,7 +18,7 @@ public enum VoicePhase: String, Codable, Sendable {
 
 public struct VoiceState: Equatable, Sendable {
   public enum Event: Sendable {
-    case start, connected, speech, silence, bargeIn, interruption, resume, reconnect, end
+    case start, connected, speech, silence, bargeIn, interruption, resume, reconnect, offline, end
     case failure(String)
   }
   public private(set) var phase: VoicePhase = .idle
@@ -35,8 +36,9 @@ public struct VoiceState: Equatable, Sendable {
     case .start: self = Self(); phase = .connecting
     case .end: self = Self()
     case .failure(let message): error = message; phase = .failed; masterWorking = false
-    case .reconnect where [.listening, .speaking, .interrupted].contains(phase): phase = .reconnecting
-    case .connected where [.connecting, .reconnecting].contains(phase): phase = .listening
+    case .reconnect where [.listening, .speaking, .interrupted, .offline].contains(phase): phase = .reconnecting
+    case .offline where [.listening, .speaking, .interrupted, .reconnecting].contains(phase): phase = .offline
+    case .connected where [.connecting, .reconnecting, .offline].contains(phase): phase = .listening
     case .speech where [.listening, .speaking].contains(phase): phase = .speaking
     case .silence where phase == .speaking, .bargeIn where phase == .speaking: phase = .listening
     case .interruption where [.listening, .speaking, .reconnecting].contains(phase): phase = .interrupted

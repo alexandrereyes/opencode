@@ -9,6 +9,8 @@ struct VoiceActivityAttributes: ActivityAttributes {
     var muted: Bool
     var working: Bool
     var speaking: Bool
+    /// SF Symbol of the coarse call state (`VoiceIndicator`), including reconnecting and offline.
+    var symbol: String
     var colors: [String: [Double]]
     func color(_ role: ThemeRole) -> Color {
       let value = colors[String(role.rawValue)] ?? [0, 0, 0, 1]

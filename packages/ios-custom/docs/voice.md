@@ -30,8 +30,11 @@ pelo WARP; não se publica essa origem na Internet.
    `session-id`, `thread-id`, `x-session-id` e `x-gpt-live-generation`. O proxy escolhe a conta e
    injeta credenciais. Só 201 com SDP e Location é aceito; criação ambígua não é repetida.
 3. `PUT /_gpt-live/sessions/{UUID}`, mesmo body, a cada cinco segundos. Timeout HTTP de oito
-   segundos e margem conservadora de dez segundos no prazo retornado. Falha de renovação encerra
-   o áudio, em vez de continuar depois da autorização. A lease padrão no deploy é de 60 segundos.
+   segundos e margem fixa de dez segundos no prazo retornado, medida desde o início da requisição
+   que o confirmou. Rede inalcançável (erro de URL, HTTP 408/429/502/503/504) é repetida a cada
+   segundo enquanto essa lease confirmada cobrir a chamada; ao fim dela o áudio fecha, mesmo com uma
+   renovação ainda em voo. Recusa explícita (outro HTTP, lease malformada, de outra chamada ou já
+   dentro da margem) encerra na hora, sem reconexão. A lease padrão no deploy é de 60 segundos.
 4. Encerramento fecha primeiro mídia/canal/áudio local, depois envia `DELETE` com `generation` na
    query. Se a rede estiver indisponível, a lease do proxy expira; não há retry de criação.
 
@@ -112,8 +115,38 @@ outro pedido sem esperar o trabalho anterior terminar.
 Áudio: `playAndRecord`, `voiceChat`, 48 kHz preferidos, buffer de 10 ms, Bluetooth HFP/AirPods e
 alto-falante padrão. Mudanças de rota revalidam ativação; iOS 27 usa `didBecomeInactiveNotification`
 e `resumptionRecommendationNotification`. Sem recomendação de retomada, o controle **Retomar
-áudio** é explícito. Media-services reset exige nova conexão. Uma troca de rede tem dez segundos
-para recuperar o peer; depois há erro honesto e reconexão manual, com novos UUIDs.
+áudio** é explícito. Media-services reset exige nova conexão. Quedas de rede seguem a seção abaixo.
+
+## Recuperação de rede
+
+Uma conversa já conectada sobrevive a túnel, troca de antena ou Wi-Fi→celular. `VoiceController`
+separa a **conversa** (`sessionID`, mestra, fila de delegações, memória, mute, Live Activity) do
+**link** (uma chamada GPT Live: transporte, `VoiceSignaling`, lease). Callbacks de um link antigo são
+descartados pelo token do link. Limites em `VoiceRecoveryPolicy` (Kit); a margem da lease não é
+configurável.
+
+- **Perda do link:** ICE `disconnected` dá 15 s para o WebRTC se recuperar sozinho; `failed`, canal
+  fechado ou fim da lease reconstroem a chamada na hora. Se `NWPathMonitor` (`VoicePathMonitor`) indicar
+  rede de volta enquanto o peer está desconectado, a reconstrução começa sem esperar os 15 s.
+- **Reconstrução:** fecha mídia e lease antiga (DELETE sem bloquear) e abre uma chamada nova, com novos
+  UUIDs e a memória como `initial_items`, exatamente como uma chamada nova; antes, aguarda a gravação
+  local dos turnos ouvidos. Mute e a voz aceita continuam. Itens de delegação pertencem à chamada
+  antiga: o progresso pendente é descartado e a nova chamada recebe o estado da mestra pela memória.
+- **Limites:** janela de **90 s** desde a primeira perda, até **4 tentativas** com espera de 1, 3, 6 e
+  10 s, cada uma com **20 s** para ficar pronta. Sem rede, nenhuma tentativa é gasta: o estado é
+  **Sem conexão** e a rede é conferida a cada 250 ms até voltar ou a janela acabar. Esgotado, a faixa
+  mostra a falha e um alerta **Voz sem conexão** oferece **Tentar de novo** ou **Encerrar**.
+- **Falhas antes da primeira conexão** continuam encerrando com erro, sem retry (deadline de 45 s).
+- **Feedback:** faixa e Live Activity mostram **Reconectando…** ou **Sem conexão**. `VoiceCuePlayer`
+  toca dois tons descendentes na perda, um tique suave a cada 3 s durante a recuperação, dois tons
+  ascendentes ao voltar e dois graves ao desistir, com hápticos `warning`/`success` quando o app está
+  em primeiro plano. O tique é áudio real que segura um crédito do `RTCAudioSession` enquanto não há
+  WebRTC, para o modo de áudio em background continuar legítimo e o app não ser suspenso no bolso;
+  termina na reconexão, na desistência ou no encerramento.
+- **Estados para superfícies compactas:** `VoiceIndicator` (Kit) resume `VoiceState` em conectando,
+  ouvindo, falando, mestra trabalhando, interrompido, reconectando, sem conexão e falha, com título,
+  título curto, SF Symbol e animação. A Live Activity já usa o símbolo; a futura cena CarPlay mapeia
+  esses casos para `CPVoiceControlState`.
 
 ## Memória da conversa (KV, sem Session de voz)
 
@@ -190,12 +223,14 @@ explicitamente quer enfileirar. ID repetido da mesma delegação não é reenvia
 
 `UIBackgroundModes=audio` preserva a mídia autorizada quando o usuário bloqueia o telefone ou troca
 de aplicativo. O `EventHub` permanece ativo durante a chamada para acompanhar a mestra. Não há
-background task fictícia nem loop de áudio silencioso. O sistema ainda pode suspender/encerrar o
+background task fictícia nem loop de áudio silencioso; durante uma recuperação de rede o tique
+audível descrito acima substitui o WebRTC por no máximo 90 s. O sistema ainda pode suspender/encerrar o
 app; isso não garante execução depois de force-quit.
 
 O target `VoiceActivity` (`br.com.alexandrem.opencode.VoiceActivity`, time `ERRYZ68LX5`) é embarcado
 no app. `VoiceShared` contém atributos e `LiveActivityIntent`s. A Live Activity e Dynamic Island
-exibem ouvindo/falando/trabalho da mestra; mute/end são validados pelo UUID da chamada no processo
+exibem ouvindo/falando/trabalho da mestra, reconectando e sem conexão (rótulo e ícone de
+`VoiceIndicator`); mute/end são validados pelo UUID da chamada no processo
 do app. Tema é um snapshot de roles tipados. O driver mantém instâncias ActivityKit fora da MainActor
 durante chamadas assíncronas e limpa apenas atividades desse tipo deixadas por uma execução anterior.
 Live Activity negada pelo sistema não derruba áudio. Ela não contém transcrição pessoal.
@@ -272,7 +307,7 @@ Para usar o simulador da faixa com a regressão do motor, configure
 e `OPENCODE_VOICE_EVIDENCE=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-faixavoz-prints`.
 Selecione `OpenCodeUITests/VoiceUITests`, `OpenCodeTests/VoiceControllerTests`,
 `OpenCodeTests/VoiceMasterTests` e `OpenCodeTests/VoiceActivityTests`; repita em `openchamber-light`.
-`script/test-voice-bar.py` verifica separadamente os dez estados de apresentação e seus dois tamanhos
+`script/test-voice-bar.py` verifica separadamente os onze estados de apresentação (inclui **Sem conexão**) e seus dois tamanhos
 sobre Sessões e conversa, sem iniciar o motor. Ambos deixam os seeds e o serviço sandbox intactos.
 
 Build: `xcodebuild … -derivedDataPath "$TMPDIR/opencode/ios-voz-derived" build-for-testing
@@ -314,3 +349,27 @@ essa apresentação exige um modelo Pro compatível ou o simulador dedicado.
 - `signing-summary.json` e `testflight-verified.log`: archive e export IPA assinados, sem upload;
   `codesign --verify --strict` passou para o app e para `VoiceActivity.appex`, build `202610231026`.
 - Consumo de modelos desta rodada: **zero**. Nenhum prompt foi enviado ao llm-proxy ou à mestra real.
+
+### Verificação da recuperação de rede — 24/10
+
+Simulador exclusivo **OpenCode Voz Resiliencia** (iPhone 18 Pro/iOS 27), DerivedData
+`$TMPDIR/opencode/ios-vozres-derived`. `swift test`: **348 testes** Debug e **347** Release. Os testes
+hospedados de `VoiceControllerTests` usam transporte, rede, sons e proxy falsos com limites curtos:
+renovação que falha uma vez não encerra; falhas até o fim da lease fecham o áudio no prazo e, com o
+proxy inalcançável, esgotam a recuperação com alerta; recusa 403 encerra na hora sem reconexão; queda
+de rede passa a **Sem conexão** e, com a rede de volta, abre um segundo link com nova lease, DELETE do
+anterior, mute preservado e o turno ouvido antes da queda em `initial_items`; sem rede, nenhuma
+tentativa é feita até a janela esgotar; falha antes da primeira conexão não entra em recuperação.
+Dez iterações seguidas passaram. Toda a suíte `OpenCodeTests` passou (98, três probes opt-in pulados).
+
+O probe opt-in `testExplicitSilentLiveRecovery` (`TEST_RUNNER_OPENCODE_TEST_LIVE_VOICE_RECOVERY=1`,
+somente simulador) usa o proxy real com WebRTC mudo antes da oferta: bloqueia renovações por uma
+rodada (a chamada continua), injeta perda de mídia e confirma a segunda chamada real pronta em cerca
+de 2,3 s (1 s de espera + negociação). Resultado: criações `[201, 201]`, liberações `[204, 204]`.
+Duas chamadas silenciosas, sem fala humana e sem delegação à mestra.
+
+Ressalvas: o simulador compartilha a rede do Mac, então a perda de rede real foi simulada no proxy e
+no transporte, não com o rádio. O tique em background e a troca Wi-Fi→celular com o iPhone bloqueado
+ainda precisam de um aparelho que alcance o `llm-proxy-svc`. A faixa **Sem conexão** foi conferida
+pelo fixture `-OpenCodeVoiceBarFixture offline`; o alerta de esgotamento é coberto pelo teste do
+controlador, não por captura.

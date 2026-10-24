@@ -9,8 +9,10 @@ import XCTest
   var closed = false
   var frames: [Data] = []
   var answered: (() -> Void)?
+  var connects = true
   func offer() async throws -> String { "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" }
   func answer(_ sdp: String) async throws {
+    guard connects else { answered?(); return }
     event?(.connected); event?(.data(Data(#"{"type":"session.started"}"#.utf8))); answered?()
   }
   func send(_ data: Data) async throws { frames.append(data) }
@@ -55,6 +57,71 @@ private actor VoiceTestHTTP {
   }
 }
 
+@MainActor private final class VoiceTestPath: VoicePathMonitoring {
+  var current = VoicePath(satisfied: true, interfaces: ["wifi:en0"])
+  var change: (@MainActor (VoicePath) -> Void)?
+  func start(_ change: @escaping @MainActor (VoicePath) -> Void) { self.change = change }
+  func stop() { change = nil }
+  func set(_ path: VoicePath) { current = path; change?(path) }
+}
+
+@MainActor private final class VoiceTestCues: VoiceCueing {
+  var played: [VoiceCue] = []
+  var stops = 0
+  func play(_ cue: VoiceCue) { played.append(cue) }
+  func stop() { stops += 1 }
+}
+
+/// Every link gets a fresh transport so recovery can be observed call by call.
+@MainActor private final class VoiceTransportPool {
+  var transports: [VoiceTestTransport] = []
+  var connects = true
+  func make(_ event: @escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting {
+    let transport = VoiceTestTransport()
+    transport.event = event; transport.connects = connects
+    transports.append(transport)
+    return transport
+  }
+}
+
+/// Proxy double whose renewals and reservations can fail like an unreachable WARP route.
+private actor VoiceFlakyHTTP {
+  var requests: [URLRequest] = []
+  let lease: TimeInterval
+  var renewalErrors: Int
+  let renewalStatus: Int?
+  let reservations: Int
+  init(lease: TimeInterval = 60, renewalErrors: Int = 0, renewalStatus: Int? = nil, reservations: Int = .max) {
+    self.lease = lease; self.renewalErrors = renewalErrors; self.renewalStatus = renewalStatus; self.reservations = reservations
+  }
+  func count(_ method: String, calls: Bool = false) -> Int {
+    requests.filter { $0.httpMethod == method && ($0.url?.path.hasSuffix("/calls") == true) == calls }.count
+  }
+  func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
+    requests.append(request)
+    let url = request.url!
+    if request.httpMethod == "DELETE" { return (Data(), HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)!) }
+    if url.path.hasSuffix("/calls") {
+      return (Data("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n".utf8),
+        HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil, headerFields: ["Location": "/v1/live/test"])!)
+    }
+    if request.httpMethod == "PUT" {
+      if renewalErrors > 0 { renewalErrors -= 1; throw URLError(.timedOut) }
+      if let renewalStatus {
+        return (Data(), HTTPURLResponse(url: url, statusCode: renewalStatus, httpVersion: nil, headerFields: nil)!)
+      }
+    }
+    if request.httpMethod == "POST", count("POST") > reservations { throw URLError(.cannotConnectToHost) }
+    let body = try JSONDecoder().decode([String: String].self, from: XCTUnwrap(request.httpBody))
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return (try JSONEncoder().encode(["sessionId": url.lastPathComponent,
+      "generation": body["generation"]!, "serverTime": formatter.string(from: .now),
+      "leaseExpiresAt": formatter.string(from: .now.addingTimeInterval(lease))]),
+      HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+}
+
 @MainActor private final class SilentLiveTransport: VoiceTransporting {
   private let transport: VoiceTransport
   init(event: @escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) { transport = VoiceTransport(event: event) }
@@ -70,6 +137,38 @@ private actor VoiceTestHTTP {
   func mute(_ muted: Bool) { transport.mute(true) }
   func resume() { transport.resume() }
   func close() async { await transport.close() }
+}
+
+/// Real WebRTC transport, muted before any offer leaves, that also lets a test inject a media loss.
+@MainActor private final class InjectableLiveTransport: VoiceTransporting {
+  let event: @MainActor @Sendable (VoiceTransportEvent) -> Void
+  private let transport: SilentLiveTransport
+  init(event: @escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) {
+    self.event = event; transport = SilentLiveTransport(event: event)
+  }
+  func offer() async throws -> String { try await transport.offer() }
+  func answer(_ sdp: String) async throws { try await transport.answer(sdp) }
+  func send(_ data: Data) async throws { try await transport.send(data) }
+  func mute(_ muted: Bool) { transport.mute(true) }
+  func resume() { transport.resume() }
+  func close() async { await transport.close() }
+}
+
+/// Real proxy, except renewals can be cut as if the WARP route dropped.
+private actor LiveFlakyHTTP {
+  var blockRenewals = false
+  var renewalFailures = 0
+  var creates: [Int] = []
+  var releases: [Int] = []
+  func block(_ value: Bool) { blockRenewals = value }
+  func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    if request.httpMethod == "PUT" && blockRenewals { renewalFailures += 1; throw URLError(.notConnectedToInternet) }
+    let (data, response) = try await URLSession.shared.data(for: request)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    if request.url?.path.hasSuffix("/calls") == true { creates.append(status) }
+    if request.httpMethod == "DELETE" { releases.append(status) }
+    return (data, response)
+  }
 }
 
 private actor LiveMemoryHTTP {
@@ -294,6 +393,215 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(session?["initial_items"]?.array?.first?.object?["content"]?.array?.first?.object?["text"]?.string?.contains("pitanga violeta") == true)
     await controller.end()
     await memory.stop()
+  }
+
+  // MARK: Network recovery
+
+  private func recoveringController(http: VoiceFlakyHTTP, pool: VoiceTransportPool, path: VoiceTestPath, cues: VoiceTestCues,
+    policy: VoiceRecoveryPolicy, memory: VoiceMemoryStore? = nil) -> VoiceController {
+    VoiceController(testing: .init(transport: { pool.make($0) }, master: { _ in VoiceTestMaster() },
+      request: { try await http.respond($0) }, memory: memory, policy: policy, network: path, cues: cues))
+  }
+  private func until(_ timeout: TimeInterval = 3, _ condition: () async -> Bool) async -> Bool {
+    let deadline = Date.now.addingTimeInterval(timeout)
+    while Date.now < deadline {
+      if await condition() { return true }
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+    return await condition()
+  }
+
+  func testSingleRenewalFailureKeepsTheCall() async throws {
+    let http = VoiceFlakyHTTP(renewalErrors: 1)
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues,
+      policy: .init(renewal: 0.05, renewalRetry: 0.05))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let ready = await until { controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    let renewed = await until { await http.count("PUT") >= 3 }
+    XCTAssertTrue(renewed)
+    XCTAssertEqual(controller.state.phase, .listening)
+    XCTAssertEqual(pool.transports.count, 1)
+    XCTAssertFalse(pool.transports[0].closed)
+    XCTAssertEqual(cues.played, [])
+    await controller.end()
+  }
+
+  func testRenewalFailuresStopAudioAtLeaseExpiryAndExhaustedRecoveryOffersRetry() async throws {
+    // Lease minus the fixed ten-second margin leaves 0.6 s; the proxy then stays unreachable.
+    let http = VoiceFlakyHTTP(lease: 10.6, renewalErrors: .max, reservations: 1)
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues,
+      policy: .init(renewal: 0.05, renewalRetry: 0.05, window: 1, backoff: [0.05, 0.05], attemptTimeout: 0.3))
+    let sessions = SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!))
+    controller.start(sessions: sessions)
+    let ready = await until { controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    let failedRenewal = await until { await http.count("PUT") >= 1 }
+    XCTAssertTrue(failedRenewal)
+    XCTAssertFalse(pool.transports[0].closed, "a transient renewal failure inside the lease keeps audio")
+    let stopped = await until { pool.transports[0].closed }
+    XCTAssertTrue(stopped, "audio stops when the confirmed lease minus its margin ends")
+    XCTAssertEqual(cues.played.first, .lost)
+    let failed = await until(4) { controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(cues.played, [.lost, .failed])
+    XCTAssertTrue(controller.alert?.contains("Não consegui reconectar") == true)
+    let calls = await http.count("POST", calls: true)
+    XCTAssertEqual(calls, 1, "an unreachable reservation never creates another call")
+    await controller.retry(sessions: sessions)
+    XCTAssertNil(controller.alert)
+    await controller.end()
+  }
+
+  func testRefusedRenewalStillEndsTheCallAtOnce() async throws {
+    let http = VoiceFlakyHTTP(renewalStatus: 403)
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues, policy: .init(renewal: 0.05))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let failed = await until { controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(controller.detail, "A autorização da voz não pôde ser renovada. A chamada foi encerrada por segurança.")
+    XCTAssertTrue(pool.transports[0].closed)
+    XCTAssertEqual(cues.played, [])
+    XCTAssertNil(controller.alert)
+    let reservations = await http.count("POST")
+    XCTAssertEqual(reservations, 1)
+    await controller.end()
+  }
+
+  func testNetworkLossRebuildsTheCallWithMemoryWhenTheNetworkReturns() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("opencode/voice-recovery-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:4180")!)
+    let client = OpenCodeClient(configuration: configuration, transport: { request in
+      let body: String
+      switch request.url?.lastPathComponent {
+      case "info": body = #"{"output":{"version":2,"storage":"kv","contextFormat":"initial_items","scopes":["global"]}}"#
+      case "context": body = #"{"output":{"version":2,"scope":"global","summary":"","turns":[],"approxTokens":0,"updatedAt":0,"truncated":false}}"#
+      // Appends stay pending, as they would while the Mac is unreachable.
+      default: return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+      }
+      return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    })
+    let memory = VoiceMemoryStore(client: client, root: root)
+    let http = VoiceFlakyHTTP()
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues,
+      policy: .init(renewal: 5, mediaGrace: 5, backoff: [0.05]), memory: memory)
+    controller.start(sessions: SessionStore(configuration: configuration))
+    let ready = await until { controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    let call = controller.sessionID
+    controller.mute()
+    pool.transports[0].event?(.data(Data(#"{"type":"turn.done","turn":{"id":"before-tunnel","role":"user","transcript":"Lembre a palavra jabuticaba."}}"#.utf8)))
+    path.set(VoicePath(satisfied: false))
+    pool.transports[0].event?(.disconnected)
+    XCTAssertEqual(controller.state.phase, .offline)
+    XCTAssertEqual(VoiceIndicator(controller.state), .offline)
+    path.set(VoicePath(satisfied: true, interfaces: ["cellular:pdp_ip0"]))
+    let rebuilt = await until { pool.transports.count == 2 && controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    XCTAssertTrue(pool.transports[0].closed)
+    XCTAssertTrue(pool.transports[1].muted, "mute survives the rebuilt call")
+    XCTAssertEqual(cues.played, [.lost, .restored])
+    XCTAssertEqual(controller.sessionID, call)
+    XCTAssertNil(controller.alert)
+    let requests = await http.requests
+    let offers = requests.filter { $0.url?.path.hasSuffix("/calls") == true }
+    XCTAssertEqual(offers.count, 2)
+    let reservations = requests.filter { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/calls") == false }
+    XCTAssertEqual(Set(reservations.map(\.url)).count, 2, "each rebuilt call has its own lease")
+    let released = await until { await http.count("DELETE") >= 1 }
+    XCTAssertTrue(released)
+    let session = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(offers[1].httpBody)).object?["session"]?.object
+    let texts = session?["initial_items"]?.array?.flatMap { $0.object?["content"]?.array ?? [] }.compactMap { $0.object?["text"]?.string } ?? []
+    XCTAssertTrue(texts.contains("Lembre a palavra jabuticaba."))
+    await controller.end()
+    await memory.stop()
+  }
+
+  func testMediaFailureWithoutNetworkWaitsThenGivesUpWithAlert() async throws {
+    let http = VoiceFlakyHTTP()
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues,
+      policy: .init(window: 0.4, backoff: [0.05], networkPoll: 0.02))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let ready = await until { controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    path.set(VoicePath(satisfied: false))
+    pool.transports[0].event?(.failed)
+    XCTAssertEqual(controller.state.phase, .offline)
+    let failed = await until { controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(pool.transports.count, 1, "no attempt is made without a network path")
+    XCTAssertEqual(cues.played, [.lost, .failed])
+    XCTAssertNotNil(controller.alert)
+    controller.dismissAlert()
+    XCTAssertNil(controller.alert)
+    await controller.end()
+  }
+
+  func testFailureBeforeTheFirstConnectionIsNotRetried() async throws {
+    let http = VoiceFlakyHTTP()
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
+    pool.connects = false
+    let controller = recoveringController(http: http, pool: pool, path: path, cues: cues, policy: .init())
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let offered = await until { await http.count("POST", calls: true) == 1 }
+    XCTAssertTrue(offered)
+    pool.transports[0].event?(.failed)
+    let failed = await until { controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(pool.transports.count, 1)
+    XCTAssertEqual(cues.played, [])
+    XCTAssertNil(controller.alert)
+    await controller.end()
+  }
+
+  func testExplicitSilentLiveRecovery() async throws {
+    #if targetEnvironment(simulator)
+    guard ProcessInfo.processInfo.environment["OPENCODE_TEST_LIVE_VOICE_RECOVERY"] == "1" else {
+      throw XCTSkip("Explicit two-call muted simulator recovery probe only; never enabled by the normal suite.")
+    }
+    let http = LiveFlakyHTTP()
+    let path = VoiceTestPath()
+    var transports: [InjectableLiveTransport] = []
+    let controller = VoiceController(testing: .init(transport: { event in
+      let transport = InjectableLiveTransport(event: event)
+      transports.append(transport)
+      return transport
+    }, master: { _ in VoiceTestMaster() }, request: { try await http.perform($0) }, network: path, cues: VoiceCuePlayer()))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let ready = await until(25) { controller.state.phase == .listening }
+    XCTAssertTrue(ready, controller.detail)
+    guard ready else { await controller.end(); return }
+    // One renewal (every five seconds) fails while the 60 s lease is valid: the call must stay.
+    await http.block(true)
+    let missed = await until(8) { await http.renewalFailures >= 1 }
+    await http.block(false)
+    XCTAssertTrue(missed)
+    try await Task.sleep(for: .seconds(6))
+    XCTAssertEqual(controller.state.phase, .listening)
+    XCTAssertEqual(transports.count, 1)
+    // A media loss rebuilds a second real call.
+    transports[0].event(.failed)
+    XCTAssertEqual(controller.state.phase, .reconnecting)
+    let recovered = await until(30) { transports.count == 2 && controller.state.phase == .listening }
+    XCTAssertTrue(recovered, controller.detail)
+    await controller.end()
+    let released = await until(10) { await http.releases.count >= 2 }
+    XCTAssertTrue(released)
+    let creates = await http.creates, releases = await http.releases, failures = await http.renewalFailures
+    let evidence = XCTAttachment(data: try JSONEncoder().encode(["creates": creates, "releases": releases, "renewalFailures": [failures]]),
+      uniformTypeIdentifier: "public.json")
+    evidence.name = "voice-recovery-live"; evidence.lifetime = .keepAlways; add(evidence)
+    XCTAssertEqual(creates, [201, 201])
+    XCTAssertEqual(releases, [204, 204])
+    #else
+    throw XCTSkip("No physical device live probing in this suite.")
+    #endif
   }
 
   func testExplicitSilentLiveMemorySignaling() async throws {

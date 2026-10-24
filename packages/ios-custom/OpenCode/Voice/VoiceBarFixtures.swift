@@ -3,7 +3,7 @@ import Foundation
 import OpenCodeKit
 
 enum VoiceBarFixtures {
-  static let names = ["listening", "speaking", "thinking", "connecting", "reconnecting", "muted", "error", "idle", "long", "interrupted"]
+  static let names = ["listening", "speaking", "thinking", "connecting", "reconnecting", "offline", "muted", "error", "idle", "long", "interrupted"]
   static let launchState: VoiceBarState? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard let server = arguments.firstIndex(of: "-OpenCodeServerURL"), arguments.indices.contains(server + 1),
@@ -20,6 +20,7 @@ enum VoiceBarFixtures {
     case "thinking": .thinking
     case "connecting": .connecting
     case "reconnecting": .reconnecting
+    case "offline": .offline
     case "error": .failed
     case "interrupted": .interrupted
     default: .listening

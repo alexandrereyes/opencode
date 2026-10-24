@@ -22,6 +22,14 @@ import XCTest
     XCTAssertEqual(VoiceActivityDriver.content(state: state, theme: .selected).label, "Falando")
     state.apply(.interruption)
     XCTAssertEqual(VoiceActivityDriver.content(state: state, theme: .selected).label, "Áudio interrompido")
+    state.apply(.reconnect)
+    let reconnecting = VoiceActivityDriver.content(state: state, theme: .selected)
+    XCTAssertEqual(reconnecting.label, "Reconectando…")
+    XCTAssertEqual(reconnecting.symbol, "antenna.radiowaves.left.and.right")
+    state.apply(.offline)
+    let offline = VoiceActivityDriver.content(state: state, theme: .selected)
+    XCTAssertEqual(offline.label, "Sem conexão")
+    XCTAssertEqual(offline.symbol, "wifi.slash")
   }
   func testStaleSystemActionCannotControlAnotherCall() async {
     VoiceActivityRouter.sessionID = "current"

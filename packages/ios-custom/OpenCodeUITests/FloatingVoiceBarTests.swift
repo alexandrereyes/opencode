@@ -181,7 +181,7 @@ import XCTest
   }
 
   func testCaptureEveryState() throws {
-    for state in ["listening", "speaking", "thinking", "connecting", "reconnecting", "muted", "error", "idle", "long", "interrupted"] {
+    for state in ["listening", "speaking", "thinking", "connecting", "reconnecting", "offline", "muted", "error", "idle", "long", "interrupted"] {
       try launch(state)
       let origin = app.coordinate(withNormalizedOffset: .zero)
       origin.withOffset(CGVector(dx: 200, dy: 600)).press(forDuration: 0.05,

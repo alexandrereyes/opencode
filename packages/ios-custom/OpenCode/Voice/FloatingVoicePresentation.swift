@@ -91,6 +91,11 @@ struct FloatingVoiceHost: View {
             retry: { presentation.retry(voice, sessions: sessions) }, resume: { presentation.resume(voice) },
             expand: { presentation.expanded = $0 }, transcript: { transcript = true })
         }
+        .alert("Voz sem conexão", isPresented: Binding(get: { voice?.alert != nil },
+          set: { if !$0 { voice?.dismissAlert() } })) {
+          Button("Tentar de novo") { presentation.retry(voice, sessions: sessions) }
+          Button("Encerrar", role: .cancel) { presentation.end(voice) }
+        } message: { Text(voice?.alert ?? "") }
       }
     }.sheet(isPresented: $transcript) {
       if let sessions = sessions ?? contextSessions { VoiceTranscriptView(memory: sessions.voiceMemory) }

@@ -12,7 +12,7 @@ struct VoiceActivityWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: VoiceActivityAttributes.self) { context in
       HStack(spacing: 14) {
-        Image(systemName: context.state.speaking ? "waveform" : "mic.fill")
+        Image(systemName: context.state.symbol)
           .foregroundStyle(context.state.color(.accent))
         VStack(alignment: .leading, spacing: 4) {
           Text("OpenCode · Voz").font(.caption).foregroundStyle(context.state.color(.textSecondary))
@@ -31,7 +31,7 @@ struct VoiceActivityWidget: Widget {
         }
         DynamicIslandExpandedRegion(.bottom) { controls(context).padding(.top, 8) }
       } compactLeading: {
-        Image(systemName: context.state.muted ? "mic.slash.fill" : "waveform").foregroundStyle(context.state.color(.accent))
+        Image(systemName: context.state.muted ? "mic.slash.fill" : context.state.symbol).foregroundStyle(context.state.color(.accent))
       } compactTrailing: {
         Image(systemName: context.state.working ? "brain" : "mic.fill").foregroundStyle(context.state.color(.accent))
       } minimal: {

@@ -43,7 +43,8 @@ import OpenCodeKit
       return (String(role.rawValue), [color.red, color.green, color.blue, color.opacity])
     })
     return VoiceActivityAttributes.ContentState(label: state.label, muted: state.muted,
-      working: state.masterWorking, speaking: state.phase == .speaking, colors: colors)
+      working: state.masterWorking, speaking: state.phase == .speaking,
+      symbol: VoiceIndicator(state)?.symbol ?? VoiceIndicator.listening.symbol, colors: colors)
   }
   func end() async {
     VoiceActivityRouter.handler = nil; VoiceActivityRouter.sessionID = nil

@@ -3,7 +3,7 @@ import Foundation
 /// Presentation only: a call's audio and execution lifetimes belong to the voice engine.
 public struct VoiceBarState: Equatable, Sendable {
   public enum Phase: String, CaseIterable, Sendable {
-    case connecting, listening, speaking, thinking, reconnecting, interrupted, failed
+    case connecting, listening, speaking, thinking, reconnecting, offline, interrupted, failed
   }
 
   public var phase: Phase
@@ -35,6 +35,7 @@ public struct VoiceBarState: Equatable, Sendable {
     case .connecting: .connecting
     case .speaking: .speaking
     case .reconnecting: .reconnecting
+    case .offline: .offline
     case .interrupted: .interrupted
     case .failed: .failed
     }
@@ -51,6 +52,7 @@ public struct VoiceBarState: Equatable, Sendable {
     case .speaking: "Falando"
     case .thinking: "Pensando"
     case .reconnecting: "Reconectando…"
+    case .offline: "Sem conexão"
     case .interrupted: "Áudio pausado"
     case .failed: "Falha na conexão"
     }
