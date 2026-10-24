@@ -406,6 +406,19 @@ against an isolated sandbox: `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `
 `<home>/repos/app-mentions`, connects the real `codex-computer-use` there (only `list_apps` runs; no app is
 controlled and nothing is sent), restores the MCP state and deletes the Session.
 
+### Case-insensitive suggestions — 24 October
+
+Every trigger ignores case. `$`, `#`, `/`, agents, references and apps rank locally with case- and
+diacritic-insensitive folding; files come from `/api/fs/find`, whose fuzzy search ignores case too. Session titles
+are searched by the server with SQLite `LIKE`, which ignores case only for ASCII letters, so a query with other
+cased letters (Ã, Í, Ç…) is also sent lowered, uppercased and capitalized (`ComposerSources.caseVariants`) and the
+results are merged by recency; accents are still matched as typed there ("sessao" does not find "Sessão"). The web
+composer does the same in `composer/session-search.ts`.
+
+After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
+creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`@`, `$`, `#`, `/`
+in several cases, then Return on `#COMMIT`) and removes them.
+
 ### Composer editing stability — 23 October
 
 The live `UITextView.textStorage` owns editing. Native edits publish a lightweight content revision; SwiftUI only

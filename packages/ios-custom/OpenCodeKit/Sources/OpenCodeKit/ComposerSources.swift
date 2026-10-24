@@ -49,6 +49,18 @@ public struct ComposerSuggestion: Sendable, Identifiable {
   }
 }
 public struct ComposerSources: Sendable {
+  /// The server matches session titles with SQLite LIKE, which ignores case only for ASCII letters.
+  /// With other cased letters (Ã, Í, Ç…), also search them lowered, uppercased and capitalized, so
+  /// "SESSÃO" finds "Sessão" and "índice" finds "Índice". Accents are matched as typed.
+  public static func caseVariants(_ query: String) -> [String] {
+    guard query.unicodeScalars.contains(where: {
+      !$0.isASCII && $0.properties.lowercaseMapping != $0.properties.uppercaseMapping
+    }) else { return [query] }
+    let lower = query.lowercased()
+    var seen = Set<String>()
+    return [query, lower, query.uppercased(), lower.prefix(1).uppercased() + lower.dropFirst()]
+      .filter { seen.insert($0).inserted }
+  }
   public var commands: [ComposerCommand] = []
   public var skills: [ComposerSkill] = []
   public var references: [ComposerReference] = []
@@ -223,13 +235,27 @@ extension OpenCodeClient {
     return response.data
   }
   public func composerSessions(_ search: String) async throws -> [Session] {
-    let response: DataResponse<[Session]> = try await get(
-      "/api/session",
-      query: [
-        .init(name: "parentID", value: "null"), .init(name: "order", value: "desc"),
-        .init(name: "limit", value: search.isEmpty ? "10" : "30"),
-      ]
-        + (search.isEmpty ? [] : [.init(name: "search", value: search)]))
-    return response.data
+    let variants = ComposerSources.caseVariants(search)
+    let lists = try await withThrowingTaskGroup(of: (Int, [Session]).self) { group in
+      for (index, variant) in variants.enumerated() {
+        group.addTask {
+          let response: DataResponse<[Session]> = try await self.get(
+            "/api/session",
+            query: [
+              .init(name: "parentID", value: "null"), .init(name: "order", value: "desc"),
+              .init(name: "limit", value: variant.isEmpty ? "10" : "30"),
+            ]
+              + (variant.isEmpty ? [] : [.init(name: "search", value: variant)]))
+          return (index, response.data)
+        }
+      }
+      return try await group.reduce(into: [[Session]](repeating: [], count: variants.count)) {
+        $0[$1.0] = $1.1
+      }
+    }
+    guard lists.count > 1 else { return lists.first ?? [] }
+    var seen = Set<String>()
+    return lists.flatMap { $0 }.filter { seen.insert($0.id).inserted }
+      .sorted { $0.time.updated > $1.time.updated }
   }
 }
