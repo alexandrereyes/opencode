@@ -173,13 +173,34 @@ public enum NewSessionProjection {
     let same: (ModelReference?) -> Bool = {
       $0?.id == selected.id && $0?.providerID == selected.providerID
     }
-    let variant =
+    // "default" is the explicit Padrão; a variant the model no longer offers falls through.
+    let candidates =
       same(explicit)
-      ? explicit?.variant
-      : (same(saved) ? saved?.variant ?? "default" : preferences?.variant[info.identity])
-        ?? (same(agent) ? agent?.variant : nil) ?? (same(configured) ? configured?.variant : nil)
-    selected.variant = info.variants?.contains { $0.id == variant } == true ? variant : nil
+      ? [explicit?.variant ?? "default"]
+      : [
+        same(saved) ? saved?.variant ?? "default" : nil, preferences?.variant[info.identity],
+        same(agent) ? agent?.variant : nil, same(configured) ? configured?.variant : nil,
+      ]
+    let variant = candidates.compactMap { $0 }.first { variant in
+      variant == "default" || info.variants?.contains { $0.id == variant } == true
+    }
+    selected.variant = variant == "default" ? nil : variant
     return selected
+  }
+  /// The model and effort to keep as the default for new sessions after one is created: a choice
+  /// made on this screen, not an origin's inherited model left unchanged, nor one the projection
+  /// replaced because it became unavailable.
+  public static func remembered(
+    explicit: ModelReference?, inherited: ModelReference?, sent: ModelReference,
+    saved: Preferences.Models.Key?
+  ) -> ModelReference? {
+    guard let explicit, explicit != inherited, explicit.id == sent.id,
+      explicit.providerID == sent.providerID
+    else { return nil }
+    let current = saved.map {
+      ModelReference(id: $0.modelID, providerID: $0.providerID, variant: $0.variant)
+    }
+    return current == sent ? nil : sent
   }
 }
 

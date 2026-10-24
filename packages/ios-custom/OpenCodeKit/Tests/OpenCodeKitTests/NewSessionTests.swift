@@ -142,6 +142,20 @@ private func newProjects() throws -> [Project] {
       .variant == nil)
   #expect(
     resolve(.init(id: "explicit", providerID: "wrong"), preference, nil, nil, [])?.id == "saved")
+  // A saved default whose effort the model no longer offers falls back to the ordinary effort.
+  let lost: Preferences.Models = try newDecode(
+    #"{"user":[],"variant":{"p/saved":"high"},"default":{"providerID":"p","modelID":"saved","variant":"gone"}}"#
+  )
+  #expect(resolve(nil, lost, nil, nil, []) == .init(id: "saved", providerID: "p", variant: "high"))
+  let padrao: Preferences.Models = try newDecode(
+    #"{"user":[],"variant":{"p/saved":"high"},"default":{"providerID":"p","modelID":"saved"}}"#
+  )
+  #expect(resolve(nil, padrao, nil, nil, [])?.variant == nil)
+  // A saved default that is no longer available falls back to the previous precedence.
+  let missing: Preferences.Models = try newDecode(
+    #"{"user":[],"variant":{},"default":{"providerID":"p","modelID":"removed","variant":"low"}}"#
+  )
+  #expect(resolve(nil, missing, refs[1], refs[2], []) == refs[1])
   let agents: [AgentInfo] = try newDecode(
     #"[{"id":"hidden","name":"Hidden","mode":"primary","hidden":true},{"id":"child","name":"Child","mode":"subagent"},{"id":"build","name":"Build","mode":"primary"},{"id":"plan","name":"Plan","mode":"all"}]"#
   )
@@ -150,6 +164,31 @@ private func newProjects() throws -> [Project] {
   #expect(
     NewSessionProjection.agent(explicit: "plan", configured: "build", agents: agents) == "plan")
   #expect(NewSessionProjection.agent(explicit: nil, configured: "plan", agents: agents) == "plan")
+}
+
+@Test func newSessionRemembersOnlyADeliberateChoice() {
+  let chosen = ModelReference(id: "luna", providerID: "p", variant: "low")
+  let saved = Preferences.Models.Key(providerID: "p", modelID: "sol", variant: "high")
+  func remembered(_ explicit: ModelReference?, inherited: ModelReference? = nil,
+    sent: ModelReference = chosen, saved: Preferences.Models.Key? = saved) -> ModelReference? {
+    NewSessionProjection.remembered(explicit: explicit, inherited: inherited, sent: sent, saved: saved)
+  }
+  #expect(remembered(chosen) == chosen)
+  #expect(remembered(chosen, saved: nil) == chosen)
+  // Padrão is a deliberate effort too.
+  let padrao = ModelReference(id: "luna", providerID: "p")
+  #expect(remembered(padrao, sent: padrao) == padrao)
+  // Nothing chosen on the screen: the projection's own pick is not a new default.
+  #expect(remembered(nil) == nil)
+  // Inherited from the originating conversation and left unchanged.
+  #expect(remembered(chosen, inherited: chosen) == nil)
+  #expect(remembered(chosen, inherited: .init(id: "luna", providerID: "p", variant: "high")) == chosen)
+  // Already the default.
+  #expect(remembered(chosen, saved: .init(providerID: "p", modelID: "luna", variant: "low")) == nil)
+  // The chosen model became unavailable, so another one was sent.
+  #expect(remembered(chosen, sent: .init(id: "sol", providerID: "p")) == nil)
+  // The effort is normalized to what was sent.
+  #expect(remembered(.init(id: "luna", providerID: "p", variant: "gone"), sent: padrao) == padrao)
 }
 
 private actor NewSessionFake: NewSessionActions {

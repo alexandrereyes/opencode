@@ -136,7 +136,8 @@ branch (no base branch, which only applies to a new worktree). It also preselect
 effort (`draft.model ?? session.model`); the agent is **not** inherited. `NewSessionOrigin` builds this context and
 rides on the pushed `ConversationRoute`; `NewSessionStore.open()` applies it over Sessões' repository/Chats filter,
 a restored draft and the remembered last-used category. Sending replaces the route with the created session, so Voltar
-returns to the origin.
+returns to the origin. Sending the inherited model/effort unchanged does not replace the default for new sessions;
+choosing another one on that screen does (see [Nova sessão](#nova-sessão-wave-9)).
 
 A chat session (under the managed chats root) selects the [Chats destination](#chats-destination) with the same
 model and effort, as the web's `openChat(connection, model)` does. A project missing from the new-session list falls
@@ -1407,7 +1408,22 @@ has no selected projects, the empty state (otherwise it skips).
   native recent history → first available model. Explicit effort includes "Padrão"; otherwise the saved default's
   variant wins for that model, then per-model preference, agent/configured variant, constrained to available variants.
   Recent model identities are server-local and updated after successful conversation/new-session sends. Hidden and
-  subagent-only agents are not choices. `/compact` and `/btw` require an existing session and are disabled here;
+  subagent-only agents are not choices.
+  **Alexandre, 24/10: a escolha vira o padrão.** Once a Session exists (successful send, or a later failure after
+  creation), a model/effort chosen in the picker on this screen (project or Chats) becomes the saved default above:
+  `custom.preferences` `model.default`, the same preference as the picker's **Usar como padrão para novas sessões**
+  and the web's **Use as default for new sessions**, so the next new session starts with it on iOS and on the web.
+  Only a choice made here counts: a send without touching the picker, or Nova sessão from a conversation sending the
+  inherited model/effort unchanged, keeps the saved default (changing it there does count). It is written after
+  creation without delaying navigation, and skipped when unchanged; a failed write shows a toast. If that model is
+  no longer available or enabled, the previous order applies; if it lost the effort, the model keeps its per-model
+  effort, then agent/configured. The master keeps the plugin's own preferred model, and agents are unchanged.
+  The web itself does not adopt its last choice: it only honors this preference, set explicitly there.
+  Kit tests cover `NewSessionProjection.remembered` and the fallbacks;
+  `OpenCodeUITests/NewSessionModelDefaultTests` chooses Luna 6 · low in Chats, creates the chat (one tiny send), finds
+  it again on the next Nova sessão, checks that an inherited menu Nova sessão (second send) keeps the default, and
+  that missing models/efforts fall back (no send). It needs Chats and `llm-proxy` Luna/Astra in an isolated sandbox
+  and restores the saved default. `/compact` and `/btw` require an existing session and are disabled here;
   known backend slash commands use the command endpoint, including when typed without choosing a suggestion.
 - **Send:** generate the Session ID on the client → resolve/create the worktree → await live MCP mutations and apply/
   verify explicit destination intents → create Session with agent/model/Location → serialize attachments/tokens with

@@ -478,6 +478,10 @@ final class SessionStore {
   func touchProject(_ directory: String) async throws {
     preferences = try await client.mutate(.touch(directory: directory))
   }
+  /// Shared with the web's "Use as default for new sessions" (`custom.preferences` `model.default`).
+  func rememberNewSessionModel(_ model: ModelReference) async throws {
+    preferences = try await client.mutate(.modelDefault(model))
+  }
   func markRead(_ session: Session) async {
     await perform(session.id) { try await client.markViewed(session) }
   }

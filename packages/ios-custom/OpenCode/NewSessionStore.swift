@@ -24,6 +24,8 @@ import OpenCodeKit
   private let memoryKey: String
   private var categories: [String: String]
   private let origin: NewSessionOrigin?
+  /// The originating conversation's model, applied to the draft; sending it unchanged is not a choice.
+  private var inheritedModel: ModelReference?
   private let startInChats: Bool
 
   init(
@@ -115,7 +117,10 @@ import OpenCodeKit
             || (chat && !projects.contains { $0.id == sessions.selectedProject }))))
     {
       if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
-      if let model = origin?.model { draft.model = model }
+      if let model = origin?.model {
+        draft.model = model
+        inheritedModel = model
+      }
       initialized = true
       draft.focused = true
       return
@@ -128,7 +133,10 @@ import OpenCodeKit
     if let origin, let inherited {
       draft.newSession = NewSessionContext(
         projectID: inherited.id, destination: origin.destination, mcp: draft.newSession?.mcp ?? [:])
-      if let model = origin.model { draft.model = model }
+      if let model = origin.model {
+        draft.model = model
+        inheritedModel = model
+      }
     } else if let initial, initial.id != restored?.id {
       draft.newSession = NewSessionContext(
         projectID: initial.id,
@@ -333,6 +341,9 @@ import OpenCodeKit
           destination: context.destination, branch: baseBranch,
           intents: draft.newSession?.intents ?? [:], agent: agent, model: model, command: command)
       }
+    let remembered = NewSessionProjection.remembered(
+      explicit: draft.model, inherited: inheritedModel, sent: model,
+      saved: composer.preferences?.data.models?.default)
     var snapshot = draft.snapshot
     snapshot.document = document
     let persistence = draft.persistence
@@ -358,6 +369,7 @@ import OpenCodeKit
           attachments: delivered, quotes: snapshot.quotes)
       }
       sessions.catalog.committed(model)
+      remember(remembered)
       draft.didSend()
       await finish(id: submission.id, restore: nil)
       Haptics.play(.light)
@@ -373,12 +385,25 @@ import OpenCodeKit
         await draft.persist()
       }
       if let id = failure.sessionID {
+        remember(remembered)
         await finish(id: id, restore: snapshot)
         sessions.toast.show(failure.localizedDescription, kind: .error)
       } else {
         composer.toast.show(failure.localizedDescription, kind: .error)
       }
     } catch { composer.toast.show(error.localizedDescription, kind: .error) }
+  }
+  /// Once a Session exists, the model and effort deliberately chosen here become the default for
+  /// the next new sessions. It does not delay opening the conversation.
+  private func remember(_ model: ModelReference?) {
+    guard let model else { return }
+    let sessions = sessions
+    Task {
+      do { try await sessions.rememberNewSessionModel(model) } catch {
+        sessions.toast.show(
+          "Não foi possível guardar o modelo como padrão para novas sessões.", kind: .error)
+      }
+    }
   }
   private func finish(id: String, restore: DraftSnapshot?) async {
     if let restore {
