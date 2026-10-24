@@ -33,7 +33,7 @@ import SwiftUI
     XCTAssertEqual(AppTextStyle.chrome.size, 12)
     XCTAssertEqual(AppTextStyle.bubbleMeta.size, 12)
     XCTAssertEqual(AppTextStyle.mcp.size, 11)
-    XCTAssertEqual(AppTextStyle.metrics.size, 9)
+    XCTAssertEqual(AppTextStyle.metrics.size, 11)
     XCTAssertEqual(AppLayout.margin, 16)
     XCTAssertEqual(AppLayout.composerMargin, 12)
     XCTAssertEqual(AppLayout.avatar, 44)

@@ -26,7 +26,7 @@ struct ContextUsageLine: View {
       line
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 5) {
-          ContextUsageRing(usage: usage, size: style == .metrics ? 8 : 12)
+          ContextUsageRing(usage: usage, size: style == .metrics ? 10 : 12)
           Text(compact ? usage.shortContextLabel : usage.contextLabel)
           if !compact { Text("· " + usage.tokenLabel) }
         }
@@ -38,7 +38,7 @@ struct ContextUsageLine: View {
   }
   private var line: some View {
     HStack(spacing: 5) {
-      ContextUsageRing(usage: usage, size: style == .metrics ? 8 : 12)
+      ContextUsageRing(usage: usage, size: style == .metrics ? 10 : 12)
       Text(compact ? usage.shortContextLabel : usage.contextLabel)
       if !compact { Text("· " + usage.tokenLabel) }
       Text("·")

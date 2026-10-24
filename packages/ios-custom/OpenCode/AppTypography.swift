@@ -14,7 +14,7 @@ enum AppTextStyle: CaseIterable, Sendable {
     case .caption, .path: 13
     case .footnote, .chrome, .bubbleMeta: 12
     case .micro, .mcp: 11
-    case .metrics: 9
+    case .metrics: 11
     }
   }
 
