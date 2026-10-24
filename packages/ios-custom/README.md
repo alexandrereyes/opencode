@@ -445,6 +445,40 @@ search navigates to messages and reuses wave 6's position restoration).
 Out of scope for this screen for now: "Alterações" and "Arquivos" in the `…` menu,
 and the fork action on messages.
 
+### Pending and optimistic user bubbles — 24 October
+
+The custom web is the reference (`session-ui-custom/src/actions.ts`, `message/message-content.tsx`,
+`components/message-part.css`, `app-custom/src/session/composer/region.tsx`, `client/src/solid/data.ts`). Undelivered
+user **steers** render as user bubbles below the transcript, in admission order; queued items stay in the tray.
+`PendingInputs.status` ports the web's `DataPendingStatus`: `starting` (promoted at the next idle boundary),
+`steering` (behind input this execution already delivered), `stranded` (an execution ended without it) and `queued`.
+Like the web, `steering`/`stranded` drop the sent-message accent (`userBubblePending*` roles, generated from
+`v2-background-bg-layer-02`/`v2-text-text-base`) and prefix the time with **Pendente**; every non-queued status
+replaces **Redefinir para este ponto** with **Mover para a fila** (`PATCH …/inbox/:id` `{delivery:"queue"}`) and
+**Excluir** (`DELETE …/inbox/:id`), in the meta row and the long-press menu, without confirmation. Child sessions show
+their pending steers without actions or styling, as the web passes no pending actions there. Delivery turns the row into
+the ordinary sticky bubble with the same ID. The web has no "back to composer" action on the bubble; a steer moved to
+the queue can be edited from the tray. Its English copy (`Pending`, `Move to queue`, `Delete`) has no pt-BR keys.
+
+Sending in an existing conversation is optimistic, like the web's `session.prompt`: the admission ID is minted first,
+the row appears and the composer clears on tap, and a refresh after acknowledgement reconciles that ID with the inbox
+or transcript. A failed send retracts the row, restores text, attachments, quotes and context into the composer (disk
+keeps the unsent draft meanwhile) and keeps the existing error/toast; a retry reuses the ID. Inbox actions wait until
+the server knows the item. There is no success toast. New sessions still wait for creation (and, in Chats, for
+allocation/claim/MCPs) on the new-session screen. Staged attachments show as filename chips until the echo arrives.
+
+Verification uses **OpenCode Pendente** (`FDB1B4E0-2C49-4642-AB8D-88AA57C38F9A`) and **OpenCode Pendente Light**
+(`C84000CE-14E9-464E-8B6B-259E0CA4E8B9`), an isolated `custom-sandbox.ts` home on port 4193 and `ios-pendente-derived`:
+`script/test-pending.py prepare --label L`, then `test --label L [--theme openchamber-light --device …]`. Steers are
+admitted with `resume:false`; the DEBUG-only, loopback-gated `OPENCODE_TEST_PROMPT_FIXTURE=<session|*|create>:<ms>:<admit|fail>`
+delays the app's admission or new-session creation, then admits without waking execution or rejects it. This and the
+deletion, revert and composer-failure fixtures accept any loopback sandbox port except 4096/4178
+(`ServerConfiguration.isolatedTestSandbox`); the old 4177/4183 allowlist silently disabled them on agents' own sandbox
+ports, which is why `ComposerCollapseTests/testFailedSendKeepsExpandedDraftEditable` sent for real and failed. Only the
+delivery case makes one tiny Luna 6/low call. With the same build, a probe measured tap-to-bubble at 0.14–0.21 s
+(immediate admission) and 3.2–3.3 s (3 s admission delay) before, and 0.06–0.08 s in both cases after; on the phone,
+the old path also waited for the agent/model selection, prompt and full conversation refresh round trips.
+
 ### Desfazer mensagem enviada
 
 The backward-arrow action on delivered root/master user messages, including their sticky presentation and long-press

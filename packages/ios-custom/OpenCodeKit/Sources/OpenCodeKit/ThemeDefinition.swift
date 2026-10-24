@@ -6,7 +6,8 @@ public enum ThemeRole: Int, CaseIterable, Sendable {
   case textMuted, textPreview, textAccent, glassSecondary
   case primary, onPrimary, onInfo, infoFill, success, info, error, warning, accent
   case filledButton, onFilledButton
-  case userBubble, userBubbleText, userBubbleSecondary, inlineCode, inlineCodeBackground, codeSurface, toolSurface,
+  case userBubble, userBubbleText, userBubbleSecondary, userBubblePending, userBubblePendingText,
+    userBubblePendingSecondary, inlineCode, inlineCodeBackground, codeSurface, toolSurface,
     diffAdd, diffDelete
   case contextTrack, contextFill, contextWarning
   case agentBuild, agentExplore, agentPlan, agentReview, agentWriter, agentExplicit

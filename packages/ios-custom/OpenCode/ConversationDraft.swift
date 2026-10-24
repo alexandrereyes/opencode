@@ -179,8 +179,19 @@ extension ComposerTokenKind {
       persistenceError = "Não foi possível salvar o rascunho."
     }
   }
+  /// While an optimistic send owns the cleared composer, disk keeps the unsent draft until the
+  /// send succeeds (explicit `clear()`) or fails (restored, then persisted).
+  @ObservationIgnored var holdsPersistence = false {
+    didSet {
+      guard holdsPersistence, !oldValue, restored, !deleted else { return }
+      // Replace a pending debounced save with the unsent draft before the composer clears.
+      saving?.cancel()
+      let snapshot = snapshot
+      saving = Task { try? await persistence.save(snapshot) }
+    }
+  }
   private func changed() {
-    guard restored, !restoring, !deleted else { return }
+    guard restored, !restoring, !deleted, !holdsPersistence else { return }
     saving?.cancel()
     saving = Task {
       do { try await Task.sleep(for: .milliseconds(250)) } catch { return }

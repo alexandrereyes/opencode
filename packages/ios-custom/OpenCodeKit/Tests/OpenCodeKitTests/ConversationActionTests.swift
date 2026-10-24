@@ -135,11 +135,16 @@ private actor RequestRecorder {
   try await client.stopShell("sh_background", directory: "/sandbox/a b")
   try await client.promoteInbox("msg_queued", sessionID: "ses_root")
   try await client.cancelInbox("msg_queued", sessionID: "ses_root")
+  try await client.updateInbox("msg_steer", sessionID: "ses_root", delivery: .queue)
   let requests = await recorder.requests
   #expect(
     requests.map(\.httpMethod) == [
-      "POST", "POST", "DELETE", "POST", "POST", "POST", "DELETE", "PATCH", "DELETE",
+      "POST", "POST", "DELETE", "POST", "POST", "POST", "DELETE", "PATCH", "DELETE", "PATCH",
     ])
+  #expect(requests[9].url?.path == "/api/session/ses_root/inbox/msg_steer")
+  #expect(
+    try JSONDecoder().decode(JSONValue.self, from: #require(requests[9].httpBody))
+      == .object(["delivery": .string("queue")]))
   #expect(
     requests[0].url?.path
       == "/api/session/\(permission.sessionID)/permission/\(permission.id)/reply")

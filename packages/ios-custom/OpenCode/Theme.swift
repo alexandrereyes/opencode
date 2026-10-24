@@ -45,6 +45,13 @@ struct AppTheme: Sendable {
     }
     return self.color(agentRole(agent, id: id))
   }
+  /// Every bubble element reads the pending colors, including attachments and context cards.
+  var pendingUserBubble: AppTheme {
+    Self(definition: definition
+      .overriding(.userBubble, with: definition.color(.userBubblePending))
+      .overriding(.userBubbleText, with: definition.color(.userBubblePendingText))
+      .overriding(.userBubbleSecondary, with: definition.color(.userBubblePendingSecondary)))
+  }
 }
 
 @MainActor @Observable final class AppearanceSettings {

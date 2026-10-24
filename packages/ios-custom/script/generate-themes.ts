@@ -45,6 +45,10 @@ const roles = {
   userBubble: "v2-user-message-background",
   userBubbleText: "v2-user-message-text",
   userBubbleSecondary: "text-weak",
+  // A steer waiting behind delivered work drops the sent-message accent, like the web's `data-pending` bubble.
+  userBubblePending: "v2-background-bg-layer-02",
+  userBubblePendingText: "v2-text-text-base",
+  userBubblePendingSecondary: "text-weak",
   inlineCode: "v2-inline-code-text",
   inlineCodeBackground: "v2-inline-code-background",
   codeSurface: "background-stronger",
@@ -203,6 +207,9 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     const bubble = composite(colors.userBubble!, colors.background!)
     colors.userBubbleText = legible(colors.userBubbleText!, [bubble], 4.5, luminance(bubble) < 0.18)
     colors.userBubbleSecondary = legible(colors.textSecondary!, [bubble], 4.5, luminance(bubble) < 0.18)
+    const pending = composite(colors.userBubblePending!, colors.background!)
+    colors.userBubblePendingText = legible(colors.userBubblePendingText!, [pending], 4.5, luminance(pending) < 0.18)
+    colors.userBubblePendingSecondary = legible(colors.textSecondary!, [pending], 4.5, luminance(pending) < 0.18)
     // A separate fill keeps information text legible in light themes without making its button dark.
     const infoHue = hexToOklch(colors.infoFill! as HexColor)
     colors.onInfo = oklchToHex({ ...infoHue, l: 0.14, c: Math.min(infoHue.c, 0.025) })
@@ -218,7 +225,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     for (const role of ["textStrong", "text", "textSecondary", "textMuted", "textPreview", "textAccent", "glassSecondary", "success", "info", "error",
       "markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink", "inlineCode", "codeText",
       "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "userBubbleText", "userBubbleSecondary",
-      "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder", "quoteBadge"]) {
+      "userBubblePendingText", "userBubblePendingSecondary", "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder", "quoteBadge"]) {
       exportedRoles[role] = `ios-derived-${role}`
     }
     for (const [role, value] of Object.entries(colors)) {

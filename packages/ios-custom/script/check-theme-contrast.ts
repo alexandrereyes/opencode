@@ -19,6 +19,8 @@ for await (const file of new Bun.Glob("*-*.json").scan(root)) {
       .map((role) => [role, Math.min(...surfaces.map((surface) => contrast(colors[role]!, surface)))]),
     ["userBubbleText", contrast(colors.userBubbleText!, composite(colors.userBubble!, colors.background!))],
     ["userBubbleSecondary", contrast(colors.userBubbleSecondary!, composite(colors.userBubble!, colors.background!))],
+    ["userBubblePendingText", contrast(colors.userBubblePendingText!, composite(colors.userBubblePending!, colors.background!))],
+    ["userBubblePendingSecondary", contrast(colors.userBubblePendingSecondary!, composite(colors.userBubblePending!, colors.background!))],
     ["onInfo", contrast(colors.onInfo!, colors.infoFill!)],
     ["onPrimary", contrast(colors.onPrimary!, colors.primary!)],
     ["onFilledButton", contrast(colors.onFilledButton!, colors.filledButton!)],

@@ -62,6 +62,7 @@ extension AppTheme {
 struct UserBubble: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.userMessageRevert) private var reversion
+  @Environment(\.userMessagePending) private var pendingInput
   @Environment(ToastCenter.self) private var toast
   @Environment(\.conversationSearch) private var highlights
   @Environment(\.conversationQuotes) private var quoteContext
@@ -131,7 +132,9 @@ struct UserBubble: View {
         }
         .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
         HStack(spacing: 8) {
-          if let reversion {
+          if let pendingInput {
+            pendingActions(pendingInput)
+          } else if let reversion {
             Button {
               reversion.revert(message.id)
             } label: {
@@ -140,6 +143,9 @@ struct UserBubble: View {
             }.buttonStyle(.plain).disabled(reversion.pending)
               .accessibilityLabel("Redefinir para este ponto")
               .accessibilityIdentifier("user-revert-" + message.id)
+          }
+          if pendingInput?.status.waiting == true {
+            Text("Pendente ·").appFont(.bubbleMeta).accessibilityIdentifier("user-pending-" + message.id)
           }
           Text(ConversationProjection.date(message.time.created, format: "HH:mm"))
             .appFont(.bubbleMeta).monospacedDigit()
@@ -160,6 +166,20 @@ struct UserBubble: View {
     var transaction = Transaction()
     transaction.disablesAnimations = true
     withTransaction(transaction) { expanded = value }
+  }
+  @ViewBuilder private func pendingActions(_ pending: UserMessagePendingAction) -> some View {
+    Button(action: pending.queue) {
+      Image(systemName: "arrow.down.to.line").appFont(.bubbleMeta)
+        .frame(width: 28, height: 24).contentShape(Rectangle())
+    }.buttonStyle(.plain).disabled(pending.busy)
+      .accessibilityLabel("Mover mensagem pendente para a fila")
+      .accessibilityIdentifier("user-pending-queue-" + message.id)
+    Button(action: pending.remove) {
+      Image(systemName: "trash").appFont(.bubbleMeta)
+        .frame(width: 28, height: 24).contentShape(Rectangle())
+    }.buttonStyle(.plain).disabled(pending.busy)
+      .accessibilityLabel("Excluir mensagem pendente")
+      .accessibilityIdentifier("user-pending-delete-" + message.id)
   }
   private var searchRange: NSRange? {
     guard let match = highlights.matches.first(where: { $0.id == highlights.current && $0.messageID == message.id }) else { return nil }

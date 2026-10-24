@@ -101,14 +101,21 @@ final class SessionStore {
   init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil) {
     self.acceptsLaunchSession = acceptsLaunchSession
     #if DEBUG
-    let isolated = ["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(configuration.url.absoluteString)
+    let isolated = configuration.isolatedTestSandbox
     let failure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_DELETE_FAILURE"] : nil
     let composerFailure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_COMPOSER_FAILURE"] : nil
     let revertFailure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_REVERT_FAILURE"] : nil
+    // "<sessionID|*|create>:<delay ms>:admit|fail", for optimistic-send checks against an isolated sandbox.
+    let promptFixture = isolated
+      ? ProcessInfo.processInfo.environment["OPENCODE_TEST_PROMPT_FIXTURE"]?.split(separator: ":").map(String.init) : nil
     let client = suppliedClient ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
+      ?? promptFixture.flatMap { parts in
+        parts.count == 3 ? OpenCodeClient.promptAdmissionFixture(configuration: configuration, sessionID: parts[0],
+          delay: .milliseconds(Int(parts[1]) ?? 0), fail: parts[2] == "fail") : nil
+      }
       ?? composerFailure.map { OpenCodeClient.composerSubmissionFailure(configuration: configuration, sessionID: $0) }
       ?? revertFailure.map { OpenCodeClient.revertFailureFixture(configuration: configuration, sessionID: $0) }
       ?? (ScrollFixtures.mode == nil

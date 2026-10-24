@@ -238,7 +238,7 @@ struct ConversationTray: View {
                     Image(systemName: "xmark")
                   }
                   .accessibilityLabel("Remover mensagem da fila")
-                }.disabled(store.acting.contains(item.id))
+                }.disabled(!store.actionable(item))
               }
             }
           }.frame(maxHeight: min(155, CGFloat(store.queue.count) * 63)).fixedSize(

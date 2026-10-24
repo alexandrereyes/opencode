@@ -126,7 +126,7 @@ import XCTest
     app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
       environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark", "-OpenCodeOpenSession", session]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
-    // DEBUG transport, restricted to 4177/4183: only this Session's prompt endpoint answers 400.
+    // DEBUG transport, restricted to an isolated loopback sandbox: only this Session's prompt endpoint answers 400.
     app.launchEnvironment["OPENCODE_TEST_COMPOSER_FAILURE"] = session
     app.launch()
     defer { app.terminate() }

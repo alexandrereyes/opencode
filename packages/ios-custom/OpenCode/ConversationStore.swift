@@ -33,6 +33,9 @@ import OpenCodeKit
     didSet { updateActivity() }
   }
   private(set) var inbox: [InboxItem] = []
+  /// Optimistic prompt rows shown from the tap until a refresh after admission observes them.
+  private(set) var outbox: [InboxItem] = []
+  @ObservationIgnored private var acknowledged: Set<String> = []
   private(set) var preferences: Preferences?
   private(set) var acting: Set<String> = []
   var error: String?
@@ -164,7 +167,26 @@ import OpenCodeKit
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
   var working: Bool { active.contains(id) || family?.active.isEmpty == false }
   var executing: Bool { active.contains(id) }
-  var queue: [InboxItem] { inbox.filter(\.queuedUser) }
+  /// Server inbox plus optimistic admissions awaiting their echo.
+  var pendingInbox: [InboxItem] {
+    let admitted = Set(inbox.map(\.id))
+    return inbox + outbox.filter { !admitted.contains($0.id) }
+  }
+  var queue: [InboxItem] { pendingInbox.filter(\.queuedUser) }
+  /// Inbox actions wait for the server to know the item; optimistic rows are not admitted yet.
+  func actionable(_ item: InboxItem) -> Bool {
+    !acting.contains(item.id) && inbox.contains { $0.id == item.id }
+  }
+  /// Undelivered steers render below the transcript, like the web timeline's pending inputs.
+  var pendingSteers: [InboxItem] {
+    let boundary = reversion.boundary(session)
+    return PendingInputs.steers(pendingInbox, messages: messages).filter { item in boundary.map { item.id < $0 } ?? true }
+  }
+  /// Like the web, child sessions show their pending steers without pending actions or styling.
+  func pendingStatus(_ item: InboxItem) -> PendingInputStatus? {
+    guard !isChild else { return nil }
+    return PendingInputs.status(item, inbox: pendingInbox, messages: messages, running: executing)
+  }
   var canBackground: Bool {
     session?.parentID == nil && executing
       && messages.flatMap(\.tools).contains {
@@ -232,21 +254,60 @@ import OpenCodeKit
     draft.sending = true
     draft.error = nil
     defer { draft.sending = false }
+    let snapshot = draft.snapshot
+    let editing = draft.editing
+    let dispatch = ComposerDispatch.resolve(snapshot.document)
+    let reusable = draft.submission.flatMap { submission in
+      draft.submissionDocument?.document == snapshot.document
+        && draft.submissionDocument?.attachments == snapshot.attachments
+        && draft.submissionDocument?.quotes == snapshot.quotes
+        && draft.submissionDocument?.revertedContext == snapshot.revertedContext
+        && submission.model == model && submission.agent == agent ? submission : nil
+    }
+    let requestID = reusable?.request.id ?? PromptRequest.newID()
+    func request(_ attachments: [DeliveredAttachment]) -> PromptRequest {
+      PromptRequest(
+        id: requestID, document: snapshot.document,
+        delivery: delivery, agent: agent, model: model, attachments: attachments,
+        quotes: snapshot.quotes,
+        metadata: editing?.payload.metadata ?? snapshot.revertedContext?.metadata ?? [:],
+        contextFiles: snapshot.revertedContext?.allFiles ?? [], contextText: snapshot.revertedContext?.text ?? [])
+    }
+    // Like the web's optimistic admission, the bubble and an empty composer appear on tap; the
+    // admission ID is minted first, so the server echo reconciles this same row.
+    var optimistic: InboxItem?
+    if case .prompt = dispatch, !pendingInbox.contains(where: { $0.id == requestID }),
+      !messages.contains(where: { $0.id == requestID }) {
+      let item = InboxItem(
+        optimistic: reusable?.request ?? request([]), sessionID: id,
+        attachments: snapshot.attachments.filter { $0.quoteID == nil }.map(\.name),
+        created: Date.now.timeIntervalSince1970 * 1000)
+      optimistic = item
+      outbox.append(item)
+      draft.holdsPersistence = true
+      draft.text = NSAttributedString()
+      draft.attachments = []
+      draft.quotes = []
+      draft.revertedContext = nil
+      draft.editing = nil
+      draft.replacing = nil
+      draft.selection = NSRange(location: 0, length: 0)
+      submitted += 1
+      revision += 1
+    }
+    defer { draft.holdsPersistence = false }
     do {
-      if draft.submissionDocument?.document != draft.document
-        || draft.submissionDocument?.attachments != draft.attachments
-        || draft.submissionDocument?.quotes != draft.quotes
-        || draft.submissionDocument?.revertedContext != draft.revertedContext
-        || draft.submission?.model != model
-        || draft.submission?.agent != agent || draft.submission == nil
-      {
+      let submission: PromptSubmission
+      if let reusable {
+        submission = reusable
+      } else {
         var attachments: [DeliveredAttachment] = []
-        for attachment in draft.attachments {
+        for attachment in snapshot.attachments {
           if let path = attachment.remotePath {
             attachments.append(.init(attachment: attachment, path: path, inline: nil))
             continue
           }
-          toast.show("Enviando anexo \(attachments.count + 1) de \(draft.attachments.count)…")
+          toast.show("Enviando anexo \(attachments.count + 1) de \(snapshot.attachments.count)…")
           let bytes = try await draft.persistence.bytes(attachment)
           attachments.append(
             try await client.deliver(
@@ -255,22 +316,18 @@ import OpenCodeKit
               input: models.first { $0.id == model.id && $0.providerID == model.providerID }?
                 .capabilities?.input ?? []))
         }
-        draft.submission = PromptSubmission(
-          request: PromptRequest(
-            document: draft.document,
-            delivery: delivery, agent: agent, model: model, attachments: attachments,
-            quotes: draft.quotes,
-            metadata: draft.editing?.payload.metadata ?? draft.revertedContext?.metadata ?? [:],
-            contextFiles: draft.revertedContext?.allFiles ?? [], contextText: draft.revertedContext?.text ?? []),
-          sessionID: id, agent: agent, model: model, replacing: draft.replacing, keepsAgent: isChild,
+        submission = PromptSubmission(
+          request: request(attachments),
+          sessionID: id, agent: agent, model: model, replacing: snapshot.replacing, keepsAgent: isChild,
           commitsRevert: reversion.boundary(session) != nil)
-        draft.submissionDocument = draft.snapshot
+        draft.submission = submission
+        draft.submissionDocument = snapshot
       }
-      guard let submission = draft.submission else { return }
-      switch ComposerDispatch.resolve(draft.document) {
+      switch dispatch {
       case .prompt:
-        submitted += 1
+        if optimistic == nil { submitted += 1 }
         try await submission.send(using: client)
+        acknowledged.insert(submission.request.id)
       case .command(let name, _):
         submitted += 1
         // Command callbacks have no idempotency key. Never automatically retry them.
@@ -290,11 +347,23 @@ import OpenCodeKit
       catalog?.committed(submission.model)
       Haptics.play(.light)
       draft.focused = false
-      toast.show(
-        submission.request.delivery == .queue ? "Mensagem adicionada à fila" : "Mensagem enviada")
       if submission.commitsRevert { replaceHistory = true }
       await refresh()
     } catch {
+      if let optimistic {
+        // Like the web, retract the unacknowledged row and return the prompt to the composer.
+        outbox.removeAll { $0.id == optimistic.id }
+        revision += 1
+        draft.text = snapshot.document.attributed
+        draft.attachments = snapshot.attachments
+        draft.quotes = snapshot.quotes
+        draft.revertedContext = snapshot.revertedContext
+        draft.editing = editing
+        draft.replacing = snapshot.replacing
+        draft.selection = NSRange(location: snapshot.document.editorOffset(snapshot.cursor), length: 0)
+        draft.holdsPersistence = false
+        await draft.persist()
+      }
       draft.error =
         "Não foi possível concluir o envio. Seu rascunho foi mantido. \(error.localizedDescription)"
       toast.show("Não foi possível enviar. Seu rascunho foi mantido.", kind: .error)
@@ -368,6 +437,16 @@ import OpenCodeKit
   }
   func cancel(_ item: InboxItem) async {
     await act(item.id, success: "Mensagem removida da fila") {
+      try await client.cancelInbox(item.id, sessionID: item.sessionID)
+    }
+  }
+  func moveToQueue(_ item: InboxItem) async {
+    await act(item.id, success: "Mensagem movida para a fila") {
+      try await client.updateInbox(item.id, sessionID: item.sessionID, delivery: .queue)
+    }
+  }
+  func deletePending(_ item: InboxItem) async {
+    await act(item.id, success: "Mensagem pendente excluída") {
       try await client.cancelInbox(item.id, sessionID: item.sessionID)
     }
   }
@@ -550,6 +629,8 @@ import OpenCodeKit
       return
     }
     refreshing = true
+    // Reads that start after an admission was acknowledged observe it, delivered, or cancelled.
+    let settled = acknowledged
     loading = !hasTranscript
     pending.removeAll()
     batchTask?.cancel()
@@ -680,6 +761,9 @@ import OpenCodeKit
       self.located = snapshots.2.first
       ownerMessages = parentMessages
       inbox = queueValue
+      let observed = Set(queueValue.map(\.id) + messages.map(\.id)).union(settled)
+      outbox.removeAll { observed.contains($0.id) }
+      acknowledged.subtract(settled)
       if preferencesValue.revision >= (preferences?.revision ?? -1) {
         preferences = preferencesValue
       }

@@ -59,7 +59,8 @@ import XCTest
     app.buttons["Enviar mensagem"].tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 60))
     XCTAssertTrue(app.staticTexts["Responda apenas: nova ok"].waitForExistence(timeout: 30))
-    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'nova ok'")).firstMatch
+    // Selectable responses are text views, not static texts.
+    XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label ==[c] 'nova ok'")).firstMatch
       .waitForExistence(timeout: 120))
     XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "label BEGINSWITH %@", originBranch),

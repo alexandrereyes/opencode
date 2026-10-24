@@ -2,7 +2,7 @@ import Foundation
 
 extension PromptRequest {
   public init(
-    id: String = "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+    id: String = PromptRequest.newID(),
     document: ComposerDocument, delivery: PromptDelivery, agent: String, model: ModelReference,
     attachments: [DeliveredAttachment] = [], quotes: [ChatQuote] = [],
     metadata extra: [String: JSONValue] = [:], contextFiles: [JSONValue] = [], contextText: [String] = []

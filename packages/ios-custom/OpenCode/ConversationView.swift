@@ -707,6 +707,22 @@ struct ConversationView: View {
           .listRowSeparator(.hidden)
           .listRowBackground(theme.color(.background))
         }
+        // Like delivered prompts, each pending one is a section header, so delivery swaps it in place.
+        ForEach(conversation.pendingSteers) { item in
+          Section {
+          } header: {
+            PendingUserMessage(item: item, store: conversation, maximumTextHeight: promptViewport.height * 0.4,
+              width: promptViewport.width)
+              .background { theme.color(.background).padding(.horizontal, -32) }
+              .listRowInsets(EdgeInsets())
+              .textCase(nil)
+              .id(item.id)
+              .onGeometryChange(for: CGSize.self) { $0.size } action: { _, _ in scrollState.correctAnchor() }
+          }
+          .listSectionSeparator(.hidden)
+          .listRowSeparator(.hidden)
+          .listRowBackground(theme.color(.background))
+        }
         ForEach(conversation.family?.permissions ?? []) { request in
           ConversationPermissionCard(request: request, store: conversation)
             .padding(.vertical, 10)

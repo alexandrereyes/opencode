@@ -27,6 +27,7 @@ public struct InboxItem: Codable, Sendable, Identifiable {
 }
 
 public struct PromptRequest: Codable, Sendable, Equatable {
+  public static func newID() -> String { "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "") }
   public let id: String
   public let text: String
   public let delivery: PromptDelivery
@@ -47,7 +48,7 @@ public struct PromptRequest: Codable, Sendable, Equatable {
     self.skills = skills.isEmpty ? nil : skills
   }
   public init(
-    id: String = "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""), text: String,
+    id: String = PromptRequest.newID(), text: String,
     delivery: PromptDelivery, agent: String, model: ModelReference,
     restoring: InboxItem.Payload? = nil
   ) {
@@ -206,9 +207,13 @@ extension OpenCodeClient: ConversationActions {
     try await perform("DELETE", "/api/session/\(sessionID)/inbox/\(id)")
   }
   public func promoteInbox(_ id: String, sessionID: String) async throws {
-    struct Input: Encodable { let delivery = PromptDelivery.steer }
+    try await updateInbox(id, sessionID: sessionID, delivery: .steer)
+  }
+  public func updateInbox(_ id: String, sessionID: String, delivery: PromptDelivery) async throws {
+    struct Input: Encodable { let delivery: PromptDelivery }
     try await perform(
-      "PATCH", "/api/session/\(sessionID)/inbox/\(id)", body: JSONEncoder().encode(Input()))
+      "PATCH", "/api/session/\(sessionID)/inbox/\(id)",
+      body: JSONEncoder().encode(Input(delivery: delivery)))
   }
   public func interrupt(_ sessionID: String, resume: Bool = false) async throws {
     try await perform(
