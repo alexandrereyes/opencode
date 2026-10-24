@@ -32,6 +32,7 @@ import { createSessionSearch } from "./session-search"
 import { useAttachmentDestination } from "./attachments/deliver"
 import { resolveBlobUrl } from "@/runtime/persistence/drafts"
 import { createComposerBtw } from "@/session/btw/model"
+import { createAppMentions } from "./app-mentions"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly btw?: ReturnType<typeof createComposerBtw>
@@ -217,25 +218,22 @@ export function createComposerModel(
     })),
   )
   const skills = createMemo(() => data.location.skill.list({ directory: sdk().directory }) ?? [])
-  const appSource = createMemo(
-    () => {
-      if (completionState.contextQuery === undefined || !available()) return false
-      return { server: server.key, directory: sdk().directory }
-    },
-    false,
-    {
-      equals: (previous, next) =>
-        previous === next ||
-        (!!previous && !!next && previous.server === next.server && previous.directory === next.directory),
-    },
-  )
-  const [apps] = createResource(appSource, (source) =>
-    server.ctx.sdk.api
-      .rpc(AppMentions.Definition)
-      .list({}, { location: { directory: source.directory } })
-      .then((result) => result.apps)
-      .catch(() => []),
-  )
+  const apps = createAppMentions({
+    target: () =>
+      available()
+        ? {
+            server: server.key,
+            directory: sdk().directory,
+            mcp: data.location.mcp.server.list({ directory: sdk().directory }),
+          }
+        : undefined,
+    open: () => completionState.contextQuery !== undefined,
+    list: (directory) =>
+      server.ctx.sdk.api
+        .rpc(AppMentions.Definition)
+        .list({}, { location: { directory } })
+        .then((result) => result.apps),
+  })
   const sessionSearch = createSessionSearch({
     list: (query, signal) =>
       server.ctx.sdk.api.session
@@ -278,7 +276,7 @@ export function createComposerModel(
         },
       }
     }),
-    ...(appSource() && !apps.loading ? (apps() ?? []) : []).map((app) => ({
+    ...(completionState.contextQuery !== undefined ? apps() : []).map((app) => ({
       id: `app:${app.server}:${app.bundleID}`,
       kind: "app" as const,
       label: app.name,

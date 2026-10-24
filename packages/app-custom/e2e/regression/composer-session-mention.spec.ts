@@ -20,7 +20,6 @@ test("selects, copies, pastes, and submits a globally searched session reference
   const prompts: Record<string, unknown>[] = []
   const referencedMessageRequests: string[] = []
   const appMentionRequests: Array<{ url: string; body: unknown }> = []
-  let rejectAppMentions = false
   const sessionListParents: Array<string | null> = []
   const sessionListGates = new Map<
     string,
@@ -73,6 +72,10 @@ test("selects, copies, pastes, and submits a globally searched session reference
         time: { created: 3, updated: 3, archived: 4 },
       },
     ],
+    mcpServers: [
+      { name: "codex-computer-use", status: { status: "connected" } },
+      { name: "safari-devtools", status: { status: "connected" } },
+    ],
     appMentions: [
       {
         server: "codex-computer-use",
@@ -90,10 +93,6 @@ test("selects, copies, pastes, and submits a globally searched session reference
     pageMessages: () => ({ items: [] }),
     findFiles: () => [],
     onPrompt: ({ body }) => prompts.push(body),
-  })
-  await page.route("**/api/rpc/custom.app-mentions/list?*", (route) => {
-    if (!rejectAppMentions) return route.fallback()
-    return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "missing" }) })
   })
   await page.route("**/api/session?*", async (route) => {
     const url = new URL(route.request().url())
@@ -172,7 +171,8 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await editor.pressSequentially("@Shared")
   const appSuggestion = page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')
   await expect(appSuggestion).toBeVisible()
-  expect(appMentionRequests).toHaveLength(2)
+  // A reopened `@` reuses the listing loaded when the composer saw the app MCPs connected.
+  expect(appMentionRequests).toHaveLength(1)
   await appSuggestion.click()
   await expect(editor.locator(`[data-mention="session"][data-id="${secondID}"]`)).toHaveCount(1)
   await expect(editor.locator('[data-mention="app"]')).toHaveText("@Shared work")
@@ -194,11 +194,10 @@ test("selects, copies, pastes, and submits a globally searched session reference
   await expect(sent).toContainText("@Shared work")
   await expect(sent.locator('[data-highlight="session"]')).toHaveText("@Shared work")
 
-  rejectAppMentions = true
   await editor.fill("@")
   await expect(page.getByRole("button", { name: `Session, Shared work, /repo/two, ${secondID}` })).toBeVisible()
-  await expect(page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')).toHaveCount(0)
-  expect(appMentionRequests).toHaveLength(3)
+  await expect(page.locator('[data-suggestion-id="app:codex-computer-use:com.example.shared-work"]')).toBeVisible()
+  expect(appMentionRequests).toHaveLength(1)
 
   // Keep suggestions open across both layout breakpoints: their positioning
   // lifecycle must follow the rendered popup when it enters or leaves a Portal.
