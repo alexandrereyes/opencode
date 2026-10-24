@@ -69,13 +69,13 @@ const mcp = (options?: {
     readResource: () => Effect.undefined,
   })
 
-const call = Effect.fn(function* (service: Mcp.Interface) {
+const call = Effect.fn(function* (service: Mcp.Interface, input: { enabled?: string[] } = {}) {
   const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
     Effect.provideService(Mcp.Service, service),
   )
   yield* AppMentionsPlugin.effect(host)
   const rpc = yield* Rpc.Service
-  return yield* rpc.client(AppMentions.Definition).list({})
+  return yield* rpc.client(AppMentions.Definition).list(input)
 })
 
 const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<A, E, R>) =>
@@ -164,6 +164,40 @@ describe("app mentions plugin integration", () => {
       })
       expect(yield* call(mcp({ missing: true, native: "disabled" }))).toEqual({ apps: [] })
       expect(yield* call(mcp({ missing: true, native: "failed" }))).toEqual({ apps: [] })
+    }),
+  )
+
+  it.effect("lists servers a client will enable before its Location connects them", () =>
+    Effect.gen(function* () {
+      const safari = {
+        server: "safari-devtools",
+        name: "Safari DevTools",
+        bundleID: "mcp.safari-devtools",
+        running: false,
+      }
+      const calls = yield* Ref.make(0)
+      const listing = mcp({
+        callTool: (input) =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.as({
+              server: Mcp.ServerName.make(input.server),
+              tool: input.name,
+              isError: false,
+              content: [{ type: "text" as const, text: "Notes — com.apple.Notes [running]" }],
+            }),
+          ),
+      })
+      expect(yield* call(listing, { enabled: [] })).toEqual({ apps: [] })
+      expect(yield* Ref.get(calls)).toBe(0)
+      const notes = { server: "codex-computer-use", name: "Notes", bundleID: "com.apple.Notes", running: true }
+      expect(yield* call(listing)).toEqual({ apps: [notes] })
+      expect(yield* Ref.get(calls)).toBe(1)
+      expect(
+        yield* call(mcp({ missing: true, native: "disabled" }), { enabled: ["codex-computer-use", "safari-devtools"] }),
+      ).toEqual({ apps: [safari, notes] })
+      expect(yield* call(mcp({ missing: true, native: "connected" }), { enabled: ["safari-devtools"] })).toEqual({
+        apps: [safari],
+      })
     }),
   )
 

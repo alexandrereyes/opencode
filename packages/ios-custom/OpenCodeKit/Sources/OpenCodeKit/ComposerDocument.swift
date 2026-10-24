@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ComposerTokenKind: String, Codable, Sendable {
-  case file, reference, session, agent, command, skill, snippet
+  case file, reference, session, agent, command, skill, snippet, app
 }
 
 public struct ComposerToken: Codable, Sendable, Equatable {
@@ -73,7 +73,16 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
           "text": object["content"] ?? .null,
         ]), kind: .session, id: id, detail: session)
     }
-    self.init(text: payload.displayText, tokens: files + agents + skills + sessions)
+    let apps = (payload.metadata?["apps"]?.array ?? []).compactMap { value -> ComposerSpan? in
+      guard let object = value.object, let app = object["app"]?.object.flatMap(ComposerApp.init(detail:))
+      else { return nil }
+      return Self.restoreSpan(
+        .object([
+          "start": object["start"] ?? .null, "end": object["end"] ?? .null,
+          "text": object["content"] ?? .null,
+        ]), kind: .app, id: app.token.id, detail: app.detail)
+    }
+    self.init(text: payload.displayText, tokens: files + agents + skills + sessions + apps)
     tokens = validTokens
   }
   private static func restoreSpan(

@@ -9,6 +9,8 @@ export const SafariDevTools = {
   bundleID: "mcp.safari-devtools",
 } as const
 
+export const ComputerUse = { server: "codex-computer-use" } as const
+
 export interface App extends Schema.Schema.Type<typeof App> {}
 export const App = Schema.Struct({
   server: Schema.String,
@@ -26,7 +28,9 @@ export const Definition = Rpc.define({
   id: "custom.app-mentions",
   methods: {
     list: {
-      input: Schema.toStandardSchemaV1(Schema.Struct({})),
+      // `enabled` replaces this Location's connection state with the MCP servers a client will enable
+      // once the Location exists, such as a new chat whose directory is allocated only on send.
+      input: Schema.toStandardSchemaV1(Schema.Struct({ enabled: Schema.Array(Schema.String).pipe(Schema.optional) })),
       output: Schema.toStandardSchemaV1(Schema.Struct({ apps: Schema.Array(App) })),
     },
   },

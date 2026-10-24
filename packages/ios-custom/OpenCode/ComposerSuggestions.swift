@@ -16,6 +16,11 @@ struct ComposerSuggestions: View {
   @State private var items: [ComposerSuggestion] = []
   @State private var loading = true
   @State private var failed = false
+  @State private var shown: ComposerTrigger?
+  private struct Load: Equatable {
+    let trigger: ComposerTrigger
+    let apps: Int
+  }
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 2) {
@@ -67,12 +72,20 @@ struct ComposerSuggestions: View {
       .overlay {
         RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7)
       }
-      .task(id: trigger) {
-        ready?.first = nil
-        loading = true
-        failed = false
+      .task(
+        id: Load(trigger: trigger, apps: trigger.character == "@" ? ComposerAppMentions.shared.revision : 0)
+      ) {
+        // An app listing that arrives while the panel is open merges without re-debouncing or
+        // dropping the item Return would choose.
+        let arrival = shown == trigger
+        shown = trigger
+        if !arrival {
+          ready?.first = nil
+          loading = true
+          failed = false
+        }
         do {
-          try await Task.sleep(for: .milliseconds(180))
+          if !arrival { try await Task.sleep(for: .milliseconds(180)) }
           #if DEBUG
           let next = ComposerFixtures.enabled ? ComposerFixtures.suggestions(trigger)
             : ComposerTypingDriver.scenario != nil ? ComposerTypingDriver.suggestions(trigger)
@@ -86,9 +99,12 @@ struct ComposerSuggestions: View {
           ready?.first = next.first.flatMap { selectable($0) ? (trigger, $0) : nil }
         } catch {
           if !Task.isCancelled {
-            failed = true
             loading = false
-            items = []
+            // A failed refresh after an app listing keeps what the panel already shows.
+            if !arrival {
+              failed = true
+              items = []
+            }
           }
         }
       }

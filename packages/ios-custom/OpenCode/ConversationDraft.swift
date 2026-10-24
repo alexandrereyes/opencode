@@ -46,6 +46,8 @@ extension ComposerTokenKind {
     case .command: .composerCommand
     case .skill: .composerSkill
     case .snippet: .composerSnippet
+    // Like the web's app chip: base text on the subtle token background.
+    case .app: .text
     }
   }
 }

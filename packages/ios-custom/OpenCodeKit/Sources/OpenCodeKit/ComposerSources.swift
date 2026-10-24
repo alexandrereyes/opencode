@@ -67,12 +67,12 @@ public struct ComposerSources: Sendable {
   }
   public func suggestions(
     _ trigger: ComposerTrigger, agents: [AgentInfo] = [],
-    files: [ComposerFile] = [], sessions: [Session] = [], current: String = "", server: String = "",
-    directory: String = "", project: String? = nil
+    files: [ComposerFile] = [], sessions: [Session] = [], apps: [ComposerApp] = [],
+    current: String = "", server: String = "", directory: String = "", project: String? = nil
   ) -> [ComposerSuggestion] {
     let query = normalize(trigger.query)
     let items = candidates(
-      trigger.character, agents: agents, files: files, sessions: sessions,
+      trigger.character, agents: agents, files: files, sessions: sessions, apps: apps,
       current: current, server: server, directory: directory, project: project
     )
     let ranked = items.enumerated().compactMap { index, item in
@@ -85,11 +85,13 @@ public struct ComposerSources: Sendable {
     if query.isEmpty { return 0 }
     let basename =
       item.token.kind == .file ? [item.title.components(separatedBy: "/").last ?? ""] : []
-    let names = ([item.token.id, String(item.token.text.dropFirst())] + item.aliases + basename).map
-    { normalize($0) }
+    // Like the web, apps match only by name: every bundle ID or "Computer use" would match otherwise.
+    let app = item.token.kind == .app
+    let names = (app ? [item.title] : [item.token.id, String(item.token.text.dropFirst())] + item.aliases + basename)
+      .map { normalize($0) }
     if names.contains(where: { $0.hasPrefix(query) }) { return 0 }
     if names.contains(where: { $0.contains(query) }) { return 1 }
-    if normalize(item.subtitle).contains(query) { return 2 }
+    if !app && normalize(item.subtitle).contains(query) { return 2 }
     return nil
   }
   private func normalize(_ value: String) -> String {
@@ -97,7 +99,7 @@ public struct ComposerSources: Sendable {
   }
   private func candidates(
     _ character: String, agents: [AgentInfo], files: [ComposerFile], sessions: [Session],
-    current: String, server: String, directory: String, project: String?
+    apps: [ComposerApp], current: String, server: String, directory: String, project: String?
   ) -> [ComposerSuggestion] {
     switch character {
     case "@":
@@ -121,6 +123,12 @@ public struct ComposerSources: Sendable {
                   "id": .string($0.id), "title": .string(title), "server": .string(server),
                   "directory": .string($0.location.directory),
                 ]))
+        }
+        + apps.map {
+          .init(
+            section: "Apps", title: $0.name,
+            subtitle: $0.isSafariDevTools ? "Safari MCP" : "Computer use", icon: "desktopcomputer",
+            token: $0.token)
         }
         + agents.filter {
           $0.hidden != true && $0.mode != "primary"

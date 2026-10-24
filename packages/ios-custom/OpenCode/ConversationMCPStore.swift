@@ -15,6 +15,8 @@ import OpenCodeKit
   @ObservationIgnored var panelFrame = CGRect.zero
   @ObservationIgnored var pillFrame = CGRect.zero
   @ObservationIgnored var transcriptFrame = CGRect.zero
+  /// Called after the server list changes, so app mentions follow connected app MCPs.
+  @ObservationIgnored var changed: (() -> Void)?
   var isOpen: Bool { order.visible }
   var summary: MCPSummary { MCPSummary(servers, unsupported: unsupported) }
   var chips: [MCPServer] {
@@ -54,6 +56,7 @@ import OpenCodeKit
       servers = values
       unsupported = false
       if values.isEmpty { close() }
+      changed?()
     } catch {
       guard !Task.isCancelled, directory == self.directory else { return }
       failed = true
@@ -75,6 +78,7 @@ import OpenCodeKit
         let updated = try await client.mcpServers(directory: directory)
         guard directory == self.directory else { return }
         servers = updated
+        changed?()
         guard let value = updated.first(where: { $0.name == server.name }),
           value.status.status == (server.enabled ? .disabled : .connected)
         else { throw MCPUIError() }

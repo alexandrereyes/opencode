@@ -77,6 +77,9 @@ import OpenCodeKit
   private var composerConfiguration: [NewSessionConfiguration] = []
   private var recentModels: [ModelReference] = []
   @ObservationIgnored var newSessionSubmit: ((ConversationDraft) async -> Void)?
+  /// A new session's app MCPs come from its chips; `intent` when they only record intent for a
+  /// Location that does not exist yet. Nil while they are unknown.
+  @ObservationIgnored var newSessionApps: (@MainActor () -> (enabled: [String], intent: Bool)?)?
   var isNewSession: Bool { newSessionSubmit != nil }
   var masterMode = false
 
@@ -117,6 +120,7 @@ import OpenCodeKit
     expansionValues = expansions?.values(id) ?? [:]
     self.quoteDismissals = quoteDismissals
     dismissedQuotes = quoteDismissals?.values(id) ?? []
+    mcps.changed = { [weak self] in self?.prepareApps() }
   }
   /// Hides sent quote marks in responses on this device; `metadata.quotes` is never rewritten.
   @discardableResult func dismissQuotes(_ ids: Set<String>) -> Bool {
@@ -420,8 +424,28 @@ import OpenCodeKit
   func askSideQuestion(_ request: SideQuestionRequest) async throws -> String {
     try await client.sideQuestion(request, sessionID: id)
   }
+  /// Where app mentions come from, without waiting for the Location's MCP list.
+  var appScope: ComposerAppScope? {
+    guard let directory = composerLocation ?? session?.location.directory else { return nil }
+    let server = client.configuration.url.absoluteString
+    if let newSessionApps {
+      let value = newSessionApps()
+      return .init(
+        server: server, directory: directory, enabled: value?.enabled, intent: value?.intent ?? false)
+    }
+    let known = mcps.directory == directory && !mcps.failed && (!mcps.servers.isEmpty || !mcps.loading)
+    return .init(
+      server: server, directory: directory,
+      enabled: known ? ComposerAppScope.enabled(mcps.servers) : nil)
+  }
+  /// Lists app mentions ahead of `@` once the enabled app MCPs are known; `open` lists even before.
+  func prepareApps(open: Bool = false) {
+    guard let appScope else { return }
+    ComposerAppMentions.shared.prepare(appScope, client: client, open: open)
+  }
   func suggestions(_ trigger: ComposerTrigger) async throws -> [ComposerSuggestion] {
     guard let directory = composerLocation ?? session?.location.directory else { return [] }
+    if trigger.character == "@" { prepareApps(open: true) }
     if composerCatalog == nil {
       composerCatalog = try await client.composerSources(directory: directory)
     }
@@ -429,8 +453,9 @@ import OpenCodeKit
       trigger.character == "@"
       ? client.composerFiles(trigger.query, directory: directory) : []
     async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
+    let apps = trigger.character == "@" ? appScope.map(ComposerAppMentions.shared.apps) ?? [] : []
     let suggestions = try await composerCatalog?.suggestions(
-      trigger, agents: agents, files: files, sessions: sessions,
+      trigger, agents: agents, files: files, sessions: sessions, apps: apps,
       current: id, server: client.configuration.url.absoluteString,
       directory: directory, project: composerProjectID ?? session?.projectID) ?? []
     guard isChild else { return suggestions }

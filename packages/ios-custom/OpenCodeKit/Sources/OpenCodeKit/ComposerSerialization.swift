@@ -25,6 +25,7 @@ extension PromptRequest {
     var agents: [JSONValue] = []
     var skills: [JSONValue] = []
     var sessions: [JSONValue] = []
+    var apps: [JSONValue] = []
     var suffix: [String] = contextText
     for span in expanded.validTokens {
       let mention = JSONValue.object([
@@ -63,6 +64,16 @@ extension PromptRequest {
             )
           }
         }
+      case .app:
+        if let detail = span.token.detail, let app = ComposerApp(detail: detail) {
+          apps.append(
+            .object([
+              "type": .string("app"), "content": .string(span.token.text),
+              "start": .number(Double(span.start)), "end": .number(Double(span.end)),
+              "app": .object(app.detail),
+            ]))
+          suffix.append(app.context)
+        }
       case .snippet, .command: break
       }
     }
@@ -97,11 +108,14 @@ extension PromptRequest {
         object.removeValue(forKey: "mention")
         return .object(object)
       }
-      if let contexts = request.metadata["sessions"]?.array {
-        sessions += contexts
-        if request.text.hasPrefix(quote.document.expanded.text + "\n") {
-          suffix.append(String(request.text.dropFirst(quote.document.expanded.text.count + 1)))
-        }
+      let quoteSessions = request.metadata["sessions"]?.array ?? []
+      let quoteApps = request.metadata["apps"]?.array ?? []
+      sessions += quoteSessions
+      apps += quoteApps
+      if !(quoteSessions.isEmpty && quoteApps.isEmpty),
+        request.text.hasPrefix(quote.document.expanded.text + "\n")
+      {
+        suffix.append(String(request.text.dropFirst(quote.document.expanded.text.count + 1)))
       }
     }
     // Web restoration associates trailing inline files with quote image IDs, in quote/part order.
@@ -119,6 +133,7 @@ extension PromptRequest {
     if !quotes.isEmpty { suffix.append(ChatQuote.format(quotes)) }
     var metadata = extra
     metadata.removeValue(forKey: "sessions")
+    metadata.removeValue(forKey: "apps")
     metadata.removeValue(forKey: "attachments")
     metadata.removeValue(forKey: "quotes")
     if !quotes.isEmpty, let data = try? JSONEncoder().encode(quotes),
@@ -135,6 +150,7 @@ extension PromptRequest {
     if let variant = model.variant { ref["variant"] = .string(variant) }
     metadata["model"] = .object(ref)
     if !sessions.isEmpty { metadata["sessions"] = .array(sessions) }
+    if !apps.isEmpty { metadata["apps"] = .array(apps) }
     if !staged.isEmpty { metadata["attachments"] = .array(staged) }
     if let data = try? JSONEncoder().encode(display.tokens),
       let tokens = try? JSONDecoder().decode(JSONValue.self, from: data)

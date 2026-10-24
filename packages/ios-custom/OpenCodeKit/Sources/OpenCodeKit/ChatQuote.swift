@@ -136,6 +136,9 @@ extension ComposerDocument {
       case .session:
         value["type"] = .string("session")
         value["session"] = .object(span.token.detail ?? [:])
+      case .app:
+        value["type"] = .string("app")
+        value["app"] = .object(span.token.detail ?? [:])
       case .command: break
       }
       result.append(.object(value))
@@ -173,6 +176,9 @@ extension ComposerDocument {
           return nil
         }
         token = .init(kind: .session, id: id, text: content, detail: session)
+      case "app":
+        guard let app = part["app"]?.object.flatMap(ComposerApp.init(detail:)) else { return nil }
+        token = .init(kind: .app, id: app.token.id, text: content, detail: app.detail)
       default: return nil
       }
       return .init(start: from, end: to, token: token)

@@ -383,6 +383,29 @@ warnings (`COPY_PHASE_STRIP=NO` avoids re-stripping already signed embedded fram
 mockup, this uses native Liquid Glass and a rounded panel without a drawn speech-bubble tail; the generator's stray
 dash/dot are absent. `pill-closed`, `panel-open`, `toggle-pending` and `new-session-order` captures exist in both themes.
 
+### App mentions — 24 October
+
+Like the web, `@` offers the Mac apps of the enabled app MCPs (**Apps**: Computer use apps of
+`codex-computer-use` and **Safari DevTools** of `safari-devtools`), from the plugin RPC `custom.app-mentions/list`.
+Apps match by name only. Choosing one inserts an atomic `@Name` token (`ComposerTokenKind.app`); sending writes the
+web's `metadata.apps` parts (`{type:"app", content, start, end, app}`) and appends the web's `formatAppContext`
+instruction to the prompt text. Web messages restore their app tokens from `metadata.apps`; quotes carry them as
+`app` parts.
+
+Listing Computer Use apps takes about 2.5 s, so it never runs in the typing path. `ComposerAppMentions.shared` keeps
+one listing per server and Location for a minute (`ComposerAppCache`), keyed by the enabled app MCPs. A conversation
+lists as soon as its MCP list loads or changes; `@` uses what is cached, and an open panel merges a listing that
+arrives later without re-debouncing or clearing the item Return would choose. A changed enabled set (disconnect,
+reconnect) lists again; no enabled app MCP lists nothing. A new chat or worktree only records MCP intents, so its
+request sends `enabled`; the plugin then answers Computer Use from its latest listing kept in plugin storage (shared
+by all Locations), until the chat exists and connects the MCP.
+
+After `build-for-testing`, `script/test-app-mentions.py` runs `ComposerAppMentionsUITests` (or the test IDs given)
+against an isolated sandbox: `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`,
+`OPENCODE_TEST_SIMULATOR`, `OPENCODE_TEST_EVIDENCE`, `OPENCODE_TEST_THEME`. It imports one disposable Session in
+`<home>/repos/app-mentions`, connects the real `codex-computer-use` there (only `list_apps` runs; no app is
+controlled and nothing is sent), restores the MCP state and deletes the Session.
+
 ### Composer editing stability — 23 October
 
 The live `UITextView.textStorage` owns editing. Native edits publish a lightweight content revision; SwiftUI only

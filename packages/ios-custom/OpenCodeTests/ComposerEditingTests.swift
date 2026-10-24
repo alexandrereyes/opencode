@@ -290,7 +290,7 @@ import XCTest
 
   func testEveryTokenKindRoundTripsWithoutChangingMetadata() throws {
     var document = ComposerDocument(text: "😀\r\n")
-    for kind in [ComposerTokenKind.file, .reference, .session, .agent, .command, .skill, .snippet] {
+    for kind in [ComposerTokenKind.file, .reference, .session, .agent, .command, .skill, .snippet, .app] {
       let token = ComposerToken(kind: kind, id: "id-\(kind.rawValue)", text: "@\(kind.rawValue)", value: "/repo/á", detail: ["id": .string("id"), "title": .string("ação")])
       let start = document.text.utf16.count
       document.text += token.text

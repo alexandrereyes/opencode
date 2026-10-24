@@ -41,6 +41,10 @@ import OpenCodeKit
     memoryKey = "OpenCodeNewSession." + server
     categories = defaults.dictionary(forKey: memoryKey + ".categories") as? [String: String] ?? [:]
     composer.newSessionSubmit = { [weak self] draft in await self?.send(draft) }
+    composer.newSessionApps = { [weak self] in
+      guard let self, !mcpError, !mcpLoading || !mcps.isEmpty else { return nil }
+      return (ComposerAppScope.enabled(previewChips), preview)
+    }
   }
   var projects: [Project] {
     NewSessionProjection.projects(
@@ -248,6 +252,7 @@ import OpenCodeKit
       mcpDefaults = MCPServer.defaults(value.1)
       mcps = value.0
       showMCPs()
+      composer.prepareApps()
     } catch { if !Task.isCancelled && directory == self.directory { mcpError = true } }
   }
   func toggle(_ server: MCPServer) {
@@ -259,6 +264,7 @@ import OpenCodeKit
         "Faça o login de \(server.name) pelo app web para conectar este MCP.", kind: .error)
     case .intent:
       draft.newSession?.mcp[context.intentKey, default: [:]][server.name] = !server.enabled
+      composer.prepareApps()
       Haptics.play(.selection)
     case .live:
       guard toggling.insert(server.name).inserted else { return }
@@ -279,6 +285,7 @@ import OpenCodeKit
           if self.directory == directory && !preview {
             // Replace values in place: a tap must never change chip order.
             mcps = mcps.map { old in updated.first { $0.name == old.name } ?? old }
+            composer.prepareApps()
           }
           Haptics.play(.selection)
           return true
