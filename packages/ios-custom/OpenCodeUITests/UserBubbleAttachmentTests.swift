@@ -55,16 +55,16 @@ import UIKit
         tree.name = "collapsed-ax-" + role.lowercased()
         tree.lifetime = .keepAlways
         add(tree)
+        toggle.tap()
+        wait(NSPredicate(format: "value == 'Expandido'"), on: toggle)
+        try assertAttachments(app, kind: kind, id: id, collapsed: false)
         if kind == "IMAGE" && placement == "LIST" {
           app.buttons["feed-image-captura-sintetica-com-nome-muito-longo.png"].tap()
           XCTAssertTrue(app.navigationBars["captura-sintetica-com-nome-muito-longo.png"].waitForExistence(timeout: 10))
           shot(app, "full-image-" + role.lowercased())
           app.buttons["Fechar"].tap()
-          XCTAssertEqual(toggle.value as? String, "Recolhido")
+          XCTAssertEqual(toggle.value as? String, "Expandido")
         }
-        toggle.tap()
-        wait(NSPredicate(format: "value == 'Expandido'"), on: toggle)
-        try assertAttachments(app, kind: kind, id: id, collapsed: false)
         XCTAssertGreaterThan(prompt.frame.height, twoLines)
         shot(app, "expanded-" + role.lowercased())
         if ["QUOTE", "MIXED"].contains(kind) {
@@ -92,7 +92,10 @@ import UIKit
   }
 
   private func assertAttachments(_ app: XCUIApplication, kind: String, id: String, collapsed: Bool) throws {
-    if ["IMAGE", "MIXED"].contains(kind) {
+    if ["IMAGE", "MIXED"].contains(kind) && collapsed {
+      XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed-image-'")).firstMatch.exists)
+    }
+    if ["IMAGE", "MIXED"].contains(kind) && !collapsed {
       let image = app.buttons["feed-image-captura-sintetica-com-nome-muito-longo.png"]
       XCTAssertTrue(image.waitForExistence(timeout: 15))
       XCTAssertEqual(image.frame.width, 48, accuracy: 1)
@@ -112,14 +115,13 @@ import UIKit
     if ["QUOTE", "MIXED"].contains(kind) {
       let summary = app.buttons["user-context-summary-" + id + "-quote-0"]
       let quote = app.buttons["user-context-quote-" + id + "-quote-0"]
-      XCTAssertEqual(summary.exists, collapsed)
+      // A folded bubble with prompt text hides its quotes and file comments entirely.
+      XCTAssertFalse(summary.exists)
       XCTAssertEqual(quote.exists, !collapsed)
       if collapsed {
-        XCTAssertLessThanOrEqual(summary.frame.height, 20)
-        XCTAssertTrue(summary.label.contains("Comentário da citação preservado."))
-        XCTAssertTrue(summary.label.contains("Citação de uma resposta"))
-        XCTAssertTrue(summary.label.contains("Contexto anexado"))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'user-context-'")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Trecho citado 1.'")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Comentário de arquivo preservado."].exists)
       } else {
         XCTAssertTrue(quote.label.contains("Trecho citado 8."))
         XCTAssertTrue(app.staticTexts["Comentário da citação preservado."].exists)
@@ -133,9 +135,7 @@ import UIKit
       for kind in ["IMAGE", "FILE", "QUOTE", "PLAIN", "MIXED"] {
         let role = "REVIEW_" + kind + "_" + placement
         let app = try launch(role)
-        if ["IMAGE", "MIXED"].contains(kind) {
-          XCTAssertTrue(app.buttons["feed-image-captura-sintetica-com-nome-muito-longo.png"].waitForExistence(timeout: 15))
-        }
+        XCTAssertTrue(app.buttons["user-prompt-toggle-" + (try message(role))].waitForExistence(timeout: 15))
         shot(app, "collapsed-" + role.lowercased())
         app.terminate()
       }

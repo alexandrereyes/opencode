@@ -27,6 +27,13 @@ import XCTest
   private func marker(_ app: XCUIApplication) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
   }
+  /// Bubbles carrying quotes start folded; their source links appear after expansion.
+  private func expand(_ app: XCUIApplication, carrier: String) {
+    let toggle = app.buttons["user-prompt-toggle-" + carrier]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 25))
+    if toggle.value as? String == "Recolhido" { toggle.tap() }
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'Expandido'"), evaluatedWith: toggle)], timeout: 10), .completed)
+  }
   private func source(_ app: XCUIApplication, kind: String) throws -> XCUIElement {
     let id = try XCTUnwrap(environment["OPENCODE_QUOTE_" + kind + "_SOURCE"])
     return app.textViews["response-\(id)-\(id):text:0"]
@@ -84,6 +91,8 @@ import XCTest
     let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_SENT_CARRIER"])
     let reverse = app.buttons["quote-source-\(carrier)-0"]
     XCTAssertTrue(reverse.waitForExistence(timeout: 10))
+    XCTAssertEqual(app.buttons["user-prompt-toggle-" + carrier].value as? String, "Expandido")
+    screenshot("native-sent-message-expanded")
     reverse.tap()
     XCTAssertTrue(marker(app).waitForExistence(timeout: 15))
     app.terminate()
@@ -107,6 +116,8 @@ import XCTest
     screenshot("native-removable-removed")
     let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_REMOVABLE_CARRIER"])
     let reverse = app.buttons["quote-source-\(carrier)-0"]
+    XCTAssertFalse(reverse.exists)
+    expand(app, carrier: carrier)
     XCTAssertTrue(reverse.waitForExistence(timeout: 10))
     reverse.tap()
     XCTAssertTrue(response.waitForExistence(timeout: 15))
@@ -115,7 +126,8 @@ import XCTest
     screenshot("native-removable-source-revealed")
     app.terminate()
     app.launch()
-    XCTAssertTrue(app.buttons["quote-source-\(carrier)-0"].waitForExistence(timeout: 25))
+    expand(app, carrier: carrier)
+    XCTAssertTrue(app.buttons["quote-source-\(carrier)-0"].waitForExistence(timeout: 10))
     XCTAssertTrue(response.waitForExistence(timeout: 10))
     XCTAssertFalse(marker(app).exists)
     screenshot("native-removable-reopened")
@@ -157,6 +169,7 @@ import XCTest
     defer { app.terminate() }
     let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_PAGED_CARRIER"])
     let reverse = app.buttons["quote-source-\(carrier)-0"]
+    expand(app, carrier: carrier)
     XCTAssertTrue(reverse.waitForExistence(timeout: 15))
     reverse.tap()
     let response = try source(app, kind: "PAGED")
@@ -169,6 +182,7 @@ import XCTest
     defer { app.terminate() }
     let carrier = try XCTUnwrap(environment["OPENCODE_QUOTE_MISSING_CARRIER"])
     let reverse = app.buttons["quote-source-\(carrier)-0"]
+    expand(app, carrier: carrier)
     XCTAssertTrue(reverse.waitForExistence(timeout: 15))
     XCTAssertFalse(marker(app).exists)
     reverse.tap()
@@ -265,6 +279,13 @@ import XCTest
     app.buttons["Enviar mensagem"].tap()
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["draft-quotes"])], timeout: 30), .completed)
     let reverse = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-source-'")).firstMatch
+    // The acknowledged bubble carries a quote, so it starts folded until expanded.
+    func expandSent() {
+      let toggle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'user-prompt-toggle-' AND value == 'Recolhido'")).element(boundBy: 0)
+      XCTAssertTrue(toggle.waitForExistence(timeout: 30))
+      toggle.tap()
+    }
+    expandSent()
     XCTAssertTrue(reverse.waitForExistence(timeout: 30))
     XCTAssertFalse(marker.exists)
     shoot("native-live-send-acknowledged")
@@ -274,6 +295,7 @@ import XCTest
     shoot("native-live-send-source-revealed")
     app.terminate()
     app.launch()
+    expandSent()
     XCTAssertTrue(reverse.waitForExistence(timeout: 25))
     XCTAssertTrue(response.waitForExistence(timeout: 10))
     XCTAssertFalse(marker.exists)

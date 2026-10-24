@@ -82,25 +82,27 @@ struct UserBubble: View {
               .accessibilityIdentifier("master-origin-" + message.id)
           }
           UserMessageContent(maximumHeight: maximumTextHeight) {
-            ForEach(Array((message.metadata?["quotes"]?.array ?? []).enumerated()), id: \.offset) {
-              index, quote in
-              UserMessageContextCard(
-                summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
-                comment: quote.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
-                id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
-              if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
-                Button("Ir ao trecho citado", systemImage: "text.quote") {
-                  quoteContext.source?(mark.quote)
-                }.appFont(.caption).buttonStyle(.plain).foregroundStyle(theme.color(.userBubbleSecondary))
-                  .accessibilityIdentifier("quote-source-\(message.id)-\(index)")
+            // Folded bubbles hide quotes and file comments behind their expansion control. Without prompt
+            // text, their one-line summaries remain so the bubble is never empty.
+            if !folded || message.displayText.isEmpty {
+              ForEach(Array(quotes.enumerated()), id: \.offset) { index, quote in
+                UserMessageContextCard(
+                  summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
+                  comment: quote.object?["comment"]?.string ?? "", collapsed: folded,
+                  id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
+                if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
+                  Button("Ir ao trecho citado", systemImage: "text.quote") {
+                    quoteContext.source?(mark.quote)
+                  }.appFont(.caption).buttonStyle(.plain).foregroundStyle(theme.color(.userBubbleSecondary))
+                    .accessibilityIdentifier("quote-source-\(message.id)-\(index)")
+                }
               }
-            }
-            ForEach(Array((message.metadata?["comments"]?.array ?? []).enumerated()), id: \.offset) {
-              index, comment in
-              UserMessageContextCard(
-                summary: comment.object?["path"]?.string ?? "Comentário em arquivo", text: "",
-                comment: comment.object?["comment"]?.string ?? "", collapsed: collapsible && !expanded,
-                id: "\(message.id)-comment-\(index)", expand: { setExpanded(true) })
+              ForEach(Array(comments.enumerated()), id: \.offset) { index, comment in
+                UserMessageContextCard(
+                  summary: comment.object?["path"]?.string ?? "Comentário em arquivo", text: "",
+                  comment: comment.object?["comment"]?.string ?? "", collapsed: folded,
+                  id: "\(message.id)-comment-\(index)", expand: { setExpanded(true) })
+              }
             }
             if !message.displayText.isEmpty {
               UserPrompt(
@@ -110,10 +112,9 @@ struct UserBubble: View {
               ).accessibilityIdentifier("user-prompt-\(message.id)")
             }
           }.accessibilityIdentifier("user-content-\(message.id)")
-          // Truncated bubbles omit image thumbnails; their expansion control below reveals them.
-          UserMessageAttachmentsView(attachments: UserMessageAttachments(
-            message, includesImages: !(collapsible && !expanded && truncated)))
-          if collapsible && (expanded || truncated) {
+          // Folded bubbles omit image thumbnails; their expansion control below reveals them.
+          UserMessageAttachmentsView(attachments: UserMessageAttachments(message, includesImages: !folded))
+          if collapsible && (expanded || truncated || hasContext) {
             Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
               setExpanded(!expanded)
             }.appFont(.path).foregroundStyle(theme.color(.userBubbleSecondary))
@@ -157,12 +158,19 @@ struct UserBubble: View {
       }
     }
     .onChange(of: collapsible) { _, value in if !value { setExpanded(false) } }
+    .onAppear { if quoteContext.revealedMessage == message.id { setExpanded(true) } }
+    .onChange(of: quoteContext.revealedMessage) { _, id in if id == message.id { setExpanded(true) } }
     .onChange(of: highlights.current) { _, current in
       if highlights.matches.contains(where: { $0.id == current && $0.messageID == message.id }) {
         setExpanded(true)
       }
     }
   }
+  private var quotes: [JSONValue] { message.metadata?["quotes"]?.array ?? [] }
+  private var comments: [JSONValue] { message.metadata?["comments"]?.array ?? [] }
+  private var hasContext: Bool { !quotes.isEmpty || !comments.isEmpty }
+  /// Long prompts and any attached quote/comment start folded, as in the custom web.
+  private var folded: Bool { collapsible && !expanded && (truncated || hasContext) }
   private func setExpanded(_ value: Bool) {
     var transaction = Transaction()
     transaction.disablesAnimations = true

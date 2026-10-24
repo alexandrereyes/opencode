@@ -6,6 +6,8 @@ struct ConversationQuoteContext {
   var pending: [ChatQuote] = []
   var dismissed: Set<String> = []
   var revealing: String?
+  /// The user message reached through "Ir à mensagem com o comentário"; its folded bubble expands.
+  var revealedMessage: String?
   var open: ((ChatQuoteMark) -> Void)?
   var source: ((ChatQuote) -> Void)?
   var target: String?
@@ -32,7 +34,8 @@ struct ResponseQuoteContext {
 extension ConversationQuoteContext: Equatable {
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.index == rhs.index && lhs.pending == rhs.pending && lhs.dismissed == rhs.dismissed
-      && lhs.revealing == rhs.revealing && lhs.target == rhs.target && lhs.active == rhs.active
+      && lhs.revealing == rhs.revealing && lhs.revealedMessage == rhs.revealedMessage
+      && lhs.target == rhs.target && lhs.active == rhs.active
   }
 }
 extension ResponseQuoteContext: Equatable {

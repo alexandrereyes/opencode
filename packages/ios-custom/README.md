@@ -187,12 +187,17 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
   fade. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
   actions stay outside it. Attachments use 48-point square image thumbnails in a horizontal strip, no repeated image
-  filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the text is
-  truncated (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
-  chips stay visible in both states, and a message that never truncates (short or image-only) always shows its images.
+  filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the bubble is
+  folded (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
+  chips stay visible in both states, and a message that never folds (short or image-only, without quotes) always shows
+  its images.
   This deliberately differs from the custom web, which hides every attachment until expanded and makes any message
   with attachments or context expandable, even when its text is short.
-  Quotes/comments collapse to a caption/comment line; expanding reveals the quote's separate four-line/full disclosure.
+  **Alexandre, 24/10 (citações):** as on the web, any quote or file comment makes the bubble fold by default, even
+  with short text, and the folded bubble hides those cards, their **Ir ao trecho citado** links and its image
+  thumbnails until **Mostrar mensagem completa**. A quote-only bubble (no prompt text) keeps one caption/comment line
+  per quote while folded, so it is never empty. **Ir à mensagem com o comentário** expands the carrying bubble.
+  Expanding reveals the quote's separate four-line/full disclosure.
   Collapsing off shows the content immediately. VoiceOver retains full filenames and announces attached context.
   The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
 - **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
@@ -1468,11 +1473,11 @@ Markdown block, and creating, styling and sizing those views still produces 100�
 
 User-prompt parity has its own **OpenCode Bolha** simulator (`49BFE0E0-8D48-406C-A5D1-491DE91CA392`) and
 `ios-bolha-derived`. After `build-for-testing` for that destination, run `script/test-user-bubble.py` with Python:
-`--prepare` imports four owned synthetic histories (two with an image), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
+`--prepare` imports seven owned synthetic histories (two with an image, three with quotes), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
 removes only those imports. No model call or seed reset is needed. The runner always supplies explicit sandbox-4177
 arguments/password and removes its private xctestrun file. Both themes cover manual expansion invariant under scrolling,
-the persisted Você option, short-message threshold, copy/quote menu, user-message search and image thumbnails hidden
-only while the prompt is truncated. `UserPromptTests` checks
+the persisted Você option, short-message threshold, copy/quote menu, user-message search, image thumbnails hidden
+while folded and quotes folded until expanded (long, short and quote-only). `UserPromptTests` checks
 native line measurement, width changes and search reveal after viewport shrink. Research/source references are in
 `.agent-artifacts/bolha-usuario/OPENCHAMBER.md`; results and evidence paths are in `RESULTADO.md` beside it.
 

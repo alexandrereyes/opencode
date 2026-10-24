@@ -123,6 +123,49 @@ import UIKit
     }
   }
 
+  func testQuotesStayFoldedUntilExpandedInBothThemes() throws {
+    let anyContext = NSPredicate(format: "identifier BEGINSWITH 'user-context-'")
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      for role in ["QUOTES_LONG", "QUOTE_SHORT"] {
+        let id = try XCTUnwrap(environment["OPENCODE_TEST_" + role + "_MESSAGE"])
+        var app = try launch(role, theme: theme)
+        let control = app.buttons["user-prompt-toggle-" + id]
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        XCTAssertEqual(control.value as? String, "Recolhido")
+        XCTAssertEqual(control.label, "Mostrar mensagem completa")
+        XCTAssertFalse(app.descendants(matching: .any).matching(anyContext).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Comentário 1 preservado."].exists)
+        shot(app, "app-quotes-collapsed-" + role.lowercased() + "-" + theme)
+        control.tap()
+        wait(NSPredicate(format: "value == 'Expandido'"), on: control)
+        let count = role == "QUOTES_LONG" ? 3 : 1
+        for index in 0..<count {
+          XCTAssertTrue(app.buttons["user-context-quote-\(id)-quote-\(index)"].waitForExistence(timeout: 5))
+          XCTAssertTrue(app.staticTexts["Comentário \(index + 1) preservado."].exists)
+        }
+        shot(app, "app-quotes-expanded-" + role.lowercased() + "-" + theme)
+        control.tap()
+        wait(NSPredicate(format: "value == 'Recolhido'"), on: control)
+        XCTAssertFalse(app.descendants(matching: .any).matching(anyContext).firstMatch.exists)
+        app.terminate()
+        app = try launch(role, theme: theme, preference: false)
+        XCTAssertTrue(app.buttons["user-context-quote-\(id)-quote-0"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["user-prompt-toggle-" + id].exists)
+        shot(app, "app-quotes-disabled-" + role.lowercased() + "-" + theme)
+        app.terminate()
+      }
+      let id = try XCTUnwrap(environment["OPENCODE_TEST_QUOTE_ONLY_MESSAGE"])
+      let app = try launch("QUOTE_ONLY", theme: theme)
+      let control = app.buttons["user-prompt-toggle-" + id]
+      XCTAssertTrue(control.waitForExistence(timeout: 10))
+      XCTAssertTrue(app.buttons["user-context-summary-\(id)-quote-0"].exists)
+      shot(app, "app-quote-only-collapsed-" + theme)
+      control.tap()
+      XCTAssertTrue(app.buttons["user-context-quote-\(id)-quote-0"].waitForExistence(timeout: 5))
+      app.terminate()
+    }
+  }
+
   func testPromptTextIsAccessibleSeparatelyFromExpansionInBothThemes() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = try launch(theme: theme)

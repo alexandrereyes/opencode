@@ -179,6 +179,7 @@ struct ConversationView: View {
   @State private var quoteEditing: ChatQuote?
   @State private var quoteValidation: Task<Void, Never>?
   @State private var quoteRevealed: String?
+  @State private var quoteMessage: String?
   @State private var quoteRevealTask: Task<Void, Never>?
   let initialFollowTail: Bool
   let sessions: SessionStore
@@ -265,7 +266,7 @@ struct ConversationView: View {
     .environment(conversation.toast)
     .environment(\.conversationQuotes, ConversationQuoteContext(
       index: conversation.quoteIndex, pending: sessions.drafts.draft(conversation.id).quotes,
-      dismissed: conversation.dismissedQuotes, revealing: quoteRevealed,
+      dismissed: conversation.dismissedQuotes, revealing: quoteRevealed, revealedMessage: quoteMessage,
       open: { quoteDetail = $0 }, source: { revealQuote($0) }, target: quoteTarget?.id, active: quoteDetail?.id,
       align: { id, message, offset in
         guard quoteTarget?.id == id, quoteAligned != id else { return }
@@ -365,7 +366,10 @@ struct ConversationView: View {
         revealQuote(mark.quote, mark: mark)
       }, message: {
         quoteDetail = nil
-        if let id = mark.carryingMessageID { conversation.revealMessage(id, persist: false) }
+        if let id = mark.carryingMessageID {
+          quoteMessage = id
+          conversation.revealMessage(id, persist: false)
+        }
       }, close: { quoteDetail = nil })
     }
     .sheet(isPresented: $detailsOpen) {

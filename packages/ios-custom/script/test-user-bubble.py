@@ -49,7 +49,8 @@ if args.prepare:
     now = int(time.time() * 1000)
     sessions = []
     roles = (["REVIEW_" + kind + "_" + placement for kind in ["IMAGE", "FILE", "QUOTE", "PLAIN", "MIXED"]
-        for placement in ["LIST", "PINNED"]] if args.review_attachments else ["BUBBLE", "SHORT", "IMAGE_LONG", "IMAGE_SHORT"])
+        for placement in ["LIST", "PINNED"]] if args.review_attachments else ["BUBBLE", "SHORT", "IMAGE_LONG", "IMAGE_SHORT",
+            "QUOTES_LONG", "QUOTE_SHORT", "QUOTE_ONLY"])
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 60, 180, 8, 2, 0, 0, 0))
@@ -66,6 +67,13 @@ if args.prepare:
         files = []
         metadata = {"quotes": [{"id": "quote-bolha", "messageID": "msg_quote_bolha", "partID": "part_quote_bolha", "text": "Citação sintética preservada.", "comment": "Comentário preservado."}],
             "attachments": [{"name": "nota-sintetica.txt"}]} if role == "BUBBLE" else {}
+        if role.startswith("QUOTE"):
+            if role != "QUOTES_LONG":
+                text = "Primeira linha.\nSegunda linha." if role == "QUOTE_SHORT" else "Comments on earlier assistant messages:\n> Trecho citado 1."
+            metadata = {"displayText": "" if role == "QUOTE_ONLY" else text, "comments": [], "quotes": [
+                {"id": "quote-bolha-" + str(n), "messageID": "msg_quote_bolha", "partID": "part_quote_bolha",
+                    "text": "Trecho citado " + str(n) + ".", "comment": "Comentário " + str(n) + " preservado."}
+                for n in range(1, 4 if role == "QUOTES_LONG" else 2)]}
         if role.startswith("IMAGE_"):
             files.append({"mime": "image/png", "name": image_name,
                 "data": base64.b64encode(png).decode(), "source": {"type": "inline"}})
