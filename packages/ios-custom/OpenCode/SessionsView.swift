@@ -9,6 +9,7 @@ struct SessionsView: View {
   @Environment(\.floatingVoice) private var floatingVoice
   @Bindable var store: SessionStore
   @State private var archiveCandidate: SessionRow?
+  @State private var renameCandidate: SessionRow?
   @State private var deleteCandidate: Session?
   @State private var projectAction: ProjectAction?
   @State private var showProjects = false
@@ -98,10 +99,9 @@ struct SessionsView: View {
               Label("Excluir", systemImage: "trash")
             }.tint(theme.color(.error))
             Button {
-              Task { await store.pin(row) }
+              renameCandidate = row
             } label: {
-              Label(
-                row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin")
+              Label("Renomear", systemImage: "pencil")
             }.tint(theme.color(.info))
             Button {
               archiveCandidate = row
@@ -158,6 +158,12 @@ struct SessionsView: View {
       .listStyle(.plain)
       .scrollContentBackground(.hidden)
       .background(theme.color(.background))
+      .background(ConversationRenameAlert(
+        isPresented: Binding(get: { renameCandidate != nil }, set: { if !$0 { renameCandidate = nil } }),
+        title: renameCandidate?.session.title ?? "", theme: theme
+      ) { [row = renameCandidate] title in
+        if let row { Task { await store.rename(row, title: title) } }
+      })
       .scrollEdgeEffectStyle(.soft, for: .top)
       .scrollEdgeEffectStyle(.hard, for: .bottom)
       .floatingVoiceInset(sessions: store)
@@ -445,6 +451,7 @@ struct SessionsView: View {
 
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {
     Button("Abrir sessão", systemImage: "bubble.left") { store.conversationPath.append(.init(id: row.id)) }
+    Button("Renomear", systemImage: "pencil") { renameCandidate = row }
     Button(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin") {
       Task { await store.pin(row) }
     }

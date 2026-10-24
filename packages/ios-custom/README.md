@@ -73,10 +73,12 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
   a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
   "Atualizar", deletion, and the list of archived sessions (open/delete; the backend has no unarchive).
-- **Swipe actions:** trailing, from left to right, **Silenciar/Reativar**, **Arquivar**, **Fixar/Desafixar** and
+- **Swipe actions:** trailing, from left to right, **Silenciar/Reativar**, **Arquivar**, **Renomear** and
   **Excluir**; leading, **Marcar como lida** (unread only) and **Fixar/Desafixar**. There is no "Mais" action: the
-  long-press menu keeps the full row action list. Pinning reuses `custom.preferences` (`sidebar.pin`), shared with the
-  web, and the row moves into the pinned group as soon as the mutation returns. After `build-for-testing`,
+  long-press menu keeps the full row action list (Abrir sessão, Renomear, Fixar, Silenciar, Marcar como lida, Excluir
+  sessão). Pinning reuses `custom.preferences` (`sidebar.pin`), shared with the web, and the row moves into the pinned
+  group as soon as the mutation returns. Renomear reuses the conversation menu's alert, validation (`SessionRename`),
+  `PATCH /api/session/:id` and toasts, then reloads the list once the server confirms. After `build-for-testing`,
   `python3 packages/ios-custom/script/test-session-swipe.py --device … --derived … --server-url … --home …` imports two
   owned sessions (no model calls), runs `OpenCodeUITests/SessionSwipeTests` and deletes them with their pin keys.
 - **Visual only for now:** "Selecionar sessões", "Configurações", and the other

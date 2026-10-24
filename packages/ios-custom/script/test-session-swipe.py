@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Swipe pin/unpin: imports two owned sessions (no model calls), runs SessionSwipeTests and deletes them."""
+"""Swipe pin/unpin and rename: imports two owned sessions (no model calls), runs SessionSwipeTests and deletes them."""
 import argparse
 import base64
 import json

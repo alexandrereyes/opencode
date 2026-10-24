@@ -1,4 +1,19 @@
+import OpenCodeKit
 import SwiftUI
+
+extension OpenCodeClient {
+  /// The conversation menu and the Sessões swipe share this request and its feedback.
+  @MainActor func rename(_ sessionID: String, to change: SessionRename, toast: ToastCenter) async -> Bool {
+    do {
+      try await rename(sessionID, title: change.title)
+      toast.show("Sessão renomeada")
+      return true
+    } catch {
+      toast.show("Não foi possível renomear a sessão.", kind: .error)
+      return false
+    }
+  }
+}
 
 struct ConversationRenameAlert: UIViewControllerRepresentable {
   @Binding var isPresented: Bool

@@ -424,6 +424,11 @@ final class SessionStore {
       }
     }
   }
+  func rename(_ row: SessionRow, title: String) async {
+    guard let change = SessionRename(title, current: row.session.title), busy.insert(row.id).inserted else { return }
+    defer { busy.remove(row.id) }
+    if await client.rename(row.id, to: change, toast: toast) { await reload() }
+  }
   func mute(_ row: SessionRow) async {
     await perform(row.id, feedback: .light) {
       let keys =

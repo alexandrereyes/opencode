@@ -11,7 +11,7 @@ import XCTest
     add(attachment)
   }
 
-  func testTrailingSwipePinsAndUnpins() throws {
+  func testSwipePinsAndRenames() throws {
     let target = try XCTUnwrap(environment["OPENCODE_SWIPE_TARGET"])
     let anchor = try XCTUnwrap(environment["OPENCODE_SWIPE_ANCHOR"])
     let app = XCUIApplication()
@@ -29,14 +29,11 @@ import XCTest
     XCTAssertFalse(row.label.contains(", fixada"))
     assertBelowAnchor(row, other)
 
-    row.swipeLeft()
+    row.swipeRight()
     XCTAssertTrue(app.buttons["Fixar"].waitForExistence(timeout: 5))
-    for action in ["Silenciar", "Arquivar", "Excluir"] { XCTAssertTrue(app.buttons[action].exists, action) }
     XCTAssertFalse(app.buttons["Mais"].exists)
     XCTAssertFalse(app.buttons["Abrir sessão"].exists)
-    let order = ["Silenciar", "Arquivar", "Fixar", "Excluir"].map { app.buttons[$0].frame.minX }
-    XCTAssertEqual(order, order.sorted())
-    shot("actions")
+    shot("leading-actions")
     app.buttons["Fixar"].tap()
     wait(row, label: ", fixada", present: true)
     app.revealSessionRow(row)
@@ -46,7 +43,7 @@ import XCTest
     XCTAssertTrue(above.allSatisfy { $0.label.contains(", fixada") }, "Só sessões fixadas podem ficar acima.")
     shot("pinned")
 
-    row.swipeLeft()
+    row.swipeRight()
     XCTAssertTrue(app.buttons["Desafixar"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons["Mais"].exists)
     app.buttons["Desafixar"].tap()
@@ -54,6 +51,31 @@ import XCTest
     app.revealSessionRow(row)
     assertBelowAnchor(row, other)
     shot("unpinned")
+
+    // Renaming last: the server may treat it as activity and move the row above the anchor.
+    row.swipeLeft()
+    XCTAssertTrue(app.buttons["Renomear"].waitForExistence(timeout: 5))
+    for action in ["Silenciar", "Arquivar", "Excluir"] { XCTAssertTrue(app.buttons[action].exists, action) }
+    for action in ["Mais", "Abrir sessão", "Fixar", "Desafixar"] { XCTAssertFalse(app.buttons[action].exists, action) }
+    let order = ["Silenciar", "Arquivar", "Renomear", "Excluir"].map { app.buttons[$0].frame.minX }
+    XCTAssertEqual(order, order.sorted())
+    shot("trailing-actions")
+    app.buttons["Renomear"].tap()
+    XCTAssertTrue(app.alerts["Renomear sessão"].waitForExistence(timeout: 5))
+    let field = app.alerts.textFields.firstMatch
+    let old = field.value as? String ?? ""
+    field.tap()
+    field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + "Deslize renomeada")
+    // As in SessionReadingTests: restore the keyboard before resolving the moving alert button.
+    field.tap()
+    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    shot("rename")
+    app.alerts.buttons["Salvar"].tap()
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"),
+      evaluatedWith: app.alerts["Renomear sessão"])], timeout: 5), .completed)
+    XCTAssertTrue(app.staticTexts["Sessão renomeada"].waitForExistence(timeout: 10))
+    wait(row, label: "Deslize renomeada,", present: true)
+    shot("renamed")
   }
 
   private func assertBelowAnchor(_ row: XCUIElement, _ anchor: XCUIElement) {

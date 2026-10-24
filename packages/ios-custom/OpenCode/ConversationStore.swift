@@ -122,12 +122,8 @@ import OpenCodeKit
     renaming = change
     session?.title = change.title
     defer { renaming = nil }
-    do {
-      try await client.rename(id, title: change.title)
-      toast.show("Sessão renomeada")
-    } catch {
+    if await !client.rename(id, to: change, toast: toast) {
       session?.title = change.rollback(current: session?.title)
-      toast.show("Não foi possível renomear a sessão.", kind: .error)
     }
   }
   func archive() async -> Bool {
