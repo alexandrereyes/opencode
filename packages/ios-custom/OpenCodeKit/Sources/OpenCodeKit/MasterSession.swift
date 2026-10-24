@@ -24,9 +24,13 @@ public enum MasterAvailability: Sendable, Equatable {
   }
 }
 
-public struct ChatAllocation: Codable, Sendable {
+public struct ChatAllocation: Codable, Sendable, Equatable {
   public let id: String
   public let directory: String
+  public init(id: String, directory: String) {
+    self.id = id
+    self.directory = directory
+  }
 }
 
 extension OpenCodeClient {

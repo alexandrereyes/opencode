@@ -27,17 +27,36 @@ public struct NewSessionContext: Codable, Sendable, Equatable {
   public var destination: SessionDestination
   public var baseBranch: String?
   public var mcp: [String: [String: Bool]]
+  /// A managed `custom.chats` destination instead of a project; `projectID` is then unused.
+  public var chat: NewSessionChat?
   public init(
     projectID: String, destination: SessionDestination = .root, baseBranch: String? = nil,
-    mcp: [String: [String: Bool]] = [:]
+    mcp: [String: [String: Bool]] = [:], chat: NewSessionChat? = nil
   ) {
     self.projectID = projectID
     self.destination = destination
     self.baseBranch = baseBranch
     self.mcp = mcp
+    self.chat = chat
   }
-  public var intentKey: String { projectID + "\n" + destination.key }
+  public static func chat(mcp: [String: [String: Bool]] = [:]) -> Self {
+    .init(projectID: "", mcp: mcp, chat: NewSessionChat())
+  }
+  public var intentKey: String { chat == nil ? projectID + "\n" + destination.key : "chats" }
   public var intents: [String: Bool] { mcp[intentKey] ?? [:] }
+}
+
+/// The Session ID is fixed when Chats is chosen: an allocation claimed for it accepts only that ID on retry.
+public struct NewSessionChat: Codable, Sendable, Equatable {
+  public var sessionID: String
+  public var allocation: ChatAllocation?
+  public init(
+    sessionID: String = "ses_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+    allocation: ChatAllocation? = nil
+  ) {
+    self.sessionID = sessionID
+    self.allocation = allocation
+  }
 }
 
 public struct WorktreeDirectory: Codable, Sendable, Identifiable, Hashable {
@@ -277,9 +296,13 @@ public struct MCPServer: Codable, Sendable, Identifiable, Equatable {
   }
   public enum Toggle: Equatable, Sendable { case intent, live, login, unavailable }
   public func toggle(destination: SessionDestination) -> Toggle {
+    toggle(preview: destination == .create)
+  }
+  /// `preview` is a destination that does not exist yet: a new worktree or an unallocated chat.
+  public func toggle(preview: Bool) -> Toggle {
     if status.status == .pending || status.status == .unknown { return .unavailable }
     if status.status == .needsAuth { return .login }
-    return destination == .create ? .intent : .live
+    return preview ? .intent : .live
   }
 }
 

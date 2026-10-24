@@ -54,6 +54,21 @@ struct NewSessionProjectSheet: View {
       List {
         SelectorSearch(text: $search, prompt: "Buscar projetos")
         Section {
+          // The web lists Chats first, before projects, and filters it by its label.
+          if store.chatsAvailable && (search.isEmpty || "Chats".localizedStandardContains(search)) {
+            Button {
+              store.selectChat()
+              dismiss()
+            } label: {
+              HStack(spacing: 14) {
+                ChatsAvatar(size: 38)
+                Text("Chats").foregroundStyle(theme.color(.text))
+                Spacer()
+                if store.chat { Image(systemName: "checkmark") }
+              }.padding(.vertical, 3)
+            }.accessibilityIdentifier("new-project-chats")
+              .listRowBackground(theme.color(.surface))
+          }
           ForEach(
             store.projects.filter {
               search.isEmpty || $0.displayName.localizedStandardContains(search)

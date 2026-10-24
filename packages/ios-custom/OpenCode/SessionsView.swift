@@ -322,9 +322,22 @@ struct SessionsView: View {
           store.selectedProject = nil
         }
         .accessibilityHint("Mantenha pressionado para filtrar por estado")
+        if store.chatRoot != nil {
+          let chats = store.rows.filter(\.chat)
+          Button {
+            store.selectedProject = store.chatsSelected ? nil : SessionStore.chatsSelection
+          } label: {
+            Chip(
+              title: "Chats", selected: store.chatsSelected,
+              running: chats.contains { $0.state == .running },
+              count: chats.filter { $0.requestCount > 0 }.count, symbol: "bubble.left")
+          }
+          .accessibilityLabel("Chats")
+          .accessibilityIdentifier("filter-chats")
+        }
         ForEach(Array(store.selectedProjects.enumerated()), id: \.element.directory) {
           index, selected in
-          let rows = store.rows.filter { $0.project?.id == selected.project.id }
+          let rows = store.rows.filter { !$0.chat && $0.project?.id == selected.project.id }
           Menu {
             Button("Remover dos filtros", systemImage: "minus.circle", role: .destructive) {
               projectAction = ProjectAction(
@@ -467,10 +480,12 @@ private struct Chip: View {
   let selected: Bool
   var running = false
   var count = 0
+  var symbol: String?
 
   var body: some View {
     HStack(spacing: 8) {
       if running { RunningArc(size: 9, filled: true) }
+      if let symbol { Image(systemName: symbol).appSymbol(.inline) }
       Text(title).appFont(.secondary, weight: selected ? .semibold : .regular).lineLimit(1)
       if count > 0 {
         Text("\(count)").appFont(.footnote, weight: .medium).monospacedDigit().padding(.horizontal, 5).padding(

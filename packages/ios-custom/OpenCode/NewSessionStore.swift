@@ -39,12 +39,25 @@ import OpenCodeKit
     NewSessionProjection.projects(
       sessions.projects, preferences: sessions.preferences, chatRoot: sessions.chatRoot)
   }
-  var project: Project? { projects.first { $0.id == draft.newSession?.projectID } }
+  var project: Project? {
+    chat ? nil : projects.first { $0.id == draft.newSession?.projectID }
+  }
+  /// Managed chats need the plugin's `custom.chats`; older servers never offer them.
+  var chatsAvailable: Bool { sessions.chatRoot != nil }
+  var chat: Bool { chatsAvailable && draft.newSession?.chat != nil }
   var destination: SessionDestination { draft.newSession?.destination ?? .root }
   var baseBranch: String? { draft.newSession?.baseBranch ?? rootBranch }
-  var directory: String? { project.map { destination.directory(root: $0.canonical) } }
+  /// Before allocation a chat reads catalogs and MCP defaults from the chats root, like the master.
+  var directory: String? {
+    chat ? sessions.chatRoot : project.map { destination.directory(root: $0.canonical) }
+  }
+  /// Chats and new worktrees do not exist yet: MCP taps only record intent for them.
+  var preview: Bool { chat || destination == .create }
   var loadKey: String {
-    initialized ? "\(project?.id ?? ""):\(destination.key):\(selectionRevision)" : ""
+    guard initialized else { return "" }
+    return chat
+      ? "chats:\(selectionRevision)"
+      : "\(project?.id ?? ""):\(destination.key):\(selectionRevision)"
   }
   var directoryLabel: String {
     switch destination {
@@ -65,7 +78,7 @@ import OpenCodeKit
         pending.status = .init(.pending)
         return pending
       }
-      return destination == .create
+      return preview
         ? server.preview(
           draft.newSession?.intents[server.name], defaultEnabled: mcpDefaults[server.name] ?? true)
         : server
@@ -77,7 +90,17 @@ import OpenCodeKit
     guard !initialized else { return }
     await draft.load()
     if sessions.preferences == nil { await sessions.reload() }
-    let restored = projects.first { $0.id == draft.newSession?.projectID }
+    // Like a repository filter, the Chats filter wins; otherwise a restored chat draft stays a chat.
+    if chatsAvailable
+      && (sessions.chatsSelected
+        || (chat && !projects.contains { $0.id == sessions.selectedProject }))
+    {
+      if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
+      initialized = true
+      draft.focused = true
+      return
+    }
+    let restored = chat ? nil : projects.first { $0.id == draft.newSession?.projectID }
     let initial =
       projects.first { $0.id == sessions.selectedProject } ?? restored
       ?? NewSessionProjection.initialProject(
@@ -94,6 +117,10 @@ import OpenCodeKit
         composer.toast.show("Não foi possível guardar o último projeto usado.", kind: .error)
       }
     }
+  }
+  func selectChat() {
+    guard !draft.sending, chatsAvailable, !chat else { return }
+    draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:])
   }
   func selectProject(_ project: Project) async {
     guard !draft.sending else { return }
@@ -114,12 +141,16 @@ import OpenCodeKit
   }
   func selectBase(_ branch: String) { draft.newSession?.baseBranch = branch }
   private func remember() {
-    guard let project else { return }
+    guard !chat, let project else { return }
     categories[project.id] = destination.category
     defaults.set(categories, forKey: memoryKey + ".categories")
   }
   func reloadSelection() async {
-    guard initialized, let project, let directory else { return }
+    guard initialized, let directory else { return }
+    guard let project else {
+      if chat { await reloadChat(directory) }
+      return
+    }
     loading = true
     loadError = nil
     mcpLoading = true
@@ -164,6 +195,24 @@ import OpenCodeKit
       }
     }
   }
+  private func reloadChat(_ directory: String) async {
+    loading = true
+    loadError = nil
+    mcps = []
+    mcpOrder = MCPChipOrder()
+    defer { if !Task.isCancelled { loading = false } }
+    do {
+      try await composer.loadNewSession(
+        directory: directory, projectID: "global", recent: sessions.catalog.recent)
+      try Task.checkCancellation()
+      await loadMCPs()
+    } catch {
+      if !Task.isCancelled {
+        loadError = "Não foi possível preparar o chat. \(error.localizedDescription)"
+        mcpError = true
+      }
+    }
+  }
   func retry() { selectionRevision += 1 }
   func loadMCPs() async {
     guard let directory else { return }
@@ -183,7 +232,7 @@ import OpenCodeKit
   }
   func toggle(_ server: MCPServer) {
     guard !draft.sending, let directory, let context = draft.newSession else { return }
-    switch server.toggle(destination: destination) {
+    switch server.toggle(preview: preview) {
     case .unavailable: return
     case .login:
       composer.toast.show(
@@ -207,7 +256,7 @@ import OpenCodeKit
           guard let value = updated.first(where: { $0.name == server.name }),
             !server.enabled ? value.status.status == .connected : value.status.status == .disabled
           else { throw MCPUIError() }
-          if self.directory == directory && destination != .create {
+          if self.directory == directory && !preview {
             // Replace values in place: a tap must never change chip order.
             mcps = mcps.map { old in updated.first { $0.name == old.name } ?? old }
           }
@@ -224,7 +273,8 @@ import OpenCodeKit
   }
   private func send(_ draft: ConversationDraft) async {
     guard !draft.sending, !draft.importing, composer.ready, !loading,
-      let project, let context = draft.newSession, let model = composer.selectedModel(draft)
+      let context = draft.newSession, chat || project != nil,
+      let model = composer.selectedModel(draft)
     else { return }
     draft.sending = true
     draft.error = nil
@@ -245,11 +295,17 @@ import OpenCodeKit
     }
     let agent = composer.selectedAgent(draft)
     let command: String? = if case .command(let name, _) = dispatch { name } else { nil }
-    let submission = NewSessionSubmission(
-      projectID: project.id, root: project.canonical,
-      destination: context.destination, branch: baseBranch,
-      intents: draft.newSession?.intents ?? [:],
-      agent: agent, model: model, command: command)
+    let submission =
+      if let chat = context.chat, self.chat {
+        NewSessionSubmission(
+          chat: chat, intents: draft.newSession?.intents ?? [:], agent: agent, model: model,
+          command: command)
+      } else {
+        NewSessionSubmission(
+          projectID: project?.id ?? "", root: project?.canonical ?? "",
+          destination: context.destination, branch: baseBranch,
+          intents: draft.newSession?.intents ?? [:], agent: agent, model: model, command: command)
+      }
     var snapshot = draft.snapshot
     snapshot.document = document
     let persistence = draft.persistence
@@ -279,6 +335,10 @@ import OpenCodeKit
       await finish(id: submission.id, restore: nil)
       Haptics.play(.light)
     } catch let failure as NewSessionFailure {
+      if let allocation = failure.allocation {
+        draft.newSession?.chat?.allocation = allocation
+        await draft.persist()
+      }
       if let directory = failure.createdDirectory {
         let intents = draft.newSession?.intents ?? [:]
         draft.newSession?.destination = .worktree(directory)

@@ -27,14 +27,20 @@ struct NewSessionView: View {
         Text("Nova sessão").appFont(.navigation)
         Spacer()
       }.foregroundStyle(theme.color(.textStrong)).padding(.horizontal, 12).padding(.vertical, 8)
-      if let project = store.project {
+      if store.chat || store.project != nil {
         GeometryReader { geometry in
           let compact = geometry.size.height < 275
           ScrollView {
             VStack(spacing: compact ? 10 : 20) {
               VStack(spacing: compact ? 8 : 13) {
-                ProjectAvatar(project: project, size: compact ? 48 : 56)
-                Text("No que vamos trabalhar\nem \(project.displayName)?")
+                if let project = store.project {
+                  ProjectAvatar(project: project, size: compact ? 48 : 56)
+                } else {
+                  ChatsAvatar(size: compact ? 48 : 56)
+                }
+                Text(
+                  store.project.map { "No que vamos trabalhar\nem \($0.displayName)?" }
+                    ?? "Sobre o que vamos\nconversar?")
                   .font(.system(size: compact ? 22 : 24)).multilineTextAlignment(.center)
                   .foregroundStyle(theme.color(.textStrong)).fixedSize(
                     horizontal: false, vertical: true
@@ -48,7 +54,7 @@ struct NewSessionView: View {
             .contentShape(Rectangle()).onTapGesture { store.draft.focused = false }
         }
         VStack(alignment: .leading, spacing: 10) {
-          selectors(project)
+          selectors
           if let error = store.loadError {
             Button {
               store.retry()
@@ -70,6 +76,10 @@ struct NewSessionView: View {
           Text("Adicione um projeto para começar uma sessão.")
         } actions: {
           Button("Adicionar projeto") { show(.add) }.buttonStyle(.borderedProminent)
+          if store.chatsAvailable {
+            Button("Conversar em Chats", systemImage: "bubble.left") { store.selectChat() }
+              .accessibilityIdentifier("new-empty-chats")
+          }
         }
         FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)
       }
@@ -145,23 +155,27 @@ struct NewSessionView: View {
       presentingSelector = false
     }
   }
-  private func selectors(_ project: Project) -> some View {
+  private var selectors: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 20) {
         Button {
           show(.project)
         } label: {
           HStack(spacing: 7) {
-            ProjectAvatar(project: project, size: 23)
-            Text(project.displayName).lineLimit(1)
+            if let project = store.project {
+              ProjectAvatar(project: project, size: 23)
+            } else {
+              ChatsAvatar(size: 23)
+            }
+            Text(store.project?.displayName ?? "Chats").lineLimit(1)
             chevron
           }
-        }.accessibilityLabel("Projeto: \(project.displayName)").accessibilityIdentifier(
-          "new-project")
-        if store.destination != .create { directorySelector }
+        }.accessibilityLabel("Projeto: \(store.project?.displayName ?? "Chats")")
+          .accessibilityIdentifier("new-project")
+        if !store.chat && store.destination != .create { directorySelector }
         Spacer(minLength: 0)
       }
-      if store.destination == .create {
+      if !store.chat && store.destination == .create {
         HStack(spacing: 18) {
           directorySelector
           Button {
@@ -211,13 +225,15 @@ struct NewSessionView: View {
       } else {
         MCPFlowLayout(spacing: 7) {
           ForEach(store.chips) { server in
-            MCPChip(server: server, preview: store.destination == .create) { store.toggle(server) }
+            MCPChip(server: server, preview: store.preview, chat: store.chat) {
+              store.toggle(server)
+            }
           }
         }.disabled(store.draft.sending)
       }
-      if store.destination == .create {
-        Text("Vale quando a worktree for criada").font(.system(size: 11))
-          .foregroundStyle(theme.color(.textSecondary))
+      if store.preview {
+        Text(store.chat ? "Vale quando o chat for criado" : "Vale quando a worktree for criada")
+          .font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary))
       }
     }
   }
@@ -234,6 +250,17 @@ struct ProjectAvatar: View {
     )
     .foregroundStyle(colors.text).frame(width: size, height: size)
     .background(colors.background, in: Circle()).accessibilityHidden(true)
+  }
+}
+
+/// The managed chats destination, drawn like the web's speech-bubble Chats item.
+struct ChatsAvatar: View {
+  @Environment(\.appTheme) private var theme
+  let size: CGFloat
+  var body: some View {
+    Image(systemName: "bubble.left").font(.system(size: size * 0.42, weight: .medium))
+      .foregroundStyle(theme.color(.icon)).frame(width: size, height: size)
+      .background(theme.color(.highlight), in: Circle()).accessibilityHidden(true)
   }
 }
 
@@ -257,6 +284,7 @@ struct MCPChip: View {
   @Environment(\.appTheme) private var theme
   let server: MCPServer
   let preview: Bool
+  var chat = false
   let toggle: () -> Void
   @State private var pulse = false
   private var disabled: Bool { server.status.status == .disabled }
@@ -289,7 +317,9 @@ struct MCPChip: View {
         }.disabled(pending || server.status.status == .unknown)
           .accessibilityHint(
             preview
-              ? "Prévia. Vale quando a worktree for criada."
+              ? (chat
+                ? "Prévia. Vale quando o chat for criado."
+                : "Prévia. Vale quando a worktree for criada.")
               : "Altera o MCP para todas as sessões deste diretório."
           )
           .accessibilityValue(server.status.status.label)

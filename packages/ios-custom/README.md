@@ -50,7 +50,9 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 `packages/app-custom/src/shell/notifications/session-attention.ts`) and is not changed by this work.
 
 - **Rows:** only root sessions, without archived sessions or chats. Running state, permissions, and questions of
-  subagents roll up into their root session. Pinned sessions come first, then the activity order. When a session has
+  subagents roll up into their root session. Managed chats (`custom.chats`) are listed only under the **Chats** chip,
+  after the status chip and before repositories, like the web sidebar's separate Chats section; their requests still
+  count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
   several states, the priority is permission > question > running > unread.
 - **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
   at 60 seconds, 60 minutes and 24 hours, using `messageAt ?? time.created`, never metadata updates or recent rank.
@@ -982,8 +984,8 @@ visible; with the keyboard hidden, the introduction is centered in the available
 
 - **Project:** an active Sessões repository filter takes precedence. Otherwise an explicitly restored draft keeps
   its project; a fresh draft uses `custom.preferences.data.projects["local"].lastProject`, then the first selected
-  project. Chats is excluded. The Projeto sheet preserves saved selection order and searches display names without
-  sorting. "Adicionar projeto" reuses Sessões' server-project picker and `project.open`; selecting/opening the draft's
+  project. The Projeto sheet lists **Chats** first (when the server has `custom.chats`), then preserves saved selection
+  order and searches display names without sorting; see [Chats](#chats-destination) below. "Adicionar projeto" reuses Sessões' server-project picker and `project.open`; selecting/opening the draft's
   project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state.
 - **Directory:** `GET /api/worktree?projectID=…`, known project worktrees and sandboxes are merged in that order,
   deduplicated and stripped of the root. `custom.worktrees/branches` labels each checkout without booting every
@@ -1031,6 +1033,22 @@ visible; with the keyboard hidden, the introduction is centered in the available
   and attachment storage as conversations. Its snapshot includes project, destination, base branch, MCP intent maps,
   document/token ranges, cursor, attachments, model/variant and agent. It persists while editing, on leaving and on
   background/server switch, restores after relaunch, and is excluded from missing-Session pruning.
+
+### Chats destination
+
+Like the web's project selector (`packages/app-custom/src/new-session/project/selector.tsx`), Nova sessão offers
+**Chats**: a session without a repository in a managed `custom.chats/<date>/session-<uuid>` directory. It is listed
+first in Projeto (speech bubble, filtered by its label), offered by the no-project empty state, preselected by an active
+Chats chip in Sessões, and kept by a restored chat draft unless a repository filter is active. The directory selector is
+hidden. Nothing is allocated until Send, as for the master: catalogs and MCP defaults load from the chats root, and MCP
+taps only record intent (“Vale quando o chat for criado”). Send allocates (or reuses the draft's
+allocation) → `claim` with the draft's fixed Session ID → MCP intents on the allocated directory → create Session →
+`confirm` (ignored on failure, as on the web; the plugin reconciles pending claims) → prompt. Failures before Session
+creation keep the allocation in the protected draft, so a retry claims the same directory instead of allocating another.
+
+`NewSessionChatsTests` (UI) chooses Chats in the sheet, sends a Luna 6/low prompt, checks Recentes is unchanged and the
+Chats chip lists the new row, and that the chip preselects Chats. Run it against an isolated sandbox with one selected
+project; it creates one real chat per run.
 
 `NewSessionView`/`NewSessionStore` own presentation and navigation; selectors live in `NewSessionSelectors.swift`.
 `OpenCodeKit/NewSession.swift` owns projections and the narrow typed HTTP contracts, and

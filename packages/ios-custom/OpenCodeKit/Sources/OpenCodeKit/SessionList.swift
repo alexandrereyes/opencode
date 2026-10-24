@@ -15,11 +15,14 @@ public struct SessionRow: Sendable, Identifiable {
   public let activeChildren: Int
   public let requestCount: Int
   public let rank: Double
+  /// A managed `custom.chats` conversation: listed under Chats, never under Recentes or a project.
+  public var chat = false
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
   public var interactionAt: Double { entry.messageAt ?? session.time.created }
   public var projectName: String {
-    project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent
+    if chat { return session.displayTitle }
+    return project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent
   }
 }
 
@@ -66,9 +69,7 @@ public enum SessionList {
       families[root.session.id, default: []].append(entry)
     }
     return entries.filter { entry in
-      let session = entry.session
-      return session.parentID == nil && session.time.archived == nil
-        && !(chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false)
+      entry.session.parentID == nil && entry.session.time.archived == nil
     }.map { entry in
       let session = entry.session
       let members = families[session.id] ?? [entry]
@@ -93,7 +94,8 @@ public enum SessionList {
         activeChildren: members.filter {
           $0.session.parentID != nil && active.contains($0.session.id)
         }.count,
-        requestCount: permissions + questions, rank: ranks[session.id] ?? session.time.updated)
+        requestCount: permissions + questions, rank: ranks[session.id] ?? session.time.updated,
+        chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false)
     }.sorted { left, right in
       if left.pinned != right.pinned { return left.pinned }
       if left.pinned, let a = pinnedIDs.firstIndex(of: left.id),

@@ -49,7 +49,10 @@ final class SessionStore {
   var error: String?
   private(set) var notice: ConversationNotice?
   var filter = SessionFilter.all
+  /// A selected repository's project ID, or `chatsSelection` for managed chats.
   var selectedProject: String?
+  static let chatsSelection = "custom.chats"
+  var chatsSelected: Bool { selectedProject == Self.chatsSelection }
   struct ConversationRoute: Hashable {
     let id: String
     var parent: String? = nil
@@ -160,13 +163,20 @@ final class SessionStore {
     }
     #endif
     return rows.filter {
-      filter.includes($0) && (selectedProject == nil || $0.project?.id == selectedProject)
+      filter.includes($0)
+        && (chatsSelected
+          ? $0.chat : selectedProject == nil || (!$0.chat && $0.project?.id == selectedProject))
     }
   }
   var attention: [SessionRow] {
     filtered.filter { $0.state == .permission || $0.state == .question }
   }
-  var recent: [SessionRow] { filtered.filter { $0.state != .permission && $0.state != .question } }
+  /// Like the web's Recentes, chats are listed only under their own Chats filter.
+  var recent: [SessionRow] {
+    filtered.filter {
+      $0.state != .permission && $0.state != .question && ($0.chat == chatsSelected)
+    }
+  }
   var requestCount: Int { rows.reduce(0) { $0 + $1.requestCount } }
   var selectedProjects: [(directory: String, project: Project)] {
     (preferences?.data.projects["local"]?.projects ?? []).compactMap { selected in

@@ -6,11 +6,11 @@ import Testing
 private func entry(
   _ id: String, parent: String? = nil, updated: Double = 100,
   idle: Double? = nil, viewed: Double? = nil, permission: Bool = false,
-  question: Bool = false, archived: Bool = false
+  question: Bool = false, archived: Bool = false, directory: String = "/repo"
 ) throws -> NavigationEntry {
   var session: [String: JSONValue] = [
     "id": .string(id), "projectID": .string("project"), "title": .string(id),
-    "location": .object(["directory": .string("/repo")]),
+    "location": .object(["directory": .string(directory)]),
     "time": .object(["created": .number(100), "updated": .number(updated)]),
   ]
   var time = session["time"]!.object!
@@ -108,6 +108,17 @@ private func entry(
   #expect(SessionFilter.muted.includes(row))
   #expect(SessionFilter.attention.includes(row))
   #expect(!SessionFilter.running.includes(row))
+}
+
+@Test func managedChatsStayListedWithTheirOwnIdentity() throws {
+  let chat = try entry("ses_chat", permission: true, directory: "/chats/day/session-a")
+  let rows = SessionList.rows(
+    entries: [chat, try entry("ses_repo")], projects: [], active: [], pins: [], muted: [],
+    autoApprove: false, ranks: [:], chatRoot: "/chats")
+  #expect(rows.map(\.id).sorted() == ["ses_chat", "ses_repo"])
+  let row = try #require(rows.first { $0.id == "ses_chat" })
+  #expect(row.chat && row.requestCount == 1 && row.projectName == "ses_chat")
+  #expect(rows.first { $0.id == "ses_repo" }?.chat == false)
 }
 
 @Test func missingAndArchivedAncestorsNeverBecomeRoots() throws {

@@ -169,7 +169,17 @@ private actor NewSessionFake: NewSessionActions {
     #expect(projectID == "project" && from == "/root" && branch == "base")
     return "/created"
   }
+  func allocateChat() throws -> ChatAllocation {
+    try record("allocate")
+    return ChatAllocation(id: "allocation", directory: "/chats/day/session-a")
+  }
+  func claimChat(_ allocation: ChatAllocation, sessionID: String, confirm: Bool) throws {
+    try record(confirm ? "confirm" : "claim")
+    #expect(allocation.id == "allocation" && sessionID == "ses_client")
+  }
+  var directories: Set<String> = []
   func mcpServers(directory: String) throws -> [MCPServer] {
+    directories.insert(directory)
     try record(calls.contains("list") ? "verify" : "list")
     return servers
   }
@@ -180,6 +190,7 @@ private actor NewSessionFake: NewSessionActions {
     }
   }
   func createSession(id: String, agent: String, model: ModelReference, directory: String) throws {
+    directories.insert(directory)
     try record("session")
     #expect(id == "ses_client" && agent == "build" && model == newModel)
   }
@@ -384,4 +395,61 @@ private actor NewSessionHTTP {
   #expect(try await persistence.load().0?.newSession?.intents == ["safe": false])
   let other = DraftPersistence(server: "other", sessionID: "new-session", root: root)
   #expect(try await other.load().0 == nil)
+}
+
+private func chatSubmission(
+  allocation: ChatAllocation? = nil, intents: [String: Bool] = [:]
+) -> NewSessionSubmission {
+  .init(
+    chat: .init(sessionID: "ses_client", allocation: allocation), intents: intents,
+    agent: "build", model: newModel)
+}
+
+@Test func newSessionChatAllocatesClaimsCreatesConfirmsThenPrompts() async throws {
+  let fake = NewSessionFake()
+  let directory = try await chatSubmission(intents: ["safe": false]).send(
+    using: fake, request: newRequest)
+  #expect(directory == "/chats/day/session-a")
+  #expect(
+    await fake.calls == ["allocate", "claim", "list", "toggle", "verify", "session", "confirm", "prompt"])
+  #expect(await fake.directories == ["/chats/day/session-a"])
+}
+
+@Test func newSessionChatRetryReusesItsAllocationAndIgnoresConfirmFailure() async throws {
+  let allocation = ChatAllocation(id: "allocation", directory: "/chats/day/session-a")
+  let fake = NewSessionFake(failure: "confirm")
+  _ = try await chatSubmission(allocation: allocation).send(using: fake, request: newRequest)
+  #expect(await fake.calls == ["claim", "session", "confirm", "prompt"])
+}
+
+@Test(arguments: ["allocate", "claim", "list", "session", "prompt"])
+func newSessionChatFailureKeepsTheAllocationForRetry(_ point: String) async throws {
+  let fake = NewSessionFake(failure: point)
+  do {
+    _ = try await chatSubmission(intents: ["safe": false]).send(using: fake, request: newRequest)
+    Issue.record("Expected failure")
+  } catch let error as NewSessionFailure {
+    let expected: NewSessionFailure.Stage =
+      point == "allocate" || point == "claim"
+      ? .chat : point == "list" ? .mcp : point == "session" ? .session : .prompt
+    #expect(error.stage == expected)
+    #expect(error.createdDirectory == nil)
+    #expect(error.allocation?.directory == (point == "allocate" || point == "prompt" ? nil : "/chats/day/session-a"))
+    #expect(error.sessionID == (point == "prompt" ? "ses_client" : nil))
+    if expected == .chat { #expect(!(await fake.calls).contains("session")) }
+  }
+}
+
+@Test func newSessionChatContextKeepsSeparateIntentsAndDecodesOldDrafts() throws {
+  var chat = NewSessionContext.chat(mcp: ["project\nmain": ["safe": true]])
+  chat.mcp[chat.intentKey] = ["safe": false]
+  #expect(chat.intentKey == "chats" && chat.intents == ["safe": false])
+  #expect(chat.chat?.sessionID.hasPrefix("ses_") == true && chat.chat?.allocation == nil)
+  let round = try JSONDecoder().decode(NewSessionContext.self, from: JSONEncoder().encode(chat))
+  #expect(round == chat)
+  let old: NewSessionContext = try newDecode(
+    #"{"projectID":"project","destination":{"root":{}},"mcp":{}}"#)
+  #expect(old.chat == nil && old.intentKey == "project\nmain")
+  #expect(MCPServer(name: "safe", state: .connected).toggle(preview: true) == .intent)
+  #expect(MCPServer(name: "safe", state: .connected).toggle(preview: false) == .live)
 }
