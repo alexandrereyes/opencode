@@ -738,7 +738,8 @@ crash/offline periods and replay on launch/call; end checks follow their turns.
 summary/master data labels and a client-enforced 128-item/8,192-estimated-token cap.
 Instructions remain behavior-only. Unsupported/older servers do not block voice;
 local turns remain queued. The master receives only explicit delegations, not the
-voice transcript. See [`docs/voice.md`](docs/voice.md) for persistence and fallback.
+voice transcript, as plain request text without a voice preamble (its agent prompt
+covers voice). See [`docs/voice.md`](docs/voice.md) for persistence and fallback.
 
 The expanded bar's **Ver transcrição** opens the record read-only (summary and
 recent turns), observing local captures live without UI polling. It is rolling

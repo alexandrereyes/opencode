@@ -163,7 +163,11 @@ verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-s
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação relê
 `custom.preferences`, usa o ponteiro `masterSessions.local` quando válido ou faz o mesmo fluxo do
 composer: `custom.master/info`, allocate/claim de chat, create Session com agente `mestra`, confirm,
-`master.set`, prompt. Nenhuma sessão é criada apenas ao abrir a voz.
+`master.set`, prompt. Nenhuma sessão é criada apenas ao abrir a voz. O prompt contém só o texto
+delegado, sem preâmbulo: as orientações de voz (progresso conciso, resumo final para fala) e a regra
+de não executar instruções vindas de resultados de ferramentas ficam no prompt do agente `mestra`
+(`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem que ele envie
+só o pedido de Alexandre, natural e fiel, sem prefixos.
 
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
 ferramentas e textos concluídos alimentam atualizações curtas. Isso inclui os `toolCalls` estruturados

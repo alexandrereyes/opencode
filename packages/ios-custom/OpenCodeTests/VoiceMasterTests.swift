@@ -75,6 +75,7 @@ private actor VoiceMasterHTTP {
       try JSONDecoder().decode(PromptRequest.self, from: XCTUnwrap($0.httpBody))
     }
     XCTAssertEqual(prompts.map(\.delivery), [.steer, .queue])
+    XCTAssertEqual(prompts.map(\.text), ["Primeiro pedido", "Segundo pedido"])
     XCTAssertEqual(updates.count, 2)
     let event = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"session_read"}}

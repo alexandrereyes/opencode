@@ -2,7 +2,9 @@
 
 `master/` registers the hidden primary agent `mestra` (display name **Mestra**), with a short invisible system prompt,
 pt-BR summaries, explicit-user-request-only actions, untrusted-transcript precautions and on-demand `opencode` skill
-guidance. Its rules allow direct execution. The agent has no static model; `custom.master/info` advertises version 1 and
+guidance. It also covers voice: iOS voice delegations arrive as plain user messages with no per-message preamble or
+marker, so the prompt asks for concise progress and a final summary that works read aloud, which suits text too. Its
+rules allow direct execution. The agent has no static model; `custom.master/info` advertises version 1 and
 the model new Mestra sessions should start with, resolved on every call (configured providers such as `llm-proxy` load
 after this plugin, so a registration-time lookup always missed them):
 
