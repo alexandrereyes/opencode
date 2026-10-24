@@ -153,7 +153,33 @@ import XCTest
     XCTAssertFalse(app.textViews["conversation-composer"].exists)
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Histórico preservado'")).firstMatch.exists)
     screenshot("missing-directory")
+    // Sessions outside a Git project have no root checkout to move to.
+    XCTAssertFalse(app.buttons["notice-move-root"].exists)
     app.buttons["Tentar novamente"].tap()
     XCTAssertTrue(app.staticTexts["Diretório indisponível"].exists)
+  }
+  func testMoveToProjectRootRestoresComposerWithStrandedChild() throws {
+    let app = try launch("SESSION_RELOCATE")
+    XCTAssertTrue(app.staticTexts["Diretório indisponível"].waitForExistence(timeout: 15))
+    let move = app.buttons["notice-move-root"]
+    XCTAssertTrue(move.waitForExistence(timeout: 10))
+    XCTAssertEqual(move.label, "Mover para o repositório local")
+    XCTAssertTrue(app.buttons["notice-choose-worktree"].waitForExistence(timeout: 10))
+    let children = app.switches["notice-move-children"]
+    XCTAssertTrue(children.waitForExistence(timeout: 10))
+    XCTAssertEqual(children.value as? String, "1")
+    XCTAssertFalse(app.textViews["conversation-composer"].exists)
+    screenshot("relocation-offer")
+    app.buttons["notice-choose-worktree"].tap()
+    XCTAssertTrue(app.buttons["outro"].waitForExistence(timeout: 5))
+    screenshot("relocation-worktrees")
+    // Dismiss the menu over the inert "Envio indisponível" footer.
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.93)).tap()
+    XCTAssertTrue(app.buttons["outro"].waitForNonExistence(timeout: 5))
+    move.tap()
+    XCTAssertTrue(app.textViews["conversation-composer"].waitForExistence(timeout: 20))
+    XCTAssertFalse(app.staticTexts["Diretório indisponível"].exists)
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Histórico preservado'")).firstMatch.exists)
+    screenshot("relocated")
   }
 }

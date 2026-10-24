@@ -40,6 +40,10 @@ import OpenCodeKit
   private(set) var acting: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
+  /// Other worktrees and descendants left in the vanished directory, for the notice's move actions.
+  private(set) var relocationWorktrees: [WorktreeChoice] = []
+  private(set) var strandedChildren: [Session] = []
+  private(set) var relocating = false
   @ObservationIgnored private var renaming: SessionRename?
   var revealedToolID: String?
   /// A tool to reveal once the conversation is visible again, set from the agents screen.
@@ -145,6 +149,37 @@ import OpenCodeKit
       toast.show("Não foi possível arquivar a sessão.", kind: .error)
       return false
     }
+  }
+  func loadRelocation(_ project: Project) async {
+    guard case .missingDirectory(let missing) = notice else { return }
+    async let worktrees = try? client.relocationWorktrees(project: project, missing: missing)
+    async let stranded = try? client.strandedDescendants(id, missing: missing)
+    relocationWorktrees = await worktrees ?? []
+    strandedChildren = await stranded ?? []
+  }
+  /// Only on a tap: moves this Session, and optionally its stranded descendants, then reloads it in place.
+  func relocate(to directory: String, children: Bool) async {
+    guard !relocating, !executing, case .missingDirectory = notice else { return }
+    relocating = true
+    defer { relocating = false }
+    do {
+      try await client.moveSession(id, directory: directory)
+    } catch {
+      toast.show("Não foi possível mover a sessão. \(error.localizedDescription)", kind: .error)
+      return
+    }
+    var failed = 0
+    for child in children ? strandedChildren : [] {
+      do { try await client.moveSession(child.id, directory: directory) } catch { failed += 1 }
+    }
+    relocationWorktrees = []
+    strandedChildren = []
+    await refresh()
+    if failed > 0 {
+      toast.show("A sessão foi movida, mas \(failed) subsessão(ões) não puderam ser movidas.", kind: .error)
+      return
+    }
+    Haptics.play(.success)
   }
   func services() async -> SessionServices {
     guard let session else { return SessionServices() }

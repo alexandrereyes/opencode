@@ -200,11 +200,24 @@ struct SessionDetailsSheet: View {
   }
 }
 
+/// Move actions for a Session whose directory vanished, like the web's location-missing dock.
+struct ConversationRelocation {
+  let root: String
+  let worktrees: [WorktreeChoice]
+  let children: Int
+  /// The web disables moving while the Session runs.
+  let running: Bool
+  let moving: Bool
+  let move: (_ directory: String, _ children: Bool) -> Void
+}
+
 struct ConversationNoticeView: View {
   @Environment(\.appTheme) private var theme
   let notice: ConversationNotice
   var showDirectory = true
+  var relocation: ConversationRelocation?
   let retry: () -> Void
+  @State private var withChildren = true
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Label(notice == .incompatible ? "Servidor incompatível" : "Diretório indisponível", systemImage: "exclamationmark.triangle")
@@ -215,11 +228,45 @@ struct ConversationNoticeView: View {
       } else {
         Text("Este servidor não oferece a API do OpenCode V2. Atualize o servidor para continuar.")
       }
+      if let relocation { actions(relocation) }
       Button("Tentar novamente", action: retry).fontWeight(.medium)
     }
     .font(.footnote).foregroundStyle(theme.color(.textStrong)).padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(theme.color(.warning).opacity(0.12))
+    // Contain the children so the actions keep their own identifiers.
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("conversation-notice")
+  }
+  @ViewBuilder private func actions(_ relocation: ConversationRelocation) -> some View {
+    let disabled = relocation.running || relocation.moving
+    let children = relocation.children > 0 && withChildren
+    Button {
+      relocation.move(relocation.root, children)
+    } label: {
+      Text(relocation.moving ? "Movendo sessão…" : "Mover para o repositório local").fontWeight(.semibold)
+    }
+    .buttonStyle(.borderedProminent).tint(theme.color(.filledButton)).foregroundStyle(theme.color(.onFilledButton))
+    .disabled(disabled).accessibilityIdentifier("notice-move-root")
+    if !relocation.worktrees.isEmpty {
+      Menu {
+        ForEach(relocation.worktrees) { choice in
+          Button(choice.label) { relocation.move(choice.directory, children) }
+        }
+      } label: {
+        Label("Escolher worktree", systemImage: "arrow.triangle.branch").fontWeight(.medium)
+      }
+      .disabled(disabled).accessibilityIdentifier("notice-choose-worktree")
+    }
+    if relocation.children > 0 {
+      Toggle(isOn: $withChildren) {
+        Text(relocation.children == 1 ? "Mover a subsessão junto" : "Mover as \(relocation.children) subsessões junto")
+      }
+      .tint(theme.color(.primary)).disabled(disabled).accessibilityIdentifier("notice-move-children")
+    }
+    if relocation.running {
+      Text("Disponível quando a sessão terminar de executar.").font(.caption)
+        .foregroundStyle(theme.color(.textSecondary))
+    }
   }
 }

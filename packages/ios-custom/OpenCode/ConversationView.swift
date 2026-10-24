@@ -210,6 +210,25 @@ struct ConversationView: View {
     return directory == root || directory.hasPrefix(root + "/")
   }
   private var showLocation: Bool { sessions.chatRoot != nil && !chat }
+  /// A vanished directory of a Git project (never a chat) can move to the project's root checkout.
+  private var relocationProject: Project? {
+    guard case .missingDirectory(let missing) = conversation.notice, sessions.chatRoot != nil, !chat,
+      let project = sessions.projects.first(where: { $0.id == conversation.session?.projectID }),
+      SessionRelocation.root(project, missing: missing) != nil
+    else { return nil }
+    return project
+  }
+  private var relocationKey: String? { relocationProject.map { $0.id + "\n" + (conversation.session?.location.directory ?? "") } }
+  private var relocation: ConversationRelocation? {
+    guard let project = relocationProject else { return nil }
+    return ConversationRelocation(
+      root: project.canonical, worktrees: conversation.relocationWorktrees,
+      children: conversation.strandedChildren.count, running: conversation.executing,
+      moving: conversation.relocating
+    ) { directory, children in
+      Task { await conversation.relocate(to: directory, children: children) }
+    }
+  }
   private var headerSubtitle: String {
     if chat { return conversation.modelLabel(conversation.session?.model) }
     // Do not expose a directory fallback before the managed-chat root has been resolved.
@@ -234,7 +253,12 @@ struct ConversationView: View {
     VStack(spacing: 0) {
       header
       if let notice = conversation.notice {
-        ConversationNoticeView(notice: notice, showDirectory: showLocation) { Task { await conversation.refresh() } }
+        ConversationNoticeView(notice: notice, showDirectory: showLocation, relocation: relocation) {
+          Task { await conversation.refresh() }
+        }
+        .task(id: relocationKey) {
+          if let project = relocationProject { await conversation.loadRelocation(project) }
+        }
       }
       if let error = conversation.error {
         Button {

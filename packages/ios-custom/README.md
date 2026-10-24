@@ -2518,7 +2518,8 @@ the backend owns interruption and cascading to descendants. Neither action retri
   when a legacy server cannot open a conversation. No app/server semver equality is assumed. A missing directory is
   established only by `custom.worktrees/available == false` (queried in the default Location) or a matching typed
   `LocationNotFoundError`. Arbitrary 404s/network errors are not misclassified. History remains readable and the
-  composer is replaced by an explanation; retry rechecks availability. Choosing/moving directories remains out of scope.
+  composer is replaced by an explanation; retry rechecks availability. Moving out of it is described under
+  "Diretório indisponível: mover a sessão" below.
 
 `SessionReadingTests.swift` in OpenCodeKit covers matching, source highlights, order/counter, the older-page budget,
 rename/rollback, removed tools, HTTP methods/Location scoping, independent service errors and notice
@@ -2545,6 +2546,28 @@ The actual sandbox remains V2-compatible and was never modified/restarted to man
 For wave 7: retain the non-persisting search request, the Location notice's send guard, atomic initial publication,
 recycled Markdown lifetime and the single shared SSE hub. Enabling the child composer must not enable archive on
 children or bypass a server/directory notice. Reuse `SessionStore.toast` for feedback after returning to Sessões.
+
+### Diretório indisponível: mover a sessão — 24 October
+
+Like the web's location-missing dock, the notice offers **Mover para o repositório local** (the project's
+`canonical` root checkout) and an **Escolher worktree** menu, then keeps **Tentar novamente**. Moving happens only on a
+tap: `POST /api/session/:id/move` with `{ directory }`, which the server applies at once to an idle Session whose
+directory vanished (`core/src/session/move.ts`). The menu first runs `POST /api/worktree/refresh` (pruning worktrees
+removed outside OpenCode, as the web menu does), then lists `/api/worktree` with `custom.worktrees/branches` labels,
+excluding the root and the vanished directory. When descendants (`custom.session-family/page`) still sit in the same
+vanished directory, **Mover a subsessão junto** / **Mover as N subsessões junto** (on by default) moves each one after
+the Session; a partial failure is reported in a toast. The actions are hidden for chats, projects without Git, unknown
+projects and a vanished root itself, and disabled while the Session runs. After the move the conversation refreshes
+in place: the server appends **Diretório de trabalho alterado**, wakes the Session (it idles without a model call)
+and the composer returns.
+
+Verification used **OpenCode Mover** (iPhone 18 Pro/iOS 27), `ios-mover-derived` and an isolated `custom-sandbox.ts`
+home on port 4196. A private prepare step created a fake Git repository with worktrees, imported a parent and child
+Session (no model calls) into a worktree and removed it with `git worktree remove`; `script/test-isolated.py
+--environment` then ran `SessionReadingTests/testMoveToProjectRootRestoresComposerWithStrandedChild` and
+`testMissingDirectoryKeepsHistoryAndBlocksComposer` (no actions for a non-Git Session) in both themes, and the server
+confirmed both Sessions in the root checkout. `SessionRelocationTests` in OpenCodeKit cover the root rule, the move
+request and its error, the refresh-then-list worktree menu and the paged stranded-descendant filter.
 
 ### Reading continuity (wave 6)
 
