@@ -4,8 +4,38 @@ import Testing
 @testable import OpenCodeKit
 
 struct DictationTests {
+  /// Microphone already allowed: recording starts at the touch; a release within the hold delay continues
+  /// hands-free, and a release after it asks to finish (the composer keeps recording under one second).
+  @Test func authorizedTouchRecordsAtOnceAndReleaseWithinHoldDelayIsHandsFree() {
+    var tap = VoiceRecordingGesture()
+    #expect(tap.handle(.pressed) == .startHolding)
+    #expect(tap.state == .holding)
+    #expect(tap.handle(.moved(CGSize(width: -30, height: -20))) == .none)
+    #expect(tap.handle(.ended) == .handsFree)
+    #expect(tap.state == .locked)
+    #expect(tap.offset == .zero)
+    #expect(tap.handle(.held) == .none)
+    #expect(tap.handle(.ended) == .none)
+    var hold = VoiceRecordingGesture()
+    #expect(hold.handle(.pressed) == .startHolding)
+    #expect(hold.handle(.held) == .none)
+    #expect(hold.state == .holding)
+    #expect(hold.handle(.ended) == .finish)
+    var kept = VoiceRecordingGesture()
+    _ = kept.handle(.pressed); _ = kept.handle(.held)
+    _ = kept.handle(.moved(CGSize(width: -40, height: -30)))
+    kept.keepRecording()
+    #expect(kept.state == .locked)
+    #expect(kept.offset == .zero)
+    #expect(kept.handle(.ended) == .none)
+    #expect(kept.handle(.cancelled) == .none)
+    var cancelled = VoiceRecordingGesture()
+    _ = cancelled.handle(.pressed)
+    #expect(cancelled.handle(.moved(CGSize(width: -100, height: 0))) == .discard)
+    #expect(cancelled.handle(.ended) == .none)
+  }
   @Test func tapHoldReleaseAndMinimumDuration() {
-    #expect(VoiceRecordingGesture.holdDelay == 0.22)
+    #expect(VoiceRecordingGesture.holdDelay == 0.3)
     #expect(VoiceRecordingGesture.minimumDuration == 1)
     #expect(VoiceRecordingAccessibility.duration(0) == "0 segundos")
     #expect(VoiceRecordingAccessibility.duration(1.9) == "1 segundo")

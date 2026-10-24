@@ -33,13 +33,19 @@ import XCTest
     app.buttons["dictation-microphone"].press(forDuration: 1.8)
     assertReview()
   }
-  func testSlideLeftCancelsAndShortHoldDiscards() {
+  /// As in WhatsApp on iPhone: releasing a hold before one second neither transcribes nor discards; it keeps
+  /// recording hands-free.
+  func testSlideLeftCancelsAndShortHoldKeepsRecordingHandsFree() {
     open()
     let microphone = app.buttons["dictation-microphone"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
     microphone.press(forDuration: 1.5, thenDragTo: microphone.withOffset(CGVector(dx: -150, dy: 0)))
     XCTAssertTrue(app.buttons["dictation-microphone"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons["Recolher"].exists)
-    app.buttons["dictation-microphone"].press(forDuration: 0.4)
+    app.buttons["dictation-microphone"].press(forDuration: 0.6)
+    XCTAssertTrue(app.buttons["dictation-stop"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["dictation-pause-resume"].exists)
+    XCTAssertFalse(app.buttons["Recolher"].exists)
+    app.buttons["dictation-discard"].tap()
     XCTAssertTrue(app.buttons["dictation-microphone"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons["Recolher"].exists)
     XCTAssertFalse((app.textViews["conversation-composer"].value as? String ?? "").contains("Confira"))

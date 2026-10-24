@@ -180,7 +180,7 @@ import os
     var received: String?
     recording.receive = { received = $0 }
     recording.handle(.began); recording.handle(.ended)
-    try await wait { recording.state == .recording }
+    try await wait { recording.state == .recording && recording.elapsed > 0 }
     recording.finish()
     try await wait { if case .failed? = recording.job?.state { return true }; return false }
     XCTAssertTrue(FileManager.default.fileExists(atPath: recording.file.path))
@@ -190,6 +190,78 @@ import os
     try await wait { recording.state == .idle && received != nil }
     XCTAssertEqual(received, "Texto transcrito")
     XCTAssertFalse(FileManager.default.fileExists(atPath: recording.file.path))
+    // The next recording's panel starts at zero, not with the time and levels of this one.
+    capture.waits = true
+    recording.handle(.began); recording.handle(.ended)
+    try await wait { capture.permission != nil }
+    XCTAssertEqual(recording.state, .authorizing)
+    XCTAssertEqual(recording.elapsed, 0)
+    XCTAssertTrue(recording.levels.allSatisfy { $0 == 0 })
+    capture.permission?.resume(returning: false); capture.permission = nil
+    try await wait { recording.state == .idle }
+  }
+  private func granted(recorded: TimeInterval = 2) -> (VoiceRecordingComposer, DictationTestCapture) {
+    let capture = DictationTestCapture()
+    capture.waits = false; capture.granted = true; capture.recorded = recorded
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    let recording = VoiceRecordingComposer(file: root.appending(path: "dictation.caf"), capture: capture)
+    addTeardownBlock { @MainActor in recording.discard(); try? FileManager.default.removeItem(at: root) }
+    return (recording, capture)
+  }
+  /// Microphone already allowed: recording starts at the touch; a quick release continues hands-free, and so does
+  /// releasing a hold under one second (nothing is lost); one second or more finishes for transcription.
+  func testAuthorizedTouchRecordsAtOnceAndOnlyHoldOverOneSecondFinishes() async throws {
+    let (recording, capture) = granted()
+    recording.handle(.began)
+    XCTAssertEqual(recording.gesture.state, .holding)
+    try await wait { recording.state == .recording }
+    XCTAssertEqual(capture.starts, 1)
+    recording.handle(.ended)
+    XCTAssertEqual(recording.state, .recording)
+    XCTAssertEqual(recording.gesture.state, .locked)
+    recording.discard()
+    capture.recorded = 0.5
+    recording.handle(.began); recording.handle(.held)
+    try await wait { recording.state == .recording }
+    recording.handle(.ended)
+    XCTAssertEqual(recording.state, .recording)
+    XCTAssertEqual(recording.gesture.state, .locked)
+    recording.discard()
+    capture.recorded = 2
+    recording.handle(.began); recording.handle(.held)
+    try await wait { recording.state == .recording }
+    recording.handle(.ended)
+    XCTAssertEqual(recording.state, .pending)
+    XCTAssertEqual(capture.starts, 3)
+  }
+  /// Locked, or held for one second or more, an interruption keeps a paused draft with "Parar e transcrever";
+  /// a shorter hold is discarded. Nothing resumes on its own.
+  func testInterruptionsKeepPausedDraftUnlessHeldUnderOneSecond() async throws {
+    for (locked, recorded) in [(true, 2.0), (true, 0.5), (false, 2.0), (false, 0.5)] {
+      let (recording, capture) = granted(recorded: recorded)
+      recording.handle(.began)
+      recording.handle(locked ? .ended : .held)
+      try await wait { recording.state == .recording }
+      recording.suspend()
+      let kept = locked || recorded >= 1
+      XCTAssertEqual(recording.state, kept ? .paused : .idle, "locked \(locked), \(recorded) s")
+      XCTAssertEqual(recording.gesture.state, kept ? .locked : .idle, "locked \(locked), \(recorded) s")
+      XCTAssertEqual(capture.pauses, kept ? 1 : 0)
+    }
+  }
+  /// The system cancelling a hold (Home, lock, alert) keeps a paused draft from one second on and ignores the
+  /// release that may still arrive; a shorter hold is discarded.
+  func testInterruptedHoldKeepsDraftOrDiscardsAndIgnoresLateRelease() async throws {
+    for recorded in [2.0, 0.5] {
+      let (recording, capture) = granted(recorded: recorded)
+      recording.handle(.began); recording.handle(.held)
+      try await wait { recording.state == .recording }
+      recording.handle(.cancelled)
+      recording.handle(.ended)
+      XCTAssertEqual(recording.state, recorded >= 1 ? .paused : .idle, "\(recorded) s")
+      XCTAssertEqual(capture.pauses, recorded >= 1 ? 1 : 0)
+      if recorded >= 1 { XCTAssertEqual(recording.gesture.state, .locked) }
+    }
   }
   private func warmup(build: String, engine: DictationWarmupEngine, defaults: UserDefaults) -> (TranscriptionController, DictationTestSource) {
     let source = DictationTestSource()
@@ -297,6 +369,9 @@ final class DictationTestSource: TranscriptionModelSource, @unchecked Sendable {
 @MainActor final class DictationTestCapture: VoiceRecordingCapture {
   var waits = true
   var writesFixture = false
+  var granted = false
+  var recorded: TimeInterval = 2
+  var authorized: Bool { granted }
   var permission: CheckedContinuation<Bool, Never>?
   var starts = 0
   var pauses = 0
@@ -307,7 +382,7 @@ final class DictationTestSource: TranscriptionModelSource, @unchecked Sendable {
       try FileManager.default.copyItem(at: XCTUnwrap(Bundle.main.url(forResource: "dictation-fixture", withExtension: "caf")), to: file)
     }
   }
-  var elapsed: TimeInterval { 2 }
+  var elapsed: TimeInterval { recorded }
   var level: Float { 0.5 }
   func pause() { pauses += 1 }
   func resume() async throws {}

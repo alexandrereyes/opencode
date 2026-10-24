@@ -3,22 +3,40 @@ import Foundation
 /// Ported from Abacato's VoiceRecordingGesture; finishing requests transcription, never submission.
 public struct VoiceRecordingGesture: Sendable {
   public enum State: Sendable { case idle, pressing, holding, locked, finished }
-  public enum Event: Sendable { case began, held, moved(CGSize), ended, cancelled }
-  public enum Effect: Sendable { case none, startHolding, startLocked, lock, finish, discard }
-  public static let holdDelay: TimeInterval = 0.22
+  /// `pressed`: a touch with the microphone already allowed records at once. `began`: permission is still unknown,
+  /// and the system prompt would take the gesture.
+  public enum Event: Sendable { case began, pressed, held, moved(CGSize), ended, cancelled }
+  public enum Effect: Sendable { case none, startHolding, startLocked, handsFree, lock, finish, discard }
+  /// Releasing before this is a tap and keeps recording hands-free. Without permission it is also the margin before
+  /// holding, so a touch that slips off the button does not become a continuous recording.
+  public static let holdDelay: TimeInterval = 0.3
   public static let cancelDistance: CGFloat = 100
   public static let lockDistance: CGFloat = 80
   public static let minimumDuration: TimeInterval = 1
   public private(set) var state = State.idle
   public private(set) var offset = CGSize.zero
+  /// Recording since the touch and still within `holdDelay`.
+  private var tapping = false
   public init() {}
+
+  /// A hold released or interrupted before it is worth keeping as-is continues as a locked recording.
+  public mutating func keepRecording() {
+    state = .locked
+    offset = .zero
+  }
 
   public mutating func handle(_ event: Event) -> Effect {
     switch event {
     case .began:
       guard state == .idle else { return .none }
       state = .pressing
+    case .pressed:
+      guard state == .idle else { return .none }
+      state = .holding
+      tapping = true
+      return .startHolding
     case .held:
+      if state == .holding { tapping = false; return .none }
       guard state == .pressing else { return .none }
       state = .holding
       return .startHolding
@@ -39,6 +57,7 @@ public struct VoiceRecordingGesture: Sendable {
       }
     case .ended:
       if state == .pressing { state = .locked; return .startLocked }
+      if state == .holding, tapping { keepRecording(); return .handsFree }
       if state == .holding { state = .finished; return .finish }
     case .cancelled:
       guard state == .pressing || state == .holding else { return .none }

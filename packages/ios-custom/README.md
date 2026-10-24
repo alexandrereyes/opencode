@@ -837,11 +837,19 @@ deletes the session and checkout.
 ### Composer dictation (independent of GPT Live calls)
 
 The empty composer's microphone records locally in conversations, Nova sessão and Sessão mestra. The gesture is
-ported from Abacato v2's `VoiceRecordingGesture.swift`: tap starts hands-free; hold begins at 220 ms; slide left
-100 pt to discard or up 80 pt to lock. Diagonal movement uses normalized dominant progress. Release transcribes a
-held recording; locked recording offers pause, local preview/seek/resume, trash and **Parar e transcrever**. Audio
-shorter than one second is discarded. A locked recording pauses on background, route changes or interruption and
-never automatically resumes; an interrupted hold is discarded. The UIKit touch target stays mounted throughout.
+ported from Abacato v2's `VoiceRecordingGesture.swift` (including its `voz/gravacao-fluida` merge, `5733cb4ef`).
+With the microphone already allowed, recording starts **at the touch**, so the first word is not lost to the hold
+delay; releasing within 300 ms keeps recording hands-free. Before permission is known, the touch waits for the
+system prompt as before: a tap starts hands-free and a hold begins at 300 ms. Holding, slide left 100 pt to discard
+or up 80 pt to lock; diagonal movement uses normalized dominant progress. Releasing a hold transcribes it from one
+second on; earlier it keeps recording hands-free (as in WhatsApp on iPhone), never discarding speech. A locked
+recording offers pause, local preview/seek/resume, trash and **Parar e transcrever**; stopping one shorter than one
+second discards it. Background, route changes, interruption, another recorder or the system cancelling the touch
+(Home, lock, alert) turn a locked recording, or a hold of one second or more, into a paused draft locked to
+**Parar e transcrever**; it never resumes automatically, and a shorter hold is discarded. The live waveform slides
+on every frame between its 100 ms meter samples (static with Reduce Motion), the panel starts at 0:00 instead of the
+previous recording's time, and the paused preview is ready after 200 ms without file growth instead of 500 ms.
+The UIKit touch target stays mounted throughout.
 
 **Nothing sends automatically.** Parakeet Ultra inserts plain text at the current caret through the existing
 incremental/undoable editing path, preserving tokens and any text typed during a download. It then opens the real
@@ -858,9 +866,12 @@ TestFlight update or iOS update. `TranscriptionController` therefore prewarms on
 finished download (`.medium`; `.utility` took 38 s on the iPhone 14) and again when a recording starts, so the
 compilation overlaps speech. All callers share one load, serialized after any pending unload; idle unload is unchanged.
 While it runs, the pending row says "Otimizando o modelo para este iPhone (uma vez por atualização)…".
-AVAudioSession activation/deactivation, `AVAudioRecorder.record()` and preview `play()` (which activate internally)
-run on one serial queue off the main thread, and the expanded composer raises the keyboard only after its cover
-finishes presenting. Recording remains usable while missing/downloading; audio waits locally. The download
+AVAudioSession activation/deactivation, creating the `AVAudioRecorder`, `record()` and preview `play()` (which
+activate internally) run on one serial queue off the main thread, and the expanded composer raises the keyboard only
+after its cover finishes presenting. Stopping during an activation no longer drains that queue on the main thread:
+`stop()` advances a lock-protected epoch that the queue checks right before recording, so the main thread waits at
+most for one `record()` call, a stopped opening never records, and one that recorded just before the stop is closed
+and its file deleted (it cannot reappear as pending audio). Recording remains usable while missing/downloading; audio waits locally. The download
 uses background URLSession, resumable files, exact byte counts and SHA-256 before atomic installation. Inference
 starts only on-device in the foreground, one recording at a time, with the CPU preprocessor and Neural Engine;
 the model unloads after idle time. Download continuation is not a promise of background inference.
@@ -897,7 +908,9 @@ excludes the fixture audio and code. `-OpenCodeDictationFixture device` instead 
 background downloader and Parakeet in the same server-free root; acquire the physical iPhone 14 lease first.
 Evidence is under `$TMPDIR/opencode/ios-gravacao-prints/`. Run `swift test` from `OpenCodeKit` for pure gesture,
 manifest/checksum/resume-file and draft-retention coverage; hosted `DictationPipelineTests` exercise queue/failure/retry,
-permission cancellation and native token-preserving insertion/undo. No live server or GPT Live call is required.
+permission cancellation, recording at an authorized touch, sub-second releases continuing hands-free, interruption and
+system-cancelled holds becoming paused drafts (or discarded under one second), the panel restarting at zero, and
+native token-preserving insertion/undo. No live server or GPT Live call is required.
 
 After the leased iPhone has downloaded the real model, `python3 packages/ios-custom/script/test-dictation-device.py`
 feeds the bundled Portuguese PCM (padded to 10 seconds) directly into only the server-free fixture's pending draft,
@@ -919,6 +932,28 @@ download. The clean 10-second PCM benchmark (7.96 seconds of synthesized Portugu
 individual local runs, not latency guarantees; loading is measured separately from inference. Both outputs preserved
 the sentence with one extra **“o”** in **“Não o envie…”**, demonstrating why review is required. After success, device
 inspection found only `draft.json`, no recording/preview audio. The device was released and owned simulators shut down.
+
+**Touch-to-recording latency (iPhone 14, 24/10/2026).** `script/measure-dictation-device.py --app … --label …`
+installs an optimized DEBUG build (`SWIFT_OPTIMIZATION_LEVEL=-O`, whole module, `GCC_OPTIMIZATION_LEVEL=s`, generic
+iOS destination, `DEVELOPMENT_TEAM=ERRYZ68LX5`) under its own process lease, launches `-OpenCodeDictationFixture
+device -OpenCodeDictationTimeline` (real microphone and Parakeet, no server) and drives the microphone with
+agent-device: five taps followed by pause and trash, then five 4.5 s holds, each after a relaunch with an empty
+draft, while the Mac says a short Portuguese phrase. The DEBUG-only timeline records `ProcessInfo.systemUptime` marks
+at the touch/release handling, `state = .recording` (after `record()` returned), pause, preview ready and text
+insertion, and the script copies them back; it measures inside the app, not frame by frame on video. Medians of
+five, same gesture, same build flags, `origin/custom` `026bd5a44a5` against this change:
+
+| Milestone | Before | After |
+|---|---|---|
+| Tap → recording | 184 ms (180–337) | 116 ms (107–148) |
+| Hold → recording | 339 ms (336–397) | 123 ms (122–147) |
+| Release → text in the composer | 206 ms (201–227) | 202 ms (164–210) |
+| Pause → preview ready | 719 ms (556–735) | 389 ms (221–403) |
+
+Before, a hold waited the 220 ms hold delay and a tap only opened the microphone after the finger left; now both
+start at the touch, so the remaining time is the session activation and `record()`. Release → text (reading the
+file, resampling and warm Parakeet inference of about four seconds of audio) did not change and was not a goal.
+Individual local runs, not latency guarantees.
 
 Debug/test builds and the signed Release archive/export are warning-free. The dry-run uses a temporary
 `XCODE_XCCONFIG_FILE` containing `COPY_PHASE_STRIP = NO`, the existing verification workaround for an already-signed

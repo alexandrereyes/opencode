@@ -1,8 +1,11 @@
 import AVFoundation
 import Foundation
 import OpenCodeKit
+import os
 
 @MainActor protocol VoiceRecordingCapture: AnyObject {
+  /// The microphone is already allowed: recording starts at the touch, with no system prompt to take the gesture.
+  var authorized: Bool { get }
   func authorize() async -> Bool
   func start(at file: URL) async throws
   var elapsed: TimeInterval { get }
@@ -12,67 +15,75 @@ import OpenCodeKit
   func stop()
 }
 
+extension VoiceRecordingCapture {
+  var authorized: Bool { false }
+}
+
 /// AVAudioSession activation and deactivation block the caller (Apple's "Hang Risk").
 /// One serial queue keeps them off the main thread and in the order they were requested,
 /// so a deactivation queued by stop/pause always precedes the next activation.
 enum DictationAudioSession {
   private static let queue = DispatchQueue(label: "br.com.alexandrem.opencode.dictation-audio", qos: .userInitiated)
   /// `AVAudioRecorder.record()` and `AVAudioPlayer.play()` activate the session again
-  /// internally, so `start` runs here too, right after the activation.
-  static func activate(_ category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions = [],
-                       then start: (@Sendable () -> Bool)? = nil) async throws {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+  /// internally, so `start` runs here too, right after the activation. A failure deactivates.
+  static func activate<Value: Sendable>(_ category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions = [],
+                                        then start: @escaping @Sendable () throws -> Value) async throws -> Value {
+    try await withCheckedThrowingContinuation { continuation in
       queue.async {
+        let session = AVAudioSession.sharedInstance()
         do {
-          let session = AVAudioSession.sharedInstance()
           try session.setCategory(category, mode: .default, options: options)
           if category == .playAndRecord { try session.setAllowHapticsAndSystemSoundsDuringRecording(true) }
           try session.setActive(true)
-          if let start, !start() { throw TranscriptionError.integrity }
-          continuation.resume()
-        } catch { continuation.resume(throwing: error) }
+          continuation.resume(returning: try start())
+        } catch {
+          try? session.setActive(false, options: .notifyOthersOnDeactivation)
+          continuation.resume(throwing: error)
+        }
       }
     }
   }
   static func deactivate() {
     queue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
   }
-  /// Waits for an activation in flight; only used when stop races a start or resume.
-  static func drain() { queue.sync {} }
 }
 
-/// Hands a recorder or player to the audio queue while the main actor awaits its start.
+/// Hands a recorder or player between the audio queue and the main actor.
 struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
 
 /// Continuous PCM, including pause/resume on the same recorder, as in Abacato.
 @MainActor final class MicrophoneVoiceCapture: VoiceRecordingCapture {
   private var recorder: AVAudioRecorder?
   private var ownsSession = false
-  private var activating = false
-  // stop() during an activation invalidates it, so a late activation reports cancellation.
-  private var attempt = UUID()
-  func authorize() async -> Bool { await AVAudioApplication.requestRecordPermission() }
+  /// stop() advances it without waiting for an activation in flight. The audio queue checks it under the lock right
+  /// before recording, so a stopped opening never records and stop() waits at most for that `record()` call.
+  private let epoch = OSAllocatedUnfairLock(initialState: 0)
+  var authorized: Bool { AVAudioApplication.shared.recordPermission == .granted }
+  func authorize() async -> Bool { authorized ? true : await AVAudioApplication.requestRecordPermission() }
   func start(at file: URL) async throws {
-    do {
-      let recorder = try AVAudioRecorder(url: file, settings: [
-        AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000,
-        AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32,
-        AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false,
-      ])
-      recorder.isMeteringEnabled = true
-      self.recorder = recorder
-      try await record(recorder)
-    } catch { stop(); throw error }
-  }
-  private func record(_ recorder: AVAudioRecorder) async throws {
-    let current = UUID()
-    attempt = current
+    let epoch = epoch, ticket = epoch.withLock { $0 }
+    let opened = try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) {
+      try epoch.withLock { current in
+        guard current == ticket else { throw CancellationError() }
+        let recorder = try AVAudioRecorder(url: file, settings: [
+          AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000,
+          AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 32,
+          AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false,
+        ])
+        recorder.isMeteringEnabled = true
+        guard recorder.record() else { recorder.stop(); throw TranscriptionError.integrity }
+        return QueuedAudio(value: recorder)
+      }
+    }
+    guard epoch.withLock({ $0 }) == ticket else {
+      // stop() came after this opening began recording: none of it may remain or look like pending audio.
+      opened.value.stop()
+      try? FileManager.default.removeItem(at: file)
+      DictationAudioSession.deactivate()
+      throw CancellationError()
+    }
+    recorder = opened.value
     ownsSession = true
-    activating = true
-    defer { activating = false }
-    let queued = QueuedAudio(value: recorder)
-    try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) { queued.value.record() }
-    guard attempt == current else { throw CancellationError() }
   }
   var elapsed: TimeInterval { recorder?.currentTime ?? 0 }
   var level: Float {
@@ -83,15 +94,22 @@ struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
   func pause() { recorder?.pause(); releaseSession() }
   func resume() async throws {
     guard let recorder else { throw TranscriptionError.integrity }
-    do { try await record(recorder) } catch { releaseSession(); throw error }
+    let epoch = epoch, ticket = epoch.withLock { $0 }, queued = QueuedAudio(value: recorder)
+    try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) {
+      try epoch.withLock { current in
+        guard current == ticket else { throw CancellationError() }
+        guard queued.value.record() else { throw TranscriptionError.integrity }
+      }
+    }
+    // stop() after the recorder resumed already stopped it; only the session is left to release.
+    guard epoch.withLock({ $0 }) == ticket else { DictationAudioSession.deactivate(); throw CancellationError() }
+    ownsSession = true
   }
   func stop() {
-    // A recorder whose start is still queued must not begin recording after this stop.
-    if activating { DictationAudioSession.drain() }
+    epoch.withLock { $0 += 1 }
     recorder?.stop(); recorder = nil; releaseSession()
   }
   private func releaseSession() {
-    attempt = UUID()
     guard ownsSession else { return }
     DictationAudioSession.deactivate()
     ownsSession = false

@@ -9,6 +9,8 @@ import UIKit
   private(set) var state = State.idle
   private(set) var elapsed: TimeInterval = 0
   private(set) var levels = [Float](repeating: 0, count: 40)
+  /// When the meter last sampled: the live waveform slides between samples on every frame.
+  @ObservationIgnored private(set) var sampledAt = Date.distantPast
   private(set) var gesture = VoiceRecordingGesture()
   private(set) var discarding = false
   private(set) var previewReady = false
@@ -40,19 +42,36 @@ import UIKit
     self.file = file; self.capture = capture ?? MicrophoneVoiceCapture(); self.transcription = transcription
   }
   func handle(_ event: VoiceRecordingGesture.Event) {
+    var event = event
     if case .began = event {
       guard state == .idle, !discarding else { return }
       gesture = VoiceRecordingGesture()
+      mark("touch")
+      // With the microphone already allowed, recording starts at the touch instead of after the hold delay.
+      if capture.authorized { event = .pressed }
     }
+    if case .ended = event { mark("release") }
     let wasHolding = gesture.state == .holding
     switch gesture.handle(event) {
     case .startHolding, .startLocked: start()
+    case .handsFree: UIImpactFeedbackGenerator(style: .light).impactOccurred()
     case .lock:
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
       announce("Gravação travada. Pode soltar o dedo")
     case .finish:
-      if state == .authorizing { discard() } else { finish() }
+      // Releasing during the permission prompt never lets a capture open later. A release before one second is
+      // not a dictation yet: keep recording hands-free, as in WhatsApp on iPhone.
+      let opening = state == .authorizing
+      if opening && !capture.authorized { discard() }
+      else if opening || capture.elapsed < VoiceRecordingGesture.minimumDuration {
+        gesture.keepRecording()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      } else { finish() }
     case .discard:
+      if case .cancelled = event, wasHolding, keepsDraft {
+        // The system took the touch (Home, lock, alert): keep a paused draft.
+        gesture.keepRecording(); pause(); return
+      }
       discard()
       if wasHolding {
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
@@ -71,6 +90,8 @@ import UIKit
     Self.audioOwner = self
     state = .authorizing
     error = nil
+    // The panel appears at the touch: nothing from the previous recording.
+    elapsed = 0; levels = Array(repeating: 0, count: 40)
     observeInterruptions()
     let ticket = generation
     task = Task {
@@ -83,7 +104,8 @@ import UIKit
         try await capture.start(at: file)
         // discard() during activation already stopped the capture.
         guard !Task.isCancelled, ticket == generation else { return }
-        elapsed = 0; levels = Array(repeating: 0, count: 40); state = .recording
+        state = .recording
+        mark("recording")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         announce("Gravando para transcrever")
         startMeter()
@@ -102,6 +124,7 @@ import UIKit
         guard let self, state == .recording else { return }
         elapsed = capture.elapsed
         levels.removeFirst(); levels.append(capture.level)
+        sampledAt = .now
         if elapsed >= 86_400 { finish(); return }
       }
     }
@@ -110,6 +133,7 @@ import UIKit
     guard state == .recording else { return }
     task?.cancel(); task = nil
     capture.pause(); elapsed = capture.elapsed; state = .paused
+    mark("pause")
     announce("Gravação pausada")
     makePreview()
   }
@@ -131,11 +155,15 @@ import UIKit
       }
     }
   }
+  /// Background, interruption, route change or another recorder: a locked recording, or a hold of one second or
+  /// more, becomes a paused draft that never resumes on its own; a shorter hold is discarded.
   func suspend() {
     if state == .recording, gesture.state == .locked { pause() }
+    else if gesture.state == .holding, keepsDraft { gesture.keepRecording(); pause() }
     else if state == .recording || state == .authorizing { discard() }
     pausePreview()
   }
+  private var keepsDraft: Bool { state == .recording && capture.elapsed >= VoiceRecordingGesture.minimumDuration }
   private func observeInterruptions() {
     guard observers.isEmpty else { return }
     let center = NotificationCenter.default
@@ -189,6 +217,7 @@ import UIKit
     let job = DictationJob(file: file) { [weak self] text in
       guard let self else { return }
       await receive(text)
+      mark("text")
       pendingChanged(false)
       try? FileManager.default.removeItem(at: file)
       state = .idle; gesture = VoiceRecordingGesture(); self.job = nil
@@ -227,13 +256,14 @@ import UIKit
           let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize
           quiet = size == previous ? quiet + 1 : 0
           previous = size
-          if quiet >= 10 {
+          if quiet >= 4 {
             let result = try await Task.detached {
               try VoiceRecordingSnapshot.copy(pcm: file, to: preview)
               return try VoiceRecordingSnapshot.inspect(preview)
             }.value
             guard !Task.isCancelled, state == .paused else { return }
             waveform = result.waveform; previewDuration = result.duration; elapsed = result.duration; previewReady = result.duration > 0
+            mark("preview")
             return
           }
           try await Task.sleep(for: .milliseconds(50))
@@ -260,7 +290,9 @@ import UIKit
         if previewPosition >= previewDuration { previewPosition = 0 }
         player.currentTime = previewPosition
         let queued = QueuedAudio(value: player)
-        try await DictationAudioSession.activate(.playback) { queued.value.play() }
+        try await DictationAudioSession.activate(.playback) {
+          guard queued.value.play() else { throw TranscriptionError.integrity }
+        }
         // pausePreview() during the activation already queued the deactivation.
         guard !Task.isCancelled, previewPlaying, state == .paused else { player.pause(); return }
         while !Task.isCancelled {
@@ -290,6 +322,11 @@ import UIKit
     if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
     previewFile = nil
     previewReady = false; previewPosition = 0; previewDuration = 0
+  }
+  private func mark(_ name: String) {
+    #if DEBUG
+    DictationTimeline.mark(name)
+    #endif
   }
   private func announce(_ message: String) {
     guard UIAccessibility.isVoiceOverRunning, UIApplication.shared.applicationState == .active else { return }

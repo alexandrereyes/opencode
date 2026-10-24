@@ -103,7 +103,7 @@ struct DictationAction: View {
   }
   private var face: some View {
     Group {
-      if sending || recording.state == .authorizing || recording.state == .pending { ProgressView().tint(theme.color(.onPrimary)) }
+      if sending || (recording.state == .authorizing && !holding) || recording.state == .pending { ProgressView().tint(theme.color(.onPrimary)) }
       else { Image(systemName: locked ? "stop.fill" : hasContent && !recording.visible ? submission == .message ? "arrow.up" : "checkmark" : "mic.fill").appSymbol(.action) }
     }.foregroundStyle(theme.color(.onPrimary))
       .frame(width: holding ? 64 : 36, height: holding ? 64 : 36)
@@ -115,6 +115,7 @@ struct DictationAction: View {
 struct DictationRecordingPanel: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let recording: VoiceRecordingComposer
   private var holding: Bool { recording.gesture.state == .holding }
   var body: some View {
@@ -181,20 +182,25 @@ struct DictationRecordingPanel: View {
   }
   private var waveform: some View {
     GeometryReader { geometry in
-      Canvas { context, size in
-        let preview = recording.state == .paused
-        let levels = preview ? recording.waveform : recording.levels
-        let fraction = recording.previewDuration > 0 ? recording.previewPosition / recording.previewDuration : 0
-        let step = size.width / CGFloat(levels.count)
-        for (index, level) in levels.enumerated() {
-          let height = max(2, CGFloat(level) * min(22, size.height))
-          context.fill(Path(roundedRect: CGRect(x: CGFloat(index) * step, y: (size.height - height) / 2,
-            width: max(1, step - 2), height: height), cornerRadius: 1),
-            with: .color(theme.color(preview && Double(index) / Double(levels.count) >= fraction ? .textSecondary : .primary)))
-        }
-        if preview {
-          let cursor = CGRect(x: max(0, min(size.width - 20, size.width * fraction - 10)), y: (size.height - 20) / 2, width: 20, height: 20)
-          context.fill(Path(ellipseIn: cursor), with: .color(theme.color(.primary)))
+      // While recording, every frame slides the bars between the 100 ms meter samples instead of jumping a bar.
+      TimelineView(.animation(paused: recording.state != .recording || reduceMotion)) { timeline in
+        Canvas { context, size in
+          let preview = recording.state == .paused
+          let levels = preview ? recording.waveform : recording.levels
+          let fraction = recording.previewDuration > 0 ? recording.previewPosition / recording.previewDuration : 0
+          let step = size.width / CGFloat(levels.count)
+          let shift = preview ? 0 : step * (reduceMotion ? 1 : min(1, max(0, timeline.date.timeIntervalSince(recording.sampledAt) / 0.1)))
+          context.clip(to: Path(CGRect(origin: .zero, size: size)))
+          for (index, level) in levels.enumerated() {
+            let height = max(2, CGFloat(level) * min(22, size.height))
+            context.fill(Path(roundedRect: CGRect(x: CGFloat(preview ? index : index + 1) * step - shift, y: (size.height - height) / 2,
+              width: max(1, step - 2), height: height), cornerRadius: 1),
+              with: .color(theme.color(preview && Double(index) / Double(levels.count) >= fraction ? .textSecondary : .primary)))
+          }
+          if preview {
+            let cursor = CGRect(x: max(0, min(size.width - 20, size.width * fraction - 10)), y: (size.height - 20) / 2, width: 20, height: 20)
+            context.fill(Path(ellipseIn: cursor), with: .color(theme.color(.primary)))
+          }
         }
       }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged {
         recording.seekPreview(fraction: $0.location.x / max(1, geometry.size.width))

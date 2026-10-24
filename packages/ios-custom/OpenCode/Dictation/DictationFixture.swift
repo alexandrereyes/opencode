@@ -13,6 +13,21 @@ import SwiftUI
   nonisolated static let text = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
 }
 
+/// `-OpenCodeDictationTimeline`: uptime marks of the recording milestones for `script/measure-dictation-device.py`.
+@MainActor enum DictationTimeline {
+  struct Mark: Codable { let name: String; let uptime: TimeInterval }
+  static let enabled = DictationFixtures.mode != nil && ProcessInfo.processInfo.arguments.contains("-OpenCodeDictationTimeline")
+  private static var marks: [Mark] = []
+  private static let writer = DispatchQueue(label: "br.com.alexandrem.opencode.dictation-timeline", qos: .utility)
+  static func mark(_ name: String) {
+    guard enabled else { return }
+    marks.append(Mark(name: name, uptime: ProcessInfo.processInfo.systemUptime))
+    guard let data = try? JSONEncoder().encode(marks) else { return }
+    let target = URL.applicationSupportDirectory.appending(path: "OpenCode/dictation-timeline.json")
+    writer.async { try? data.write(to: target, options: .atomic) }
+  }
+}
+
 struct DictationFixtureRoot: View {
   @Environment(\.colorScheme) private var scheme
   @Environment(\.scenePhase) private var scenePhase
@@ -103,6 +118,7 @@ actor DictationFixtureEngine: TranscriptionEngine {
   private var started: TimeInterval?
   private var accumulated: TimeInterval = 0
   private var file: URL?
+  var authorized: Bool { true }
   func authorize() async -> Bool { true }
   func start(at file: URL) async throws { self.file = file; accumulated = 0; started = ProcessInfo.processInfo.systemUptime; try writePCM() }
   var elapsed: TimeInterval { accumulated + (started.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0) }
