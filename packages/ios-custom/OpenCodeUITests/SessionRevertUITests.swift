@@ -31,6 +31,14 @@ import XCTest
     XCTAssertTrue(button.waitForExistence(timeout: 10))
     return button
   }
+  private func answer(_ button: String, app: XCUIApplication) {
+    let alert = app.alerts["Redefinir para este ponto?"]
+    XCTAssertTrue(alert.waitForExistence(timeout: 5))
+    XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@",
+      "A mensagem volta para o campo de texto e as seguintes ficam ocultas até Refazer. Enviar uma nova mensagem apaga as ocultas de vez.")).firstMatch.exists)
+    alert.buttons[button].tap()
+    XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+  }
   private func restored(_ text: String, app: XCUIApplication) {
     let editor = app.textViews["conversation-composer"]
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: editor)], timeout: 30), .completed)
@@ -44,30 +52,59 @@ import XCTest
     let earlier = try value("EARLIER")
     shot("before")
     show(last, app: app).tap()
-    XCTAssertFalse(app.alerts.firstMatch.exists)
+    shot("confirm")
+    answer("Redefinir", app: app)
     restored(try value("LAST_TEXT"), app: app)
     XCTAssertFalse(app.buttons["user-revert-" + last].exists)
     shot("last")
-    app.buttons["revert-redo"].tap()
-    XCTAssertTrue(app.buttons["user-revert-" + last].waitForExistence(timeout: 30))
-    show(earlier, app: app).tap()
+    // The bar's Desfazer hides one more message, so it asks too; Cancelar keeps the current boundary.
+    app.buttons["revert-undo"].tap()
+    shot("bar-confirm")
+    answer("Cancelar", app: app)
+    XCTAssertEqual(app.textViews["conversation-composer"].value as? String, try value("LAST_TEXT"))
+    XCTAssertTrue(app.buttons["user-revert-" + earlier].exists)
+    app.buttons["revert-undo"].tap()
+    answer("Redefinir", app: app)
     restored(try value("EARLIER_TEXT"), app: app)
     XCTAssertFalse(app.buttons["user-revert-" + earlier].exists)
     shot("earlier")
     app.buttons["revert-redo"].tap()
+    XCTAssertFalse(app.alerts.firstMatch.exists)
     restored(try value("LAST_TEXT"), app: app)
     app.buttons["revert-redo"].tap()
     XCTAssertTrue(app.buttons["user-revert-" + last].waitForExistence(timeout: 30))
     shot("redo")
     show(earlier, app: app).tap()
+    answer("Redefinir", app: app)
     restored(try value("EARLIER_TEXT"), app: app)
     shot("cascade")
+  }
+
+  func testCancelKeepsTimelineAndDraft() throws {
+    let app = try launch(value("FAILURE"))
+    defer { app.terminate() }
+    let message = try value("FAILURE_MESSAGE")
+    let composer = app.textViews["conversation-composer"]
+    let draft = composer.value as? String
+    show(message, app: app).tap()
+    answer("Cancelar", app: app)
+    let prompt = app.descendants(matching: .any)["user-prompt-" + message]
+    prompt.press(forDuration: 1)
+    let action = app.buttons.matching(NSPredicate(format: "label == 'Redefinir para este ponto'")).firstMatch
+    XCTAssertTrue(action.waitForExistence(timeout: 5))
+    action.tap()
+    answer("Cancelar", app: app)
+    XCTAssertTrue(app.buttons["user-revert-" + message].exists)
+    XCTAssertFalse(app.buttons["revert-redo"].exists)
+    XCTAssertEqual(composer.value as? String, draft)
+    shot("cancelled")
   }
 
   func testFailureKeepsTimelineAndRestoredDraft() throws {
     let app = try launch(value("FAILURE"), failure: true)
     defer { app.terminate() }
     show(try value("FAILURE_MESSAGE"), app: app).tap()
+    answer("Redefinir", app: app)
     XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Não foi possível atualizar a sessão.'")).firstMatch.waitForExistence(timeout: 30))
     XCTAssertTrue(app.buttons["user-revert-" + (try value("FAILURE_MESSAGE"))].waitForExistence(timeout: 15))
     XCTAssertEqual(app.textViews["conversation-composer"].value as? String, "Mensagem da falha simulada.")
@@ -105,6 +142,7 @@ import XCTest
     let action = try XCTUnwrap(app.buttons.matching(NSPredicate(format: "label == 'Redefinir para este ponto'"))
       .allElementsBoundByIndex.first(where: \.isHittable))
     action.tap()
+    answer("Redefinir", app: app)
     restored("Responda apenas NOVO. Não use ferramentas.", app: app)
     app.buttons["Enviar mensagem"].tap()
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"),
@@ -126,6 +164,7 @@ import XCTest
     XCTAssertLessThanOrEqual(undo.frame.maxY, header.frame.maxY)
     shot("sticky-before")
     undo.tap()
+    answer("Redefinir", app: app)
     restored("Pedido fixado para desfazer.", app: app)
     XCTAssertFalse(app.buttons["user-revert-" + id].exists)
     shot("sticky-undone")

@@ -181,6 +181,7 @@ struct ConversationView: View {
   @State private var quoteRevealed: String?
   @State private var quoteMessage: String?
   @State private var quoteRevealTask: Task<Void, Never>?
+  @State private var revertCandidate: ConversationMessage?
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
@@ -284,12 +285,14 @@ struct ConversationView: View {
       pending: sessions.drafts.draft(conversation.id).sending
         || sessions.drafts.draft(conversation.id).importing,
       revert: { id in
-        guard let message = conversation.messages.first(where: { $0.id == id && $0.type == "user" }) else { return }
-        Task {
-          await conversation.reversion.perform(target: message, store: conversation,
-            draft: sessions.drafts.draft(conversation.id))
-        }
+        revertCandidate = conversation.messages.first { $0.id == id && $0.type == "user" }
       }))
+    .revertConfirmation($revertCandidate) { message in
+      Task {
+        await conversation.reversion.perform(target: message, store: conversation,
+          draft: sessions.drafts.draft(conversation.id))
+      }
+    }
     // Only pinned prompts read this size; it changes on every frame of a keyboard transition.
     .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport.promptSize = $0 }
     .environment(\.conversationImages, conversation.session.map {

@@ -515,7 +515,11 @@ the old path also waited for the agent/model selection, prompt and full conversa
 ### Desfazer mensagem enviada
 
 The backward-arrow action on delivered root/master user messages, including their sticky presentation and long-press
-menu, uses the web's **Redefinir para este ponto** label and acts without confirmation. Child bubbles omit it. Undo hides
+menu, uses the web's **Redefinir para este ponto** label. **Alexandre, 24/10:** it, and the **Desfazer** button of the
+bar above the composer, first ask in a native alert (**Redefinir para este ponto?**, explaining that the message returns
+to the composer, later ones stay hidden until **Refazer**, and sending a new message deletes them for good) with
+**Cancelar** and destructive **Redefinir**; **Refazer** stays immediate. The web acts without confirmation. Child
+bubbles omit it. Undo hides
 the selected message and later history, restores its text/tokens, attachments, quotes and file/comment context into the
 composer, and preserves the selected model/agent. **Refazer** advances one message at a time, then restores all history.
 The progress row covers descendant planning, Session rollback and pending-inbox cleanup. A partial child failure is
@@ -532,7 +536,9 @@ Verification uses only **OpenCode Desfazer** (`8AE067E9-2D79-4BBF-80A5-A8965804C
 `ios-desfazer-derived` and explicit sandbox URL/password. `script/test-revert.py prepare --role dark|light|web` creates
 isolated Git repositories and parent/child Sessions using Luna 6/low. After `build-for-testing`, run
 `script/test-revert.py test --role dark` (then light), and `verify` to check staged parent/child boundaries and the real
-child-created file's rollback. Creation and verification records are in `.agent-artifacts/desfazer/LEDGER.json`.
+child-created file's rollback. `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`,
+`OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_EVIDENCE` and `OPENCODE_REVERT_LEDGER` select another isolated sandbox; run the
+roles sequentially, since they share one ledger. Creation and verification records are in `.agent-artifacts/desfazer/LEDGER.json`.
 Screenshots, xcresults and sanitized evidence are under
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-desfazer-prints/`.
 The six undo UI cases pass in both themes, including the pinned header, and each native parent's rollback patch matches the live web twin byte for

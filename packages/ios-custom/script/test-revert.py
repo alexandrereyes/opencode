@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owned-only live fixtures and native undo verification, fixed to sandbox 4177."""
+"""Owned-only live fixtures and native undo verification; sandbox 4177 unless OPENCODE_TEST_* overrides it."""
 import argparse
 import base64
 import json
@@ -20,21 +20,23 @@ parser.add_argument("--role", default="dark", choices=["dark", "light", "web"])
 parser.add_argument("tests", nargs="*")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-evidence = temporary / "ios-desfazer-prints"
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+assert server.startswith("http://127.0.0.1:") and server.rsplit(":", 1)[1] not in ["4096", "4178"]
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
+evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-desfazer-prints"))
 evidence.mkdir(exist_ok=True)
-derived = temporary / "ios-desfazer-derived"
-device = "8AE067E9-2D79-4BBF-80A5-A8965804CB6E"
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-desfazer-derived"))
+device = os.environ.get("OPENCODE_TEST_DEVICE", "8AE067E9-2D79-4BBF-80A5-A8965804CB6E")
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
-ledger_path = Path(__file__).resolve().parents[3] / ".agent-artifacts/desfazer/LEDGER.json"
-ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else {"sandbox": "http://127.0.0.1:4177", "runs": {}}
+ledger_path = Path(os.environ.get("OPENCODE_REVERT_LEDGER", Path(__file__).resolve().parents[3] / ".agent-artifacts/desfazer/LEDGER.json"))
+ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else {"sandbox": server, "runs": {}}
 
 def save():
     ledger_path.write_text(json.dumps(ledger, indent=2) + "\n")
 
 def api(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path, headers=headers,
+    request = urllib.request.Request(server + path, headers=headers,
         data=json.dumps(body).encode() if body is not None else None, method=method)
     with urllib.request.urlopen(request, timeout=240) as response:
         data = response.read()
@@ -249,7 +251,8 @@ else:
     targets = [target for config in definition["TestConfigurations"] for target in config["TestTargets"]] if "TestConfigurations" in definition else [v for k,v in definition.items() if k != "__xctestrun_metadata__"]
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(env)
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["EnvironmentVariables"]["OPENCODE_TEST_SERVER_URL"] = server
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
     configured = derived / "Build/Products/Desfazer.xctestrun"
     configured.write_bytes(plistlib.dumps(definition))
     configured.chmod(0o600)

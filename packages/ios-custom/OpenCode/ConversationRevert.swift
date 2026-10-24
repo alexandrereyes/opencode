@@ -17,6 +17,31 @@ extension EnvironmentValues {
   @Entry var userMessageRevert: UserMessageRevertAction? = nil
 }
 
+/// Every entry point that hides history asks first; Refazer only restores and stays immediate.
+private struct RevertConfirmation: ViewModifier {
+  @Binding var candidate: ConversationMessage?
+  let confirm: (ConversationMessage) -> Void
+  func body(content: Content) -> some View {
+    content.alert("Redefinir para este ponto?", isPresented: Binding(
+      get: { candidate != nil }, set: { if !$0 { candidate = nil } }
+    ), presenting: candidate) { message in
+      Button("Cancelar", role: .cancel) { candidate = nil }
+      Button("Redefinir", role: .destructive) {
+        candidate = nil
+        confirm(message)
+      }
+    } message: { _ in
+      Text("A mensagem volta para o campo de texto e as seguintes ficam ocultas até Refazer. Enviar uma nova mensagem apaga as ocultas de vez.")
+    }
+  }
+}
+
+extension View {
+  func revertConfirmation(_ candidate: Binding<ConversationMessage?>, confirm: @escaping (ConversationMessage) -> Void) -> some View {
+    modifier(RevertConfirmation(candidate: candidate, confirm: confirm))
+  }
+}
+
 @MainActor @Observable final class ConversationRevert {
   private(set) var progress: RevertProgress?
   private(set) var local = false
@@ -133,6 +158,7 @@ extension ConversationDraft {
 
 struct ConversationRevertStatus: View {
   @Environment(\.appTheme) private var theme
+  @State private var candidate: ConversationMessage?
   let store: ConversationStore
   let draft: ConversationDraft
   var body: some View {
@@ -175,14 +201,17 @@ struct ConversationRevertStatus: View {
       store.messages.contains(where: { $0.id == boundary }) {
       HStack {
         Button("Desfazer", systemImage: "arrow.uturn.backward") {
-          guard let target = SessionRevert.undo(store.messages, boundary: boundary) else { return }
-          Task { await store.reversion.perform(target: target, store: store, draft: draft) }
+          candidate = SessionRevert.undo(store.messages, boundary: boundary)
         }.disabled(SessionRevert.undo(store.messages, boundary: boundary) == nil)
+          .accessibilityIdentifier("revert-undo")
         Spacer()
         Button("Refazer", systemImage: "arrow.uturn.forward") {
           Task { await store.reversion.perform(target: SessionRevert.redo(store.messages, boundary: boundary), store: store, draft: draft) }
         }.accessibilityIdentifier("revert-redo")
       }.font(.caption).foregroundStyle(theme.color(.textSecondary)).padding(.horizontal, 16).padding(.vertical, 8)
+        .revertConfirmation($candidate) { target in
+          Task { await store.reversion.perform(target: target, store: store, draft: draft) }
+        }
     }
   }
 }

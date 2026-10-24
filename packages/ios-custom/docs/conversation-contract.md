@@ -827,7 +827,7 @@ projecting the requested boundary/draft. Submission waits for the operations, in
 per-server/session coordinator survives conversation remounts.
 
 Every delivered root/master user bubble (also its sticky header and long-press menu) offers
-**Redefinir para este ponto**, without confirmation. Child bubbles omit it, as the web does. Hidden history begins
+**Redefinir para este ponto**, after a native confirmation (iOS only; the web has none). Child bubbles omit it, as the web does. Hidden history begins
 at the selected user message. **Refazer** advances one user boundary; at the last boundary it asks
 `custom.session-family/clear({sessionID})`, clears descendants sequentially (interrupt/wait busy ones), then
 bodyless `DELETE /api/session/:id/revert` and resets the composer. No Session DELETE is involved.
