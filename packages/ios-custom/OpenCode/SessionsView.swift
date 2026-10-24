@@ -212,7 +212,7 @@ struct SessionsView: View {
         if route.master {
           MasterSessionView(sessions: store)
         } else if route.newSession {
-          NewSessionView(sessions: store)
+          NewSessionView(sessions: store, origin: route.origin)
             .id(route.id)
         } else {
           ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)

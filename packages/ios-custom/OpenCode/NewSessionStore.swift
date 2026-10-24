@@ -23,9 +23,11 @@ import OpenCodeKit
   private let defaults: UserDefaults
   private let memoryKey: String
   private var categories: [String: String]
+  private let origin: NewSessionOrigin?
 
-  init(sessions: SessionStore, defaults: UserDefaults = .standard) {
+  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, defaults: UserDefaults = .standard) {
     self.sessions = sessions
+    self.origin = origin
     self.defaults = defaults
     let server = sessions.client.configuration.url.absoluteString
     draft = sessions.drafts.draft("new-session")
@@ -90,22 +92,31 @@ import OpenCodeKit
     guard !initialized else { return }
     await draft.load()
     if sessions.preferences == nil { await sessions.reload() }
-    // Like a repository filter, the Chats filter wins; otherwise a restored chat draft stays a chat.
+    let inherited = origin.flatMap { origin in projects.first { $0.id == origin.projectID } }
+    // An originating session wins. Otherwise, like a repository filter, the Chats filter wins,
+    // and a restored chat draft stays a chat.
     if chatsAvailable
-      && (sessions.chatsSelected
-        || (chat && !projects.contains { $0.id == sessions.selectedProject }))
+      && (origin?.chat == true
+        || (inherited == nil
+          && (sessions.chatsSelected
+            || (chat && !projects.contains { $0.id == sessions.selectedProject }))))
     {
       if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
+      if let model = origin?.model { draft.model = model }
       initialized = true
       draft.focused = true
       return
     }
     let restored = chat ? nil : projects.first { $0.id == draft.newSession?.projectID }
     let initial =
-      projects.first { $0.id == sessions.selectedProject } ?? restored
+      inherited ?? projects.first { $0.id == sessions.selectedProject } ?? restored
       ?? NewSessionProjection.initialProject(
         projects, filtered: nil, last: sessions.preferences?.data.projects["local"]?.lastProject)
-    if let initial, initial.id != restored?.id {
+    if let origin, let inherited {
+      draft.newSession = NewSessionContext(
+        projectID: inherited.id, destination: origin.destination, mcp: draft.newSession?.mcp ?? [:])
+      if let model = origin.model { draft.model = model }
+    } else if let initial, initial.id != restored?.id {
       draft.newSession = NewSessionContext(
         projectID: initial.id,
         destination: .implicit(lastUsed: categories[initial.id]))

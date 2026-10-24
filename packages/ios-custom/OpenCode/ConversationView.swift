@@ -578,6 +578,16 @@ struct ConversationView: View {
           sessions.drafts.draft(conversation.id).focused = false
           Haptics.play(.warning)
           deleteCandidate = conversation.session
+        }, newSession: {
+          let draft = sessions.drafts.draft(conversation.id)
+          draft.focused = false
+          leavePosition()
+          let origin = conversation.session.flatMap {
+            NewSessionOrigin(session: $0, projects: sessions.projects, chatRoot: sessions.chatRoot,
+              model: draft.model ?? $0.model)
+          }
+          sessions.conversationPath.append(
+            .init(id: "draft_" + UUID().uuidString, newSession: true, origin: origin))
         }))
         .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
       }

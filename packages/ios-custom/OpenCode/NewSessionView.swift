@@ -13,7 +13,9 @@ struct NewSessionView: View {
     case project, directory, base, add
     var id: String { rawValue }
   }
-  init(sessions: SessionStore) { _store = State(initialValue: NewSessionStore(sessions: sessions)) }
+  init(sessions: SessionStore, origin: NewSessionOrigin? = nil) {
+    _store = State(initialValue: NewSessionStore(sessions: sessions, origin: origin))
+  }
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {

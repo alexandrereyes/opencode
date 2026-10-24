@@ -119,6 +119,25 @@ no model calls). All launches explicitly use the sandbox URL/password. Evidence,
 sidebar comparison and fixture-driven real-row renders for root/worktree/chat/extreme names, is in
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda10-prints/`.
 
+### Nova sessão from a conversation
+
+**Nova sessão** is the first item of the conversation's `…` menu, for roots and children. Like the web's
+`tab.new` from a session (`packages/app-custom/src/shell/titlebar/titlebar.tsx`), it opens the ordinary new-session
+screen with the session's project and checkout already selected: the main directory, or that existing worktree with its
+branch (no base branch, which only applies to a new worktree). It also preselects the composer's current model and
+effort (`draft.model ?? session.model`); the agent is **not** inherited. `NewSessionOrigin` builds this context and
+rides on the pushed `ConversationRoute`; `NewSessionStore.open()` applies it over Sessões' repository/Chats filter,
+a restored draft and the remembered last-used category. Sending replaces the route with the created session, so Voltar
+returns to the origin.
+
+A chat session (under the managed chats root) selects the [Chats destination](#chats-destination) with the same
+model and effort, as the web's `openChat(connection, model)` does. A project missing from the new-session list falls
+back to the ordinary choice.
+
+`OpenCodeUITests/MenuNewSessionTests` needs `OPENCODE_TEST_ORIGIN_SESSION` (a sandbox session in a listed project or
+in Chats) and optionally `OPENCODE_TEST_ORIGIN_PROJECT` (the project name, or `Chats`), passed through
+`test-isolated.py --environment`; it sends one short prompt with the origin's model.
+
 ## Second screen: Conversa
 
 The conversation of one session, opened from "Sessões" (row tap and "Responder"). It replaces the provisional session

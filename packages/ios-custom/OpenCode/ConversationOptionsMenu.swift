@@ -15,12 +15,14 @@ struct ConversationOptionsMenu: UIViewRepresentable {
     let details: () -> Void
     let archive: () -> Void
     var delete: (() -> Void)? = nil
+    var newSession: (() -> Void)? = nil
   }
   struct Signature: Equatable {
     let sessionID: String
     let available: Bool
     let canArchive: Bool
     let archiving: Bool
+    let canCreate: Bool
     let canDelete: Bool
     let deleting: Bool
     let theme: String
@@ -42,7 +44,8 @@ struct ConversationOptionsMenu: UIViewRepresentable {
   func update(_ button: UIButton, coordinator: Coordinator) {
     coordinator.actions = actions
     let signature = Signature(sessionID: sessionID, available: available, canArchive: canArchive,
-                              archiving: archiving, canDelete: actions.delete != nil,
+                              archiving: archiving, canCreate: actions.newSession != nil,
+                              canDelete: actions.delete != nil,
                               deleting: deleting, theme: theme.id)
     guard coordinator.signature != signature else { return }
     coordinator.signature = signature
@@ -54,6 +57,9 @@ struct ConversationOptionsMenu: UIViewRepresentable {
     }
     // Keep the menu and native actions alive across unrelated header/transcript
     // updates. Their handlers read the latest callbacks, not a discarded View body.
+    let create = UIAction(title: "Nova sessão", image: icon("plus"), attributes: available ? [] : .disabled) {
+      [weak coordinator] _ in coordinator?.actions?.newSession?()
+    }
     let search = UIAction(title: "Buscar na conversa", image: icon("magnifyingglass")) {
       [weak coordinator] _ in coordinator?.actions?.search()
     }
@@ -72,7 +78,7 @@ struct ConversationOptionsMenu: UIViewRepresentable {
       [weak coordinator] _ in coordinator?.actions?.delete?()
     }
     let destructive = (canArchive ? [archive] : []) + (actions.delete != nil ? [delete] : [])
-    button.menu = UIMenu(children: [search, rename, details] + (destructive.isEmpty
+    button.menu = UIMenu(children: (actions.newSession != nil ? [create] : []) + [search, rename, details] + (destructive.isEmpty
       ? [] : [UIMenu(options: .displayInline, children: destructive)]))
   }
   static func dismantleUIView(_ button: UIButton, coordinator: Coordinator) {

@@ -59,6 +59,7 @@ final class SessionStore {
     var tool: String? = nil
     var newSession = false
     var master = false
+    var origin: NewSessionOrigin? = nil
   }
   var conversationPath: [ConversationRoute] = [] {
     didSet {

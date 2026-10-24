@@ -29,6 +29,32 @@ import XCTest
     XCTAssertNil(coordinator.signature)
   }
 
+  func testNewSessionIsTheFirstCommandAndUsesTheLatestAction() throws {
+    let button = UIButton(type: .system)
+    let coordinator = ConversationOptionsMenu.Coordinator()
+    var opened = ""
+    func menu(_ title: String, available: Bool = true) -> ConversationOptionsMenu {
+      ConversationOptionsMenu(sessionID: "synthetic", available: available, canArchive: true,
+        archiving: false, theme: .selected, actions: .init(search: {}, rename: {}, details: {},
+          archive: {}, delete: {}, newSession: { opened = title }))
+    }
+    menu("old").update(button, coordinator: coordinator)
+    let original = try XCTUnwrap(button.menu)
+    menu("latest").update(button, coordinator: coordinator)
+    XCTAssertTrue(button.menu === original)
+    let children = original.children
+    XCTAssertEqual(children.compactMap { ($0 as? UIAction)?.title },
+      ["Nova sessão", "Buscar na conversa", "Renomear", "Detalhes da sessão"])
+    let create = try XCTUnwrap(children.first as? UIAction)
+    XCTAssertFalse(create.attributes.contains(.disabled))
+    XCTAssertFalse(create.attributes.contains(.destructive))
+    XCTAssertEqual(create.image?.renderingMode, .alwaysOriginal)
+    coordinator.actions?.newSession?()
+    XCTAssertEqual(opened, "latest")
+    menu("unavailable", available: false).update(button, coordinator: coordinator)
+    XCTAssertTrue(try XCTUnwrap(button.menu?.children.first as? UIAction).attributes.contains(.disabled))
+  }
+
   func testUnavailableCommandsAndArchiveKeepNativeSemantics() throws {
     let button = UIButton(type: .system)
     let coordinator = ConversationOptionsMenu.Coordinator()
