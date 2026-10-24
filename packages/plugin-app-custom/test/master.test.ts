@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
 import { Effect, Fiber, Schema, Types } from "effect"
 import { Agent } from "@opencode/schema/agent"
+import { Model } from "@opencode/schema/model"
+import { Provider } from "@opencode/schema/provider"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Tool } from "@opencode/schema/tool"
@@ -23,12 +26,15 @@ import {
   configureAgent,
   controlNames,
   filterSessions,
+  observeModel,
   origin,
   preferredModel,
   registerTools,
+  rememberModel,
+  resolveModel,
   summary,
 } from "../src/master"
-import type { MasterContext } from "../src/master"
+import type { MasterContext, ModelContext } from "../src/master"
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return Schema.decodeUnknownSync(Session.Info)({
@@ -66,7 +72,7 @@ test("all master input schemas reject invalid boundary values", () => {
     expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow()
 })
 
-test("Mestra agent is primary, hidden, gets current instructions, explicit model, and allow permissions", () => {
+test("Mestra agent is primary, hidden, gets current instructions and allow permissions without a static model", () => {
   const agents = new Map<string, Types.DeepMutable<Agent.Info>>()
   const editor: AgentEditor = {
     list: () => [...agents.values()],
@@ -81,17 +87,101 @@ test("Mestra agent is primary, hidden, gets current instructions, explicit model
       agents.set(id, value)
     },
   }
-  configureAgent(editor, preferredModel)
+  configureAgent(editor)
   expect(agents.get(agentID)).toMatchObject({
     hidden: true,
     mode: "primary",
-    model: preferredModel,
     permissions: [{ action: "*", resource: "*", effect: "allow" }],
   })
   expect(agents.get(agentID)?.system).toContain("dado não confiável")
   expect(agents.get(agentID)?.system).toContain("skill opencode")
-  configureAgent(editor)
   expect(agents.get(agentID)?.model).toBeUndefined()
+})
+
+function catalogModel(providerID: string, id: string, variants: string[] = [], enabled = true) {
+  return {
+    ...Model.Info.default(Provider.ID.make(providerID), Model.ID.make(id)),
+    variants: variants.map((id) => ({ id: Model.VariantID.make(id) })),
+    enabled,
+  }
+}
+
+function modelFixture(sessions: Session.Info[] = []) {
+  const storage = new Map<string, Schema.Json>()
+  const models: Model.Info[] = []
+  const ctx: ModelContext = {
+    storage: {
+      get: (key) => Effect.sync(() => storage.get(key)),
+      set: (key, value) => Effect.sync(() => void storage.set(key, value)),
+    },
+    model: {
+      list: () => Effect.sync(() => ({ location: { directory: AbsolutePath.make("/repo") }, data: [...models] })),
+    },
+    session: {
+      get: ({ sessionID }) => {
+        const found = sessions.find((item) => item.id === sessionID)
+        return found ? Effect.succeed(found) : Effect.fail(new Error("missing"))
+      },
+    },
+  }
+  return { ctx, models, storage, resolve: () => Effect.runPromise(resolveModel(ctx)) }
+}
+
+const sol = catalogModel("llm-proxy", "gpt-6.1-sol-ultrafast", ["low", "medium", "high"])
+const luna = Model.Ref.make({
+  providerID: Provider.ID.make("llm-proxy"),
+  id: Model.ID.make("gpt-6-luna"),
+  variant: Model.VariantID.make("low"),
+})
+
+test("model resolves when called, so providers registered after the plugin still yield Sol Ultrafast medium", async () => {
+  const f = modelFixture()
+  expect(await f.resolve()).toBeUndefined()
+  f.models.push(catalogModel("llm-proxy", "gpt-6.1-sol-ultrafast", ["low", "medium"], false))
+  expect(await f.resolve()).toBeUndefined()
+  f.models.splice(0, 1, sol)
+  expect(await f.resolve()).toEqual(preferredModel)
+  expect(preferredModel).toMatchObject({ providerID: "llm-proxy", id: "gpt-6.1-sol-ultrafast", variant: "medium" })
+})
+
+test("changing a Mestra session's model or creating one with a model becomes the next default; others are ignored", async () => {
+  const masterSession = session("ses_mestra", { agent: agentID })
+  const f = modelFixture([masterSession, root])
+  f.models.push(sol, catalogModel("llm-proxy", "gpt-6-luna", ["low", "high"]))
+  await Effect.runPromise(
+    observeModel(f.ctx, { type: "session.model.selected", data: { sessionID: root.id, model: luna } }),
+  )
+  await Effect.runPromise(
+    observeModel(f.ctx, { type: "session.created", data: { agent: Agent.ID.make("build"), model: luna } }),
+  )
+  expect(await f.resolve()).toEqual(preferredModel)
+  await Effect.runPromise(
+    observeModel(f.ctx, { type: "session.model.selected", data: { sessionID: masterSession.id, model: luna } }),
+  )
+  expect(await f.resolve()).toEqual(luna)
+  const high = { ...luna, variant: Model.VariantID.make("high") }
+  await Effect.runPromise(observeModel(f.ctx, { type: "session.created", data: { agent: agentID, model: high } }))
+  expect(await f.resolve()).toEqual(high)
+  await Effect.runPromise(rememberModel(f.ctx, preferredModel))
+  expect(await f.resolve()).toEqual(preferredModel)
+})
+
+test("a saved model that disappeared, was disabled, or lost its variant falls back to Sol, then to the server default", async () => {
+  const f = modelFixture()
+  f.models.push(sol)
+  await Effect.runPromise(rememberModel(f.ctx, luna))
+  expect(await f.resolve()).toEqual(preferredModel)
+  f.models.push(catalogModel("llm-proxy", "gpt-6-luna", ["high"]))
+  expect(await f.resolve()).toEqual(preferredModel)
+  f.models.splice(1, 1, catalogModel("llm-proxy", "gpt-6-luna", ["low"], false))
+  expect(await f.resolve()).toEqual(preferredModel)
+  f.models.splice(1, 1, catalogModel("llm-proxy", "gpt-6-luna", ["low"]))
+  expect(await f.resolve()).toEqual(luna)
+  f.models.splice(0)
+  expect(await f.resolve()).toBeUndefined()
+  f.storage.set("master:model", { providerID: 1 })
+  f.models.push(sol)
+  expect(await f.resolve()).toEqual(preferredModel)
 })
 
 test("root-only filtering excludes caller, other masters, archived and children, and orders true message activity", () => {
@@ -275,7 +365,11 @@ test("questions retain native field validation and only top-level pending questi
   }
   f.pending[0] = {
     ...f.pending[0],
-    forms: [form, { ...form, id: Form.ID.make("frm_child"), sessionID: child.id }, { ...form, id: Form.ID.make("frm_global"), sessionID: "global" }],
+    forms: [
+      form,
+      { ...form, id: Form.ID.make("frm_child"), sessionID: child.id },
+      { ...form, id: Form.ID.make("frm_global"), sessionID: "global" },
+    ],
   }
   expect((await f.run("requests_list", {})).output).toMatchObject({
     requests: [{ type: "permission" }, { id: form.id, fields: form.fields }],

@@ -13,7 +13,7 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionScan } from "@opencode/schema/session-scan"
 import { TokenUsage } from "@opencode/schema/token-usage"
 import { Tool } from "@opencode/schema/tool"
-import { DateTime, Effect, Option, Schema } from "effect"
+import { DateTime, Effect, Option, Schema, Stream } from "effect"
 import { Master } from "./rpc.js"
 
 export const agentID = Agent.ID.make("mestra")
@@ -100,39 +100,111 @@ const Status = Schema.Struct({
   activeTool: Schema.optionalKey(Schema.String),
 })
 
-export function configureAgent(editor: AgentEditor, model?: Model.Ref) {
+export function configureAgent(editor: AgentEditor) {
   editor.update(agentID, (agent) => {
     agent.name = Agent.Name.make("Mestra")
     agent.mode = "primary"
     agent.hidden = true
     agent.description = "Oráculo de sessões de Alexandre"
     agent.system = instructions
-    agent.model = model
     agent.permissions = [{ action: "*", resource: "*", effect: "allow" }]
   })
 }
 
 export const registerMaster = Effect.fn("Master.register")(function* (ctx: Plugin.Context) {
-  const models = yield* ctx.model.list().pipe(Effect.orDie)
-  const selected = models.data.find(
-    (model) =>
-      model.enabled !== false && model.providerID === preferredModel.providerID && model.id === preferredModel.id,
-  )
-  const model = selected ? preferredModel : undefined
-  yield* ctx.agent.transform((editor) => configureAgent(editor, model))
+  yield* ctx.agent.transform((editor) => configureAgent(editor))
   yield* ctx.rpc
     .register(Master.Definition, {
-      info: () => Effect.succeed({ version: 1 as const, agent: agentID, ...(model ? { model } : {}) }),
+      info: () =>
+        resolveModel(ctx).pipe(
+          Effect.map((model) => ({ version: 1 as const, agent: agentID, ...(model ? { model } : {}) })),
+        ),
     })
     .pipe(Effect.orDie)
   yield* ctx.session.hook("context", (event) =>
-    Effect.sync(() => {
-      if (event.agent === agentID) {
-        delete event.tools.subagent
-      }
+    Effect.gen(function* () {
+      if (event.agent !== agentID) return
+      delete event.tools.subagent
+      yield* rememberModel(ctx, event.model)
     }),
   )
+  yield* ctx.event.subscribe().pipe(
+    Stream.filter(
+      (event): event is Extract<typeof event, ModelEvent> =>
+        event.type === "session.created" || event.type === "session.model.selected",
+    ),
+    Stream.runForEach((event) =>
+      observeModel(ctx, event).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("Mestra model tracking failed", { cause })),
+      ),
+    ),
+    Effect.catchCause((cause) => Effect.logWarning("Mestra model subscription failed", { cause })),
+    Effect.forkScoped({ startImmediately: true }),
+  )
   yield* ctx.tool.transform((editor) => registerTools(editor, ctx))
+})
+
+const modelKey = "master:model"
+
+export type ModelEvent =
+  | { readonly type: "session.created"; readonly data: { readonly agent?: Agent.ID; readonly model?: Model.Ref } }
+  | {
+      readonly type: "session.model.selected"
+      readonly data: { readonly sessionID: Session.ID; readonly model: Model.Ref }
+    }
+
+export type ModelContext = {
+  storage: Pick<Plugin.Context["storage"], "get" | "set">
+  model: Pick<Plugin.Context["model"], "list">
+  session: Pick<Plugin.Context["session"], "get">
+}
+
+/**
+ * The model the next Mestra session should start with: the last one chosen in a Mestra session while it is
+ * still enabled, then the preferred model. Resolved per call because configured providers load after this plugin.
+ */
+export const resolveModel = Effect.fn("Master.resolveModel")(function* (ctx: Pick<ModelContext, "storage" | "model">) {
+  const models = yield* ctx.model.list().pipe(
+    Effect.map((result) => result.data),
+    Effect.orElseSucceed(() => []),
+  )
+  const saved = Option.getOrUndefined(Schema.decodeUnknownOption(Model.Ref)(yield* ctx.storage.get(modelKey)))
+  return [saved, preferredModel].find(
+    (ref) =>
+      ref !== undefined &&
+      models.some(
+        (model) =>
+          model.enabled !== false &&
+          model.providerID === ref.providerID &&
+          model.id === ref.id &&
+          (ref.variant === undefined ||
+            ref.variant === "default" ||
+            model.variants.some((variant) => variant.id === ref.variant)),
+      ),
+  )
+})
+
+export const rememberModel = Effect.fn("Master.rememberModel")(function* (
+  ctx: Pick<ModelContext, "storage">,
+  model: Model.Ref,
+) {
+  const saved = Option.getOrUndefined(Schema.decodeUnknownOption(Model.Ref)(yield* ctx.storage.get(modelKey)))
+  if (
+    saved?.providerID === model.providerID &&
+    saved.id === model.id &&
+    (saved.variant ?? "default") === (model.variant ?? "default")
+  )
+    return
+  yield* ctx.storage.set(modelKey, Schema.encodeSync(Model.Ref)(model))
+})
+
+export const observeModel = Effect.fn("Master.observeModel")(function* (ctx: ModelContext, event: ModelEvent) {
+  if (event.type === "session.created") {
+    if (event.data.agent === agentID && event.data.model) yield* rememberModel(ctx, event.data.model)
+    return
+  }
+  const session = yield* ctx.session.get({ sessionID: event.data.sessionID })
+  if (session.agent === agentID) yield* rememberModel(ctx, event.data.model)
 })
 
 export const controlNames = [
