@@ -204,6 +204,7 @@ public enum VoiceMasterProgress {
       case "request_answer": return "A mestra está respondendo ao pedido autorizado."
       case "read", "grep", "glob": return "A mestra está consultando os arquivos."
       case "execute": return "A mestra está consultando as ferramentas."
+      case "iphone_query", "iphone_status": return "A mestra está consultando seu iPhone."
       default: return "A mestra está usando uma ferramenta."
       }
     }

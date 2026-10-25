@@ -199,11 +199,13 @@ public struct ConversationPart: Codable, Sendable, Equatable {
     case "execute": "execute"
     case "question": "Perguntou"
     case "skill": "Skill"
+    case "iphone_query", "iphone_status": "Consultou o iPhone"
     default: name ?? "Ferramenta"
     }
   }
   public var icon: String {
     switch name {
+    case "iphone_query", "iphone_status": "iphone"
     case "glob", "grep": "magnifyingglass"
     case "websearch": "globe"
     case "webfetch": "link"
@@ -213,6 +215,11 @@ public struct ConversationPart: Codable, Sendable, Equatable {
     case "edit", "write", "patch": "pencil"
     default: "wrench.and.screwdriver"
     }
+  }
+  /// "Consultou o iPhone · Saúde" while the source is known, "· estado" for `iphone_status`.
+  public var iphoneSummary: String {
+    let source = input["source"]?.string.flatMap(DeviceSource.init(rawValue:))?.label
+    return "Consultou o iPhone · " + (name == "iphone_status" ? "estado" : source ?? "dados")
   }
   public var exitCode: Int? {
     guard name == "shell", status == "completed", let exit = metadata["exit"]?.number, exit != 0
@@ -260,6 +267,7 @@ public struct ConversationPart: Codable, Sendable, Equatable {
       return
         "Skill · \(metadata["name"]?.string ?? input["id"]?.string ?? input["name"]?.string ?? "skill")\(failed)"
     case "subagent": return input["description"]?.string ?? "Subagente"
+    case "iphone_query", "iphone_status": return iphoneSummary + failed
     case "question":
       let question = input["questions"]?.array?.first?.object
       return

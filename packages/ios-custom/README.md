@@ -1901,6 +1901,40 @@ Review-1 verification: `test-master.py --review-1` adds an ordinary managed-chat
 captures into `ios-mestra-prints/review-1/`. All four master/chat UI cases and the current 26 app-hosted tests pass in both
 themes; simulator build and root `bun run check` pass. The runner deletes only its own ordinary-chat import/allocation.
 
+## Dados do iPhone
+
+The Sessão mestra's `iphone_status` and `iphone_query` tools read this iPhone on demand through `custom.device`
+(contract: [`plugin-app-custom/docs/device.md`](../plugin-app-custom/docs/device.md)). `DeviceAgent` keeps a presence
+lease while the `EventHub` is connected (renewed every 30 s), detaches when the stream stops for good, and answers
+`rpc.custom.device.request` events, which never reach screen subscribers, through the request's Location. It
+therefore answers with the app open or during a voice call, also with the screen locked; otherwise the tool reports
+`offline` immediately.
+
+**Você → Dados do iPhone** has one switch per source (Aparelho and Rede on by default; the others ask for their iOS
+permission when turned on), each permission state and the last answered query. Sources: `device` (UIKit/
+ProcessInfo), `network` (`NWPathMonitor`, no SSID), `location` ("While Using", fresh fix plus `MKReverseGeocodingRequest`
+address in the foreground, last known position in the background), `health` (read-only HealthKit:
+`HKStatisticsCollectionQueryDescriptor` daily aggregates, sleep and workout samples, up to 90 days), `motion`
+(`CMPedometer` per day and `CMMotionActivityManager` minutes, last 7 days) and `photos` (PhotoKit metadata and
+384-pixel JPEG thumbnails returned as tool images). While the iPhone is locked HealthKit is unreadable; a 90-day daily
+summary protected until first unlock (`Application Support/OpenCode/DeviceData`) answers instead. In the
+conversation the tool reads **Consultou o iPhone · Saúde** with the `iphone` symbol; voice narrates **A mestra está
+consultando seu iPhone.**
+
+Requirements: `OpenCode/OpenCode.entitlements` (HealthKit, no clinical records), the usage descriptions
+`NSHealthShareUsageDescription`, `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription` and
+`NSPhotoLibraryUsageDescription`, and an explicit-App-ID profile: automatic signing (`-allowProvisioningUpdates`)
+enables HealthKit on `br.com.alexandrem.opencode`; the team wildcard profile cannot sign the app anymore.
+
+Verification: `swift test --filter DeviceDataTests` (contract, dispatch, ranges, sleep/motion aggregation, cache
+filter, conversation labels), and against an isolated sandbox with location granted and set on the simulator
+(`simctl privacy <udid> grant location br.com.alexandrem.opencode`, and `simctl location <udid> set …` right before each
+run: a simulated position set long before may yield no fix within the 3-second limit):
+`test-isolated.py … OpenCodeUITests/DeviceDataTests` in both themes. The second case sends one real Mestra prompt and
+checks that `iphone_query` for `device`, `network` and `location` completed with `status: "ok"`. HealthKit, CoreMotion
+and Photos need the physical iPhone 14: a DEBUG launch with `-OpenCodeDeviceProbe` enables every source (answer the
+iOS prompts), collects each once plus the locked-cache answer, and writes `Documents/device-probe.json`.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with
@@ -1909,7 +1943,9 @@ themes; simulator build and root `bun run check` pass. The runner deletes only i
 - **Private TestFlight only.** Builds go to an internal testing group in App Store Connect with automatic
   distribution, so every processed build reaches the iPhone without Beta App Review. App Store requirements (review
   guidelines, public privacy disclosures, screenshots) do not apply.
-- **Signing:** Alexandre's personal Apple Developer team (`ERRYZ68LX5`), with automatic signing.
+- **Signing:** Alexandre's personal Apple Developer team (`ERRYZ68LX5`), with automatic signing. The app carries
+  the HealthKit entitlement (`OpenCode/OpenCode.entitlements`), so device builds need `-allowProvisioningUpdates` with
+  the App Store Connect API key (Xcode has no signed-in account) to obtain the explicit App ID profile.
 - **Identifiers:** bundle ID `br.com.alexandrem.opencode`, following the `alexandrem.com.br` domain already used by
   the Cloudflare One hostnames. Extensions use `br.com.alexandrem.opencode.<extension>`, and data shared between the
   app and its extensions uses the App Group `group.br.com.alexandrem.opencode`.

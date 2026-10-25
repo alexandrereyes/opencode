@@ -55,6 +55,10 @@ struct SettingsView: View {
           NavigationLink("Transcrição no aparelho") { TranscriptionSettingsView(transcription: .shared) }
             .accessibilityIdentifier("settings-transcription")
         }.listRowBackground(theme.color(.surface))
+        Section("Sessão mestra") {
+          NavigationLink("Dados do iPhone") { DeviceDataView(agent: .shared) }
+            .accessibilityIdentifier("settings-device-data")
+        }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {
             ServerListView(runtime: runtime, store: store)

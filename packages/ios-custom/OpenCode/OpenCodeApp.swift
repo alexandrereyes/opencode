@@ -107,8 +107,16 @@ private struct AppRoot: View {
     .tint(theme.color(.primary))
     .background(ThemeChrome(theme: theme).frame(width: 0, height: 0))
     .task(id: runtime.servers.revision) { await runtime.prepare() }
-    .task { TranscriptionController.shared.start() }
-    .onChange(of: scenePhase, initial: true) { _, phase in TranscriptionController.shared.setActive(phase == .active) }
+    .task {
+      TranscriptionController.shared.start()
+      #if DEBUG
+      DeviceAgent.shared.probeIfRequested()
+      #endif
+    }
+    .onChange(of: scenePhase, initial: true) { _, phase in
+      TranscriptionController.shared.setActive(phase == .active)
+      if phase == .active { DeviceAgent.shared.sceneBecameActive() }
+    }
     .onChange(of: theme.id, initial: true) { runtime.voice.setTheme(theme) }
   }
 }

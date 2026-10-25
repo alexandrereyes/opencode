@@ -205,6 +205,7 @@ extension ConversationPart {
         return "\(name) Pesquisa na web"
       } ?? "Pesquisa na web"
     case "question": "Perguntas"
+    case "iphone_query", "iphone_status": "Consultou o iPhone"
     default: name ?? "Ferramenta"
     }
   }

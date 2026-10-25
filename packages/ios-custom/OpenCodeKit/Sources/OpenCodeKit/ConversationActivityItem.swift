@@ -55,6 +55,7 @@ extension ConversationPart {
     case "read": return "Ler \(readGroupName)"
     case "webfetch": return "\(groupTitle) \(input["url"]?.string ?? "")"
     case "websearch": return "\(groupTitle) \(input["query"]?.string ?? "")"
+    case "iphone_query", "iphone_status": return iphoneSummary
     default: return groupTitle
     }
   }

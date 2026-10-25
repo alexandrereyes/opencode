@@ -32,18 +32,26 @@ import OpenCodeKit
             delay = 1
             connection += 1
             connected = true
+            DeviceAgent.shared.connected(client)
+          }
+          // iPhone data requests go to the device agent only; they must not trigger screen reloads.
+          if case .update(let update) = event, update.type.hasPrefix("rpc.custom.device.") {
+            DeviceAgent.shared.receive(update, client: client)
+            continue
           }
           publish(event)
         }
       } catch { if Task.isCancelled { break } }
       connected = false
       connection += 1
+      DeviceAgent.shared.disconnected(stopped: false)
       publish(.disconnected)
       do { try await Task.sleep(for: .seconds(delay)) } catch { break }
       delay = min(delay * 2, 15)
     }
     connected = false
     connection += 1
+    DeviceAgent.shared.disconnected(stopped: true)
     publish(.disconnected)
   }
   private func publish(_ event: ServerEvent) {
