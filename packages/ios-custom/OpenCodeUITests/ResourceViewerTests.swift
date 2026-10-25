@@ -45,11 +45,11 @@ import XCTest
     screenshot("watching")
 
     // Only watching, a tap on the screen toggles the controls.
-    let screen = app.otherElements["resource-touch"]
-    screen.tap()
+    let frame = app.images["resource-frame"]
+    frame.tap()
     XCTAssertTrue(take.waitForNonExistence(timeout: 5))
     screenshot("watching-hidden")
-    screen.tap()
+    frame.tap()
     XCTAssertTrue(take.waitForExistence(timeout: 5))
 
     // In control the controls hide, the pill and the edge handle remain, and touches go to the resource.
@@ -62,6 +62,8 @@ import XCTest
     let held = try await state(id)
     XCTAssertEqual(held, "user")
     screenshot("control")
+    let screen = app.otherElements["resource-touch"]
+    XCTAssertTrue(screen.waitForExistence(timeout: 5))
     screen.tap()
     XCTAssertFalse(app.buttons["resource-close"].exists, "a touch in control never toggles the controls")
     handle.tap()
@@ -75,6 +77,6 @@ import XCTest
     let returned = try await state(id)
     XCTAssertNotEqual(returned, "user")
     app.buttons["resource-close"].tap()
-    XCTAssertTrue(take.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.images["resource-frame"].waitForNonExistence(timeout: 10), "the viewer closes")
   }
 }

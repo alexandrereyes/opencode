@@ -20,6 +20,9 @@ import OpenCodeKit
   let reversion: ConversationRevert
   private(set) var family: FamilySnapshot?
   private(set) var children: [Session] = []
+  /// Simulators, emulators and browsers this conversation's family used (`custom.resources`).
+  private(set) var resources: [SessionResource] = []
+  @ObservationIgnored private var resourcesTask: Task<Void, Never>?
   private(set) var active: Set<String> = []
   private(set) var shells: [ShellInfo] = []
   private(set) var ownerMessages: [ConversationMessage] = []
@@ -642,11 +645,16 @@ import OpenCodeKit
     #endif
     let events = hub.events()
     await refresh()
+    scheduleResources()
     for await frame in events {
       if Task.isCancelled { break }
       switch frame.event {
-      case .connected: scheduleRefresh()
+      case .connected:
+        scheduleRefresh()
+        scheduleResources()
       case .disconnected: break
+      case .update(let event) where event.type == OpenCodeClient.resourcesChangedEvent:
+        scheduleResources()
       case .update(let event):
         let ids = Set([id, session?.parentID].compactMap { $0 } + children.map(\.id))
         guard event.data.owner.map(ids.contains) == true || event.type.hasPrefix("rpc.") else {
@@ -672,6 +680,23 @@ import OpenCodeKit
     refreshTask = nil
     batchTask?.cancel()
     batchTask = nil
+    resourcesTask?.cancel()
+    resourcesTask = nil
+  }
+  /// Coalesced reload: resource events arrive for every session on the server.
+  func scheduleResources() {
+    guard resourcesTask == nil else { return }
+    resourcesTask = Task {
+      try? await Task.sleep(for: .milliseconds(300))
+      resourcesTask = nil
+      guard !Task.isCancelled, let all = try? await client.resources() else { return }
+      let family = Set([id] + children.map(\.id))
+      let next = all.filter { resource in
+        guard let owner = resource.owner else { return false }
+        return owner.rootSessionID == id || family.contains(owner.sessionID)
+      }
+      if next != resources { resources = next }
+    }
   }
   #if DEBUG
   static let fixturePage = 30

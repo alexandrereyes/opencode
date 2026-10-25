@@ -36,6 +36,10 @@ parser.add_argument("--evidence", type=Path, required=True)
 parser.add_argument("--theme", default=os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark"))
 parser.add_argument("--skip-ui", action="store_true")
 parser.add_argument("--lock", action="store_true", help="also check the agent lock with one real model call")
+parser.add_argument("--android", help="with --discovery: serial of your own running emulator (emulator-NNNN)")
+parser.add_argument("--discovery", action="store_true",
+    help="register through real agent commands (Luna 6 / low): the target by name in the session, and a headless "
+    "playwright-cli browser in a subagent; then run OpenCodeUITests/ResourceListTests")
 args = parser.parse_args()
 port = int(args.server_url.rsplit(":", 1)[1].rstrip("/"))
 if port in (4096, 4177, 4178) or not args.server_url.startswith(("http://127.0.0.1:", "http://localhost:")):
@@ -83,9 +87,58 @@ try:
         "location": {"directory": str(root)}, "agent": "build", "model": model, "cost": 0,
         "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}, "outcome": "succeeded",
         "time": {"created": now, "updated": now, "idle": now, "viewed": now}}, "location": {"directory": str(root)},
-        "messages": [{"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Recursos.", "time": {"created": now}}]})
-    resource = admin("/admin/resources", {"kind": "ios-simulator", "meta": {"kind": "ios-simulator", "udid": args.target},
-        "owner": {"sessionID": session, "rootSessionID": session, "agent": "opushigh"}, "used": True}, "PUT")["id"]
+        "messages": [{"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Recursos.", "time": {"created": now}}] + [
+            # One link per message: UIKit's per-line accessibility of a multi-paragraph text view can hide a link.
+            {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
+             "time": {"created": now + 1000 + index, "completed": now + 2000 + index}, "finish": "stop",
+             "content": [{"type": "text", "text": text}]}
+            for index, text in enumerate(["Abra o [simulador de teste](opencode-resource:ios-simulator%%3A%s)." % args.target.upper(),
+                "E o [navegador de teste](opencode-resource:chrome%%3Ars-%s)." % token]
+                + (["Também o [emulador de teste](opencode-resource:android-emulator%%3A%s)." % args.android] if args.android else []))]})
+    name = next(device["name"] for group in json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices",
+        "-j"]))["devices"].values() for device in group if device["udid"] == args.target)
+    browser = None
+    if args.discovery:
+        def run_prompt(text, done, timeout=240):
+            api("/api/session/" + session + "/prompt", {"id": "msg_" + uuid.uuid4().hex, "delivery": "steer", "text": text})
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                time.sleep(2)
+                value = done()
+                if value:
+                    return value
+            raise SystemExit("Timed out: " + text[:80])
+        def find(kind):
+            return next((r for r in rpc("list", {"sessionID": session})["resources"] if r["kind"] == kind), None)
+        found = run_prompt("Use a ferramenta shell uma única vez para executar exatamente "
+            "`xcrun simctl spawn \"%s\" launchctl print system | head -1`. Depois responda apenas: OK." % name,
+            lambda: find("ios-simulator"))
+        assert found["owner"] == {"sessionID": session, "rootSessionID": session, "agent": "build"}, found
+        assert found["meta"]["udid"] == args.target.upper(), found
+        resource = found["id"]
+        page = api("/api/session/" + session + "/message?limit=20&order=desc", method="GET")["data"]
+        shell = next(part for message in page if message["type"] == "assistant" for part in message.get("content", [])
+            if part.get("type") == "tool" and part.get("name") == "shell")
+        assert "opencode-resource:" in json.dumps(shell["state"].get("content")), shell["state"]
+        assert shell["state"]["metadata"]["resources"][0]["id"] == resource, shell["state"]["metadata"]
+        report["discovered"] = resource
+        if args.android:
+            emulator = run_prompt("Use a ferramenta shell uma única vez para executar exatamente "
+                "`adb -s %s shell getprop ro.product.model`. Depois responda apenas: OK." % args.android,
+                lambda: find("android-emulator"))
+            assert emulator["owner"]["sessionID"] == session and emulator["meta"]["serial"] == args.android, emulator
+            report["android"] = {"id": emulator["id"], "label": emulator["label"], "state": emulator["state"]}
+        browser = "rs-" + token
+        child_browser = run_prompt('Chame a ferramenta subagent uma única vez com agent="general", description='
+            '"Abrir navegador de teste", model="llm-proxy/gpt-6-luna#low", prompt="Use a ferramenta shell uma única vez '
+            'para executar exatamente `playwright-cli -s=%s open about:blank --browser=chrome`. Depois responda apenas: OK.", '
+            'background=false. Depois responda apenas: OK.' % browser, lambda: find("chrome"), 300)
+        assert child_browser["owner"]["sessionID"] != session and child_browser["owner"]["rootSessionID"] == session, child_browser
+        assert child_browser["meta"]["session"] == browser, child_browser
+        report["child"] = {"id": child_browser["id"], "state": child_browser["state"], "agent": child_browser["owner"].get("agent")}
+    else:
+        resource = admin("/admin/resources", {"kind": "ios-simulator", "meta": {"kind": "ios-simulator", "udid": args.target},
+            "owner": {"sessionID": session, "rootSessionID": session, "agent": "opushigh"}, "used": True}, "PUT")["id"]
     report["resource"] = resource
 
     # Stream: frames per second and capture-to-receipt age over 8 seconds, from a view ticket.
@@ -113,7 +166,12 @@ console.log(JSON.stringify({ frames: ages.length, fps: +(ages.length / ((Date.no
     status = 0
     if not args.skip_ui:
         environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
-            "OPENCODE_TEST_THEME": args.theme, "OPENCODE_TEST_SERVER_URL": args.server_url, "OPENCODE_TEST_RESOURCE": resource}
+            "OPENCODE_TEST_THEME": args.theme, "OPENCODE_TEST_SERVER_URL": args.server_url, "OPENCODE_TEST_RESOURCE": resource,
+            "OPENCODE_TEST_SESSION": session}
+        if args.discovery:
+            environment["OPENCODE_TEST_CHILD_RESOURCE"] = report["child"]["id"]
+            if args.android:
+                environment["OPENCODE_TEST_ANDROID_RESOURCE"] = report["android"]["id"]
         run = plistlib.loads(next(args.derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
         targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run
             else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
@@ -131,7 +189,8 @@ console.log(JSON.stringify({ frames: ages.length, fps: +(ages.length / ((Date.no
             "-destination", "platform=iOS Simulator,id=" + args.device, "-parallel-testing-enabled", "NO",
             "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES",
             "-maximum-test-execution-time-allowance", "300", "-resultBundlePath", str(result),
-            "-only-testing:OpenCodeUITests/ResourceViewerTests"], stdout=subprocess.DEVNULL)
+            "-only-testing:OpenCodeUITests/" + ("ResourceListTests" if args.discovery else "ResourceViewerTests")],
+            stdout=subprocess.DEVNULL)
         exported = args.evidence / ("attachments-" + token)
         subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path",
             str(exported)], check=True, stdout=subprocess.DEVNULL)
@@ -149,8 +208,6 @@ console.log(JSON.stringify({ frames: ages.length, fps: +(ages.length / ((Date.no
         taken = rpc("control", {"id": resource, "action": "take"})
         assert taken["resource"]["state"] == "user" and taken.get("ticket"), taken
         # The simulator's name is a lock token too, and short models copy it more faithfully than a UDID.
-        name = next(device["name"] for group in json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices",
-            "-j"]))["devices"].values() for device in group if device["udid"] == args.target)
         command = 'xcrun simctl spawn "%s" launchctl print system' % name
         api("/api/session/" + session + "/prompt", {"id": "msg_" + uuid.uuid4().hex, "delivery": "steer",
             "text": "Use a ferramenta shell uma única vez para executar exatamente `%s`. Não tente de novo nem contorne "
@@ -190,6 +247,21 @@ finally:
         try:
             rpc("control", {"id": resource, "action": "release"})
             rpc("dismiss", {"id": resource})
+        except Exception as error:
+            print("cleanup:", error, file=sys.stderr)
+    if args.android and session:
+        try:
+            emulator = next((r["id"] for r in rpc("list", {"sessionID": session})["resources"] if r["kind"] == "android-emulator"), None)
+            if emulator:
+                rpc("dismiss", {"id": emulator})
+        except Exception as error:
+            print("cleanup:", error, file=sys.stderr)
+    if browser:
+        subprocess.run(["playwright-cli", "-s=" + browser, "close"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            child = next((r["id"] for r in rpc("list", {"sessionID": session})["resources"] if r["kind"] == "chrome"), None)
+            if child:
+                rpc("dismiss", {"id": child})
         except Exception as error:
             print("cleanup:", error, file=sys.stderr)
     if session:

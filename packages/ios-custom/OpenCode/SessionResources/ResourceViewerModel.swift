@@ -30,8 +30,12 @@ import UIKit
   var keyboardVisible = false
   /// Traits of the hidden keyboard field, set by the kind (Chrome follows the page's focused field).
   var keyboardStyle = ResourceKeyboardStyle()
+  /// Window frames of floating controls over the screen; touches there never reach the resource.
+  @ObservationIgnored var exclusions: [String: CGRect] = [:]
   /// Frames the shell cannot draw itself (for example H.264); the kind view decodes them.
   @ObservationIgnored var rawFrames: ((ResourceFrame) -> Void)?
+  /// Closes the viewer by clearing its presentation (the X button).
+  @ObservationIgnored var close: (() -> Void)?
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored private var socket: URLSessionWebSocketTask?
@@ -53,9 +57,12 @@ import UIKit
     guard case .number(let degrees) = meta["rotation"] else { return 0 }
     return ResourceScreenGeometry.normalized(Int(degrees))
   }
+  /// In control, touches on the screen go to the resource (except on floating controls, see `exclusions`); otherwise
+  /// a tap on the screen toggles the controls.
+  var touching: Bool { inControl }
   /// "iPhone 17 · ao vivo · 38 ms".
   var status: String {
-    let device = resource.meta.device ?? resource.kind.title
+    let device = resource.meta.device ?? resource.kind.short
     guard connected else { return "\(device) · conectando…" }
     return [device, "ao vivo", latency.map { "\($0) ms" }].compactMap { $0 }.joined(separator: " · ")
   }

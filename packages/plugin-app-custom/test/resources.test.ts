@@ -4,8 +4,10 @@ import os from "node:os"
 import path from "node:path"
 import type { Adapter, Entry } from "../src/resources/adapters/types"
 import { parseRunning } from "../src/resources/adapters/android-emulator"
-import { parse as parseSimulators } from "../src/resources/adapters/ios-simulator"
-import { createHub, label, type Lock } from "../src/resources/hub/hub"
+import { parse } from "../src/resources/adapters/ios-simulator"
+import { parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
+import { createHub, idFor, label, sameResource, type Lock } from "../src/resources/hub/hub"
+import { links } from "../src/resources/index"
 import { sign, verify } from "../src/resources/hub/ticket"
 import { blocking, refusal, returned } from "../src/resources/lock"
 import { ResourceProtocol } from "../src/resources/protocol"
@@ -384,7 +386,7 @@ describe("hub process", () => {
 describe("adapter parsing", () => {
   test("reads simulators and running emulators", () => {
     expect(
-      parseSimulators({
+      parse({
         devices: {
           "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
             {
@@ -404,5 +406,107 @@ describe("adapter parsing", () => {
       grpcPort: 8556,
       avd: "Pixel_9",
     })
+  })
+})
+
+describe("discovery", () => {
+  const sim = "77441AC7-5092-422F-8223-B53AC7973439"
+  test("finds simulators, emulators and Playwright browsers named by commands", () => {
+    expect(references(`xcrun simctl io ${sim.toLowerCase()} screenshot a.png`)).toEqual([
+      { kind: "ios-simulator", udid: sim },
+    ])
+    expect(references(`xcodebuild test -destination 'platform=iOS Simulator,name=OpenCode Teste,OS=27.0'`)).toEqual([
+      { kind: "ios-simulator", name: "OpenCode Teste" },
+    ])
+    expect(references(`xcrun simctl boot "OpenCode Teste"`)).toEqual([
+      { kind: "ios-simulator", name: "OpenCode Teste" },
+    ])
+    expect(
+      references(`xcrun simctl create "Novo" com.apple.CoreSimulator.SimDeviceType.iPhone-17`, `${sim}\n`),
+    ).toEqual([{ kind: "ios-simulator", udid: sim }])
+    expect(references(`npx -y agent-device snapshot --platform ios --udid ${sim}`)).toEqual([
+      { kind: "ios-simulator", udid: sim },
+    ])
+    expect(references("adb -s emulator-5554 shell input tap 10 10")).toEqual([
+      { kind: "android-emulator", serial: "emulator-5554" },
+    ])
+    expect(references("~/.local/bin/android-emulator -avd abacato_v2 -no-window")).toEqual([
+      { kind: "android-emulator", avd: "abacato_v2" },
+    ])
+    expect(references("emulator @Pixel_9 -no-snapshot")).toEqual([{ kind: "android-emulator", avd: "Pixel_9" }])
+    expect(references("playwright-cli -s=login open http://localhost:5173 --browser=chrome", "", "/w/app")).toEqual([
+      { kind: "chrome", session: "login", workspace: "/w/app" },
+    ])
+    expect(references("playwright-cli click e3", "", "/w/app")).toEqual([
+      { kind: "chrome", session: "default", workspace: "/w/app" },
+    ])
+  })
+
+  test("ignores listings, teardown, physical devices and unrelated UUIDs", () => {
+    expect(references("xcrun simctl list devices")).toEqual([])
+    expect(references(`xcrun simctl delete ${sim}`)).toEqual([])
+    expect(references("xcrun simctl io booted screenshot a.png")).toEqual([])
+    expect(references(`echo ${sim}`)).toEqual([])
+    expect(references("adb -s d8cf6fc2 shell ls")).toEqual([])
+    expect(references("xcrun devicectl device info details --device 00008110-00065DA13A78401E")).toEqual([])
+    expect(references("playwright-cli list")).toEqual([])
+    expect(references("playwright-cli -s=login close")).toEqual([])
+  })
+
+  test("resolves simulator names, skips ambiguous ones and drops unknown UDIDs", () => {
+    const simulators = parseSimulators({
+      devices: {
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+          { udid: sim.toLowerCase(), name: "OpenCode Teste", state: "Shutdown" },
+          { udid: "77441AC7-5092-422F-8223-B53AC7973430", name: "OpenCode Teste", state: "Booted" },
+          { udid: "77441AC7-5092-422F-8223-B53AC7973431", name: "Duplicado", state: "Booted" },
+          { udid: "77441AC7-5092-422F-8223-B53AC7973432", name: "Duplicado", state: "Booted" },
+        ],
+      },
+    })
+    expect(
+      resolveSimulators(
+        [
+          { kind: "ios-simulator", name: "OpenCode Teste" },
+          { kind: "ios-simulator", name: "Duplicado" },
+          { kind: "ios-simulator", udid: sim },
+          { kind: "ios-simulator", udid: "00000000-0000-4000-8000-000000000000" },
+          { kind: "chrome", session: "login", cdp: "http://127.0.0.1:9333" },
+        ],
+        simulators,
+      ),
+    ).toEqual([
+      { kind: "ios-simulator", udid: "77441AC7-5092-422F-8223-B53AC7973430", name: "OpenCode Teste" },
+      { kind: "ios-simulator", udid: sim, name: "OpenCode Teste" },
+      { kind: "chrome", session: "login", cdp: "http://127.0.0.1:9333" },
+    ])
+  })
+
+  test("links open the resource in the app and default Playwright sessions stay per worktree", () => {
+    expect(links([{ id: `ios-simulator:${sim}`, kind: "ios-simulator", label: "iPhone 17 · X" }])).toBe(
+      `Recurso no app: [Simulador iOS · iPhone 17 · X](opencode-resource:ios-simulator%3A${sim})`,
+    )
+    expect(idFor({ kind: "chrome", session: "default", workspace: "/w/app-a" })).toBe("chrome:default@app-a")
+    expect(
+      sameResource(
+        { kind: "chrome", session: "default", workspace: "/w/a" },
+        { kind: "chrome", session: "default", workspace: "/w/b" },
+      ),
+    ).toBe(false)
+    expect(
+      sameResource(
+        { kind: "chrome", session: "login" },
+        { kind: "chrome", session: "login", cdp: "http://127.0.0.1:1" },
+      ),
+    ).toBe(true)
+    const lock: Lock = {
+      id: "chrome:default@a",
+      kind: "chrome",
+      label: "x",
+      meta: { kind: "chrome", session: "default", workspace: "/w/a" },
+      expiresAt: 0,
+    }
+    expect(blocking("playwright-cli click e1", [lock], "/w/a")).toBe(lock)
+    expect(blocking("playwright-cli click e1", [lock], "/w/b")).toBeUndefined()
   })
 })

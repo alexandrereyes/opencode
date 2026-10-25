@@ -27,6 +27,15 @@ public enum ResourceKind: Codable, Hashable, Sendable {
     case .unknown(let value): value
     }
   }
+  /// "Simulador", for the viewer's compact status pill.
+  public var short: String {
+    switch self {
+    case .iosSimulator: "Simulador"
+    case .androidEmulator: "Android"
+    case .chrome: "Chrome"
+    case .unknown: "Recurso"
+    }
+  }
   /// "Simulador iOS", as the lists caption it.
   public var title: String {
     switch self {
@@ -81,6 +90,7 @@ public struct ResourceMeta: Codable, Hashable, Sendable {
   public let grpcPort: Int?
   /// Chrome.
   public let session: String?
+  public let workspace: String?
   public let cdp: String?
   public let targetID: String?
   public let url: String?
@@ -88,7 +98,7 @@ public struct ResourceMeta: Codable, Hashable, Sendable {
   public init(
     kind: String, udid: String? = nil, name: String? = nil, device: String? = nil, runtime: String? = nil,
     serial: String? = nil, avd: String? = nil, consolePort: Int? = nil, grpcPort: Int? = nil,
-    session: String? = nil, cdp: String? = nil, targetID: String? = nil, url: String? = nil, title: String? = nil
+    session: String? = nil, workspace: String? = nil, cdp: String? = nil, targetID: String? = nil, url: String? = nil, title: String? = nil
   ) {
     self.kind = kind
     self.udid = udid
@@ -100,6 +110,7 @@ public struct ResourceMeta: Codable, Hashable, Sendable {
     self.consolePort = consolePort
     self.grpcPort = grpcPort
     self.session = session
+    self.workspace = workspace
     self.cdp = cdp
     self.targetID = targetID
     self.url = url

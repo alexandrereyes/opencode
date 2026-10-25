@@ -11,8 +11,10 @@ const kindNames = {
  * identifiers (UDID, simulator name, adb serial, AVD, `playwright-cli` session, CDP port) or targets it implicitly:
  * `simctl … booted`, `adb` without `-s`/`ANDROID_SERIAL`, or `playwright-cli` without `-s` for the default session.
  */
-export function blocking(command: string, locks: readonly Lock[]) {
-  return locks.find((lock) => tokens(lock).some((token) => mentions(command, token)) || implicit(command, lock))
+export function blocking(command: string, locks: readonly Lock[], workdir?: string) {
+  return locks.find(
+    (lock) => tokens(lock).some((token) => mentions(command, token)) || implicit(command, lock, workdir),
+  )
 }
 
 export function refusal(lock: Lock) {
@@ -38,7 +40,7 @@ function tokens(lock: Lock) {
   return [meta.session, port ? `:${port}` : undefined].filter(present)
 }
 
-function implicit(command: string, lock: Lock) {
+function implicit(command: string, lock: Lock, workdir: string | undefined) {
   if (lock.kind === "ios-simulator") return /\bsimctl\b/.test(command) && /(^|\s)booted(\s|$)/.test(command)
   if (lock.kind === "android-emulator")
     return (
@@ -49,6 +51,7 @@ function implicit(command: string, lock: Lock) {
   return (
     lock.meta.kind === "chrome" &&
     (lock.meta.session ?? "default") === "default" &&
+    (!lock.meta.workspace || !workdir || lock.meta.workspace === workdir) &&
     /\bplaywright-cli\b/.test(command) &&
     !/(\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)/.test(command)
   )

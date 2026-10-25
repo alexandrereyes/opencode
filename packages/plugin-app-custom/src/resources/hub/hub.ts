@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
+import path from "node:path"
 import type { Server, ServerWebSocket } from "bun"
 import { optional } from "@opencode/schema/schema"
 import { Option, Schema } from "effect"
@@ -312,7 +313,7 @@ export function createHub(options: HubOptions) {
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
         if (!entry) return []
-        const meta = found.meta ?? entry.meta
+        const meta = found.meta ? mergeMeta(entry.meta, found.meta) : entry.meta
         if (found.status === entry.status && JSON.stringify(meta) === JSON.stringify(entry.meta)) return []
         entries.set(id, { ...entry, status: found.status, meta, updatedAt: at })
         if (found.status !== "running") lives.get(id)?.controller.abort()
@@ -673,6 +674,7 @@ export function createHub(options: HubOptions) {
 export function idFor(meta: Resources.Meta) {
   if (meta.kind === "ios-simulator") return `ios-simulator:${meta.udid}`
   if (meta.kind === "android-emulator") return `android-emulator:${meta.avd ?? meta.serial ?? "unknown"}`
+  if (meta.session === "default" && meta.workspace) return `chrome:default@${path.basename(meta.workspace)}`
   return `chrome:${meta.session ?? meta.cdp ?? "unknown"}`
 }
 
@@ -682,7 +684,15 @@ export function sameResource(a: Resources.Meta, b: Resources.Meta) {
   if (a.kind === "android-emulator" && b.kind === "android-emulator")
     return (a.avd !== undefined && a.avd === b.avd) || (a.serial !== undefined && a.serial === b.serial)
   if (a.kind === "chrome" && b.kind === "chrome")
-    return (a.session !== undefined && a.session === b.session) || (a.cdp !== undefined && a.cdp === b.cdp)
+    return (
+      (a.session !== undefined &&
+        a.session === b.session &&
+        (a.session !== "default" ||
+          a.workspace === undefined ||
+          b.workspace === undefined ||
+          a.workspace === b.workspace)) ||
+      (a.cdp !== undefined && a.cdp === b.cdp)
+    )
   return false
 }
 

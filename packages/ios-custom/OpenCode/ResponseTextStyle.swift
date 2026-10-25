@@ -41,7 +41,7 @@ import UIKit
       if run.strikethrough { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
       if run.superscript { attributes[.baselineOffset] = 6 }
       if let link = run.link, let url = URL(string: link),
-        ["http", "https", "mailto", "tel", "sms", "opencode-markdown"].contains(url.scheme) {
+        ["http", "https", "mailto", "tel", "sms", "opencode-markdown", ResourceLink.scheme].contains(url.scheme) {
         attributes[.link] = url
         attributes[.foregroundColor] = theme.uiColor(.markdownLink)
       }

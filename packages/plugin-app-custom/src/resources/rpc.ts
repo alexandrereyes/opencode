@@ -65,8 +65,10 @@ export const AndroidEmulatorMeta = Schema.Struct({
 export interface ChromeMeta extends Schema.Schema.Type<typeof ChromeMeta> {}
 export const ChromeMeta = Schema.Struct({
   kind: Schema.Literal("chrome"),
-  /** `playwright-cli -s=<session>` name. */
+  /** `playwright-cli -s=<session>` name (`default` without `-s`). */
   session: optional(Schema.String),
+  /** Directory where `playwright-cli` ran: its sessions are per workspace, so `default` differs between worktrees. */
+  workspace: optional(Schema.String),
   /** CDP HTTP endpoint, for example `http://127.0.0.1:9333`. */
   cdp: optional(Schema.String),
   /** CDP target (page) the viewer follows. */

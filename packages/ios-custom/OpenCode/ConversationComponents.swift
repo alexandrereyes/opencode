@@ -450,6 +450,15 @@ struct ConversationStep: View {
                 theme.color(.error))
             }
           }
+          ForEach(Array((part.metadata["resources"]?.array ?? []).enumerated()), id: \.offset) { _, value in
+            if let id = value.object?["id"]?.string {
+              Button("Abrir \(value.object?["label"]?.string ?? "recurso")", systemImage: "rectangle.on.rectangle") {
+                ResourceLinks.open(id)
+              }
+              .appFont(.caption, weight: .medium).buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+              .accessibilityIdentifier("tool-resource-" + id)
+            }
+          }
           Button("Copiar", systemImage: "doc.on.doc") {
             UIPasteboard.general.string =
               part.diffs.isEmpty

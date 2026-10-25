@@ -21,6 +21,7 @@ struct AndroidEmulatorResourceView: View {
       if model.inControl, !model.controlsVisible {
         AndroidNavigationBar(model: model)
           .accessibilityElement(children: .contain).accessibilityIdentifier("resource-android-navigation-floating")
+          .excludedFromTouches(model, "android-navigation")
           .resourceDraggable("android-navigation", initial: CGPoint(x: 0.66, y: 0.93))
           .transition(.opacity)
       }
@@ -48,7 +49,7 @@ private struct AndroidNavigationBar: View {
         ) { model.keyboardVisible.toggle() }
       }
       .padding(.horizontal, 8).frame(height: 48)
-      .glassEffect(.regular.interactive(), in: .capsule)
+      .resourceGlass(.capsule)
       more
     }
     .disabled(!model.inControl)
@@ -64,7 +65,7 @@ private struct AndroidNavigationBar: View {
       Button("Diminuir volume", systemImage: "speaker.minus") { model.send([.button("volume-down")]) }
     } label: {
       Image(systemName: "ellipsis").appSymbol(.action).foregroundStyle(theme.color(.textStrong))
-        .frame(width: 48, height: 48).glassEffect(.regular.interactive(), in: .circle)
+        .frame(width: 48, height: 48).resourceGlass(.circle)
     }
     .accessibilityLabel("Mais botões do Android")
     .accessibilityIdentifier("resource-android-more")

@@ -608,7 +608,8 @@ struct ConversationView: View {
           .accessibilityIdentifier("conversation-header-subtitle")
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
-      if !conversation.work.isEmpty {
+      if !conversation.work.isEmpty || !conversation.resources.isEmpty {
+        let resources = conversation.resources.filter(\.state.running).count
         Button {
           leavePosition()
           sessions.conversationPath.append(.init(id: conversation.id, agents: true))
@@ -616,11 +617,18 @@ struct ConversationView: View {
           HStack(spacing: 6) {
             AgentPixels(color: theme.color(running > 0 ? .success : .textSecondary), size: 16, running: running > 0)
             if running > 0 { Text("\(running)").appFont(.secondary).monospacedDigit() }
+            if !conversation.resources.isEmpty {
+              Rectangle().fill(theme.color(.border)).frame(width: 1, height: 16)
+              Image(systemName: "macbook.and.iphone").appSymbol(.inline)
+                .foregroundStyle(theme.color(resources > 0 ? .textStrong : .textSecondary))
+              if resources > 0 { Text("\(resources)").appFont(.secondary).monospacedDigit() }
+            }
           }
           .padding(.horizontal, 9).frame(minWidth: 36).frame(height: 36).glassEffect(
             .regular.interactive(), in: .capsule)
         }.buttonStyle(.plain).accessibilityLabel(
-          running == 0 ? "Agentes e tarefas" : running == 1 ? "1 agente em execução" : "\(running) agentes em execução")
+          (running == 0 ? "Agentes e tarefas" : running == 1 ? "1 agente em execução" : "\(running) agentes em execução")
+            + (conversation.resources.isEmpty ? "" : resources == 1 ? ", 1 recurso ativo" : ", \(resources) recursos ativos"))
           .accessibilityIdentifier("conversation-agents")
       }
       if master {

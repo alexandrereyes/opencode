@@ -4,8 +4,10 @@ import SwiftUI
 /// Full-screen viewer for one resource, opened from "Agentes e tarefas" or an `opencode-resource:` link.
 struct ResourceViewerScreen: View {
   @State private var model: ResourceViewerModel
-  init(resource: SessionResource, client: OpenCodeClient) {
-    _model = State(initialValue: ResourceViewerModel(resource: resource, client: client))
+  init(resource: SessionResource, client: OpenCodeClient, close: @escaping () -> Void) {
+    let model = ResourceViewerModel(resource: resource, client: client)
+    model.close = close
+    _model = State(initialValue: model)
   }
   var body: some View {
     switch model.resource.kind {
@@ -54,9 +56,17 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       ZStack {
         theme.color(.background).ignoresSafeArea()
         screen.padding(.horizontal, 8).padding(.vertical, 4)
-        if model.controlsVisible { controls.transition(.opacity) }
-        if model.inControl, !model.controlsVisible { controlPill.padding(.top, 6).frame(maxHeight: .infinity, alignment: .top) }
+        // While watching, a tap anywhere outside the controls toggles them (the controls' own background catches it
+        // while they are shown). In control nothing catches it: touches go to the resource underneath.
+        if !model.touching, !model.controlsVisible { toggleArea }
+        if model.controlsVisible {
+          controls.background { if !model.touching { toggleArea } }.transition(.opacity)
+        }
+        if model.inControl, !model.controlsVisible {
+          controlPill.excludedFromTouches(model, "pill-top").padding(.top, 6).frame(maxHeight: .infinity, alignment: .top)
+        }
         if model.inControl, !model.controlsVisible { edgeHandle(height: geometry.size.height) }
+        if model.controlsVisible { closeButton.transition(.opacity) }
         ResourceKeyboard(model: model, active: $model.keyboardVisible, style: model.keyboardStyle)
           .frame(width: 1, height: 1).opacity(0.02)
       }
@@ -65,7 +75,6 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
     }
     .foregroundStyle(theme.color(.textStrong))
     .tint(theme.color(.primary))
-    .statusBarHidden(!model.controlsVisible)
     .task { model.start() }
     .onDisappear {
       if model.inControl { Task { await model.giveBack() } }
@@ -76,10 +85,9 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
   private var screen: some View {
     ZStack {
       surface()
-      ResourceTouchOverlay(model: model, contentSize: contentSize, indicator: theme.uiColor(.primary)) {
-        model.controlsVisible.toggle()
-      }
+      ResourceTouchOverlay(model: model, contentSize: contentSize, indicator: theme.uiColor(.primary))
     }
+
     .overlay {
       if model.inControl {
         RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.primary), lineWidth: 3).allowsHitTesting(false)
@@ -89,25 +97,38 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
     .overlay(alignment: .bottom) {
       if let failure = model.failure {
         Text(failure).appFont(.caption).padding(.horizontal, 12).padding(.vertical, 8)
-          .glassEffect(.regular, in: .capsule).padding(.bottom, 96).allowsHitTesting(false)
+          .resourceGlass(.capsule).padding(.bottom, 96).allowsHitTesting(false)
       }
     }
+  }
+
+  private var closeButton: some View {
+    Button {
+      if let close = model.close { close() } else { dismiss() }
+    } label: {
+      Image(systemName: "xmark").appSymbol(.action).frame(width: 44, height: 44).resourceGlass(.circle)
+        .contentShape(.rect)
+    }
+    .buttonStyle(.plain).accessibilityLabel("Fechar").accessibilityIdentifier("resource-close")
+    .excludedFromTouches(model, "close")
+    .padding(.leading, 12).padding(.top, 6)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private var toggleArea: some View {
+    Color.clear.contentShape(.rect).onTapGesture { model.controlsVisible.toggle() }.accessibilityHidden(true)
   }
 
   private var controls: some View {
     VStack(spacing: 0) {
       HStack(spacing: 8) {
-        Button {
-          dismiss()
-        } label: {
-          Image(systemName: "xmark").appSymbol(.action).frame(width: 44, height: 44)
-            .glassEffect(.regular.interactive(), in: .circle)
-        }.buttonStyle(.plain).accessibilityLabel("Fechar").accessibilityIdentifier("resource-close")
+        // The close button is its own top layer (see `body`); this keeps its place in the row.
+        Color.clear.frame(width: 44, height: 44).allowsHitTesting(false).accessibilityHidden(true)
         pill(model.status, dot: model.connected ? .success : .textWeak).layoutPriority(1)
-          .accessibilityIdentifier("resource-status")
+          .accessibilityIdentifier("resource-status").excludedFromTouches(model, "status")
         Spacer(minLength: 0)
         if model.inControl {
-          controlPill
+          controlPill.excludedFromTouches(model, "pill-bar")
         } else {
           pill(holderText, dot: model.holder == .agent ? .success : .primary).accessibilityIdentifier("resource-holder")
         }
@@ -118,12 +139,12 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       if Tools.self != EmptyView.self {
         HStack {
           Spacer()
-          VStack(spacing: 10) { tools() }.padding(6).glassEffect(.regular, in: .capsule)
-            .accessibilityIdentifier("resource-tools")
+          VStack(spacing: 10) { tools() }.padding(6).resourceGlass(.capsule)
+            .accessibilityIdentifier("resource-tools").excludedFromTouches(model, "tools")
         }.padding(.trailing, 10)
       }
       Spacer()
-      bottom()
+      bottom().excludedFromTouches(model, "bottom")
     }
   }
 
@@ -140,7 +161,7 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       Circle().fill(theme.color(dot)).frame(width: 7, height: 7)
       Text(text).appFont(.micro, weight: .medium).lineLimit(1).monospacedDigit()
     }
-    .padding(.horizontal, 11).frame(height: 32).glassEffect(.regular, in: .capsule)
+    .padding(.horizontal, 11).frame(height: 32).resourceGlass(.capsule)
   }
 
   private var controlPill: some View {
@@ -156,29 +177,33 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
           .lineLimit(1).fixedSize()
       }
       .padding(.horizontal, 14).frame(height: 34)
-      .glassEffect(.regular.tint(theme.color(.primary).opacity(0.18)).interactive(), in: .capsule)
+      .resourceGlass(.capsule, tint: .primary)
     }
     .accessibilityIdentifier("resource-control-pill")
   }
 
   private func edgeHandle(height: CGFloat) -> some View {
     let span = max(1, height - 160)
-    let y = min(max(80, 80 + span * handle + handleDrag), height - 80)
-    return Capsule().fill(.clear).frame(width: 22, height: 64)
-      .overlay { Image(systemName: "line.3.horizontal").rotationEffect(.degrees(90)).appSymbol(.disclosure) }
-      .glassEffect(.regular.interactive(), in: .capsule)
-      .contentShape(.capsule)
-      .gesture(
-        DragGesture(minimumDistance: 4)
-          .updating($handleDrag) { value, state, _ in state = value.translation.height }
-          .onEnded { value in handle = min(1, max(0, handle + value.translation.height / span)) }
-      )
-      .simultaneousGesture(TapGesture().onEnded { model.controlsVisible = true })
-      .accessibilityElement().accessibilityLabel("Mostrar controles").accessibilityAddTraits(.isButton)
-      .accessibilityIdentifier("resource-handle")
-      .offset(y: y - height / 2)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-      .padding(.trailing, 2)
+    let top = min(max(80, 80 + span * handle + handleDrag), height - 80) - 32
+    return VStack(spacing: 0) {
+      Color.clear.frame(width: 1, height: max(0, top)).allowsHitTesting(false)
+      Capsule().fill(.clear).frame(width: 22, height: 64)
+        .overlay { Image(systemName: "line.3.horizontal").rotationEffect(.degrees(90)).appSymbol(.disclosure) }
+        .resourceGlass(.capsule)
+        .contentShape(.capsule)
+        .gesture(
+          DragGesture(minimumDistance: 4)
+            .updating($handleDrag) { value, state, _ in state = value.translation.height }
+            .onEnded { value in handle = min(1, max(0, handle + value.translation.height / span)) }
+        )
+        .simultaneousGesture(TapGesture().onEnded { model.controlsVisible = true })
+        .accessibilityElement().accessibilityLabel("Mostrar controles").accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("resource-handle")
+        .excludedFromTouches(model, "handle")
+      Spacer(minLength: 0).allowsHitTesting(false)
+    }
+    .frame(maxWidth: .infinity, alignment: .trailing)
+    .padding(.trailing, 2)
   }
 }
 
@@ -211,7 +236,7 @@ struct ResourceControlBar<Accessory: View>: View {
           Task { await model.giveBack() }
         } label: {
           Label("Devolver controle", systemImage: "hand.raised.slash").appFont(.body, weight: .semibold)
-            .padding(.horizontal, 24).frame(height: 50).glassEffect(.regular.interactive(), in: .capsule)
+            .padding(.horizontal, 24).frame(height: 50).resourceGlass(.capsule)
         }
         .buttonStyle(.plain).accessibilityIdentifier("resource-give-back")
       } else {
@@ -229,7 +254,7 @@ struct ResourceControlBar<Accessory: View>: View {
       accessory()
       Text(model.inControl ? "A alça na borda mostra e oculta os controles" : "Toque na tela para ocultar os controles")
         .appFont(.micro).foregroundStyle(theme.color(.textSecondary)).padding(.horizontal, 10).padding(.vertical, 4)
-        .glassEffect(.regular, in: .capsule)
+        .resourceGlass(.capsule)
     }
     .padding(.bottom, 10)
   }
@@ -256,7 +281,7 @@ struct ResourceToolButton: View {
     Button(action: action) {
       Image(systemName: systemImage).appSymbol(.action)
         .foregroundStyle(theme.color(active ? .primary : .textStrong))
-        .frame(width: 46, height: 46).glassEffect(.regular.interactive(), in: .circle)
+        .frame(width: 46, height: 46).resourceGlass(.circle)
     }
     .buttonStyle(.plain).accessibilityLabel(title).accessibilityAddTraits(active ? .isSelected : [])
   }
@@ -295,7 +320,36 @@ struct ResourceDraggable: ViewModifier {
   }
 }
 
+/// Material for controls floating over any screen: a blurred backdrop tinted with the theme background, so text
+/// keeps its contrast over light pages in the dark theme (and dark ones in the light theme), a hairline border and a
+/// soft shadow. Not Liquid Glass: neighboring glass shapes merge, and a merged non-interactive shape took the touches
+/// of the close button beside the status pill. `tint` outlines it in that role (the "Você no controle" pill).
+struct ResourceGlass<S: Shape>: ViewModifier {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  let shape: S
+  var tint: ThemeRole? = nil
+  func body(content: Content) -> some View {
+    content
+      .background {
+        shape.fill(.regularMaterial)
+          .overlay { shape.fill(theme.color(.background).opacity(0.55)) }
+          .overlay { shape.stroke(theme.color(tint ?? .controlBorder), lineWidth: tint == nil ? 1 / displayScale : 1.5) }
+          .shadow(color: .black.opacity(theme.dark ? 0.35 : 0.18), radius: 6, y: 2)
+      }
+      .contentShape(shape)
+  }
+}
+
 extension View {
+  func resourceGlass<S: Shape>(_ shape: S, tint: ThemeRole? = nil) -> some View {
+    modifier(ResourceGlass(shape: shape, tint: tint))
+  }
+  /// Registers this floating control's frame so touches on it never reach the resource underneath.
+  func excludedFromTouches(_ model: ResourceViewerModel, _ key: String) -> some View {
+    onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { model.exclusions[key] = $0 }
+      .onDisappear { model.exclusions[key] = nil }
+  }
   func resourceDraggable(_ key: String, initial: CGPoint = CGPoint(x: 0.5, y: 0.92)) -> some View {
     modifier(ResourceDraggable(key: key, initial: initial))
   }

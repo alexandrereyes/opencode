@@ -9,19 +9,46 @@ struct ConversationAgentsView: View {
   let store: ConversationStore
   let sessions: SessionStore
   @State private var stopping: SessionWork?
+  @State private var thumbnails = ResourceThumbnails()
+  /// Resources used by this session itself (or by descendants without a row here).
+  private var ownResources: [SessionResource] {
+    store.resources.filter { resource in !store.work.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID } }
+  }
   var body: some View {
     List {
-      ForEach(store.work) { work in
-        row(work)
-          .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
-          .contextMenu {
-            if work.running { Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work } }
+      if !ownResources.isEmpty {
+        Section {
+          ForEach(ownResources) { resource in
+            resourceRow(resource, via: resource.owner?.sessionID == store.id ? nil : resource.owner?.agent)
           }
-          .listRowBackground(theme.color(.surface))
+        } header: {
+          Text("Esta sessão" + (store.session?.agent.map { " · \($0)" } ?? ""))
+        }
       }
-      if store.work.isEmpty {
-        Text("Nenhum agente nesta sessão.").foregroundStyle(theme.color(.textSecondary))
-          .listRowBackground(theme.color(.surface))
+      Section {
+        ForEach(store.work) { work in
+          row(work)
+            .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
+            .contextMenu {
+              if work.running { Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work } }
+            }
+            .listRowBackground(theme.color(.surface))
+          if !store.resources.isEmpty, let child = work.sessionID {
+            let nested = store.resources.filter { $0.owner?.sessionID == child }
+            ForEach(nested) { resource in resourceRow(resource, nested: true) }
+            if nested.isEmpty {
+              Text("Sem recursos").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+                .padding(.leading, 30).listRowBackground(theme.color(.surface))
+            }
+          }
+        }
+        if store.work.isEmpty {
+          Text(store.resources.isEmpty ? "Nenhum agente nesta sessão." : "Nenhum subagente nesta sessão.")
+            .foregroundStyle(theme.color(.textSecondary))
+            .listRowBackground(theme.color(.surface))
+        }
+      } header: {
+        if !store.resources.isEmpty { Text("Subagentes") }
       }
     }
     .scrollContentBackground(.hidden).background(theme.color(.background))
@@ -34,6 +61,10 @@ struct ConversationAgentsView: View {
     .sessionAlertOverlay()
     // The conversation below stops listening while covered; keep this list live.
     .task(id: scenePhase) { if scenePhase == .active { await store.run() } }
+    .task(id: scenePhase) {
+      guard scenePhase == .active else { return }
+      await thumbnails.run({ store.resources }, client: sessions.client)
+    }
     .confirmationDialog(
       "Parar esta tarefa?",
       isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
@@ -94,6 +125,38 @@ struct ConversationAgentsView: View {
         Color.clear.frame(width: 32, height: 40).accessibilityHidden(true)
       }
     }
+  }
+  private func resourceRow(_ resource: SessionResource, nested: Bool = false, via: String? = nil) -> some View {
+    ResourceRow(resource: resource, image: thumbnails.images[resource.id], via: via) {
+      sessions.openResource = resource
+    }
+    .padding(.leading, nested ? 30 : 0)
+    .background(alignment: .leading) {
+      if nested {
+        // Tree connector from the subagent above.
+        GeometryReader { geometry in
+          Path { path in
+            path.move(to: CGPoint(x: 12, y: -12))
+            path.addLine(to: CGPoint(x: 12, y: geometry.size.height / 2))
+            path.addLine(to: CGPoint(x: 26, y: geometry.size.height / 2))
+          }
+          .stroke(theme.color(.border), lineWidth: 1.2)
+        }
+        .frame(width: 30).accessibilityHidden(true)
+      }
+    }
+    .contextMenu {
+      Button("Abrir", systemImage: "rectangle.on.rectangle") { sessions.openResource = resource }
+      if !resource.state.running {
+        Button("Remover da lista", systemImage: "xmark.circle", role: .destructive) {
+          Task {
+            try? await sessions.client.dismissResource(resource.id)
+            store.scheduleResources()
+          }
+        }
+      }
+    }
+    .listRowBackground(theme.color(.surface))
   }
   private func state(_ work: SessionWork) -> some View {
     HStack(spacing: 5) {

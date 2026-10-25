@@ -144,7 +144,7 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
   emulator started without gRPC is still found. `device` comes from the AVD's `hw.device.name`.
 - **gRPC endpoint.** The adapter reads `grpc.port` and `grpc.token` from the ini. When gRPC is off (the usual case:
   `-ports` disables the automatic start), it turns it on through the console, `adb -s <serial> emu grpc
-  <console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;
+<console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;
   the token never leaves the hub (it is not part of `meta`). It stays on until the emulator exits.
 - **Frames.** `streamScreenshot` in RGBA8888 fitted to a 1200 × 1200 box (540 × 1200 for a 720 × 1600 panel), wrapped
   in a top-down BMP header and encoded to JPEG (quality 70) by `Bun.Image` off the JavaScript thread. Only the newest
@@ -222,6 +222,30 @@ session) with "Alexandre está usando … ; aguarde". Every input renews the loc
 `session.synthetic` message (without resuming) to the owner session: "Alexandre interagiu com … Reavalie a tela".
 Only watching never blocks the agent.
 
+## Discovery
+
+Automatic, in the plugin (`discovery.ts`, `index.ts`): `tool.hook("execute.after")` reads every completed `shell`
+call (`OPENCODE_SESSION_ID` is also in the shell environment) and registers what it names, owned by that session and
+its family's root:
+
+| Kind    | Recognized                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS     | Simulator UDIDs with `simctl`/`xcodebuild`/`agent-device`/`axe`/`idb`/`serve-sim`/`maestro`; device names after `simctl <boot\|spawn\|launch\|install\|io\|openurl\|…>`, `--device`, `-destination 'platform=iOS Simulator,name=…'`; the UDID printed by `simctl create`. Names resolve through `simctl list` (the only booted simulator with that name, else the only one; ambiguous names register nothing). `booted`, `delete`, `erase` and `shutdown` register nothing |
+| Android | `emulator-NNNN` serials with `adb`/`emulator`/`android-emulator`/`agent-device`/`maestro`; `-avd NAME` or `@NAME` after `emulator`/`android-emulator`. Physical serials are ignored                                                                                                                                                                                                                                                                                        |
+| Chrome  | `playwright-cli` commands with their session (`-s=`, `--session`, `PLAYWRIGHT_CLI_SESSION`; `default` otherwise, kept per workspace) and a CDP port (`--remote-debugging-port`, `--cdp=http://127.0.0.1:N`); `list`, `close`, `close-all`, `kill-all`, `install`, `delete-data` register nothing                                                                                                                                                                           |
+
+Chrome needs nothing else: the `shell` `create.before` hook (see Chrome above) makes every `playwright-cli` browser
+open with a loopback CDP port, and the adapter finds it from the session's daemon, so `meta.cdp` arrives with the
+first probe. An emulator discovered by serial gains its AVD, ports and device from the Android probe, so a later
+`-avd NAME` command matches the same entry. Each registration marks the resource as used by the agent (state `agent`). The result gains
+`metadata.resources: [{ id, kind, label }]` and, once per session and resource, a line
+`Recurso no app: [<kind> · <label>](opencode-resource:<encoded id>)`; the iOS app opens such links in the viewer.
+Subagents' resources keep their own session as `owner.sessionID` and the family root as `owner.rootSessionID`, so
+lists show them under the subagent ("via <agente>"). Reconciliation is the hub's `probe` every 5 s: dead resources
+become `stopped` or `gone` (ended entries are dropped after 24 h, stopped ones after 7 days). The optional
+`resource_label` tool only names a resource already used (`ref` = UDID, simulator name, serial, AVD or Playwright
+session) or records its purpose.
+
 ## Hub process
 
 The plugin starts the hub on demand (`supervisor.ts`) as `process.execPath` with `BUN_BE_BUN=1`: the release runs
@@ -241,14 +265,21 @@ instances replace a hub reporting another `protocol`.
 **Você no controle** pill (menu: show controls, give back).
 
 Showing and hiding the controls never steals a touch meant for the resource: while only watching, touches do not
-reach the resource, so a tap toggles the controls; in control, every touch goes to the resource, the controls hide
-and a small edge handle (draggable along the edge, position remembered) brings them back. Floating controls that
-must stay visible in control, such as Android's navigation pill, use `.resourceDraggable(key)` so Alexandre can move
-them off whatever they cover. Kinds without side tools pass `EmptyView` as `tools` and the column disappears;
+reach the resource, so a tap on the screen toggles the controls. In control, every touch on the screen goes to the
+resource except on the floating controls, which register their frames with `.excludedFromTouches(model, key)` (the
+shell registers its own top bar, side tools, bottom bar, pill and handle; kinds register extra floating controls).
+Taking control hides the controls; a small edge handle (draggable along the edge, position remembered) and the
+**Você no controle** pill bring them back, and kinds may keep them shown (Chrome's address bar). Floating controls
+that may cover the app, such as Android's navigation pill, also use `.resourceDraggable(key)` so Alexandre can move
+them. Kinds without side tools pass `EmptyView` as `tools` and the column disappears;
 `ResourceControlBar(model:accessory:)` puts a kind's control between the button and the hint (Android's pill).
-`ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
+Floating controls use `.resourceGlass(shape, tint:)` instead of Liquid Glass: a blurred material tinted with the
+theme background, a hairline border and a soft shadow keep text legible over light pages in the dark theme and dark
+ones in the light theme (Liquid Glass shapes also merge with neighbors, and a merged non-interactive shape swallowed
+the close button's taps). `ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
 indicator). A stream `meta.rotation` (clockwise 0/90/180/270, the iOS Simulator in landscape) turns the picture
-upright in `ResourceFrameView` and maps touches back to the unrotated frame (`OpenCodeKit/ResourceScreenGeometry`); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
+upright in `ResourceFrameView` and maps touches back to the unrotated frame (`OpenCodeKit/ResourceScreenGeometry`);
+`ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
 `.password` for password autofill: kinds set `model.keyboardStyle`, a `ResourceKeyboardStyle` of content type,
 keyboard type, secure entry and Return key). Frames decode one at a time and the newest waiting frame always follows,
 so the last frame of a burst is never lost. Kinds that stream H.264 set `model.rawFrames` and pass their own

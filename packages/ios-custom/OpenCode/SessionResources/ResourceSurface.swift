@@ -31,22 +31,21 @@ struct ResourceFrameView: View {
   }
 }
 
-/// Transparent layer over the screen. In control, touches become normalized `touch` inputs (multi-touch, with a
-/// touch indicator); otherwise a tap calls `onTap` (the shell toggles the controls). `contentSize` is the frame's
-/// pixel size, so coordinates map to the aspect-fit image and touches in the letterbox are ignored. With a
-/// `model.rotation`, touches on the upright picture map back to the unrotated frame.
+/// Transparent layer over the screen. While `model.touching` (in control), touches become normalized `touch` inputs
+/// (multi-touch, with a touch indicator); otherwise it lets every touch through to the shell, which toggles the
+/// controls. Floating controls register their frames in `model.exclusions`, so a touch on them never reaches the
+/// resource. `contentSize` is the frame's pixel size, so coordinates map to the aspect-fit image and touches in the
+/// letterbox are ignored. With a `model.rotation`, touches on the upright picture map back to the unrotated frame.
 struct ResourceTouchOverlay: UIViewRepresentable {
   let model: ResourceViewerModel
   var contentSize: CGSize?
   var indicator: UIColor
-  var onTap: () -> Void
 
   func makeUIView(context: Context) -> TouchView {
     let view = TouchView()
     view.isMultipleTouchEnabled = true
     view.backgroundColor = .clear
     view.accessibilityIdentifier = "resource-touch"
-    view.isAccessibilityElement = true
     view.accessibilityLabel = "Tela do recurso"
     // VoiceOver users in control touch the resource directly, as sighted users do.
     view.accessibilityTraits = .allowsDirectInteraction
@@ -54,11 +53,12 @@ struct ResourceTouchOverlay: UIViewRepresentable {
   }
   func updateUIView(_ view: TouchView, context: Context) {
     view.model = model
-    view.interactive = model.inControl
+    view.interactive = model.touching
+    // Only in control: while watching it would cover the floating controls for accessibility hit tests.
+    view.isAccessibilityElement = model.touching
     view.contentSize = contentSize ?? model.image?.size ?? model.hello.map { CGSize(width: $0.width, height: $0.height) }
     view.rotation = model.rotation
     view.indicatorColor = indicator
-    view.onTap = onTap
   }
 
   final class TouchView: UIView {
@@ -67,10 +67,15 @@ struct ResourceTouchOverlay: UIViewRepresentable {
     var contentSize: CGSize?
     var rotation = 0
     var indicatorColor = UIColor.systemOrange
-    var onTap: () -> Void = {}
     private var pointers: [ObjectIdentifier: Int] = [:]
     private var dots: [ObjectIdentifier: CALayer] = [:]
-    private var tapStart: CGPoint?
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+      guard interactive, let model else { return nil }
+      let global = convert(point, to: nil)
+      if model.exclusions.values.contains(where: { $0.insetBy(dx: -6, dy: -6).contains(global) }) { return nil }
+      return super.hitTest(point, with: event)
+    }
 
     /// Where the (upright) frame sits inside the view; without a size, the whole view.
     var geometry: ResourceScreenGeometry {
@@ -81,10 +86,7 @@ struct ResourceTouchOverlay: UIViewRepresentable {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-      guard interactive else {
-        tapStart = touches.first?.location(in: self)
-        return
-      }
+      guard interactive else { return }
       let events = touches.compactMap { touch -> ResourceInput? in
         let free = Set(0..<10).subtracting(pointers.values).min() ?? 0
         pointers[ObjectIdentifier(touch)] = free
@@ -99,17 +101,10 @@ struct ResourceTouchOverlay: UIViewRepresentable {
       model?.send(touches.compactMap { input($0, .moved) })
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-      guard interactive else {
-        if let start = tapStart, let end = touches.first?.location(in: self), hypot(end.x - start.x, end.y - start.y) < 12 {
-          onTap()
-        }
-        tapStart = nil
-        return
-      }
+      guard interactive else { return }
       finish(touches, .ended)
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-      tapStart = nil
       guard interactive else { return }
       finish(touches, .cancelled)
     }

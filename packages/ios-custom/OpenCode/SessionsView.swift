@@ -250,9 +250,6 @@ struct SessionsView: View {
           store.openResource = resource
         }
       }
-      .fullScreenCover(item: $store.openResource) { resource in
-        ResourceViewerScreen(resource: resource, client: store.client)
-      }
       .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).sessionAlertOverlay() }
       .sessionDeleteConfirmation($deleteCandidate, store: store)
       .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: store).sessionAlertOverlay() }

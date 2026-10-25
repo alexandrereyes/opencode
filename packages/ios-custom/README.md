@@ -1268,10 +1268,21 @@ The shell is the approved layout B: the stream fills the screen and glass contro
 pill with the hub round trip, who controls it, a side column of kind tools, **Assumir controle**). Taking control
 makes touches (multi-touch, normalized to the frame) and the iPhone keyboard go to the resource, draws a primary
 border and hides the controls. Hiding/showing never steals a touch: while watching, touches do not reach the
-resource, so a tap toggles the controls; in control, every touch goes to the resource and a small edge handle,
-draggable along the edge, brings the controls back, while the **Você no controle** pill offers **Mostrar controles**
-and **Devolver controle**. Floating controls that stay visible in control (Android's navigation pill) are draggable
-anywhere with `.resourceDraggable(key)`, remembered per key.
+resource, so a tap on the screen toggles the controls; in control, every touch on the screen goes to the resource
+except on floating controls, which register their frames (`.excludedFromTouches`). A small edge handle, draggable
+along the edge, brings the controls back, and the **Você no controle** pill offers **Mostrar controles** and
+**Devolver controle**. Floating controls that stay visible in control (Android's navigation pill) are also draggable
+anywhere with `.resourceDraggable(key)`, remembered per key. Floating controls use `.resourceGlass` (material tinted with the
+theme background, hairline border, shadow) rather than Liquid Glass, for contrast over any page in both themes.
+
+**Agentes e tarefas (layout 1B):** the conversation header pill adds a devices icon and the count of running
+resources of the family beside the agents. The screen lists **Esta sessão · <agente>** (resources the session itself
+used) above **Subagentes**, where each subagent row carries its resources on a tree line (or **Sem recursos**). Rows
+show a snapshot thumbnail (refreshed every 5 s while visible, `custom.resources/snapshot` at 240 px), an **AO VIVO**
+badge, kind, name and state (Agente usando, Ao vivo, Livre, Você no controle, Desligado, Encerrado); tapping opens the
+viewer, and stopped/ended ones can be removed from the list. `ConversationStore.resources` reloads on
+`rpc.custom.resources.changed`. `opencode-resource:` links in responses and the **Abrir …** buttons of shell tool
+details (from `metadata.resources`) open the viewer.
 
 **Chrome (layout 4B, `Chrome/ChromeResourceView.swift`).** Instead of side tools, a Safari-style address bar at the
 bottom: Chrome glyph, the address (lock for HTTPS and loopback origins; tap to edit in control, the whole address
@@ -1290,8 +1301,12 @@ back, give back), then closes the browser and removes the registration.
 
 Verify after `build-for-testing` with your own booted target simulator:
 `python3 packages/ios-custom/script/test-resources.py --device <app-sim> --target <target-sim> --derived … --home <sandbox> --server-url … --evidence … [--theme openchamber-light] [--lock]`.
-It registers the target in the sandbox hub, measures the stream, runs `OpenCodeUITests/ResourceViewerTests`, and with
-`--lock` checks with one Luna 6 / low shell call that the agent is refused while Alexandre holds control and is told
+It registers the target in the sandbox hub, measures the stream, runs `OpenCodeUITests/ResourceViewerTests`; with
+`--discovery` the session finds the target by name (and, with `--android emulator-NNNN`, your own running emulator by
+serial) and a subagent opens a headless Chrome through real Luna 6 / low shell calls, then
+`OpenCodeUITests/ResourceListTests` checks the pill, the list, and opening every kind from its row and its
+`opencode-resource:` link; with
+`--lock` it checks with one Luna 6 / low shell call that the agent is refused while Alexandre holds control and is told
 when control returns.
 
 **iOS Simulator (layout 2B, `IOSSimulator/IOSSimulatorResourceView.swift`).** The live serve-sim stream (see

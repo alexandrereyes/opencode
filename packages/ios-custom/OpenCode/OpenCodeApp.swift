@@ -182,6 +182,11 @@ private struct AppTabs: View {
         .accessibilityElement(children: .combine)
       }.buttonStyle(.plain).accessibilityIdentifier("master-accessory")
     }
+    // Above the tabs and every navigation stack, so a resource opens the same way from any screen.
+    .fullScreenCover(item: $store.openResource) { resource in
+      ResourceViewerScreen(resource: resource, client: store.client) { store.openResource = nil }
+    }
+    .onAppear { ResourceLinks.store = store }
     .environment(\.floatingVoice, floatingVoice)
     .onChange(of: runtime.voice.sessionID, initial: true) { _, id in floatingVoice.observe(id) }
     .background(theme.color(.background))

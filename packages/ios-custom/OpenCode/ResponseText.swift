@@ -373,6 +373,12 @@ struct SelectableResponseText: UIViewRepresentable {
           view.openFile?(path)
         }
       }
+      if case .link(let url) = textItem.content, let resource = ResourceLink.id(from: url) {
+        return UIAction(title: "Abrir recurso") { [weak textView] _ in
+          (textView as? ResponseTextView)?.selectionChanged?()
+          ResourceLinks.open(resource)
+        }
+      }
       guard case .link(let url) = textItem.content, url.scheme == "opencode-markdown" else { return defaultAction }
       return UIAction(title: "Abrir nota") { [weak textView] _ in
         guard let view = textView as? ResponseTextView else { return }
