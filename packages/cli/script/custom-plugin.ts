@@ -1,8 +1,13 @@
 import plugin from "../../plugin-app-custom/src/index"
+import { flag, main } from "../../plugin-app-custom/src/resources/hub/main"
 import { Plugin } from "@opencode/plugin/effect"
 import type { Rpc } from "@opencode/schema/rpc"
 import type { Tool } from "@opencode/schema/tool"
 import { Schema } from "effect"
+
+// The release ships one plugin file; the resources hub runs from it as a separate process
+// (`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`).
+if (process.argv.includes(flag)) await main()
 
 // Bundled codecs must execute in their defining runtime. Standard Schema is
 // the public host boundary; do not pass bundled Effect Schema ASTs to the host.

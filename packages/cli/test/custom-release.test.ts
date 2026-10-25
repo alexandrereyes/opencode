@@ -13,8 +13,11 @@ import {
   backup,
   command,
   health,
+  installProxy,
   launchd,
   label,
+  proxyLabel,
+  resourcesHubPort,
   manifest,
   plist,
   point,
@@ -1028,4 +1031,122 @@ test("launcher service status checks authenticated health, legacy health, and st
     await server.stop(true)
   }
   expect(await fixture.run(["service", "status"])).toEqual({ code: 0, stdout: "stopped\n", stderr: "" })
+})
+
+test("the launcher pins the resources hub port the 4096 proxy forwards to", async () => {
+  const home = await fixture()
+  const output = scripts(home, await settings(home))
+  expect(output.server).toContain(`export OPENCODE_RESOURCES_HUB_PORT='${resourcesHubPort}'`)
+  const custom = scripts(home, { ...(await settings(home)), environment: { OPENCODE_RESOURCES_HUB_PORT: "4300" } })
+  expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
+})
+
+test("proxy installation only touches the job that runs this runtime's proxy", async () => {
+  const home = await fixture()
+  const agents = path.join(home, "agents")
+  await mkdir(`${home}/bin`, { recursive: true })
+  await mkdir(agents)
+  expect(await installProxy(home, agents)).toContain("skipped")
+  const job = (program: string) =>
+    Bun.write(
+      `${agents}/${proxyLabel}.plist`,
+      `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>${proxyLabel}</string><key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>${program.replaceAll("&", "&amp;")}</string></array></dict></plist>`,
+    )
+  await job("/elsewhere/bin/proxy.mjs")
+  expect(await installProxy(home, agents)).toContain("skipped")
+  await job(`${home}/bin/proxy.mjs`)
+  await Bun.write(
+    `${home}/bin/proxy.mjs`,
+    await Bun.file(path.join(import.meta.dir, "../script/custom-proxy.mjs")).text(),
+  )
+  expect(await installProxy(home, agents)).toBe("proxy unchanged")
+})
+
+test("the 4096 proxy injects credentials for the server and forwards /resources to the hub without them", async () => {
+  const node = Bun.which("node")
+  if (!node) return
+  const home = await fixture()
+  const seen: { target: string; path: string; authorization: string | null }[] = []
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      seen.push({
+        target: "server",
+        path: new URL(request.url).pathname,
+        authorization: request.headers.get("authorization"),
+      })
+      return new Response("server")
+    },
+  })
+  const hub = Bun.serve<undefined>({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request, server) {
+      seen.push({
+        target: "hub",
+        path: new URL(request.url).pathname,
+        authorization: request.headers.get("authorization"),
+      })
+      if (server.upgrade(request, { data: undefined })) return undefined
+      return new Response("hub")
+    },
+    websocket: { message: (socket, message) => void socket.send(`echo:${message}`) },
+  })
+  await mkdir(`${home}/config/opencode`, { recursive: true })
+  await Bun.write(
+    `${home}/config/opencode/service-custom.json`,
+    JSON.stringify({ hostname: "127.0.0.1", port: upstream.port, password: "pw" }),
+  )
+  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  const port = listener.port
+  listener.stop(true)
+  const proxy = Bun.spawn([node, path.join(import.meta.dir, "../script/custom-proxy.mjs")], {
+    env: {
+      ...process.env,
+      OPENCODE_CUSTOM_HOME: home,
+      OPENCODE_PROXY_PORT: String(port),
+      OPENCODE_RESOURCES_HUB_PORT: String(hub.port),
+    },
+    stdout: "ignore",
+    stderr: "inherit",
+  })
+  try {
+    const base = `http://127.0.0.1:${port}`
+    const deadline = Date.now() + 10_000
+    while (
+      Date.now() < deadline &&
+      !(await fetch(`${base}/api/info`).then(
+        (response) => response.ok,
+        () => false,
+      ))
+    )
+      await Bun.sleep(50)
+    expect(await (await fetch(`${base}/api/info`, { headers: { authorization: "Basic eA==" } })).text()).toBe("server")
+    expect(
+      await (await fetch(`${base}/resources/x/snapshot?ticket=t`, { headers: { authorization: "Basic eA==" } })).text(),
+    ).toBe("hub")
+    expect(seen.find((item) => item.target === "server")?.authorization).toBe(
+      `Basic ${Buffer.from("opencode:pw").toString("base64")}`,
+    )
+    expect(seen.find((item) => item.target === "hub")).toEqual({
+      target: "hub",
+      path: "/resources/x/snapshot",
+      authorization: null,
+    })
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/resources/x/stream?ticket=t`)
+    const reply = await new Promise<string>((resolve, reject) => {
+      socket.onopen = () => socket.send("ping")
+      socket.onmessage = (event) => resolve(String(event.data))
+      socket.onerror = () => reject(new Error("websocket failed"))
+    })
+    socket.close()
+    expect(reply).toBe("echo:ping")
+    expect((await fetch(`${base}/api/info`, { headers: { origin: "https://evil.example" } })).status).toBe(403)
+  } finally {
+    proxy.kill()
+    await proxy.exited
+    void upstream.stop(true)
+    void hub.stop(true)
+  }
 })

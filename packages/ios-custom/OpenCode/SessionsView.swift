@@ -244,6 +244,14 @@ struct SessionsView: View {
             store.conversationPath.append(.init(id: session.id))
           }
         }
+        if let index = arguments.firstIndex(of: "-OpenCodeOpenResource"), arguments.indices.contains(index + 1),
+          let resource = try? await store.client.resource(arguments[index + 1]), !Task.isCancelled
+        {
+          store.openResource = resource
+        }
+      }
+      .fullScreenCover(item: $store.openResource) { resource in
+        ResourceViewerScreen(resource: resource, client: store.client)
       }
       .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).sessionAlertOverlay() }
       .sessionDeleteConfirmation($deleteCandidate, store: store)

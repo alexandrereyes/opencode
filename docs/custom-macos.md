@@ -284,6 +284,28 @@ explicit rollback. Restoring a snapshot discards later writes. A failure before 
 pointer switch leaves the old pointer intact, possibly with the service stopped;
 correct the reported problem and rerun activation.
 
+### 4096 proxy and session resources hub
+
+The loopback proxy on 4096 (`com.alexandrem.opencode2-ui`, Homebrew Node, `<runtime>/bin/proxy.mjs`) is the
+entry point of the Cloudflare One route (`10.203.96.2:80` → nginx → 4096) and of local browsers. Its source is
+`packages/cli/script/custom-proxy.mjs`. It injects the server credentials for every route except `/resources/*`,
+which it forwards, without any `authorization` header, to the session resources hub on `127.0.0.1:4179`
+(WebSocket upgrades included); the hub authorizes each request with its own short tickets
+(`packages/plugin-app-custom/docs/resources.md`).
+
+After a successful activation (`custom:activate`, `custom:update`, rollback), activation installs that file as
+`<runtime>/bin/proxy.mjs` and restarts the proxy job with `launchctl kickstart -k`, but only when the installed job
+runs this runtime's `bin/proxy.mjs` and the content changed; other runtimes and unchanged proxies are left alone.
+A proxy failure is reported after the server is already healthy and does not undo the activation. The
+already-active shortcut does not touch the proxy.
+
+The server launcher exports `OPENCODE_RESOURCES_HUB_PORT=4179` (override it in `manual.json` `environment` only
+together with the proxy). The custom plugin starts the hub on demand as a separate process of the release binary
+(`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`), with the server as its parent: it exits with the
+server, and a hub crash never takes the server down. Its state lives in `$XDG_STATE_HOME/opencode/resources-hub`
+(`hub.json` with its secret, `resources.json`, `hub.log`). Sandboxes leave the port unset, so their hub binds a free
+loopback port and clients on the Mac connect to it directly.
+
 ### One-time migration from the old installation
 
 Preparation is safe while the old service runs. Run the explicit migration in a

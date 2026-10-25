@@ -277,6 +277,7 @@ export async function health(home: string, port: number) {
 
 export function scripts(home: string, config: Awaited<ReturnType<typeof settings>>) {
   const environment = Object.entries({
+    OPENCODE_RESOURCES_HUB_PORT: String(resourcesHubPort),
     ...config.environment,
     OPENCODE_DB: config.database,
     OPENCODE_CONFIG_DIR: config.config,
@@ -520,6 +521,39 @@ export type Service = {
   stop: () => Promise<void>
   start: () => Promise<void>
   pid: () => Promise<number | undefined>
+  /** Installs the repository's 4096 proxy after a successful activation; absent for fixture services. */
+  proxy?: () => Promise<string>
+}
+
+export const proxyLabel = "com.alexandrem.opencode2-ui"
+/** Loopback port of the session resources hub; the 4096 proxy (`custom-proxy.mjs`) forwards `/resources/*` to it. */
+export const resourcesHubPort = 4179
+
+/**
+ * Replaces `<runtime>/bin/proxy.mjs` with `custom-proxy.mjs` and restarts the proxy job, only when the installed
+ * job runs this runtime's proxy and the content changed. Other runtimes (sandboxes, tests) are skipped.
+ */
+export async function installProxy(home: string, agents = path.join(os.homedir(), "Library/LaunchAgents")) {
+  const target = `${home}/bin/proxy.mjs`
+  const definition = Bun.spawn(["/usr/bin/plutil", "-convert", "json", "-o", "-", `${agents}/${proxyLabel}.plist`], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+  const parsed: unknown = await new Response(definition.stdout).json().catch(() => undefined)
+  const program =
+    typeof parsed === "object" && parsed !== null && "ProgramArguments" in parsed ? parsed.ProgramArguments : []
+  if (!Array.isArray(program) || !program.includes(target)) return "proxy skipped (job not installed for this runtime)"
+  const source = await Bun.file(path.join(import.meta.dirname, "custom-proxy.mjs")).text()
+  const installed = await Bun.file(target)
+    .text()
+    .catch(() => "")
+  if (installed === source) return "proxy unchanged"
+  await Bun.write(`${target}.tmp`, source)
+  await chmod(`${target}.tmp`, 0o644)
+  await rename(`${target}.tmp`, target)
+  const result = await launchctl(["kickstart", "-k", `gui/${process.getuid!()}/${proxyLabel}`])
+  if (result.code !== 0) throw new Error(`Proxy installed but restart failed (${result.code}): ${result.stderr.trim()}`)
+  return "proxy updated and restarted"
 }
 
 export function portFree(port: number) {
@@ -584,6 +618,7 @@ export function launchd(
     return { pid: Number(result.stdout.match(/^\s*pid = (\d+)$/m)?.[1]) || undefined }
   }
   return {
+    proxy: () => installProxy(home),
     async pid() {
       return (await query())?.pid
     },
@@ -659,7 +694,7 @@ export async function activate(
     )
   if (options.dryRun) {
     console.log(
-      `Stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start; authenticated healthcheck. Failed boot stays stopped: no automatic database downgrade.`,
+      `Stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start; authenticated healthcheck; then install bin/proxy.mjs and restart ${proxyLabel} only if it changed. Failed boot stays stopped: no automatic database downgrade.`,
     )
     return
   }
@@ -721,6 +756,9 @@ export async function activate(
       if (result.ready && result.version === release.version) {
         await verifyProcess(service, result.pid, config.port)
         console.log(`Active ${commit}; launcher ${home}/bin/opencode2`)
+        // The server is already healthy; a proxy failure is reported without undoing the activation.
+        if (service.proxy)
+          await service.proxy().then(console.log, (error: unknown) => console.error(`Proxy: ${String(error)}`))
         return
       }
       await Bun.sleep(1000)

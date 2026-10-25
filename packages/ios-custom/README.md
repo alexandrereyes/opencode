@@ -1254,6 +1254,31 @@ so there is a single list component. Verify after `build-for-testing` with
 child made running by a Luna 6 / low `sleep`, runs `OpenCodeUITests/ConversationAgentsTests`, then interrupts and
 deletes the family.
 
+### Recursos das sessões (simulador, emulador, Chrome) — 25 October
+
+Simulators, Android emulators and Chrome browsers that agents use on the Mac can be watched and controlled from the
+app, also with the Mac locked. The contract, hub routes, adapter interface and lock are specified in
+`packages/plugin-app-custom/docs/resources.md`; `OpenCodeKit/SessionResources.swift` mirrors it. The viewer lives in
+`OpenCode/SessionResources/`: the shared shell (`ResourceViewer.swift`, `ResourceViewerModel.swift`,
+`ResourceSurface.swift`) and one folder per kind (`IOSSimulator/`, `AndroidEmulator/`, `Chrome/`), so kinds evolve
+without touching each other. `SessionStore.openResource` presents it full screen above everything;
+`-OpenCodeOpenResource <id>` opens one at launch for tests.
+
+The shell is the approved layout B: the stream fills the screen and glass controls float above it (close, status
+pill with the hub round trip, who controls it, a side column of kind tools, **Assumir controle**). Taking control
+makes touches (multi-touch, normalized to the frame) and the iPhone keyboard go to the resource, draws a primary
+border and hides the controls. Hiding/showing never steals a touch: while watching, touches do not reach the
+resource, so a tap toggles the controls; in control, every touch goes to the resource and a small edge handle,
+draggable along the edge, brings the controls back, while the **Você no controle** pill offers **Mostrar controles**
+and **Devolver controle**. Floating controls that stay visible in control (Android's navigation pill) are draggable
+anywhere with `.resourceDraggable(key)`, remembered per key.
+
+Verify after `build-for-testing` with your own booted target simulator:
+`python3 packages/ios-custom/script/test-resources.py --device <app-sim> --target <target-sim> --derived … --home <sandbox> --server-url … --evidence … [--theme openchamber-light] [--lock]`.
+It registers the target in the sandbox hub, measures the stream, runs `OpenCodeUITests/ResourceViewerTests`, and with
+`--lock` checks with one Luna 6 / low shell call that the agent is refused while Alexandre holds control and is told
+when control returns.
+
 `ContextUsage` in OpenCodeKit owns the shared math, pt-BR abbreviations, VoiceOver wording and >80% warning threshold.
 A bounded store-local formatter cache is keyed by step ID, measured tokens and resolved context limit, so text/tool
 deltas do not repeatedly format metrics. The ring clamps drawing only, not the displayed percentage or token count.

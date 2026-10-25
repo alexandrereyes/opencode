@@ -64,6 +64,8 @@ final class SessionStore {
     /// The conversation's "Agentes e tarefas" screen, pushed above it.
     var agents = false
   }
+  /// The resource viewer (simulator, emulator or browser) shown full screen above everything.
+  var openResource: SessionResource?
   var conversationPath: [ConversationRoute] = [] {
     didSet {
       #if DEBUG
