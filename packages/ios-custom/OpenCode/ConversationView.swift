@@ -1046,8 +1046,9 @@ struct ConversationView: View {
     guard
       let target = scrollState.capture(followTail: atBottom)
     else { return }
+    let anchored: String? = if case .message(let id, _) = target { id } else { nil }
     let position = ReadingPosition(
-      target, viewportTop: atBottom ? nil : Double(scrollState.usableTop))
+      target, viewportTop: atBottom ? nil : Double(scrollState.usableTop(excluding: anchored)))
     savedPosition = position
     sessions.reading.set(position, sessionID: conversation.id)
     captureRequested = false

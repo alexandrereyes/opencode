@@ -115,10 +115,11 @@ import XCTest
     }
   }
 
-  /// Long-press in the introduction and drag past the "1. Destaques no texto" heading.
+  /// Long-press the introduction's first line ("Um pequeno mostruário", below the title) and drag past the
+  /// "1. Destaques no texto" heading.
   private func select(in response: XCUIElement) {
     let origin = response.coordinate(withNormalizedOffset: .zero)
-    origin.withOffset(CGVector(dx: 40, dy: 70))
+    origin.withOffset(CGVector(dx: 40, dy: 52))
       .press(forDuration: 1, thenDragTo: origin.withOffset(CGVector(dx: 140, dy: 290)), withVelocity: .slow, thenHoldForDuration: 0.3)
   }
 

@@ -81,9 +81,12 @@ import SwiftUI
       return frame.minY <= 2 && frame.maxY > 0 ? (id as String, header) : nil
     }
   }
-  var usableTop: CGFloat {
+  var usableTop: CGFloat { usableTop(excluding: nil) }
+  /// A prompt kept as the reading position rests at the top edge, where it becomes the active header.
+  /// Measuring it below its own header would push it down until it is inline again, then back up.
+  func usableTop(excluding id: String?) -> CGFloat {
     guard let view else { return 0 }
-    return activeHeaders.map {
+    return activeHeaders.filter { $0.id != id }.map {
       $0.view.convert($0.view.bounds, to: view).maxY - view.bounds.minY
     }.max() ?? 0
   }
@@ -286,7 +289,7 @@ import SwiftUI
     let correction: CGFloat
     if let readingAnchor, let frame = frames[readingAnchor.id] {
       correction =
-        frame.minY - (readingAnchor.viewportTop ?? usableTop)
+        frame.minY - (readingAnchor.viewportTop ?? usableTop(excluding: readingAnchor.id))
         + ReadingCapture.clampedOffset(readingAnchor.offset, height: frame.height)
     } else if let anchor, let frame = frames[anchor.id] {
       correction = frame.minY - anchor.y

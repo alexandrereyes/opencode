@@ -2935,7 +2935,10 @@ against a captured viewport origin.
   Probe views identify their current recycled cell, but geometry comes from the native cell's bounds: a SwiftUI
   background representable can be zero-sized or inset and must not stand in for the message rectangle. The position
   also records the captured usable-top edge (`viewportTop`) so natural/pinned header transitions do not redefine the
-  coordinate origin when reopening; old JSON without that optional field still decodes.
+  coordinate origin when reopening; old JSON without that optional field still decodes. A prompt kept as the reading
+  position (revealed by search or a comment's quote, or captured from it) is measured against every active header
+  except its own: below its own header it would move down until inline, become pinned and move back, a loop that
+  shook a conversation's first prompt by its day chip at about 27 corrections per second.
   Restoration and layout never recapture their own geometry: only real user scrolling or an explicit new target may
   change a bookmark. Negative offsets are real gaps before a message and are preserved, not clamped to an arbitrary
   negative limit. That former `-32` clamp caused a systematic upward shift when a captured gap was larger.
