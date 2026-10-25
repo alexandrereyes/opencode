@@ -36,6 +36,12 @@ nonarchived top-level sessions, excluding the caller and Mestra sessions; no sub
 | `request_answer` | Discriminated `question` (`requestID`, field-key/value `answer`) or `permission` (`requestID`, `allow` boolean), plus `sessionID`. Native form validation; permissions are once/reject, never persistent approval. |
 | `session_wait` | `sessionID`, optional `timeoutSeconds` (30 default, 120 maximum). Caller-clock timeout without target interruption; short status + latest assistant text capped at 2,000 characters. |
 
+`mac_query` (namespace `mac`, also Mestra-only, `src/mac-data`) reads Calendar, Reminders and Contacts on the Mac through
+the `OpenCode Mac Data` helper: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
+`query`), `contacts` (name/phone/e-mail `query`) or `status`. Results carry the Mac time zone, `total` and `truncated`
+(item `limit` and 20,000 serialized characters); missing grants fail with where to enable them. See "Calendar, Reminders
+and Contacts" in `docs/custom-macos.md`.
+
 Both send and create tag the admitted user prompt with `{"custom.master":{"sessionID":"<origin>"}}`.
 Preferences add optional `data.masterSessions: Record<server, sessionID>` and `master.set` / `master.clear` intents;
 old profiles remain version 1. iOS uses `local` within each server's own persisted profile, reuses managed chats, and

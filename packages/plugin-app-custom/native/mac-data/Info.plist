@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>local.opencode.custom.macdata</string>
+	<key>CFBundleExecutable</key>
+	<string>opencode-mac-data</string>
+	<key>CFBundleName</key>
+	<string>OpenCode Mac Data</string>
+	<key>CFBundleDisplayName</key>
+	<string>OpenCode Mac Data</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>A Sessão mestra do OpenCode lê seus eventos para responder perguntas sobre a sua agenda.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>A Sessão mestra do OpenCode lê seus eventos para responder perguntas sobre a sua agenda.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>A Sessão mestra do OpenCode lê seus lembretes para responder perguntas sobre as suas tarefas.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>A Sessão mestra do OpenCode lê seus lembretes para responder perguntas sobre as suas tarefas.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>A Sessão mestra do OpenCode lê seus contatos para encontrar telefones, e-mails e aniversários.</string>
+</dict>
+</plist>

@@ -10,8 +10,17 @@ import { command } from "./custom-release"
 export const bundle = "OpenCode Custom.app"
 export const bundleID = "local.opencode.custom"
 const subject = "OpenCode Custom Local Signing"
+// Calendar, Reminders and Contacts reader for the plugin's `mac_query`. It disclaims the
+// server's responsibility, so its own bundle holds those grants (see docs/custom-macos.md).
+export const macData = "OpenCode Mac Data.app"
+export const macDataPath = `Contents/Helpers/${macData}/Contents/MacOS/opencode-mac-data`
 
-export async function bundleRelease(home: string, staging: string, binary: string) {
+export async function bundleRelease(
+  home: string,
+  staging: string,
+  binary: string,
+  source = path.resolve(import.meta.dirname, "../../.."),
+) {
   const app = path.join(staging, bundle)
   const executable = path.join(app, "Contents/MacOS/opencode")
   await mkdir(path.dirname(executable), { recursive: true })
@@ -21,8 +30,46 @@ export async function bundleRelease(home: string, staging: string, binary: strin
   await Bun.write(path.join(app, "Contents/Info.plist"), infoPlist())
   await symlink(path.join("..", bundle, "Contents/MacOS/opencode"), path.join(staging, "bin/opencode"))
   const signing = await signingIdentity(home)
+  // Nested code must be signed before the outer bundle seals it.
+  await buildMacData(signing, source, path.join(app, "Contents/Helpers"))
   await command(["/usr/bin/codesign", "--force", "--sign", signing.identity, "--keychain", signing.keychain, app])
   await command(["/usr/bin/codesign", "--verify", "--strict", app])
+}
+
+export async function buildMacData(signing: { identity: string; keychain: string }, source: string, directory: string) {
+  const native = path.join(source, "packages/plugin-app-custom/native/mac-data")
+  const app = path.join(directory, macData)
+  await mkdir(path.join(app, "Contents/MacOS"), { recursive: true })
+  await copyFile(path.join(native, "Info.plist"), path.join(app, "Contents/Info.plist"))
+  await command(
+    [
+      "/usr/bin/xcrun",
+      "swiftc",
+      "-O",
+      "-swift-version",
+      "5",
+      "-target",
+      `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`,
+      "-module-cache-path",
+      path.join(directory, ".module-cache"),
+      "-Xlinker",
+      "-sectcreate",
+      "-Xlinker",
+      "__TEXT",
+      "-Xlinker",
+      "__info_plist",
+      "-Xlinker",
+      path.join(native, "Info.plist"),
+      path.join(native, "main.swift"),
+      "-o",
+      path.join(app, "Contents/MacOS/opencode-mac-data"),
+    ],
+    directory,
+  )
+  await rm(path.join(directory, ".module-cache"), { recursive: true, force: true })
+  await command(["/usr/bin/codesign", "--force", "--sign", signing.identity, "--keychain", signing.keychain, app])
+  await command(["/usr/bin/codesign", "--verify", "--strict", app])
+  return path.join(directory, macData)
 }
 
 export async function signingIdentity(home: string) {

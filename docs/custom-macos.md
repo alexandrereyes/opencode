@@ -32,7 +32,8 @@ fails preparation rather than silently changing launcher safety. No server is st
 Each `releases/<sha>` contains:
 
 - `OpenCode Custom.app`: signed bundle (`local.opencode.custom`) holding the compiled CLI/TUI
-  with version `0.0.0-custom.<sha>`;
+  with version `0.0.0-custom.<sha>`, and the nested `Contents/Helpers/OpenCode Mac Data.app`
+  (see "Calendar, Reminders and Contacts" below);
 - `bin/opencode`: relative symlink to the bundle executable, used by launchers and hashed
   through the link;
 - `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
@@ -130,6 +131,38 @@ To tell a missing grant from a Computer Use regression, run the official client
 from Terminal.app. It gets past bootstrap and reports `Sender process is not authenticated`,
 because only an OpenAI-signed Codex parent is accepted. `bootstrapTimedOut` only from the
 server context points to the server identity's grants.
+
+#### Calendar, Reminders and Contacts
+
+The Mestra agent's `mac_query` tool (`packages/plugin-app-custom/src/mac-data`) reads Calendar,
+Reminders and Contacts through EventKit and Contacts.framework in a Swift helper,
+`OpenCode Mac Data.app` (`local.opencode.custom.macdata`, source in
+`packages/plugin-app-custom/native/mac-data`). Prepare compiles it with `xcrun swiftc` (Xcode or
+the Command Line Tools are required), signs it with the same local certificate before sealing the
+outer bundle, and nests it in `OpenCode Custom.app/Contents/Helpers`. The plugin runs it from
+`<release>/OpenCode Custom.app/...`; `OPENCODE_MAC_DATA_HELPER` overrides the path. The tool only
+reads; one call is one helper process (about 0.3 s, plus EventKit work).
+
+The helper re-spawns itself disclaiming responsibility, so TCC attributes the access to the
+helper's own bundle instead of the launchd server (or Terminal, tmux, a sandbox) that started it.
+`tccd` logs confirm `Resp:{identifier=local.opencode.custom.macdata}`. Its designated requirement
+is stable across releases, so the three grants are given once and survive updates while the
+`signing/` directory is kept. Calendar and Reminders need **Full Access**; macOS cannot add these
+services manually with **+**, so access starts from the prompt:
+
+1. After `custom:update`, ask the Mestra about the calendar, reminders or a contact, or open the
+   helper once from Terminal (it requests all three):
+   `open ~/.local/share/opencode-custom-v2/current/OpenCode\ Custom.app/Contents/Helpers/OpenCode\ Mac\ Data.app`.
+2. Click **Allow** / **Allow Full Access** on the "OpenCode Mac Data" prompts. A query waits up to
+   50 seconds for an answer; an unanswered prompt returns `notDetermined`, so ask again.
+3. Check with `mac_query {"source": "status"}` or the helper directly:
+   `".../OpenCode Mac Data.app/Contents/MacOS/opencode-mac-data" '{"source":"status"}'`.
+
+A denied grant is re-enabled in System Settings → Privacy & Security → Calendars, Reminders or
+Contacts (Ajustes do Sistema → Privacidade e Segurança → Calendários, Lembretes, Contatos) under
+"OpenCode Mac Data"; no server restart is needed because every query starts a new helper. The
+sandbox builds the helper into `<home>/mac-data`, signed with the installed `signing/` keychain when
+present, so it shares the production grants.
 
 Manual retention is explicit:
 

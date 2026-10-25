@@ -5,7 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
 import { artifacts, command, publish, seal } from "./custom-release"
-import { bundle, bundleRelease } from "./custom-signing"
+import { bundle, bundleRelease, macData } from "./custom-signing"
 import { verifyParser } from "./custom-parser-smoke"
 
 const binary = process.argv[2]
@@ -113,7 +113,14 @@ try {
   const expected = [
     ...artifacts.filter((file) => file !== "bin/opencode"),
     "manual-release.json",
-    ...["Info.plist", "MacOS/opencode", "_CodeSignature/CodeResources"].map((file) => `${bundle}/Contents/${file}`),
+    ...[
+      "Info.plist",
+      "MacOS/opencode",
+      "_CodeSignature/CodeResources",
+      ...["Info.plist", "MacOS/opencode-mac-data", "_CodeSignature/CodeResources"].map(
+        (file) => `Helpers/${macData}/Contents/${file}`,
+      ),
+    ].map((file) => `${bundle}/Contents/${file}`),
   ].sort()
   if (JSON.stringify(files) !== JSON.stringify(expected)) throw new Error("Unexpected compact release payload")
   if ((await readlink(`${release}/bin/opencode`)) !== `../${bundle}/Contents/MacOS/opencode`)
