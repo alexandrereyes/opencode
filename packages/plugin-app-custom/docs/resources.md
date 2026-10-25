@@ -96,7 +96,7 @@ Text messages client → hub: `ping { t }` and `input { events }` (≤ 64 events
 frame (0…1, top left): `touch { phase: began|moved|ended|cancelled, x, y, pointer? }`, `scroll { x, y, dx, dy }`
 (fractions of the frame), `key { key, modifiers? }` (DOM key names), `text { text }` (never logged),
 `button { button: home|back|recents|lock|volume-up|volume-down|rotate-left|rotate-right|app-switcher }`,
-`navigate { action: url|back|forward|reload, url? }`. Without control the hub answers `error not_in_control`; an adapter
+`navigate { action: url|back|forward|reload|tab, url?, target? }` (`tab` follows the Chrome tab `target`). Without control the hub answers `error not_in_control`; an adapter
 without `input` gives `error unsupported`.
 
 ## Adapters
@@ -170,6 +170,48 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
   (about 22 % scrolling either way). The iPhone adds its network round trip (shown in the status pill) and a JPEG
   decode.
 
+### Chrome (`adapters/chrome.ts`, `adapters/cdp.ts`)
+
+**Attaching to the agent's browser.** `playwright-cli` launches Chrome with `--remote-debugging-pipe`, a pipe only its
+daemon holds, so nothing else can attach to it. Instead of driving the browser through the daemon's private socket
+protocol (`~/Library/Caches/ms-playwright/daemon/<hash>/*.session`, versioned with Playwright and without a frame
+stream) or asking agents to change how they open it, the plugin registers a `shell` `create.before` hook that sets
+`PLAYWRIGHT_MCP_CONFIG=<hub state>/playwright-cli.json` (only when the shell has none). That config adds
+`--remote-debugging-port=0`: Chrome keeps the pipe for Playwright and also listens on a random **loopback** port,
+which it writes to `<user-data-dir>/DevToolsActivePort`. Headless and headed work alike. The adapter finds the browser
+of `meta.session` from the process table: the `cliDaemon.js <session>` process, its Chrome child (`--user-data-dir`),
+and that file. It never attaches to a Chrome it did not find this way (a personal Chrome with its own debugging port
+is never a candidate). `--config`, a `.playwright/cli.config.json` in the working directory, or a browser opened before
+the hook existed win over the environment: such browsers stay listed but live view reports that they were opened
+without a debugging port. Agent shell calls wait for the Location's plugins, so the hook is in place before the
+command runs; the raw `POST /api/shell` route does not wait, so its very first call in a cold Location can miss it.
+Like the personal Chrome on 9222, the port accepts any local process; it closes with the browser.
+
+**Stream.** One browser WebSocket per resource (flattened target sessions), shared by snapshot, stream and input and
+closed after 60 s unused. `Page.startScreencast` (JPEG 70, at most 1280×2400) follows one tab; each frame is acked
+after at least 66 ms (about 15 fps), so Chrome never runs ahead of the hub. During a finger scroll the screencast
+restarts at half size and quality 50 and returns to full when frames settle (after t3code's `ServerBrowser`). Because
+screencasts ignore emulated device scale, a phone-sized page streams only ~400 px wide: 200 ms after frames stop, a
+still rendered up to 1200 px wide (`Page.captureScreenshot` with a scaled clip, screencast paused) replaces it, and the
+repeated frame of the restarted screencast is dropped. Idle pages start from such a still.
+
+**Meta** (`ChromeState`, replaced whole on every change): `{ url, title, canGoBack, canGoForward, targetID, tabs:
+[{ id, title, url }], focus: { editable, field? }, editTaps, viewport?: { width, height } }`. `focus.field` is one of
+`text multiline password email username url tel number search one-time-code`, classified in the page (through shadow
+roots and same-origin frames) after taps, Tab/Enter/Escape and loads; values are never read. `editTaps` counts taps
+that land on an editable field, so a viewer reopens its keyboard on the field that already had focus.
+
+**Input.** Pages with touch emulation (`--device`/`--mobile`) get `Input.dispatchTouchEvent`. Mouse-only pages
+(Playwright's default desktop context) turn a finger that stays put into a click at the release point and one that
+moves more than 8 CSS px into wheel scrolling, like a phone browser, instead of a text-selecting drag. `scroll` is a
+wheel event; `key` maps DOM key names to `Input.dispatchKeyEvent`; `text` is `Input.insertText` and is never logged;
+`navigate` uses `Page.navigate` (addresses without a scheme get `http://` for local hosts, `https://` otherwise),
+history entries, `Page.reload`, and `tab` re-targets the stream (`Target.activateTarget` brings it to front).
+
+Checks: `bun test test/resources-chrome.test.ts` drives a real headless Chrome under a fake `cliDaemon.js` parent
+(skipped without Chrome); `script/chrome-resource-check.ts --session <s> --out <dir>` measures a real `playwright-cli`
+session; `script/chrome-login-fixture.ts` is the local login page those and the iOS UI test use.
+
 ## Control lock
 
 "Assumir controle" (`control take`) gives Alexandre the resource. The plugin's `tool.hook("execute.before")` then
@@ -206,4 +248,6 @@ them off whatever they cover. Kinds without side tools pass `EmptyView` as `tool
 `ResourceControlBar(model:accessory:)` puts a kind's control between the button and the hint (Android's pill).
 `ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
 indicator); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
-`.password` for password autofill). Kinds that stream H.264 set `model.rawFrames` and pass their own `surface`.
+`.password` for password autofill: kinds set `model.keyboardStyle`, a `ResourceKeyboardStyle` of content type,
+keyboard type, secure entry and Return key). Frames decode one at a time and the newest waiting frame always follows,
+so the last frame of a burst is never lost. Kinds without side tools pass `EmptyView` and get no tool column. Kinds that stream H.264 set `model.rawFrames` and pass their own `surface`.

@@ -2,6 +2,8 @@ import { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
 import { Tool } from "@opencode/schema/tool"
 import { Effect, Schedule } from "effect"
+import path from "node:path"
+import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
 import { blocking, refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
 import { HubError, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
@@ -16,6 +18,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
   ctx: Plugin.Context,
   hub: HubClient = makeHubClient({ state: stateDirectory() }),
 ) {
+  // Chrome: agent shells open `playwright-cli` browsers with a loopback CDP port that the adapter attaches to.
+  const playwrightConfig = path.join(stateDirectory(), "playwright-cli.json")
+  yield* ctx.shell.hook("create.before", (input) => Effect.sync(() => shellEnvironment(input.env, playwrightConfig)))
+  yield* Effect.promise(() => writeConfig(playwrightConfig))
+
   const call = <A>(run: () => Promise<A>) =>
     Effect.tryPromise({
       try: run,

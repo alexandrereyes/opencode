@@ -57,11 +57,12 @@ export const Button = Schema.Struct({
   ]),
 })
 
-/** Browser navigation (Chrome). */
+/** Browser navigation (Chrome). `tab` follows another tab: `target` is a `tabs[].id` from the viewer's `meta`. */
 export const Navigate = Schema.Struct({
   type: Schema.Literal("navigate"),
-  action: Schema.Literals(["url", "back", "forward", "reload"]),
+  action: Schema.Literals(["url", "back", "forward", "reload", "tab"]),
   url: optional(Schema.String.check(Schema.isMaxLength(4_000))),
+  target: optional(Schema.String.check(Schema.isMaxLength(200))),
 })
 
 export const Input = Schema.Union([Touch, Scroll, Key, Text, Button, Navigate]).annotate({
