@@ -8,6 +8,7 @@ import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StreamSink } from "../adapters/types.js"
 import { ResourceProtocol } from "../protocol.js"
 import { Resources } from "../rpc.js"
+import { makeInputQueue } from "./input-queue.js"
 import { sign, verify } from "./ticket.js"
 
 /** Bumped on incompatible admin API changes; the plugin replaces a hub that reports another value. */
@@ -81,12 +82,27 @@ const decodeInputs = Schema.decodeUnknownOption(
 
 type SocketData = { readonly id: string; readonly capability: Resources.Capability; readonly lock?: string }
 
+type Frame = { readonly encoded: Uint8Array; readonly payload: Uint8Array; readonly keyframe: boolean }
+
+/** Per-viewer stream counters, for `GET /admin/streams` and measurements. */
+type ViewerStats = { frames: number; bytes: number; replaced: number; dropped: number }
+
 interface Viewer {
-  readonly lock?: string
-  readonly capability: Resources.Capability
+  /** Updated in place when the client upgrades its socket with a control ticket (`auth`). */
+  lock?: string
+  capability: Resources.Capability
+  live?: Live
   waitingKeyframe: boolean
+  /** Newest image frame that did not fit yet; sent as soon as the viewer catches up, replaced by newer ones. */
+  pending?: Frame
+  retry?: ReturnType<typeof setTimeout>
+  /** Frames sent on this connection and, once the client acknowledges, how many it has received. */
+  sent: number
+  acked?: number
+  profile: ResourceProtocol.Profile
+  readonly stats: ViewerStats
   text(message: ResourceProtocol.ServerMessage): void
-  frame(encoded: Uint8Array, payload: Uint8Array, keyframe: boolean): void
+  frame(frame: Frame): void
   buffered(): number
   close(): void
 }
@@ -97,10 +113,27 @@ interface Live {
   hello?: ResourceProtocol.Hello
   /** Latest `meta`, replayed to viewers that join later (an iOS Simulator's rotation). */
   meta?: Record<string, unknown>
-  keyframe?: { readonly encoded: Uint8Array; readonly payload: Uint8Array }
+  keyframe?: Frame
+  /** Capture → hub ages (ms) since the last `stats`, for frames whose adapter reported `capturedAt`. */
+  readonly captures: number[]
+  /** Adapters waiting in `whenReady`. */
+  readonly waiters: Set<() => void>
+  linger?: ReturnType<typeof setTimeout>
+  ticker?: ReturnType<typeof setInterval>
 }
 
-const maxBuffered = 2 * 1024 * 1024
+/**
+ * Bytes a viewer may have waiting in its connection before the hub holds frames back. Images keep only the newest
+ * held-back frame and send it once the viewer drains, so a slow viewer sees the latest screen a little late instead of
+ * an ever older one; this budget (a few JPEG frames) bounds that lateness for clients that do not acknowledge.
+ * H.264 cannot skip frames, so it keeps the larger budget and resumes at the next keyframe.
+ */
+const maxBufferedImages = 512 * 1024
+const maxBufferedVideo = 2 * 1024 * 1024
+const retryMs = 30
+const lingerMs = 5_000
+const statsMs = 2_000
+const mjpegRepeatMs = 100
 const goneRetentionMs = 24 * 3_600_000
 const stoppedRetentionMs = 7 * 24 * 3_600_000
 
@@ -115,7 +148,7 @@ export function createHub(options: HubOptions) {
   const locks = new Map<string, { token: string; since: number; expiresAt: number }>()
   const lives = new Map<string, Live>()
   const snapshots = new Map<string, { at: number; image: Promise<Image> }>()
-  const inputs = new Map<string, Promise<void>>()
+  const queues = new Map<string, ReturnType<typeof makeInputQueue>>()
   const pending: HubEvent[] = []
   const waiters = new Set<() => void>()
   let writing: ReturnType<typeof setTimeout> | undefined
@@ -211,7 +244,7 @@ export function createHub(options: HubOptions) {
   const remove = (id: string) => {
     const live = lives.get(id)
     live?.controller.abort()
-    if (locks.has(id)) release(id, "returned")
+    if (locks.has(id)) void release(id, "returned").then(() => queues.delete(id))
     entries.delete(id)
     snapshots.delete(id)
     changed(id)
@@ -229,8 +262,13 @@ export function createHub(options: HubOptions) {
     )
   }
 
-  const release = (id: string, reason: "returned" | "expired") => {
+  /**
+   * Ends Alexandre's control. New inputs are refused at once and pending ones are dropped; the input in flight
+   * finishes and fingers still down are lifted before viewers and the session hear about the hand-back.
+   */
+  const release = async (id: string, reason: "returned" | "expired") => {
     if (!locks.delete(id)) return
+    await queues.get(id)?.reset()
     const entry = entries.get(id)
     broadcastControl(id)
     if (entry)
@@ -245,12 +283,12 @@ export function createHub(options: HubOptions) {
     changed(id)
   }
 
-  const control = (id: string, action: "take" | "renew" | "release") => {
+  const control = async (id: string, action: "take" | "renew" | "release") => {
     const entry = entries.get(id)
     if (!entry) return undefined
     const at = now()
     if (action === "release") {
-      release(id, "returned")
+      await release(id, "returned")
       return { resource: view(entry) }
     }
     const current = locks.get(id)
@@ -285,7 +323,9 @@ export function createHub(options: HubOptions) {
 
   const expire = () => {
     const at = now()
-    ;[...locks.entries()].filter(([, lock]) => lock.expiresAt <= at).forEach(([id]) => release(id, "expired"))
+    return Promise.all(
+      [...locks.entries()].filter(([, lock]) => lock.expiresAt <= at).map(([id]) => release(id, "expired")),
+    )
   }
 
   // Serialized: an explicit probe after an upsert must observe the adapter, not skip a periodic one in flight.
@@ -364,52 +404,79 @@ export function createHub(options: HubOptions) {
       waiters.add(take)
     })
 
-  const subscribe = (id: string, viewer: Viewer) => {
-    const entry = entries.get(id)
-    if (!entry) return viewer.close()
-    const existing = lives.get(id)
-    const live: Live = existing ?? { controller: new AbortController(), viewers: new Set() }
-    live.viewers.add(viewer)
+  const controlMessage = (id: string, viewer: Viewer): ResourceProtocol.ServerMessage => {
     const lock = locks.get(id)
-    viewer.text({
+    return {
       type: "control",
       holder: lock ? "user" : null,
       ...(lock ? { expiresAt: lock.expiresAt } : {}),
       mine: lock !== undefined && viewer.lock === lock.token,
-    })
+    }
+  }
+
+  const subscribe = (id: string, viewer: Viewer) => {
+    const entry = entries.get(id)
+    if (!entry) return viewer.close()
+    const existing = lives.get(id)
+    const live: Live = existing ?? {
+      controller: new AbortController(),
+      viewers: new Set(),
+      captures: [],
+      waiters: new Set(),
+    }
+    clearTimeout(live.linger)
+    live.linger = undefined
+    live.viewers.add(viewer)
+    viewer.live = live
+    viewer.text(controlMessage(id, viewer))
     if (live.hello) viewer.text(live.hello)
     if (live.meta) viewer.text({ type: "meta", value: live.meta })
-    if (live.keyframe) {
-      viewer.frame(live.keyframe.encoded, live.keyframe.payload, true)
-      viewer.waitingKeyframe = false
-    }
+    if (live.keyframe) offer(viewer, live.keyframe, live.hello?.format === "h264")
     if (existing) return
     lives.set(id, live)
     const sink: StreamSink = {
       hello: (hello) => {
         live.hello = { type: "hello", ...hello }
         live.keyframe = undefined
-        live.viewers.forEach((item) => item.text({ type: "hello", ...hello }))
-      },
-      frame: (payload, frame = {}) => {
-        const keyframe = live.hello?.format !== "h264" || frame.keyframe === true
-        const encoded = ResourceProtocol.encodeFrame(payload, frame.capturedAt ?? now(), keyframe)
-        if (keyframe) live.keyframe = { encoded, payload }
         live.viewers.forEach((item) => {
-          if (item.waitingKeyframe && !keyframe) return
-          if (item.buffered() > maxBuffered) {
-            item.waitingKeyframe = true
-            return
-          }
-          item.waitingKeyframe = false
-          item.frame(encoded, payload, keyframe)
+          item.pending = undefined
+          item.text({ type: "hello", ...hello })
         })
+      },
+      frame: (payload, options = {}) => {
+        const video = live.hello?.format === "h264"
+        const keyframe = !video || options.keyframe === true
+        const at = now()
+        if (options.capturedAt !== undefined) live.captures.push(at - options.capturedAt)
+        const frame = {
+          encoded: ResourceProtocol.encodeFrame(payload, options.capturedAt ?? at, keyframe),
+          payload,
+          keyframe,
+        }
+        if (keyframe) live.keyframe = frame
+        live.viewers.forEach((item) => offer(item, frame, video))
       },
       meta: (value) => {
         live.meta = value
         live.viewers.forEach((item) => item.text({ type: "meta", value }))
       },
+      notice: (message) => live.viewers.forEach((item) => item.text({ type: "notice", message })),
+      profile: () =>
+        live.viewers.size > 0 && [...live.viewers].every((item) => item.profile === "economy") ? "economy" : "standard",
+      ready: () => anyReady(live),
+      whenReady: (signal) =>
+        new Promise<void>((resolve) => {
+          if (anyReady(live) || signal?.aborted) return resolve()
+          const done = () => {
+            live.waiters.delete(done)
+            signal?.removeEventListener("abort", done)
+            resolve()
+          }
+          live.waiters.add(done)
+          signal?.addEventListener("abort", done, { once: true })
+        }),
     }
+    live.ticker = setInterval(() => report(live), statsMs)
     const adapter = options.adapters[entry.kind]
     const run = adapter.stream
       ? adapter.stream(entry, sink, live.controller.signal)
@@ -423,6 +490,9 @@ export function createHub(options: HubOptions) {
         }),
       )
       .then((message) => {
+        clearInterval(live.ticker)
+        clearTimeout(live.linger)
+        live.waiters.forEach((wake) => wake())
         if (lives.get(id) !== live) return
         lives.delete(id)
         if (live.controller.signal.aborted && live.viewers.size === 0) return
@@ -433,13 +503,110 @@ export function createHub(options: HubOptions) {
       })
   }
 
+  /** Per-viewer delivery counters plus the capture → hub age of the last interval, every `statsMs`. */
+  const report = (live: Live) => {
+    const ages = live.captures.splice(0).toSorted((a, b) => a - b)
+    const capture =
+      ages.length > 0
+        ? {
+            p50: Math.round(ages[Math.floor(ages.length / 2)] ?? 0),
+            p95: Math.round(ages[Math.floor(ages.length * 0.95)] ?? 0),
+          }
+        : undefined
+    live.viewers.forEach((viewer) =>
+      viewer.text({
+        type: "stats",
+        hub: now(),
+        ...(capture ? { capture } : {}),
+        ...viewer.stats,
+        ...(viewer.acked === undefined ? {} : { inFlight: viewer.sent - viewer.acked }),
+      }),
+    )
+  }
+
+  /** Whether `viewer` can take another frame now: within its byte budget and, if it acknowledges, its frames in flight. */
+  const ready = (viewer: Viewer, video: boolean) =>
+    viewer.buffered() <= (video ? maxBufferedVideo : maxBufferedImages) &&
+    (viewer.acked === undefined || viewer.sent - viewer.acked < ResourceProtocol.maxFramesInFlight)
+
+  /** Some viewer could take a new frame right now (adapters that capture on demand pace themselves by this). */
+  const anyReady = (live: Live) =>
+    live.viewers.size === 0 ||
+    [...live.viewers].some((viewer) => !viewer.pending && ready(viewer, live.hello?.format === "h264"))
+
+  const wake = (live: Live | undefined) => {
+    if (!live || live.waiters.size === 0 || !anyReady(live)) return
+    live.waiters.forEach((done) => done())
+  }
+
+  const send = (viewer: Viewer, frame: Frame) => {
+    viewer.waitingKeyframe = false
+    viewer.sent++
+    viewer.stats.frames++
+    viewer.stats.bytes += frame.encoded.byteLength
+    viewer.frame(frame)
+  }
+
+  /**
+   * Delivers one frame to one viewer, so a slow viewer never holds back a fast one. Images that do not fit replace
+   * the viewer's held-back frame, sent by `flush` when it catches up. H.264 deltas that do not fit are dropped and the
+   * viewer waits for the next keyframe.
+   */
+  const offer = (viewer: Viewer, frame: Frame, video: boolean) => {
+    if (viewer.waitingKeyframe && !frame.keyframe) return void viewer.stats.dropped++
+    if (ready(viewer, video)) {
+      if (viewer.pending) viewer.stats.replaced++
+      viewer.pending = undefined
+      return send(viewer, frame)
+    }
+    if (video) {
+      viewer.waitingKeyframe = true
+      viewer.stats.dropped++
+      return
+    }
+    if (viewer.pending) viewer.stats.replaced++
+    viewer.pending = frame
+    schedule(viewer)
+  }
+
+  /** Sends the held-back frame once the viewer has room; called on drain, acknowledgement and a short retry. */
+  const flush = (viewer: Viewer) => {
+    const frame = viewer.pending
+    if (frame && !ready(viewer, false)) return schedule(viewer)
+    if (frame) {
+      viewer.pending = undefined
+      send(viewer, frame)
+    }
+    wake(viewer.live)
+  }
+
+  // Bun reports drain only past its own backpressure limit, far above the image budget, so also poll briefly.
+  const schedule = (viewer: Viewer) => {
+    if (viewer.retry) return
+    viewer.retry = setTimeout(() => {
+      viewer.retry = undefined
+      flush(viewer)
+    }, retryMs)
+  }
+
+  /**
+   * The stream outlives its last viewer by `lingerMs`, so a viewer that reconnects (app back from the background, a
+   * network change) gets the cached frame at once and the adapter does not restart its capture.
+   */
   const unsubscribe = (id: string, viewer: Viewer) => {
+    clearTimeout(viewer.retry)
+    viewer.pending = undefined
+    viewer.live = undefined
     const live = lives.get(id)
     if (!live) return
     live.viewers.delete(viewer)
-    if (live.viewers.size > 0) return
-    lives.delete(id)
-    live.controller.abort()
+    if (live.viewers.size > 0) return wake(live)
+    live.linger = setTimeout(() => {
+      if (live.viewers.size > 0 || lives.get(id) !== live) return
+      lives.delete(id)
+      clearInterval(live.ticker)
+      live.controller.abort()
+    }, lingerMs)
   }
 
   /** Without an adapter stream, viewers still see the screen: snapshots as JPEG frames, a few per second. */
@@ -465,20 +632,35 @@ export function createHub(options: HubOptions) {
     const entry = entries.get(id)
     const lock = locks.get(id)
     if (!entry) return "not_found" as const
-    if (!lock || lock.token !== token) return "not_in_control" as const
+    if (!lock || !token || lock.token !== token) return "not_in_control" as const
     const adapter = options.adapters[entry.kind]
     if (!adapter.input) return "unsupported" as const
     locks.set(id, { ...lock, expiresAt: now() + Resources.limits.controlIdleMs })
-    const apply = adapter.input.bind(adapter)
-    const previous = inputs.get(id) ?? Promise.resolve()
-    const next = events
-      .reduce((chain, event) => chain.then(() => apply(entry, event)), previous)
-      .catch((error: unknown) => {
+    const queue = queues.get(id) ?? inputQueue(id)
+    return queue.enqueue(token, events) ? ("ok" as const) : ("input_overflow" as const)
+  }
+
+  const inputQueue = (id: string) => {
+    const queue = makeInputQueue({
+      apply: async (event) => {
+        const entry = entries.get(id)
+        const input = entry ? options.adapters[entry.kind].input : undefined
+        if (entry && input) await input.call(options.adapters[entry.kind], entry, event)
+      },
+      holds: (token) => locks.get(id)?.token === token,
+      failed: (error) => {
         // Text may be a password: report the failure without the event.
-        console.error(`resources hub: ${entry.kind} input failed`, error instanceof Error ? error.message : "unknown")
-      })
-    inputs.set(id, next)
-    return "ok" as const
+        console.error(`resources hub: ${id} input failed`, error instanceof Error ? error.message : "unknown")
+        const lock = locks.get(id)
+        lives
+          .get(id)
+          ?.viewers.forEach(
+            (viewer) => lock && viewer.lock === lock.token && viewer.text({ type: "error", message: "input_failed" }),
+          )
+      },
+    })
+    queues.set(id, queue)
+    return queue
   }
 
   const admin = async (request: Request, url: URL, parts: string[]) => {
@@ -491,6 +673,21 @@ export function createHub(options: HubOptions) {
     }
     if (resource === "events" && request.method === "POST")
       return Response.json({ events: await claim(Math.min(Number(url.searchParams.get("wait") ?? 0), 30_000)) })
+    if (resource === "streams")
+      return Response.json({
+        streams: [...lives.entries()].map(([streamID, live]) => ({
+          id: streamID,
+          hello: live.hello,
+          viewers: [...live.viewers].map((viewer) => ({
+            capability: viewer.capability,
+            profile: viewer.profile,
+            acknowledging: viewer.acked !== undefined,
+            inFlight: viewer.acked === undefined ? undefined : viewer.sent - viewer.acked,
+            buffered: viewer.buffered(),
+            ...viewer.stats,
+          })),
+        })),
+      })
     if (resource === "locks")
       return Response.json({
         locks: [...locks.entries()].flatMap(([lockID, lock]): Lock[] => {
@@ -534,7 +731,7 @@ export function createHub(options: HubOptions) {
     if (action === "control" && request.method === "POST") {
       const input = decodeControl(await request.json().catch(() => undefined))
       if (Option.isNone(input)) return status(400)
-      return Response.json(control(decoded, input.value.action))
+      return Response.json(await control(decoded, input.value.action))
     }
     if (action === "snapshot") return image(decoded, url)
     return status(404)
@@ -592,33 +789,59 @@ export function createHub(options: HubOptions) {
     const boundary = "opencode-frame"
     const encoder = new TextEncoder()
     let viewer: Viewer | undefined
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        viewer = {
-          capability: data.capability,
-          waitingKeyframe: false,
-          text: () => {},
-          frame: (_encoded, payload) => {
-            if (lives.get(id)?.hello?.format !== "jpeg") return
-            controller.enqueue(
-              encoder.encode(
-                `--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${payload.byteLength}\r\n\r\n`,
-              ),
-            )
-            controller.enqueue(payload)
-            controller.enqueue(encoder.encode("\r\n"))
-          },
-          buffered: () => Math.max(0, -(controller.desiredSize ?? 0)),
-          close: () => controller.close(),
-        }
-        subscribe(id, viewer)
+    let repeat: ReturnType<typeof setTimeout> | undefined
+    // Counted in bytes (not chunks): `desiredSize` is the room left below the image budget, negative past it.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(controller) {
+          viewer = {
+            capability: data.capability,
+            waitingKeyframe: false,
+            sent: 0,
+            profile: "standard",
+            stats: { frames: 0, bytes: 0, replaced: 0, dropped: 0 },
+            text: () => {},
+            frame: (frame) => {
+              if (lives.get(id)?.hello?.format !== "jpeg") return
+              const head = encoder.encode(
+                `--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.payload.byteLength}\r\n\r\n`,
+              )
+              const part = new Uint8Array(head.byteLength + frame.payload.byteLength + 2)
+              part.set(head)
+              part.set(frame.payload, head.byteLength)
+              part.set([13, 10], head.byteLength + frame.payload.byteLength)
+              controller.enqueue(part)
+              // HTTP clients show a part only when the next boundary arrives; screens that only send changes would
+              // leave the newest one hidden, so repeat it once if nothing newer follows.
+              clearTimeout(repeat)
+              repeat = setTimeout(() => {
+                if ((controller.desiredSize ?? 0) > 0) controller.enqueue(part)
+              }, mjpegRepeatMs)
+            },
+            buffered: () => Math.max(0, maxBufferedImages - (controller.desiredSize ?? 0)),
+            close: () => {
+              clearTimeout(repeat)
+              controller.close()
+            },
+          }
+          subscribe(id, viewer)
+        },
+        pull() {
+          if (viewer) flush(viewer)
+        },
+        cancel() {
+          clearTimeout(repeat)
+          if (viewer) unsubscribe(id, viewer)
+        },
       },
-      cancel() {
-        if (viewer) unsubscribe(id, viewer)
-      },
-    })
+      new ByteLengthQueuingStrategy({ highWaterMark: maxBufferedImages }),
+    )
     return new Response(body, {
-      headers: { "content-type": `multipart/x-mixed-replace; boundary=${boundary}`, "cache-control": "no-store" },
+      headers: {
+        "content-type": `multipart/x-mixed-replace; boundary=${boundary}`,
+        "cache-control": "no-store, no-transform",
+        "x-accel-buffering": "no",
+      },
     })
   }
 
@@ -629,12 +852,16 @@ export function createHub(options: HubOptions) {
         capability: socket.data.capability,
         ...(socket.data.lock ? { lock: socket.data.lock } : {}),
         waitingKeyframe: true,
+        sent: 0,
+        profile: "standard",
+        stats: { frames: 0, bytes: 0, replaced: 0, dropped: 0 },
         text: (message) => void socket.send(JSON.stringify(message)),
-        frame: (encoded) => void socket.send(encoded),
+        frame: (frame) => void socket.send(frame.encoded),
         buffered: () => socket.getBufferedAmount(),
         close: () => socket.close(1000),
       }
       sockets.set(socket, viewer)
+      viewer.text({ type: "features", ack: true, auth: true, profiles: ResourceProtocol.Profile.literals })
       subscribe(socket.data.id, viewer)
     },
     message(socket: ServerWebSocket<SocketData>, message: string | Buffer) {
@@ -643,10 +870,32 @@ export function createHub(options: HubOptions) {
       if (Option.isNone(parsed)) return void socket.send(JSON.stringify({ type: "error", message: "invalid message" }))
       if (parsed.value.type === "ping")
         return void socket.send(JSON.stringify({ type: "pong", t: parsed.value.t, hub: now() }))
-      if (socket.data.capability !== "control")
+      const viewer = sockets.get(socket)
+      if (!viewer) return
+      if (parsed.value.type === "ack") {
+        viewer.acked = Math.min(viewer.sent, Math.max(viewer.acked ?? 0, parsed.value.n))
+        return flush(viewer)
+      }
+      if (parsed.value.type === "profile") {
+        viewer.profile = parsed.value.value
+        return
+      }
+      if (parsed.value.type === "auth") {
+        // Taking control upgrades this socket instead of opening another, so the stream keeps running.
+        const claims = verify(options.secret, parsed.value.ticket, socket.data.id, now())
+        if (!claims) return void socket.send(JSON.stringify({ type: "error", message: "invalid_ticket" }))
+        viewer.capability = claims.c
+        viewer.lock = claims.l
+        return viewer.text(controlMessage(socket.data.id, viewer))
+      }
+      if (viewer.capability !== "control")
         return void socket.send(JSON.stringify({ type: "error", message: "not_in_control" }))
-      const result = applyInput(socket.data.id, socket.data.lock, parsed.value.events)
+      const result = applyInput(socket.data.id, viewer.lock, parsed.value.events)
       if (result !== "ok") socket.send(JSON.stringify({ type: "error", message: result }))
+    },
+    drain(socket: ServerWebSocket<SocketData>) {
+      const viewer = sockets.get(socket)
+      if (viewer) flush(viewer)
     },
     close(socket: ServerWebSocket<SocketData>) {
       const viewer = sockets.get(socket)
@@ -657,14 +906,18 @@ export function createHub(options: HubOptions) {
   const timers: ReturnType<typeof setInterval>[] = []
   const start = async () => {
     await load()
-    timers.push(setInterval(expire, 1_000))
+    timers.push(setInterval(() => void expire(), 1_000))
     timers.push(setInterval(() => probing === 0 && void probe(), options.probeMs ?? 5_000))
     void probe()
   }
 
   const close = () => {
     timers.forEach(clearInterval)
-    lives.forEach((live) => live.controller.abort())
+    lives.forEach((live) => {
+      clearTimeout(live.linger)
+      clearInterval(live.ticker)
+      live.controller.abort()
+    })
     waiters.forEach((wake) => wake())
   }
 

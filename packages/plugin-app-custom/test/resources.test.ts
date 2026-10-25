@@ -302,7 +302,7 @@ describe("hub", () => {
     // Two minutes after the last input, control returns and one hand-back event is queued.
     await hub.claim(0)
     clock.value += Resources.limits.controlIdleMs
-    hub.expire()
+    await hub.expire()
     expect(
       await viewer.next(
         (message) =>

@@ -84,20 +84,68 @@ caller), `POST /admin/shutdown`.
 
 ### Stream protocol (`protocol.ts`)
 
-Text messages hub → client: `hello { format: "jpeg"|"png"|"h264", width, height, scale?, codec? }`,
+Text messages hub → client: `features { ack, auth, profiles }` (first; older hubs never send it),
+`hello { format: "jpeg"|"png"|"h264", width, height, scale?, codec? }`,
 `control { holder: "user"|null, expiresAt?, mine }`, `meta { value }` (kind state such as `{ url, title }`),
-`pong { t, hub }`, `error { message }`, `end { reason }`.
+`stats { hub, capture?, frames, bytes, replaced, dropped, inFlight? }` (every 2 s), `notice { message }` (an adapter's
+diagnosis, shown discreetly), `pong { t, hub }`, `error { message }`, `end { reason }`. `error` messages include
+`not_in_control`, `unsupported`, `input_failed` (an input could not be applied; the event is never echoed),
+`input_overflow` and `invalid_ticket`; a failing stream ends with `error` carrying the adapter's message.
+
+`meta.rotation` is reserved for the clockwise turn the viewer must still apply to show frames upright (the iOS
+Simulator streams its portrait framebuffer); the viewer maps touches back through it. A device orientation that is
+only informative, because frames already arrive upright (Android), goes in `meta.orientation`.
 
 Binary messages are frames: `u8 version = 1`, `u8 flags` (bit 0 keyframe), `f64` big-endian capture time (epoch
-ms), payload (one JPEG/PNG image or one H.264 access unit). A new viewer gets `control`, the cached `hello`, the
-latest `meta` and the last keyframe at once. Viewers more than 2 MiB behind skip frames until the next keyframe.
+ms, Mac clock; the hub's receipt time when the adapter gives none), payload (one JPEG/PNG image or one H.264 access
+unit). A new viewer gets `features`, `control`, the cached `hello`, the latest `meta` and the last keyframe at once.
 
-Text messages client → hub: `ping { t }` and `input { events }` (≤ 64 events). Input coordinates are normalized to the
+Text messages client → hub: `ping { t }`, `input { events }` (≤ 64 events) and, only when `features` lists them,
+`ack { n }`, `profile { value: "standard"|"economy" }` and `auth { ticket }`. Input coordinates are normalized to the
 frame (0…1, top left): `touch { phase: began|moved|ended|cancelled, x, y, pointer? }`, `scroll { x, y, dx, dy }`
 (fractions of the frame), `key { key, modifiers? }` (DOM key names), `text { text }` (never logged),
 `button { button: home|back|recents|lock|volume-up|volume-down|rotate-left|rotate-right|app-switcher }`,
 `navigate { action: url|back|forward|reload|tab, url?, target? }` (`tab` follows the Chrome tab `target`). Without control the hub answers `error not_in_control`; an adapter
 without `input` gives `error unsupported`.
+
+### Delivery and flow control
+
+Each viewer is served on its own, so a slow viewer never holds back a fast one sharing the same capture.
+
+- **Acknowledgements.** A client that sends `ack { n }` (frames received on this connection) has at most
+  `maxFramesInFlight` = 3 unacknowledged frames on the way. This bounds lateness through the 4096 proxy and TCP,
+  which the hub's own socket buffer cannot see. Clients without `ack` are limited by the hub's socket buffer:
+  512 KiB for images.
+- **Newest frame wins.** An image frame that does not fit replaces the viewer's single held-back frame, sent as soon
+  as the viewer acknowledges, drains (WebSocket `drain`, MJPEG `pull`) or after a 30 ms retry. The last frame of a
+  burst therefore always arrives, which matters for adapters that only send changes. H.264 cannot skip: a delta that
+  does not fit (2 MiB budget) is dropped and the viewer waits for the next keyframe.
+- **Pacing for adapters.** `sink.ready()` says whether some viewer can take a frame now (within budget, fewer than
+  `maxFramesInFlight` in flight, nothing held back); `sink.whenReady(signal)` resolves when one can. Adapters that
+  capture on demand (Chrome acknowledging screencast frames) wait on it before asking for the next frame; Android
+  waits on it before encoding, so it encodes only frames someone can receive.
+- **Profiles.** `profile` asks for `standard` or `economy`; the stream follows the most demanding viewer and adapters
+  read it per frame with `sink.profile()`. The iPhone asks for economy on cellular or Low Data Mode.
+- **Telemetry.** `stats` gives each viewer its own counters and, for adapters that report capture times, the
+  capture → hub age of the last interval (p50/p95). With the pong's `hub` clock the client estimates the clock offset
+  (from the fastest round trip) and measures capture → arrival, decode and capture → on screen. `GET /admin/streams`
+  lists the same counters per viewer.
+- **Control on the same socket.** `auth { ticket }` swaps a socket's ticket in place (a control ticket after taking
+  control), so taking or giving back control does not tear the stream down. A stream also outlives its last viewer
+  by 5 s, so a reconnecting viewer gets the cached frame at once and the adapter does not restart its capture.
+- **MJPEG fallback.** Counted in bytes (512 KiB), with `Cache-Control: no-store, no-transform` and
+  `X-Accel-Buffering: no`; the newest part is held back like a WebSocket frame and repeated once after 100 ms when
+  nothing newer follows, because an HTTP client shows a part only when the next boundary arrives.
+
+### Input queue (`hub/input-queue.ts`)
+
+Inputs run one at a time per resource, in order, through a bounded queue (128 pending; lifting a finger is always
+accepted, anything else beyond the limit gets `input_overflow`). Consecutive moves of the same finger collapse into
+the newest position and adjacent text joins into one insert; `began`/`ended`/`cancelled`, keys, buttons and text
+keep their order. Every input carries the control token that queued it and runs only if that token still holds the
+resource. Giving control back (or expiry) drops pending inputs at once, waits for the input in flight, lifts fingers
+still down (`touch cancelled` at their last position) and only then announces the hand-back to viewers and the
+session. After Expo serve-emu's `control-input-queue.ts` (expo-device-hub rev `42918bc`).
 
 ## Adapters
 
@@ -147,28 +195,39 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
 <console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;
   the token never leaves the hub (it is not part of `meta`). It stays on until the emulator exits.
 - **Frames.** `streamScreenshot` in RGBA8888 fitted to a 1200 × 1200 box (540 × 1200 for a 720 × 1600 panel), wrapped
-  in a top-down BMP header and encoded to JPEG (quality 70) by `Bun.Image` off the JavaScript thread. Only the newest
-  frame is encoded; an idle screen sends nothing. The display rotation (`dumpsys display`, polled every 1.5 s while
-  streaming) rotates the JPEG upright, re-announces `hello` with the new size and sends `meta { rotation }` (degrees).
-  `snapshot` uses `getScreenshot` at panel size (JPEG quality 85).
+  in a top-down BMP header and encoded to JPEG by `Bun.Image` off the JavaScript thread. Only the newest frame is
+  encoded, and only once some viewer can take it (`sink.whenReady`); an idle screen sends nothing. Profiles
+  (`profiles`): `standard` keeps 1200 px, quality 55 while the screen moves; `economy` shrinks to 800 px (360 × 800),
+  quality 50 and at most about 15 fps. 300 ms after the last change the same picture goes out once more at the still
+  quality (80 / 72), so a paused screen is sharp. The display rotation (`dumpsys display`, polled every 1.5 s while
+  streaming) rotates the JPEG upright and re-announces `hello` when the size changes; `meta { orientation }`
+  (`portrait`, `landscape_left`, `portrait_upside_down`, `landscape_right`, from `Surface.ROTATION_*`) is
+  informative, never `rotation`, since the frames are already upright. `snapshot` uses `getScreenshot` at panel size
+  (JPEG quality 85).
 - **Input.** `touch` → gRPC `sendTouch` in panel pixels (pressure 1024 while down, 0 to lift; `pointer` is the
   contact id, so multi-touch works), mapped back through the rotation. `scroll` → a 6-step drag with pointer 9.
   `button` → `adb shell input keyevent` (`back` BACK, `home` HOME, `recents`/`app-switcher` APP_SWITCH, `lock` POWER,
   volume); `rotate-left`/`rotate-right` set `user_rotation` with auto-rotate off. `key` → `input keyevent` for DOM
   names (Enter, Backspace, Delete, Tab, Escape, arrows, Home/End, PageUp/PageDown) or `input keycombination` with
   modifiers. `text` → printable ASCII through `input text` (spaces as `%s`, shell-quoted); anything else (accents,
-  emoji, `%`) through the emulator clipboard: gRPC `setClipboard`, `KEYCODE_PASTE`, then the previous clipboard text
-  back. The gRPC keyboard is not used because it only works with `hw.keyboard=yes`, which these AVDs lack.
+  emoji, `%`) through the emulator clipboard: gRPC `setClipboard`, `KEYCODE_PASTE`, a 250 ms settle, then the
+  previous clipboard text back, also when the paste fails, but only if it could be read (an unreadable clipboard is
+  left alone rather than emptied). The hub's queue joins adjacent text, so letters typed during a paste go in one
+  insert. The gRPC keyboard is not used because it only works with `hw.keyboard=yes`, which these AVDs lack.
+- **gRPC calls.** A unary call resolves only after the final `grpc-status: 0` (trailers, or the headers of a
+  trailers-only answer); an HTTP error, a non-zero or a missing status rejects, and the hub tells the controlling
+  viewer `input_failed` without the event.
 - **Limits.** Pasting shows Android's "pasted from your clipboard" toast and briefly replaces the emulator clipboard
   (and, in a windowed emulator with clipboard sharing, the Mac's). Gboard with a stylus-capable touch panel may show
   its floating toolbar instead of the soft keyboard; the iPhone keyboard covers typing. Rotation is the display's
   `user_rotation`, not a skin rotation.
-- **Measured** (MacBook Pro M4 Max, Android 37 image, 720 × 1600 at 30 Hz, sandbox hub, loopback): 15–18 fps while scrolling;
-  emulator capture → hub WebSocket receipt 5 ms median (p95 8 ms); drag sent → first new frame 22–28 ms median
-  (60 ms median measured on the adapter alone with slower moves); Início/Recentes sent → first frame about 90 ms;
-  hub CPU 10–14 % of one core while frames flow, under 1 % on a still screen; emulator CPU unchanged by streaming
-  (about 22 % scrolling either way). The iPhone adds its network round trip (shown in the status pill) and a JPEG
-  decode.
+- **Measured** (MacBook Pro M4 Max, Android 37 image, 720 × 1600 at 30 Hz, sandbox hub, loopback, 25 Oct): emulator
+  capture → hub WebSocket receipt 5 ms median (p95 7–9 ms); drag sent → first changed frame about 60 ms, of which the
+  hub pipeline is 4–10 ms and the rest Android's own response; Início/Recentes → first frame 80–100 ms; 21–39 KB per
+  standard frame (45 KB at the former quality 70), 18.6 KB in economy. Behind a relay limited to 2 Mbit/s that buffers
+  like the proxy, an acknowledging viewer saw frames 513 ms old at p50 and 552 ms at p95 (before: 1.5–2.0 s and
+  3.1–3.9 s, pings up to 4 s, and the final frame never arrived), 290 ms in economy, while a direct viewer of the
+  same capture stayed at 5 ms. Hub CPU 3–6 % of one core while frames flow.
 
 ### Chrome (`adapters/chrome.ts`, `adapters/cdp.ts`)
 
@@ -260,7 +319,7 @@ instances replace a hub reporting another `protocol`.
 
 `ResourceViewerScreen` picks the kind view (`IOSSimulator/`, `AndroidEmulator/`, `Chrome/`), each built on
 `ResourceViewerShell` (layout B): the screen fills the view with floating glass controls — close, status pill
-(`iPhone 17 · ao vivo · 38 ms`, round trip from ping), who controls it, a side column of kind tools and the bottom
+(`iPhone 17 · ao vivo · 38 ms`, frame age or round trip, see below), who controls it, a side column of kind tools and the bottom
 **Assumir controle** / **Devolver controle**. In control the screen gets a primary-colored border and a
 **Você no controle** pill (menu: show controls, give back).
 
@@ -284,3 +343,16 @@ upright in `ResourceFrameView` and maps touches back to the unrotated frame (`Op
 keyboard type, secure entry and Return key). Frames decode one at a time and the newest waiting frame always follows,
 so the last frame of a burst is never lost. Kinds that stream H.264 set `model.rawFrames` and pass their own
 `surface`.
+
+`ResourceViewerModel` owns the connection. Each socket has a generation; late messages and decodes from an older one
+are dropped. The stream counts as live (`connected`) only after a frame or pong on the current socket; a ping goes
+out every 2 s and 7 s without any answer drops the socket and reconnects, with a backoff that starts over after a
+connection that worked. Input availability is separate from video: an `input_failed`/`input_overflow` error or a
+failed send shows a short notice and marks input unavailable until it clears. With hubs that list them in
+`features`, the model acknowledges every frame, asks for `economy` on cellular or Low Data Mode (`NWPathMonitor`) and
+takes control with `auth` on the open socket instead of reconnecting; giving control back keeps the socket. Closing
+the viewer (`finish()`) gives control back without reopening anything; the app going to the background suspends the
+stream and coming back reconnects at once. The status pill shows how old the picture was when it reached the screen
+(capture → on screen, clock-corrected) while frames flow, otherwise the round trip; a long press lists the
+measurements (frame age, capture → device, capture → hub, decode, round trip, frames and KB per second, quality, held
+back and dropped frames). Adapter `notice`s and stream errors appear briefly above the bottom controls.

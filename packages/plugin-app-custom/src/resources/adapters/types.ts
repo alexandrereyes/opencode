@@ -1,4 +1,4 @@
-import type { Hello, Input } from "../protocol.js"
+import type { Hello, Input, Profile } from "../protocol.js"
 import type { Resources } from "../rpc.js"
 
 /** Registry entry as the hub stores it. `Resource` (the RPC shape) is derived from it plus control and time. */
@@ -34,8 +34,25 @@ export interface StreamSink {
   hello(hello: Omit<Hello, "type">): void
   /** One frame payload in the `hello` format. JPEG/PNG frames are always keyframes. */
   frame(payload: Uint8Array, options?: { readonly keyframe?: boolean; readonly capturedAt?: number }): void
-  /** Kind-specific state for the viewer, for example `{ url, title }` for Chrome or `{ orientation }`. */
+  /**
+   * Kind-specific state for the viewer, for example `{ url, title }` for Chrome. `rotation` (clockwise degrees) is
+   * reserved for the turn the viewer must still apply to show frames upright (the iOS Simulator streams its portrait
+   * framebuffer); a device's own orientation, when frames already arrive upright, goes in `orientation`.
+   */
   meta(value: Record<string, unknown>): void
+  /** The quality the viewers currently ask for (`standard` when none says otherwise); read it per frame. */
+  profile?(): Profile
+  /** Shows the viewers a short, discreet message (a diagnosis such as "aberto sem porta CDP"). Never secrets. */
+  notice?(message: string): void
+  /**
+   * Whether some viewer can take another frame now: it is within its byte budget and, if it acknowledges frames
+   * (`ack`), has fewer than `maxFramesInFlight` unacknowledged. Adapters that capture on demand (Chrome's
+   * screencast acknowledgements) pace themselves with `ready`/`whenReady` instead of producing frames nobody can
+   * receive; push-only adapters can ignore them, since the hub keeps just the newest frame per slow viewer.
+   */
+  ready?(): boolean
+  /** Resolves as soon as `ready()` holds (at once if it already does), or when `signal` aborts. */
+  whenReady?(signal?: AbortSignal): Promise<void>
 }
 
 /**

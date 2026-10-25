@@ -78,28 +78,62 @@ export const adapter: Adapter = {
     const device = await attach(serial)
     const state = {
       latest: undefined as Frame | undefined,
-      shown: undefined as Frame | undefined,
+      /** Last frame sent and whether it went out at the still (sharp) quality. */
+      shown: undefined as { readonly frame: Frame; readonly sharp: boolean } | undefined,
       busy: false,
-      announced: "",
+      size: "",
+      orientation: -1,
+      sentAt: 0,
+      timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    }
+    const later = (ms: number, run: () => void) => {
+      clearTimeout(state.timer)
+      state.timer = setTimeout(run, ms)
+    }
+    const publish = async (frame: Frame, sharp: boolean) => {
+      const profile = profiles[sink.profile?.() ?? "standard"]
+      const rotation = device.rotation
+      const image = await encode(frame, rotation, sharp ? profile.still : profile.motion, profile.side).catch(
+        () => undefined,
+      )
+      if (!image || signal.aborted) return
+      const size = `${image.width}x${image.height}`
+      if (size !== state.size) {
+        state.size = size
+        sink.hello({ format: "jpeg", width: image.width, height: image.height })
+      }
+      if (rotation !== state.orientation) {
+        state.orientation = rotation
+        // Frames already arrive upright, so this is information only; `rotation` would make viewers turn them again.
+        sink.meta({ orientation: orientations[rotation] ?? "portrait" })
+      }
+      state.shown = { frame, sharp }
+      state.sentAt = performance.now()
+      sink.frame(image.data, { capturedAt: frame.capturedAt })
     }
     const pump = async (): Promise<void> => {
-      const frame = state.latest
-      if (state.busy || !frame || signal.aborted) return
+      if (state.busy || !state.latest || signal.aborted) return
+      const profile = profiles[sink.profile?.() ?? "standard"]
+      const wait = state.sentAt + profile.intervalMs - performance.now()
+      if (wait > 0) return later(wait, () => void pump())
       state.busy = true
+      // Encode only when some viewer can take the frame; meanwhile newer frames replace this one.
+      if (sink.ready && !sink.ready()) await sink.whenReady?.(signal)
+      const frame = state.latest
       state.latest = undefined
-      const rotation = device.rotation
-      const image = await encode(frame, rotation, streamQuality).catch(() => undefined)
+      if (frame) await publish(frame, false)
       state.busy = false
-      if (!image || signal.aborted) return pump()
-      const key = `${image.width}x${image.height}`
-      if (key !== state.announced) {
-        state.announced = key
-        sink.hello({ format: "jpeg", width: image.width, height: image.height })
-        sink.meta({ rotation: rotation * 90 })
-      }
-      state.shown = frame
-      sink.frame(image.data, { capturedAt: frame.capturedAt })
-      return pump()
+      if (state.latest) return pump()
+      // The screen settled: send the same picture once more at the sharp quality.
+      later(settleMs, () => {
+        const shown = state.shown
+        if (state.busy || state.latest || !shown || shown.sharp || signal.aborted) return
+        state.busy = true
+        void publish(shown.frame, true).finally(() => {
+          state.busy = false
+          void pump()
+        })
+      })
     }
     const watch = setInterval(() => {
       void displayRotation(serial)
@@ -107,7 +141,7 @@ export const adapter: Adapter = {
           if (rotation === device.rotation) return
           device.rotation = rotation
           // A rotation alone does not change the panel, so the emulator sends no frame: redraw the last one.
-          state.latest ??= state.shown
+          state.latest ??= state.shown?.frame
           void pump()
         })
         .catch(() => {})
@@ -125,7 +159,10 @@ export const adapter: Adapter = {
         },
         signal,
       )
-      .finally(() => clearInterval(watch))
+      .finally(() => {
+        clearInterval(watch)
+        clearTimeout(state.timer)
+      })
   },
 
   async input(entry, event) {
@@ -141,8 +178,23 @@ export const adapter: Adapter = {
 
 /** Frames are scaled by the emulator to fit this box, so portrait and landscape panels keep the same detail. */
 export const streamBox = 1200
-const streamQuality = 70
+
+/**
+ * Stream profiles (see `ResourceProtocol.Profile`): the longest side in pixels, JPEG quality while the screen moves
+ * and once it settles, and the shortest interval between frames. Economy (360 × 800 for a 720 × 1600 panel, about
+ * 15 fps) is for cellular and Low Data Mode. Either way, `settleMs` after the last change the same picture goes out
+ * again at the still quality, so a paused screen is sharp.
+ */
+export const profiles = {
+  standard: { side: 1200, motion: 55, still: 80, intervalMs: 0 },
+  economy: { side: 800, motion: 50, still: 72, intervalMs: 66 },
+} as const
+const settleMs = 300
 const rotationPollMs = 1_500
+/** Android `Surface.ROTATION_*` as the viewers' informative `meta.orientation`. */
+const orientations = ["portrait", "landscape_left", "portrait_upside_down", "landscape_right"]
+/** How long a paste may take inside the app before the previous clipboard text goes back. */
+const pasteSettleMs = 250
 /** Raw pressure for a touching contact; zero lifts it. */
 const pressure = 1024
 /** The pointer used to emulate scroll gestures, kept apart from the iPhone's finger indices. */
@@ -316,15 +368,20 @@ async function perform(serial: string, device: Device, step: Step) {
     ])
     return
   }
-  const previous = await device.connection
-    .unary("getClipboard", new Uint8Array(0))
-    .then((message) => decode(message).bytes(1))
-    .catch(() => undefined)
-  await device.connection.unary("setClipboard", pb.string(1, step.text))
-  await run([adb(), "-s", serial, "shell", "input keyevent KEYCODE_PASTE"])
-  // The paste is asynchronous in the app; give it a moment before putting the old clipboard back.
-  await Bun.sleep(250)
-  await device.connection.unary("setClipboard", previous ? pb.bytes(1, previous) : new Uint8Array(0)).catch(() => {})
+  // The previous clipboard goes back whatever happens to the paste, but only if it could be read: restoring an
+  // unknown clipboard as empty would erase it.
+  const previous = await device.connection.unary("getClipboard", new Uint8Array(0)).then(
+    (message) => ({ text: decode(message).bytes(1) ?? new Uint8Array(0) }),
+    () => undefined,
+  )
+  await device.connection
+    .unary("setClipboard", pb.string(1, step.text))
+    .then(() => run([adb(), "-s", serial, "shell", "input keyevent KEYCODE_PASTE"]))
+    // The paste is asynchronous in the app; give it a moment before putting the old clipboard back.
+    .then(() => Bun.sleep(pasteSettleMs))
+    .finally(() =>
+      previous ? device.connection.unary("setClipboard", pb.bytes(1, previous.text)).catch(() => {}) : undefined,
+    )
 }
 
 /** `ImageFormat` for RGBA8888 frames that fit a `box`×`box` square; 0 keeps the panel size. */
@@ -344,23 +401,27 @@ function parseImage(message: Uint8Array): Frame {
   }
 }
 
-/** Encodes a panel frame as an upright JPEG, rotating it the way the display is rotated. */
+/**
+ * Encodes a panel frame as an upright JPEG, rotating it the way the display is rotated and, with `side`, shrinking it
+ * to fit a `side` × `side` box.
+ */
 async function encode(
   frame: Frame,
   rotation: number,
   quality: number,
+  side?: number,
 ): Promise<Image & { width: number; height: number }> {
   const pipeline = new Bun.Image(bmp(frame.rgba, frame.width, frame.height))
   const turned = rotation === 0 ? pipeline : pipeline.rotate((360 - rotation * 90) % 360)
-  // Copied into a plain ArrayBuffer, which the hub's frame and HTTP bodies require.
-  const data = new Uint8Array(await turned.jpeg({ quality }).bytes())
   const swapped = rotation % 2 === 1
-  return {
-    mime: "image/jpeg",
-    data,
-    width: swapped ? frame.height : frame.width,
-    height: swapped ? frame.width : frame.height,
-  }
+  const width = swapped ? frame.height : frame.width
+  const height = swapped ? frame.width : frame.height
+  const scale = side ? Math.min(1, side / Math.max(width, height)) : 1
+  const target = { width: Math.round(width * scale), height: Math.round(height * scale) }
+  const sized = scale < 1 ? turned.resize(target.width, target.height, { filter: "bilinear" }) : turned
+  // Copied into a plain ArrayBuffer, which the hub's frame and HTTP bodies require.
+  const data = new Uint8Array(await sized.jpeg({ quality }).bytes())
+  return { mime: "image/jpeg", data, ...target }
 }
 
 /**

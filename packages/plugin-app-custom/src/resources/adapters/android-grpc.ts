@@ -18,20 +18,46 @@ export function connect(endpoint: { readonly port: number; readonly token?: stri
     ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}),
   })
 
-  /** Calls a unary method and resolves with the response message bytes; a stuck emulator fails it after 10 s. */
+  /**
+   * Calls a unary method. Resolves with the response message only once the call has ended with `grpc-status: 0`
+   * (in the trailers, or in the headers of a trailers-only response); an HTTP error, a non-zero status or a missing
+   * status rejects. A stuck emulator fails the call after 10 s.
+   */
   const unary = (method: string, message: Uint8Array) =>
     new Promise<Uint8Array>((resolve, reject) => {
       const request = session.request(headers(method))
-      request.setTimeout(10_000, () => {
+      const state = {
+        payload: new Uint8Array(0) as Uint8Array,
+        status: undefined as string | undefined,
+        error: undefined as Error | undefined,
+      }
+      const fail = (error: Error) => (state.error ??= error)
+      const check = (fields: http2.IncomingHttpHeaders) => {
+        const status = fields["grpc-status"]
+        if (typeof status === "string") state.status = status
+        failure(fields, fail)
+      }
+      // A plain timer: the stream's own setTimeout leaves a listener on the shared session per call.
+      const timer = setTimeout(() => {
+        fail(new Error(`emulator gRPC ${method} timed out`))
         request.close(http2.constants.NGHTTP2_CANCEL)
-        reject(new Error(`emulator gRPC ${method} timed out`))
+      }, 10_000)
+      request.on("response", (response) => {
+        if (response[":status"] !== 200) fail(new Error(`emulator gRPC ${method}: HTTP ${response[":status"]}`))
+        check(response)
       })
-      const reader = frames((payload) => resolve(payload))
-      request.on("data", reader)
-      request.on("response", (response) => failure(response, reject))
-      request.on("trailers", (trailers) => failure(trailers, reject))
-      request.on("end", () => resolve(new Uint8Array(0)))
-      request.on("error", reject)
+      request.on(
+        "data",
+        frames((payload) => (state.payload = payload)),
+      )
+      request.on("trailers", check)
+      request.on("error", fail)
+      request.on("close", () => {
+        clearTimeout(timer)
+        if (state.error) return reject(state.error)
+        if (state.status !== "0") return reject(new Error(`emulator gRPC ${method} ended without a status`))
+        resolve(state.payload)
+      })
       request.end(frame(message))
     })
 
@@ -67,7 +93,7 @@ export type Connection = ReturnType<typeof connect>
 
 const windowBytes = 16 * 1024 * 1024
 
-function failure(headers: http2.IncomingHttpHeaders, reject: (error: Error) => void) {
+function failure(headers: http2.IncomingHttpHeaders, reject: (error: Error) => unknown) {
   const status = headers["grpc-status"]
   if (status === undefined || status === "0") return
   const message = headers["grpc-message"]

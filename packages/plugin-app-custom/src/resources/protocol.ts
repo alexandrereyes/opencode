@@ -70,10 +70,27 @@ export const Input = Schema.Union([Touch, Scroll, Key, Text, Button, Navigate]).
 })
 export type Input = typeof Input.Type
 
-/** Client → hub text messages on `/stream`. Inputs need a control ticket. */
+/**
+ * Stream quality a viewer asks for. `standard` keeps the adapter's full detail; `economy` trades resolution, JPEG
+ * quality and frame rate for bytes (the iPhone picks it on cellular or Low Data Mode). The shared stream follows the
+ * most demanding viewer.
+ */
+export const Profile = Schema.Literals(["standard", "economy"])
+export type Profile = typeof Profile.Type
+
+/**
+ * Client → hub text messages on `/stream`. Inputs need a control ticket. `ack` reports how many frames this
+ * connection has received so far; once a viewer acknowledges, the hub keeps at most `maxFramesInFlight` frames on
+ * the way to it and holds back only the newest one. `profile` asks for a stream quality. `auth` swaps the socket's
+ * ticket in place (a control ticket after taking control), so the stream is not torn down. Clients send these only
+ * after the hub's `features` lists them.
+ */
 export const ClientMessage = Schema.Union([
   Schema.Struct({ type: Schema.Literal("ping"), t: Schema.Number }),
   Schema.Struct({ type: Schema.Literal("input"), events: Schema.Array(Input).check(Schema.isMaxLength(64)) }),
+  Schema.Struct({ type: Schema.Literal("ack"), n: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
+  Schema.Struct({ type: Schema.Literal("profile"), value: Profile }),
+  Schema.Struct({ type: Schema.Literal("auth"), ticket: Schema.String.check(Schema.isMaxLength(2_000)) }),
 ])
 export type ClientMessage = typeof ClientMessage.Type
 
@@ -92,9 +109,40 @@ export interface Hello {
   readonly codec?: string
 }
 
-/** Hub → client text messages on `/stream`. Binary messages are frames (see `encodeFrame`). */
+/** Unacknowledged frames the hub lets travel to an acknowledging viewer. */
+export const maxFramesInFlight = 3
+
+/**
+ * Hub → client text messages on `/stream`. Binary messages are frames (see `encodeFrame`). `features` comes first and
+ * tells clients which optional messages this hub understands; older hubs never send it. `error` messages include
+ * `input_failed` (an input could not be applied; the event itself is never echoed), `input_overflow` and
+ * `invalid_ticket`; a stream that fails ends with `error` carrying the adapter's message.
+ */
 export type ServerMessage =
+  | {
+      readonly type: "features"
+      readonly ack: boolean
+      readonly auth: boolean
+      readonly profiles: readonly Profile[]
+    }
   | Hello
+  /** Something the viewer should show discreetly, from the adapter (for example "Chrome aberto sem porta CDP"). */
+  | { readonly type: "notice"; readonly message: string }
+  /**
+   * Every few seconds while streaming: this viewer's delivery counters (frames and bytes sent, held-back frames
+   * replaced by newer ones, frames dropped, frames in flight) and, when the adapter reports capture times, the
+   * capture → hub age of the last interval. `hub` is the hub clock, for the client's clock offset.
+   */
+  | {
+      readonly type: "stats"
+      readonly hub: number
+      readonly capture?: { readonly p50: number; readonly p95: number }
+      readonly frames: number
+      readonly bytes: number
+      readonly replaced: number
+      readonly dropped: number
+      readonly inFlight?: number
+    }
   | { readonly type: "pong"; readonly t: number; readonly hub: number }
   | { readonly type: "control"; readonly holder: "user" | null; readonly expiresAt?: number; readonly mine: boolean }
   | { readonly type: "meta"; readonly value: Record<string, unknown> }
