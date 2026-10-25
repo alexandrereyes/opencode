@@ -860,8 +860,17 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
 - Audio: `.playback`/`.spokenAudio` on the app's serial audio queue; pauses for voice mode, dictation, system
   interruptions (resuming when the system recommends) and unplugged headphones; plays in the background with Now
   Playing and lock screen play/pause, ±15 s and scrubbing. Closing or leaving the file stops it.
+- **Estimate:** the total starts from `custom.speech/info`'s rate, which the server learns from the audio it
+  generates, and then blends in the rate measured on this document's generated pieces (the server rate counts as
+  1,000 characters), so the first, often unrepresentative piece only nudges it.
+- **Resume:** the place is saved on the server per file (`custom.speech` positions: text offset, text hash, sentence
+  and elapsed seconds) on pause, close, file change, background and every 8 s while playing. Reopening shows the pill
+  paused there without generating anything (an unchanged document shows the same time); play resumes from it. A
+  finished document clears it, and the full player offers **Recomeçar do início** while one is saved. An edited
+  document resumes at the saved sentence, else the nearest sentence start, else the top (see the plugin's
+  `docs/speech.md`).
 - `FileReadAloudTests` (through `test-file-viewer.py`, both themes) uses the sandbox's real gateway: the run's first
-  piece names the run, so about a cent of speech is generated per run; the rest comes from the sandbox cache.
+  piece numbers the run, so about a cent of speech is generated per run; the rest comes from the sandbox cache.
 
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates

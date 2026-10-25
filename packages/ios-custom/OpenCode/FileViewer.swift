@@ -383,7 +383,8 @@ struct FileViewer: View {
         else { FileQuickLook(file: store.preview ?? file, name: store.name) }
       }
       .accessibilityElement(children: .contain).accessibilityIdentifier("file-preview")
-      .modifier(ReadAloudHost(text: store.markdown ? store.text : nil, title: store.name, client: store.context.client))
+      .modifier(ReadAloudHost(text: store.markdown ? store.text : nil, title: store.name, path: store.path ?? store.source,
+        client: store.context.client))
     case .unknown:
       if UTType(filenameExtension: file.pathExtension)?.isDeclared == true,
         QLPreviewController.canPreview(file as NSURL) {

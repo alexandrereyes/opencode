@@ -63,15 +63,19 @@ import XCTest
     XCTAssertEqual(times(app).elapsed, 0)
     // About 3,000 speakable characters at ~12 per second, estimated before any audio.
     XCTAssertTrue((150...420).contains(times(app).total), "estimated total \(times(app).total)")
+    let opened = times(app).total
+    print("READ_ALOUD_TOTAL opened \(opened)")
     siblingArrowsReachable(app, "with the pill")
     screenshot("recolhida-parada")
 
     play.tap()
-    // The run's first piece names the run, so it is always generated: a spinner first, then pause.
+    // The run's first piece numbers the run, so it is always generated: a spinner first, then pause.
     if play.label.hasPrefix("Gerando") { screenshot("recolhida-carregando") }
     expect(play, "label == %@", "Pausar leitura", timeout: 45, "first piece playing")
     expect(expand, "NOT (value BEGINSWITH %@)", "0:00 ", timeout: 15, "elapsed time advances")
     screenshot("recolhida-tocando")
+    let playing = times(app).total
+    print("READ_ALOUD_TOTAL playing \(playing)")
 
     play.tap()
     expect(play, "label == %@", "Ouvir documento", timeout: 5, "paused")
@@ -106,6 +110,11 @@ import XCTest
     let resumed = times(app)
     XCTAssertEqual(Double(resumed.elapsed) / Double(resumed.total), Double(target.elapsed) / Double(target.total), accuracy: 0.12)
     screenshot("expandida-tocando")
+    let settled = times(app).total
+    print("READ_ALOUD_TOTAL after-seek \(settled)")
+    // Measured pieces move the estimate toward the real length without swinging it.
+    XCTAssertEqual(Double(playing), Double(settled), accuracy: Double(settled) * 0.15, "total while playing")
+    XCTAssertEqual(Double(opened), Double(settled), accuracy: Double(settled) * 0.3, "total when opened")
 
     app.buttons["read-aloud-collapse"].tap()
     XCTAssertTrue(pill.waitForExistence(timeout: 5))
@@ -120,17 +129,70 @@ import XCTest
     screenshot("fonte-tocando")
     app.buttons["file-markdown-source"].tap()
 
-    // Closing ends the reading; reopening starts a new one from the top with the remembered speed.
+    // Closing ends the reading; reopening shows it paused where it stopped, with the remembered speed.
+    let stopped = times(app)
     app.navigationBars["f-leitura.md"].buttons["Fechar"].tap()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
     openDocument(app)
     XCTAssertTrue(pill.waitForExistence(timeout: 20))
     XCTAssertEqual(play.label, "Ouvir documento")
-    XCTAssertEqual(times(app).elapsed, 0)
+    expect(expand, "NOT (value BEGINSWITH %@)", "0:00 ", timeout: 10, "reopened at the saved place")
+    XCTAssertEqual(Double(times(app).elapsed), Double(stopped.elapsed), accuracy: 2, "the time it was left at")
     XCTAssertEqual(rate.value as? String, "1,5×")
     rate.tap()
     rate.tap()
     expect(rate, "value == %@", "1×", timeout: 3, "speed back to 1×")
+    // Start over clears the saved place for the next test.
+    expand.tap()
+    app.buttons["read-aloud-restart"].tap()
+    XCTAssertEqual(times(app).elapsed, 0)
+    XCTAssertFalse(app.buttons["read-aloud-restart"].waitForExistence(timeout: 2))
+    app.terminate()
+  }
+
+  func testReopensPausedWhereItStoppedAndStartsOver() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
+      "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_VIEWER_LINK_DOC_LEITURA"])]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
+    openDocument(app)
+    let play = app.buttons["read-aloud-play"]
+    let expand = app.buttons["read-aloud-expand"]
+    XCTAssertTrue(app.otherElements["read-aloud-pill"].waitForExistence(timeout: 20))
+    expect(expand, "value BEGINSWITH %@", "0:00 ", timeout: 10, "starts from the top")
+    play.tap()
+    expect(play, "label == %@", "Pausar leitura", timeout: 45, "playing")
+    let deadline = Date.now.addingTimeInterval(20)
+    while times(app).elapsed < 5, Date.now < deadline { Thread.sleep(forTimeInterval: 0.2) }
+    XCTAssertGreaterThanOrEqual(times(app).elapsed, 5, "a few seconds in")
+    // Closing while playing saves the place too.
+    app.navigationBars["f-leitura.md"].buttons["Fechar"].tap()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+    openDocument(app)
+    XCTAssertTrue(app.otherElements["read-aloud-pill"].waitForExistence(timeout: 20))
+    expect(expand, "NOT (value BEGINSWITH %@)", "0:00 ", timeout: 10, "a place is shown")
+    let reopened = times(app).elapsed
+    XCTAssertTrue((5...9).contains(reopened), "reopened at \(reopened) s")
+    XCTAssertEqual(play.label, "Ouvir documento", "reopening does not play by itself")
+    Thread.sleep(forTimeInterval: 1.5)
+    XCTAssertEqual(times(app).elapsed, reopened)
+    screenshot("reaberta-na-posicao")
+    expand.tap()
+    let restart = app.buttons["read-aloud-restart"]
+    XCTAssertTrue(restart.waitForExistence(timeout: 5))
+    screenshot("expandida-recomecar")
+    restart.tap()
+    XCTAssertEqual(times(app).elapsed, 0)
+    XCTAssertFalse(restart.waitForExistence(timeout: 2))
+    // Started over: the next opening is at the top again.
+    app.navigationBars["f-leitura.md"].buttons["Fechar"].tap()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+    openDocument(app)
+    XCTAssertTrue(app.otherElements["read-aloud-pill"].waitForExistence(timeout: 20))
+    Thread.sleep(forTimeInterval: 2)
+    XCTAssertEqual(times(app).elapsed, 0)
     app.terminate()
   }
 }

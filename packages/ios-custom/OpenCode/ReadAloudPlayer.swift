@@ -1,4 +1,5 @@
 import AVFoundation
+import UIKit
 import MediaPlayer
 import Observation
 import OpenCodeKit
@@ -14,10 +15,14 @@ extension Notification.Name {
   enum Phase: Equatable { case idle, loading, playing, paused, failed(String) }
   static let rates: [Float] = [1, 1.5, 2]
   static let rateKey = "OpenCodeReadAloudRate"
-  /// The server's estimate until `custom.speech/info` answers.
-  static let defaultCharactersPerSecond = 12.0
+  /// The server's starting estimate until `custom.speech/info` answers.
+  static let defaultCharactersPerSecond = 14.0
+  /// While playing, the place is saved at most this often.
+  static let saveInterval: Duration = .seconds(8)
 
   let title: String
+  /// Absolute path of the file; the server keeps one reading place per path.
+  let path: String
   let pieces: [ReadAloud.Piece]
   private(set) var timeline: ReadAloud.Timeline
   private(set) var phase: Phase = .idle
@@ -26,6 +31,8 @@ extension Notification.Name {
   private(set) var rate: Float
   /// Estimated cost of a long document, while the app asks before generating it.
   var confirmation: (seconds: Double, usd: Double)?
+  /// A reading place is saved on the server, so the player offers to start over.
+  private(set) var saved = false
 
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let defaults: UserDefaults
@@ -42,10 +49,18 @@ extension Notification.Name {
   @ObservationIgnored private var observers: [any NSObjectProtocol] = []
   @ObservationIgnored private var commands: [(MPRemoteCommand, Any)] = []
   @ObservationIgnored private let delegate = Delegate()
+  @ObservationIgnored private let hash: String
+  /// Only a reading that moved in this session saves its place, so opening and closing never overwrites it.
+  @ObservationIgnored private var dirty = false
+  @ObservationIgnored private var lastSave = ContinuousClock.now
+  @ObservationIgnored private var writes: Task<Void, Never>?
+  @ObservationIgnored private var background: (any NSObjectProtocol)?
 
-  init(title: String, pieces: [ReadAloud.Piece], client: OpenCodeClient, defaults: UserDefaults = .standard) {
+  init(title: String, path: String, pieces: [ReadAloud.Piece], client: OpenCodeClient, defaults: UserDefaults = .standard) {
     self.title = title
+    self.path = path
     self.pieces = pieces
+    hash = ReadAloud.hash(pieces)
     self.client = client
     self.defaults = defaults
     timeline = ReadAloud.Timeline(pieces: pieces, charactersPerSecond: Self.defaultCharactersPerSecond)
@@ -56,6 +71,33 @@ extension Notification.Name {
       guard let self, player === self.player else { return }
       self.fail("Não foi possível tocar o áudio.")
     }
+    background = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+      object: nil, queue: .main) { _ in
+      MainActor.assumeIsolated { [weak self] in self?.save() }
+    }
+  }
+
+  /// Opens paused at the place saved for this file (adjusted if the document changed), with the server's learned
+  /// speaking rate; nothing is generated or played. A reading started meanwhile wins.
+  func restore() async {
+    async let info = try? client.speechInfo()
+    async let bookmark = try? client.readingPosition(path)
+    let (learned, saved) = await (info, bookmark)
+    if let learned, self.info == nil { adopt(learned) }
+    guard phase == .idle, !dirty, let saved, let offset = ReadAloud.resume(saved, in: pieces), offset > 0 else { return }
+    if saved.hash == hash, let seconds = saved.seconds {
+      position = timeline.anchor(offset: offset, seconds: seconds)
+    } else {
+      let location = ReadAloud.location(pieces, offset: offset)
+      position = timeline.time(piece: location.piece, offset: location.fraction * timeline.duration(location.piece))
+    }
+    self.saved = true
+  }
+
+  /// Forgets the saved place and goes back to the top, still playing if it was.
+  func restart() {
+    seek(to: 0)
+    forget()
   }
 
   var total: Double { timeline.total }
@@ -65,6 +107,7 @@ extension Notification.Name {
 
   func play() {
     guard !pieces.isEmpty else { return }
+    dirty = true
     if position >= total - 0.25 { position = 0 }
     let target = timeline.locate(position)
     if let player, target.piece == current, phase == .paused {
@@ -84,6 +127,7 @@ extension Notification.Name {
     }
     phase = .paused
     publish()
+    save()
   }
 
   /// Jumps anywhere in the document; a piece without audio yet is generated and starts at the same proportion.
@@ -91,6 +135,7 @@ extension Notification.Name {
     let time = min(max(0, time), total)
     let target = timeline.locate(time)
     position = time
+    dirty = true
     if let player, target.piece == current {
       player.currentTime = target.fraction * player.duration
       publish()
@@ -120,6 +165,10 @@ extension Notification.Name {
 
   /// Closing or leaving the file ends playback and releases the audio session and lock screen controls.
   func stop() {
+    if let player, phase != .idle { position = timeline.time(piece: current, offset: player.currentTime) }
+    save()
+    background.map { NotificationCenter.default.removeObserver($0) }
+    background = nil
     starting?.cancel(); starting = nil
     ticker?.cancel(); ticker = nil
     requests.values.forEach { $0.cancel() }
@@ -170,18 +219,44 @@ extension Notification.Name {
 
   /// Asks the server for its estimate once, then pauses at the cost prompt for a very long document.
   private func prepared() async throws -> Bool {
-    if info == nil {
-      let info = try await client.speechInfo()
-      self.info = info
-      let durations = timeline.durations
-      timeline = ReadAloud.Timeline(pieces: pieces, charactersPerSecond: info.charactersPerSecond)
-      timeline.durations = durations
-    }
+    if info == nil { adopt(try await client.speechInfo()) }
     try Task.checkCancellation()
     guard !confirmed, total > ReadAloud.confirmationSeconds, let info else { return true }
     phase = .paused
     confirmation = (total, ReadAloud.cost(seconds: total, usdPerSecond: info.usdPerSecond))
     return false
+  }
+
+  private func adopt(_ info: SpeechInfo) {
+    self.info = info
+    let durations = timeline.durations
+    timeline = ReadAloud.Timeline(pieces: pieces, charactersPerSecond: info.charactersPerSecond)
+    timeline.durations = durations
+  }
+
+  /// Saves the place as an offset into the speakable text; a place at the very top clears it instead. Writes run in
+  /// order in the background and a failed one is dropped: reading never waits on them.
+  private func save() {
+    guard dirty, !pieces.isEmpty else { return }
+    lastSave = .now
+    let location = timeline.locate(position)
+    let offset = ReadAloud.offset(pieces, piece: location.piece, fraction: location.fraction)
+    guard offset > 0, position < total - 0.25 else { return forget() }
+    let bookmark = ReadAloud.Bookmark(path: path, hash: hash, offset: offset,
+      characters: pieces.reduce(0) { $0 + $1.text.count }, sentence: ReadAloud.sentence(pieces, at: offset),
+      seconds: position)
+    saved = true
+    write { [client] in try? await client.saveReadingPosition(bookmark) }
+  }
+
+  private func forget() {
+    saved = false
+    write { [client, path] in try? await client.clearReadingPosition(path) }
+  }
+
+  private func write(_ operation: @escaping @Sendable () async -> Void) {
+    let previous = writes
+    writes = Task { await previous?.value; await operation() }
   }
 
   private func resume(_ player: AVAudioPlayer) {
@@ -245,6 +320,9 @@ extension Notification.Name {
     phase = .paused
     position = total
     publish()
+    // A finished document opens from the top next time.
+    dirty = false
+    forget()
   }
 
   private func fail(_ message: String) {
@@ -260,6 +338,7 @@ extension Notification.Name {
       while !Task.isCancelled {
         guard let self, let player = self.player else { return }
         position = timeline.time(piece: current, offset: player.currentTime)
+        if ContinuousClock.now - lastSave >= Self.saveInterval { save() }
         try? await Task.sleep(for: .milliseconds(250))
       }
     }

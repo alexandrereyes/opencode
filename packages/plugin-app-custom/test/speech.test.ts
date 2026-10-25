@@ -2,18 +2,31 @@ import { afterEach, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
-import { defaults, info, synthesize, type Options } from "../src/speech"
+import {
+  clearPosition,
+  defaults,
+  duration,
+  getPosition,
+  info,
+  learn,
+  rate,
+  setPosition,
+  synthesize,
+  type Options,
+  type SpeechContext,
+} from "../src/speech"
+import { Speech } from "../src/speech/rpc"
 
 const directories: string[] = []
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })))
 })
 
-/** 0.1 s of 24 kHz 16-bit mono silence, the gateway's WAV shape for Gemini TTS. */
-function wav() {
-  const samples = 2_400
+/** 24 kHz 16-bit mono silence (0.1 s by default), the gateway's WAV shape for Gemini TTS. */
+function wav(seconds = 0.1) {
+  const samples = Math.round(24_000 * seconds)
   const bytes = new Uint8Array(44 + samples * 2)
   const view = new DataView(bytes.buffer)
   const text = (offset: number, value: string) => [...value].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)))
@@ -125,14 +138,143 @@ test("maps gateway refusals and failures and caches nothing", async () => {
   }
 })
 
-test("info exposes the configured model and the estimate inputs", () => {
-  expect(info({ model: "google/gemini-3.8-flash-tts", gateway: "", cache: "" })).toEqual({
-    model: "google/gemini-3.8-flash-tts",
-    voice: "Kore",
-    maxCharacters: 2_000,
-    charactersPerSecond: defaults.charactersPerSecond,
-    usdPerSecond: defaults.usdPerSecond,
-  })
+function storage() {
+  const values = new Map<string, Schema.Json>()
+  const ctx: Pick<SpeechContext, "storage"> = {
+    storage: {
+      get: (key) => Effect.sync(() => values.get(key)),
+      update: (key, update) =>
+        Effect.sync(() => {
+          const [next, result] = update(values.get(key))
+          values.set(key, next)
+          return result
+        }),
+    },
+  }
+  return { ctx, values }
+}
+
+test("measures WAV durations from the format and data chunks", () => {
+  expect(duration(wav(1.5))).toBeCloseTo(1.5, 5)
+  expect(duration(new TextEncoder().encode("not a wav file"))).toBeUndefined()
+})
+
+test("learns the speaking rate from generated audio, not from cache hits", async () => {
+  const fixture = await gateway(() => Response.json({ audio: wav(2).toBase64() }))
+  const memory = storage()
+  const read = () => Effect.runPromise(info(memory.ctx, fixture.options))
+  try {
+    expect(await read()).toEqual({
+      model: defaults.model,
+      voice: "Kore",
+      maxCharacters: 2_000,
+      charactersPerSecond: defaults.charactersPerSecond,
+      usdPerSecond: defaults.usdPerSecond,
+    })
+    const input = { text: "Trinta caracteres exatos aqui." }
+    const generate = () =>
+      Effect.runPromise(
+        synthesize(fixture.options, Effect.succeed("key"), input, {
+          rate: Effect.succeed(defaults.charactersPerSecond),
+          learn: (seconds) => learn(memory.ctx, fixture.options, input, seconds),
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      )
+    await generate()
+    await generate()
+    expect(fixture.requests).toHaveLength(1)
+    expect((await read()).charactersPerSecond).toBe(rate({ characters: 30, seconds: 2 }))
+  } finally {
+    fixture.stop()
+  }
+  // The prior fades as audio accumulates: 20,000 characters in 2,000 s settle near 10 per second.
+  expect(rate({ characters: 0, seconds: 0 })).toBe(defaults.charactersPerSecond)
+  expect(rate({ characters: 20_000, seconds: 2_000 })).toBeGreaterThan(10)
+  expect(rate({ characters: 20_000, seconds: 2_000 })).toBeLessThan(10.5)
+})
+
+test("generates again audio that stopped early, cached or fresh, and learns only from plausible audio", async () => {
+  // 300 characters at 14 per second need about 21 s; 1 s means the model stopped early.
+  const lengths = [1, 20, 1, 1, 18]
+  const fixture = await gateway(() => Response.json({ audio: wav(lengths.shift() ?? 18).toBase64() }))
+  const learned: number[] = []
+  const input = { text: "Uma frase comprida o bastante para ser julgada. ".repeat(7).slice(0, 300) }
+  const call = () =>
+    Effect.runPromise(
+      synthesize(fixture.options, Effect.succeed("key"), input, {
+        rate: Effect.succeed(14),
+        learn: (seconds) => Effect.sync(() => learned.push(seconds)),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+    )
+  try {
+    expect((await call()).cached).toBe(false)
+    expect(fixture.requests).toHaveLength(2)
+    expect(learned).toEqual([20])
+    // Served from the cache while it is plausible.
+    expect((await call()).cached).toBe(true)
+    expect(fixture.requests).toHaveLength(2)
+    // A retry that stays short keeps the longer audio and teaches nothing.
+    const other = { text: input.text.replace("Uma", "Outra") }
+    await Effect.runPromise(
+      synthesize(fixture.options, Effect.succeed("key"), other, {
+        rate: Effect.succeed(14),
+        learn: (seconds) => Effect.sync(() => learned.push(seconds)),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+    )
+    expect(fixture.requests).toHaveLength(4)
+    expect(learned).toEqual([20])
+    // That short audio is not trusted from the cache either: the next request generates it again.
+    const again = await Effect.runPromise(
+      synthesize(fixture.options, Effect.succeed("key"), other, {
+        rate: Effect.succeed(14),
+        learn: (seconds) => Effect.sync(() => learned.push(seconds)),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+    )
+    expect(again.cached).toBe(false)
+    expect(fixture.requests).toHaveLength(5)
+    expect(learned).toEqual([20, 18])
+  } finally {
+    fixture.stop()
+  }
+})
+
+test("saves, reads and clears a reading position per file", async () => {
+  const memory = storage()
+  const position = {
+    path: "/repo/docs/guia.md",
+    hash: "a".repeat(64),
+    offset: 140,
+    characters: 3_000,
+    sentence: "Enquanto um trecho toca, os dois seguintes já estão sendo preparados.",
+    seconds: 10,
+  }
+  expect(await Effect.runPromise(getPosition(memory.ctx, position.path))).toBeUndefined()
+  const saved = await Effect.runPromise(setPosition(memory.ctx, position))
+  expect(saved).toMatchObject(position)
+  expect(await Effect.runPromise(getPosition(memory.ctx, position.path))).toEqual(saved)
+  // An offset past the end is kept at the end.
+  expect((await Effect.runPromise(setPosition(memory.ctx, { ...position, offset: 9_999 }))).offset).toBe(3_000)
+  // A changed document saves its new hash over the old entry; the app relocates by sentence (OpenCodeKit ReadAloud).
+  await Effect.runPromise(setPosition(memory.ctx, { ...position, hash: "c".repeat(64), offset: 90 }))
+  expect(await Effect.runPromise(getPosition(memory.ctx, position.path))).toMatchObject({ hash: "c".repeat(64), offset: 90 })
+  await Effect.runPromise(clearPosition(memory.ctx, position.path))
+  expect(await Effect.runPromise(getPosition(memory.ctx, position.path))).toBeUndefined()
+})
+
+test("keeps only the most recently saved positions", async () => {
+  const memory = storage()
+  const save = (index: number) =>
+    Effect.runPromise(
+      setPosition(memory.ctx, { path: `/docs/${index}.md`, hash: "b".repeat(64), offset: index, characters: 500, sentence: "" }),
+    )
+  for (const index of Array.from({ length: Speech.maxPositions + 5 }, (_, index) => index)) await save(index)
+  // Saving an old one again moves it to the front instead of duplicating it.
+  await save(10)
+  const kept = memory.values.get("speech:positions") as Array<{ path: string }>
+  expect(kept).toHaveLength(Speech.maxPositions)
+  expect(kept[0]?.path).toBe("/docs/10.md")
+  expect(kept.filter((item) => item.path === "/docs/10.md")).toHaveLength(1)
+  expect(await Effect.runPromise(getPosition(memory.ctx, "/docs/0.md"))).toBeUndefined()
+  expect(await Effect.runPromise(getPosition(memory.ctx, "/docs/204.md"))).toBeDefined()
 })
 
 // Opt-in, paid (a fraction of a cent): OPENCODE_SPEECH_LIVE=1 AI_GATEWAY_API_KEY=… bun test test/speech.test.ts

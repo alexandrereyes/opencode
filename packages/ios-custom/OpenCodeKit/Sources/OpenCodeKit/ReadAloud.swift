@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A Markdown document read aloud: speakable text, the pieces sent to the server and their timeline.
@@ -61,7 +62,8 @@ public enum ReadAloud {
   }
 
   /// Elapsed and total time while some pieces have no audio yet. Known pieces use their real duration; the rest use
-  /// the speaking rate observed so far (or the server's estimate before any audio), so the total settles as audio arrives.
+  /// the rate measured on this document's generated pieces, blended with the server's learned rate while little audio
+  /// exists, so the total settles within the first piece instead of jumping when each one arrives.
   public struct Timeline: Sendable, Equatable {
     public let characters: [Int]
     public var durations: [Double?]
@@ -73,17 +75,33 @@ public enum ReadAloud {
       estimatedRate = charactersPerSecond
     }
 
-    /// Characters per second at 1×.
+    /// The server's learned rate weighs as much as this many measured characters, so the short first piece (often a
+    /// title and an opening line, read at its own pace) nudges the estimate instead of swinging it.
+    public static let priorCharacters = 1_000.0
+
+    /// Characters per second at 1×: generated characters over their seconds, with the server's rate as a prior.
     public var rate: Double {
-      let known = zip(characters, durations).compactMap { count, duration in duration.map { (count, $0) } }
+      let known = zip(characters, durations).compactMap { count, duration in duration.map { (Double(count), $0) } }
+      let measured = known.reduce(0) { $0 + $1.0 }
       let seconds = known.reduce(0) { $0 + $1.1 }
-      guard seconds > 0 else { return estimatedRate }
-      return Double(known.reduce(0) { $0 + $1.0 }) / seconds
+      return (Self.priorCharacters + measured) / (Self.priorCharacters / estimatedRate + seconds)
     }
     public func duration(_ piece: Int) -> Double { durations[piece] ?? Double(characters[piece]) / rate }
     public var total: Double { characters.indices.reduce(0) { $0 + duration($1) } }
     public func start(_ piece: Int) -> Double { (0..<piece).reduce(0) { $0 + duration($1) } }
     public func time(piece: Int, offset: Double) -> Double { start(piece) + min(max(0, offset), duration(piece)) }
+
+    /// Gives the pieces before a character offset the pace a previous listening measured (`seconds` to reach it), so a
+    /// reopened document shows the time it was left at. Playing a piece replaces its share with its real length.
+    public mutating func anchor(offset: Int, seconds: Double) -> Double {
+      var before = 0
+      var piece = 0
+      while piece < characters.count - 1, before + characters[piece] <= offset { before += characters[piece]; piece += 1 }
+      guard offset > 0, seconds > 0 else { return 0 }
+      let pace = seconds / Double(offset)
+      for index in 0..<piece where durations[index] == nil { durations[index] = Double(characters[index]) * pace }
+      return time(piece: piece, offset: Double(offset - before) * pace)
+    }
 
     /// The piece at a point of the whole document and how far into it, as a fraction of that piece.
     public func locate(_ time: Double) -> (piece: Int, fraction: Double) {
@@ -98,6 +116,113 @@ public enum ReadAloud {
       }
       return (characters.count - 1, 1)
     }
+  }
+
+  /// Where reading stopped, as saved by `custom.speech`: an offset into the speakable text (the pieces joined), that
+  /// text's hash, and the sentence being read so the place can be found again after an edit.
+  public struct Bookmark: Codable, Sendable, Equatable {
+    public let path: String
+    public let hash: String
+    public let offset: Int
+    public let characters: Int
+    public let sentence: String
+    /// Elapsed audio at 1× when saved.
+    public let seconds: Double?
+    public init(path: String, hash: String, offset: Int, characters: Int, sentence: String, seconds: Double? = nil) {
+      self.path = path
+      self.hash = hash
+      self.offset = offset
+      self.characters = characters
+      self.sentence = sentence
+      self.seconds = seconds
+    }
+  }
+
+  /// SHA-256 of the speakable text; equal hashes mean an offset still points at the same words.
+  public static func hash(_ pieces: [Piece]) -> String {
+    SHA256.hash(data: Data(pieces.map(\.text).joined().utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// Characters before a point inside a piece.
+  public static func offset(_ pieces: [Piece], piece: Int, fraction: Double) -> Int {
+    guard pieces.indices.contains(piece) else { return pieces.reduce(0) { $0 + $1.text.count } }
+    let before = pieces[..<piece].reduce(0) { $0 + $1.text.count }
+    return before + Int((Double(pieces[piece].text.count) * min(1, max(0, fraction))).rounded(.down))
+  }
+
+  /// The piece holding a character offset and how far into it.
+  public static func location(_ pieces: [Piece], offset: Int) -> (piece: Int, fraction: Double) {
+    var start = 0
+    for (index, piece) in pieces.enumerated() {
+      let count = piece.text.count
+      if offset < start + count || index == pieces.count - 1 {
+        return (index, count > 0 ? min(1, max(0, Double(offset - start) / Double(count))) : 0)
+      }
+      start += count
+    }
+    return (0, 0)
+  }
+
+  /// The sentence around an offset (up to 200 characters), saved to find the place again after an edit. Pieces end at
+  /// sentence ends, so only the piece holding the offset is scanned.
+  public static func sentence(_ pieces: [Piece], at offset: Int) -> String {
+    guard !pieces.isEmpty else { return "" }
+    let location = location(pieces, offset: offset)
+    let text = pieces[location.piece].text
+    let local = Int((Double(text.count) * location.fraction).rounded(.down))
+    let starts = sentenceStarts(text)
+    let start = starts.last { $0 <= local } ?? 0
+    let end = starts.first { $0 > start } ?? text.count
+    return String(text.dropFirst(start).prefix(end - start).trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+  }
+
+  /// Where to resume a saved reading in the current text, or nil to start from the beginning:
+  /// - same text (hash): the saved offset;
+  /// - edited text that still contains the saved sentence: the start of its occurrence nearest the old offset;
+  /// - otherwise, if the old offset still falls inside the text: the sentence start nearest to it;
+  /// - otherwise (the text got shorter than the old place): nil.
+  public static func resume(_ bookmark: Bookmark, in pieces: [Piece]) -> Int? {
+    let text = pieces.map(\.text).joined()
+    if bookmark.hash == hash(pieces) { return min(bookmark.offset, text.count) }
+    let target = bookmark.sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !target.isEmpty {
+      let found = occurrences(of: target, in: text)
+      if let nearest = found.min(by: { abs($0 - bookmark.offset) < abs($1 - bookmark.offset) }) { return nearest }
+    }
+    guard bookmark.offset < text.count else { return nil }
+    // Every piece starts a sentence; within a piece, sentences start after their end marks.
+    var base = 0
+    let starts = pieces.flatMap { piece in
+      defer { base += piece.text.count }
+      return sentenceStarts(piece.text).map { $0 + base }
+    }
+    return starts.min { abs($0 - bookmark.offset) < abs($1 - bookmark.offset) }
+  }
+
+  /// Character offsets where sentences begin: the text start and after `.`, `!`, `?`, `…` or a line break.
+  static func sentenceStarts(_ text: String) -> [Int] {
+    var starts = [0]
+    var previous: Character?
+    var pending = false
+    for (index, character) in text.enumerated() {
+      if pending, character != " " && character != "\n" {
+        starts.append(index)
+        pending = false
+      }
+      if character == "\n" || (character == " " && previous.map { ".!?…".contains($0) } == true) { pending = true }
+      previous = character
+    }
+    return starts
+  }
+
+  static func occurrences(of needle: String, in text: String) -> [Int] {
+    var found: [Int] = []
+    var range = text.startIndex..<text.endIndex
+    while let match = text.range(of: needle, range: range) {
+      found.append(text.distance(from: text.startIndex, to: match.lowerBound))
+      range = match.upperBound..<text.endIndex
+    }
+    return found
   }
 
   /// Above half an hour of audio the app asks before generating; the cost is only paid for what is played.
@@ -216,6 +341,23 @@ extension OpenCodeClient {
   }
 
   /// Compressed audio for one piece; a long piece takes the model about a fifth of its duration.
+  /// The saved place in a file, if any.
+  public func readingPosition(_ path: String) async throws -> ReadAloud.Bookmark? {
+    struct Input: Encodable { let path: String }
+    struct Output: Decodable { let position: ReadAloud.Bookmark? }
+    let output: Output = try await rpc("custom.speech", "getPosition", input: Input(path: path), timeout: 20)
+    return output.position
+  }
+
+  public func saveReadingPosition(_ bookmark: ReadAloud.Bookmark) async throws {
+    let _: ReadAloud.Bookmark = try await rpc("custom.speech", "setPosition", input: bookmark, timeout: 20)
+  }
+
+  public func clearReadingPosition(_ path: String) async throws {
+    struct Input: Encodable { let path: String }
+    let _: Empty = try await rpc("custom.speech", "clearPosition", input: Input(path: path), timeout: 20)
+  }
+
   public func synthesizeSpeech(_ text: String) async throws -> Data {
     struct Input: Encodable { let text: String }
     struct Output: Decodable { let audio: String }

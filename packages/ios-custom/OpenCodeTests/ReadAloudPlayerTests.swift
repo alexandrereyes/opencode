@@ -12,6 +12,8 @@ import XCTest
     var failures: [String] = []
     var seconds = 0.6
     var charactersPerSecond = 12.0
+    var positions: [String: [String: Any]] = [:]
+    var cleared: [String] = []
     func respond(_ request: URLRequest) -> (Data, URLResponse) {
       lock.lock(); defer { lock.unlock() }
       let path = request.url?.path ?? ""
@@ -23,6 +25,19 @@ import XCTest
         infos += 1
         return reply(200, ["output": ["model": "google/gemini-3.8-flash-lite-tts", "voice": "Kore", "maxCharacters": 2000,
           "charactersPerSecond": charactersPerSecond, "usdPerSecond": 0.00015]])
+      }
+      let input = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["input"] as? [String: Any]
+      if path == "/api/rpc/custom.speech/getPosition" {
+        return reply(200, ["output": ["position": (positions[input?["path"] as? String ?? ""] as Any?) ?? NSNull()]])
+      }
+      if path == "/api/rpc/custom.speech/setPosition", let input, let file = input["path"] as? String {
+        positions[file] = input
+        return reply(200, ["output": input.merging(["updatedAt": 1]) { $1 }])
+      }
+      if path == "/api/rpc/custom.speech/clearPosition", let file = input?["path"] as? String {
+        positions[file] = nil
+        cleared.append(file)
+        return reply(200, ["output": [:]])
       }
       if path == "/api/rpc/custom.speech/synthesize" {
         if let type = failures.first {
@@ -36,6 +51,9 @@ import XCTest
       return reply(404, [:])
     }
     var texts: [String] { lock.lock(); defer { lock.unlock() }; return synthesized }
+    func saved(_ path: String) -> [String: Any]? { lock.lock(); defer { lock.unlock() }; return positions[path] }
+    func save(_ position: [String: Any]) { lock.lock(); defer { lock.unlock() }; positions[position["path"] as! String] = position }
+    var clears: [String] { lock.lock(); defer { lock.unlock() }; return cleared }
     static func wav(seconds: Double) -> Data {
       let samples = Int(24_000 * seconds)
       var data = Data()
@@ -58,7 +76,7 @@ import XCTest
   private func player(_ server: Server, pieces count: Int, characters: Int = 12) -> ReadAloudPlayer {
     let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:9")!)) { server.respond($0) }
     let pieces = (0..<count).map { ReadAloud.Piece(text: "Trecho \($0) " + String(repeating: "a", count: characters), block: $0) }
-    return ReadAloudPlayer(title: "guia.md", pieces: pieces, client: client, defaults: defaults)
+    return ReadAloudPlayer(title: "guia.md", path: "/repo/docs/guia.md", pieces: pieces, client: client, defaults: defaults)
   }
 
   private func wait(_ message: String, timeout: TimeInterval = 10, until condition: () -> Bool) async throws {
@@ -73,7 +91,8 @@ import XCTest
     let server = Server()
     let reader = player(server, pieces: 6)
     defer { reader.stop() }
-    XCTAssertEqual(reader.total, 6.0 * 21 / 12, accuracy: 0.01, "estimate from the default rate before any audio")
+    XCTAssertEqual(reader.total, 6.0 * 21 / ReadAloudPlayer.defaultCharactersPerSecond, accuracy: 0.01,
+      "estimate from the default rate before any audio")
     reader.play()
     XCTAssertEqual(reader.phase, .loading)
     try await wait("first piece playing") { reader.phase == .playing }
@@ -81,9 +100,10 @@ import XCTest
     XCTAssertEqual(server.texts, ["Trecho 0 aaaaaaaaaaaa", "Trecho 1 aaaaaaaaaaaa", "Trecho 2 aaaaaaaaaaaa"])
     try await wait("second piece reached") { reader.position > 0.7 && reader.phase == .playing }
     try await wait("third piece prefetched in turn") { server.texts.count == 4 }
-    // Real durations replace the estimate as pieces arrive.
+    // Real durations replace the estimate as pieces arrive, and the unknown rest follows the measured rate.
     XCTAssertEqual(try XCTUnwrap(reader.timeline.durations[0]), 0.6, accuracy: 0.05)
-    XCTAssertEqual(reader.total, 6 * 0.6, accuracy: 0.2)
+    XCTAssertLessThan(reader.total, 6.0 * 21 / 12, "the measured pieces pull the total down from the estimate")
+    XCTAssertGreaterThan(reader.total, 6 * 0.6)
     XCTAssertEqual(server.infos, 1)
   }
 
@@ -162,5 +182,80 @@ import XCTest
     let position = reader.position
     try await Task.sleep(for: .milliseconds(400))
     XCTAssertEqual(reader.position, position, "nothing keeps playing after stop")
+  }
+
+  private func pieces(_ count: Int, characters: Int = 12) -> [ReadAloud.Piece] {
+    (0..<count).map { ReadAloud.Piece(text: "Trecho \($0) " + String(repeating: "a", count: characters), block: $0) }
+  }
+
+  func testReopensPausedAtTheSavedPlaceWithoutGenerating() async throws {
+    let server = Server()
+    let reader = player(server, pieces: 4)
+    defer { reader.stop() }
+    // 21 characters per piece: offset 42 is the start of the third one.
+    server.save(["path": "/repo/docs/guia.md", "hash": ReadAloud.hash(pieces(4)), "offset": 42, "characters": 84,
+      "sentence": "", "updatedAt": 1])
+    await reader.restore()
+    XCTAssertEqual(reader.phase, .idle)
+    XCTAssertTrue(reader.saved)
+    XCTAssertEqual(reader.position, reader.timeline.start(2), accuracy: 0.01)
+    XCTAssertEqual(reader.timeline.estimatedRate, 12, "the server's learned rate")
+    // Saved with its elapsed time, an unchanged document shows that time.
+    let timed = player(server, pieces: 4)
+    defer { timed.stop() }
+    server.save(["path": "/repo/docs/guia.md", "hash": ReadAloud.hash(pieces(4)), "offset": 42, "characters": 84,
+      "sentence": "", "seconds": 7.5, "updatedAt": 1])
+    await timed.restore()
+    XCTAssertEqual(timed.position, 7.5, accuracy: 0.01)
+    XCTAssertEqual(timed.timeline.locate(timed.position).piece, 2)
+    XCTAssertTrue(server.texts.isEmpty, "opening generates nothing")
+    reader.play()
+    try await wait("resumed at the saved piece") { reader.phase == .playing }
+    XCTAssertEqual(server.texts.first, "Trecho 2 aaaaaaaaaaaa")
+  }
+
+  func testSavesOnPauseAndStopAndForgetsAFinishedDocument() async throws {
+    let server = Server()
+    server.seconds = 0.4
+    let reader = player(server, pieces: 3)
+    defer { reader.stop() }
+    await reader.restore()
+    XCTAssertFalse(reader.saved)
+    reader.play()
+    try await wait("into the second piece") { reader.position > 0.5 && reader.phase == .playing }
+    reader.pause()
+    try await wait("saved on pause") { server.saved("/repo/docs/guia.md") != nil }
+    let saved = try XCTUnwrap(server.saved("/repo/docs/guia.md"))
+    XCTAssertEqual(saved["hash"] as? String, ReadAloud.hash(pieces(3)))
+    XCTAssertGreaterThan(saved["offset"] as? Int ?? 0, 21, "an offset into the second piece")
+    XCTAssertTrue(reader.saved)
+    reader.play()
+    try await wait("finished") { reader.phase == .paused && reader.position >= reader.total - 0.01 }
+    try await wait("forgotten at the end") { server.saved("/repo/docs/guia.md") == nil }
+    XCTAssertFalse(reader.saved)
+    reader.stop()
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertNil(server.saved("/repo/docs/guia.md"), "stopping a finished reading saves nothing")
+  }
+
+  func testOpeningAndClosingKeepsTheSavedPlaceAndRestartForgetsIt() async throws {
+    let server = Server()
+    let bookmark: [String: Any] = ["path": "/repo/docs/guia.md", "hash": ReadAloud.hash(pieces(3)), "offset": 30,
+      "characters": 63, "sentence": "", "updatedAt": 1]
+    server.save(bookmark)
+    let first = player(server, pieces: 3)
+    await first.restore()
+    first.stop()
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(server.saved("/repo/docs/guia.md")?["offset"] as? Int, 30, "a reading that never moved saves nothing")
+    let second = player(server, pieces: 3)
+    defer { second.stop() }
+    await second.restore()
+    XCTAssertTrue(second.saved)
+    second.restart()
+    XCTAssertEqual(second.position, 0)
+    XCTAssertFalse(second.saved)
+    try await wait("cleared on the server") { server.clears.contains("/repo/docs/guia.md") }
+    XCTAssertNil(server.saved("/repo/docs/guia.md"))
   }
 }

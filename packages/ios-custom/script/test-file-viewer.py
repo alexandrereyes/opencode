@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """File viewer zoom, sibling navigation and file kinds against an owned sandbox directory. Only
 FileReadAloudTests calls a model: a few minutes of speech through the sandbox's `custom.speech`, which caches
-each piece; only the first piece (it names the run) is generated again on later runs.
+each piece; only the first piece (it numbers the run) is generated again on later runs.
 
 Usage (after `xcodebuild … build-for-testing`):
   OPENCODE_SANDBOX_HOME=<sandbox home> OPENCODE_TEST_SERVER_URL=http://127.0.0.1:<port> \
@@ -158,13 +158,43 @@ Bloco depois do link
 """, encoding="utf8")
     (docs / "d-outro.md").write_text("# Outro documento 🚀\n\nAcentuação: ação, coração, pinguim, über. Emoji: 👩🏽‍💻 ✅\n\n1. Um\n2. Dois\n", encoding="utf8")
     (docs / "e-vazio.md").write_text("", encoding="utf8")
-    # Read aloud: several pieces (short first, then longer), with code and a table announced instead of read.
-    paragraph = ("A leitura em voz alta gera o áudio no servidor, um trecho de cada vez, e o aplicativo toca cada parte assim "
-        "que ela chega. Enquanto um trecho toca, os dois seguintes já estão sendo preparados, para que a narração não pare. ")
-    (docs / "f-leitura.md").write_text("# Leitura em voz alta\n\nExecução " + token + ".\n\n" + paragraph * 2
-        + "\n\n## Como usar\n\n- Toque no botão de reproduzir.\n- Arraste a barra para pular.\n- Mude a velocidade.\n\n"
+    # Read aloud: several pieces (short first, then longer) of varied prose, with code and a table announced instead of
+    # read. Gemini TTS tends to stop early on text that repeats itself, so no paragraph repeats.
+    parts = [
+        ("Como o áudio é gerado", "O aplicativo envia o texto ao servidor em trechos, e o servidor pede a fala ao modelo. "
+         "Cada trecho volta comprimido, ocupando bem menos espaço do que um arquivo sem compressão. "
+         "Enquanto um trecho toca, os dois seguintes já estão sendo preparados, para que a narração siga sem pausas longas. "
+         "Se a conexão falhar no meio do caminho, o player mostra um aviso e permite tentar de novo."),
+        ("Onde a leitura para", "Ao pausar ou fechar o documento, o lugar da leitura fica guardado no servidor. "
+         "Na próxima vez, o player abre parado nesse ponto e espera você tocar para continuar. "
+         "Quando o documento termina, o lugar é esquecido e a leitura volta ao começo. "
+         "Também é possível recomeçar do início a qualquer momento, pelo player completo."),
+        ("Velocidade e tempo", "A velocidade alterna entre normal, uma vez e meia e duas vezes, sem mudar o tom da voz. "
+         "O tempo total começa estimado pelo ritmo que o servidor aprendeu com as leituras anteriores. "
+         "Conforme os trechos chegam, a estimativa passa a usar o ritmo medido neste próprio documento. "
+         "Assim, o total fica perto do real logo nos primeiros segundos."),
+        ("Custos e limites", "Só é gerado o trecho que está para tocar, e nada mais. "
+         "Pular para o meio do documento gera apenas o trecho daquele ponto e os dois seguintes. "
+         "Documentos muito longos pedem confirmação antes de começar, mostrando o custo estimado. "
+         "Trechos já ouvidos ficam guardados no servidor e não são cobrados de novo."),
+        ("Sessão de áudio", "A leitura usa a sessão de áudio de reprodução falada do sistema. "
+         "Uma ligação ou a Siri interrompem a narração, que volta quando o sistema recomenda. "
+         "Desconectar o fone de ouvido pausa a leitura na hora, como em qualquer aplicativo de áudio. "
+         "O modo de voz e o ditado também pausam o player antes de abrir o microfone."),
+        ("Tela bloqueada", "Com a tela bloqueada, o título do documento aparece nos controles do sistema. "
+         "Dali dá para pausar, continuar, avançar ou voltar quinze segundos e arrastar a posição. "
+         "Fechar o arquivo encerra a leitura e libera esses controles. "
+         "Trocar para outro arquivo da mesma pasta também encerra a leitura anterior."),
+        ("Texto falável", "Títulos, parágrafos e listas são lidos como estão escritos. "
+         "Blocos de código e tabelas são apenas anunciados, com a linguagem e o número de linhas. "
+         "Imagens são lidas pelo texto alternativo, e fórmulas são apenas mencionadas. "
+         "Notas de rodapé, separadores e metadados do começo do arquivo ficam de fora."),
+    ]
+    (docs / "f-leitura.md").write_text("# Leitura em voz alta\n\nExecução número " + str(int(token[:5], 16)) + ".\n\n"
+        + "Este documento serve para testar a leitura em voz alta do visualizador de arquivos.\n\n"
+        + "## Como usar\n\n- Toque no botão de reproduzir.\n- Arraste a barra para pular.\n- Mude a velocidade.\n\n"
         + "```swift\nlet leitura = true\n```\n\n| Ação | Gesto |\n| --- | --- |\n| Pular | Arrastar |\n\n"
-        + "\n\n".join(["## Parte " + str(index) + "\n\n" + paragraph * 3 for index in range(1, 5)]) + "\n", encoding="utf8")
+        + "\n\n".join(["## " + title + "\n\n" + body for title, body in parts]) + "\n", encoding="utf8")
     (docs / "g-anexo.md").write_text("# Anexo\n\nÚltimo documento da pasta.\n", encoding="utf8")
     # Above the Session directory, reachable through the session file explorer's `../`.
     (root / "acima.png").write_bytes(png(600, 400, 160))

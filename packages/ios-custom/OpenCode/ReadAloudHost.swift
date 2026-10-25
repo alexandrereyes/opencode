@@ -8,6 +8,8 @@ struct ReadAloudHost: ViewModifier {
   @Environment(\.voiceController) private var voice
   let text: String?
   let title: String
+  /// The file's absolute path, which keys its saved reading place on the server.
+  let path: String
   let client: OpenCodeClient
   @State private var player: ReadAloudPlayer?
   func body(content: Content) -> some View {
@@ -36,7 +38,9 @@ struct ReadAloudHost: ViewModifier {
         let blocks = await ResponseMarkdownCache.shared.parse(rendered)
         let pieces = ReadAloud.pieces(ReadAloud.segments(blocks, frontMatter: rendered != text))
         guard !Task.isCancelled, !pieces.isEmpty else { return }
-        player = ReadAloudPlayer(title: title, pieces: pieces, client: client)
+        let player = ReadAloudPlayer(title: title, path: path, pieces: pieces, client: client)
+        self.player = player
+        await player.restore()
       }
       .onDisappear { player?.stop() }
   }
@@ -85,6 +89,12 @@ private struct ReadAloudControls: View {
       HStack {
         Text("Lendo em voz alta").appFont(.footnote).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
         Spacer(minLength: 0)
+        if player.saved {
+          Button("Recomeçar do início") { Haptics.play(.selection); player.restart() }
+            .appFont(.footnote).buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+            .frame(minHeight: 44).padding(.horizontal, 4).contentShape(Rectangle())
+            .accessibilityIdentifier("read-aloud-restart")
+        }
         Button { expanded = false } label: {
           Image(systemName: "chevron.down").appSymbol(.action).frame(width: 44, height: 32).contentShape(Rectangle())
         }
