@@ -1279,6 +1279,19 @@ It registers the target in the sandbox hub, measures the stream, runs `OpenCodeU
 `--lock` checks with one Luna 6 / low shell call that the agent is refused while Alexandre holds control and is told
 when control returns.
 
+**Android Emulator (layout 3B).** `AndroidEmulator/AndroidEmulatorResourceView.swift` has no side column: a glass
+pill with **Voltar**, **Início**, **Recentes** and the keyboard, plus a round **…** menu (rotate left/right, lock,
+volume), sits under **Assumir controle** / **Devolver controle** while the controls show and is disabled until
+Alexandre holds control. In control, with the controls hidden, the same pill floats over the screen (default bottom
+right) and drags anywhere, remembered under `android-navigation`, since any fixed place would cover some app's bottom
+bar. Frames arrive upright (the adapter rotates them with the display), so touches need no rotation on the phone.
+Verify after `build-for-testing` with your own running emulator:
+`python3 packages/ios-custom/script/test-resources-android.py --device <app-sim> --serial emulator-<port> --derived … --home <sandbox> --server-url … --evidence … [--theme openchamber-light]`.
+It registers the emulator in the sandbox hub, measures the stream and input latency over the hub WebSocket, runs
+`OpenCodeUITests/AndroidEmulatorViewerTests` (watch, take control, drag the pill, tap a contact field, type
+`Olá João 123` with the iPhone keyboard, Início, Recentes, Voltar, give back) and checks over adb that the text
+reached the field and that the launcher and the overview appeared.
+
 `ContextUsage` in OpenCodeKit owns the shared math, pt-BR abbreviations, VoiceOver wording and >80% warning threshold.
 A bounded store-local formatter cache is keyed by step ID, measured tokens and resolved context limit, so text/tool
 deltas do not repeatedly format metrics. The ring clamps drawing only, not the displayed percentage or token count.

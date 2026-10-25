@@ -113,11 +113,14 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       }
       .padding(.horizontal, 12).padding(.top, 6)
       Spacer()
-      HStack {
-        Spacer()
-        VStack(spacing: 10) { tools() }.padding(6).glassEffect(.regular, in: .capsule)
-          .accessibilityIdentifier("resource-tools")
-      }.padding(.trailing, 10)
+      // Kinds without side tools (Android keeps its buttons in the navigation pill) pass `EmptyView`.
+      if Tools.self != EmptyView.self {
+        HStack {
+          Spacer()
+          VStack(spacing: 10) { tools() }.padding(6).glassEffect(.regular, in: .capsule)
+            .accessibilityIdentifier("resource-tools")
+        }.padding(.trailing, 10)
+      }
       Spacer()
       bottom()
     }
@@ -184,16 +187,22 @@ extension ResourceViewerShell where Surface == ResourceFrameView {
   }
 }
 
-extension ResourceViewerShell where Surface == ResourceFrameView, Bottom == ResourceControlBar {
+extension ResourceViewerShell where Surface == ResourceFrameView, Bottom == ResourceControlBar<EmptyView> {
   init(model: ResourceViewerModel, @ViewBuilder tools: @escaping () -> Tools) {
     self.init(model: model, surface: { ResourceFrameView(model: model) }, tools: tools, bottom: { ResourceControlBar(model: model) })
   }
 }
 
-/// "Assumir controle" / "Devolver" with the gesture hint, the default bottom of the viewer.
-struct ResourceControlBar: View {
+/// "Assumir controle" / "Devolver" with the gesture hint, the default bottom of the viewer. `accessory` goes between
+/// the button and the hint (Android's navigation pill).
+struct ResourceControlBar<Accessory: View>: View {
   @Environment(\.appTheme) private var theme
   let model: ResourceViewerModel
+  let accessory: () -> Accessory
+  init(model: ResourceViewerModel, @ViewBuilder accessory: @escaping () -> Accessory) {
+    self.model = model
+    self.accessory = accessory
+  }
   var body: some View {
     VStack(spacing: 8) {
       if model.inControl {
@@ -216,12 +225,17 @@ struct ResourceControlBar: View {
         .disabled(model.busy || model.holder == .elsewhere || !model.resource.state.running)
         .accessibilityIdentifier("resource-take")
       }
+      accessory()
       Text(model.inControl ? "A alça na borda mostra e oculta os controles" : "Toque na tela para ocultar os controles")
         .appFont(.micro).foregroundStyle(theme.color(.textSecondary)).padding(.horizontal, 10).padding(.vertical, 4)
         .glassEffect(.regular, in: .capsule)
     }
     .padding(.bottom, 10)
   }
+}
+
+extension ResourceControlBar where Accessory == EmptyView {
+  init(model: ResourceViewerModel) { self.init(model: model) { EmptyView() } }
 }
 
 /// One round tool in the side column.
