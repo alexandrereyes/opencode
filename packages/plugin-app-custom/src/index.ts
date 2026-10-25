@@ -16,6 +16,7 @@ import { registerCodexSearch } from "./codex-search/index.js"
 import { registerTranscript } from "./transcript/index.js"
 import { registerMaster } from "./master/index.js"
 import { registerVoice } from "./voice/index.js"
+import { registerSpeech } from "./speech/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -40,5 +41,6 @@ export default Plugin.define({
       yield* registerTranscript(ctx)
       yield* registerMaster(ctx)
       yield* registerVoice(ctx)
+      yield* registerSpeech(ctx)
     }),
 })

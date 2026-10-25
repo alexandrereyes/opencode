@@ -94,6 +94,7 @@ import OSLog
   }
   func start(sessions: SessionStore) {
     guard !busy, !state.visible else { return }
+    NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
     callVoice = preferences.voice
     let token = UUID()
     epoch = token; sessionID = token; ready = false; mediaConnected = false

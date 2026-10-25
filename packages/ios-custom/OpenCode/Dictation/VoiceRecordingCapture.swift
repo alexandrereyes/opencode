@@ -26,13 +26,14 @@ enum DictationAudioSession {
   private static let queue = DispatchQueue(label: "br.com.alexandrem.opencode.dictation-audio", qos: .userInitiated)
   /// `AVAudioRecorder.record()` and `AVAudioPlayer.play()` activate the session again
   /// internally, so `start` runs here too, right after the activation. A failure deactivates.
-  static func activate<Value: Sendable>(_ category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions = [],
+  static func activate<Value: Sendable>(_ category: AVAudioSession.Category, mode: AVAudioSession.Mode = .default,
+                                        options: AVAudioSession.CategoryOptions = [],
                                         then start: @escaping @Sendable () throws -> Value) async throws -> Value {
     try await withCheckedThrowingContinuation { continuation in
       queue.async {
         let session = AVAudioSession.sharedInstance()
         do {
-          try session.setCategory(category, mode: .default, options: options)
+          try session.setCategory(category, mode: mode, options: options)
           if category == .playAndRecord { try session.setAllowHapticsAndSystemSoundsDuringRecording(true) }
           try session.setActive(true)
           continuation.resume(returning: try start())

@@ -86,6 +86,7 @@ import UIKit
   }
   private func start() {
     guard state == .idle, willUseAudio() else { gesture = VoiceRecordingGesture(); return }
+    NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
     Self.audioOwner?.suspend()
     Self.audioOwner = self
     state = .authorizing
