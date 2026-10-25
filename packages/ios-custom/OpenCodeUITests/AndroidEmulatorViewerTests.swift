@@ -34,6 +34,16 @@ import XCTest
     XCTAssertTrue(app.buttons["resource-take"].frame.maxY < home.frame.minY, "the pill sits under Assumir controle")
     screenshot("watching")
 
+    // The status pill's menu lists the stream's measurements (frame age, decode, round trip, rate).
+    app.staticTexts.matching(NSPredicate(format: "label CONTAINS ' ms'")).firstMatch.press(forDuration: 1)
+    let age = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Atraso do quadro na tela'"))
+      .firstMatch
+    XCTAssertTrue(age.waitForExistence(timeout: 5), "the status menu lists the frame age")
+    screenshot("telemetry")
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.45)).tap()
+    XCTAssertTrue(age.waitForNonExistence(timeout: 5), "the status menu closed")
+    XCTAssertTrue(app.buttons["resource-take"].waitForExistence(timeout: 5))
+
     // In control the controls hide and the pill floats; drag it out of the way and it stays there.
     app.buttons["resource-take"].tap()
     XCTAssertTrue(app.buttons["resource-control-pill"].waitForExistence(timeout: 10))

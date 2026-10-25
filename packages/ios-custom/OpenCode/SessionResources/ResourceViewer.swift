@@ -32,6 +32,7 @@ struct ResourceViewerScreen: View {
 struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.scenePhase) private var scenePhase
   @Bindable var model: ResourceViewerModel
   let contentSize: CGSize?
   let surface: () -> Surface
@@ -76,9 +77,12 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
     .foregroundStyle(theme.color(.textStrong))
     .tint(theme.color(.primary))
     .task { model.start() }
-    .onDisappear {
-      if model.inControl { Task { await model.giveBack() } }
-      model.stop()
+    // Closing ends the viewer for good (giving control back without reopening the stream); the background only
+    // pauses it, and coming back reconnects at once.
+    .onDisappear { model.finish() }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .background { model.suspend() }
+      if phase == .active { model.resume() }
     }
   }
 
@@ -95,9 +99,13 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       }
     }
     .overlay(alignment: .bottom) {
-      if let failure = model.failure {
-        Text(failure).appFont(.caption).padding(.horizontal, 12).padding(.vertical, 8)
-          .resourceGlass(.capsule).padding(.bottom, 96).allowsHitTesting(false)
+      // Connection failures first; otherwise an adapter's or input's short notice, which fades on its own.
+      if let text = model.failure ?? model.notice {
+        Text(text).appFont(.caption).multilineTextAlignment(.center).lineLimit(3)
+          .padding(.horizontal, 12).padding(.vertical, 8)
+          .resourceGlass(.capsule).padding(.horizontal, 24).padding(.bottom, 96).allowsHitTesting(false)
+          .accessibilityIdentifier(model.failure == nil ? "resource-notice" : "resource-failure")
+          .transition(.opacity)
       }
     }
   }
@@ -125,7 +133,10 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
         // The close button is its own top layer (see `body`); this keeps its place in the row.
         Color.clear.frame(width: 44, height: 44).allowsHitTesting(false).accessibilityHidden(true)
         pill(model.status, dot: model.connected ? .success : .textWeak).layoutPriority(1)
-          .accessibilityIdentifier("resource-status").excludedFromTouches(model, "status")
+          .contextMenu { ForEach(model.statusDetails, id: \.self) { Text($0) } }
+          .accessibilityIdentifier("resource-status")
+          .accessibilityValue(model.statusDetails.joined(separator: ", "))
+          .excludedFromTouches(model, "status")
         Spacer(minLength: 0)
         if model.inControl {
           controlPill.excludedFromTouches(model, "pill-bar")

@@ -1274,8 +1274,16 @@ app, also with the Mac locked. The contract, hub routes, adapter interface and l
 without touching each other. `SessionStore.openResource` presents it full screen above everything;
 `-OpenCodeOpenResource <id>` opens one at launch for tests.
 
+**Stream delivery (25 October).** The viewer acknowledges frames, so the hub keeps at most three in flight and only
+the newest waiting (a slow or cellular link sees a recent picture, never a growing backlog); it asks for the
+`economy` profile on cellular or Low Data Mode, takes control on the open socket (`auth`) instead of reconnecting,
+reconnects on a missed heartbeat with a backoff that restarts after success, never reconnects after the viewer
+closes, pauses in the background and resumes at once. A long press on the status pill lists frame age (capture → on
+screen, clock-corrected), capture → device, capture → hub, decode, round trip, rate and quality. Details in
+`docs/resources.md` ("Delivery and flow control"); `ResourceStreamTelemetry` in OpenCodeKit holds the measurements.
+
 The shell is the approved layout B: the stream fills the screen and glass controls float above it (close, status
-pill with the hub round trip, who controls it, a side column of kind tools, **Assumir controle**). Taking control
+pill with the frame age or the hub round trip, who controls it, a side column of kind tools, **Assumir controle**). Taking control
 makes touches (multi-touch, normalized to the frame) and the iPhone keyboard go to the resource, draws a primary
 border and hides the controls. Hiding/showing never steals a touch: while watching, touches do not reach the
 resource, so a tap on the screen toggles the controls; in control, every touch on the screen goes to the resource

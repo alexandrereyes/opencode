@@ -120,12 +120,16 @@ try:
 const [viewURL, controlURL] = process.argv.slice(2)
 const ages: number[] = []
 let first = 0
+let bytes = 0
 const watcher = new WebSocket(viewURL!)
 watcher.binaryType = "arraybuffer"
+// Acknowledges every frame, as the app does with hubs that list `ack` in `features`.
 watcher.onmessage = (event) => {
   if (typeof event.data === "string") return
   ages.push(Date.now() - new DataView(event.data as ArrayBuffer).getFloat64(2))
+  bytes += (event.data as ArrayBuffer).byteLength
   first ||= Date.now()
+  watcher.send(JSON.stringify({ type: "ack", n: ages.length }))
 }
 const scroll = Bun.spawn(["sh", "-c", process.env.SCROLL!])
 await Bun.sleep(8000)
@@ -133,12 +137,17 @@ scroll.kill()
 watcher.close()
 const sorted = ages.toSorted((a, b) => a - b)
 const stream = { frames: ages.length, fps: +(ages.length / ((Date.now() - first) / 1000)).toFixed(1),
-  ageMedian: Math.round(sorted[Math.floor(sorted.length / 2)] ?? 0), ageP95: Math.round(sorted[Math.floor(sorted.length * 0.95)] ?? 0) }
+  ageMedian: Math.round(sorted[Math.floor(sorted.length / 2)] ?? 0), ageP95: Math.round(sorted[Math.floor(sorted.length * 0.95)] ?? 0),
+  kbPerFrame: +(bytes / 1024 / Math.max(1, ages.length)).toFixed(1) }
 
 const socket = new WebSocket(controlURL!)
 socket.binaryType = "arraybuffer"
 let frames = 0
-socket.onmessage = (event) => { if (typeof event.data !== "string") frames++ }
+socket.onmessage = (event) => {
+  if (typeof event.data === "string") return
+  frames++
+  socket.send(JSON.stringify({ type: "ack", n: frames }))
+}
 await new Promise((resolve) => (socket.onopen = resolve))
 await Bun.sleep(1500)
 const send = (events: unknown[]) => socket.send(JSON.stringify({ type: "input", events }))

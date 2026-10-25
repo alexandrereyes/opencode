@@ -76,3 +76,35 @@ private let hubResource = #"""
   #expect(ResourceLink.id(from: URL(string: "opencode-resource:chrome%3Alogin")!) == "chrome:login")
   #expect(ResourceLink.id(from: URL(string: "https://example.com")!) == nil)
 }
+
+@Test func deliveryMessagesDecodeAndClientMessagesEncode() throws {
+  let decode = { (text: String) in try JSONDecoder().decode(ResourceServerMessage.self, from: Data(text.utf8)) }
+  #expect(try decode(#"{"type":"features","ack":true,"auth":true,"profiles":["standard","economy"]}"#)
+    == .features(ack: true, auth: true, profiles: ["standard", "economy"]))
+  #expect(try decode(#"{"type":"notice","message":"Chrome aberto sem porta CDP"}"#) == .notice("Chrome aberto sem porta CDP"))
+  guard case .stats(let stats) = try decode(
+    #"{"type":"stats","hub":10,"capture":{"p50":4,"p95":9},"frames":3,"bytes":900,"replaced":2,"dropped":0,"inFlight":1}"#)
+  else { Issue.record("stats did not decode"); return }
+  #expect(stats.capture?.p50 == 4 && stats.replaced == 2 && stats.inFlight == 1)
+  let json = { (message: ResourceClientMessage) in
+    try JSONSerialization.jsonObject(with: Data(try #require(message.text).utf8)) as? [String: AnyHashable]
+  }
+  #expect(try json(.ack(7)) == ["type": "ack", "n": 7])
+  #expect(try json(.profile("economy")) == ["type": "profile", "value": "economy"])
+  #expect(try json(.auth("abc")) == ["type": "auth", "ticket": "abc"])
+}
+
+@Test func telemetryCorrectsTheClockAndMeasuresAges() {
+  var telemetry = ResourceStreamTelemetry()
+  // The hub clock is 1,000 ms ahead; a 40 ms round trip puts its midpoint at 1,020 on this device.
+  telemetry.pong(sent: 1_000, hub: 2_020, received: 1_040)
+  #expect(telemetry.offset == 1_000 && telemetry.roundTrip == 40)
+  // A slower round trip later does not replace the precise offset.
+  telemetry.pong(sent: 2_000, hub: 3_400, received: 2_500)
+  #expect(telemetry.offset == 1_000)
+  // Captured at hub time 3,000 (device 2,000), received at 2,050, shown at 2,060.
+  telemetry.frame(bytes: 2_048, captured: 3_000, received: 2_050, presented: 2_060)
+  #expect(telemetry.arrivalAge == 50 && telemetry.presentationAge == 60 && telemetry.decodeTime == 10)
+  #expect(telemetry.flowing(now: 2_100))
+  #expect(!telemetry.flowing(now: 10_000))
+}

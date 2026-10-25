@@ -240,23 +240,36 @@ public enum ResourceInput: Encodable, Hashable, Sendable {
   private static func unit(_ value: Double) -> Double { max(0, min(1, value)) }
 }
 
-/// Hub → client text messages on `/stream`.
+/// Hub → client text messages on `/stream`. `features` (first, newer hubs only) says which optional client
+/// messages the hub understands; `stats` reports this viewer's delivery every few seconds; `notice` is an adapter's
+/// diagnosis to show discreetly.
 public enum ResourceServerMessage: Decodable, Sendable, Equatable {
+  case features(ack: Bool, auth: Bool, profiles: [String])
   case hello(format: String, width: Int, height: Int, scale: Double?, codec: String?)
   case pong(t: Double, hub: Double)
   case control(holder: String?, expiresAt: Double?, mine: Bool)
   case meta([String: JSONValue])
+  case stats(ResourceDeliveryStats)
+  case notice(String)
   case error(String)
   case end(String)
   case unknown(String)
 
   private enum Keys: String, CodingKey {
     case type, format, width, height, scale, codec, t, hub, holder, expiresAt, mine, value, message, reason
+    case ack, auth, profiles
   }
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: Keys.self)
     let type = try values.decode(String.self, forKey: .type)
     switch type {
+    case "features":
+      self = .features(
+        ack: try values.decodeIfPresent(Bool.self, forKey: .ack) ?? false,
+        auth: try values.decodeIfPresent(Bool.self, forKey: .auth) ?? false,
+        profiles: try values.decodeIfPresent([String].self, forKey: .profiles) ?? [])
+    case "stats": self = .stats(try ResourceDeliveryStats(from: decoder))
+    case "notice": self = .notice(try values.decodeIfPresent(String.self, forKey: .message) ?? "")
     case "hello":
       self = .hello(
         format: try values.decode(String.self, forKey: .format), width: try values.decode(Int.self, forKey: .width),
@@ -274,6 +287,120 @@ public enum ResourceServerMessage: Decodable, Sendable, Equatable {
     case "end": self = .end(try values.decodeIfPresent(String.self, forKey: .reason) ?? "")
     default: self = .unknown(type)
     }
+  }
+}
+
+/// The hub's per-viewer delivery report (`stats`): frames and bytes sent, held-back frames replaced by newer ones,
+/// frames dropped, frames in flight and, when the adapter reports capture times, the capture → hub age.
+public struct ResourceDeliveryStats: Decodable, Sendable, Equatable {
+  public struct Capture: Decodable, Sendable, Equatable {
+    public let p50: Double
+    public let p95: Double
+  }
+  public let hub: Double
+  public let capture: Capture?
+  public let frames: Int
+  public let bytes: Int
+  public let replaced: Int
+  public let dropped: Int
+  public let inFlight: Int?
+}
+
+/// Client → hub text messages on `/stream`. `ack`, `profile` and `auth` go only to hubs whose `features` list them.
+public enum ResourceClientMessage: Encodable, Sendable, Equatable {
+  case ping(t: Double)
+  case input([ResourceInput])
+  /// Frames received on this connection so far.
+  case ack(Int)
+  /// `standard` or `economy`.
+  case profile(String)
+  /// Swaps this socket's ticket (a control ticket after taking control) without reconnecting.
+  case auth(String)
+
+  private enum Keys: String, CodingKey { case type, t, events, n, value, ticket }
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: Keys.self)
+    switch self {
+    case .ping(let t):
+      try container.encode("ping", forKey: .type)
+      try container.encode(t, forKey: .t)
+    case .input(let events):
+      try container.encode("input", forKey: .type)
+      try container.encode(events, forKey: .events)
+    case .ack(let count):
+      try container.encode("ack", forKey: .type)
+      try container.encode(count, forKey: .n)
+    case .profile(let value):
+      try container.encode("profile", forKey: .type)
+      try container.encode(value, forKey: .value)
+    case .auth(let ticket):
+      try container.encode("auth", forKey: .type)
+      try container.encode(ticket, forKey: .ticket)
+    }
+  }
+  public var text: String? {
+    (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) }
+  }
+}
+
+/// What the viewer measures about its stream, with the hub's clock offset from ping/pong, so frame ages compare the
+/// capture time (Mac clock) with this device's clock.
+///
+/// - `offset`: hub clock − device clock, from the pong with the shortest round trip (`hub` minus the round trip's
+///   midpoint), which bounds the error by half that round trip.
+/// - Per frame: arrival age (capture → received here, including capture → hub), decode time and presentation age
+///   (capture → on screen). Ages are kept for the last `window` seconds.
+public struct ResourceStreamTelemetry: Sendable, Equatable {
+  public private(set) var roundTrip: Double?
+  public private(set) var offset: Double?
+  private var bestRoundTrip = Double.infinity
+  private var samples: [Sample] = []
+  public private(set) var delivery: ResourceDeliveryStats?
+  public var window: Double = 2
+
+  struct Sample: Sendable, Equatable {
+    let at: Double
+    let bytes: Int
+    let arrival: Double?
+    let decode: Double
+    let presentation: Double?
+  }
+
+  public init() {}
+
+  /// `sent` and `received` on this device's clock (epoch ms); `hub` on the hub's.
+  public mutating func pong(sent: Double, hub: Double, received: Double) {
+    let trip = max(0, received - sent)
+    roundTrip = trip
+    // The offset from a fast round trip is the most precise; refresh it when a comparably fast one arrives.
+    guard trip <= bestRoundTrip * 1.5 + 5 else { return }
+    bestRoundTrip = min(bestRoundTrip, trip)
+    offset = hub - (sent + received) / 2
+  }
+
+  /// One frame: `captured` on the hub clock, `received`/`presented` on this device's (epoch ms).
+  public mutating func frame(bytes: Int, captured: Double, received: Double, presented: Double) {
+    let offset = offset
+    let age = { (local: Double) in offset.map { max(0, local + $0 - captured) } }
+    samples.append(
+      Sample(at: presented, bytes: bytes, arrival: age(received), decode: presented - received, presentation: age(presented)))
+    samples.removeAll { $0.at < presented - window * 1000 }
+  }
+
+  public mutating func report(_ stats: ResourceDeliveryStats) { delivery = stats }
+
+  /// Median capture → on-screen age over the window, once the clock offset is known.
+  public var presentationAge: Double? { Self.median(samples.compactMap(\.presentation)) }
+  public var arrivalAge: Double? { Self.median(samples.compactMap(\.arrival)) }
+  public var decodeTime: Double? { Self.median(samples.map(\.decode)) }
+  public var framesPerSecond: Double { Double(samples.count) / window }
+  public var kilobytesPerSecond: Double { Double(samples.reduce(0) { $0 + $1.bytes }) / 1024 / window }
+  /// Whether a frame was presented within the window before `now` (a still screen sends none, which is fine).
+  public func flowing(now: Double) -> Bool { samples.last.map { now - $0.at < window * 1000 } ?? false }
+
+  static func median(_ values: [Double]) -> Double? {
+    guard !values.isEmpty else { return nil }
+    return values.sorted()[values.count / 2]
   }
 }
 
