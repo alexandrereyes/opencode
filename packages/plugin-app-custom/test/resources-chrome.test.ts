@@ -140,7 +140,8 @@ describe.skipIf(!live)("a real headless Chrome", () => {
     await Bun.write(
       script,
       `const chrome = Bun.spawn(${JSON.stringify([chromePath, "--headless", "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${path.join(dir, "profile")}`, "--window-size=400,600"])}.concat([process.argv[3]]), { stdout: "ignore", stderr: "ignore" })
-       process.on("SIGTERM", () => { chrome.kill(); process.exit(0) })
+       // Chrome keeps writing its profile while it shuts down; exit only after it has, so the test can remove it.
+       process.on("SIGTERM", () => { chrome.kill(); void chrome.exited.then(() => process.exit(0)) })
        await chrome.exited`,
     )
     daemon = Bun.spawn([process.execPath, script, session, `http://127.0.0.1:${server.port}/`], {
