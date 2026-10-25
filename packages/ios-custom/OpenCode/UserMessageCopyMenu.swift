@@ -90,3 +90,28 @@ struct UserMessageCopyMenu: UIViewRepresentable {
     }
   }
 }
+
+/// Copies the same text as the long-press "Copiar". Only this button re-renders while it shows ✓.
+struct UserMessageCopyButton: View {
+  let message: ConversationMessage
+  @State private var copied = false
+  var body: some View {
+    Button {
+      UIPasteboard.general.string = message.copyText
+      Haptics.play(.light)
+      copied = true
+    } label: {
+      Image(systemName: copied ? "checkmark" : "doc.on.doc").appFont(.bubbleMeta)
+        .frame(width: 28, height: 24)
+        // A 48 × 44 pt target that adds no layout size.
+        .contentShape(Rectangle().inset(by: -10))
+    }.buttonStyle(.plain)
+      .accessibilityLabel("Copiar mensagem").accessibilityValue(copied ? "Copiada" : "")
+      .accessibilityIdentifier("user-copy-" + message.id)
+      .task(id: copied) {
+        guard copied else { return }
+        do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+        copied = false
+      }
+  }
+}

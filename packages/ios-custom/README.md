@@ -163,7 +163,11 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   "digitando…" (`neon-mountain · trabalhando…`, `aguardando você`); on the right, a glass capsule with the running
   agents counter (animated 5×5 pixel grid and the number of active subagents and background tasks; tapping lists them
   and opens a child session; hidden when nothing runs) and a separate `…` button.
-- **Messages:** the user's messages are bubbles on the right, with undo/time in a right-aligned meta row below the bubble. The agent's text uses the full
+- **Messages:** the user's messages are bubbles on the right, with undo/copy/time in a right-aligned meta row below the bubble.
+  **Alexandre, 25/10:** copy (`doc.on.doc`, 48 × 44 pt target without layout size) copies the same text as the
+  long-press **Copiar** (`displayText`, mentions as their labels, quotes and attachment names excluded), even while the
+  bubble is folded; it shows ✓ for 1.5 s with a light haptic and no toast. Every user bubble has it: pinned, pending
+  (after its queue/delete actions) and child-session bubbles. The agent's text uses the full
   width, without a bubble, and is rendered as selectable Markdown with GFM tables/tasks, highlighted code,
   formulas, diagrams and disclosures (see [Markdown rendering](#markdown-rendering)).
 - **Activity groups:** follow the custom web's default **compact** preset. Consecutive tools, edits, subagents,
@@ -1246,7 +1250,7 @@ without the earlier blanket ~9% increase. At the default Dynamic Type size the s
 | `footnote` | 12 | Small counts |
 | `micro` | 11 | Avatar badges |
 | `navigation` | 17, capped | Native/custom bar titles; conversation title is regular |
-| `chrome` / `bubbleMeta` | 12, capped | Composer model/agent and undo/time below user bubbles |
+| `chrome` / `bubbleMeta` | 12, capped | Composer model/agent and undo/copy/time below user bubbles |
 | `mcp` | 11, capped | MCP pill (20 pt high, 6 pt horizontal padding, 5 pt dot) |
 | `metrics` | 9, capped | Composer usage line (8 pt ring) |
 

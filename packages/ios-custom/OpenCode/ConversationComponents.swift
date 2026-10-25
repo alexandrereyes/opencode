@@ -146,6 +146,7 @@ struct UserBubble: View {
               .accessibilityLabel("Redefinir para este ponto")
               .accessibilityIdentifier("user-revert-" + message.id)
           }
+          UserMessageCopyButton(message: message).id(message.id)
           if undelivered {
             Text("Pendente ·").appFont(.bubbleMeta).accessibilityIdentifier("user-pending-" + message.id)
           }

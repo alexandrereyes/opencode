@@ -24,7 +24,9 @@ parser.add_argument("--additional-fixtures", type=Path)
 parser.add_argument("tests", nargs="*")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+assert server.startswith("http://127.0.0.1:") and server.rsplit(":", 1)[1] not in ["4096", "4178"]
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
 products = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-bolha-derived")) / "Build/Products"
 evidence = args.evidence or temporary / "ios-bolha-prints"
 evidence.mkdir(parents=True, exist_ok=True)
@@ -34,7 +36,7 @@ password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -108,7 +110,7 @@ if args.prepare:
                     "time": {"created": now - 900, "completed": now - 800}, "finish": "stop",
                     "content": [{"type": "text", "text": answer}]},
             ]})
-        sessions.append({"role": role, "id": session, "userMessageID": user, "directory": str(directory)})
+        sessions.append({"role": role, "id": session, "userMessageID": user, "directory": str(directory), "text": metadata.get("displayText", text)})
         manifest_path.write_text(json.dumps(sessions, indent=2) + "\n")
     print(json.dumps(sessions))
     raise SystemExit()
@@ -134,9 +136,11 @@ for target in targets:
     for session in fixtures:
         environment["OPENCODE_TEST_" + session["role"]] = session["id"]
         environment["OPENCODE_TEST_" + session["role"] + "_MESSAGE"] = session["userMessageID"]
+        if "text" in session: environment["OPENCODE_TEST_" + session["role"] + "_TEXT"] = session["text"]
     for key, role in [("A", "working"), ("B", "permission"), ("C", "history"), ("CHILD", "child-1")]:
         environment["OPENCODE_TEST_" + key] = next(s["id"] for s in seed["sessions"] if s["role"] == role)
-    arguments = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+    environment["OPENCODE_TEST_SERVER_URL"] = server
+    arguments = ["-OpenCodeServerURL", server]
     target["CommandLineArguments"] = arguments
     target["UITargetAppCommandLineArguments"] = arguments
     target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password

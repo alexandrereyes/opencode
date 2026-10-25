@@ -212,6 +212,50 @@ import UIKit
     app.terminate()
   }
 
+  func testCopyButtonCopiesFullCollapsedPromptWithoutToastInBothThemes() throws {
+    let id = try XCTUnwrap(environment["OPENCODE_TEST_BUBBLE_MESSAGE"])
+    let expected = try XCTUnwrap(environment["OPENCODE_TEST_BUBBLE_TEXT"])
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let app = try launch(theme: theme)
+      let copy = app.buttons["user-copy-" + id].firstMatch
+      let revert = app.buttons["user-revert-" + id].firstMatch
+      let time = app.staticTexts["user-time-" + id].firstMatch
+      XCTAssertTrue(copy.waitForExistence(timeout: 10))
+      XCTAssertEqual(copy.label, "Copiar mensagem")
+      XCTAssertEqual(try toggle(app).value as? String, "Recolhido")
+      // The button frame is its 48 × 44 pt hit target; the glyphs keep the ↶ spacing.
+      XCTAssertLessThan(revert.frame.midX, copy.frame.midX)
+      XCTAssertLessThan(copy.frame.midX, time.frame.minX)
+      XCTAssertEqual(copy.frame.midX - revert.frame.midX, 36, accuracy: 1)
+      XCTAssertGreaterThanOrEqual(copy.frame.height, 43.5)
+      XCTAssertGreaterThanOrEqual(copy.frame.width, 43.5)
+      XCTAssertEqual(copy.frame.midY, revert.frame.midY, accuracy: 1)
+      shot(app, "app-copy-button-" + theme)
+      // Below the 24 pt glyph frame, inside the 44 pt target.
+      copy.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 18)).tap()
+      wait(NSPredicate(format: "value == 'Copiada'"), on: copy)
+      shot(app, "app-copy-checked-" + theme)
+      XCTAssertFalse(app.descendants(matching: .any)["action-toast"].exists)
+      XCTAssertEqual(try toggle(app).value as? String, "Recolhido")
+      wait(NSPredicate(format: "value != 'Copiada'"), on: copy)
+      // Paste inside the app: reading the pasteboard from the runner could raise a paste prompt.
+      let composer = app.textViews["conversation-composer"]
+      composer.tap()
+      composer.press(forDuration: 1.2)
+      let paste = app.descendants(matching: .any).matching(NSPredicate(format: "label IN {'Colar', 'Paste'}")).firstMatch
+      XCTAssertTrue(paste.waitForExistence(timeout: 5))
+      paste.tap()
+      wait(NSPredicate(format: "value == %@", expected), on: composer)
+      composer.press(forDuration: 1.2)
+      let all = app.descendants(matching: .any).matching(NSPredicate(format: "label IN {'Selecionar Tudo', 'Select All'}")).firstMatch
+      XCTAssertTrue(all.waitForExistence(timeout: 5))
+      all.tap()
+      composer.typeText(XCUIKeyboardKey.delete.rawValue)
+      wait(NSPredicate(format: "value != %@", expected), on: composer)
+      app.terminate()
+    }
+  }
+
   func testCollapsePreferenceInVoceDefaultsOnAndPersists() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
       var app = try launch(theme: theme, preference: nil)
