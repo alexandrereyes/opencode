@@ -200,8 +200,11 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   with attachments or context expandable, even when its text is short.
   **Alexandre, 24/10 (citações):** as on the web, any quote or file comment makes the bubble fold by default, even
   with short text, and the folded bubble hides those cards, their **Ir ao trecho citado** links and its image
-  thumbnails until **Mostrar mensagem completa**. A quote-only bubble (no prompt text) keeps one caption/comment line
-  per quote while folded, so it is never empty. **Ir à mensagem com o comentário** expands the carrying bubble.
+  thumbnails until **Mostrar mensagem completa**. **Alexandre, 25/10:** a quote-only bubble (no prompt text) folds into
+  one prompt-like text instead of a card per quote: a small inline quote icon, then each quote's comment (its passage
+  when the comment is empty) and each file comment, whitespace collapsed and joined with ` · `, in the secondary color
+  and with the prompt's two-line clamp and ellipsis; no **Ir ao trecho citado** links. **Ir à mensagem com o
+  comentário** expands the carrying bubble.
   Expanding reveals the quote's separate four-line/full disclosure.
   Collapsing off shows the content immediately. VoiceOver retains full filenames and announces attached context.
   The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
@@ -1757,11 +1760,11 @@ Markdown block, and creating, styling and sizing those views still produces 100�
 
 User-prompt parity has its own **OpenCode Bolha** simulator (`49BFE0E0-8D48-406C-A5D1-491DE91CA392`) and
 `ios-bolha-derived`. After `build-for-testing` for that destination, run `script/test-user-bubble.py` with Python:
-`--prepare` imports seven owned synthetic histories (two with an image, three with quotes), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
+`--prepare` imports eight owned synthetic histories (two with an image, four with quotes), `--label <run>` exercises `UserBubbleTests`, and `--cleanup`
 removes only those imports. No model call or seed reset is needed. The runner always supplies explicit sandbox-4177
 arguments/password and removes its private xctestrun file. Both themes cover manual expansion invariant under scrolling,
 the persisted Você option, short-message threshold, copy/quote menu, user-message search, image thumbnails hidden
-while folded and quotes folded until expanded (long, short and quote-only). `UserPromptTests` checks
+while folded and quotes folded until expanded (long, short, quote-only and six quotes without text). `UserPromptTests` checks
 native line measurement, width changes and search reveal after viewport shrink. Research/source references are in
 `.agent-artifacts/bolha-usuario/OPENCHAMBER.md`; results and evidence paths are in `RESULTADO.md` beside it.
 

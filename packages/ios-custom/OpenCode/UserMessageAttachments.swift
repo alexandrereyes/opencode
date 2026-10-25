@@ -108,40 +108,28 @@ struct UserMessageContextCard: View {
   let summary: String
   let text: String
   let comment: String
-  let collapsed: Bool
   let id: String
-  let expand: () -> Void
   @State private var quoteExpanded = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      if collapsed {
-        Button(action: expand) {
-          Label(comment.isEmpty ? summary : "\(summary): \(comment)", systemImage: "quote.bubble")
-            .appFont(.caption).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.plain).accessibilityValue("Recolhido")
-          .accessibilityLabel("Contexto anexado. \(comment.isEmpty ? summary : "\(summary): \(comment)")")
-          .accessibilityHint("Mostrar mensagem completa.")
-          .accessibilityIdentifier("user-context-summary-\(id)")
-      } else {
-        Button {
-          var transaction = Transaction()
-          transaction.disablesAnimations = true
-          withTransaction(transaction) { quoteExpanded.toggle() }
-        } label: {
-          VStack(alignment: .leading, spacing: 4) {
-            Label(summary, systemImage: "quote.bubble").appFont(.caption).lineLimit(1)
-            if !text.isEmpty {
-              Text(text).appFont(.secondary).lineLimit(quoteExpanded ? nil : 4)
-                .multilineTextAlignment(.leading).accessibilityIdentifier("user-context-text-\(id)")
-            }
-          }.frame(maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.plain).disabled(text.isEmpty)
-          .accessibilityHint(text.isEmpty ? "" : quoteExpanded ? "Recolher citação" : "Mostrar citação completa")
-          .accessibilityIdentifier("user-context-quote-\(id)")
-        if !comment.isEmpty {
-          Text(comment).appFont(.secondary).foregroundStyle(theme.color(.userBubbleText))
-        }
+      Button {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { quoteExpanded.toggle() }
+      } label: {
+        VStack(alignment: .leading, spacing: 4) {
+          Label(summary, systemImage: "quote.bubble").appFont(.caption).lineLimit(1)
+          if !text.isEmpty {
+            Text(text).appFont(.secondary).lineLimit(quoteExpanded ? nil : 4)
+              .multilineTextAlignment(.leading).accessibilityIdentifier("user-context-text-\(id)")
+          }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+      }.buttonStyle(.plain).disabled(text.isEmpty)
+        .accessibilityHint(text.isEmpty ? "" : quoteExpanded ? "Recolher citação" : "Mostrar citação completa")
+        .accessibilityIdentifier("user-context-quote-\(id)")
+      if !comment.isEmpty {
+        Text(comment).appFont(.secondary).foregroundStyle(theme.color(.userBubbleText))
       }
     }.foregroundStyle(theme.color(.userBubbleSecondary)).frame(maxWidth: .infinity, alignment: .leading)
       .padding(.leading, 12).overlay(alignment: .leading) {

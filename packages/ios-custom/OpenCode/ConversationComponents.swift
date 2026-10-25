@@ -83,13 +83,19 @@ struct UserBubble: View {
           }
           UserMessageContent(maximumHeight: maximumTextHeight) {
             // Folded bubbles hide quotes and file comments behind their expansion control. Without prompt
-            // text, their one-line summaries remain so the bubble is never empty.
-            if !folded || message.displayText.isEmpty {
+            // text, one clamped line of their comments stands in for the prompt so the bubble is never empty.
+            if folded && message.displayText.isEmpty {
+              UserPrompt(
+                text: contextSummary, theme: theme, collapsed: true, maximumHeight: maximumTextHeight,
+                revealRange: nil, truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
+              ).accessibilityIdentifier("user-context-summary-\(message.id)")
+            }
+            if !folded {
               ForEach(Array(quotes.enumerated()), id: \.offset) { index, quote in
                 UserMessageContextCard(
                   summary: "Citação de uma resposta", text: quote.object?["text"]?.string ?? "",
-                  comment: quote.object?["comment"]?.string ?? "", collapsed: folded,
-                  id: "\(message.id)-quote-\(index)", expand: { setExpanded(true) })
+                  comment: quote.object?["comment"]?.string ?? "",
+                  id: "\(message.id)-quote-\(index)")
                 if let mark = quoteContext.index.carried(by: message.id).first(where: { $0.number == index + 1 }) {
                   Button("Ir ao trecho citado", systemImage: "text.quote") {
                     quoteContext.source?(mark.quote)
@@ -100,8 +106,8 @@ struct UserBubble: View {
               ForEach(Array(comments.enumerated()), id: \.offset) { index, comment in
                 UserMessageContextCard(
                   summary: comment.object?["path"]?.string ?? "Comentário em arquivo", text: "",
-                  comment: comment.object?["comment"]?.string ?? "", collapsed: folded,
-                  id: "\(message.id)-comment-\(index)", expand: { setExpanded(true) })
+                  comment: comment.object?["comment"]?.string ?? "",
+                  id: "\(message.id)-comment-\(index)")
               }
             }
             if !message.displayText.isEmpty {
@@ -172,6 +178,21 @@ struct UserBubble: View {
   private var hasContext: Bool { !quotes.isEmpty || !comments.isEmpty }
   /// Long prompts and any attached quote/comment start folded, as in the custom web.
   private var folded: Bool { collapsible && !expanded && (truncated || hasContext) }
+  /// Each quote's own comment (else its passage) and each file comment, joined into one line of prompt text.
+  private var contextSummary: AttributedString {
+    let parts = quotes.map { quote in
+      let comment = quote.object?["comment"]?.string ?? ""
+      return comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? quote.object?["text"]?.string ?? "" : comment
+    } + comments.map { $0.object?["comment"]?.string ?? $0.object?["path"]?.string ?? "" }
+    let line = parts.map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+      .filter { !$0.isEmpty }.joined(separator: " · ")
+    let color = theme.uiColor(.userBubbleSecondary)
+    let icon = UIImage(systemName: "quote.bubble", withConfiguration: UIImage.SymbolConfiguration(textStyle: .body, scale: .small))
+    let value = NSMutableAttributedString(attributedString: NSAttributedString(
+      attachment: NSTextAttachment(image: (icon ?? UIImage()).withTintColor(color, renderingMode: .alwaysOriginal))))
+    value.append(NSAttributedString(string: " " + line, attributes: [.foregroundColor: color]))
+    return (try? AttributedString(value, including: \.uiKit)) ?? AttributedString(line)
+  }
   private func setExpanded(_ value: Bool) {
     var transaction = Transaction()
     transaction.disablesAnimations = true

@@ -125,6 +125,7 @@ import UIKit
 
   func testQuotesStayFoldedUntilExpandedInBothThemes() throws {
     let anyContext = NSPredicate(format: "identifier BEGINSWITH 'user-context-'")
+    let twoLines = UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5) * 2
     for theme in ["openchamber-dark", "openchamber-light"] {
       for role in ["QUOTES_LONG", "QUOTE_SHORT"] {
         let id = try XCTUnwrap(environment["OPENCODE_TEST_" + role + "_MESSAGE"])
@@ -134,7 +135,9 @@ import UIKit
         XCTAssertEqual(control.value as? String, "Recolhido")
         XCTAssertEqual(control.label, "Mostrar mensagem completa")
         XCTAssertFalse(app.descendants(matching: .any).matching(anyContext).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-source-'")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts["Comentário 1 preservado."].exists)
+        XCTAssertLessThanOrEqual(app.scrollViews["user-prompt-" + id].frame.height, ceil(twoLines) + 1)
         shot(app, "app-quotes-collapsed-" + role.lowercased() + "-" + theme)
         control.tap()
         wait(NSPredicate(format: "value == 'Expandido'"), on: control)
@@ -154,15 +157,31 @@ import UIKit
         shot(app, "app-quotes-disabled-" + role.lowercased() + "-" + theme)
         app.terminate()
       }
-      let id = try XCTUnwrap(environment["OPENCODE_TEST_QUOTE_ONLY_MESSAGE"])
-      let app = try launch("QUOTE_ONLY", theme: theme)
-      let control = app.buttons["user-prompt-toggle-" + id]
-      XCTAssertTrue(control.waitForExistence(timeout: 10))
-      XCTAssertTrue(app.buttons["user-context-summary-\(id)-quote-0"].exists)
-      shot(app, "app-quote-only-collapsed-" + theme)
-      control.tap()
-      XCTAssertTrue(app.buttons["user-context-quote-\(id)-quote-0"].waitForExistence(timeout: 5))
-      app.terminate()
+      for (role, count) in [("QUOTE_ONLY", 1), ("QUOTES_SIX", 6)] {
+        let id = try XCTUnwrap(environment["OPENCODE_TEST_" + role + "_MESSAGE"])
+        let app = try launch(role, theme: theme)
+        let control = app.buttons["user-prompt-toggle-" + id]
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        // Quote-only bubbles fold into one prompt-like line: the same two-line clamp, no cards or source links.
+        let summary = app.scrollViews["user-context-summary-" + id]
+        XCTAssertTrue(summary.exists)
+        XCTAssertLessThanOrEqual(summary.frame.height, ceil(twoLines) + 1)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'user-context-quote-'")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-source-'")).firstMatch.exists)
+        let label = summary.staticTexts.firstMatch.label
+        XCTAssertTrue(label.hasPrefix("Comentário 1 preservado.") || label.hasPrefix("Fase 1 · Trecho citado 2."), label)
+        if role == "QUOTES_SIX" { XCTAssertTrue(label.hasSuffix("Não entendi este ponto da resposta."), label) }
+        shot(app, "app-quote-only-collapsed-" + role.lowercased() + "-" + theme)
+        control.tap()
+        wait(NSPredicate(format: "value == 'Expandido'"), on: control)
+        XCTAssertFalse(summary.exists)
+        for index in 0..<count {
+          XCTAssertTrue(app.buttons["user-context-quote-\(id)-quote-\(index)"].waitForExistence(timeout: 5))
+        }
+        XCTAssertTrue(app.buttons["quote-source-\(id)-0"].exists)
+        shot(app, "app-quote-only-expanded-" + role.lowercased() + "-" + theme)
+        app.terminate()
+      }
     }
   }
 

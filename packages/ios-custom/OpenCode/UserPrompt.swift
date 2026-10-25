@@ -25,7 +25,8 @@ struct UserPrompt: UIViewRepresentable {
       view.measurements.removeAll(keepingCapacity: true)
     }
     view.label.textColor = theme.uiColor(.userBubbleText)
-    view.label.accessibilityLabel = String(text.characters)
+    // Inline icons are decorative; VoiceOver reads only the text around them.
+    view.label.accessibilityLabel = String(text.characters).replacingOccurrences(of: "\u{FFFC}", with: "").trimmingCharacters(in: .whitespaces)
     view.collapsed = collapsed
     view.truncationChanged = truncationChanged
     view.expand = expand
