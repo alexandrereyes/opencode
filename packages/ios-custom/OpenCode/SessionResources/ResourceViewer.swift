@@ -57,7 +57,8 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
         if model.controlsVisible { controls.transition(.opacity) }
         if model.inControl, !model.controlsVisible { controlPill.padding(.top, 6).frame(maxHeight: .infinity, alignment: .top) }
         if model.inControl, !model.controlsVisible { edgeHandle(height: geometry.size.height) }
-        ResourceKeyboard(model: model, active: $model.keyboardVisible).frame(width: 1, height: 1).opacity(0.02)
+        ResourceKeyboard(model: model, active: $model.keyboardVisible, style: model.keyboardStyle)
+          .frame(width: 1, height: 1).opacity(0.02)
       }
       .animation(.easeOut(duration: 0.2), value: model.controlsVisible)
       .animation(.easeOut(duration: 0.2), value: model.inControl)
@@ -113,7 +114,7 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
       }
       .padding(.horizontal, 12).padding(.top, 6)
       Spacer()
-      // Kinds without side tools (Android keeps its buttons in the navigation pill) pass `EmptyView`.
+      // Kinds without side tools (Android's navigation pill, Chrome's address bar) pass `EmptyView`.
       if Tools.self != EmptyView.self {
         HStack {
           Spacer()

@@ -144,8 +144,7 @@ struct ResourceTouchOverlay: UIViewRepresentable {
 struct ResourceKeyboard: UIViewRepresentable {
   let model: ResourceViewerModel
   @Binding var active: Bool
-  var contentType: UITextContentType? = nil
-  var secure = false
+  var style = ResourceKeyboardStyle()
 
   func makeUIView(context: Context) -> Field {
     let field = Field()
@@ -161,8 +160,13 @@ struct ResourceKeyboard: UIViewRepresentable {
   }
   func updateUIView(_ field: Field, context: Context) {
     field.model = model
-    field.textContentType = contentType
-    field.isSecureTextEntry = secure
+    let changed = field.textContentType != style.contentType || field.isSecureTextEntry != style.secure
+      || field.keyboardType != style.keyboard
+    field.textContentType = style.contentType
+    field.isSecureTextEntry = style.secure
+    field.keyboardType = style.keyboard
+    field.returnKeyType = style.returnKey
+    if changed, field.isFirstResponder { field.reloadInputViews() }
     field.onEnd = { active = false }
     if active, !field.isFirstResponder { field.becomeFirstResponder() }
     if !active, field.isFirstResponder { field.resignFirstResponder() }
@@ -193,4 +197,12 @@ struct ResourceKeyboard: UIViewRepresentable {
     }
     func textFieldDidEndEditing(_ textField: UITextField) { onEnd() }
   }
+}
+
+/// Traits of the hidden keyboard field. Kinds set `ResourceViewerModel.keyboardStyle`.
+struct ResourceKeyboardStyle: Equatable {
+  var contentType: UITextContentType?
+  var keyboard: UIKeyboardType = .default
+  var secure = false
+  var returnKey: UIReturnKeyType = .default
 }

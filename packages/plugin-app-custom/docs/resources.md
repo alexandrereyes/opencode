@@ -250,4 +250,5 @@ them off whatever they cover. Kinds without side tools pass `EmptyView` as `tool
 indicator); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
 `.password` for password autofill: kinds set `model.keyboardStyle`, a `ResourceKeyboardStyle` of content type,
 keyboard type, secure entry and Return key). Frames decode one at a time and the newest waiting frame always follows,
-so the last frame of a burst is never lost. Kinds without side tools pass `EmptyView` and get no tool column. Kinds that stream H.264 set `model.rawFrames` and pass their own `surface`.
+so the last frame of a burst is never lost. Kinds that stream H.264 set `model.rawFrames` and pass their own
+`surface`.

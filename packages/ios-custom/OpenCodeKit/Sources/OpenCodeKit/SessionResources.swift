@@ -185,8 +185,12 @@ public enum ResourceInput: Encodable, Hashable, Sendable {
   case text(String)
   case button(String)
   case navigate(String, url: String? = nil)
+  /// Chrome: follow another tab (a `tabs` entry of the viewer's `meta`).
+  case selectTab(String)
 
-  private enum Keys: String, CodingKey { case type, phase, x, y, pointer, dx, dy, key, modifiers, text, button, action, url }
+  private enum Keys: String, CodingKey {
+    case type, phase, x, y, pointer, dx, dy, key, modifiers, text, button, action, url, target
+  }
   public func encode(to encoder: any Encoder) throws {
     var container = encoder.container(keyedBy: Keys.self)
     switch self {
@@ -216,6 +220,10 @@ public enum ResourceInput: Encodable, Hashable, Sendable {
       try container.encode("navigate", forKey: .type)
       try container.encode(action, forKey: .action)
       try container.encodeIfPresent(url, forKey: .url)
+    case .selectTab(let target):
+      try container.encode("navigate", forKey: .type)
+      try container.encode("tab", forKey: .action)
+      try container.encode(target, forKey: .target)
     }
   }
   private static func unit(_ value: Double) -> Double { max(0, min(1, value)) }

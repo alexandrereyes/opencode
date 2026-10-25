@@ -1273,6 +1273,21 @@ draggable along the edge, brings the controls back, while the **Você no control
 and **Devolver controle**. Floating controls that stay visible in control (Android's navigation pill) are draggable
 anywhere with `.resourceDraggable(key)`, remembered per key.
 
+**Chrome (layout 4B, `Chrome/ChromeResourceView.swift`).** Instead of side tools, a Safari-style address bar at the
+bottom: Chrome glyph, the address (lock for HTTPS and loopback origins; tap to edit in control, the whole address
+selected, Return navigates), reload; below it back, forward, **Assumir controle**/**Devolver** and **…** (show the
+keyboard, the browser's tabs to follow another one, copy the address). The bar stays visible in control and rises
+with the keyboard, then keeps only the address row with **Devolver**. When the page focuses an editable field the
+keyboard opens by itself with the field's traits (`ChromeKeyboard` in OpenCodeKit): a password field gets secure
+entry and `.password`, so iOS offers **Passwords** AutoFill; e-mail/username, URL, numbers, search and one-time codes
+get their keyboards and content types. Typing goes straight to the page (`insertText`) and is never logged. The tab
+state comes from the hub's `meta` (`ChromeViewerState`). After `build-for-testing`, run
+`bun packages/ios-custom/script/test-chrome-resource.ts --device <sim> --derived … --evidence … --server-url … --home <sandbox> [--theme openchamber-light]`:
+it starts the login fixture, opens a headless Pixel-sized Chrome through the sandbox's own shell (so the plugin's
+hook gives it a CDP port, as for an agent), registers it in the sandbox hub and runs
+`OpenCodeUITests/ChromeResourceTests` (watch, take control, type e-mail and password, submit, scroll, address bar,
+back, give back), then closes the browser and removes the registration.
+
 Verify after `build-for-testing` with your own booted target simulator:
 `python3 packages/ios-custom/script/test-resources.py --device <app-sim> --target <target-sim> --derived … --home <sandbox> --server-url … --evidence … [--theme openchamber-light] [--lock]`.
 It registers the target in the sandbox hub, measures the stream, runs `OpenCodeUITests/ResourceViewerTests`, and with

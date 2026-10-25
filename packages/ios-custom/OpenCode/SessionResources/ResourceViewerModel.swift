@@ -28,6 +28,8 @@ import UIKit
   private(set) var busy = false
   var controlsVisible = true
   var keyboardVisible = false
+  /// Traits of the hidden keyboard field, set by the kind (Chrome follows the page's focused field).
+  var keyboardStyle = ResourceKeyboardStyle()
   /// Frames the shell cannot draw itself (for example H.264); the kind view decodes them.
   @ObservationIgnored var rawFrames: ((ResourceFrame) -> Void)?
 
@@ -36,6 +38,7 @@ import UIKit
   @ObservationIgnored private var connection: Task<Void, Never>?
   @ObservationIgnored private var pinger: Task<Void, Never>?
   @ObservationIgnored private var decoding = false
+  @ObservationIgnored private var pendingFrame: Data?
   @ObservationIgnored private let session = URLSession(configuration: .ephemeral)
 
   init(resource: SessionResource, client: OpenCodeClient) {
@@ -190,15 +193,27 @@ import UIKit
       rawFrames?(frame)
       return
     }
-    // Drop frames while one is still decoding: the newest frame wins.
-    guard !decoding else { return }
+    decode(frame.payload)
+  }
+
+  /// One decode at a time; frames arriving meanwhile replace each other, so the newest one is always drawn last
+  /// (a burst's final frame or a sharp still after scrolling is never dropped).
+  private func decode(_ payload: Data) {
+    guard !decoding else {
+      pendingFrame = payload
+      return
+    }
     decoding = true
-    let payload = frame.payload
     Task.detached(priority: .userInitiated) {
       let image = UIImage(data: payload)?.preparingForDisplay()
       await MainActor.run { [weak self] in
-        self?.decoding = false
-        if let image { self?.image = image }
+        guard let self else { return }
+        self.decoding = false
+        if let image { self.image = image }
+        if let next = self.pendingFrame {
+          self.pendingFrame = nil
+          self.decode(next)
+        }
       }
     }
   }
