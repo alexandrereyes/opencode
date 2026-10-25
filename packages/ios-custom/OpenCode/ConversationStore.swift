@@ -227,10 +227,9 @@ import OpenCodeKit
     !acting.contains(item.id) && inbox.contains { $0.id == item.id }
   }
   /// Undelivered steers render below the transcript, like the web timeline's pending inputs.
-  var pendingSteers: [InboxItem] {
-    let boundary = reversion.boundary(session)
-    return PendingInputs.steers(pendingInbox, messages: messages).filter { item in boundary.map { item.id < $0 } ?? true }
-  }
+  /// They are never hidden history: a reset cancels earlier pending input, and a new prompt commits
+  /// the staged boundary before admission, so its bubble shows from the tap.
+  var pendingSteers: [InboxItem] { PendingInputs.steers(pendingInbox, messages: messages) }
   /// Like the web, child sessions show their pending steers without pending actions or styling.
   func pendingStatus(_ item: InboxItem) -> PendingInputStatus? {
     guard !isChild else { return nil }
@@ -837,7 +836,7 @@ import OpenCodeKit
       // Reopening a staged Session must load its boundary, not offer full redo from a hidden tail page.
       while let boundary = infoValue.revert?.messageID, let current = cursor,
         !nextMessages.contains(where: { $0.id == boundary })
-          || !nextMessages.contains(where: { $0.type == "user" && $0.id < boundary }) {
+          || !SessionRevert.visible(nextMessages, boundary: boundary).contains(where: { $0.type == "user" }) {
         let older = try await client.conversation(id, cursor: current)
         nextMessages = ConversationProjection.merge(nextMessages, page: older.data.reversed(), older: true)
         cursor = older.data.isEmpty || older.cursor?.next == current ? nil : older.cursor?.next

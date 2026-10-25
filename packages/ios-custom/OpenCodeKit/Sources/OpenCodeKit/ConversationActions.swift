@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public enum PromptDelivery: String, Codable, Sendable {
   case steer, queue
@@ -27,7 +28,20 @@ public struct InboxItem: Codable, Sendable, Identifiable {
 }
 
 public struct PromptRequest: Codable, Sendable, Equatable {
-  public static func newID() -> String { "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "") }
+  /// The server and web `SessionMessage.ID.create()` shape: ascending hex time, then base62.
+  /// Clients order and hide history by comparing these IDs.
+  public static func newID(now: Date = .now) -> String {
+    let millis = UInt64(now.timeIntervalSince1970 * 1000)
+    let counter = idClock.withLock { clock in
+      clock = clock.millis == millis ? (millis, clock.counter + 1) : (millis, 1)
+      return clock.counter
+    }
+    let time = String((millis &* 0x1000 &+ counter) & 0xFFFF_FFFF_FFFF, radix: 16)
+    let chars = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+    return "msg_" + String(repeating: "0", count: 12 - time.count) + time
+      + String((0..<14).map { _ in chars[Int.random(in: 0..<62)] })
+  }
+  private static let idClock = Mutex<(millis: UInt64, counter: UInt64)>((0, 0))
   public let id: String
   public let text: String
   public let delivery: PromptDelivery

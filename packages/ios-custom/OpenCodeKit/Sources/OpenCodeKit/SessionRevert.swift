@@ -46,6 +46,16 @@ public enum SessionRevert {
     messages.filter { $0.type == "user" }
   }
 
+  /// Hidden history starts at the boundary in server order, which loaded pages keep. IDs are not
+  /// ordered: earlier iOS builds sent "msg_" + uppercase UUID, which sorts after the server's reply.
+  public static func visible(_ messages: [ConversationMessage], boundary: String?) -> [ConversationMessage] {
+    guard let boundary else { return messages }
+    guard let index = messages.firstIndex(where: { $0.id == boundary }) else {
+      return messages.filter { $0.id < boundary }
+    }
+    return Array(messages[..<index])
+  }
+
   public static func undo(_ messages: [ConversationMessage], boundary: String?) -> ConversationMessage? {
     let users = users(messages)
     let index = boundary.flatMap { id in users.firstIndex { $0.id == id } } ?? users.count

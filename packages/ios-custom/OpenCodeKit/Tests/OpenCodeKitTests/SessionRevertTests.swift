@@ -47,6 +47,32 @@ private func revertInbox(_ id: String, type: String = "user", created: Double = 
   #expect(SessionRevert.redo(messages, boundary: "c") == nil)
 }
 
+@Test func revertHidesFromTheBoundaryInServerOrderEvenWithUnorderedIDs() {
+  // Real IDs from a sandbox prompt sent with the pre-fix iOS ID: the reply sorts before the user message.
+  let user = revertUser("msg_7CF4E1F40B9A45049FA1A5F4CD2B98F6")
+  let reply = ConversationMessage(id: "msg_1754d1db5001SkslIke887xd5M", type: "assistant", time: .init(created: 101))
+  let earlier = revertUser("msg_17544e0a1001AbCdEfGhIjKlMn", created: 50)
+  let messages = [earlier, user, reply]
+  #expect(reply.id < user.id)
+  #expect(SessionRevert.visible(messages, boundary: user.id).map(\.id) == [earlier.id])
+  #expect(SessionRevert.visible(messages, boundary: earlier.id).isEmpty)
+  #expect(SessionRevert.visible(messages, boundary: nil).map(\.id) == messages.map(\.id))
+  // A boundary that is not loaded keeps the previous ID comparison.
+  #expect(SessionRevert.visible([reply], boundary: "msg_1754d1db5002").map(\.id) == [reply.id])
+}
+
+@Test func newMessageIDsFollowTheServerAscendingShape() {
+  let date = Date(timeIntervalSince1970: 1_793_000_000)
+  let first = PromptRequest.newID(now: date)
+  let second = PromptRequest.newID(now: date)
+  let later = PromptRequest.newID(now: date.addingTimeInterval(0.001))
+  #expect(first.count == 30 && first.hasPrefix("msg_"))
+  #expect(first.dropFirst(4).prefix(12).allSatisfy { "0123456789abcdef".contains($0) })
+  #expect(first < second && second < later)
+  // Server replies created later sort after the client's message, as SessionMessage.ID.create() does.
+  #expect(first < "msg_" + String((UInt64(1_793_000_000_001) * 0x1000 + 1) & 0xFFFF_FFFF_FFFF, radix: 16))
+}
+
 @Test func revertPreservesFamilyOrderAndOnlyRootRestoresFiles() async {
   let client = RevertClient()
   let result = await SessionRevert.perform(sessionID: "root", target: revertUser("a"), directory: "/fake",

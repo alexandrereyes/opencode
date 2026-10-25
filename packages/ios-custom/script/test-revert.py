@@ -154,6 +154,26 @@ else:
              "time": {"created": now-900,"completed": now-800}, "finish": "stop", "content": [{"type": "text", "text": "\n\n".join(f"## Etapa {n}\n\nResposta longa para testar o pedido fixado e sua ação de desfazer." for n in range(1,35))}]}])
         run["stickyMessage"] = sticky_message
         save()
+    if not run.get("ordering"):
+        # iOS builds before 26/10 sent "msg_" + uppercase UUID IDs; server IDs are lowercase ascending
+        # hex. An "F" UUID sorts after the reply generated later, as in the reported sessions.
+        def server_id(offset):
+            stamp = (int(time.time() * 1000) + offset) * 0x1000 + 1
+            return "msg_" + format(stamp & 0xFFFFFFFFFFFF, "012x") + uuid.uuid4().hex[:14]
+        now = int(time.time() * 1000)
+        ordering_message = "msg_F" + uuid.uuid4().hex.upper()[1:]
+        model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
+        run["ordering"] = import_history(run, "ordering", [
+            {"id": server_id(-4000), "type": "user", "text": "Pedido anterior preservado.", "time": {"created": now - 4000}},
+            {"id": server_id(-3000), "type": "assistant", "agent": "build", "model": model,
+             "time": {"created": now - 3000, "completed": now - 2900}, "finish": "stop", "content": [{"type": "text", "text": "Resposta anterior preservada."}]},
+            {"id": ordering_message, "type": "user", "text": "Pedido enviado pelo iPhone.", "time": {"created": now - 2000}},
+            {"id": server_id(-1000), "type": "assistant", "agent": "build", "model": model,
+             "time": {"created": now - 1000, "completed": now - 900}, "finish": "stop", "content": [{"type": "text", "text": "RESPOSTA-SEGUINTE oculta ao redefinir."}]}])
+        run["orderingMessage"] = ordering_message
+        save()
+    if api("/api/session/" + run["ordering"])["data"].get("revert"):
+        api("/api/session/" + run["ordering"] + "/revert", method="DELETE")
     if not args.tests or any("testUndoLastEarlierCascadeAndRedo" in test or test == "OpenCodeUITests/SessionRevertUITests" for test in args.tests):
         if api("/api/session/" + run["session"])["data"].get("revert"):
             boundaries = api("/api/rpc/custom.session-family/clear", {"input": {"sessionID": run["session"]}}, "POST")["output"]
@@ -190,6 +210,8 @@ else:
     env["OPENCODE_REVERT_COMMIT_MESSAGE"] = run["commitMessage"]
     env["OPENCODE_REVERT_STICKY"] = run["sticky"]
     env["OPENCODE_REVERT_STICKY_MESSAGE"] = run["stickyMessage"]
+    env["OPENCODE_REVERT_ORDERING"] = run["ordering"]
+    env["OPENCODE_REVERT_ORDERING_MESSAGE"] = run["orderingMessage"]
     if any("SessionReadingTests" in test or "UserBubble" in test for test in args.tests):
         now = int(time.time() * 1000)
         fixtures = {}

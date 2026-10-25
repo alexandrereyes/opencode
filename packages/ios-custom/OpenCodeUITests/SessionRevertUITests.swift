@@ -100,6 +100,31 @@ import XCTest
     shot("cancelled")
   }
 
+  func testUndoHidesReplyAfterUnorderedMessageIDAndRedoRestoresIt() throws {
+    let session = try value("ORDERING")
+    let id = try value("ORDERING_MESSAGE")
+    let reply = { (app: XCUIApplication) in
+      app.textViews.matching(NSPredicate(format: "value CONTAINS 'RESPOSTA-SEGUINTE'")).firstMatch
+    }
+    var app = try launch(session)
+    defer { app.terminate() }
+    XCTAssertTrue(reply(app).waitForExistence(timeout: 15))
+    show(id, app: app).tap()
+    answer("Redefinir", app: app)
+    restored("Pedido enviado pelo iPhone.", app: app)
+    XCTAssertTrue(reply(app).waitForNonExistence(timeout: 10), "The reply after the reset message stays hidden")
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Resposta anterior preservada.'")).firstMatch.exists)
+    shot("ordering-hidden")
+    app.terminate()
+    app = try launch(session)
+    XCTAssertTrue(app.buttons["revert-redo"].waitForExistence(timeout: 30))
+    XCTAssertFalse(reply(app).exists, "Reopening keeps the reply hidden")
+    app.buttons["revert-redo"].tap()
+    XCTAssertTrue(reply(app).waitForExistence(timeout: 30))
+    XCTAssertTrue(app.buttons["user-revert-" + id].waitForExistence(timeout: 30))
+    shot("ordering-redo")
+  }
+
   func testFailureKeepsTimelineAndRestoredDraft() throws {
     let app = try launch(value("FAILURE"), failure: true)
     defer { app.terminate() }
@@ -144,7 +169,11 @@ import XCTest
     action.tap()
     answer("Redefinir", app: app)
     restored("Responda apenas NOVO. Não use ferramentas.", app: app)
+    let bubble = app.collectionViews["conversation-transcript"].descendants(matching: .any)
+      .matching(NSPredicate(format: "label CONTAINS 'Responda apenas NOVO'")).firstMatch
+    XCTAssertFalse(bubble.exists, "The reset message itself is hidden")
     app.buttons["Enviar mensagem"].tap()
+    XCTAssertTrue(bubble.waitForExistence(timeout: 5), "The new prompt's bubble shows while the reset is committed")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"),
       evaluatedWith: app.buttons["revert-redo"])], timeout: 30), .completed)
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'NOVO'")).firstMatch.waitForExistence(timeout: 30))

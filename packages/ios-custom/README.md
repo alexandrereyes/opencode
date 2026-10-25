@@ -638,7 +638,10 @@ to the composer, later ones stay hidden until **Refazer**, and sending a new mes
 bubbles omit it. Undo hides
 the selected message and later history, restores its text/tokens, attachments, quotes and file/comment context into the
 composer, and preserves the selected model/agent. **Refazer** advances one message at a time, then restores all history.
-The progress row covers descendant planning, Session rollback and pending-inbox cleanup. A partial child failure is
+Hidden history starts at the boundary in server order (the loaded list), not by comparing message IDs:
+builds before 26/10 sent `msg_` + uppercase UUID IDs, which sort after the reply, so the reply stayed visible.
+New prompts use the server/web ascending `SessionMessage.ID` shape, and pending bubbles are never hidden by a
+boundary (a reset cancels earlier pending input; a new prompt commits the boundary first). The progress row covers descendant planning, Session rollback and pending-inbox cleanup. A partial child failure is
 reported explicitly. Submissions wait for rollback to settle; new admission commits the parent boundary before model
 selection, just like the web. Draft restoration also survives app relaunch.
 
