@@ -246,31 +246,26 @@ export function registerTools(editor: ToolEditor, device: ReturnType<typeof make
   editor.add({
     name: "iphone_status",
     description:
-      "Show whether Alexandre's iPhone is connected to this server (the OpenCode app open, or a voice call active), when it was last seen, and which data sources are turned on and authorized.",
+      "Check whether Alexandre's (the user's) iPhone is reachable before or instead of reading it: online is true while the OpenCode app is open on the iPhone or a voice call keeps it running. Lists each device's last contact (epoch ms) and every data source with its in-app switch and iOS permission.",
     input: standard(Schema.Struct({})),
     output: standard(StatusOutput),
-    options: { codemode: false, agents: [agentID] },
-    execute: (_, context) =>
-      requireMaster(context).pipe(
-        Effect.andThen(device.status()),
-        Effect.map((output) => ({ output, content: JSON.stringify(output) })),
-      ),
+    options: { codemode: false },
+    execute: () => device.status().pipe(Effect.map((output) => ({ output, content: JSON.stringify(output) }))),
   })
   editor.add({
     name: "iphone_query",
     description: [
-      "Read live data from Alexandre's iPhone. The app collects it on demand and answers within the timeout (default 5 s, max 30 s).",
-      "Sources: device (battery, low power, thermal, storage, model, iOS); network (Wi-Fi/cellular, expensive, constrained); location (current position and reverse-geocoded address; only while the app is in the foreground);",
-      `health (metrics sleep, steps, activeEnergy, restingHeartRate, hrv, workouts, weight; from/to as YYYY-MM-DD, at most ${limits.healthDays} days, default the last 7; granularity day = daily aggregates, sample = individual sleep and workout samples);`,
-      `motion (CoreMotion steps, distance, floors and walking/running/automotive activity per day; from/to, last ${limits.motionDays} days only); photos (recent photos' date, place and type; limit 1–10, default 5; thumbnails default true, attached as images).`,
-      "Status other than ok explains why data is missing: offline (app not running), timeout, locked (iPhone locked), disabled (source off in the app), denied (no iOS permission), unavailable.",
+      "Read live data from Alexandre's (the user's) iPhone when he asks about his phone, health, sleep, workouts, activity, location or recent photos. The OpenCode app on the iPhone collects it on demand within the timeout (default 5 s, max 30 s); nothing is stored on the server.",
+      "Sources: device (battery, low power, thermal, storage, model, iOS); network (Wi-Fi/cellular, expensive, constrained); location (current position and reverse-geocoded address; with the app in the background only the last known position);",
+      `health (metrics sleep, steps, activeEnergy, restingHeartRate, hrv, workouts, weight; from/to as YYYY-MM-DD in the iPhone's time zone, at most ${limits.healthDays} days, default the last 7; granularity day = daily aggregates, sample = also individual sleep samples);`,
+      `motion (CoreMotion steps, distance, floors and walking/running/automotive minutes per day; last ${limits.motionDays} days only); photos (recent photos' date, place and type; limit 1–10, default 5; thumbnails default true, attached as images).`,
+      "When status is not ok, report it instead of guessing values: offline = the app is not running on the iPhone (ask him to open it); timeout = the iPhone did not answer in time; locked = the iPhone is locked and health data cannot be read (a note says when a cached daily summary answered instead); disabled = the source is off in the app (Você → Dados do iPhone); denied = iOS permission missing; unavailable = not available on this device or right now.",
     ].join(" "),
     input: standard(QueryInput),
     output: standard(QueryOutput),
-    options: { codemode: false, agents: [agentID] },
-    execute: (input, context) =>
-      requireMaster(context).pipe(
-        Effect.andThen(device.query(input)),
+    options: { codemode: false },
+    execute: (input) =>
+      device.query(input).pipe(
         Effect.map((result) => ({
           output: result.output,
           content: [
@@ -285,12 +280,6 @@ export function registerTools(editor: ToolEditor, device: ReturnType<typeof make
         })),
       ),
   })
-}
-
-function requireMaster(context: Pick<Tool.Context, "agent">) {
-  return context.agent === agentID
-    ? Effect.void
-    : Effect.fail(new Tool.Error({ message: "Only the Mestra agent may read iPhone data" }))
 }
 
 function invalid(input: QueryInput) {

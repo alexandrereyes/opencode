@@ -4,7 +4,6 @@ import { PositiveInt } from "@opencode/schema/schema"
 import { Tool } from "@opencode/schema/tool"
 import { Effect, Option, Schema } from "effect"
 import path from "node:path"
-import { agentID } from "../master/index.js"
 
 export const toolName = "mac_query"
 // Release layout from packages/cli/script/custom-signing.ts: <release>/plugin/index.js beside the app bundle.
@@ -140,20 +139,19 @@ export function registerTools(editor: ToolEditor, helper: string) {
   editor.add({
     name: toolName,
     description: [
-      "Read Alexandre's Calendar, Reminders or Contacts from his Mac (iCloud-synced, read-only).",
+      "Read Alexandre's (the user's) Calendar, Reminders or Contacts from his Mac (iCloud-synced, read-only) when he asks about his schedule, events, reminders/to-dos or a person's phone, e-mail, birthday or address.",
       "Dates are YYYY-MM-DD (a whole local day; `to` is inclusive) or ISO date-times; results carry the Mac time zone and ISO times with offset.",
       "calendar: events in [from, to], default today plus 7 days, at most 366 days; filter by calendar names or a text query.",
       "reminders: status pending (default; from/to filter the due date), completed (completion date, default last 30 days) or all; filter by list names or text.",
       "contacts: search by name, phone or e-mail; returns phones, e-mails, birthday (--MM-DD when the year is unknown) and addresses.",
       "status: permission state without prompting. Lists are bounded by limit (default 50; contacts 10) and 20,000 characters; check truncated and total.",
+      "Missing access fails with a message saying what to do; relay it instead of guessing: denied (macOS denied access; he enables it in System Settings → Privacy & Security), notDetermined (a macOS permission prompt was not answered; he clicks Allow), restricted (blocked by a device policy).",
     ].join(" "),
     input: standard(Input),
     output: standard(Output),
-    options: { namespace: "mac", codemode: true, agents: [agentID] },
-    execute: (input, context) =>
+    options: { namespace: "mac", codemode: true },
+    execute: (input) =>
       Effect.gen(function* () {
-        if (context.agent !== agentID)
-          return yield* new Tool.Error({ message: "Only the Mestra agent may read Mac personal data" })
         const output = bound(input, yield* query(helper, input))
         return { output, content: JSON.stringify(output) }
       }),

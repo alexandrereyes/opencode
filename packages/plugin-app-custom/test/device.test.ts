@@ -188,26 +188,25 @@ it.effect("invalid ranges fail before contacting the iPhone", () =>
   }),
 )
 
-it.effect("the tools are direct, Mestra-only, and attach images as tool file content", () =>
+it.effect("the tools are direct, open to any agent, and attach images as tool file content", () =>
   Effect.gen(function* () {
     const shared = storage()
     const node = instance(shared, "/chats")
     const tools = new Map<string, Tool.Info>()
     registerTools({ add: (tool: Tool.Info) => void tools.set(tool.name, tool) } as unknown as ToolEditor, node.device)
     expect([...tools.keys()]).toEqual(["iphone_status", "iphone_query"])
-    for (const tool of tools.values()) expect(tool.options).toEqual({ codemode: false, agents: [agentID] })
-    const context = (agent: string): Tool.Context => ({
+    for (const tool of tools.values()) expect(tool.options).toEqual({ codemode: false })
+    const build: Tool.Context = {
       sessionID: Session.ID.make("ses_test"),
-      agent: Agent.ID.make(agent),
+      agent: Agent.ID.make("build"),
       messageID: SessionMessage.ID.make("msg_test"),
       id: Tool.CallID.make("call_test"),
       progress: () => Effect.void,
-    })
-    const query = tools.get("iphone_query")!
-    const denied = yield* query.execute({ source: "device" }, context("build")).pipe(Effect.flip)
-    expect(denied.message).toBe("Only the Mestra agent may read iPhone data")
+    }
     yield* node.device.attach(iphone)
-    const call = yield* query.execute({ source: "device" }, context(agentID)).pipe(Effect.forkChild)
+    const status = yield* tools.get("iphone_status")!.execute({}, build)
+    expect(status.output).toMatchObject({ online: true, devices: [{ deviceID: "iphone-14" }] })
+    const call = yield* tools.get("iphone_query")!.execute({ source: "device" }, build).pipe(Effect.forkChild)
     yield* Effect.yieldNow
     yield* node.device.respond({
       deviceID: "iphone-14",

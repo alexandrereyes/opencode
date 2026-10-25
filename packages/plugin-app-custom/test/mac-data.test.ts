@@ -8,7 +8,6 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import { Tool } from "@opencode/schema/tool"
 import { Effect, Exit, Schema } from "effect"
 import { Input, Output, registerTools, toolName } from "../src/mac-data"
-import { agentID } from "../src/master"
 
 const directory = await mkdtemp(path.join(os.tmpdir(), "mac-data-"))
 const helper = path.join(directory, "helper")
@@ -16,6 +15,14 @@ const helper = path.join(directory, "helper")
 await Bun.write(helper, `#!/bin/sh\nprintf '%s' "$1" > "$0.request"\ncat "$0.reply"\nexit "$(cat "$0.code")"\n`)
 await chmod(helper, 0o755)
 afterAll(() => rm(directory, { recursive: true, force: true }))
+// Any agent may read; a regular primary agent stands in for all of them.
+const build: Tool.Context = {
+  agent: Agent.ID.make("build"),
+  sessionID: Session.ID.make("ses_build"),
+  messageID: SessionMessage.ID.make("msg_build"),
+  id: Tool.CallID.make("call"),
+  progress: () => Effect.void,
+}
 
 function tool(executable = helper) {
   const tools: Tool.Info[] = []
@@ -35,18 +42,10 @@ function tool(executable = helper) {
   return tools[0]
 }
 
-async function run(input: unknown, reply: unknown, options: { code?: number; agent?: Agent.ID; raw?: string } = {}) {
+async function run(input: unknown, reply: unknown, options: { code?: number; raw?: string } = {}) {
   await Bun.write(`${helper}.reply`, options.raw ?? JSON.stringify(reply))
   await Bun.write(`${helper}.code`, String(options.code ?? 0))
-  const exit = await Effect.runPromiseExit(
-    tool().execute(input, {
-      agent: options.agent ?? agentID,
-      sessionID: Session.ID.make("ses_master"),
-      messageID: SessionMessage.ID.make("msg_master"),
-      id: Tool.CallID.make("call"),
-      progress: () => Effect.void,
-    }),
-  )
+  const exit = await Effect.runPromiseExit(tool().execute(input, build))
   return { exit, request: await Bun.file(`${helper}.request`).json() }
 }
 
@@ -85,9 +84,9 @@ function calendar(events: unknown[]) {
   }
 }
 
-test("only Mestra gets the tool, in the mac namespace", () => {
+test("every agent gets the tool, in the mac namespace", () => {
   expect(tool().name).toBe(toolName)
-  expect(tool().options).toEqual({ namespace: "mac", codemode: true, agents: [agentID] })
+  expect(tool().options).toEqual({ namespace: "mac", codemode: true })
 })
 
 test("input rejects malformed dates, limits and contact searches", () => {
@@ -110,23 +109,15 @@ test("input rejects malformed dates, limits and contact searches", () => {
 
 // The simulated helper is a POSIX shell script.
 describe.skipIf(process.platform === "win32")("helper", () => {
-  test("other agents are rejected before the helper runs", async () => {
+  test("a regular agent (build) reaches the helper", async () => {
     await rm(`${helper}.request`, { force: true })
-    await Bun.write(`${helper}.reply`, "{}")
-    const exit = await Effect.runPromiseExit(
-      tool().execute(
-        { source: "status" },
-        {
-          agent: Agent.ID.make("build"),
-          sessionID: Session.ID.make("ses_build"),
-          messageID: SessionMessage.ID.make("msg_build"),
-          id: Tool.CallID.make("call"),
-          progress: () => Effect.void,
-        },
-      ),
-    )
-    expect(failure(exit).message).toContain("Only the Mestra")
-    expect(await Bun.file(`${helper}.request`).exists()).toBe(false)
+    const status = {
+      source: "status" as const,
+      permissions: { calendar: "granted" as const, reminders: "granted" as const, contacts: "granted" as const },
+    }
+    const result = await run({ source: "status" }, status)
+    expect(result.request).toEqual({ source: "status" })
+    expect(success(result.exit).output).toEqual(status)
   })
 
   test("calendar forwards typed parameters and applies the item limit", async () => {
@@ -218,16 +209,7 @@ describe.skipIf(process.platform === "win32")("helper", () => {
       "The Mac data helper failed (exit 3): boom",
     )
     const missing = await Effect.runPromiseExit(
-      tool(path.join(directory, "missing")).execute(
-        { source: "status" },
-        {
-          agent: agentID,
-          sessionID: Session.ID.make("ses_master"),
-          messageID: SessionMessage.ID.make("msg_master"),
-          id: Tool.CallID.make("call"),
-          progress: () => Effect.void,
-        },
-      ),
+      tool(path.join(directory, "missing")).execute({ source: "status" }, build),
     )
     expect(failure(missing).message).toContain("Could not run the OpenCode Mac Data helper")
   })
@@ -238,14 +220,7 @@ test.skipIf(!process.env.OPENCODE_MAC_DATA_HELPER)(
   "real helper reports permissions and reads granted sources",
   async () => {
     const real = tool(process.env.OPENCODE_MAC_DATA_HELPER)
-    const context = {
-      agent: agentID,
-      sessionID: Session.ID.make("ses_master"),
-      messageID: SessionMessage.ID.make("msg_master"),
-      id: Tool.CallID.make("call"),
-      progress: () => Effect.void,
-    }
-    const status = success(await Effect.runPromiseExit(real.execute({ source: "status" }, context))).output
+    const status = success(await Effect.runPromiseExit(real.execute({ source: "status" }, build))).output
     if (status.source !== "status") throw new Error("Expected status")
     for (const [source, input] of [
       ["calendar", { source: "calendar" }],
@@ -253,7 +228,7 @@ test.skipIf(!process.env.OPENCODE_MAC_DATA_HELPER)(
       ["contacts", { source: "contacts", query: "a", limit: 1 }],
     ] as const) {
       if (status.permissions[source] !== "granted") continue
-      expect(success(await Effect.runPromiseExit(real.execute(input, context))).output.source).toBe(source)
+      expect(success(await Effect.runPromiseExit(real.execute(input, build))).output.source).toBe(source)
     }
   },
   { timeout: 30_000 },

@@ -138,7 +138,7 @@ server context points to the server identity's grants.
 
 #### Calendar, Reminders and Contacts
 
-The Mestra agent's `mac_query` tool (`packages/plugin-app-custom/src/mac-data`) reads Calendar,
+The `mac_query` tool (`packages/plugin-app-custom/src/mac-data`), available to every agent, reads Calendar,
 Reminders and Contacts through EventKit and Contacts.framework in a Swift helper,
 `OpenCode Mac Data.app` (`local.opencode.custom.macdata`, source in
 `packages/plugin-app-custom/native/mac-data`). Prepare compiles it with `xcrun swiftc` (Xcode or

@@ -1,13 +1,16 @@
 # iPhone data on demand (`custom.device`)
 
-The Sessão mestra reads live data from Alexandre's iPhone through two direct tools, `iphone_status` and
-`iphone_query`, registered only for the `mestra` agent. The iOS app (`packages/ios-custom`) collects the data on
-demand; nothing is synchronized in the background and nothing is stored on the server besides presence.
+Any agent reads live data from Alexandre's iPhone through two direct tools, `iphone_status` and `iphone_query`.
+The iOS app (`packages/ios-custom`) collects the data on demand; nothing is synchronized in the background and
+nothing is stored on the server besides presence. The tool descriptions carry when to use them and what each status
+means, so no agent prompt needs extra instructions; only the Mestra keeps one line in its prompt (see below). Agents
+whose own rules deny every tool outside an allowlist still do not see them: `explore` (built-in read-only subagent)
+and the hidden `title` and `summary` agents.
 
 ## Flow
 
 ```text
-mestra → iphone_query (plugin, Location L)
+agent → iphone_query (plugin, Location L)
   → event rpc.custom.device.request { request: { requestID, deviceID, query, deadline, directory: L } }
   → app (EventHub, /api/event) runs the collector
   → POST /api/rpc/custom.device/respond?location[directory]=L { deviceID, requestID, answer }

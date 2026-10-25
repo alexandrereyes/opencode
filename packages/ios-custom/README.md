@@ -2016,8 +2016,8 @@ themes; simulator build and root `bun run check` pass. The runner deletes only i
 
 ## Dados do iPhone
 
-The Sessão mestra's `iphone_status` and `iphone_query` tools read this iPhone on demand through `custom.device`
-(contract: [`plugin-app-custom/docs/device.md`](../plugin-app-custom/docs/device.md)). `DeviceAgent` keeps a presence
+The `iphone_status` and `iphone_query` tools, available to every agent, read this iPhone on demand through
+`custom.device` (contract: [`plugin-app-custom/docs/device.md`](../plugin-app-custom/docs/device.md)). `DeviceAgent` keeps a presence
 lease while the `EventHub` is connected (renewed every 30 s), detaches when the stream stops for good, and answers
 `rpc.custom.device.request` events, which never reach screen subscribers, through the request's Location. It
 therefore answers with the app open or during a voice call, also with the screen locked; otherwise the tool reports
