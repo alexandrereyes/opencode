@@ -33,15 +33,18 @@ export type Audio = typeof Audio.Type
 
 const failure = Schema.toStandardSchemaV1(Schema.Struct({ message: Schema.String }))
 
-/** Positions kept, most recently saved first; older ones are dropped. */
+/** Positions kept per kind (files, messages), most recently saved first; older ones are dropped. */
 export const maxPositions = 200
 
+/** A reading place is keyed by a file's absolute path or by `message:<sessionID>/<messageID>` for a chat response. */
+export const messagePrefix = "message:"
+export const messageKey = (sessionID: string, messageID: string) => `${messagePrefix}${sessionID}/${messageID}`
 const Path = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096))
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 /** Where reading stopped, in terms of the speakable text so it survives other devices, speeds and edits. */
 export const Position = Schema.Struct({
-  /** Absolute path of the Markdown file on this server. */
+  /** Absolute path of the Markdown file on this server, or a `message:` key (the field keeps its name for older apps). */
   path: Path,
   /** SHA-256 of the speakable text the offset refers to. */
   hash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),

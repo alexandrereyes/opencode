@@ -29,9 +29,11 @@ compressed audio back.
   this was added carries no text length and teaches nothing.
 - **Reading positions:** `getPosition({ path })` → `{ position | null }`, `setPosition({ path, hash, offset,
   characters, sentence, seconds? })` and `clearPosition({ path })`, in `speech:positions`. The plugin is per server, so
-  the key is the file's absolute path. `offset` counts characters of the speakable text (the app's pieces joined),
+  the key (still named `path` for older apps) is a file's absolute path or, for a chat answer,
+  `message:<sessionID>/<messageID>` with the answer's last message (`Speech.messageKey`). `offset` counts characters of the speakable text (the app's pieces joined),
   `hash` is that text's SHA-256, `sentence` (≤ 200 characters) the sentence being read and `seconds` the elapsed audio
-  at 1×. Saving moves the file to the front; only the 200 most recently saved files are kept. The app saves on pause,
+  at 1×. Saving moves the key to the front; the 200 most recently saved files and, separately, the 200 most recent
+  answers are kept, so listened answers never push out a file's place. The app saves on pause,
   stop, closing or leaving the file, going to the background and every 8 s while playing (only after the reading
   moved in that opening, and failures are ignored); it clears the place when the document ends or on **Recomeçar do
   início**. When the hash differs, the app looks for the saved sentence (nearest the old offset), then the sentence

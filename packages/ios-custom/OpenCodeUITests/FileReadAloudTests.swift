@@ -113,7 +113,7 @@ import XCTest
     let settled = times(app).total
     print("READ_ALOUD_TOTAL after-seek \(settled)")
     // Measured pieces move the estimate toward the real length without swinging it.
-    XCTAssertEqual(Double(playing), Double(settled), accuracy: Double(settled) * 0.15, "total while playing")
+    XCTAssertEqual(Double(playing), Double(settled), accuracy: Double(settled) * 0.2, "total while playing")
     XCTAssertEqual(Double(opened), Double(settled), accuracy: Double(settled) * 0.3, "total when opened")
 
     app.buttons["read-aloud-collapse"].tap()

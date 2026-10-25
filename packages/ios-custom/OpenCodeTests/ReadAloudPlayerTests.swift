@@ -97,7 +97,9 @@ import XCTest
     XCTAssertEqual(reader.phase, .loading)
     try await wait("first piece playing") { reader.phase == .playing }
     try await wait("two pieces generated ahead") { server.texts.count == 3 }
-    XCTAssertEqual(server.texts, ["Trecho 0 aaaaaaaaaaaa", "Trecho 1 aaaaaaaaaaaa", "Trecho 2 aaaaaaaaaaaa"])
+    // The two pieces ahead are requested together, in either order.
+    XCTAssertEqual(server.texts.first, "Trecho 0 aaaaaaaaaaaa")
+    XCTAssertEqual(Set(server.texts), ["Trecho 0 aaaaaaaaaaaa", "Trecho 1 aaaaaaaaaaaa", "Trecho 2 aaaaaaaaaaaa"])
     try await wait("second piece reached") { reader.position > 0.7 && reader.phase == .playing }
     try await wait("third piece prefetched in turn") { server.texts.count == 4 }
     // Real durations replace the estimate as pieces arrive, and the unknown rest follows the measured rate.
@@ -257,5 +259,52 @@ import XCTest
     XCTAssertFalse(second.saved)
     try await wait("cleared on the server") { server.clears.contains("/repo/docs/guia.md") }
     XCTAssertNil(server.saved("/repo/docs/guia.md"))
+  }
+
+  func testStartingAnotherReadingStopsAndSavesThePrevious() async throws {
+    let server = Server()
+    server.seconds = 2
+    let first = player(server, pieces: 3)
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:9")!)) { server.respond($0) }
+    let second = ReadAloudPlayer(title: "outra", path: "message:ses_a/msg_b", pieces: pieces(2), client: client,
+      defaults: defaults)
+    defer { first.stop(); second.stop() }
+    first.play()
+    try await wait("first playing") { first.phase == .playing && first.position > 0.3 }
+    second.play()
+    XCTAssertTrue(first.closed)
+    XCTAssertEqual(first.phase, .idle)
+    try await wait("the first place saved") { server.saved("/repo/docs/guia.md") != nil }
+    try await wait("second playing") { second.phase == .playing }
+    // A document opened elsewhere ends it too.
+    ReadAloudPlayer.stopCurrent()
+    XCTAssertTrue(second.closed)
+  }
+
+  func testConversationReadsAnAnswerOrOpensItPausedAtItsPlace() async throws {
+    let server = Server()
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:9")!)) { server.respond($0) }
+    let reader = ConversationReadAloud()
+    defer { reader.stop() }
+    let first = ReadAloud.Response(key: "message:ses_a/msg_1", messageID: "msg_1", text: "Primeira resposta. Curta.")
+    reader.read(first, title: "Conversa", client: client)
+    try await wait("the first answer plays") { reader.active?.phase == .playing }
+    let playing = try XCTUnwrap(reader.active)
+    XCTAssertEqual(reader.messageID, "msg_1")
+    // Its own button again keeps the same reading.
+    reader.read(first, title: "Conversa", client: client)
+    XCTAssertTrue(reader.active === playing)
+    // Another answer with a saved place: the previous one stops, the new one opens paused there.
+    let text = "Segunda resposta, um pouco mais longa. Ela continua aqui."
+    let pieces = ReadAloud.pieces(ReadAloud.segments(MarkdownBlocks.parse(text)))
+    server.save(["path": "message:ses_a/msg_2", "hash": ReadAloud.hash(pieces), "offset": 20, "characters": 56,
+      "sentence": "", "seconds": 1.5, "updatedAt": 1])
+    reader.read(.init(key: "message:ses_a/msg_2", messageID: "msg_2", text: text), title: "Conversa", client: client)
+    try await wait("opened paused at the saved place") { reader.active?.saved == true }
+    XCTAssertTrue(playing.closed)
+    XCTAssertEqual(reader.messageID, "msg_2")
+    XCTAssertEqual(reader.active?.phase, .idle)
+    XCTAssertEqual(reader.active?.position ?? 0, 1.5, accuracy: 0.01)
+    XCTAssertEqual(server.texts, ["Primeira resposta. Curta."], "nothing generated for the paused answer")
   }
 }

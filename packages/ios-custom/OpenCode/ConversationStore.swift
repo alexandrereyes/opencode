@@ -14,6 +14,8 @@ import OpenCodeKit
   private(set) var agents: [AgentInfo] = []
   private(set) var providers: [ProviderInfo] = []
   let toast = ToastCenter()
+  /// Rows reach it only from the footer's action, so reading never observes the transcript.
+  let readAloud = ConversationReadAloud()
   let mcps: ConversationMCPStore
   let reversion: ConversationRevert
   private(set) var family: FamilySnapshot?
@@ -575,11 +577,14 @@ import OpenCodeKit
         "Não foi possível atualizar os modelos. \(error.localizedDescription)", kind: .error)
     }
   }
+  /// The footer's play: reads the answer that ends at this message.
+  func readAloudResponse(endingAt id: String) {
+    guard let response = ReadAloud.response(messages, endingAt: id, sessionID: self.id), !response.text.isEmpty
+    else { return }
+    readAloud.read(response, title: session?.title ?? "Resposta", client: client)
+  }
   func responseText(endingAt id: String) -> String {
-    guard let end = messages.firstIndex(where: { $0.id == id }) else { return "" }
-    let start = messages[..<end].lastIndex(where: { $0.type == "user" }).map { $0 + 1 } ?? 0
-    return messages[start...end].map(\.responseText).filter { !$0.isEmpty }.joined(
-      separator: "\n\n")
+    ReadAloud.response(messages, endingAt: id, sessionID: self.id)?.text ?? ""
   }
   func run() async {
     #if DEBUG

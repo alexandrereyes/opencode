@@ -872,6 +872,24 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
 - `FileReadAloudTests` (through `test-file-viewer.py`, both themes) uses the sandbox's real gateway: the run's first
   piece numbers the run, so about a cent of speech is generated per run; the rest comes from the sandbox cache.
 
+#### Reading answers aloud — 25 October
+
+- A finished answer with text has a play icon beside Copiar in its footer (never while streaming). It reads what
+  Copiar copies: the text parts of the turn's messages from the prompt to the footer's message, in order (text written
+  between tools included), through the same speakable extraction; reasoning, tool calls and tool output are skipped.
+- The answer's identity is its footer message, the last message of the turn: the place is saved on the server as
+  `message:<sessionID>/<messageID>` with the text hash, exactly like a file. The button reads `store.messages` only in
+  its action, and rows do not observe the player, so streaming never re-renders them for it.
+- The same pill/full player as the Markdown viewer floats over the transcript's bottom trailing corner, above the
+  composer, with **Ir para a mais recente** stacked above it; the transcript's end grows by the player's height so the
+  last answer stays visible. The pinned prompt, usage row, voice bar and composer keep their places. The full player's
+  **Ir para a resposta** scrolls back to the answer being read. Reading continues while scrolling.
+- One reading at a time: playing another answer, or opening a Markdown file, stops the previous one and saves its
+  place; leaving the conversation does too. Tapping an answer with a saved place opens the pill paused there; play
+  resumes from it (the server's per-text audio cache avoids paying again).
+- `ChatReadAloudTests` (through `test-file-viewer.py`, both themes) imports a two-turn session and uses the sandbox's
+  real gateway (a few seconds of speech per run).
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

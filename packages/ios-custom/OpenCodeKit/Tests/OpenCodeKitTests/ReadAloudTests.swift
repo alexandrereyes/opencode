@@ -180,3 +180,31 @@ private let document = """
   #expect(ReadAloud.clock(3_725) == "1:02:05")
   #expect(abs(ReadAloud.cost(seconds: ReadAloud.confirmationSeconds, usdPerSecond: 0.00015) - 0.27) < 0.0001)
 }
+
+@Test func readAloudResponseReadsTheTurnTextUpToItsFooterMessage() {
+  func message(_ id: String, _ type: String, _ parts: [ConversationPart] = []) -> ConversationMessage {
+    var value = ConversationMessage(id: id, type: type, time: .init(created: 1, completed: 2))
+    value.content = parts
+    return value
+  }
+  let messages = [
+    message("msg_old_user", "user"),
+    message("msg_old", "assistant", [.init(type: "text", text: "Resposta anterior.")]),
+    message("msg_user", "user"),
+    message("msg_step", "assistant", [
+      .init(type: "reasoning", text: "Pensando em segredo."),
+      .init(type: "text", text: "Vou conferir o arquivo."),
+      .init(type: "tool", id: "call_1", name: "read", state: .object(["status": .string("completed")])),
+    ]),
+    message("msg_final", "assistant", [.init(type: "text", text: "## Pronto\n\nO arquivo tem `3` linhas.")]),
+  ]
+  let response = ReadAloud.response(messages, endingAt: "msg_final", sessionID: "ses_chat")
+  #expect(response?.key == "message:ses_chat/msg_final")
+  #expect(response?.messageID == "msg_final")
+  #expect(response?.text == "Vou conferir o arquivo.\n\n## Pronto\n\nO arquivo tem `3` linhas.")
+  // The speakable text drops the Markdown and keeps the order.
+  let pieces = ReadAloud.pieces(ReadAloud.segments(MarkdownBlocks.parse(response?.text ?? "")))
+  #expect(pieces.map(\.text).joined(separator: " ") == "Vou conferir o arquivo.\nPronto.\nO arquivo tem 3 linhas.")
+  #expect(ReadAloud.response(messages, endingAt: "msg_old", sessionID: "ses_chat")?.text == "Resposta anterior.")
+  #expect(ReadAloud.response(messages, endingAt: "msg_missing", sessionID: "ses_chat") == nil)
+}

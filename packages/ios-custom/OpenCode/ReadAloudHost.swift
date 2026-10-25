@@ -5,7 +5,6 @@ import SwiftUI
 /// edge; leaving the file (close, paging, links, Voltar) stops it. The pill is always there for Markdown so reading
 /// is one tap away without another toolbar button; nothing is generated until play.
 struct ReadAloudHost: ViewModifier {
-  @Environment(\.voiceController) private var voice
   let text: String?
   let title: String
   /// The file's absolute path, which keys its saved reading place on the server.
@@ -18,6 +17,31 @@ struct ReadAloudHost: ViewModifier {
       .safeAreaInset(edge: .bottom, spacing: 0) {
         if let player { ReadAloudControls(player: player).padding(.horizontal, 12).padding(.bottom, 6) }
       }
+      .modifier(ReadAloudPrompts(player: player))
+      .task(id: text) {
+        player?.stop()
+        player = nil
+        guard let text else { return }
+        let rendered = MarkdownDocument.renderable(text)
+        let blocks = await ResponseMarkdownCache.shared.parse(rendered)
+        let pieces = ReadAloud.pieces(ReadAloud.segments(blocks, frontMatter: rendered != text))
+        guard !Task.isCancelled, !pieces.isEmpty else { return }
+        let player = ReadAloudPlayer(title: title, path: path, pieces: pieces, client: client)
+        // Opening a document ends a reading elsewhere (a chat response), saving its place.
+        ReadAloudPlayer.stopCurrent()
+        self.player = player
+        await player.restore()
+      }
+      .onDisappear { player?.stop() }
+  }
+}
+
+/// Pauses reading when a voice call starts and asks before generating a very long text.
+struct ReadAloudPrompts: ViewModifier {
+  @Environment(\.voiceController) private var voice
+  let player: ReadAloudPlayer?
+  func body(content: Content) -> some View {
+    content
       .onChange(of: voice?.state.visible == true) { _, calling in if calling { player?.pause() } }
       .alert("Ouvir documento longo?", isPresented: Binding(get: { player?.confirmation != nil },
         set: { if !$0 { player?.confirmation = nil } })) {
@@ -30,29 +54,18 @@ struct ReadAloudHost: ViewModifier {
             + "; só é gerado o trecho que você ouvir, e trechos já ouvidos não são cobrados de novo.")
         }
       }
-      .task(id: text) {
-        player?.stop()
-        player = nil
-        guard let text else { return }
-        let rendered = MarkdownDocument.renderable(text)
-        let blocks = await ResponseMarkdownCache.shared.parse(rendered)
-        let pieces = ReadAloud.pieces(ReadAloud.segments(blocks, frontMatter: rendered != text))
-        guard !Task.isCancelled, !pieces.isEmpty else { return }
-        let player = ReadAloudPlayer(title: title, path: path, pieces: pieces, client: client)
-        self.player = player
-        await player.restore()
-      }
-      .onDisappear { player?.stop() }
   }
 }
 
 /// A compact pill in the trailing corner (play with a progress ring, time, speed) that expands into the full player:
 /// play, a draggable position over the whole document, elapsed/total time and speed. Until each piece has audio the
 /// total is an estimate that settles while playing.
-private struct ReadAloudControls: View {
+struct ReadAloudControls: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let player: ReadAloudPlayer
+  /// In a conversation, the full player offers to scroll back to the answer being read.
+  var reveal: (() -> Void)? = nil
   @State private var expanded = false
   @State private var scrub: Double?
   @State private var editing = false
@@ -87,7 +100,14 @@ private struct ReadAloudControls: View {
   private var panel: some View {
     VStack(spacing: 0) {
       HStack {
-        Text("Lendo em voz alta").appFont(.footnote).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+        if let reveal {
+          Button("Ir para a resposta") { Haptics.play(.selection); reveal() }
+            .appFont(.footnote).buttonStyle(.plain).foregroundStyle(theme.color(.primary)).lineLimit(1)
+            .frame(minHeight: 44).contentShape(Rectangle())
+            .accessibilityIdentifier("read-aloud-reveal")
+        } else {
+          Text("Lendo em voz alta").appFont(.footnote).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+        }
         Spacer(minLength: 0)
         if player.saved {
           Button("Recomeçar do início") { Haptics.play(.selection); player.restart() }

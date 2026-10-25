@@ -33,6 +33,10 @@ extension Notification.Name {
   var confirmation: (seconds: Double, usd: Double)?
   /// A reading place is saved on the server, so the player offers to start over.
   private(set) var saved = false
+  /// Stopped for good (closed, or another reading started); its owner drops it.
+  private(set) var closed = false
+  /// The player that last started; starting another stops it, saving its place.
+  private static weak var current: ReadAloudPlayer?
 
   @ObservationIgnored private let client: OpenCodeClient
   @ObservationIgnored private let defaults: UserDefaults
@@ -106,7 +110,9 @@ extension Notification.Name {
   func toggle() { busy ? pause() : play() }
 
   func play() {
-    guard !pieces.isEmpty else { return }
+    guard !pieces.isEmpty, !closed else { return }
+    if let other = Self.current, other !== self { other.stop() }
+    Self.current = self
     dirty = true
     if position >= total - 0.25 { position = 0 }
     let target = timeline.locate(position)
@@ -164,7 +170,11 @@ extension Notification.Name {
   func retry() { play() }
 
   /// Closing or leaving the file ends playback and releases the audio session and lock screen controls.
+  static func stopCurrent() { current?.stop() }
+
   func stop() {
+    closed = true
+    if Self.current === self { Self.current = nil }
     if let player, phase != .idle { position = timeline.time(piece: current, offset: player.currentTime) }
     save()
     background.map { NotificationCenter.default.removeObserver($0) }

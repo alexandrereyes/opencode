@@ -260,6 +260,27 @@ test("saves, reads and clears a reading position per file", async () => {
   expect(await Effect.runPromise(getPosition(memory.ctx, position.path))).toBeUndefined()
 })
 
+test("keeps chat response places by session and message, apart from files", async () => {
+  const memory = storage()
+  const key = Speech.messageKey("ses_conversa", "msg_resposta")
+  expect(key).toBe("message:ses_conversa/msg_resposta")
+  const position = { path: key, hash: "d".repeat(64), offset: 50, characters: 400, sentence: "Uma frase.", seconds: 4 }
+  await Effect.runPromise(setPosition(memory.ctx, position))
+  // Many listened responses never push out a file's place.
+  await Effect.runPromise(
+    setPosition(memory.ctx, { path: "/docs/guia.md", hash: "e".repeat(64), offset: 10, characters: 90, sentence: "" }),
+  )
+  for (const index of Array.from({ length: Speech.maxPositions + 3 }, (_, index) => index))
+    await Effect.runPromise(setPosition(memory.ctx, { ...position, path: Speech.messageKey("ses_outra", `msg_${index}`) }))
+  expect(await Effect.runPromise(getPosition(memory.ctx, "/docs/guia.md"))).toMatchObject({ offset: 10 })
+  expect(await Effect.runPromise(getPosition(memory.ctx, key))).toBeUndefined()
+  const kept = memory.values.get("speech:positions") as Array<{ path: string }>
+  expect(kept.filter((item) => item.path.startsWith("message:"))).toHaveLength(Speech.maxPositions)
+  expect(kept[0]?.path).toBe(Speech.messageKey("ses_outra", `msg_${Speech.maxPositions + 2}`))
+  await Effect.runPromise(clearPosition(memory.ctx, kept[0]!.path))
+  expect(await Effect.runPromise(getPosition(memory.ctx, kept[0]!.path))).toBeUndefined()
+})
+
 test("keeps only the most recently saved positions", async () => {
   const memory = storage()
   const save = (index: number) =>

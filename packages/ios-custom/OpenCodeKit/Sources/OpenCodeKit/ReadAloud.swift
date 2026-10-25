@@ -138,6 +138,26 @@ public enum ReadAloud {
     }
   }
 
+  /// One answer of a conversation, as the footer under its last message shows it: the text parts of every message
+  /// from the one after the prompt to that last message, in order, so reasoning, tool calls and their output are
+  /// left out and text written between tools is read in sequence (what Copiar copies). The last message (the footer's)
+  /// names the answer: it is stable once the answer completes, and the button only appears then.
+  public struct Response: Sendable, Equatable {
+    /// `custom.speech` position key, `message:<sessionID>/<messageID>`.
+    public let key: String
+    public let messageID: String
+    public let text: String
+  }
+
+  public static func messageKey(sessionID: String, messageID: String) -> String { "message:\(sessionID)/\(messageID)" }
+
+  public static func response(_ messages: [ConversationMessage], endingAt id: String, sessionID: String) -> Response? {
+    guard let end = messages.firstIndex(where: { $0.id == id }) else { return nil }
+    let start = messages[..<end].lastIndex(where: { $0.type == "user" }).map { $0 + 1 } ?? 0
+    let text = messages[start...end].map(\.responseText).filter { !$0.isEmpty }.joined(separator: "\n\n")
+    return Response(key: messageKey(sessionID: sessionID, messageID: id), messageID: id, text: text)
+  }
+
   /// SHA-256 of the speakable text; equal hashes mean an offset still points at the same words.
   public static func hash(_ pieces: [Piece]) -> String {
     SHA256.hash(data: Data(pieces.map(\.text).joined().utf8)).map { String(format: "%02x", $0) }.joined()

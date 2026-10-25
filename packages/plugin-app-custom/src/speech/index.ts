@@ -116,7 +116,8 @@ export function getPosition(ctx: Pick<SpeechContext, "storage">, file: string) {
   return ctx.storage.get(positionsKey).pipe(Effect.map((value) => decodePositions(value).find((item) => item.path === file)))
 }
 
-/** Saving moves the document to the front; only the most recent `maxPositions` documents are kept. */
+/** Saving moves the document to the front; only the most recent `maxPositions` files and, separately, the most recent
+ * `maxPositions` chat responses are kept, so many listened responses never push out a file's place. */
 export const setPosition = Effect.fn("Speech.setPosition")(function* (
   ctx: Pick<SpeechContext, "storage">,
   input: typeof Speech.PositionInput.Type,
@@ -124,10 +125,17 @@ export const setPosition = Effect.fn("Speech.setPosition")(function* (
   const now = yield* Clock.currentTimeMillis
   const position: Speech.Position = { ...input, offset: Math.min(input.offset, input.characters), updatedAt: now }
   return yield* ctx.storage.update(positionsKey, (current) => [
-    encodePositions([position, ...decodePositions(current).filter((item) => item.path !== input.path)].slice(0, Speech.maxPositions)),
+    encodePositions(retain([position, ...decodePositions(current).filter((item) => item.path !== input.path)])),
     position,
   ])
 })
+
+function retain(positions: ReadonlyArray<Speech.Position>) {
+  const message = (item: Speech.Position) => item.path.startsWith(Speech.messagePrefix)
+  const messages = positions.filter(message).slice(0, Speech.maxPositions)
+  const files = positions.filter((item) => !message(item)).slice(0, Speech.maxPositions)
+  return positions.filter((item) => messages.includes(item) || files.includes(item))
+}
 
 export function clearPosition(ctx: Pick<SpeechContext, "storage">, file: string) {
   return ctx.storage.update(positionsKey, (current) => [

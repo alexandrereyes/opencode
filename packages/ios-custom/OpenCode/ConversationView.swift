@@ -182,6 +182,7 @@ struct ConversationView: View {
   @State private var quoteMessage: String?
   @State private var quoteRevealTask: Task<Void, Never>?
   @State private var revertCandidate: ConversationMessage?
+  @State private var readAloudHeight: CGFloat = 0
   let initialFollowTail: Bool
   let sessions: SessionStore
   let parentOnStack: String?
@@ -474,6 +475,8 @@ struct ConversationView: View {
       scrollState.correctAnchor()
     }
     .onDisappear {
+      // Leaving the conversation ends its reading, saving the place.
+      conversation.readAloud.stop()
       quoteValidation?.cancel()
       quoteRevealTask?.cancel()
       quoteRevealed = nil
@@ -788,7 +791,8 @@ struct ConversationView: View {
             .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
             .id(form.id)
         }
-        theme.color(.background).opacity(0).frame(height: 12).id("bottom")
+        // While reading aloud, the end of the transcript sits above the player.
+        theme.color(.background).opacity(0).frame(height: 12 + (readAloudHeight > 0 ? readAloudHeight + 12 : 0)).id("bottom")
           .background(ConversationRowProbe(state: scrollState, id: "bottom", color: theme.uiColor(.background)))
           .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(
             theme.color(.background)
@@ -920,14 +924,9 @@ struct ConversationView: View {
         requestedTool = nil
       }
       .overlay(alignment: .bottomTrailing) {
-        if viewport.jumpToLatest {
-          Button {
-            resumeFollowing(animated: true)
-          } label: {
-            Image(systemName: "arrow.down").frame(width: 42, height: 42)
-          }.buttonStyle(.glass).buttonBorderShape(.circle).padding(12).accessibilityLabel(
-            "Ir para a mais recente")
-        }
+        ConversationBottomControls(
+          readAloud: conversation.readAloud, viewport: viewport, jump: { resumeFollowing(animated: true) },
+          reveal: { conversation.revealMessage($0, persist: false) }, height: { readAloudHeight = $0 })
       }
       .overlay(alignment: .top) {
         ConversationViewportNotices(
@@ -1246,6 +1245,14 @@ private struct ConversationMessageView: View, @MainActor Equatable {
                 Image(systemName: "doc.on.doc").appSymbol(.inline)
               }
               .buttonStyle(.plain).accessibilityLabel("Copiar resposta")
+              Button {
+                Haptics.play(.selection)
+                store.readAloudResponse(endingAt: message.id)
+              } label: {
+                Image(systemName: "play").appSymbol(.inline)
+              }
+              .buttonStyle(.plain).accessibilityLabel("Ouvir resposta")
+              .accessibilityIdentifier("read-aloud-message-" + message.id)
             }.foregroundStyle(theme.color(.textSecondary))
           }
         }

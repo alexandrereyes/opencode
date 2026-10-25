@@ -228,6 +228,36 @@ Bloco depois do link
                  "time": {"created": now - 900, "completed": now - 600}, "finish": "stop", "content": [{"type": "text", "text": body}]}]})
         created.append(session)
         environment["OPENCODE_VIEWER_" + role] = session
+    # Two answered prompts for reading chat answers aloud (ChatReadAloudTests); the second answer also has a tool
+    # call between its texts. Each run numbers its answers, so their first pieces are generated again.
+    model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
+    chat = "ses_" + uuid.uuid4().hex
+    answers = ["msg_" + uuid.uuid4().hex for _ in range(3)]
+    number = str(int(token[:5], 16))
+    api("/api/experimental/session/import", {"info": {"id": chat, "title": "Leitura de respostas", "projectID": "global",
+        "location": {"directory": str(folder)}, "agent": "build", "model": model,
+        "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}, "outcome": "succeeded",
+        "time": {"created": now, "updated": now, "idle": now, "viewed": now}}, "location": {"directory": str(folder)},
+        "messages": [
+            {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Explique a leitura em voz alta.", "time": {"created": now - 9000}},
+            {"id": answers[0], "type": "assistant", "agent": "build", "model": model, "time": {"created": now - 8900, "completed": now - 8000},
+             "finish": "stop", "content": [{"type": "text", "text": "Primeira resposta número " + number + ". A leitura em voz alta "
+                 "transforma a resposta em fala no servidor e toca no aplicativo. O botão ao lado de copiar começa a leitura, "
+                 "e a pílula no canto mostra o tempo, a velocidade e o progresso. Tocar no tempo abre o player completo."}]},
+            {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "E onde ela para?", "time": {"created": now - 7000}},
+            {"id": answers[1], "type": "assistant", "agent": "build", "model": model, "time": {"created": now - 6900, "completed": now - 6500},
+             "finish": "tool-calls", "content": [{"type": "text", "text": "Segunda resposta número " + number + ". Vou conferir onde a posição fica guardada."},
+                 {"type": "tool", "id": "call_" + uuid.uuid4().hex, "name": "read", "state": {"status": "completed", "input": {"path": "speech.md"},
+                  "content": [{"type": "text", "text": "Conteúdo que não deve ser lido."}]}, "time": {"created": now - 6800, "completed": now - 6700}}]},
+            {"id": answers[2], "type": "assistant", "agent": "build", "model": model, "time": {"created": now - 6400, "completed": now - 6000},
+             "finish": "stop", "content": [{"type": "text", "text": "A posição fica guardada no servidor, por sessão e por mensagem. "
+                 "Ao reabrir a conversa e tocar de novo na mesma resposta, o player aparece pausado onde a leitura parou. "
+                 "Quando a resposta termina, a posição é esquecida e a próxima leitura começa do início."}]},
+        ]})
+    created.append(chat)
+    environment["OPENCODE_CHAT_SESSION"] = chat
+    environment["OPENCODE_CHAT_FIRST"] = answers[0]
+    environment["OPENCODE_CHAT_SECOND"] = answers[2]
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
     for target in targets:
