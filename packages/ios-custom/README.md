@@ -2036,7 +2036,8 @@ Sessão mestra, narrates **A mestra está consultando seu iPhone.** The footer a
 the OpenCode agents read this data when Alexandre asks.
 
 Requirements: `OpenCode/OpenCode.entitlements` (HealthKit, no clinical records), the usage descriptions
-`NSHealthShareUsageDescription`, `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription` and
+`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription` (App Store Connect rejects a HealthKit upload
+without it, even though the app never writes), `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription` and
 `NSPhotoLibraryUsageDescription`, and an explicit-App-ID profile: automatic signing (`-allowProvisioningUpdates`)
 enables HealthKit on `br.com.alexandrem.opencode`; the team wildcard profile cannot sign the app anymore.
 

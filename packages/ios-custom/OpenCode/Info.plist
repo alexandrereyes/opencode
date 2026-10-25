@@ -19,6 +19,7 @@
     <key>NSCameraUsageDescription</key><string>O OpenCode usa a câmera para ler o QR code de pareamento do seu servidor.</string>
     <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para ditar mensagens com transcrição neste iPhone e para conversar por voz com a Sessão mestra, inclusive durante a chamada em segundo plano.</string>
     <key>NSHealthShareUsageDescription</key><string>Os agentes do OpenCode leem seus dados do app Saúde (sono, passos, energia, frequência cardíaca, VFC, treinos e peso) quando você pede. O OpenCode nunca grava no Saúde.</string>
+    <key>NSHealthUpdateUsageDescription</key><string>O OpenCode não grava dados no app Saúde; os agentes só leem os dados que você permitir.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>Os agentes do OpenCode consultam sua localização atual quando você pede, com o app aberto.</string>
     <key>NSMotionUsageDescription</key><string>Os agentes do OpenCode leem passos, distância, andares e atividade dos últimos dias quando você pede.</string>
     <key>NSPhotoLibraryUsageDescription</key><string>Os agentes do OpenCode veem a data, o local e uma miniatura das suas fotos recentes quando você pede.</string>
