@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import type { Input } from "../protocol.js"
+import type { Input, Profile } from "../protocol.js"
 
 /**
  * Supervises `serve-sim` (Expo Device Hub, Apache-2.0) for the iOS Simulator adapter: one loopback helper process per
@@ -12,11 +12,18 @@ import type { Input } from "../protocol.js"
  * its input socket. See `docs/resources-ios-simulator.md`.
  */
 
-/** Frame bound and quality: about 70 KB per frame instead of 250 KB at the native 1206 × 2622. */
-export const streamOptions = { maxDimension: 1280, quality: 0.6, fps: 30 }
+/**
+ * Frame bound, quality and rate per stream profile. `standard`: about 70 KB per frame instead of 250 KB at the native
+ * 1206 × 2622. `economy` (cellular, Low Data Mode): about a third of that, at half the rate.
+ */
+export const streamOptions = {
+  standard: { maxDimension: 1280, quality: 0.6, fps: 30 },
+  economy: { maxDimension: 720, quality: 0.45, fps: 15 },
+} satisfies Record<Profile, { maxDimension: number; quality: number; fps: number }>
 const idleMs = 120_000
 const startMs = 30_000
 const pasteMs = 15_000
+const reconnectAttempts = 5
 
 // Release layout from packages/cli/script/custom-release.ts: <release>/plugin/index.js beside <release>/serve-sim.
 const releaseScript = path.join(import.meta.dirname, "..", "serve-sim/node_modules/@expo/serve-sim/dist/serve-sim.js")
@@ -42,9 +49,16 @@ export interface Helper {
   readonly config: () => Config | undefined
   /** Calls `listener` with every configuration the helper sends (size and orientation). */
   readonly onConfig: (listener: (config: Config) => void) => () => void
+  /** Whether the input socket is open; video keeps flowing while it reconnects. */
+  readonly inputAvailable: () => boolean
+  /** Changes every time the input socket is (re)admitted; serve-sim has lifted every finger by then. */
+  readonly inputGeneration: () => number
+  readonly onInput: (listener: (available: boolean) => void) => () => void
   readonly send: (tag: number, body?: unknown) => void
   readonly paste: (text: string) => Promise<void>
-  readonly frames: (signal: AbortSignal) => AsyncGenerator<Uint8Array>
+  /** Switches serve-sim's encoder to `profile` (shared by every viewer of this simulator); no-op when it already is. */
+  readonly profile: (profile: Profile) => Promise<void>
+  readonly frames: (signal: AbortSignal) => AsyncGenerator<Part>
 }
 
 interface Running {
@@ -101,20 +115,34 @@ export function stopAll() {
 
 process.once("exit", stopAll)
 
-function stateDirectory() {
-  // One directory per hub: a helper orphaned by a crashed hub is found and stopped by the next one.
+/**
+ * Where serve-sim keeps its per-simulator records: inside the hub's own state directory, so each hub finds the
+ * helpers it left behind (`recover`). Outside a hub (tests, scripts), a temporary directory per user state root.
+ */
+export function stateDirectory(env: Record<string, string | undefined> = process.env) {
+  if (env.OPENCODE_RESOURCES_HUB_STATE) return path.join(env.OPENCODE_RESOURCES_HUB_STATE, "serve-sim")
   const key = new Bun.CryptoHasher("sha256")
-    .update(process.env.OPENCODE_RESOURCES_HUB_STATE ?? process.env.XDG_STATE_HOME ?? os.homedir())
+    .update(env.XDG_STATE_HOME ?? os.homedir())
     .digest("hex")
     .slice(0, 12)
   return path.join(os.tmpdir(), "opencode-serve-sim", key)
+}
+
+/**
+ * Stops the helpers a previous hub of this state directory left running (it died without its exit handler). Only
+ * processes whose command line is still that helper's (serve-sim, the record's simulator and port) are stopped, so a
+ * reused PID is never touched. The hub calls it once it holds its lock, before serving.
+ */
+export async function recover(state = stateDirectory()) {
+  const files = await Array.fromAsync(new Bun.Glob("server-*.json").scan({ cwd: state })).catch(() => [])
+  await Promise.all(files.map((file) => stopRecorded(path.join(state, file))))
 }
 
 function start(udid: string, exited: () => void): Running {
   const state = stateDirectory()
   const controller = new AbortController()
   const helper = (async () => {
-    await stopOrphan(state, udid)
+    await stopRecorded(path.join(state, `server-${udid}.json`))
     const child = Bun.spawn(
       [
         process.execPath,
@@ -125,11 +153,11 @@ function start(udid: string, exited: () => void): Running {
         "--disable",
         "clipboard",
         "--max-dimension",
-        String(streamOptions.maxDimension),
+        String(streamOptions.standard.maxDimension),
         "--mjpeg-quality",
-        String(streamOptions.quality),
+        String(streamOptions.standard.quality),
         "--mjpeg-fps",
-        String(streamOptions.fps),
+        String(streamOptions.standard.fps),
         "--port",
         String(await freePort()),
         udid,
@@ -148,7 +176,7 @@ function start(udid: string, exited: () => void): Running {
       child.kill("SIGTERM")
       throw new Error(`serve-sim did not start for ${udid}`)
     }
-    return connect(udid, port, controller.signal)
+    return connect(udid, port, controller.signal, () => controller.abort())
   })()
   return { helper, stop: () => controller.abort(), refs: 0 }
 }
@@ -187,15 +215,36 @@ async function freePort() {
   return port
 }
 
-async function stopOrphan(state: string, udid: string) {
-  const record: unknown = await Bun.file(path.join(state, `server-${udid}.json`))
+async function stopRecorded(file: string) {
+  const record: unknown = await Bun.file(file)
     .json()
     .catch(() => undefined)
-  if (typeof record !== "object" || record === null || !("pid" in record) || typeof record.pid !== "number") return
-  const pid = record.pid
-  if (!alive(pid)) return
-  process.kill(pid, "SIGTERM")
-  for (let attempt = 0; attempt < 30 && alive(pid); attempt++) await Bun.sleep(100)
+  if (typeof record !== "object" || record === null) return
+  if (!("pid" in record) || !("port" in record) || !("device" in record)) return
+  if (typeof record.pid !== "number" || typeof record.port !== "number" || typeof record.device !== "string") return
+  const helper = record.pid
+  const command = commandLine(helper)
+  if (
+    !command?.includes("serve-sim.js") ||
+    !command.includes(record.device) ||
+    !command.includes(`--port ${record.port}`)
+  )
+    return
+  // The launcher (`--no-preview`) waits on the helper; stop it too when it is still ours.
+  const parent = Number(
+    Bun.spawnSync(["/bin/ps", "-o", "ppid=", "-p", String(helper)])
+      .stdout.toString()
+      .trim(),
+  )
+  const launcher = parent > 1 && commandLine(parent)?.includes("serve-sim.js --no-preview") ? [parent] : []
+  const pids = [helper, ...launcher]
+  pids.forEach((pid) => process.kill(pid, "SIGTERM"))
+  for (let attempt = 0; attempt < 30 && pids.some(alive); attempt++) await Bun.sleep(100)
+}
+
+function commandLine(pid: number) {
+  const result = Bun.spawnSync(["/bin/ps", "-o", "command=", "-p", String(pid)])
+  return result.exitCode === 0 ? result.stdout.toString().trim() : undefined
 }
 
 function alive(pid: number) {
@@ -206,46 +255,83 @@ const configTag = 0x82
 const admittedTag = 0x83
 const pasteReplyTag = 0x92
 
-/** Opens the helper's input socket and waits until it admits input. */
-async function connect(udid: string, port: number, stopped: AbortSignal): Promise<Helper> {
+/**
+ * Opens the helper's input socket and waits until it admits input. A socket that closes later is reopened with
+ * backoff (serve-sim lifts the fingers of a closed socket, so `inputGeneration` changes); after `reconnectAttempts`
+ * failures in a row `invalidate` stops the helper, and the next viewer starts a new one.
+ */
+export async function connect(
+  udid: string,
+  port: number,
+  stopped: AbortSignal,
+  invalidate: () => void,
+  retry = { attempts: reconnectAttempts, delay: 250 },
+): Promise<Helper> {
   const base = `127.0.0.1:${port}/helper/${udid}`
-  const socket = new WebSocket(`ws://${base}/ws`)
-  socket.binaryType = "arraybuffer"
-  stopped.addEventListener("abort", () => socket.close(), { once: true })
   const listeners = new Set<(config: Config) => void>()
+  const inputListeners = new Set<(available: boolean) => void>()
   const pastes = new Map<number, (ok: boolean) => void>()
-  let config: Config | undefined
-  let nextPaste = 1
-  const admitted = Promise.withResolvers<void>()
-  socket.onmessage = (event) => {
-    if (!(event.data instanceof ArrayBuffer)) return
-    const bytes = new Uint8Array(event.data)
-    if (bytes[0] === admittedTag) admitted.resolve()
-    if (bytes[0] === configTag) {
-      const value = parseConfig(bytes.subarray(1))
-      if (!value) return
-      config = value
-      listeners.forEach((listener) => listener(value))
-    }
-    if (bytes[0] === pasteReplyTag) {
-      const reply = parseJSON(bytes.subarray(1))
-      if (typeof reply !== "object" || reply === null || !("requestId" in reply)) return
-      const id = Number(reply.requestId)
-      pastes.get(id)?.("ok" in reply && reply.ok === true)
-      pastes.delete(id)
-    }
+  const state = {
+    socket: undefined as WebSocket | undefined,
+    available: false,
+    generation: 0,
+    failures: 0,
+    config: undefined as Config | undefined,
+    nextPaste: 1,
+    profile: "standard" as Profile,
+    applying: Promise.resolve(),
   }
-  socket.onclose = () => {
-    admitted.reject(new Error("serve-sim refused input"))
-    pastes.forEach((resolve) => resolve(false))
-    pastes.clear()
+  const available = (value: boolean) => {
+    if (state.available === value) return
+    state.available = value
+    inputListeners.forEach((listener) => listener(value))
   }
-  await Promise.race([
-    admitted.promise,
-    Bun.sleep(startMs).then(() => Promise.reject(new Error("serve-sim input timed out"))),
-  ])
+  const open = () =>
+    new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(`ws://${base}/ws`)
+      socket.binaryType = "arraybuffer"
+      state.socket = socket
+      socket.onmessage = (event) => {
+        if (!(event.data instanceof ArrayBuffer)) return
+        const bytes = new Uint8Array(event.data)
+        if (bytes[0] === admittedTag) {
+          state.generation++
+          state.failures = 0
+          available(true)
+          resolve()
+        }
+        if (bytes[0] === configTag) {
+          const value = parseConfig(bytes.subarray(1))
+          if (!value) return
+          state.config = value
+          listeners.forEach((listener) => listener(value))
+        }
+        if (bytes[0] === pasteReplyTag) {
+          const reply = parseJSON(bytes.subarray(1))
+          if (typeof reply !== "object" || reply === null || !("requestId" in reply)) return
+          const id = Number(reply.requestId)
+          pastes.get(id)?.("ok" in reply && reply.ok === true)
+          pastes.delete(id)
+        }
+      }
+      socket.onclose = () => {
+        if (state.socket !== socket) return
+        reject(new Error("serve-sim refused input"))
+        available(false)
+        pastes.forEach((done) => done(false))
+        pastes.clear()
+        if (stopped.aborted) return
+        state.failures++
+        if (state.failures > retry.attempts) return invalidate()
+        const delay = Math.min(4_000, retry.delay * 2 ** (state.failures - 1))
+        setTimeout(() => !stopped.aborted && void open().catch(() => undefined), delay)
+      }
+    })
+  stopped.addEventListener("abort", () => state.socket?.close(), { once: true })
+  await Promise.race([open(), Bun.sleep(startMs).then(() => Promise.reject(new Error("serve-sim input timed out")))])
   const send = (tag: number, body?: unknown) => {
-    if (socket.readyState !== WebSocket.OPEN) throw new Error("Simulator input is closed")
+    const socket = state.socket
+    if (!state.available || socket?.readyState !== WebSocket.OPEN) throw new Error("Simulator input is unavailable")
     const json = body === undefined ? new Uint8Array(0) : new TextEncoder().encode(JSON.stringify(body))
     const message = new Uint8Array(1 + json.byteLength)
     message[0] = tag
@@ -255,19 +341,46 @@ async function connect(udid: string, port: number, stopped: AbortSignal): Promis
   return {
     udid,
     port,
-    config: () => config,
+    config: () => state.config,
     onConfig: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    inputAvailable: () => state.available,
+    inputGeneration: () => state.generation,
+    onInput: (listener) => {
+      inputListeners.add(listener)
+      return () => inputListeners.delete(listener)
+    },
     send,
     paste: async (text) => {
-      const requestId = nextPaste++
+      const requestId = state.nextPaste++
       const result = new Promise<boolean>((resolve) => pastes.set(requestId, resolve))
       send(0x12, { requestId, text })
       const ok = await Promise.race([result, Bun.sleep(pasteMs).then(() => false)])
       pastes.delete(requestId)
       if (!ok) throw new Error("Simulator paste failed")
+    },
+    profile: (profile) => {
+      if (state.profile === profile) return state.applying
+      state.profile = profile
+      const options = streamOptions[profile]
+      state.applying = state.applying
+        .then(() =>
+          fetch(`http://${base}/stream-settings`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              maxDimension: options.maxDimension,
+              mjpegQuality: options.quality,
+              mjpegFps: options.fps,
+            }),
+            signal: stopped,
+          }),
+        )
+        .then(() => undefined)
+        .catch(() => undefined)
+      return state.applying
     },
     frames: (signal) => mjpeg(`http://${base}/stream.mjpeg`, AbortSignal.any([signal, stopped])),
   }
@@ -291,6 +404,15 @@ export function parseConfig(bytes: Uint8Array): Config | undefined {
   return { width: value.width, height: value.height, orientation: value.orientation as Orientation }
 }
 
+export interface Part {
+  readonly jpeg: Uint8Array
+  /**
+   * Epoch ms when the part's first bytes arrived. serve-sim sends no capture time over MJPEG; on loopback this is
+   * within a millisecond or two of its capture callback, so it stands in for `capturedAt`.
+   */
+  readonly receivedAt: number
+}
+
 /** JPEG payloads of a `multipart/x-mixed-replace` MJPEG response; each part carries `Content-Length`. */
 export async function* mjpeg(url: string, signal: AbortSignal) {
   const response = await fetch(url, { signal })
@@ -298,13 +420,15 @@ export async function* mjpeg(url: string, signal: AbortSignal) {
   yield* parts(response.body, signal)
 }
 
-export async function* parts(body: ReadableStream<Uint8Array>, signal?: AbortSignal) {
+export async function* parts(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<Part> {
   const reader = body.getReader()
   signal?.addEventListener("abort", () => void reader.cancel().catch(() => undefined), { once: true })
   let buffer: Uint8Array = new Uint8Array(0)
+  let started = 0
   while (true) {
     const chunk = await reader.read().catch(() => ({ done: true as const, value: undefined }))
     if (chunk.done) return
+    if (started === 0) started = Date.now()
     buffer = concat(buffer, chunk.value)
     while (true) {
       const header = headerEnd(buffer)
@@ -315,8 +439,10 @@ export async function* parts(body: ReadableStream<Uint8Array>, signal?: AbortSig
         continue
       }
       if (buffer.byteLength < header + 4 + length) break
-      yield buffer.slice(header + 4, header + 4 + length)
+      yield { jpeg: buffer.slice(header + 4, header + 4 + length), receivedAt: started }
       buffer = buffer.subarray(header + 4 + length)
+      // More than the separator left means the next part arrived with this chunk; otherwise wait for its bytes.
+      started = buffer.byteLength > 2 ? Date.now() : 0
     }
   }
 }
@@ -482,8 +608,28 @@ export function makeTranslator() {
   let touchEdge = 0
   let pinching = false
 
+  /** Ends whatever is still pressed and forgets it. */
+  const lift = (): readonly Message[] => {
+    const [first, second] = [...fingers.values()]
+    const messages: Message[] =
+      pinching && first && second
+        ? [[0x05, { type: "end", x1: first.x, y1: first.y, x2: second.x, y2: second.y }]]
+        : first
+          ? [[0x03, { type: "end", x: first.x, y: first.y, edge: touchEdge }]]
+          : []
+    fingers.clear()
+    leftover.clear()
+    pinching = false
+    touchEdge = 0
+    return messages
+  }
+
   const touch = (event: Extract<Input, { type: "touch" }>, degrees: number): readonly Message[] => {
     const pointer = event.pointer ?? 0
+    // The viewer reuses a finger's number only after lifting it, so a new touch on a number still held means its
+    // end never arrived (the gesture was interrupted): end the old gesture and start over.
+    if (event.phase === "began" && (fingers.has(pointer) || leftover.has(pointer)))
+      return [...lift(), ...touch(event, degrees)]
     const ending = event.phase === "ended" || event.phase === "cancelled"
     if (leftover.has(pointer)) {
       if (ending) leftover.delete(pointer)
@@ -536,5 +682,5 @@ export function makeTranslator() {
     if (event.type === "text") return [...event.text].flatMap((character) => press(character, []))
     return []
   }
-  return { translate }
+  return { translate, lift }
 }

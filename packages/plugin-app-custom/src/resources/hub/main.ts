@@ -20,6 +20,7 @@ export async function main() {
   await fs.mkdir(state, { recursive: true, mode: 0o700 })
   const lock = path.join(state, "hub.lock")
   if (!(await acquire(lock))) return
+  await Promise.all(Object.values(adapters).map((adapter) => adapter.recover?.()))
   const secret = randomBytes(32).toString("base64url")
   const hub = createHub({ adapters, secret, file: path.join(state, "resources.json") })
   await hub.start()

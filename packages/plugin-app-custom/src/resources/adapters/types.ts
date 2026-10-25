@@ -64,6 +64,8 @@ export interface StreamSink {
  *   starts it once per resource and shares it. Without `stream`, viewers fall back to snapshot polling.
  * - `input` applies one event; the hub only calls it while Alexandre holds control with a matching ticket.
  *   Never log `text` events.
+ * - `recover` runs once when a hub starts (holding its state directory's lock), before it serves: clean up what a
+ *   previous hub of the same directory left behind when it died abruptly (helper processes).
  */
 export interface Adapter {
   readonly kind: Resources.Kind
@@ -71,4 +73,5 @@ export interface Adapter {
   snapshot(entry: Entry): Promise<Image>
   stream?(entry: Entry, sink: StreamSink, signal: AbortSignal): Promise<void>
   input?(entry: Entry, event: Input): Promise<void>
+  recover?(): Promise<void>
 }

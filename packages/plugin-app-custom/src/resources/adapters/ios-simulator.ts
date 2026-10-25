@@ -2,7 +2,16 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { run, size, text } from "./process.js"
-import { acquire, makeTranslator, rotation, typeable, withHelper, type Config, type Helper } from "./serve-sim.js"
+import {
+  acquire,
+  makeTranslator,
+  recover,
+  rotation,
+  typeable,
+  withHelper,
+  type Config,
+  type Helper,
+} from "./serve-sim.js"
 import type { Adapter, Entry, Probe, StreamSink } from "./types.js"
 
 /**
@@ -44,26 +53,49 @@ export const adapter: Adapter = {
     }
   },
   async stream(entry, sink, signal) {
-    const lease = await acquire(udidOf(entry))
+    const udid = udidOf(entry)
+    const lease = await acquire(udid)
     const stop = lease.helper.onConfig((config) => sink.meta(orientationMeta(config)))
+    // Video keeps flowing while serve-sim's input socket reconnects; say so instead of failing touches silently.
+    const stopInput = lease.helper.onInput((available) =>
+      sink.notice?.(
+        available ? "Controle do simulador restabelecido." : "Controle do simulador indisponível; reconectando…",
+      ),
+    )
     return relay(lease.helper, sink, signal).finally(() => {
       stop()
+      stopInput()
+      // Nobody watches any more: lift a finger whose end will never come.
+      if (lease.helper.inputAvailable())
+        translator(udid, lease.helper)
+          .lift()
+          .forEach(([tag, body]) => lease.helper.send(tag, body))
       lease.release()
     })
   },
   async input(entry, event) {
     const udid = udidOf(entry)
-    const translator = translators.get(udid) ?? makeTranslator()
-    translators.set(udid, translator)
     // Input arrives while the viewer streams, so this reuses the stream's helper.
     await withHelper(udid, async (helper) => {
       if (event.type === "text" && !typeable(event.text)) return helper.paste(event.text)
-      translator.translate(event, helper.config()).forEach(([tag, body]) => helper.send(tag, body))
+      translator(udid, helper)
+        .translate(event, helper.config())
+        .forEach(([tag, body]) => helper.send(tag, body))
     })
   },
+  recover: () => recover(),
 }
 
-const translators = new Map<string, ReturnType<typeof makeTranslator>>()
+const translators = new Map<string, { generation: number; translator: ReturnType<typeof makeTranslator> }>()
+
+/** The simulator's gesture state, fresh whenever serve-sim's input socket was readmitted (it lifted every finger). */
+function translator(udid: string, helper: Helper) {
+  const current = translators.get(udid)
+  if (current && current.generation === helper.inputGeneration()) return current.translator
+  const fresh = { generation: helper.inputGeneration(), translator: makeTranslator() }
+  translators.set(udid, fresh)
+  return fresh.translator
+}
 
 function udidOf(entry: Entry) {
   if (entry.meta.kind !== "ios-simulator") throw new Error("Not an iOS simulator")
@@ -75,20 +107,30 @@ function orientationMeta(config: Config) {
   return { orientation: config.orientation, rotation: rotation(config) }
 }
 
-/** Forwards JPEG frames, announcing their size again when it changes. */
-async function relay(helper: Helper, sink: StreamSink, signal: AbortSignal) {
+/**
+ * Forwards JPEG frames, announcing their size again when it changes (an `economy` profile shrinks them). serve-sim repeats the last frame at 5 fps while
+ * the screen is still; repeats are dropped, so a still screen costs nothing between viewers and the hub (it caches the
+ * last frame for viewers that join, and its own heartbeat keeps them alive).
+ */
+export async function relay(helper: Helper, sink: StreamSink, signal: AbortSignal) {
   const announced = { width: 0, height: 0 }
   const config = helper.config()
   if (config) sink.meta(orientationMeta(config))
-  for await (const frame of helper.frames(signal)) {
-    const dimensions = size(frame)
+  let last: Buffer | undefined
+  for await (const part of helper.frames(signal)) {
+    // serve-sim repeats frames at 5 fps even when still, so a profile change applies within 200 ms.
+    void helper.profile(sink.profile?.() ?? "standard")
+    const jpeg = Buffer.from(part.jpeg.buffer, part.jpeg.byteOffset, part.jpeg.byteLength)
+    if (last?.equals(jpeg)) continue
+    last = jpeg
+    const dimensions = size(part.jpeg)
     if (dimensions && (dimensions.width !== announced.width || dimensions.height !== announced.height)) {
       Object.assign(announced, dimensions)
       sink.hello({ format: "jpeg", width: dimensions.width, height: dimensions.height })
       const current = helper.config()
       if (current) sink.meta(orientationMeta(current))
     }
-    sink.frame(frame)
+    sink.frame(part.jpeg, { capturedAt: part.receivedAt })
   }
 }
 

@@ -141,6 +141,10 @@ await new Promise((resolve) => (ws.onopen = () => { opened = performance.now(); 
 const first = await new Promise<number>((resolve) => waiters.push(resolve))
 const firstFrame = first - opened
 await Bun.sleep(1500)
+// Still screen: serve-sim repeats its last frame at 5 fps; the adapter should forward none of the repeats.
+const stillStart = { frames, bytes }
+await Bun.sleep(10000)
+const still = { seconds: 10, frames: frames - stillStart.frames, kB: +((bytes - stillStart.bytes) / 1024).toFixed(1) }
 const send = (events: unknown[]) => ws.send(JSON.stringify({ type: "input", events }))
 // A previous run may have left the simulator sideways; turn it back to portrait.
 for (let turn = 0; turn < 3 && (meta as { rotation?: number } | undefined)?.rotation; turn++) {
@@ -160,7 +164,7 @@ for (let i = 0; i < taps; i++) {
 const sorted = samples.toSorted((a, b) => a - b)
 const pick = (p: number) => +sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))].toFixed(1)
 ws.close()
-console.log(JSON.stringify({ hello, meta, firstFrameMs: +firstFrame.toFixed(1), taps: samples.length,
+console.log(JSON.stringify({ hello, meta, firstFrameMs: +firstFrame.toFixed(1), still, taps: samples.length,
   tapToFrameMs: { p50: pick(0.5), p90: pick(0.9), min: +sorted[0].toFixed(1), max: +sorted.at(-1).toFixed(1) },
   frames, averageKB: +(bytes / Math.max(1, frames) / 1024).toFixed(1) }))
 process.exit(0)
