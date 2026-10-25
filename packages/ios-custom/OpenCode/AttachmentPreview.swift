@@ -37,6 +37,7 @@ struct FeedImageView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var scale
   @Environment(\.conversationImages) private var context
+  @Environment(\.openImage) private var openImage
   let source: String
   var name = "Imagem"
   var compact = false
@@ -50,7 +51,7 @@ struct FeedImageView: View {
     VStack(alignment: .leading, spacing: 6) {
       if let thumbnailSize {
         Button {
-          if image != nil { open = true }
+          if image != nil { present() }
           if failure != nil { attempt += 1 }
         } label: {
           Group {
@@ -70,7 +71,7 @@ struct FeedImageView: View {
           .accessibilityIdentifier(image == nil ? "feed-image-placeholder-\(name)" : "feed-image-\(name)")
       } else {
       if let image {
-        Button { open = true } label: {
+        Button { present() } label: {
           Image(decorative: image, scale: scale).resizable().scaledToFit()
             .frame(maxWidth: compact ? 160 : .infinity, maxHeight: compact ? 110 : 300)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -119,6 +120,7 @@ struct FeedImageView: View {
         failure = FeedImageFailure.map(error)
       }
     }
+    // Only views without a conversation-level host (such as a Markdown file in the viewer) present here.
     .fullScreenCover(isPresented: $open) {
       Group {
         // Server files open in the file viewer, which can page through their directory.
@@ -135,7 +137,14 @@ struct FeedImageView: View {
   }
 }
 
-private struct FeedImageFullscreen: View {
+extension FeedImageView {
+  /// Transcript rows are recycled, so the viewer is presented by the conversation, not by this row.
+  private func present() {
+    if let openImage, let context { openImage.open(source, name, context) } else { open = true }
+  }
+}
+
+struct FeedImageFullscreen: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   @Environment(\.conversationImages) private var context
@@ -169,6 +178,8 @@ private struct FeedImageFullscreen: View {
       }
     }.tint(theme.color(.primary))
       .task(id: attempt) {
+        // `.task` also reruns when the view reappears; a shown image is not reloaded.
+        guard image == nil else { return }
         guard let context else { failure = .unavailable; return }
         failure = nil
         do {

@@ -18,6 +18,7 @@ import signal
 import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -79,7 +80,9 @@ outside.mkdir(parents=True)
 created = []
 configured = derived / ("Build/Products/FileViewer-" + token + ".xctestrun")
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
-environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
+signals_dir = evidence / ("signals-" + token)
+signals_dir.mkdir(parents=True, exist_ok=True)
+environment = {"OPENCODE_VIEWER_SIGNALS": str(signals_dir), "OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
     "OPENCODE_TEST_SERVER_URL": url}
 try:
     # Server order (directories first, then localeCompare) is the same as the web file tree.
@@ -274,7 +277,45 @@ Bloco depois do link
         "-maximum-test-execution-time-allowance", "600", "-resultBundlePath", str(result)]
     for test in sys.argv[1:] or ["OpenCodeUITests/FileViewerNavigationTests"]:
         command.append("-only-testing:" + test)
+    # Background activity for the viewer-reload test: the UI test writes `zoomed`, this thread changes the open
+    # Session (title, a short Luna 6 / low reply) and another one, then writes `done`.
+    signals = Path(environment["OPENCODE_VIEWER_SIGNALS"])
+    def background():
+        while not (signals / "zoomed").exists():
+            if (signals / "stop").exists():
+                return
+            time.sleep(0.2)
+        log = []
+        def step(name):
+            log.append([round(time.time(), 3), name])
+            print("VIEWER_BACKGROUND", name, flush=True)
+        try:
+            target = environment["OPENCODE_VIEWER_" + (signals / "zoomed").read_text().strip()]
+            step("rename")
+            api("/api/session/" + target, {"title": "Visualizador · renomeada"}, "PATCH")
+            time.sleep(3)
+            for session in [target, environment["OPENCODE_VIEWER_DOCS"]]:
+                step("prompt " + session)
+                before = int(time.time() * 1000)
+                api("/api/session/" + session + "/prompt", {"id": "msg_" + uuid.uuid4().hex, "delivery": "steer",
+                    "text": "Sem usar ferramentas, escreva uma lista numerada de 1 a 80, uma linha por item, cada item com uma frase curta sobre o mar."
+                        if session == target else "Responda apenas com a palavra ok, sem usar ferramentas."})
+                deadline = time.monotonic() + 90
+                while time.monotonic() < deadline:
+                    info = api("/api/session/" + session, method="GET")["data"]
+                    if info["time"].get("idle", 0) > before:
+                        break
+                    time.sleep(0.5)
+                last = api("/api/session/" + session + "/message?limit=1&order=desc", method="GET")["data"]
+                step("idle " + session + " " + json.dumps(last)[:400])
+                time.sleep(2)
+        except Exception as error:
+            step("error " + repr(error)[:300])
+        (signals / "done").write_text(json.dumps(log))
+    worker = threading.Thread(target=background, daemon=True)
+    worker.start()
     status = subprocess.call(command)
+    (signals / "stop").write_text("1")
     exported = evidence / ("attachments-" + token)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(exported)], check=True)
     for test in json.loads((exported / "manifest.json").read_text()):
@@ -292,3 +333,4 @@ finally:
         api("/api/session/" + session, method="DELETE")
     shutil.rmtree(root, ignore_errors=True)
     shutil.rmtree(outside, ignore_errors=True)
+    shutil.rmtree(signals_dir, ignore_errors=True)

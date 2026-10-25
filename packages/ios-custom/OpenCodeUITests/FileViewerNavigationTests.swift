@@ -329,6 +329,52 @@ import XCTest
     app.terminate()
   }
 
+  /// The reported reload: while a reply streams, the image's transcript row scrolls away and is recycled; the next
+  /// scene deactivation (Notification Center, Control Center, background) used to rebuild the viewer at fit.
+  func testZoomSurvivesStreamingAndSceneDeactivation() throws {
+    let signals = URL(fileURLWithPath: try XCTUnwrap(environment["OPENCODE_VIEWER_SIGNALS"]))
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    for role in ["FEED", "LINK", "DATA"] {
+      let app = try launch(role == "LINK" ? "FEED" : role)
+      switch role {
+      case "FEED": openFeedImage(app)
+      case "LINK": open("Abrir PNG", app: app)
+      default:
+        let embedded = app.buttons["feed-image-Embutida"]
+        XCTAssertTrue(embedded.waitForExistence(timeout: 25))
+        embedded.tap()
+      }
+      let image = app.images["fullscreen-image"]
+      XCTAssertTrue(image.waitForExistence(timeout: 25), role)
+      image.pinch(withScale: 3, velocity: 2)
+      expect(image, value: "Ampliada", role)
+      if role == "FEED" {
+        // A long Luna 6 / low reply in the same Session follows the tail past the image row.
+        try "FEED".write(to: signals.appendingPathComponent("zoomed"), atomically: true, encoding: .utf8)
+        let done = signals.appendingPathComponent("done")
+        let deadline = Date().addingTimeInterval(240)
+        while Date() < deadline, !FileManager.default.fileExists(atPath: done.path) { Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: done.path), "background reply")
+        expect(image, value: "Ampliada", "\(role) after streaming")
+      }
+      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.001)).press(forDuration: 0.1,
+        thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)))
+      Thread.sleep(forTimeInterval: 2)
+      springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.99)).press(forDuration: 0.1,
+        thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+      Thread.sleep(forTimeInterval: 2)
+      expect(image, value: "Ampliada", "\(role) after Notification Center")
+      XCUIDevice.shared.press(.home)
+      Thread.sleep(forTimeInterval: 3)
+      app.activate()
+      Thread.sleep(forTimeInterval: 3)
+      XCTAssertTrue(image.waitForExistence(timeout: 10), role)
+      expect(image, value: "Ampliada", "\(role) after background")
+      screenshot("zoom-kept-after-background-" + role.lowercased())
+      app.terminate()
+    }
+  }
+
   func testFileKinds() throws {
     let app = try launch("LINKS")
     let kinds: [(String, String, String)] = [("PNG", "a-imagem.png", "image"), ("JPG", "b-foto.jpg", "image"),

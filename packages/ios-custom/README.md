@@ -908,6 +908,18 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
 - `ChatReadAloudTests` (through `test-file-viewer.py`, both themes) imports a two-turn session and uses the sandbox's
   real gateway (a few seconds of speech per run).
 
+#### Viewer reload — 25 October
+
+- **Zoom reset without a touch:** chat images presented their viewer from their own transcript row. While a reply
+  streamed, following the tail scrolled that row away and the recycling `List` released it; the next scene
+  deactivation (Notification Center, Control Center, app switcher, background) rebuilt the orphaned presentation with
+  a new `FileViewer` state, which downloaded, decoded and fitted the image again. The UI test reproduced it on the
+  previous code (`FEED after Notification Center`). Links already used the conversation-level host.
+- `FileViewerHost` now presents both files and chat images (`openImage`), so the viewer outlives transcript rows.
+  A viewer's disappearance only suspends an unfinished download; the downloaded file is removed when its store goes
+  away, and the decoded image is not reloaded when the view reappears. Images inside a file viewer still present
+  over it.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

@@ -18,17 +18,51 @@ extension EnvironmentValues {
   @Entry var openFile: FileOpenAction? = nil
 }
 
+/// Opens a chat image (Markdown, tool output or attachment) in the conversation-level viewer.
+struct ImageOpenAction {
+  let open: (_ source: String, _ name: String, _ context: ConversationImageContext) -> Void
+}
+extension ImageOpenAction: Equatable {
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+extension EnvironmentValues {
+  @Entry var openImage: ImageOpenAction? = nil
+}
+
+/// Presents the file and image viewers from a view that outlives transcript rows. A presentation owned by a
+/// recycled List row is rebuilt from scratch, with a new viewer state, once that row has scrolled away.
 struct FileViewerHost: ViewModifier {
   @Environment(\.conversationImages) private var context
   @State private var selection: Selection?
-  private struct Selection: Identifiable { let id: String }
+  private enum Selection: Identifiable {
+    case file(String)
+    case image(source: String, name: String, context: ConversationImageContext)
+    var id: String {
+      switch self {
+      case .file(let path): "file:" + path
+      case .image(let source, _, _): "image:" + source
+      }
+    }
+  }
   func body(content: Content) -> some View {
-    content.environment(\.openFile, FileOpenAction(open: { selection = Selection(id: $0) }))
+    content.environment(\.openFile, FileOpenAction(open: { selection = .file($0) }))
+      .environment(\.openImage, ImageOpenAction(open: { selection = .image(source: $0, name: $1, context: $2) }))
       .fullScreenCover(item: $selection) { selection in
-        if let context {
-          FileViewer(source: selection.id, context: context).floatingVoiceInset()
-            .modifier(FloatingVoiceScope())
+        Group {
+          switch selection {
+          case .file(let path):
+            if let context { FileViewer(source: path, context: context) }
+          case .image(let source, let name, let context):
+            // Server files open in the file viewer, which can page through their directory.
+            if case .local = FeedImageReference(source) {
+              FileViewer(source: source, context: context, name: ["", "Imagem"].contains(name) ? nil : name, exact: true)
+            } else {
+              FeedImageFullscreen(source: source, name: name).environment(\.conversationImages, context)
+            }
+          }
         }
+        .floatingVoiceInset()
+        .modifier(FloatingVoiceScope())
       }
   }
 }
@@ -161,6 +195,17 @@ struct FileViewerHost: ViewModifier {
     file = nil
     preview = nil
     text = nil
+  }
+  /// Starts the first load or resumes one interrupted by `suspend()`; a loaded, failed or waiting file stays as is.
+  func begin() {
+    guard file == nil, loading, task?.isCancelled != false else { return }
+    start()
+  }
+  /// A disappearance is not always a dismissal (a scene deactivation can report one), so a loaded file survives it.
+  func suspend() { task?.cancel() }
+  isolated deinit {
+    task?.cancel()
+    if let file { FilePreviewStorage.remove(file) }
   }
 }
 
@@ -302,6 +347,8 @@ struct FileViewer: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .environment(\.openFile, FileOpenAction(open: follow))
+      // Images inside a file resolve against it and present over this viewer, not the conversation.
+      .environment(\.openImage, nil)
       // A new file always starts with fresh viewer state, including zoom.
       .id(store.source)
       .gesture(FilePageSwipe(previous: neighbor(-1) != nil, next: neighbor(1) != nil, page: page))
@@ -345,7 +392,7 @@ struct FileViewer: View {
     }
     .tint(theme.color(.primary))
     .sheet(isPresented: $sharing) { if let file = store.file { FileShareSheet(file: file) } }
-    .task { store.start() }
+    .task { store.begin() }
     .task(id: store.path) {
       // The opened file's directory defines the sequence; paging keeps it.
       guard siblings == nil, let path = store.path, case .local = FeedImageReference(store.source) else { return }
@@ -353,7 +400,7 @@ struct FileViewer: View {
       guard !Task.isCancelled, store.path == path else { return }
       siblings = listed
     }
-    .onDisappear { store.close() }
+    .onDisappear { store.suspend() }
   }
   private func pageButton(_ step: Int, symbol: String, label: String, identifier: String) -> some View {
     Button { page(step) } label: {
@@ -409,11 +456,12 @@ private struct FileImagePreview: View {
   let dismiss: () -> Void
   let retry: () -> Void
   @State private var image: CGImage?
+  @State private var decoded: URL?
   @State private var animated = false
   @State private var failed = false
   var body: some View {
     Group {
-      if let image { ZoomableImageView(image: image, name: name, animation: animated ? file : nil, dismiss: dismiss) }
+      if let image { ZoomableImageView(image: image, name: name, animation: animated ? file : nil, dismiss: dismiss).id(decoded) }
       else if failed {
         VStack(spacing: 12) {
           Text("Não foi possível exibir a imagem")
@@ -423,15 +471,18 @@ private struct FileImagePreview: View {
       else { ProgressView("Carregando imagem…") }
     }
     .task(id: file) {
-      let decoded = await Task.detached(priority: .userInitiated) {
+      // `.task` also reruns when the view reappears; the decoded image and its zoom stay.
+      guard decoded != file else { return }
+      let result = await Task.detached(priority: .userInitiated) {
         let data = try? Data(contentsOf: file, options: .mappedIfSafe)
         let frames = data.flatMap { CGImageSourceCreateWithData($0 as CFData, nil) }.map(CGImageSourceGetCount) ?? 0
         return (data.flatMap { AttachmentImage.thumbnail($0, maxPixelSize: nil) }, frames > 1)
       }.value
       guard !Task.isCancelled else { return }
-      animated = decoded.1
-      self.image = decoded.0
-      failed = decoded.0 == nil
+      animated = result.1
+      image = result.0
+      decoded = file
+      failed = result.0 == nil
     }
   }
 }
