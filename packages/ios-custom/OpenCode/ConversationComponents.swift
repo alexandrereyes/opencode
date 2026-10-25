@@ -59,8 +59,20 @@ extension AppTheme {
   }
 }
 
+/// A tap on a pinned prompt's body returns to the start of its turn. The handler answers whether it took
+/// the tap and resolves the turn only when invoked; equality ignores it, so the bubble never re-renders for it.
+struct UserPromptJump: Equatable {
+  let perform: (String) -> Bool
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+extension EnvironmentValues {
+  @Entry var userPromptJump: UserPromptJump? = nil
+}
+
 struct UserBubble: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.userPromptJump) private var promptJump
   @Environment(\.userMessageRevert) private var reversion
   @Environment(\.userMessagePending) private var pendingInput
   @Environment(\.userMessageUndelivered) private var undelivered
@@ -87,7 +99,8 @@ struct UserBubble: View {
             if folded && message.displayText.isEmpty {
               UserPrompt(
                 text: contextSummary, theme: theme, collapsed: true, maximumHeight: maximumTextHeight,
-                revealRange: nil, truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
+                revealRange: nil, truncationChanged: { truncated = $0 }, expand: { setExpanded(true) },
+                jump: promptJump.map { jump in { jump.perform(message.id) } }
               ).accessibilityIdentifier("user-context-summary-\(message.id)")
             }
             if !folded {
@@ -114,7 +127,8 @@ struct UserBubble: View {
               UserPrompt(
                 text: promptText, theme: theme, collapsed: collapsible && !expanded,
                 maximumHeight: maximumTextHeight, revealRange: searchRange,
-                truncationChanged: { truncated = $0 }, expand: { setExpanded(true) }
+                truncationChanged: { truncated = $0 }, expand: { setExpanded(true) },
+                jump: promptJump.map { jump in { jump.perform(message.id) } }
               ).accessibilityIdentifier("user-prompt-\(message.id)")
             }
           }.accessibilityIdentifier("user-content-\(message.id)")
@@ -139,6 +153,9 @@ struct UserBubble: View {
           #endif
         }
         .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
+        // Its buttons and the prompt's own tap take precedence; the actions below the bubble are outside it.
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture { _ = promptJump?.perform(message.id) }
         HStack(spacing: 8) {
           if let pendingInput {
             pendingActions(pendingInput)

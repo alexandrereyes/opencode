@@ -49,8 +49,10 @@ import UIKit
       let control = try toggle(app)
       let text = try prompt(app)
       XCTAssertTrue(control.waitForExistence(timeout: 10))
-      // A saved reading anchor can open with the prompt still in its natural
-      // position. Cross the sticky edge before comparing pinned coordinates.
+      // A saved reading anchor can open with the prompt still in its natural position: the previous
+      // theme's pinned tap saved the start of the turn. Cross the sticky edge with room for the drags
+      // below, which fling, before comparing pinned coordinates.
+      scrollAnswer(app, below: control.frame.maxY, up: true)
       scrollAnswer(app, below: control.frame.maxY, up: true)
       XCTAssertEqual(control.value as? String, "Recolhido")
       let height = text.frame.height
@@ -64,7 +66,10 @@ import UIKit
         XCTAssertEqual(text.frame.height, height, accuracy: 1)
         XCTAssertEqual(text.frame.minY, y, accuracy: 2)
       }
+      // A pinned prompt's text returns to the start of its turn (PinnedPromptJumpTests); the control expands.
       text.tap()
+      XCTAssertEqual(control.value as? String, "Recolhido")
+      control.tap()
       wait(NSPredicate(format: "value == 'Expandido'"), on: control)
       XCTAssertGreaterThan(text.frame.height, height)
       XCTAssertLessThanOrEqual(text.frame.height, app.frame.height * 0.4)

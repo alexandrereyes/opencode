@@ -190,7 +190,17 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   like OpenChamber** — scrolling never collapses or expands it. **Você → Leitura → Recolher mensagens longas do usuário**
   is on by default: overflow beyond two rendered lines offers **Mostrar mensagem completa** / **Mostrar menos**.
   Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
-  fade. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
+  fade. **Alexandre, 25/10:** while the bubble is pinned at the top edge, tapping its body (the prompt text and the
+  bubble around it) scrolls once (0.35 s ease-out; instant with Reduzir Movimento) until the turn's first row,
+  the first step even when tools and subagents precede the final-answer divider, sits right below the bubble. The
+  owner (`ConversationScrollState.revealTurn`) starts a distant jump one viewport from that row, after revealing it by
+  identity when it is not laid out, aims each frame at its live position, then holds it as the reading anchor and
+  saves the position. While it runs, it owns the offset like a finger: corrections, older pages and settling wait;
+  a touch or drag stops it; **Ir para a mais recente** and new prompts replace it. A pinned bubble already at its
+  turn's start only plays a selection haptic. An inline bubble keeps its old taps, so its truncated text expands;
+  pinned, expansion is the **Mostrar mensagem completa** control. Its buttons (**Mostrar mensagem completa**,
+  **Ir ao trecho citado**, context cards, image thumbnails) and the actions below the bubble (redefinir, copiar) keep their
+  own behavior, as does the long-press menu. VoiceOver offers **Ir para o começo da resposta** on the prompt text. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
   actions stay outside it. Attachments use 48-point square image thumbnails in a horizontal strip, no repeated image
   filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the bubble is
   folded (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
@@ -1771,7 +1781,8 @@ normal simulator signing configuration when running Keychain/server regressions,
 ## Offline scrolling fixtures and performance checks
 
 Debug builds accept `-OpenCodeScrollFixture conversation` or `-OpenCodeScrollFixture sessions`, optionally
-`-OpenCodeFixturePosition top|middle|tail`, `-OpenCodeTheme openchamber-light|openchamber-dark` and
+`-OpenCodeFixturePosition top|middle|tail` or a fixture message ID (`msg_scroll_0204` opens deep in a turn whose
+first row is not laid out), `-OpenCodeTheme openchamber-light|openchamber-dark` and
 `-OpenCodeFixtureUpdates` (four local preview updates per second). This bypasses server setup, SSE and pruning;
 the fixture client's HTTP transport rejects every request. Never combine this mode with a live-server test.
 The bundled JSON has 300 messages/525 parts and 300 rows. Only sizes, Markdown structure and tool kinds came

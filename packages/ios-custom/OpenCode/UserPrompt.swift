@@ -9,6 +9,8 @@ struct UserPrompt: UIViewRepresentable {
   let revealRange: NSRange?
   let truncationChanged: (Bool) -> Void
   let expand: () -> Void
+  /// Answers whether a pinned prompt took the tap to return to its turn.
+  var jump: (() -> Bool)?
 
   func makeUIView(context: Context) -> UserPromptScrollView { UserPromptScrollView() }
   func updateUIView(_ view: UserPromptScrollView, context: Context) {
@@ -30,6 +32,7 @@ struct UserPrompt: UIViewRepresentable {
     view.collapsed = collapsed
     view.truncationChanged = truncationChanged
     view.expand = expand
+    view.jump = jump
     view.revealRange = revealRange
     view.setNeedsLayout()
   }
@@ -44,6 +47,16 @@ final class UserPromptScrollView: UIScrollView {
   var collapsed = true
   var truncationChanged: ((Bool) -> Void)?
   var expand: (() -> Void)?
+  var jump: (() -> Bool)? {
+    didSet {
+      guard (jump == nil) != (oldValue == nil) else { return }
+      label.accessibilityCustomActions = jump == nil ? nil : [
+        UIAccessibilityCustomAction(name: "Ir para o começo da resposta") { [weak self] _ in
+          self?.jump?() == true
+        }
+      ]
+    }
+  }
   var revealRange: NSRange? {
     didSet { if revealRange != oldValue { revealedRange = nil } }
   }
@@ -131,6 +144,7 @@ final class UserPromptScrollView: UIScrollView {
   }
 
   @objc private func tapped() {
+    if jump?() == true { return }
     if collapsed && truncated { expand?() }
   }
 }

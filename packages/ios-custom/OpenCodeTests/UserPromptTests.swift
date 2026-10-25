@@ -11,6 +11,20 @@ import XCTest
     XCTAssertFalse(view.label.accessibilityTraits.contains(.button))
   }
 
+  func testPinnedPromptOffersVoiceOverJumpToTheStartOfTheAnswer() throws {
+    let view = UserPromptScrollView()
+    XCTAssertNil(view.label.accessibilityCustomActions)
+    var pinned = false
+    view.jump = { pinned }
+    let action = try XCTUnwrap(view.label.accessibilityCustomActions?.first)
+    XCTAssertEqual(action.name, "Ir para o começo da resposta")
+    XCTAssertFalse(action.actionHandler?(action) ?? true)
+    pinned = true
+    XCTAssertTrue(action.actionHandler?(action) ?? false)
+    view.jump = nil
+    XCTAssertNil(view.label.accessibilityCustomActions)
+  }
+
   func testMeasuredTwoLineThresholdPreservesNewlinesAndInternalScrolling() {
     let view = UserPromptScrollView()
     view.label.text = "Primeira linha\nSegunda linha"

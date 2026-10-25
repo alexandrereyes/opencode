@@ -749,6 +749,7 @@ struct ConversationView: View {
                 message: user.presented(isChild: conversation.isChild),
                 scrollState: scrollState, viewport: viewport
               ).equatable()
+              .environment(\.userPromptJump, UserPromptJump { jumpToTurn($0) })
               .listRowInsets(EdgeInsets())
               .textCase(nil)
               .id(user.id)
@@ -966,6 +967,31 @@ struct ConversationView: View {
     captureRequested = true
     scrollState.followToEnd(animated: animated)
     scheduleCapture()
+  }
+  /// A pinned prompt returns to the first row of its turn, even when later steps followed it.
+  private func jumpToTurn(_ prompt: String) -> Bool {
+    guard let row = sections.first(where: { $0.user?.id == prompt })?.messages.first?.message.id
+    else { return false }
+    let jump = scrollState.revealTurn(prompt: prompt, row: row)
+    switch jump {
+    case .unpinned: return false
+    case .repeated: return true
+    case .settled:
+      Haptics.play(.selection)
+      return true
+    case .scrolled, .unmeasured: break
+    }
+    // The scroll state already replaced its anchors; cancelling through it would stop the jump.
+    restorationTask?.cancel()
+    restorationTask = nil
+    restoring = false
+    resumeOffered = false
+    selectionPaused = false
+    userScrolling = false
+    atBottom = false
+    captureRequested = true
+    if jump == .unmeasured { conversation.revealMessage(row) } else { scheduleCapture() }
+    return true
   }
   private func revealQuote(_ quote: ChatQuote, mark: ChatQuoteMark? = nil) {
     quoteAligned = nil

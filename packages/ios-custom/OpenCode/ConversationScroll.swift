@@ -13,12 +13,12 @@ import SwiftUI
   /// The offline driver's virtual finger: programmatic offsets never report tracking or dragging.
   var simulatedTouch = false
   #endif
-  /// A finger or fling currently owns the offset.
+  /// A finger, fling or prompt jump currently owns the offset.
   var touching: Bool {
     #if DEBUG
     if simulatedTouch { return true }
     #endif
-    return view.map { $0.isTracking || $0.isDecelerating } == true
+    return jumpLink != nil || view.map { $0.isTracking || $0.isDecelerating } == true
   }
   var nearBottom = true
   var following: Bool { plan.following }
@@ -33,6 +33,9 @@ import SwiftUI
   private var plan = ConversationScrollPlan()
   private var link: CADisplayLink?
   private var animation: UIViewPropertyAnimator?
+  private var jump: (row: String, top: CGFloat, target: CGFloat, start: CFTimeInterval, eased: CGFloat)?
+  private var jumpLink: CADisplayLink?
+  private var jumpedAt: CFTimeInterval = 0
   private weak var observedView: UIScrollView?
   private var active = true
   #if DEBUG
@@ -127,6 +130,64 @@ import SwiftUI
     animation?.stopAnimation(false)
     animation?.finishAnimation(at: .current)
     animation = nil
+    endJump()
+  }
+  enum TurnJump { case unpinned, repeated, settled, scrolled, unmeasured }
+  /// Brings a turn's first row just below its pinned prompt with one scroll, then holds it there as the
+  /// reading anchor. A distant row is approached from one viewport away, so the animation never lays out
+  /// the rows in between, and each frame aims at the row's live frame while the rows it passes measure.
+  func revealTurn(prompt: String, row: String) -> TurnJump {
+    // The prompt's text and the bubble around it both observe the same tap.
+    guard CACurrentMediaTime() - jumpedAt > 0.4 else { return .repeated }
+    guard active, let view, let header = activeHeaders.first(where: { $0.id == prompt })?.view
+    else { return .unpinned }
+    jumpedAt = CACurrentMediaTime()
+    let top = header.convert(header.bounds, to: view).maxY - view.bounds.minY
+    if let frame = frames[row], frame.minY >= top - 1 { return .settled }
+    let origin = view.contentOffset.y
+    stop()
+    anchor = nil
+    readingAnchor = nil
+    if frames[row] == nil, let reveal {
+      reveal(row)
+      view.window?.layoutIfNeeded()
+    }
+    guard let frame = frames[row] else { return .unmeasured }
+    readingAnchor = (row, 0, Double(top))
+    let target = max(-view.adjustedContentInset.top, view.contentOffset.y + frame.minY - top)
+    if UIAccessibility.isReduceMotionEnabled {
+      view.setContentOffset(CGPoint(x: view.contentOffset.x, y: target), animated: false)
+      correctAnchor()
+      return .scrolled
+    }
+    let start = target + min(max(0, origin - target), view.bounds.height - top)
+    view.setContentOffset(CGPoint(x: view.contentOffset.x, y: start), animated: false)
+    jump = (row, top, target, CACurrentMediaTime(), 0)
+    let link = CADisplayLink(target: self, selector: #selector(stepJump))
+    jumpLink = link
+    link.add(to: .main, forMode: .common)
+    return .scrolled
+  }
+  @objc private func stepJump(_ link: CADisplayLink) {
+    guard active, var jump, let view, view.window != nil else { stop(); return }
+    guard !view.isTracking, !view.isDragging else { cancelAnchor(); return }
+    let progress = min(1, (link.targetTimestamp - jump.start) / 0.35)
+    let eased = 1 - pow(1 - progress, 3)
+    if let frame = frames[jump.row] { jump.target = view.contentOffset.y + frame.minY - jump.top }
+    let target = max(-view.adjustedContentInset.top, jump.target)
+    // Cover this frame's share of the remaining distance, so a re-measured row only bends the curve.
+    let y = view.contentOffset.y + (target - view.contentOffset.y) * (eased - jump.eased) / (1 - jump.eased)
+    view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: false)
+    jump.eased = eased
+    self.jump = jump
+    guard progress >= 1 else { return }
+    endJump()
+    correctAnchor()
+  }
+  private func endJump() {
+    jumpLink?.invalidate()
+    jumpLink = nil
+    jump = nil
   }
   func setVisible(_ visible: Bool) {
     active = visible
@@ -139,7 +200,7 @@ import SwiftUI
     schedule()
   }
   private func schedule() {
-    guard active, link == nil, animation == nil, let view, view.window != nil else { return }
+    guard active, link == nil, animation == nil, jumpLink == nil, let view, view.window != nil else { return }
     if observedView !== view {
       observedView?.panGestureRecognizer.removeTarget(self, action: #selector(dragged))
       view.panGestureRecognizer.addTarget(self, action: #selector(dragged))
@@ -268,6 +329,7 @@ import SwiftUI
   }
   func followToEnd(animated: Bool = false) {
     guard active else { return }
+    endJump()
     tailSettled = false
     anchor = nil
     readingAnchor = nil
