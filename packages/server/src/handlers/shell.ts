@@ -1,5 +1,6 @@
 import { Shell } from "@opencode/core/shell"
 import { Location } from "@opencode/core/location"
+import { Plugin } from "@opencode/core/plugin"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
 import { ShellNotFoundError } from "@opencode/protocol/errors"
@@ -19,6 +20,9 @@ export const ShellHandler = HttpApiBuilder.group(Api, "server.shell", (handlers)
       .handle(
         "shell.create",
         Effect.fn(function* (ctx) {
+          // Shell hooks (`shell.create.before`) come from plugins; a cold Location must finish activating them first,
+          // as session shell calls already do (`core/session/shell.ts`).
+          yield* Plugin.awaitActivation
           const shell = yield* Shell.Service
           const location = yield* Location.Service
           return yield* response(
