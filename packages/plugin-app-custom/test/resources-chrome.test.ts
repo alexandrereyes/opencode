@@ -391,11 +391,13 @@ describe.skipIf(!cli)("playwright-cli sessions", () => {
     return evaluate(probed.meta, expression)
   }
 
-  const watch = (target: Entry) => {
+  const watch = (target: Entry, options: { economy?: boolean; ready?: () => Promise<void> } = {}) => {
     const frames: { at: number; width: number }[] = []
     const states: ChromeState[] = []
     const controller = new AbortController()
     const sink: StreamSink = {
+      profile: () => (options.economy ? "economy" : "standard"),
+      whenReady: () => options.ready?.() ?? Promise.resolve(),
       hello: () => undefined,
       frame: (payload) => void frames.push({ at: Date.now(), width: size(payload)?.width ?? 0 }),
       // The Chrome adapter publishes exactly `ChromeState`.
@@ -428,6 +430,40 @@ describe.skipIf(!cli)("playwright-cli sessions", () => {
       await view.stop()
       expect(counted).toBeGreaterThan(15)
       expect(counted).toBeLessThan(60)
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "Chrome waits for the viewers before sending more, and the economy profile sends smaller, fewer frames",
+    async () => {
+      // A viewer that stops acknowledging: Chrome gets no screencast acks, so it stops after its three frames.
+      let open = true
+      let release = () => {}
+      const view = watch(entry(`${prefix}-desktop`, dir), {
+        ready: () => (open ? Promise.resolve() : new Promise<void>((resolve) => (release = resolve))),
+      })
+      await view.until(() => view.frames.length > 3)
+      open = false
+      await Bun.sleep(1_000)
+      const stalled = view.frames.length
+      await Bun.sleep(1_500)
+      expect(view.frames.length - stalled).toBeLessThanOrEqual(1)
+      open = true
+      release()
+      await view.until(() => view.frames.length > stalled + 5)
+      await view.stop()
+
+      const economy = watch(entry(`${prefix}-desktop`, dir), { economy: true })
+      await economy.until(() => economy.frames.length > 0)
+      await Bun.sleep(500)
+      const from = Date.now()
+      await Bun.sleep(3_000)
+      const counted = economy.frames.filter((frame) => frame.at >= from)
+      await economy.stop()
+      expect(counted.length).toBeGreaterThan(10)
+      expect(counted.length).toBeLessThan(40)
+      expect(counted.every((frame) => frame.width <= 800)).toBe(true)
     },
     { timeout: 30_000 },
   )

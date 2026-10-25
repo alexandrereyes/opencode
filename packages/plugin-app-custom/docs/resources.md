@@ -261,7 +261,11 @@ Like the personal Chrome on 9222, the port accepts any local process; it closes 
 **Stream.** One browser WebSocket per resource (flattened target sessions), shared by snapshot, stream and input and
 closed after 60 s unused. `Page.startScreencast` (JPEG 70, at most 1280×2400) follows one tab. Chromium keeps up to
 three frames unacknowledged, so each frame is acknowledged 200 ms after it arrives: about 15 fps on a page that repaints
-continuously (it was 44 fps with acks paced from the previous ack). During a finger scroll, on the wheel or through
+continuously (it was 44 fps with acks paced from the previous ack). Each ack also waits for `sink.whenReady`, so a viewer
+that is behind (three unacknowledged frames) slows Chrome down instead of collecting frames nobody can receive. The
+`economy` profile restarts the screencast at 800 × 1600, quality 55, acks after 300 ms (about 10 fps) and sharp
+stills at 1.5×. Chrome's sharp stills replace the hub-agnostic "send the same picture again once the screen stops"
+that Android does: there is no separate resend for Chrome. During a finger scroll, on the wheel or through
 touch emulation, the screencast restarts at half the *effective* viewport and quality 50 (a 393 px phone page goes to
 ~196 px) and returns to full size once the finger stops; the end of the movement gets a still at once.
 
@@ -285,6 +289,9 @@ margin on the right, and sharp stills (viewport only) are skipped so frames and 
 `text multiline password email username url tel number search one-time-code`, classified in the page (through shadow
 roots and same-origin frames) after taps, Tab/Enter/Escape and loads; values are never read. `editTaps` counts taps
 that land on an editable field, so a viewer reopens its keyboard on the field that already had focus.
+
+History (`canGoBack`/`canGoForward`) is read on every main-frame navigation and again at `load`, because a traversal
+can report `frameNavigated` before its history index commits.
 
 **Control end.** The hub calls the optional `Adapter.released(entry)` when control is returned or expires; Chrome stops
 its Playwright stills there.

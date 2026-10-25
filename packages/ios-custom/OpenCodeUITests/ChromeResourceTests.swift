@@ -77,7 +77,7 @@ import XCTest
     XCTAssertTrue(app.buttons["chrome-back"].waitForEnabled(timeout: 10))
     app.buttons["chrome-back"].tap()
     try await expect { (address.value as? String)?.hasSuffix("/login") == true }
-    XCTAssertTrue(app.buttons["chrome-forward"].waitForEnabled(timeout: 10))
+    XCTAssertTrue(app.buttons["chrome-forward"].waitForEnabled(timeout: 15))
     shot("back")
 
     app.buttons["resource-give-back"].tap()

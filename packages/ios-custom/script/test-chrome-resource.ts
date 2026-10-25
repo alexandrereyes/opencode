@@ -68,7 +68,10 @@ try {
     timeout: 60_000,
   })
   const shellID: string = shell.data.id
-  await until(async () => (await locate(session, await listProcesses()))?.port !== undefined, "Chrome with a CDP port")
+  await until(
+    async () => (await locate(session, await listProcesses(), workspace))[0]?.port !== undefined,
+    "Chrome with a CDP port",
+  )
   console.log("shell", shellID, "opened Chrome with a CDP port through the plugin's shell hook")
 
   // The hub's admin API stands in for discovery from the tool call.
@@ -78,14 +81,14 @@ try {
     headers: { authorization: `Bearer ${hub.secret}`, "content-type": "application/json" },
     body: JSON.stringify({
       kind: "chrome",
-      meta: { kind: "chrome", session },
+      meta: { kind: "chrome", session, workspace },
       owner: { sessionID: "ses_chrome_ui", rootSessionID: "ses_chrome_ui", agent: "build" },
       used: true,
     }),
   }).then((response) => response.json() as Promise<{ id: string }>)
   resource = registered.id
 
-  const located = await locate(session, await listProcesses())
+  const [located] = await locate(session, await listProcesses(), workspace)
   const fields = await fieldPositions(located!.port!)
   const environment = path.join(workspace, "environment.json")
   await Bun.write(

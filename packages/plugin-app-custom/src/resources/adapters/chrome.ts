@@ -37,6 +37,8 @@ export const settings = {
   stillGapMs: 1_000,
   /** …and after a lone repaint while idle (a blinking caret refreshes at most this often). */
   idleStillGapMs: 2_500,
+  /** The `economy` profile: smaller frames, lower quality and about 10 fps. */
+  economy: { quality: 55, maxWidth: 800, maxHeight: 1600, ackDelayMs: 300, maxSharpScale: 1.5 },
   /** Browser connections without stream or input for this long are closed. */
   idleMs: 60_000,
   /** CSS pixels a finger may move before a touch on a mouse-only page scrolls instead of clicking. */
@@ -188,7 +190,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 
     async stream(entry, sink, signal) {
       const browser = await live(entry)
-      await browser.use(() => browser.stream(sink, signal, () => sharpStill(entry, browser.density)))
+      await browser.use(() => browser.stream(sink, signal, (economy) => sharpStill(entry, browser.density, economy)))
     },
 
     async input(entry, event) {
@@ -228,7 +230,8 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
    * A high-density still taken by Playwright itself (`page.screenshot({ scale: "device" })` through the session's
    * `run-code`), which restores its emulation afterwards, scaled down to at most `maxSharpScale`× CSS pixels.
    */
-  async function sharpStill(entry: Entry, density: number) {
+  async function sharpStill(entry: Entry, density: number, economy: boolean) {
+    const quality = economy ? settings.economy.quality : settings.quality
     const found = await endpoint(entry, listProcesses)
     if (!found.daemon) return undefined
     const output = await text(
@@ -238,7 +241,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
         `-s=${sessionName(entry)}`,
         "--raw",
         "run-code",
-        `async page => (await page.screenshot({ type: "jpeg", quality: ${settings.quality}, scale: "device" })).toString("base64")`,
+        `async page => (await page.screenshot({ type: "jpeg", quality: ${quality}, scale: "device" })).toString("base64")`,
       ],
       { cwd: found.daemon.cwd, timeout: 10_000 },
     )
@@ -246,10 +249,11 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
     const width = size(shot)?.width
     if (!width) return undefined
     const css = width / density
-    const target = Math.round(Math.min(settings.sharpWidth, css * settings.maxSharpScale))
+    const scale = economy ? settings.economy.maxSharpScale : settings.maxSharpScale
+    const target = Math.round(Math.min(settings.sharpWidth, css * scale))
     if (target >= width) return new Uint8Array(shot)
     // Copied into a plain ArrayBuffer, which the hub's frames require.
-    return new Uint8Array(await new Bun.Image(shot).resize(target).jpeg({ quality: settings.quality }).bytes())
+    return new Uint8Array(await new Bun.Image(shot).resize(target).jpeg({ quality }).bytes())
   }
 
   /**
@@ -620,8 +624,8 @@ class Live {
     })
     this.cdp.on("Page.loadEventFired", (_event, sessionId) => {
       if (sessionId !== this.sessionId) return
-      void this.refreshTab()
-      void this.probeFocus()
+      // `frameNavigated` can arrive before a history traversal commits its index; read it again once loaded.
+      void this.refreshHistory().then(() => this.probeFocus())
     })
   }
 
@@ -673,7 +677,7 @@ class Live {
   }
 
   /** `sharp` renders a high-density still through Playwright (see the adapter's `sharpStill`). */
-  async stream(sink: StreamSink, signal: AbortSignal, sharp: () => Promise<Uint8Array | undefined>) {
+  async stream(sink: StreamSink, signal: AbortSignal, sharp: (economy: boolean) => Promise<Uint8Array | undefined>) {
     this.sink = sink
     let frameSize = { width: 0, height: 0 }
     let started = false
@@ -688,10 +692,15 @@ class Live {
     let burst = 0
     const recent: number[] = []
 
+    // The viewers' profile: economy (cellular, Low Data Mode) trades size, quality and rate for bytes.
+    const economy = () => sink.profile?.() === "economy"
+    let profiled = economy()
     // Half the effective viewport while moving: a 393 px phone page would not shrink under a fixed 640 px cap.
     const start = (scale: number) => {
-      const width = Math.min(settings.maxWidth, this.metrics?.deviceWidth ?? settings.maxWidth)
-      const height = Math.min(settings.maxHeight, this.metrics?.deviceHeight ?? settings.maxHeight)
+      profiled = economy()
+      const full = profiled ? settings.economy : settings
+      const width = Math.min(full.maxWidth, this.metrics?.deviceWidth ?? full.maxWidth)
+      const height = Math.min(full.maxHeight, this.metrics?.deviceHeight ?? full.maxHeight)
       restarting = restarting.then(async () => {
         await this.cdp.send("Page.stopScreencast", {}, this.sessionId).catch(() => undefined)
         await this.cdp
@@ -699,9 +708,9 @@ class Live {
             "Page.startScreencast",
             {
               format: "jpeg",
-              quality: scale < 1 ? settings.motionQuality : settings.quality,
-              maxWidth: scale < 1 ? Math.round(width * scale) : settings.maxWidth,
-              maxHeight: scale < 1 ? Math.round(height * scale) : settings.maxHeight,
+              quality: scale < 1 ? settings.motionQuality : full.quality,
+              maxWidth: scale < 1 ? Math.round(width * scale) : full.maxWidth,
+              maxHeight: scale < 1 ? Math.round(height * scale) : full.maxHeight,
               everyNthFrame: 1,
             },
             this.sessionId,
@@ -735,7 +744,7 @@ class Live {
       stillAt = Date.now()
       restarting = restarting.then(async () => {
         await this.cdp.send("Page.stopScreencast", {}, this.sessionId).catch(() => undefined)
-        const sharpened = sharpens() ? await sharp().catch(() => undefined) : undefined
+        const sharpened = sharpens() ? await sharp(economy()).catch(() => undefined) : undefined
         const data = sharpened ?? (await this.capture(settings.quality).catch(() => undefined))?.data
         if (data) emit(data, Date.now(), sharpened !== undefined)
         seeded = true
@@ -776,8 +785,12 @@ class Live {
         return ack()
       }
       // Chromium keeps up to three frames unacknowledged, so acknowledging each one `ackDelayMs` after it arrived
-      // caps the stream near 3 / ackDelayMs (about 15 fps), whatever the page repaints.
-      setTimeout(ack, settings.ackDelayMs)
+      // caps the stream near 3 / ackDelayMs (about 15 fps), whatever the page repaints. The ack also waits until some
+      // viewer can take another frame (`whenReady`: the iPhone acknowledges each frame, three at most in flight), so
+      // a slow link slows Chrome down instead of piling up frames nobody receives.
+      const delay = profiled ? settings.economy.ackDelayMs : settings.ackDelayMs
+      void Promise.all([Bun.sleep(delay), sink.whenReady?.(signal)]).then(ack)
+      if (economy() !== profiled && !motion) void start(1)
       previous = frame.data
       burst++
       recent.push(arrived)
