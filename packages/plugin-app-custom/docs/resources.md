@@ -117,16 +117,58 @@ To add or finish a kind, edit only `adapters/<kind>.ts` (register a new kind in 
 `Kind`/`Meta` unions). `stream` calls `sink.hello(...)` before frames and `sink.frame(payload, { keyframe,
 capturedAt })` per frame, returns when `signal` aborts, and should throw on failure (viewers get `error` and
 reconnect). Inputs for one resource are applied in order. Spawn helpers live in `adapters/process.ts`.
-Never log `text` inputs. The foundation stubs implement `probe` and `snapshot` only:
+Never log `text` inputs. Status per kind (the foundation stubs implement `probe` and `snapshot` only; finished kinds
+have their own section below):
 
-| Kind               | Liveness                                          | Snapshot                                  | Live work                                                          |
-| ------------------ | ------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
-| `ios-simulator`    | `xcrun simctl list devices -j` (Booted → running) | `simctl io <udid> screenshot --type=jpeg` | serve-sim (Expo Device Hub): IOSurface + HID                       |
-| `android-emulator` | `avd/running/pid_*.ini` (console, gRPC port, AVD) | `adb -s <serial> exec-out screencap -p`   | serve-emu H.264 or gRPC `streamScreenshot` + `sendTouch`/`sendKey` |
-| `chrome`           | CDP `/json/list` or `playwright-cli list --json`  | CDP `Page.captureScreenshot`              | `Page.startScreencast` + `Input.dispatch*`/`insertText`            |
+| Kind               | Liveness                                          | Snapshot                                        | Live work                                               |
+| ------------------ | ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| `ios-simulator`    | `xcrun simctl list devices -j` (Booted → running) | `simctl io <udid> screenshot --type=jpeg`       | serve-sim (Expo Device Hub): IOSurface + HID            |
+| `android-emulator` | `avd/running/pid_*.ini` plus `adb devices`        | gRPC `getScreenshot` (adb `screencap` fallback) | Done: see [Android Emulator](#android-emulator)         |
+| `chrome`           | CDP `/json/list` or `playwright-cli list --json`  | CDP `Page.captureScreenshot`                    | `Page.startScreencast` + `Input.dispatch*`/`insertText` |
 
 Without `stream`, the hub streams `snapshot` as JPEG frames (about 3 per second, 828 px wide), so every kind is
 viewable from the start.
+
+### Android Emulator
+
+`adapters/android-emulator.ts` and `adapters/android-grpc.ts` (a minimal gRPC client over `node:http2` with
+hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulator_controller.proto`; Expo's serve-emu
+(`expo/expo-device-hub` `packages/serve-emu`, `emulator-grpc.ts`) and t3code's devices notes informed the choice.
+
+- **Why gRPC + JPEG.** The hub and the iOS shell already speak JPEG; the emulator's own gRPC `streamScreenshot` hands
+  over raw pixels already scaled by the emulator, only when the screen changes, at no extra guest CPU. The rejected
+  paths: `adb screencap` (about 300 ms per PNG frame, 3 fps), scrcpy (H.264 encoded in the guest, a server jar to
+  ship and an H.264 decoder in the app) and serve-emu (H.264 through FFmpeg/libx264, WebSocket/WebRTC, no MJPEG).
+- **Discovery.** Running emulators come from `avd/running/pid_<pid>.ini` (written only while gRPC is on; the PID is
+  in the file name) and from `adb devices` (`emulator-<console port>`, AVD name from `adb emu avd name`), so an
+  emulator started without gRPC is still found. `device` comes from the AVD's `hw.device.name`.
+- **gRPC endpoint.** The adapter reads `grpc.port` and `grpc.token` from the ini. When gRPC is off (the usual case:
+  `-ports` disables the automatic start), it turns it on through the console, `adb -s <serial> emu grpc
+  <console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;
+  the token never leaves the hub (it is not part of `meta`). It stays on until the emulator exits.
+- **Frames.** `streamScreenshot` in RGBA8888 fitted to a 1200 × 1200 box (540 × 1200 for a 720 × 1600 panel), wrapped
+  in a top-down BMP header and encoded to JPEG (quality 70) by `Bun.Image` off the JavaScript thread. Only the newest
+  frame is encoded; an idle screen sends nothing. The display rotation (`dumpsys display`, polled every 1.5 s while
+  streaming) rotates the JPEG upright, re-announces `hello` with the new size and sends `meta { rotation }` (degrees).
+  `snapshot` uses `getScreenshot` at panel size (JPEG quality 85).
+- **Input.** `touch` → gRPC `sendTouch` in panel pixels (pressure 1024 while down, 0 to lift; `pointer` is the
+  contact id, so multi-touch works), mapped back through the rotation. `scroll` → a 6-step drag with pointer 9.
+  `button` → `adb shell input keyevent` (`back` BACK, `home` HOME, `recents`/`app-switcher` APP_SWITCH, `lock` POWER,
+  volume); `rotate-left`/`rotate-right` set `user_rotation` with auto-rotate off. `key` → `input keyevent` for DOM
+  names (Enter, Backspace, Delete, Tab, Escape, arrows, Home/End, PageUp/PageDown) or `input keycombination` with
+  modifiers. `text` → printable ASCII through `input text` (spaces as `%s`, shell-quoted); anything else (accents,
+  emoji, `%`) through the emulator clipboard: gRPC `setClipboard`, `KEYCODE_PASTE`, then the previous clipboard text
+  back. The gRPC keyboard is not used because it only works with `hw.keyboard=yes`, which these AVDs lack.
+- **Limits.** Pasting shows Android's "pasted from your clipboard" toast and briefly replaces the emulator clipboard
+  (and, in a windowed emulator with clipboard sharing, the Mac's). Gboard with a stylus-capable touch panel may show
+  its floating toolbar instead of the soft keyboard; the iPhone keyboard covers typing. Rotation is the display's
+  `user_rotation`, not a skin rotation.
+- **Measured** (MacBook Pro M4 Max, Android 37 image, 720 × 1600 at 30 Hz, sandbox hub, loopback): 15–18 fps while scrolling;
+  emulator capture → hub WebSocket receipt 5 ms median (p95 8 ms); drag sent → first new frame 22–28 ms median
+  (60 ms median measured on the adapter alone with slower moves); Início/Recentes sent → first frame about 90 ms;
+  hub CPU 10–14 % of one core while frames flow, under 1 % on a still screen; emulator CPU unchanged by streaming
+  (about 22 % scrolling either way). The iPhone adds its network round trip (shown in the status pill) and a JPEG
+  decode.
 
 ## Control lock
 
@@ -160,6 +202,8 @@ Showing and hiding the controls never steals a touch meant for the resource: whi
 reach the resource, so a tap toggles the controls; in control, every touch goes to the resource, the controls hide
 and a small edge handle (draggable along the edge, position remembered) brings them back. Floating controls that
 must stay visible in control, such as Android's navigation pill, use `.resourceDraggable(key)` so Alexandre can move
-them off whatever they cover. `ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
+them off whatever they cover. Kinds without side tools pass `EmptyView` as `tools` and the column disappears;
+`ResourceControlBar(model:accessory:)` puts a kind's control between the button and the hint (Android's pill).
+`ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
 indicator); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
 `.password` for password autofill). Kinds that stream H.264 set `model.rawFrames` and pass their own `surface`.
