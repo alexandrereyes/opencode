@@ -518,11 +518,12 @@ struct ConversationView: View {
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
             .padding(.bottom, 8)
-          ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id))
+          ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id), footer: false)
             .anchorPreference(key: MCPComposerAnchorKey.self, value: .bounds) { $0 }
             .disabled(!conversation.ready)
-          if !sessions.drafts.draft(conversation.id).expanded, let usage = conversation.sessionUsage {
-            ConversationUsageBar(usage: usage) { detailsOpen = true }
+          if !sessions.drafts.draft(conversation.id).expanded {
+            ComposerFooter(store: conversation, draft: sessions.drafts.draft(conversation.id),
+              usage: conversation.sessionUsage) { detailsOpen = true }
           } else {
             Color.clear.frame(height: 40).accessibilityHidden(true)
           }

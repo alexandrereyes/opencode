@@ -672,6 +672,8 @@ import OpenCodeKit
   }
   #if DEBUG
   static let fixturePage = 30
+  /// Server-free fixtures (dictation) choose among these in the composer footer's agent sheet.
+  func useFixtureAgents(_ value: [AgentInfo]) { agents = value }
   /// Token-sized growth of the newest response at the event batch cadence, while the Session executes.
   private func streamScrollFixture(every interval: Int) async {
     guard let target = messages.last(where: { $0.type == "assistant" && !$0.responseText.isEmpty })?.id else { return }

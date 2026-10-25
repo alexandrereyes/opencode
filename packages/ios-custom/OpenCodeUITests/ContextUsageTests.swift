@@ -35,7 +35,12 @@ import XCTest
     XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'answer-usage-'" )).firstMatch.exists)
     XCTAssertTrue(app.buttons["Copiar resposta"].exists)
     XCTAssertGreaterThan(line.frame.minY, app.buttons["model-picker"].frame.maxY)
-    XCTAssertLessThanOrEqual(line.frame.minX, app.textViews["conversation-composer"].frame.minX)
+    // The agent opens the footer line below the card and the usage follows it on the same line.
+    let agent = app.buttons["agent-picker"]
+    XCTAssertLessThanOrEqual(agent.frame.minX, app.textViews["conversation-composer"].frame.minX)
+    XCTAssertGreaterThan(agent.frame.minY, app.buttons["model-picker"].frame.maxY)
+    XCTAssertGreaterThanOrEqual(line.frame.minX, agent.frame.maxX)
+    XCTAssertEqual(line.frame.midY, agent.frame.midY, accuracy: 2)
     shot("fixed")
     line.tap()
     XCTAssertTrue(app.navigationBars["Detalhes da sessão"].waitForExistence(timeout: 10))

@@ -88,6 +88,8 @@ extension ComposerTokenKind {
   var focused = false { didSet { refreshTrigger() } }
   // Presentation is runtime-only, including transfer after a failed new-session send.
   var expanded = false
+  /// The agent sheet, opened from the footer below the composer or by `/agent`.
+  var choosingAgent = false
   var dictationReview = false
   private var dictationPending = false { didSet { changed() } }
   @ObservationIgnored var recordingFactory: ((URL) -> VoiceRecordingComposer)?
@@ -103,11 +105,16 @@ extension ComposerTokenKind {
   }()
   func insertTranscription(_ text: String) async {
     guard !deleted else { return }
-    // Pending downloads must not overwrite text typed meanwhile or a selected token.
-    let location = min(selection.location, editorText.length)
-    let prefix = location > 0 && !(editorText.string as NSString).substring(with: NSRange(location: location - 1, length: 1)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : ""
-    let suffix = location < editorText.length && !(editorText.string as NSString).substring(with: NSRange(location: location, length: 1)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : ""
-    replace(NSRange(location: location, length: 0), with: NSAttributedString(string: prefix + text + suffix, attributes: input?.plainAttributes))
+    // At the caret while editing, otherwise (keyboard down, a download finishing later) at the end. Nothing typed
+    // meanwhile or selected (a token included) is overwritten.
+    let string = CFAttributedStringGetString(editorText) as NSString
+    let location = focused ? min(selection.location, string.length) : string.length
+    let spaced = DictationInsertion.spaced(text,
+      before: location > 0 ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location - 1)).first : nil,
+      after: location < string.length ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location)).first : nil)
+    if !spaced.isEmpty {
+      replace(NSRange(location: location, length: 0), with: NSAttributedString(string: spaced, attributes: input?.plainAttributes))
+    }
     dictationPending = false
     dictationReview = true
     await persist()

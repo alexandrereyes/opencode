@@ -3,6 +3,8 @@ import SwiftUI
 
 struct VoiceRecordingTouchTarget: UIViewRepresentable {
   let available: Bool
+  var label = "Gravar para transcrever"
+  var identifier = "dictation-microphone"
   let event: (VoiceRecordingGesture.Event) -> Void
   func makeUIView(context: Context) -> TouchView { TouchView() }
   func updateUIView(_ view: TouchView, context: Context) {
@@ -10,8 +12,8 @@ struct VoiceRecordingTouchTarget: UIViewRepresentable {
     view.isAccessibilityElement = available
     view.accessibilityElementsHidden = !available
     view.accessibilityTraits = available ? .button : []
-    view.accessibilityIdentifier = available ? "dictation-microphone" : nil
-    view.accessibilityLabel = available ? "Gravar para transcrever" : nil
+    view.accessibilityIdentifier = available ? identifier : nil
+    view.accessibilityLabel = available ? label : nil
     view.accessibilityHint = available ? "Toque para gravar com as mãos livres. Ou segure: deslize para cima para travar, para a esquerda para cancelar e solte para transcrever. Nada é enviado automaticamente." : nil
   }
   static func dismantleUIView(_ view: TouchView, coordinator: ()) { view.cancelTouch() }
@@ -65,20 +67,13 @@ struct DictationAction: View {
   var submission = Submission.message
   /// A quote comment's action commits it to the message draft rather than sending.
   enum Submission { case message, comment }
-  private var holding: Bool { recording.gesture.state == .holding }
+  /// With content a hold belongs to the compact microphone beside this action (DictationCompactMicrophone).
+  private var holding: Bool { recording.gesture.state == .holding && !hasContent }
+  private var besideHold: Bool { recording.gesture.state == .holding && hasContent }
   private var locked: Bool { recording.gesture.state == .locked && recording.capturing }
   var body: some View {
     ZStack {
-      if holding {
-        VStack(spacing: 14) {
-          Image(systemName: "lock.open")
-          Image(systemName: "chevron.up")
-          Spacer(minLength: 48)
-        }.appSymbol(.action).foregroundStyle(theme.color(.primary)).padding(.top, 14)
-          .frame(width: 48, height: 140).glassEffect(.regular, in: .capsule)
-          .offset(y: -66 + recording.gesture.offset.height * 0.35)
-          .accessibilityHidden(true).allowsHitTesting(false)
-      }
+      if holding { DictationLockGuide(offset: recording.gesture.offset.height) }
       if locked || hasContent || !available {
         Button {
           if locked { recording.finish() } else { submit() }
@@ -94,6 +89,8 @@ struct DictationAction: View {
       }
     }
     .frame(width: 44, height: 44)
+    // While the compact microphone is held, its own growing face is the only recording control on screen.
+    .opacity(besideHold ? 0 : 1).accessibilityHidden(besideHold)
     // This target never unmounts while the finger moves from hold into the locked panel.
     .overlay {
       VoiceRecordingTouchTarget(available: available && !hasContent && (!recording.visible || holding || recording.state == .authorizing)) { recording.handle($0) }
@@ -104,11 +101,74 @@ struct DictationAction: View {
   private var face: some View {
     Group {
       if sending || (recording.state == .authorizing && !holding) || recording.state == .pending { ProgressView().tint(theme.color(.onPrimary)) }
-      else { Image(systemName: locked ? "stop.fill" : hasContent && !recording.visible ? submission == .message ? "arrow.up" : "checkmark" : "mic.fill").appSymbol(.action) }
+      else { Image(systemName: locked ? "stop.fill" : hasContent && !recording.capturing ? submission == .message ? "arrow.up" : "checkmark" : "mic.fill").appSymbol(.action) }
     }.foregroundStyle(theme.color(.onPrimary))
       .frame(width: holding ? 64 : 36, height: holding ? 64 : 36)
       .background(theme.color(.primary), in: Circle())
       .offset(holding ? recording.gesture.offset : .zero)
+  }
+}
+
+/// With text in the field the main action sends (or concludes a comment); this smaller microphone at its left
+/// records with the same touch target, gesture and recorder as the empty field's microphone, so dictation can
+/// complement typed text. It is shown only while idle and while its own hold lasts; a locked or hands-free
+/// recording continues in the main action (stop) and the recording panel, exactly as from the empty field.
+struct DictationCompactMicrophone: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  let recording: VoiceRecordingComposer
+  let hasContent: Bool
+  let available: Bool
+  private var holding: Bool { recording.gesture.state == .holding }
+  var body: some View {
+    if hasContent && (!recording.visible || holding) {
+      Group {
+        if available || holding {
+          face.accessibilityHidden(true)
+            .overlay {
+              VoiceRecordingTouchTarget(available: available && (!recording.visible || holding),
+                label: "Gravar áudio", identifier: "composer-microphone") { recording.handle($0) }
+            }
+        } else {
+          Button {} label: { face }.disabled(true).buttonStyle(.plain)
+            .accessibilityLabel("Gravar áudio").accessibilityHint("O microfone está indisponível no momento.")
+            .accessibilityIdentifier("composer-microphone-disabled")
+        }
+      }
+      .padding(.trailing, 8)
+      .transition(.opacity.combined(with: .scale(scale: 0.8)))
+    }
+  }
+  private var face: some View {
+    ZStack {
+      if holding { DictationLockGuide(offset: recording.gesture.offset.height) }
+      Image(systemName: "mic.fill").appSymbol(.action)
+        .foregroundStyle(theme.color(holding ? .onPrimary : .textSecondary))
+        .frame(width: holding ? 64 : 36, height: holding ? 64 : 36)
+        .background {
+          if holding { Circle().fill(theme.color(.primary)) }
+          else { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
+        }
+        .offset(holding ? recording.gesture.offset : .zero)
+    }
+    .frame(width: 44, height: 44).contentShape(Rectangle())
+    .opacity(available || holding ? 1 : 0.45)
+  }
+}
+
+/// The slide-up lock hint above a held microphone.
+private struct DictationLockGuide: View {
+  @Environment(\.appTheme) private var theme
+  let offset: CGFloat
+  var body: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "lock.open")
+      Image(systemName: "chevron.up")
+      Spacer(minLength: 48)
+    }.appSymbol(.action).foregroundStyle(theme.color(.primary)).padding(.top, 14)
+      .frame(width: 48, height: 140).glassEffect(.regular, in: .capsule)
+      .offset(y: -66 + offset * 0.35)
+      .accessibilityHidden(true).allowsHitTesting(false)
   }
 }
 
@@ -117,6 +177,8 @@ struct DictationRecordingPanel: View {
   @Environment(\.dynamicTypeSize) private var typeSize
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let recording: VoiceRecordingComposer
+  /// The field has content: a hold happens on the compact microphone, one slot further left.
+  var hasContent = false
   private var holding: Bool { recording.gesture.state == .holding }
   var body: some View {
     Group {
@@ -140,6 +202,7 @@ struct DictationRecordingPanel: View {
       } else { compact }
     }.foregroundStyle(theme.color(.text)).buttonStyle(.plain).frame(minHeight: 44)
       .accessibilityElement(children: .contain).accessibilityIdentifier("dictation-recording")
+      .padding(.trailing, hasContent && holding ? 104 : 52)
   }
   private var compact: some View {
     HStack(spacing: 8) {

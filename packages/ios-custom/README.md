@@ -210,8 +210,9 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
 - **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
   the queued messages (`Enviar agora`, edit, `×`).
 - **Composer (V2):** one rounded card with the text at full width and, inside it below the text, a row with a small
-  outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space, the agent (`build`), and a round button: send when
-  there is text, microphone when the field is empty (WhatsApp style).
+  outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space and a round button:
+  microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
+  ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
 - **Triggers:** `@` context (files, sessions, agents), `/` commands, `$` skills, and `#` snippets open a suggestion
   panel above the composer; the chosen item becomes a colored token in the field. Return picks the panel's first
   (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october)).
@@ -485,7 +486,7 @@ and `ConversationMCPStore.close()` no longer notifies when already closed. `Comp
 `validTokens` bridge the string once. Highlighting, tokens, suggestions, dictation, focus and fullscreen are unchanged;
 the comment sheet (`QuoteCommentEditor`) shares the fix.
 
-The DEBUG `-OpenCodeFixtureAutoType idle|plain|mentions|suggestions|long` driver (offline conversation fixture) types
+The DEBUG `-OpenCodeFixtureAutoType idle|plain|mentions|suggestions|long|toggle` driver (offline conversation fixture) types
 200 steps through `UITextInput` at 100 ms and records main-run-loop busy time per keystroke and display-link frames;
 `script/profile-composer.py --simulator <udid>|--physical --derived … --evidence …` runs it (`--trace` adds Instruments).
 iPhone 14, `-O` Debug build, medians of two runs, before → after:
@@ -999,6 +1000,46 @@ The port also draws from Abacato's `VoiceRecordingComposer`, `VoiceRecordingCapt
 priorities and background backlog processing are deliberately not imported. iOS 27's new inactive notification
 replaces the deprecated interruption-type API. Every color uses the app's typed semantic theme roles.
 
+#### Microphone beside Send — 25 October
+
+**Alexandre, 25/10: opção A.** Once the field has content the big round button sends (✓ **Concluir comentário** in
+the comment sheet), and a compact outlined microphone (`DictationCompactMicrophone`, 44 pt target, **Gravar áudio**,
+`composer-microphone`) sits at its left, so dictation can complement typed text. It is the same
+`VoiceRecordingTouchTarget`, `VoiceRecordingGesture` and `VoiceRecordingComposer`: recording at the touch when
+allowed, hold/release, slide left to cancel, up to lock, tap for hands-free, sub-second releases continuing, paused
+drafts on interruption, panel and preview. While its hold lasts, the compact microphone grows under the finger with
+the lock guide, Send hides and the panel makes room; a locked or hands-free recording then continues exactly as from
+the empty field (stop in the main button, the panel's trash/pause/preview), and the compact microphone returns once
+the recording is transcribed or discarded. The long-press **Enviar agora / Adicionar à fila** menu stays on Send only.
+The empty field is unchanged. During a GPT Live call, sending or importing it is shown dimmed and disabled; VoiceOver
+reads it before Send. Showing or hiding it eases in 0.15 s (none with Reduce Motion).
+
+The transcription goes **at the caret while the field is focused, otherwise at the end** (keyboard down, or a pending
+download finishing later); a selection is never replaced. `DictationInsertion.spaced` trims the text and adds one
+space only where it touches a word or token on either side, none against whitespace, closing punctuation or an
+opening bracket. Tokens, quotes and attachments are untouched (the native incremental, undoable insertion). The
+review stays as before, also with earlier text: the message composer opens fullscreen with the caret after the
+inserted text, so the whole message is reread before sending; the comment sheet refocuses the comment.
+
+To make room, the agent (`build ⌄`, `agent-picker`; `child-agent` text for children and the master) left the control
+row for the line below the card (`ComposerFooter`): before the usage in a conversation, alone in Nova sessão, the
+empty master composer and the fullscreen composer. Tapping it (or `/agent`) opens the same sheet, now presented from
+`ConversationDraft.choosingAgent`. The comment sheet has no agent, as before. When the row runs out of width the model
+label shrinks to 75% and then truncates; `+`, the MCP pill and both round buttons keep their size (iPhone SE 375 pt
+shows `Opus 5.5 · xhi…` with text). Accessibility sizes keep the row's horizontal scroll, and in the footer the usage
+folds into two lines before the agent gives way.
+
+Showing the compact microphone depends only on the published `hasText`, which changes when the field empties or
+fills, never per keystroke, and its hold state is read inside its own view. `profile-composer.py` (iPhone 18 Pro
+simulator, `-O` Debug, four interleaved rounds per side on the shared Mac, medians before → after; `toggle` empties
+and refills the field on every key, swapping the controls each time): plain p50/p95 6.7/10.2 → 6.2/9.8 ms, mentions
+7.2/53.1 → 8.0/53.0 ms, suggestions 8.7/12.3 → 9.4/13.6 ms, toggle 9.1/12.4 → 9.7/13.7 ms; no frame above 16.7 ms
+p95 and the same hitch counts. Differences are within the run-to-run spread (±1 ms) of this busy Mac, not a
+physical-device claim. Kit `transcriptionGetsOneSpace…`, hosted `testInsertionUsesNativeIncrementalPath…` (caret,
+off-screen and unfocused end), `DictationUITests` (`testCompactMicrophoneBesideSendInsertsAtTheCaret`,
+`testCompactMicrophoneTapIsHandsFreeAndTheAgentMovedToTheFooter`, the comment case) and `SizingTests` (typed text on
+iPhone 18 Pro and SE) cover it in both themes. Captures are in `$TMPDIR/opencode/composer-mic-text/prints/`.
+
 #### Isolated dictation verification
 
 Use **OpenCode Gravacao** (`0C2C8A7F-CD76-43D5-88F5-A880D5A80B78`) and
@@ -1156,17 +1197,19 @@ directory includes `verification.json` with absolute paths to all 80 state captu
 
 ## Context and cache usage
 
-One fixed, left-aligned line below the conversation composer shows a compact context ring, used/limit tokens and
+One fixed, left-aligned line below the conversation composer starts with the agent (`build ⌄`, see
+[Microphone beside Send](#microphone-beside-send--25-october)) and then shows a compact context ring, used/limit tokens and
 cache-hit percentage with monospaced digits and the capped 9 pt metrics role. It uses this conversation's latest
 measured assistant step (including the cache ratio), retaining it while a new step streams without measurements.
-Child and master conversations use their own store; there is no line before any measurement or on Nova sessão.
+Child and master conversations use their own store; there is no usage before any measurement or on Nova sessão
+(the line then holds only the agent).
 Answer footers contain only the existing model/date and copy action. An unknown limit keeps tokens without a percentage.
 
-The fixed line opens **Uso da sessão** in the existing Details sheet. It is a normal bottom-stack child, not an overlay:
+The usage part of the line opens **Uso da sessão** in the existing Details sheet. It is a normal bottom-stack child, not an overlay:
 its height reduces the transcript viewport, stays above the keyboard and below the composer, and disappears in the
-fullscreen composer. The voice bar reserves its own height above the composer without sharing this line's inset.
+fullscreen composer (where only the agent follows the editor). The voice bar reserves its own height above the composer without sharing this line's inset.
 The composer is 12 pt from each side. The 40 pt usage hit area owns the bottom home-indicator band, with its text
-centered 20 pt above the edge; without measurements, an equal empty band preserves the input's position. Only the
+centered 20 pt above the edge; without measurements the same band holds only the agent, preserving the input's position. Only the
 container bottom safe area is extended, so the native keyboard still reduces the available viewport.
 
 The header ring opens **Detalhes da sessão**, as a native sheet initially at the large detent. **Uso da sessão** sits

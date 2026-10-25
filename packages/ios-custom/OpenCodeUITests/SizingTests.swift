@@ -50,6 +50,25 @@ import XCTest
       shot.name = "sizing-" + label + "-" + theme
       shot.lifetime = .keepAlways
       add(shot)
+      // With text, the compact microphone joins Send; nothing in the control row may reach either of them.
+      let editor = app.textViews["conversation-composer"]
+      editor.tap()
+      editor.typeText("Texto")
+      let microphone = app.buttons["composer-microphone"]
+      XCTAssertTrue(microphone.waitForExistence(timeout: 5))
+      let send = app.buttons["composer-send"]
+      XCTAssertTrue(microphone.isHittable)
+      XCTAssertTrue(send.isHittable)
+      XCTAssertGreaterThanOrEqual(microphone.frame.width, 44)
+      XCTAssertLessThanOrEqual(microphone.frame.maxX, send.frame.minX)
+      if !category.contains("Accessibility") {
+        XCTAssertLessThanOrEqual(model.frame.maxX, pill.frame.minX)
+        XCTAssertLessThanOrEqual(pill.frame.maxX, microphone.frame.minX)
+      }
+      let typed = XCTAttachment(screenshot: app.screenshot())
+      typed.name = "sizing-text-" + label + "-" + theme
+      typed.lifetime = .keepAlways
+      add(typed)
       usage.tap()
       XCTAssertTrue(app.navigationBars["Detalhes da sessão"].waitForExistence(timeout: 10))
     }

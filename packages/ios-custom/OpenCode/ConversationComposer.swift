@@ -7,6 +7,8 @@ struct ConversationComposer: View {
   @Environment(\.scenePhase) private var scenePhase
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
+  /// The conversation draws the compact footer itself, together with its usage line.
+  var footer = true
   @State private var expandedSendRevision = 0
   @State private var expandedNavigationID: UUID?
   @State private var visible = false
@@ -15,6 +17,7 @@ struct ConversationComposer: View {
       ConversationRevertStatus(store: store, draft: draft)
       if !draft.expanded {
         ComposerEditor(store: store, draft: draft, expanded: false) { draft.expanded = true }
+        if footer { ComposerFooter(store: store, draft: draft) }
       }
     }
     .fullScreenCover(isPresented: $draft.expanded, onDismiss: {
@@ -25,6 +28,7 @@ struct ConversationComposer: View {
         VStack(spacing: 8) {
           FloatingVoiceHost()
           ComposerEditor(store: store, draft: draft, expanded: true) { draft.expanded = false }
+          ComposerFooter(store: store, draft: draft)
         }
           .padding(12).background(theme.color(.background))
           .navigationTitle("Mensagem").navigationBarTitleDisplayMode(.inline)

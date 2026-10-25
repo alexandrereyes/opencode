@@ -34,6 +34,16 @@ struct DictationTests {
     #expect(cancelled.handle(.moved(CGSize(width: -100, height: 0))) == .discard)
     #expect(cancelled.handle(.ended) == .none)
   }
+  @Test func transcriptionGetsOneSpaceAgainstWordsAndNoneAgainstWhitespaceOrPunctuation() {
+    #expect(DictationInsertion.spaced(" Olá mundo \n", before: nil, after: nil) == "Olá mundo")
+    #expect(DictationInsertion.spaced("Olá", before: "a", after: "b") == " Olá ")
+    #expect(DictationInsertion.spaced("Olá", before: " ", after: "\n") == "Olá")
+    #expect(DictationInsertion.spaced("Olá", before: "\u{FFFC}", after: "\u{FFFC}") == " Olá ")
+    #expect(DictationInsertion.spaced("Olá", before: "(", after: ",") == "Olá")
+    #expect(DictationInsertion.spaced("Olá", before: ".", after: ")") == " Olá")
+    #expect(DictationInsertion.spaced(", e mais", before: "x", after: nil) == ", e mais")
+    #expect(DictationInsertion.spaced("  \n", before: "a", after: "b") == "")
+  }
   @Test func tapHoldReleaseAndMinimumDuration() {
     #expect(VoiceRecordingGesture.holdDelay == 0.3)
     #expect(VoiceRecordingGesture.minimumDuration == 1)

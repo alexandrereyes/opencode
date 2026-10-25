@@ -70,6 +70,8 @@ struct DictationFixtureRoot: View {
         .task {
           guard !loaded else { return }
           await draft.load()
+          store.useFixtureAgents(try! JSONDecoder().decode([AgentInfo].self, from: Data(
+            #"[{"id":"build","name":"build","mode":"primary"},{"id":"plan","name":"plan","mode":"primary"}]"#.utf8)))
           loaded = true
           if ProcessInfo.processInfo.arguments.contains("-OpenCodeDictationComment") {
             draft.commenting = ChatQuote(messageID: "fixture", partID: "fixture", text: "Trecho citado para ditar.")

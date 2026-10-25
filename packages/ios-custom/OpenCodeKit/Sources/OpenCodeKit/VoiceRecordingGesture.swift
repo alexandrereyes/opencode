@@ -68,6 +68,19 @@ public struct VoiceRecordingGesture: Sendable {
   }
 }
 
+/// Separates a transcription from the draft text around the insertion point with exactly one space where a word
+/// touches it, never doubling existing whitespace and never splitting punctuation or brackets from their word.
+/// `before`/`after` are the neighbouring characters (a token's attachment character counts as a word).
+public enum DictationInsertion {
+  public static func spaced(_ text: String, before: Character?, after: Character?) -> String {
+    let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let first = words.first, let last = words.last else { return "" }
+    let prefix = before.map { !$0.isWhitespace && !"([{".contains($0) && !",.;:!?)]}…".contains(first) } ?? false
+    let suffix = after.map { !$0.isWhitespace && !",.;:!?)]}…".contains($0) && !"([{".contains(last) } ?? false
+    return (prefix ? " " : "") + words + (suffix ? " " : "")
+  }
+}
+
 public enum VoiceRecordingAccessibility {
   public static func duration(_ time: TimeInterval) -> String {
     let seconds = max(0, Int(time)), minutes = seconds / 60, remainder = seconds % 60

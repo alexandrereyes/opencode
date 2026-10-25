@@ -19,13 +19,13 @@ struct ComposerEditor: View {
   @Environment(\.displayScale) private var displayScale
   @Environment(\.dynamicTypeSize) private var typeSize
   @Environment(\.voiceController) private var voice
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
   var comment: ComposerComment? = nil
   let expand: () -> Void
   @State private var models = false
-  @State private var agents = false
   @State private var photos = false
   @State private var files = false
   @State private var selectedPhotos: [PhotosPickerItem] = []
@@ -62,7 +62,7 @@ struct ComposerEditor: View {
         return
       }
       models = item.token.id == "model"
-      agents = item.token.id == "agent" && !store.isChild && !store.masterMode
+      draft.choosingAgent = item.token.id == "agent" && !store.isChild && !store.masterMode
       return
     }
     draft.insert(item.token, replacing: trigger.range)
@@ -159,7 +159,7 @@ struct ComposerEditor: View {
       }
     }
     .sheet(isPresented: $models) { ConversationModelPicker(store: store, draft: draft).sessionAlertOverlay() }
-    .sheet(isPresented: $agents) { agentSheet.sessionAlertOverlay() }
+    .sheet(isPresented: comment == nil ? $draft.choosingAgent : .constant(false)) { agentSheet.sessionAlertOverlay() }
     .sheet(item: $draft.commenting) { quote in
       QuoteCommentEditor(quote: quote, store: store, draft: draft)
         .sessionAlertOverlay()
@@ -236,27 +236,34 @@ struct ComposerEditor: View {
     }
   }
   private var controls: some View {
-    ZStack(alignment: .bottomTrailing) {
+    // The compact microphone's slot; its hold is tracked inside it so a moving finger re-renders only that view.
+    let beside = hasContent && !draft.recording.visible
+    let available = !draft.sending && !draft.importing && voice?.sessionID == nil
+    return ZStack(alignment: .bottomTrailing) {
       Group {
         if typeSize.isAccessibilitySize {
           ScrollView(.horizontal) { controlRow.fixedSize(horizontal: true, vertical: false) }.scrollIndicators(.hidden)
         } else { controlRow }
-      }.padding(.trailing, 52).opacity(draft.recording.capturing || draft.recording.discarding ? 0 : 1)
+      }.padding(.trailing, beside ? 104 : 52).opacity(draft.recording.capturing || draft.recording.discarding ? 0 : 1)
         .allowsHitTesting(!draft.recording.capturing).accessibilityHidden(draft.recording.capturing)
       if draft.recording.capturing || draft.recording.discarding {
-        DictationRecordingPanel(recording: draft.recording).padding(.trailing, 52)
+        DictationRecordingPanel(recording: draft.recording, hasContent: hasContent)
       }
-      DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
-        sending: draft.sending, available: !draft.sending && !draft.importing && voice?.sessionID == nil,
-        submit: submit, submission: comment == nil ? .message : .comment)
-        .contextMenu {
-          if comment == nil && hasContent && store.executing {
-            Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
-              Task { await store.send(draft, alternate: true) }
-            }.disabled(!canSubmit)
+      HStack(spacing: 0) {
+        DictationCompactMicrophone(recording: draft.recording, hasContent: hasContent, available: available)
+        DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
+          sending: draft.sending, available: available,
+          submit: submit, submission: comment == nil ? .message : .comment)
+          .contextMenu {
+            if comment == nil && hasContent && store.executing {
+              Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
+                Task { await store.send(draft, alternate: true) }
+              }.disabled(!canSubmit)
+            }
           }
-        }
+      }
     }.frame(minHeight: 44)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: beside)
   }
   private var controlRow: some View {
     HStack(spacing: 8) {
@@ -293,19 +300,8 @@ struct ComposerEditor: View {
     if !expanded && !store.isNewSession && store.mcps.summary.visible {
       ConversationMCPPill(store: store.mcps)
     }
+    // The agent lives in the footer below the card (ComposerFooter).
     Spacer(minLength: 2)
-    if store.isChild || store.masterMode {
-      Text(store.childAgentName).appFont(.chrome).lineLimit(1)
-        .accessibilityLabel("Agente: \(store.childAgentName)")
-        .accessibilityIdentifier("child-agent")
-    } else {
-      Button {
-        draft.focused = false
-        agents = true
-      } label: {
-        Text(store.selectedAgent(draft)).appFont(.chrome).lineLimit(1)
-      }.accessibilityLabel("Agente").accessibilityIdentifier("agent-picker")
-    }
   }
   private var attachmentRow: some View {
     ScrollView(.horizontal) {
@@ -324,7 +320,7 @@ struct ComposerEditor: View {
         Button {
           draft.agent = agent.id
           if !store.isNewSession, let model = agent.model { draft.model = model }
-          agents = false
+          draft.choosingAgent = false
         } label: {
           HStack {
             AgentPixels(color: theme.agentColor(agent, id: agent.id), running: false)
@@ -336,7 +332,7 @@ struct ComposerEditor: View {
       }.scrollContentBackground(.hidden).background(theme.color(.background))
         .navigationTitle("Agente").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-          ToolbarItem(placement: .confirmationAction) { Button("Concluir") { agents = false } }
+          ToolbarItem(placement: .confirmationAction) { Button("Concluir") { draft.choosingAgent = false } }
         }
     }.presentationDetents([
       .height(

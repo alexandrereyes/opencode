@@ -59,6 +59,10 @@ import os
     try await wait { draft.input != nil }
     let input = try XCTUnwrap(draft.input)
     let attachment = try XCTUnwrap(input.textStorage.attribute(.attachment, at: 0, effectiveRange: nil) as? ComposerTokenAttachment)
+    // Editing: the transcription lands at the caret.
+    draft.focused = true
+    await Task.yield()
+    draft.selection = NSRange(location: 1, length: 0)
     let revision = draft.sourceRevision
     await draft.insertTranscription("Olá, revisão")
     XCTAssertEqual(draft.document.text, "$sample Olá, revisão Final")
@@ -77,6 +81,12 @@ import os
     XCTAssertEqual(draft.document.validTokens.map(\.token), [token])
     XCTAssertEqual(draft.sourceRevision, revision + 1)
     XCTAssertEqual(draft.selection.location, "\u{FFFC} Fora da tela".utf16.count)
+    // Not editing (keyboard down): at the end, one space apart, whatever the last caret was.
+    draft.focused = false
+    draft.selection = NSRange(location: 1, length: 0)
+    await draft.insertTranscription(" No fim ")
+    XCTAssertEqual(draft.document.text, "$sample Fora da tela Final No fim")
+    XCTAssertEqual(draft.document.validTokens.map(\.token), [token])
   }
   func testPermissionReleaseCannotStartLateAndLockedInterruptionPauses() async throws {
     let capture = DictationTestCapture()

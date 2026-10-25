@@ -48,6 +48,9 @@ struct ComposerTypingDriver: UIViewRepresentable {
     case "suggestions":
       let cycle = typed("READ") + Array(repeating: .delete, count: 4) + typed("Fonte1") + Array(repeating: .delete, count: 6)
       return typed("Abra @") + Array(Array(repeating: cycle, count: 10).joined().prefix(194))
+    case "toggle":
+      // Every keystroke empties or fills the field, swapping the send and microphone controls.
+      return Array(Array(repeating: typed("a") + [.delete], count: 100).joined())
     default:
       return Array(typed(prose + prose + prose).prefix(200))
     }
