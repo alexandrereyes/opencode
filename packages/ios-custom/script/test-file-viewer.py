@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""File viewer zoom, sibling navigation and file kinds against an owned sandbox directory; no model calls.
+"""File viewer zoom, sibling navigation and file kinds against an owned sandbox directory. Only
+FileReadAloudTests calls a model: a few minutes of speech through the sandbox's `custom.speech`, which caches
+each piece; only the first piece (it names the run) is generated again on later runs.
 
 Usage (after `xcodebuild … build-for-testing`):
   OPENCODE_SANDBOX_HOME=<sandbox home> OPENCODE_TEST_SERVER_URL=http://127.0.0.1:<port> \
@@ -156,6 +158,14 @@ Bloco depois do link
 """, encoding="utf8")
     (docs / "d-outro.md").write_text("# Outro documento 🚀\n\nAcentuação: ação, coração, pinguim, über. Emoji: 👩🏽‍💻 ✅\n\n1. Um\n2. Dois\n", encoding="utf8")
     (docs / "e-vazio.md").write_text("", encoding="utf8")
+    # Read aloud: several pieces (short first, then longer), with code and a table announced instead of read.
+    paragraph = ("A leitura em voz alta gera o áudio no servidor, um trecho de cada vez, e o aplicativo toca cada parte assim "
+        "que ela chega. Enquanto um trecho toca, os dois seguintes já estão sendo preparados, para que a narração não pare. ")
+    (docs / "f-leitura.md").write_text("# Leitura em voz alta\n\nExecução " + token + ".\n\n" + paragraph * 2
+        + "\n\n## Como usar\n\n- Toque no botão de reproduzir.\n- Arraste a barra para pular.\n- Mude a velocidade.\n\n"
+        + "```swift\nlet leitura = true\n```\n\n| Ação | Gesto |\n| --- | --- |\n| Pular | Arrastar |\n\n"
+        + "\n\n".join(["## Parte " + str(index) + "\n\n" + paragraph * 3 for index in range(1, 5)]) + "\n", encoding="utf8")
+    (docs / "g-anexo.md").write_text("# Anexo\n\nÚltimo documento da pasta.\n", encoding="utf8")
     # Above the Session directory, reachable through the session file explorer's `../`.
     (root / "acima.png").write_bytes(png(600, 400, 160))
     (root / "acima.txt").write_text("Arquivo acima da sessão.\n", encoding="utf8")
@@ -168,13 +178,13 @@ Bloco depois do link
     text = "Arquivos do visualizador:\n\n" + "\n".join("- [Abrir " + key + "](" + value + ")" for key, value in links.items()) \
         + "\n- [Abrir externo](" + str(outside / "fora.png") + ")"
     docs_text = "Documentos:\n\n" + "\n".join("- [Abrir doc " + key + "](docs/" + value + ")" for key, value in
-        {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md"}.items())
+        {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md", "LEITURA": "f-leitura.md"}.items())
     # Joined response prose exposes one text view without per-link elements, so each link also gets a session
     # whose whole message is that link.
     single = {**{"LINK_" + key: "[Abrir " + key + "](" + value + ")" for key, value in links.items()},
         "LINK_EXTERNO": "[Abrir externo](" + str(outside / "fora.png") + ")",
         **{"LINK_DOC_" + key: "[Abrir doc " + key + "](docs/" + value + ")" for key, value in
-            {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md"}.items()}}
+            {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md", "LEITURA": "f-leitura.md"}.items()}}
     messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():

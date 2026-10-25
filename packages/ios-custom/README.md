@@ -843,6 +843,26 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   **Voltar**. YAML front matter renders as a YAML code block. The `</>` button switches to the selectable source.
   In-document anchors (`#secao`) are not links yet.
 
+#### Read aloud — 25 October
+
+- Markdown files (rendered or `</>` source) show a floating pill in the bottom trailing corner: play/pause inside a
+  progress ring, elapsed/total time and speed (`1×` → `1,5×` → `2×`, remembered, pitch preserved). Tapping the time
+  opens the full player (draggable position, time, speed, chevron or swipe down to collapse). The bottom inset keeps
+  the last lines visible, and the sibling arrows stay clear above it. Nothing is generated before play.
+- `ReadAloud` (OpenCodeKit) turns blocks into speakable text: prose as written, list tasks as "Concluído/Pendente",
+  code and tables announced ("Bloco de código em swift, com 2 linhas"), image alt text, formulas named; rules,
+  footnotes and front matter skipped. Pieces of 220, 650, then 1,500 characters end at sentences.
+- `ReadAloudPlayer` asks `custom.speech` (plugin; Gemini 3.8 Flash-Lite TTS through the Vercel AI Gateway, voice
+  Kore, cached on the server) only for the piece at the playhead and the next two, so seeking or stopping early
+  never pays for the rest. The total starts from the server's speaking rate and settles with each generated piece.
+  Seeking into a piece without audio generates it and starts at the same proportion. Documents over 30 minutes of
+  audio ask first, with the estimated cost.
+- Audio: `.playback`/`.spokenAudio` on the app's serial audio queue; pauses for voice mode, dictation, system
+  interruptions (resuming when the system recommends) and unplugged headphones; plays in the background with Now
+  Playing and lock screen play/pause, ±15 s and scrubbing. Closing or leaving the file stops it.
+- `FileReadAloudTests` (through `test-file-viewer.py`, both themes) uses the sandbox's real gateway: the run's first
+  piece names the run, so about a cent of speech is generated per run; the rest comes from the sandbox cache.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

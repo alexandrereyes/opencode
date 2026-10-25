@@ -214,6 +214,11 @@ extension Notification.Name {
       let data = try await request.value
       audio[piece] = data
       requests[piece] = nil
+      // A generated piece's real length refines the total right away, before it plays.
+      if timeline.durations[piece] == nil, let duration = try? AVAudioPlayer(data: data).duration {
+        timeline.durations[piece] = duration
+        publish()
+      }
       return data
     } catch {
       requests[piece] = nil
