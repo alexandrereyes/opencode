@@ -2671,13 +2671,30 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   only in the model-facing comment. Restored web quote attachments retain their quote ownership in the protected
   draft; inline files follow main files in quote/part order and staged files stay referenced inside their quote.
   The sent bubbles reuse the existing quote presentation with aligned side bars.
-- **Pergunta paralela** is a medium/large glass sheet. Selection prefills the blockquote; `/btw` suggestions open the
+- **Pergunta paralela** is a medium/large sheet. Selection prefills the blockquote; `/btw` suggestions open the
   same sheet, and submitting `/btw <question>` sends the first local question immediately. It shows the committed
   session model, not an unsubmitted composer selection. Answers use the response Markdown renderer, with copy.
   `SideQuestionRequest` carries exactly the web instruction prefix and at most five completed local Q&As, capped at
   1,000/3,000 UTF-16 units (without splitting a surrogate). `POST /generate` is JSON, never a durable prompt or SSE.
   Parar cancels only its URLSession task and restores the question; closing discards the thread. Failure has both a
   retryable shared toast and a local retry button.
+  **Alexandre, 25/10:** every entry point (the selection menu's **Pergunta paralela**, picking the `/btw` suggestion
+  and sending `/btw <question>`) opens the sheet at the large detent, handle visible, with its field focused and the
+  keyboard up, without another tap. The conversation's `…` menu and quote sheets have no side-question action. Focus
+  uses the expanded composer's `ComposerCoverAppearance` (after the presentation transition) and `SideQuestionInput`
+  changes first responder on the next main-queue turn, never inside `updateUIView` (the hang fixed in `d6b4bc502ee`).
+  `/btw <question>` also focuses the field: its question is already sent, so the keyboard is ready for the follow-up.
+  Closing discards the thread, so a sheet never reopens with an earlier answer. The sheet and the bar behind its
+  composer use the opaque theme background, as in the conversation, with a 12 pt fade above it; it replaced the
+  `.regularMaterial` sheet whose answer showed through the translucent card. The bar is a bottom safe-area inset, so
+  the answer's last line and **Copiar resposta** end above it, also with the keyboard open.
+  `OpenCodeTests/SideQuestionPresentationTests` checks the large detent and focus only after presenting.
+  `OpenCodeUITests/SideQuestionTests` uses the offline conversation fixture plus `-OpenCodeSideQuestionFixture`
+  (DEBUG; a local long answer and local `/` suggestions, no HTTP) and checks both selection and `/btw` entries, an
+  unchanged composer card while the answer scrolls behind it, and the end of the answer above the composer with and
+  without the keyboard. Run it with `script/test-isolated.py` against an unused loopback URL and a private `--home`
+  holding any password; the simulator needs `AutomaticMinimizationEnabled` off in its `com.apple.keyboard.preferences`
+  so the software keyboard appears. Captures: `$TMPDIR/opencode/ios-side-question/prints/`.
 - A native `UIContextMenuInteraction` on the recycled header handles **Copiar** and **Copiar citação** even in List's sticky section
   headers, where SwiftUI's `contextMenu` does not install an interaction. It does not intercept buttons, attachments or
   internal prompt scrolling. Copiar uses only `displayText`; the quote

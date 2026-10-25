@@ -424,7 +424,10 @@ import OpenCodeKit
     }
   }
   func askSideQuestion(_ request: SideQuestionRequest) async throws -> String {
-    try await client.sideQuestion(request, sessionID: id)
+    #if DEBUG
+    if SideQuestionFixture.enabled { return try await SideQuestionFixture.answer() }
+    #endif
+    return try await client.sideQuestion(request, sessionID: id)
   }
   /// Where app mentions come from, without waiting for the Location's MCP list.
   var appScope: ComposerAppScope? {

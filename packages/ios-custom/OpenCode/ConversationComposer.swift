@@ -69,9 +69,9 @@ struct ConversationComposer: View {
   }
 }
 
-/// Runs once, after the fullscreen cover's presentation transition, unlike SwiftUI's `onAppear`.
+/// Runs once, after a fullscreen cover's or sheet's presentation transition, unlike SwiftUI's `onAppear`.
 /// Each presentation builds a new controller, so reappearing under a dismissed picker does not refocus.
-private struct ComposerCoverAppearance: UIViewControllerRepresentable {
+struct ComposerCoverAppearance: UIViewControllerRepresentable {
   let appeared: () -> Void
   func makeUIViewController(context: Context) -> Controller { Controller(appeared: appeared) }
   func updateUIViewController(_ controller: Controller, context: Context) { controller.appeared = appeared }

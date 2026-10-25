@@ -29,8 +29,20 @@ struct SideQuestionInput: UIViewRepresentable {
     view.submit = submit
     view.canSubmit = canSubmit
     view.requestFocus = focused
-    if focused && !view.isFirstResponder && view.window != nil { view.becomeFirstResponder() }
-    if !focused && view.isFirstResponder { view.resignFirstResponder() }
+    // As in ComposerTextView: focus changes reload the keyboard's input views, which must not run
+    // inside this graph update (attribute cycle and a ~0.4 s hang).
+    if focused && !view.isFirstResponder && view.window != nil {
+      DispatchQueue.main.async { [weak view] in
+        guard let view, view.requestFocus, !view.isFirstResponder, view.window != nil else { return }
+        view.becomeFirstResponder()
+      }
+    }
+    if !focused && view.isFirstResponder {
+      DispatchQueue.main.async { [weak view] in
+        guard let view, !view.requestFocus, view.isFirstResponder else { return }
+        view.resignFirstResponder()
+      }
+    }
   }
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ComposerInputView, context: Context)
     -> CGSize?

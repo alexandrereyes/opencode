@@ -69,6 +69,7 @@ struct SideQuestionSheet: View {
   let launch: SideQuestionLaunch
   @State private var state: SideQuestionState
   @State private var focused = false
+  @State private var detent = PresentationDetent.large
   init(store: ConversationStore, launch: SideQuestionLaunch) {
     self.store = store
     self.launch = launch
@@ -119,12 +120,22 @@ struct SideQuestionSheet: View {
               }
               theme.color(.background).opacity(0).frame(height: 1).id("side-bottom")
             }.padding(20)
-          }.scrollDismissesKeyboard(.interactively)
+          }.scrollDismissesKeyboard(.interactively).accessibilityIdentifier("side-question-scroll")
             .onChange(of: state.entries) { _, _ in proxy.scrollTo("side-bottom", anchor: .bottom) }
             .onChange(of: state.pending) { _, _ in proxy.scrollTo("side-bottom", anchor: .bottom) }
         }
       }
-      .safeAreaInset(edge: .bottom, spacing: 0) { composer.padding(12) }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Like the conversation's composer, the card sits on the opaque background, so the answer
+        // never shows through it; the fade softens the edge where the answer scrolls under it.
+        VStack(spacing: 0) {
+          LinearGradient(
+            colors: [theme.color(.background).opacity(0), theme.color(.background)],
+            startPoint: .top, endPoint: .bottom
+          ).frame(height: 12).allowsHitTesting(false)
+          composer.padding([.horizontal, .bottom], 12).background(theme.color(.background))
+        }
+      }
       .navigationTitle("Pergunta paralela").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
@@ -133,12 +144,14 @@ struct SideQuestionSheet: View {
         }
       }
       .toastOverlay(state.toast)
+      // Opens ready to type, like the expanded composer: focusing during the presentation stalled it.
+      .background(ComposerCoverAppearance { focused = true }.frame(width: 0, height: 0))
     }
     .environment(state.toast).environment(\.responseSelection, nil).environment(
       \.responseSelectionChanged, nil
     )
-    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-    .presentationBackground(.regularMaterial).tint(theme.color(.primary))
+    .presentationDetents([.medium, .large], selection: $detent).presentationDragIndicator(.visible)
+    .presentationBackground(theme.color(.background)).tint(theme.color(.primary))
     .task { if launch.submit { state.ask(store: store) } }
     .onDisappear { state.stop(restore: false) }
   }
@@ -177,6 +190,7 @@ struct SideQuestionSheet: View {
     .overlay {
       RoundedRectangle(cornerRadius: 22).strokeBorder(theme.color(.border), lineWidth: 0.7)
     }
+    .accessibilityElement(children: .contain).accessibilityIdentifier("side-question-card")
   }
   private var canSubmit: Bool {
     state.pending == nil && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
