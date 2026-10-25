@@ -103,8 +103,7 @@ struct UserMessageCopyButton: View {
     } label: {
       Image(systemName: copied ? "checkmark" : "doc.on.doc").appFont(.bubbleMeta)
         .frame(width: 28, height: 24)
-        // A 48 × 44 pt target that adds no layout size.
-        .contentShape(Rectangle().inset(by: -10))
+        .contentShape(CopyTarget())
     }.buttonStyle(.plain)
       .accessibilityLabel("Copiar mensagem").accessibilityValue(copied ? "Copiada" : "")
       .accessibilityIdentifier("user-copy-" + message.id)
@@ -113,5 +112,13 @@ struct UserMessageCopyButton: View {
         do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
         copied = false
       }
+  }
+}
+
+/// A 48 × 44 pt target that adds no layout size. Bubble hosts end 8 pt below the footer, so the
+/// rest comes from the 4 pt gap and the bubble's empty bottom padding, never from the next row.
+private struct CopyTarget: Shape {
+  func path(in rect: CGRect) -> Path {
+    Path(rect.inset(by: UIEdgeInsets(top: -12, left: -10, bottom: -8, right: -10)))
   }
 }

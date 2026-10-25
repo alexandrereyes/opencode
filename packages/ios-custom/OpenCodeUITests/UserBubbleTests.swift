@@ -229,7 +229,9 @@ import UIKit
       XCTAssertEqual(copy.frame.midX - revert.frame.midX, 36, accuracy: 1)
       XCTAssertGreaterThanOrEqual(copy.frame.height, 43.5)
       XCTAssertGreaterThanOrEqual(copy.frame.width, 43.5)
-      XCTAssertEqual(copy.frame.midY, revert.frame.midY, accuracy: 1)
+      // 12 pt above (gap and empty bubble padding) and 8 pt below (the host's bottom padding).
+      XCTAssertEqual(copy.frame.minY, revert.frame.minY - 12, accuracy: 1)
+      XCTAssertEqual(copy.frame.maxY, revert.frame.maxY + 8, accuracy: 1)
       shot(app, "app-copy-button-" + theme)
       // Below the 24 pt glyph frame, inside the 44 pt target.
       copy.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 18)).tap()

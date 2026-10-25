@@ -32,8 +32,16 @@ import XCTest
       XCTAssertTrue(bubble.exists)
       XCTAssertTrue(meta.exists)
       XCTAssertTrue(undo.isHittable)
-      XCTAssertGreaterThanOrEqual(meta.frame.minY, bubble.frame.maxY)
+      let copy = app.buttons["user-copy-msg_mcp_user"]
+      XCTAssertTrue(copy.isHittable)
+      // The footer row and glyphs stay below the bubble. The container's accessibility frame also
+      // includes the copy button's 44 pt target, which reaches 8 pt into the bubble's empty padding.
+      XCTAssertGreaterThanOrEqual(undo.frame.minY, bubble.frame.maxY)
       XCTAssertGreaterThanOrEqual(time.frame.minY, bubble.frame.maxY)
+      XCTAssertEqual(meta.frame.minY, copy.frame.minY, accuracy: 0.5)
+      XCTAssertEqual(copy.frame.minY, undo.frame.minY - 12, accuracy: 1)
+      XCTAssertEqual(copy.frame.height, 44, accuracy: 1)
+      XCTAssertEqual(copy.frame.maxY, undo.frame.maxY + 8, accuracy: 1)
       XCTAssertEqual(meta.frame.maxX, bubble.frame.maxX, accuracy: 1)
       XCTAssertEqual(bubble.frame.maxX, app.frame.maxX - 16, accuracy: 1)
       let usage = app.buttons["conversation-usage"]
