@@ -47,6 +47,12 @@ import UIKit
   }
 
   var inControl: Bool { holder == .me }
+  /// Clockwise turn that shows the frame upright, from the stream's `meta.rotation` (iOS Simulator in landscape).
+  /// Frames and touches stay in the unrotated frame; `ResourceFrameView` and `ResourceTouchOverlay` apply it.
+  var rotation: Int {
+    guard case .number(let degrees) = meta["rotation"] else { return 0 }
+    return ResourceScreenGeometry.normalized(Int(degrees))
+  }
   /// "iPhone 17 · ao vivo · 38 ms".
   var status: String {
     let device = resource.meta.device ?? resource.kind.title

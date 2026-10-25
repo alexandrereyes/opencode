@@ -2,13 +2,29 @@ import OpenCodeKit
 import SwiftUI
 import UIKit
 
-/// The streamed screen for JPEG/PNG streams (and the fallback snapshot stream), aspect-fit.
+/// The streamed screen for JPEG/PNG streams (and the fallback snapshot stream), aspect-fit and turned upright by
+/// `model.rotation`.
 struct ResourceFrameView: View {
   let model: ResourceViewerModel
   var body: some View {
     if let image = model.image {
-      Image(uiImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+      let rotation = model.rotation
+      if rotation == 0 {
+        Image(uiImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+          .accessibilityIdentifier("resource-frame")
+      } else {
+        GeometryReader { proxy in
+          let geometry = ResourceScreenGeometry(frame: image.size, rotation: rotation)
+          let rect = geometry.screenRect(in: CGRect(origin: .zero, size: proxy.size))
+          Image(uiImage: image).resizable().interpolation(.medium)
+            .frame(
+              width: geometry.sideways ? rect.height : rect.width, height: geometry.sideways ? rect.width : rect.height
+            )
+            .rotationEffect(.degrees(Double(rotation)))
+            .position(x: rect.midX, y: rect.midY)
+        }
         .accessibilityIdentifier("resource-frame")
+      }
     } else {
       ProgressView().controlSize(.large).accessibilityIdentifier("resource-loading")
     }
@@ -17,7 +33,8 @@ struct ResourceFrameView: View {
 
 /// Transparent layer over the screen. In control, touches become normalized `touch` inputs (multi-touch, with a
 /// touch indicator); otherwise a tap calls `onTap` (the shell toggles the controls). `contentSize` is the frame's
-/// pixel size, so coordinates map to the aspect-fit image and touches in the letterbox are ignored.
+/// pixel size, so coordinates map to the aspect-fit image and touches in the letterbox are ignored. With a
+/// `model.rotation`, touches on the upright picture map back to the unrotated frame.
 struct ResourceTouchOverlay: UIViewRepresentable {
   let model: ResourceViewerModel
   var contentSize: CGSize?
@@ -39,6 +56,7 @@ struct ResourceTouchOverlay: UIViewRepresentable {
     view.model = model
     view.interactive = model.inControl
     view.contentSize = contentSize ?? model.image?.size ?? model.hello.map { CGSize(width: $0.width, height: $0.height) }
+    view.rotation = model.rotation
     view.indicatorColor = indicator
     view.onTap = onTap
   }
@@ -47,19 +65,19 @@ struct ResourceTouchOverlay: UIViewRepresentable {
     weak var model: ResourceViewerModel?
     var interactive = false
     var contentSize: CGSize?
+    var rotation = 0
     var indicatorColor = UIColor.systemOrange
     var onTap: () -> Void = {}
     private var pointers: [ObjectIdentifier: Int] = [:]
     private var dots: [ObjectIdentifier: CALayer] = [:]
     private var tapStart: CGPoint?
 
-    /// The aspect-fit rect the frame occupies inside the view.
-    var content: CGRect {
-      guard let size = contentSize, size.width > 0, size.height > 0 else { return bounds }
-      let scale = min(bounds.width / size.width, bounds.height / size.height)
-      let fitted = CGSize(width: size.width * scale, height: size.height * scale)
-      return CGRect(
-        x: bounds.midX - fitted.width / 2, y: bounds.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
+    /// Where the (upright) frame sits inside the view; without a size, the whole view.
+    var geometry: ResourceScreenGeometry {
+      guard let size = contentSize, size.width > 0, size.height > 0 else {
+        return ResourceScreenGeometry(frame: bounds.size)
+      }
+      return ResourceScreenGeometry(frame: size, rotation: rotation)
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -106,17 +124,13 @@ struct ResourceTouchOverlay: UIViewRepresentable {
 
     private func input(_ touch: UITouch, _ phase: ResourceInput.Phase) -> ResourceInput? {
       guard let pointer = pointers[ObjectIdentifier(touch)] else { return nil }
-      let rect = content
-      let point = touch.location(in: self)
-      let x = (point.x - rect.minX) / rect.width
-      let y = (point.y - rect.minY) / rect.height
-      // A touch that starts in the letterbox belongs to nothing; one that drifts out is clamped by the encoder.
-      if phase == .began, !(0...1).contains(x) || !(0...1).contains(y) {
+      // A touch that starts in the letterbox belongs to nothing; one that drifts out is pinned to the edge.
+      guard let point = geometry.framePoint(for: touch.location(in: self), in: bounds, clamped: phase != .began) else {
         pointers.removeValue(forKey: ObjectIdentifier(touch))
         dots.removeValue(forKey: ObjectIdentifier(touch))?.removeFromSuperlayer()
         return nil
       }
-      return .touch(phase, x: x, y: y, pointer: pointer)
+      return .touch(phase, x: point.x, y: point.y, pointer: pointer)
     }
 
     private func showDot(_ touch: UITouch) {
@@ -168,6 +182,7 @@ struct ResourceKeyboard: UIViewRepresentable {
     field.returnKeyType = style.returnKey
     if changed, field.isFirstResponder { field.reloadInputViews() }
     field.onEnd = { active = false }
+    field.onBegin = { if !active { active = true } }
     if active, !field.isFirstResponder { field.becomeFirstResponder() }
     if !active, field.isFirstResponder { field.resignFirstResponder() }
   }
@@ -175,6 +190,9 @@ struct ResourceKeyboard: UIViewRepresentable {
   final class Field: UITextField, UITextFieldDelegate {
     weak var model: ResourceViewerModel?
     var onEnd: () -> Void = {}
+    /// Keeps Teclado in step when UIKit focuses the field on its own (seen in UI tests: focus returned after
+    /// typing), so the next tap closes the keyboard instead of reopening it.
+    var onBegin: () -> Void = {}
     override init(frame: CGRect) {
       super.init(frame: frame)
       delegate = self
@@ -195,6 +213,7 @@ struct ResourceKeyboard: UIViewRepresentable {
       model?.send([.key("Enter")])
       return false
     }
+    func textFieldDidBeginEditing(_ textField: UITextField) { onBegin() }
     func textFieldDidEndEditing(_ textField: UITextField) { onEnd() }
   }
 }

@@ -1294,6 +1294,20 @@ It registers the target in the sandbox hub, measures the stream, runs `OpenCodeU
 `--lock` checks with one Luna 6 / low shell call that the agent is refused while Alexandre holds control and is told
 when control returns.
 
+**iOS Simulator (layout 2B, `IOSSimulator/IOSSimulatorResourceView.swift`).** The live serve-sim stream (see
+`docs/resources-ios-simulator.md`) with the side column **Início**, **Girar** (rotate right), **Teclado** and
+**Captura de tela**; the first three wait for control. In landscape the hub reports `meta.rotation` and the shell's
+frame and touch overlay turn the unrotated framebuffer upright (`OpenCodeKit/ResourceScreenGeometry.swift`). Typing
+uses the shell's keyboard bridge: short US text goes as keys, accents and longer text through the simulator's paste.
+**Captura de tela** fetches the full-size, upright `simctl` screenshot through the snapshot RPC and pops the share
+sheet over the button (**Salvar imagem**, **Copiar**…), removing the temporary file when it closes. After
+`build-for-testing`, with your own booted target simulator:
+`python3 packages/ios-custom/script/test-ios-simulator-resource.py --device <app-sim> --target <target-sim> --derived … --home <sandbox> --server-url … --evidence … [--theme openchamber-light]`.
+It opens a local page in the target's Safari, measures touch → frame through the hub in control, then runs
+`OpenCodeUITests/IOSSimulatorResourceTests` (watch, take control, tap the field, type `Ola acao 42 á` + Return and
+check what the page received, rotate, capture, Início, give back). `OpenCodeTests/ResourceSurfaceTests` covers the
+rotated touch mapping and the keyboard tool staying in step with the field's focus.
+
 **Android Emulator (layout 3B).** `AndroidEmulator/AndroidEmulatorResourceView.swift` has no side column: a glass
 pill with **Voltar**, **Início**, **Recentes** and the keyboard, plus a round **…** menu (rotate left/right, lock,
 volume), sits under **Assumir controle** / **Devolver controle** while the controls show and is disabled until

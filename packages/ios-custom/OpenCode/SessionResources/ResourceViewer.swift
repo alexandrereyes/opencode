@@ -258,7 +258,7 @@ struct ResourceToolButton: View {
         .foregroundStyle(theme.color(active ? .primary : .textStrong))
         .frame(width: 46, height: 46).glassEffect(.regular.interactive(), in: .circle)
     }
-    .buttonStyle(.plain).accessibilityLabel(title)
+    .buttonStyle(.plain).accessibilityLabel(title).accessibilityAddTraits(active ? .isSelected : [])
   }
 }
 
