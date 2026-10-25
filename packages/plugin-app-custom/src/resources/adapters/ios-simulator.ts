@@ -2,12 +2,13 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { run, size, text } from "./process.js"
-import type { Adapter, Probe } from "./types.js"
+import { acquire, makeTranslator, rotation, typeable, withHelper, type Config, type Helper } from "./serve-sim.js"
+import type { Adapter, Entry, Probe, StreamSink } from "./types.js"
 
 /**
- * iOS Simulator. Foundation stub: liveness through `simctl list` and snapshots through `simctl io screenshot`
- * (both work headless, with the Mac locked and no Simulator window). The live stream and input (serve-sim from
- * Expo Device Hub, IOSurface + HID) belong to the `resources-ios-sim` work.
+ * iOS Simulator. Liveness through `simctl list` and snapshots through `simctl io screenshot`; the live stream and
+ * input go through serve-sim (`serve-sim.ts`): IOSurface MJPEG and SimulatorKit HID. All of them work headless,
+ * with the Mac locked and no Simulator window. See `docs/resources-ios-simulator.md`.
  */
 export const adapter: Adapter = {
   kind: "ios-simulator",
@@ -42,6 +43,53 @@ export const adapter: Adapter = {
       await fs.rm(directory, { recursive: true, force: true })
     }
   },
+  async stream(entry, sink, signal) {
+    const lease = await acquire(udidOf(entry))
+    const stop = lease.helper.onConfig((config) => sink.meta(orientationMeta(config)))
+    return relay(lease.helper, sink, signal).finally(() => {
+      stop()
+      lease.release()
+    })
+  },
+  async input(entry, event) {
+    const udid = udidOf(entry)
+    const translator = translators.get(udid) ?? makeTranslator()
+    translators.set(udid, translator)
+    // Input arrives while the viewer streams, so this reuses the stream's helper.
+    await withHelper(udid, async (helper) => {
+      if (event.type === "text" && !typeable(event.text)) return helper.paste(event.text)
+      translator.translate(event, helper.config()).forEach(([tag, body]) => helper.send(tag, body))
+    })
+  },
+}
+
+const translators = new Map<string, ReturnType<typeof makeTranslator>>()
+
+function udidOf(entry: Entry) {
+  if (entry.meta.kind !== "ios-simulator") throw new Error("Not an iOS simulator")
+  return entry.meta.udid
+}
+
+/** `rotation`: clockwise degrees the viewer turns frames; touch coordinates stay in the unrotated frame. */
+function orientationMeta(config: Config) {
+  return { orientation: config.orientation, rotation: rotation(config) }
+}
+
+/** Forwards JPEG frames, announcing their size again when it changes. */
+async function relay(helper: Helper, sink: StreamSink, signal: AbortSignal) {
+  const announced = { width: 0, height: 0 }
+  const config = helper.config()
+  if (config) sink.meta(orientationMeta(config))
+  for await (const frame of helper.frames(signal)) {
+    const dimensions = size(frame)
+    if (dimensions && (dimensions.width !== announced.width || dimensions.height !== announced.height)) {
+      Object.assign(announced, dimensions)
+      sink.hello({ format: "jpeg", width: dimensions.width, height: dimensions.height })
+      const current = helper.config()
+      if (current) sink.meta(orientationMeta(current))
+    }
+    sink.frame(frame)
+  }
 }
 
 export type SimulatorDevice = {

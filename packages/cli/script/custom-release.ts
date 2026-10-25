@@ -185,6 +185,7 @@ export async function prepare(home: string, dryRun = false) {
     env,
     false,
   )
+  await bundleServeSim(source, staging)
   await Bun.write(
     `${staging}/server-config.json`,
     JSON.stringify(serverConfig(path.join(home, "releases", commit, "plugin"))),
@@ -194,6 +195,20 @@ export async function prepare(home: string, dryRun = false) {
   await rm(work, { recursive: true, force: true })
   console.log(`Prepared ${commit}`)
   return commit
+}
+
+/**
+ * Copies Expo's serve-sim (Apache-2.0, prebuilt for Apple silicon) beside the plugin: the resources hub runs it with
+ * the release binary (`BUN_BE_BUN`) to stream and drive iOS simulators. Its only runtime dependency is `ws`.
+ */
+export async function bundleServeSim(source: string, staging: string) {
+  if (process.platform !== "darwin" || process.arch !== "arm64") return
+  const pkg = await realpath(path.join(source, "packages/plugin-app-custom/node_modules/@expo/serve-sim"))
+  const ws = path.dirname(Bun.resolveSync("ws/package.json", pkg))
+  const modules = path.join(staging, "serve-sim/node_modules")
+  await mkdir(path.join(modules, "@expo"), { recursive: true })
+  await command(["cp", "-R", pkg, path.join(modules, "@expo/serve-sim")])
+  await command(["cp", "-R", ws, path.join(modules, "ws")])
 }
 
 export async function settings(home: string) {

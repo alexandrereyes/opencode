@@ -94,6 +94,8 @@ interface Live {
   readonly controller: AbortController
   readonly viewers: Set<Viewer>
   hello?: ResourceProtocol.Hello
+  /** Latest `meta`, replayed to viewers that join later (an iOS Simulator's rotation). */
+  meta?: Record<string, unknown>
   keyframe?: { readonly encoded: Uint8Array; readonly payload: Uint8Array }
 }
 
@@ -375,6 +377,7 @@ export function createHub(options: HubOptions) {
       mine: lock !== undefined && viewer.lock === lock.token,
     })
     if (live.hello) viewer.text(live.hello)
+    if (live.meta) viewer.text({ type: "meta", value: live.meta })
     if (live.keyframe) {
       viewer.frame(live.keyframe.encoded, live.keyframe.payload, true)
       viewer.waitingKeyframe = false
@@ -401,7 +404,10 @@ export function createHub(options: HubOptions) {
           item.frame(encoded, payload, keyframe)
         })
       },
-      meta: (value) => live.viewers.forEach((item) => item.text({ type: "meta", value })),
+      meta: (value) => {
+        live.meta = value
+        live.viewers.forEach((item) => item.text({ type: "meta", value }))
+      },
     }
     const adapter = options.adapters[entry.kind]
     const run = adapter.stream

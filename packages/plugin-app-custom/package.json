@@ -43,6 +43,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@expo/serve-sim": "0.10.3",
     "@opencode/plugin": "workspace:*",
     "@opencode/schema": "workspace:*",
     "effect": "catalog:"

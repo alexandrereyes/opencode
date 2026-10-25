@@ -37,6 +37,10 @@ Each `releases/<sha>` contains:
 - `bin/opencode`: relative symlink to the bundle executable, used by launchers and hashed
   through the link;
 - `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
+- `serve-sim/node_modules/`: Expo's `@expo/serve-sim` and its `ws` dependency, copied from the plugin's
+  dependencies on Apple silicon, which the resources hub runs to stream and drive iOS simulators
+  (see `docs/resources-ios-simulator.md`). It is read-only like the rest of the release but outside the
+  hashed artifacts;
 - `server-config.json`: update disabled, the absolute release-owned plugin path, and the
   local `safari-devtools` MCP server (`/usr/bin/safaridriver --mcp`);
 - `manual-release.json`: format 2, commit, version, platform, architecture and SHA-256 artifact hashes.

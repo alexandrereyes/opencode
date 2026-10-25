@@ -89,8 +89,8 @@ Text messages hub → client: `hello { format: "jpeg"|"png"|"h264", width, heigh
 `pong { t, hub }`, `error { message }`, `end { reason }`.
 
 Binary messages are frames: `u8 version = 1`, `u8 flags` (bit 0 keyframe), `f64` big-endian capture time (epoch
-ms), payload (one JPEG/PNG image or one H.264 access unit). A new viewer gets `control`, the cached `hello` and the
-last keyframe at once. Viewers more than 2 MiB behind skip frames until the next keyframe.
+ms), payload (one JPEG/PNG image or one H.264 access unit). A new viewer gets `control`, the cached `hello`, the
+latest `meta` and the last keyframe at once. Viewers more than 2 MiB behind skip frames until the next keyframe.
 
 Text messages client → hub: `ping { t }` and `input { events }` (≤ 64 events). Input coordinates are normalized to the
 frame (0…1, top left): `touch { phase: began|moved|ended|cancelled, x, y, pointer? }`, `scroll { x, y, dx, dy }`
@@ -122,7 +122,7 @@ have their own section below):
 
 | Kind               | Liveness                                          | Snapshot                                        | Live work                                               |
 | ------------------ | ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| `ios-simulator`    | `xcrun simctl list devices -j` (Booted → running) | `simctl io <udid> screenshot --type=jpeg`       | serve-sim (Expo Device Hub): IOSurface + HID            |
+| `ios-simulator`    | `xcrun simctl list devices -j` (Booted → running) | `simctl io <udid> screenshot --type=jpeg`       | Done: serve-sim, see `docs/resources-ios-simulator.md`  |
 | `android-emulator` | `avd/running/pid_*.ini` plus `adb devices`        | gRPC `getScreenshot` (adb `screencap` fallback) | Done: see [Android Emulator](#android-emulator)         |
 | `chrome`           | CDP `/json/list` or `playwright-cli list --json`  | CDP `Page.captureScreenshot`                    | `Page.startScreencast` + `Input.dispatch*`/`insertText` |
 
@@ -247,7 +247,8 @@ must stay visible in control, such as Android's navigation pill, use `.resourceD
 them off whatever they cover. Kinds without side tools pass `EmptyView` as `tools` and the column disappears;
 `ResourceControlBar(model:accessory:)` puts a kind's control between the button and the hint (Android's pill).
 `ResourceTouchOverlay` maps touches to the aspect-fit frame (multi-touch, touch
-indicator); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
+indicator). A stream `meta.rotation` (clockwise 0/90/180/270, the iOS Simulator in landscape) turns the picture
+upright in `ResourceFrameView` and maps touches back to the unrotated frame (`OpenCodeKit/ResourceScreenGeometry`); `ResourceKeyboard` forwards the iPhone keyboard as `text`/`key` inputs, with a content type (Chrome uses
 `.password` for password autofill: kinds set `model.keyboardStyle`, a `ResourceKeyboardStyle` of content type,
 keyboard type, secure entry and Return key). Frames decode one at a time and the newest waiting frame always follows,
 so the last frame of a burst is never lost. Kinds that stream H.264 set `model.rawFrames` and pass their own
