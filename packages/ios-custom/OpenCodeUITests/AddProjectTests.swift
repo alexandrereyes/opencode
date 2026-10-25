@@ -145,6 +145,11 @@ import XCTest
     } else {
       // Quick add straight from the initial ~/Dev listing.
       app.navigationBars["Projeto"].buttons["new-project-add"].tap()
+      let path = app.textFields["add-project-path"]
+      XCTAssertTrue(waitValue(path, "~/Dev/"))
+      // Filter so the lazily loaded list materializes the row.
+      path.tap()
+      path.typeText("opencode2")
       let quick = app.buttons["add-project-quick-opencode2"]
       XCTAssertTrue(quick.waitForExistence(timeout: 15))
       quick.tap()

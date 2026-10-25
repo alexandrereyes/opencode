@@ -17,6 +17,8 @@ import OpenCodeKit
   private(set) var mcpError = false
   private(set) var loading = false
   private(set) var loadError: String?
+  /// Listing failures keep root and Nova worktree available but must be visible, not an empty list.
+  private(set) var worktreeError = false
   private(set) var toggling: Set<String> = []
   private var selectionRevision = 0
   @ObservationIgnored private var mutations: [UUID: Task<Bool, Never>] = [:]
@@ -185,6 +187,7 @@ import OpenCodeKit
     }
     loading = true
     loadError = nil
+    worktreeError = false
     mcpLoading = true
     mcpError = false
     mcps = []
@@ -196,25 +199,31 @@ import OpenCodeKit
       }
     }
     do {
-      async let inventory = try? sessions.client.worktrees(projectID: project.id)
-      async let branches = try? sessions.client.worktreeBranches(directory: project.canonical)
-      async let vcs = sessions.client.vcs(directory: project.canonical)
+      let client = sessions.client
+      async let inventory = Self.attempt { try await client.refreshedWorktrees(projectID: project.id) }
+      async let branches = Self.attempt {
+        try await client.worktreeBranches(directory: project.canonical)
+      }
+      async let vcs = client.vcs(directory: project.canonical)
       async let catalog: Void = composer.loadNewSession(
         directory: directory, projectID: project.id, recent: sessions.catalog.recent)
       let values = try await (inventory, branches, vcs, catalog)
       try Task.checkCancellation()
+      let listed = try? values.0.get()
+      let checkouts = try? values.1.get()
+      worktreeError = listed == nil || checkouts == nil
       rootBranch =
-        values.2.branch.current ?? values.1?.first { $0.directory == project.canonical }?.branch
+        values.2.branch.current ?? checkouts?.first { $0.directory == project.canonical }?.branch
       git = project.vcs == "git" || values.2.supportsWorktrees || rootBranch != nil
       worktrees = NewSessionProjection.worktrees(
-        root: project.canonical, inventory: values.0 ?? project.worktrees ?? [],
-        known: project.worktrees ?? [], sandboxes: project.sandboxes, branches: values.1 ?? [])
+        root: project.canonical, inventory: listed ?? project.worktrees ?? [],
+        known: project.worktrees ?? [], sandboxes: project.sandboxes, branches: checkouts ?? [])
       if !git && destination != .root {
         selectDestination(.root)
         return
       }
       if case .worktree(let path) = destination,
-        !worktrees.contains(where: { $0.directory == path }) && values.0 != nil
+        !worktrees.contains(where: { $0.directory == path }) && listed != nil
       {
         selectDestination(.implicit(lastUsed: categories[project.id]))
         return
@@ -246,6 +255,11 @@ import OpenCodeKit
     }
   }
   func retry() { selectionRevision += 1 }
+  private nonisolated static func attempt<Value: Sendable>(
+    _ operation: @Sendable () async throws -> Value
+  ) async -> Result<Value, any Error> {
+    do { return .success(try await operation()) } catch { return .failure(error) }
+  }
   func loadMCPs() async {
     guard let directory else { return }
     mcpLoading = true

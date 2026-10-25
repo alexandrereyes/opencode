@@ -416,6 +416,62 @@ private actor NewSessionHTTP {
   #expect(requests[3].httpMethod == "POST" && requests[3].httpBody == nil)
 }
 
+private actor WorktreeInventoryHTTP {
+  let refreshStatus: Int
+  let listStatus: Int
+  var requests: [String] = []
+  var refreshed = false
+  init(refreshStatus: Int, listStatus: Int = 200) {
+    self.refreshStatus = refreshStatus
+    self.listStatus = listStatus
+  }
+  func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
+    let url = request.url!
+    requests.append((request.httpMethod ?? "GET") + " " + url.path)
+    if url.path == "/api/worktree/refresh" && refreshStatus == 204 { refreshed = true }
+    let status = url.path == "/api/worktree/refresh" ? refreshStatus : listStatus
+    // Stored inventory keeps checkouts removed outside OpenCode until a refresh prunes them.
+    let json =
+      url.path == "/api/worktree" && status == 200
+      ? refreshed
+        ? #"[{"directory":"/w/detached","strategy":"git"},{"directory":"/repo","strategy":"git"}]"#
+        : #"[{"directory":"/w/gone","strategy":"git"},{"directory":"/w/detached","strategy":"git"}]"#
+      : #"{"_tag":"Error"}"#
+    return (
+      Data(json.utf8),
+      HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+    )
+  }
+}
+
+@Test func newSessionWorktreesAreRefreshedBeforeListingAndKeepDetachedCheckouts() async throws {
+  let http = WorktreeInventoryHTTP(refreshStatus: 204)
+  let client = OpenCodeClient(configuration: .init(url: URL(string: "http://localhost:4177")!)) {
+    try await http.respond($0)
+  }
+  let listed = try await client.refreshedWorktrees(projectID: "p")
+  #expect(await http.requests == ["POST /api/worktree/refresh", "GET /api/worktree"])
+  // A detached HEAD has no branch in `custom.worktrees/branches`; it is labeled by its folder.
+  let branches = try newDecode(
+    #"[{"directory":"/repo","branch":"custom"},{"directory":"/w/detached"}]"#,
+    [WorktreeBranch].self)
+  let choices = NewSessionProjection.worktrees(
+    root: "/repo", inventory: listed, sandboxes: [], branches: branches)
+  #expect(choices == [WorktreeChoice(directory: "/w/detached", label: "detached")])
+
+  let stale = WorktreeInventoryHTTP(refreshStatus: 500)
+  let fallback = OpenCodeClient(configuration: .init(url: URL(string: "http://localhost:4177")!)) {
+    try await stale.respond($0)
+  }
+  #expect(try await fallback.refreshedWorktrees(projectID: "p").map(\.directory) == ["/w/gone", "/w/detached"])
+
+  let broken = WorktreeInventoryHTTP(refreshStatus: 204, listStatus: 500)
+  let failing = OpenCodeClient(configuration: .init(url: URL(string: "http://localhost:4177")!)) {
+    try await broken.respond($0)
+  }
+  await #expect(throws: (any Error).self) { try await failing.refreshedWorktrees(projectID: "p") }
+}
+
 @Test func newSessionDraftRoundTripContainsDestinationPreviewTokensAndAttachments() async throws {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   defer { try? FileManager.default.removeItem(at: root) }

@@ -94,6 +94,19 @@ struct NewSessionDirectorySheet: View {
               Text("Nenhuma worktree encontrada").foregroundStyle(theme.color(.textSecondary))
                 .listRowBackground(theme.color(.surface))
             }
+            if store.worktreeError {
+              Button {
+                store.retry()
+              } label: {
+                Label(
+                  "Não foi possível listar as worktrees · Tentar novamente",
+                  systemImage: "exclamationmark.triangle"
+                ).foregroundStyle(theme.color(.error))
+              }.accessibilityIdentifier("new-worktrees-error").listRowBackground(theme.color(.surface))
+            } else if store.worktrees.isEmpty {
+              Text("Nenhuma worktree existente. Use Nova worktree para criar uma.")
+                .foregroundStyle(theme.color(.textSecondary)).listRowBackground(theme.color(.surface))
+            }
           }
           if store.destination == .create {
             Text("Nova worktree selecionada: ela será criada ao enviar.")
@@ -104,17 +117,22 @@ struct NewSessionDirectorySheet: View {
       }.scrollContentBackground(.hidden).background(theme.color(.background))
         .navigationTitle("Diretório").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-          // Nova worktree is a destination, not just an action: the selected state stays filled.
+          // Nova worktree is a destination, not just an action: it is labeled like the web's "+ New"
+          // and stays filled while selected. Listing failures never hide it.
           if store.git {
             ToolbarItem(placement: .topBarTrailing) {
               let selected = store.destination == .create
-              let button = Button(
-                selected ? "Nova worktree selecionada" : "Nova worktree",
-                systemImage: selected ? "checkmark" : "plus"
-              ) {
+              let button = Button {
                 store.selectDestination(.create)
                 dismiss()
-              }.accessibilityIdentifier("new-create")
+              } label: {
+                // Toolbar items collapse a Label to its icon; keep the text visible like the web's "+ New".
+                HStack(spacing: 5) {
+                  Image(systemName: selected ? "checkmark" : "plus")
+                  Text("Nova worktree")
+                }.fixedSize()
+              }.accessibilityLabel(selected ? "Nova worktree selecionada" : "Nova worktree")
+                .accessibilityIdentifier("new-create")
               if selected { button.buttonStyle(.glassProminent) } else { button }
             }
           }

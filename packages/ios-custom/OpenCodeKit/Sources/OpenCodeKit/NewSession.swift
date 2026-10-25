@@ -331,6 +331,14 @@ extension OpenCodeClient {
   public func worktrees(projectID: String) async throws -> [WorktreeDirectory] {
     try await get("/api/worktree", query: [.init(name: "projectID", value: projectID)])
   }
+  /// Like the web's sidebar, prunes checkouts removed outside OpenCode and discovers new ones before listing.
+  /// A failed refresh still lists the stored inventory; only the listing itself can fail.
+  public func refreshedWorktrees(projectID: String) async throws -> [WorktreeDirectory] {
+    struct Input: Encodable { let projectID: String }
+    try? await post("/api/worktree/refresh", input: Input(projectID: projectID))
+    try Task.checkCancellation()
+    return try await worktrees(projectID: projectID)
+  }
   public func worktreeBranches(directory: String) async throws -> [WorktreeBranch] {
     try await rpc("custom.worktrees", "branches", input: Empty(), directory: directory)
   }

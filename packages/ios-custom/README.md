@@ -1408,13 +1408,20 @@ has no selected projects, the empty state (otherwise it skips).
   the folder (registering the server project, as the web's sidebar does) and then sends `project.open`. The web's
   batch selection (sidebar/home) and keyboard hints are not ported. A folder inside another repository is saved like
   on the web but, as before, iOS lists only saved folders that match a server project root or sandbox.
-- **Directory:** `GET /api/worktree?projectID=…`, known project worktrees and sandboxes are merged in that order,
-  deduplicated and stripped of the root. `custom.worktrees/branches` labels each checkout without booting every
-  Location; the folder name is the fallback. The root uses its current branch (VCS, then the branches RPC), never the
-  `main` sentinel as a guessed branch. Search appears only with ten or more existing worktrees. Non-Git projects keep
-  their principal directory and explain that worktrees are unavailable. **Nova worktree** is the `+` in the Diretório
-  header: it selects that destination and closes the sheet; while selected it is filled with a checkmark, no list row
-  is checked and a note says it will be created on send. The main selector then shows "+ Nova worktree" plus "a partir de …".
+- **Directory:** `POST /api/worktree/refresh` (as the web's sidebar does; a failed refresh is ignored) prunes checkouts
+  removed outside OpenCode and discovers new ones, then `GET /api/worktree?projectID=…`, known project worktrees and
+  sandboxes are merged in that order, deduplicated and stripped of the root. `custom.worktrees/branches` labels each
+  checkout without booting every Location; the folder name is the fallback (detached HEADs have no branch). The root
+  uses its current branch (VCS, then the branches RPC), never the `main` sentinel as a guessed branch, exactly like the
+  web's root label: "custom ⌄" is the directory selector, not a branch picker. Search appears only with ten or more
+  existing worktrees. A failed inventory or branches read shows "Não foi possível listar as worktrees · Tentar
+  novamente" in the sheet instead of a silently shorter list; an empty inventory says so. Non-Git projects keep their
+  principal directory and explain that worktrees are unavailable. **+ Nova worktree** is a labeled button in the
+  Diretório header (the web's "+ New"), never hidden by listing errors: it selects that destination and closes the
+  sheet; while selected it is filled with a checkmark, no list row is checked and a note says it will be created on
+  send. The main selector then shows "+ Nova worktree" plus "a partir de …". `NewSessionWorktreeTests` (UI) reproduces
+  a root on `custom` with detached, named and externally removed worktrees; its environment provides
+  `OPENCODE_TEST_GIT_REPO` and `OPENCODE_TEST_STALE_WORKTREE`.
   Projeto and Diretório wait for the composer's real keyboard dismissal before presentation. Closing a selector,
   including a swipe without changes, restores composer focus; the base-branch sheet instead owns its search keyboard
   while presented. The shared editor suppresses background focus restoration until the selector has closed.
