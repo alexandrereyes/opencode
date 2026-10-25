@@ -32,27 +32,40 @@ def api(path, body=None, method="POST"):
         data = response.read()
         return json.loads(data) if data else None
 
-root = Path(json.loads((home / "seed-conversation.json").read_text())["directory"]).resolve()
+seed = home / "seed-conversation.json"
+root = (Path(json.loads(seed.read_text())["directory"]) if seed.exists() else home / "repos" / "voice-bar").resolve()
 assert root.is_relative_to((home / "repos").resolve())
+root.mkdir(parents=True, exist_ok=True)
 session = "ses_" + uuid.uuid4().hex
+# Enough owned rows to scroll the list behind both bottom strips in a fresh sandbox.
+fillers = ["ses_" + uuid.uuid4().hex for _ in range(int(os.environ.get("OPENCODE_VOICE_BAR_FILLERS", "16")))]
+imported = []
 created = False
 configured = derived / ("Build/Products/VoiceBar-" + uuid.uuid4().hex + ".xctestrun")
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
 now = int(time.time() * 1000)
+
+def history(id, title, created, text):
+    model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
+    return {"info": {"id": id, "title": title, "projectID": "global", "location": {"directory": str(root)},
+        "agent": "build", "model": model, "cost": 0,
+        "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+        "outcome": "succeeded", "time": {"created": created, "updated": created, "idle": created, "viewed": created}},
+        "location": {"directory": str(root)}, "messages": [
+            {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Confira minhas sessões, por favor.", "time": {"created": created - 1000}},
+            {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
+             "time": {"created": created - 900, "completed": created - 500}, "finish": "stop",
+             "content": [{"type": "text", "text": text}]}]}
+
 evidence.mkdir(parents=True, exist_ok=True)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 try:
-    api("/api/experimental/session/import", {"info": {"id": session, "title": "Faixa de voz · demonstração isolada",
-        "projectID": "global", "location": {"directory": str(root)}, "agent": "build",
-        "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
-        "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
-        "outcome": "succeeded", "time": {"created": now, "updated": now, "idle": now, "viewed": now}},
-        "location": {"directory": str(root)}, "messages": [
-            {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Confira minhas sessões, por favor.", "time": {"created": now - 1000}},
-            {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build",
-             "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
-             "time": {"created": now - 900, "completed": now - 500}, "finish": "stop",
-             "content": [{"type": "text", "text": "Três sessões esperam você. A conversa por voz fica acima do campo de mensagem, sem esconder seus controles."}]}]})
+    for index, filler in enumerate(fillers):
+        api("/api/experimental/session/import", history(filler, f"Faixa de voz · linha {index + 1:02d}",
+            now - (index + 1) * 60_000, "Linha de enchimento para rolar a lista."))
+        imported.append(filler)
+    api("/api/experimental/session/import", history(session, "Faixa de voz · demonstração isolada", now,
+        "Três sessões esperam você. A conversa por voz fica acima do campo de mensagem, sem esconder seus controles."))
     created = True
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     targets = ([target for config in run["TestConfigurations"] for target in config["TestTargets"]]
@@ -87,4 +100,7 @@ finally:
     configured.unlink(missing_ok=True)
     if created:
         api("/api/session/" + session, method="DELETE")
-    (evidence / ("cleanup-" + theme + ".json")).write_text(json.dumps({"session": session, "deleted": created}))
+    for filler in imported:
+        api("/api/session/" + filler, method="DELETE")
+    (evidence / ("cleanup-" + theme + ".json")).write_text(json.dumps({"session": session, "deleted": created,
+        "fillers": imported}))

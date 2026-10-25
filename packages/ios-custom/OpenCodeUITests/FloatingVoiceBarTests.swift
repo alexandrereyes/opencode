@@ -40,7 +40,8 @@ import XCTest
 
   func testControlsNavigationAndInsets() throws {
     try launch("speaking")
-    XCTAssertFalse(app.buttons["master-accessory"].exists)
+    XCTAssertTrue(app.buttons["master-accessory"].waitForExistence(timeout: 5))
+    assertStacked()
     XCTAssertTrue((bar.value as? String)?.hasPrefix("Compacta") == true)
     capture("controls-compact-sessions")
     let compact = bar.frame
@@ -49,7 +50,7 @@ import XCTest
     XCTAssertGreaterThan(bar.frame.height, compact.height)
     capture("controls-expanded-sessions")
     XCTAssertEqual(bar.frame.width, compact.width, accuracy: 1)
-    XCTAssertLessThanOrEqual(bar.frame.maxY, app.tabBars.firstMatch.frame.minY + 1)
+    assertStacked()
     control(86)
     XCTAssertTrue(bar.label.contains("falando"))
     toggle()
@@ -67,10 +68,88 @@ import XCTest
     app.buttons["Voltar"].tap()
     app.tabBars.buttons["Você"].tap()
     XCTAssertTrue(bar.exists)
+    let accessory = app.buttons["master-accessory"].frame
     control(36)
     XCTAssertTrue(bar.waitForNonExistence(timeout: 5))
     XCTAssertTrue(app.buttons["master-accessory"].waitForExistence(timeout: 5))
     XCTAssertEqual(app.buttons["master-accessory"].frame.width, compact.width, accuracy: 4)
+    XCTAssertEqual(app.buttons["master-accessory"].frame.minY, accessory.minY, accuracy: 1)
+    app.terminate()
+  }
+
+  /// Voice bar, then the master accessory, then the tab bar: both strips stay visible and tappable.
+  private func assertStacked(file: StaticString = #filePath, line: UInt = #line) {
+    let accessory = app.buttons["master-accessory"]
+    XCTAssertTrue(accessory.exists, file: file, line: line)
+    XCTAssertLessThanOrEqual(bar.frame.maxY, accessory.frame.minY + 1, file: file, line: line)
+    XCTAssertLessThanOrEqual(accessory.frame.maxY, app.tabBars.firstMatch.frame.maxY, file: file, line: line)
+    XCTAssertEqual(bar.frame.width, accessory.frame.width, accuracy: 4, file: file, line: line)
+    XCTAssertTrue(bar.isHittable, file: file, line: line)
+    XCTAssertTrue(accessory.isHittable, file: file, line: line)
+  }
+
+  func testMasterAccessoryStaysVisibleBelowTheVoiceBar() throws {
+    try launch("thinking")
+    let accessory = app.buttons["master-accessory"]
+    XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+    // The accessibility tree (VoiceOver's reading order) lists the voice bar before the accessory.
+    let tree = app.debugDescription
+    let voiceIndex = try XCTUnwrap(tree.range(of: "floating-voice-bar")).lowerBound
+    XCTAssertLessThan(voiceIndex, try XCTUnwrap(tree.range(of: "master-accessory")).lowerBound)
+    let resting = accessory.frame
+    for tab in ["Painel", "Pedidos", "Projetos", "Você", "Sessões"] {
+      app.tabBars.buttons[tab].tap()
+      XCTAssertTrue(bar.waitForExistence(timeout: 5))
+      assertStacked()
+      XCTAssertEqual(accessory.frame.minY, resting.minY, accuracy: 1)
+      toggle()
+      XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
+      assertStacked()
+      capture("stacked-expanded-" + tab.lowercased())
+      toggle()
+      XCTAssertTrue((bar.value as? String)?.hasPrefix("Compacta") == true)
+    }
+    capture("stacked-compact-sessoes")
+    control(86)
+    XCTAssertTrue(bar.label.contains("microfone desligado"))
+    control(86)
+    XCTAssertFalse(bar.label.contains("microfone desligado"))
+    toggle()
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: -28)).tap()
+    XCTAssertTrue(app.collectionViews["voice-memory-transcript"].waitForExistence(timeout: 5))
+    app.buttons["Concluir"].tap()
+    XCTAssertTrue(bar.waitForExistence(timeout: 5))
+    assertStacked()
+    toggle()
+    accessory.tap()
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 20))
+    XCTAssertFalse(accessory.exists)
+    XCTAssertTrue(bar.exists)
+    XCTAssertLessThanOrEqual(bar.frame.maxY, composer.frame.minY)
+    capture("stacked-master-opened")
+    app.buttons["Voltar"].tap()
+    XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+    assertStacked()
+    control(36)
+    XCTAssertTrue(bar.waitForNonExistence(timeout: 5))
+    XCTAssertEqual(accessory.frame.minY, resting.minY, accuracy: 1)
+    app.terminate()
+  }
+
+  func testStackedStripsWithLargeText() throws {
+    try launch("long", large: true)
+    let accessory = app.buttons["master-accessory"]
+    XCTAssertTrue(accessory.waitForExistence(timeout: 10))
+    assertStacked()
+    toggle()
+    XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
+    assertStacked()
+    XCTAssertGreaterThanOrEqual(bar.frame.minY, app.navigationBars.firstMatch.frame.minY)
+    capture("stacked-large-expanded")
+    app.tabBars.buttons["Você"].tap()
+    assertStacked()
+    capture("stacked-large-settings")
     app.terminate()
   }
 
@@ -156,6 +235,8 @@ import XCTest
       previous = last.identifier
     }
     XCTAssertTrue(reached, "A última sessão precisa ficar totalmente acima da faixa expandida")
+    assertStacked()
+    if let last = rows.allElementsBoundByIndex.last { XCTAssertTrue(last.isHittable) }
     capture("last-row-expanded-sessions")
     app.terminate()
   }

@@ -1,8 +1,8 @@
 # Conversa por voz
 
-O botão de onda em **Sessões** inicia uma chamada GPT Live. `FloatingVoiceBar` substitui o acessório
-da Sessão mestra nas abas, sem uma segunda barra empilhada, e ocupa espaço acima do composer na
-conversa. Não há mais janela provisória no topo. A apresentação compartilhada continua durante a
+O botão de onda em **Sessões** inicia uma chamada GPT Live. Nas abas, `FloatingVoiceBar` fica
+empilhada logo acima do acessório da Sessão mestra, que continua visível e tocável entre ela e a
+barra de abas (Alexandre, 25/10); na conversa, ocupa espaço acima do composer. Não há mais janela provisória no topo. A apresentação compartilhada continua durante a
 navegação, e os sheets usam um inset inferior. Encerrar voz não interrompe tarefas já admitidas
 pela Sessão mestra. Transporte, delegação e Live Activity são independentes dessa view.
 

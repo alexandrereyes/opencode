@@ -1050,7 +1050,7 @@ and contains neither Parakeet weights nor DEBUG fixture audio. Nothing was uploa
 device timing/cleanup JSON and the artifact manifest are in `$TMPDIR/opencode/ios-gravacao-prints/`.
 
 The waveform in **Sessões** starts a native, full-duplex GPT Live call through the private
-`llm-proxy-svc:8080` lease/signaling contract. The floating glass bar replaces the master accessory
+`llm-proxy-svc:8080` lease/signaling contract. The floating glass bar stacks above the master accessory
 on tabs and sits above the composer; mute/end also appear in the Live Activity/Dynamic Island extension.
 Audio continues in the background after microphone consent. Real actions and answers are delegated
 to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
@@ -1105,8 +1105,10 @@ The waveform, state and active Sessions waveform button use `primary` (orange in
 and ending uses the destructive `error` role with a tonal background.
 Typography comes from `AppTypography`; there are no fixed palette colors.
 
-On tab screens the voice surface replaces, rather than stacks on, the master accessory. Its safe-area
-inset reserves the whole expanded height so the last list row remains reachable. In a conversation it is
+On tab screens the voice surface stacks above the master accessory (**Alexandre, 25/10**): voice bar,
+then the still tappable "Sessão mestra" accessory, then the tab bar, on every tab. The accessory keeps its
+place when a call starts or ends. The voice bar's safe-area inset sits inside the accessory's own inset and
+reserves the whole expanded height, so the last list row remains reachable above both. In a conversation it is
 a sibling immediately above the composer, including with the keyboard open. It starts compact; tap the
 summary to expand, tap again or swipe down inside the bar to collapse. The microphone and end controls
 stay in the same header row. VoiceOver exposes one element with its state/duration and named actions.
@@ -1118,7 +1120,10 @@ The independent DEBUG-only `-OpenCodeVoiceBarFixture <state>` requires explicit
 microphone, Live Activity or proxy. `script/test-voice-bar.py` imports and deletes one owned history,
 leaves sandbox seeds untouched, and runs on **OpenCode Faixa Voz** (`41015785-0AB5-413B-8CEC-8C986E83BC1E`).
 Use `ios-faixavoz-derived` for `build-for-testing`; repeat the runner with
-`OPENCODE_TEST_THEME=openchamber-light`. Captures, results and cleanup ledgers are in
+`OPENCODE_TEST_THEME=openchamber-light`. The runner also imports and deletes 16 owned filler rows
+(`OPENCODE_VOICE_BAR_FILLERS`) so the list scrolls behind both strips, and uses `<home>/repos/voice-bar`
+when the sandbox has no conversation seed. `testMasterAccessoryStaysVisibleBelowTheVoiceBar` and
+`testStackedStripsWithLargeText` cover the stacked strips on every tab, their taps and the largest text size. Captures, results and cleanup ledgers are in
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-faixavoz-prints/`.
 The provisional root `VoiceOverlay` has been removed. New-session/master drafts and the fullscreen
 composer also reserve space above their input; ordinary sheets reserve their bottom safe area.

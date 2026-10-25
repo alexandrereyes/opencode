@@ -21,7 +21,8 @@ import XCTest
     let bar = app.descendants(matching: .any)["floating-voice-bar"]
     XCTAssertTrue(bar.waitForExistence(timeout: 5))
     XCTAssertTrue(bar.label.hasPrefix("Conversa por voz"))
-    XCTAssertFalse(app.buttons["master-accessory"].exists)
+    XCTAssertTrue(app.buttons["master-accessory"].waitForExistence(timeout: 5))
+    XCTAssertLessThanOrEqual(bar.frame.maxY, app.buttons["master-accessory"].frame.minY + 1)
     bar.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 90, dy: 28)).tap()
     XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
     capture("voice-sessions")

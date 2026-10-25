@@ -146,8 +146,8 @@ private struct AppTabs: View {
         }
       }
     }
-    .tabViewBottomAccessory(isEnabled: !(store.selectedTab == 3 && store.conversationOpen)
-      && !floatingVoice.visible(runtime.voice)) {
+    // The voice bar is a content inset, so it stacks above this accessory instead of replacing it.
+    .tabViewBottomAccessory(isEnabled: !(store.selectedTab == 3 && store.conversationOpen)) {
       Button {
         store.selectedTab = 3
         store.conversationPath.append(.init(id: "master", master: true))

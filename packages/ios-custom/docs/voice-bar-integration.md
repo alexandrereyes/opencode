@@ -13,8 +13,8 @@
 
 ## Encaixes já aplicados
 
-- `OpenCodeApp.swift`: contexto raiz e estado de apresentação único em `AppTabs`; acessório da mestra
-  desabilitado enquanto a voz aparece; `floatingVoiceInset` nas abas e nas listas de Sessões/Você.
+- `OpenCodeApp.swift`: contexto raiz e estado de apresentação único em `AppTabs`; o acessório da mestra
+  segue a regra de sempre (oculto só dentro da conversa); `floatingVoiceInset` nas abas e nas listas de Sessões/Você.
   Os insets ficam dentro do `NavigationStack`, junto à lista que precisa receber sua margem. Reservam a altura
   completa da faixa, inclusive expandida, em vez de sobrepor uma janela à lista.
 - `SessionsView.swift`: botão de onda em `primary` durante a voz; fixture usa somente ações locais.
@@ -42,7 +42,15 @@ guardam o caso real de tocar a conversa para dispensar o teclado.
 
 ## Diferenças deliberadas do desenho
 
-- Nunca há acessório da mestra e faixa de voz empilhados.
+- **Alexandre, 25/10: a faixa da mestra continua visível.** Antes a faixa de voz substituía o acessório
+  da mestra; agora as duas ficam empilhadas: faixa de voz, acessório da mestra e barra de abas. A faixa
+  de voz é um `safeAreaInset` do conteúdo de cada aba e o `tabViewBottomAccessory` já entra na área
+  segura desse conteúdo, então ela assenta acima do acessório sem medir alturas, e a lista reserva as
+  duas (a última linha fica acima da faixa de voz). O acessório não se move quando a voz começa ou
+  termina, e não ganhou animação nova. Os papéis não se sobrepõem: o acessório é a entrada da mestra e
+  mostra pedidos pendentes (**Tudo em dia**, **N precisam de você** ou a indisponibilidade); a linha
+  **Sessão mestra · …** da faixa expandida mostra o progresso da tarefa delegada por voz. VoiceOver lê o
+  conteúdo da aba (com a faixa de voz) antes do acessório e da barra de abas, de cima para baixo.
 - Onda, rótulo de estado e botão de onda ativo usam `primary` de cada família (OpenChamber: laranja),
   conforme a correção da revisão A; progresso da mestra e ações de recuperação mantêm `accent`.
 - Encerrar é tonal `error`, não preenchido sólido: o catálogo atual não oferece `onError`, e não se
