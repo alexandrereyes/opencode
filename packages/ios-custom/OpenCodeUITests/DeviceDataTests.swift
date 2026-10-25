@@ -48,6 +48,9 @@ import XCTest
     XCTAssertTrue(connection.waitForExistence(timeout: 10))
     XCTAssertTrue(NSPredicate(format: "label CONTAINS 'Conectado'").evaluate(with: connection)
       || connection.waitForLabel(containing: "Conectado", timeout: 20))
+    let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Os agentes do OpenCode leem estes dados'")).firstMatch
+    XCTAssertTrue(footer.waitForExistence(timeout: 5))
+    XCTAssertFalse(footer.label.contains("mestra"))
     for source in ["device", "network", "location", "health", "motion", "photos"] {
       let toggle = app.switches["device-source-" + source]
       for _ in 0..<6 where !(toggle.exists && toggle.isHittable) { app.collectionViews.firstMatch.swipeUp(velocity: .slow) }

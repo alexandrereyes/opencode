@@ -18,10 +18,10 @@
     <key>NSLocalNetworkUsageDescription</key><string>O OpenCode acessa o servidor do seu Mac pela rede privada.</string>
     <key>NSCameraUsageDescription</key><string>O OpenCode usa a câmera para ler o QR code de pareamento do seu servidor.</string>
     <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para ditar mensagens com transcrição neste iPhone e para conversar por voz com a Sessão mestra, inclusive durante a chamada em segundo plano.</string>
-    <key>NSHealthShareUsageDescription</key><string>O OpenCode lê seus dados do app Saúde (sono, passos, energia, frequência cardíaca, VFC, treinos e peso) quando a Sessão mestra pergunta. Ele nunca grava no Saúde.</string>
-    <key>NSLocationWhenInUseUsageDescription</key><string>O OpenCode informa sua localização atual à Sessão mestra quando ela pergunta, com o app aberto.</string>
-    <key>NSMotionUsageDescription</key><string>O OpenCode lê passos, distância, andares e atividade dos últimos dias quando a Sessão mestra pergunta.</string>
-    <key>NSPhotoLibraryUsageDescription</key><string>O OpenCode mostra à Sessão mestra a data, o local e uma miniatura das suas fotos recentes quando ela pergunta.</string>
+    <key>NSHealthShareUsageDescription</key><string>Os agentes do OpenCode leem seus dados do app Saúde (sono, passos, energia, frequência cardíaca, VFC, treinos e peso) quando você pede. O OpenCode nunca grava no Saúde.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>Os agentes do OpenCode consultam sua localização atual quando você pede, com o app aberto.</string>
+    <key>NSMotionUsageDescription</key><string>Os agentes do OpenCode leem passos, distância, andares e atividade dos últimos dias quando você pede.</string>
+    <key>NSPhotoLibraryUsageDescription</key><string>Os agentes do OpenCode veem a data, o local e uma miniatura das suas fotos recentes quando você pede.</string>
     <key>UIBackgroundModes</key><array><string>audio</string></array>
     <key>NSSupportsLiveActivities</key><true/>
     <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>

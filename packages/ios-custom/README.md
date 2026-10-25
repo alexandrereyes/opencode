@@ -2031,8 +2031,9 @@ address in the foreground, last known position in the background), `health` (rea
 (`CMPedometer` per day and `CMMotionActivityManager` minutes, last 7 days) and `photos` (PhotoKit metadata and
 384-pixel JPEG thumbnails returned as tool images). While the iPhone is locked HealthKit is unreadable; a 90-day daily
 summary protected until first unlock (`Application Support/OpenCode/DeviceData`) answers instead. In the
-conversation the tool reads **Consultou o iPhone · Saúde** with the `iphone` symbol; voice narrates **A mestra está
-consultando seu iPhone.**
+conversation the tool reads **Consultou o iPhone · Saúde** with the `iphone` symbol; voice, which follows only the
+Sessão mestra, narrates **A mestra está consultando seu iPhone.** The footer and the iOS permission prompts say that
+the OpenCode agents read this data when Alexandre asks.
 
 Requirements: `OpenCode/OpenCode.entitlements` (HealthKit, no clinical records), the usage descriptions
 `NSHealthShareUsageDescription`, `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription` and

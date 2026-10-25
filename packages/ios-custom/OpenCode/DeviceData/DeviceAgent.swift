@@ -3,7 +3,7 @@ import OpenCodeKit
 import UIKit
 import os
 
-/// Answers the Sessão mestra's `iphone_query` while the app runs: it keeps a presence lease on the connected
+/// Answers the agents' `iphone_query` while the app runs: it keeps a presence lease on the connected
 /// server through `custom.device/attach` and answers `rpc.custom.device.request` events with the local collectors.
 @MainActor @Observable final class DeviceAgent {
   static let shared = DeviceAgent()

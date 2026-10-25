@@ -1,7 +1,7 @@
 import OpenCodeKit
 import SwiftUI
 
-/// "Você → Dados do iPhone": one switch per source the Sessão mestra may read on demand.
+/// "Você → Dados do iPhone": one switch per source the OpenCode agents may read on demand.
 struct DeviceDataView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.openURL) private var openURL
@@ -14,7 +14,7 @@ struct DeviceDataView: View {
           .foregroundStyle(theme.color(agent.connected ? .success : .textSecondary))
           .accessibilityIdentifier("device-data-connection")
       } footer: {
-        Text("A Sessão mestra lê estes dados na hora, com o app aberto ou durante a conversa por voz. Com o app fechado, ela recebe que o iPhone está offline.")
+        Text("Os agentes do OpenCode leem estes dados na hora, quando você pede, com o app aberto ou durante a conversa por voz. Com o app fechado, eles recebem que o iPhone está offline.")
       }.listRowBackground(theme.color(.surface))
       Section("Fontes") {
         ForEach(DeviceSource.allCases) { source in row(source) }

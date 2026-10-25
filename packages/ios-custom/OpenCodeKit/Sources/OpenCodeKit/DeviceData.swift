@@ -1,6 +1,6 @@
 import Foundation
 
-/// iPhone data the Sessão mestra reads on demand through `custom.device` (`packages/plugin-app-custom/src/device`).
+/// iPhone data any OpenCode agent reads on demand through `custom.device` (`packages/plugin-app-custom/src/device`).
 public enum DeviceSource: String, Codable, CaseIterable, Sendable, Identifiable {
   case device, network, location, health, motion, photos
   public var id: String { rawValue }
