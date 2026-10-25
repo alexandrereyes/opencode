@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
-import path from "node:path"
 import type { Server, ServerWebSocket } from "bun"
 import { optional } from "@opencode/schema/schema"
 import { Option, Schema } from "effect"
+import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
 import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StreamSink } from "../adapters/types.js"
 import { ResourceProtocol } from "../protocol.js"
@@ -270,6 +270,8 @@ export function createHub(options: HubOptions) {
     if (!locks.delete(id)) return
     await queues.get(id)?.reset()
     const entry = entries.get(id)
+    // Adapters undo viewer-only behavior, such as Chrome's sharp stills through the agent's playwright-cli session.
+    if (entry) void options.adapters[entry.kind].released?.(entry).catch(() => undefined)
     broadcastControl(id)
     if (entry)
       emit({
@@ -927,8 +929,10 @@ export function createHub(options: HubOptions) {
 export function idFor(meta: Resources.Meta) {
   if (meta.kind === "ios-simulator") return `ios-simulator:${meta.udid}`
   if (meta.kind === "android-emulator") return `android-emulator:${meta.avd ?? meta.serial ?? "unknown"}`
-  if (meta.session === "default" && meta.workspace) return `chrome:default@${path.basename(meta.workspace)}`
-  return `chrome:${meta.session ?? meta.cdp ?? "unknown"}`
+  // Sessions are per `playwright-cli` namespace: global ones keep the plain name, workspace ones add its full path.
+  // Entries registered under older IDs (`chrome:default@<folder>`) keep them: `upsert` matches by `sameResource`.
+  const namespace = meta.session && meta.workspace ? namespaceOf(meta.workspace) : ""
+  return `chrome:${meta.session ?? meta.cdp ?? "unknown"}${namespace ? `@${namespace}` : ""}`
 }
 
 /** Whether two metadata records name the same resource (shared UDID, adb serial, AVD, session or CDP endpoint). */
@@ -938,12 +942,7 @@ export function sameResource(a: Resources.Meta, b: Resources.Meta) {
     return (a.avd !== undefined && a.avd === b.avd) || (a.serial !== undefined && a.serial === b.serial)
   if (a.kind === "chrome" && b.kind === "chrome")
     return (
-      (a.session !== undefined &&
-        a.session === b.session &&
-        (a.session !== "default" ||
-          a.workspace === undefined ||
-          b.workspace === undefined ||
-          a.workspace === b.workspace)) ||
+      (a.session !== undefined && a.session === b.session && sameNamespace(a.workspace, b.workspace)) ||
       (a.cdp !== undefined && a.cdp === b.cdp)
     )
   return false

@@ -23,6 +23,7 @@ const udid = "4D3C2B1A-0000-4000-8000-000000000001"
 
 function fakeAdapter() {
   const inputs: ResourceProtocol.Input[] = []
+  const released: string[] = []
   const status = { value: "running" as Entry["status"] }
   const adapter: Adapter = {
     kind: "ios-simulator",
@@ -34,8 +35,9 @@ function fakeAdapter() {
       await new Promise((resolve) => signal.addEventListener("abort", resolve))
     },
     input: async (_entry, event) => void inputs.push(event),
+    released: async (entry) => void released.push(entry.id),
   }
-  return { adapter, inputs, status }
+  return { adapter, inputs, released, status }
 }
 
 const servers: { stop: (force?: boolean) => unknown }[] = []
@@ -321,6 +323,8 @@ describe("hub", () => {
       owner: { sessionID: "ses_child", rootSessionID: "ses_root" },
       reason: "expired",
     })
+    // The adapter hears that control ended, so it can undo viewer-only behavior.
+    expect(fake.released).toEqual([resource.id])
     expect(await hub.claim(0)).toEqual([])
     viewer.ws.close()
     control.ws.close()
@@ -486,13 +490,14 @@ describe("discovery", () => {
     expect(links([{ id: `ios-simulator:${sim}`, kind: "ios-simulator", label: "iPhone 17 · X" }])).toBe(
       `Recurso no app: [Simulador iOS · iPhone 17 · X](opencode-resource:ios-simulator%3A${sim})`,
     )
-    expect(idFor({ kind: "chrome", session: "default", workspace: "/w/app-a" })).toBe("chrome:default@app-a")
+    // Outside a `.playwright` workspace every directory shares playwright-cli's global sessions.
+    expect(idFor({ kind: "chrome", session: "default", workspace: "/w/app-a" })).toBe("chrome:default")
     expect(
       sameResource(
         { kind: "chrome", session: "default", workspace: "/w/a" },
         { kind: "chrome", session: "default", workspace: "/w/b" },
       ),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       sameResource(
         { kind: "chrome", session: "login" },
@@ -507,6 +512,35 @@ describe("discovery", () => {
       expiresAt: 0,
     }
     expect(blocking("playwright-cli click e1", [lock], "/w/a")).toBe(lock)
-    expect(blocking("playwright-cli click e1", [lock], "/w/b")).toBeUndefined()
+    // `/w/b` reaches the same global `default` browser, so it is locked too.
+    expect(blocking("playwright-cli click e1", [lock], "/w/b")).toBe(lock)
+  })
+
+  test("Playwright workspaces (`.playwright`) keep their own sessions and full-path IDs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "chrome-namespace-"))
+    try {
+      const a = path.join(root, "a", "projeto")
+      const b = path.join(root, "b", "projeto")
+      await Promise.all([a, b].map((directory) => fs.mkdir(path.join(directory, ".playwright"), { recursive: true })))
+      expect(idFor({ kind: "chrome", session: "default", workspace: path.join(a, "src") })).toBe(`chrome:default@${a}`)
+      expect(idFor({ kind: "chrome", session: "default", workspace: b })).toBe(`chrome:default@${b}`)
+      expect(
+        sameResource(
+          { kind: "chrome", session: "default", workspace: a },
+          { kind: "chrome", session: "default", workspace: b },
+        ),
+      ).toBe(false)
+      const lock: Lock = {
+        id: `chrome:default@${a}`,
+        kind: "chrome",
+        label: "x",
+        meta: { kind: "chrome", session: "default", workspace: a },
+        expiresAt: 0,
+      }
+      expect(blocking("playwright-cli click e1", [lock], path.join(a, "src"))).toBe(lock)
+      expect(blocking("playwright-cli click e1", [lock], b)).toBeUndefined()
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
   })
 })

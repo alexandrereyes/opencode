@@ -74,4 +74,6 @@ export interface Adapter {
   stream?(entry: Entry, sink: StreamSink, signal: AbortSignal): Promise<void>
   input?(entry: Entry, event: Input): Promise<void>
   recover?(): Promise<void>
+  /** Alexandre's control ended (returned or expired): undo viewer-only behavior, such as Chrome's sharp stills. */
+  released?(entry: Entry): Promise<void>
 }

@@ -1,6 +1,6 @@
 /**
  * Local login page for the Chrome resource checks: a form with e-mail and password, a long scrollable area, and a
- * second page for back/forward. `POST /login` answers with the e-mail and the password length only; `GET /last`
+ * second page for back/forward, and `/animacao` (a spinner that repaints continuously). `POST /login` answers with the e-mail and the password length only; `GET /last`
  * returns the last login (e-mail and password length, never the password) and the deepest scroll reported by the page.
  *
  *   bun packages/plugin-app-custom/script/chrome-login-fixture.ts --port 5173
@@ -65,6 +65,13 @@ const server = Bun.serve({
         ),
       )
     }
+    if (url.pathname === "/animacao")
+      return html(
+        page(
+          "Animação · Abacato",
+          `<style>@keyframes spin { to { transform: rotate(360deg) } }</style><h1>Animação</h1><div id="spinner" style="width:120px;height:120px;margin:40px auto;border:12px solid #ccd;border-top-color:#1f6feb;border-radius:50%;animation:spin 1s linear infinite"></div>`,
+        ),
+      )
     if (url.pathname === "/ajuda")
       return html(page("Ajuda · Abacato", `<h1 id="help-title">Ajuda</h1><p><a href="/login">Voltar ao login</a></p>`))
     return new Response("Not found", { status: 404 })

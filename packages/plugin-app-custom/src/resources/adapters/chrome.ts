@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -19,23 +20,33 @@ import type { Adapter, Entry, Image, Probe, StreamSink } from "./types.js"
 
 export const settings = {
   quality: 70,
-  /** Lower quality and half size while the viewer scrolls, like t3code's preview stream. */
+  /** Lower quality and half the viewport while the viewer scrolls, like t3code's preview stream. */
   motionQuality: 50,
   maxWidth: 1280,
   maxHeight: 2400,
-  /** Chrome sends the next screencast frame only after an ack; pacing acks caps the frame rate (~15 fps). */
-  ackPaceMs: 66,
-  /** Chrome may drop the last frame of a burst; a still is captured once frames stop for this long. */
+  /** Each screencast frame is acknowledged this long after it arrives; with Chromium's three unacknowledged frames
+   * that caps the stream near 15 fps. */
+  ackDelayMs: 200,
+  /** A still follows once frames stop for this long. */
   settleMs: 200,
   motionFrames: 4,
-  motionWindowMs: 300,
+  motionWindowMs: 400,
+  /** Frames within this long of the viewer's input or a navigation belong to an interaction. */
+  interactionMs: 1_500,
+  /** Minimum time between sharp stills after an interaction or a burst of frames… */
+  stillGapMs: 1_000,
+  /** …and after a lone repaint while idle (a blinking caret refreshes at most this often). */
+  idleStillGapMs: 2_500,
   /** Browser connections without stream or input for this long are closed. */
   idleMs: 60_000,
   /** CSS pixels a finger may move before a touch on a mouse-only page scrolls instead of clicking. */
   dragSlop: 8,
-  /** Narrow viewports get stills rendered up to this many pixels wide (an iPhone screen is ~1,200 px). */
+  /** Sharp stills of emulated high-density pages are at most this many pixels wide (an iPhone draws a frame in
+   * ~1,100 px) and `maxSharpScale` times their CSS size: 2× is about half the bytes of 3× and still sharp. */
   sharpWidth: 1200,
-  maxSharpScale: 3,
+  maxSharpScale: 2,
+  /** Pages emulating at least this device scale (`--device`, `--mobile`) get sharp stills. */
+  sharpDensity: 1.2,
   /** Focus is probed this long after a tap, so page handlers can move it first. */
   focusDelayMs: 60,
 }
@@ -108,6 +119,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
   readonly close: () => Promise<void>
 } {
   const connections = new Map<string, Promise<Live>>()
+  const endpoints = new Map<string, Endpoint>()
 
   const live = (entry: Entry) => {
     const existing = connections.get(entry.id)
@@ -132,50 +144,35 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
     kind: "chrome",
 
     async probe(entries) {
-      const processes = await listProcesses()
+      // The process table is read only when a browser has no validated endpoint yet (or lost it).
+      let processes: Promise<ProcessRow[]> | undefined
+      const scan = () => (processes ??= listProcesses())
       const result = new Map<string, Probe>()
       await Promise.all(
         entries.map(async (entry) => {
           const meta = chromeMeta(entry)
-          // An explicit registration by CDP endpoint (a browser not opened through `playwright-cli`).
-          if (meta && !meta.session && meta.cdp) {
-            const port = Number(URL.parse(meta.cdp)?.port)
-            const pages = await listPages(port).catch(() => undefined)
-            const target = pages && choose(pages, meta.targetID)
-            result.set(
-              entry.id,
-              pages
-                ? {
-                    status: "running",
-                    meta: {
-                      ...meta,
-                      ...(target ? { targetID: target.targetId, url: target.url, title: target.title } : {}),
-                    },
-                  }
-                : { status: "gone" },
-            )
-            return
-          }
-          const session = sessionName(entry)
-          const located = await locate(session, processes)
-          if (!located) {
-            result.set(entry.id, {
+          const found = await endpoint(entry, scan).catch(() => undefined)
+          if (!found) {
+            const session = sessionName(entry)
+            // An explicit registration by CDP endpoint disappears with its browser.
+            if (meta && !meta.session && meta.cdp) return void result.set(entry.id, { status: "gone" })
+            return void result.set(entry.id, {
               status: (await sessionFileExists(session, options.daemonDir)) ? "stopped" : "gone",
             })
-            return
           }
-          if (located.port === undefined) {
-            result.set(entry.id, { status: "running", meta: { kind: "chrome", session } })
-            return
-          }
-          const pages = await listPages(located.port).catch(() => [])
-          const target = choose(pages, chromeMeta(entry)?.targetID)
+          if (found.port === undefined)
+            return void result.set(entry.id, {
+              status: "running",
+              meta: { kind: "chrome", session: sessionName(entry) },
+            })
+          const pages = await listPages(found.port).catch(() => [])
+          const target = choose(pages, meta?.targetID)
           result.set(entry.id, {
             status: "running",
             meta: {
               kind: "chrome",
-              session,
-              cdp: `http://127.0.0.1:${located.port}`,
+              ...(meta?.session || !meta?.cdp ? { session: sessionName(entry) } : {}),
+              cdp: `http://127.0.0.1:${found.port}`,
               ...(target ? { targetID: target.targetId, url: target.url, title: target.title } : {}),
             },
           })
@@ -191,12 +188,18 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 
     async stream(entry, sink, signal) {
       const browser = await live(entry)
-      await browser.use(() => browser.stream(sink, signal))
+      await browser.use(() => browser.stream(sink, signal, () => sharpStill(entry, browser.density)))
     },
 
     async input(entry, event) {
       const browser = await live(entry)
+      browser.controlled = true
       await browser.use(() => browser.input(event))
+    },
+
+    async released(entry) {
+      const browser = await connections.get(entry.id)?.catch(() => undefined)
+      if (browser) browser.controlled = false
     },
 
     async close() {
@@ -207,8 +210,12 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
   }
 
   async function open(entry: Entry) {
-    const version: { webSocketDebuggerUrl: string } = await fetchJSON(await debuggingPort(entry), "/json/version")
-    const cdp = await CDP.connect(version.webSocketDebuggerUrl)
+    const found = await endpoint(entry, listProcesses)
+    if (found.port === undefined)
+      throw new Error(
+        `O navegador da sessão ${sessionName(entry)} foi aberto sem porta de depuração; feche e abra de novo com playwright-cli open.`,
+      )
+    const cdp = await CDP.connect(found.browser)
     const browser = new Live(cdp, chromeMeta(entry)?.targetID)
     await browser.init().catch(async (error) => {
       await cdp.close()
@@ -216,19 +223,92 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
     })
     return browser
   }
+
+  /**
+   * A high-density still taken by Playwright itself (`page.screenshot({ scale: "device" })` through the session's
+   * `run-code`), which restores its emulation afterwards, scaled down to at most `maxSharpScale`× CSS pixels.
+   */
+  async function sharpStill(entry: Entry, density: number) {
+    const found = await endpoint(entry, listProcesses)
+    if (!found.daemon) return undefined
+    const output = await text(
+      [
+        found.daemon.node,
+        found.daemon.cli,
+        `-s=${sessionName(entry)}`,
+        "--raw",
+        "run-code",
+        `async page => (await page.screenshot({ type: "jpeg", quality: ${settings.quality}, scale: "device" })).toString("base64")`,
+      ],
+      { cwd: found.daemon.cwd, timeout: 10_000 },
+    )
+    const shot = Buffer.from(String(JSON.parse(output)), "base64")
+    const width = size(shot)?.width
+    if (!width) return undefined
+    const css = width / density
+    const target = Math.round(Math.min(settings.sharpWidth, css * settings.maxSharpScale))
+    if (target >= width) return new Uint8Array(shot)
+    // Copied into a plain ArrayBuffer, which the hub's frames require.
+    return new Uint8Array(await new Bun.Image(shot).resize(target).jpeg({ quality: settings.quality }).bytes())
+  }
+
+  /**
+   * The browser endpoint of an entry. A cached endpoint is reused while `/json/version` still names the same browser
+   * (a relaunched Chrome gets a new browser id, even on a reused port); otherwise the process table is scanned again.
+   */
+  async function endpoint(entry: Entry, scan: () => Promise<readonly ProcessRow[]>): Promise<Endpoint> {
+    const cached = endpoints.get(entry.id)
+    if (cached?.port !== undefined && (await browserURL(cached.port)) === cached.browser) return cached
+    endpoints.delete(entry.id)
+    const found = await resolve(entry, scan)
+    if (found.port !== undefined) endpoints.set(entry.id, found)
+    return found
+  }
 }
 
-async function debuggingPort(entry: Entry) {
+async function resolve(entry: Entry, scan: () => Promise<readonly ProcessRow[]>) {
   const meta = chromeMeta(entry)
-  if (meta && !meta.session && meta.cdp) return Number(URL.parse(meta.cdp)?.port)
+  if (meta && !meta.session && meta.cdp) {
+    const port = Number(URL.parse(meta.cdp)?.port)
+    const browser = await browserURL(port)
+    if (!browser) throw new Error(`Nenhum navegador responde em ${meta.cdp}.`)
+    return { port, browser }
+  }
   const session = sessionName(entry)
-  const located = await locate(session, await listProcesses())
-  if (!located) throw new Error(`O navegador da sessão ${session} do playwright-cli não está aberto.`)
-  if (located.port === undefined)
-    throw new Error(
-      `O navegador da sessão ${session} foi aberto sem porta de depuração; feche e abra de novo com playwright-cli open.`,
-    )
-  return located.port
+  const processes = await scan()
+  const found = await locate(session, processes, meta?.workspace)
+  if (found.length === 0) throw new Error(`O navegador da sessão ${session} do playwright-cli não está aberto.`)
+  if (found.length > 1)
+    throw new Error(`Há ${found.length} navegadores da sessão ${session} e não dá para saber qual é o do agente.`)
+  const located = found[0]!
+  return {
+    port: located.port,
+    browser: located.port === undefined ? "" : ((await browserURL(located.port)) ?? ""),
+    daemon: await daemonOf(processes.find((row) => row.pid === located.daemonPID)),
+  }
+}
+
+interface Endpoint {
+  readonly port?: number
+  /** The browser's `webSocketDebuggerUrl`, unique per launch. */
+  readonly browser: string
+  /** How to run `playwright-cli` against this browser's session: the daemon's Node, CLI and working directory. */
+  readonly daemon?: { readonly node: string; readonly cli: string; readonly cwd: string }
+}
+
+async function daemonOf(row: ProcessRow | undefined) {
+  const match = row && /^(\S+)\s+(\S*[/\\]lib[/\\]entry[/\\]cliDaemon\.js)\s/.exec(row.command)
+  if (!row || !match) return undefined
+  const cwd = (await workingDirectories([row.pid])).get(row.pid)
+  if (!cwd) return undefined
+  return { node: match[1]!, cli: path.join(path.dirname(match[2]!), "..", "tools", "cli-client", "cli.js"), cwd }
+}
+
+async function browserURL(port: number) {
+  const version = await fetchJSON<{ webSocketDebuggerUrl?: string }>(port, "/json/version", 1_500).catch(
+    () => undefined,
+  )
+  return version?.webSocketDebuggerUrl
 }
 
 export const sessionName = (entry: Pick<Entry, "id" | "meta">) =>
@@ -254,25 +334,78 @@ export function parseProcesses(output: string): ProcessRow[] {
   })
 }
 
-/** Finds the Chrome that the `playwright-cli` daemon of `session` launched, and its CDP port if it has one. */
-export async function locate(session: string, processes: readonly ProcessRow[]): Promise<Located | undefined> {
+/**
+ * The Chromes that `playwright-cli` daemons of `session` launched in the namespace of `workspace` (where the agent's
+ * shell ran), with their CDP ports. `playwright-cli` keeps sessions per namespace: the nearest ancestor directory with
+ * `.playwright`, else one global namespace. A daemon's namespace comes from its working directory, read with `lsof`
+ * only when it matters. Without `workspace` (older registrations) every namespace qualifies. More than one result is
+ * ambiguous: callers must not guess.
+ */
+export async function locate(
+  session: string,
+  processes: readonly ProcessRow[],
+  workspace?: string,
+  directories: (pids: readonly number[]) => Promise<ReadonlyMap<number, string>> = workingDirectories,
+): Promise<Located[]> {
   const daemons = processes.filter((row) => daemonSession(row.command) === session)
-  const browsers = processes
-    .filter((row) => daemons.some((daemon) => daemon.pid === row.ppid))
-    .filter((row) => !row.command.includes(" --type=") && /--user-data-dir=/.test(row.command))
-    // The newest daemon wins when two workspaces use the same session name.
-    .toSorted((a, b) => b.pid - a.pid)
-  const browser = browsers[0]
-  if (!browser) return undefined
-  const userDataDir = /--user-data-dir=(\S+)/.exec(browser.command)?.[1] ?? ""
-  const port = await readActivePort(userDataDir)
-  return {
-    pid: browser.pid,
-    daemonPID: browser.ppid,
-    userDataDir,
-    port,
-    headless: /\s--headless(=|\s|$)/.test(browser.command),
+  if (daemons.length === 0) return []
+  const wanted = workspace === undefined ? undefined : namespaceOf(workspace)
+  const cwd = wanted === undefined ? undefined : await directories(daemons.map((daemon) => daemon.pid))
+  const owners = daemons.filter((daemon) => {
+    if (wanted === undefined) return true
+    const directory = cwd?.get(daemon.pid)
+    return directory !== undefined && namespaceOf(directory) === wanted
+  })
+  const browsers = processes.filter(
+    (row) =>
+      owners.some((daemon) => daemon.pid === row.ppid) &&
+      !row.command.includes(" --type=") &&
+      /--user-data-dir=/.test(row.command),
+  )
+  return Promise.all(
+    browsers.map(async (browser) => {
+      const userDataDir = /--user-data-dir=(\S+)/.exec(browser.command)?.[1] ?? ""
+      return {
+        pid: browser.pid,
+        daemonPID: browser.ppid,
+        userDataDir,
+        port: await readActivePort(userDataDir),
+        headless: /\s--headless(=|\s|$)/.test(browser.command),
+      }
+    }),
+  )
+}
+
+/**
+ * `playwright-cli`'s session namespace for a directory, as its client computes it: the nearest of up to ten ancestors
+ * holding `.playwright`, or `""` for the global namespace shared by every other directory.
+ */
+export function namespaceOf(directory: string) {
+  for (let current = directory, depth = 0; depth < 10; depth++) {
+    if (existsSync(path.join(current, ".playwright"))) return current
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
   }
+  return ""
+}
+
+/** Whether two shell directories reach the same `playwright-cli` sessions (unknown directories match any). */
+export function sameNamespace(a: string | undefined, b: string | undefined) {
+  return a === undefined || b === undefined || namespaceOf(a) === namespaceOf(b)
+}
+
+async function workingDirectories(pids: readonly number[]) {
+  const output = await text(["/usr/sbin/lsof", "-a", "-d", "cwd", "-Fn", "-p", pids.join(",")], {
+    timeout: 5_000,
+  }).catch(() => "")
+  const result = new Map<number, string>()
+  let pid = 0
+  for (const line of output.split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1))
+    if (line.startsWith("n")) result.set(pid, line.slice(1))
+  }
+  return result
 }
 
 function daemonSession(command: string) {
@@ -300,8 +433,8 @@ function defaultDaemonDir() {
   return path.join(os.homedir(), "Library", "Caches", "ms-playwright", "daemon")
 }
 
-async function fetchJSON<T>(port: number, pathname: string): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, { signal: AbortSignal.timeout(3_000) })
+async function fetchJSON<T>(port: number, pathname: string, timeout = 3_000): Promise<T> {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, { signal: AbortSignal.timeout(timeout) })
   if (!response.ok) throw new Error(`CDP ${pathname} answered ${response.status}`)
   return response.json() as Promise<T>
 }
@@ -436,6 +569,14 @@ class Live {
   metrics?: ScreencastMetadata
   sink?: StreamSink
   scrolledAt = 0
+  /** The viewer's last input or the last navigation: frames shortly after it belong to an interaction. */
+  interactedAt = 0
+  /** Alexandre holds control (he sent input and has not given it back). */
+  controlled = false
+  /** The page's `devicePixelRatio`, which Playwright emulates for `--device`/`--mobile`. */
+  density = 1
+  /** Frames show the window rather than exactly the viewport (see `fitWindow`); sharp stills would not line up. */
+  windowed = false
   focus: Focus = { editable: false }
   editTaps = 0
   tabs: Tab[] = []
@@ -469,7 +610,10 @@ class Live {
       this.publish()
     })
     this.cdp.on("Page.frameNavigated", (event, sessionId) => {
-      if (sessionId === this.sessionId && !event.frame.parentId) void this.refreshHistory()
+      if (sessionId !== this.sessionId || event.frame.parentId) return
+      // A new document (also when the agent navigates) deserves a prompt sharp still.
+      this.interactedAt = Date.now()
+      void this.refreshHistory()
     })
     this.cdp.on("Page.navigatedWithinDocument", (_event, sessionId) => {
       if (sessionId === this.sessionId) void this.refreshHistory()
@@ -489,10 +633,16 @@ class Live {
     this.targetId = targetId
     this.metrics = undefined
     await this.cdp.send("Page.enable", {}, this.sessionId)
-    const touch = await this.cdp
-      .send("Runtime.evaluate", { expression: "navigator.maxTouchPoints > 0", returnByValue: true }, this.sessionId)
-      .catch(() => ({ result: { value: false } }))
-    this.touch = touch.result.value === true
+    const device = await this.cdp
+      .send(
+        "Runtime.evaluate",
+        { expression: "[navigator.maxTouchPoints > 0, devicePixelRatio]", returnByValue: true },
+        this.sessionId,
+      )
+      .catch(() => ({ result: { value: [false, 1] } }))
+    const value = Array.isArray(device.result.value) ? device.result.value : []
+    this.touch = value[0] === true
+    this.density = typeof value[1] === "number" ? value[1] : 1
     await this.refreshHistory()
   }
 
@@ -509,51 +659,39 @@ class Live {
   }
 
   /**
-   * A still of the viewport. Screencasts ignore the emulated device scale, so a phone-sized page streams at about
-   * 400 px wide; stills of narrow viewports render at up to `settings.sharpWidth` pixels so text stays legible.
+   * A still of the viewport in CSS pixels. Never with `clip`: any clipped (or scaled) capture resets the device
+   * metrics Playwright emulates, so the agent's page would drop to `devicePixelRatio` 1 (or the window's size).
    */
   async capture(quality: number): Promise<Image> {
-    const metrics = await this.cdp.send("Page.getLayoutMetrics", {}, this.sessionId)
-    const viewport = metrics.cssVisualViewport
-    const scale = Math.min(settings.maxSharpScale, settings.sharpWidth / viewport.clientWidth)
     const shot = await this.cdp.send(
       "Page.captureScreenshot",
-      {
-        format: "jpeg",
-        quality,
-        optimizeForSpeed: true,
-        ...(scale > 1.2
-          ? {
-              clip: {
-                x: viewport.pageX,
-                y: viewport.pageY,
-                width: viewport.clientWidth,
-                height: viewport.clientHeight,
-                scale: Math.round(scale * 100) / 100,
-              },
-            }
-          : {}),
-      },
+      { format: "jpeg", quality, optimizeForSpeed: true },
       this.sessionId,
     )
     const data = Buffer.from(shot.data, "base64")
     return { mime: "image/jpeg", data, ...size(data) }
   }
 
-  async stream(sink: StreamSink, signal: AbortSignal) {
+  /** `sharp` renders a high-density still through Playwright (see the adapter's `sharpStill`). */
+  async stream(sink: StreamSink, signal: AbortSignal, sharp: () => Promise<Uint8Array | undefined>) {
     this.sink = sink
     let frameSize = { width: 0, height: 0 }
     let started = false
-    let lastAck = 0
     let motion = false
     let restarting = Promise.resolve()
-    let mayHaveDropped = false
-    let inFlight = 0
     let settle: ReturnType<typeof setTimeout> | undefined
+    let scheduled: ReturnType<typeof setTimeout> | undefined
     let previous = ""
+    let seeded = false
+    let sharpShown = false
+    let stillAt = 0
+    let burst = 0
     const recent: number[] = []
 
+    // Half the effective viewport while moving: a 393 px phone page would not shrink under a fixed 640 px cap.
     const start = (scale: number) => {
+      const width = Math.min(settings.maxWidth, this.metrics?.deviceWidth ?? settings.maxWidth)
+      const height = Math.min(settings.maxHeight, this.metrics?.deviceHeight ?? settings.maxHeight)
       restarting = restarting.then(async () => {
         await this.cdp.send("Page.stopScreencast", {}, this.sessionId).catch(() => undefined)
         await this.cdp
@@ -562,8 +700,8 @@ class Live {
             {
               format: "jpeg",
               quality: scale < 1 ? settings.motionQuality : settings.quality,
-              maxWidth: Math.round(settings.maxWidth * scale),
-              maxHeight: Math.round(settings.maxHeight * scale),
+              maxWidth: scale < 1 ? Math.round(width * scale) : settings.maxWidth,
+              maxHeight: scale < 1 ? Math.round(height * scale) : settings.maxHeight,
               everyNthFrame: 1,
             },
             this.sessionId,
@@ -573,7 +711,7 @@ class Live {
       return restarting
     }
 
-    const emit = (data: Uint8Array, capturedAt: number) => {
+    const emit = (data: Uint8Array, capturedAt: number, sharp: boolean) => {
       const next = size(data)
       if (next && (next.width !== frameSize.width || next.height !== frameSize.height)) {
         frameSize = next
@@ -585,19 +723,33 @@ class Live {
         })
         this.publish()
       }
+      sharpShown = sharp
       sink.frame(data, { keyframe: true, capturedAt })
     }
 
     // Stills pause the screencast: a scaled capture repaints, which would otherwise come back as a blurry frame.
     const still = () => {
+      clearTimeout(scheduled)
+      // The screencast pauses during the still; that silence is not the end of a burst.
+      clearTimeout(settle)
+      stillAt = Date.now()
       restarting = restarting.then(async () => {
         await this.cdp.send("Page.stopScreencast", {}, this.sessionId).catch(() => undefined)
-        const image = await this.capture(settings.quality).catch(() => undefined)
-        if (image) emit(image.data, Date.now())
+        const sharpened = sharpens() ? await sharp().catch(() => undefined) : undefined
+        const data = sharpened ?? (await this.capture(settings.quality).catch(() => undefined))?.data
+        if (data) emit(data, Date.now(), sharpened !== undefined)
+        seeded = true
       })
-      return start(motion ? 0.5 : 1)
+      return start(1)
     }
-    const sharpens = () => (this.metrics?.deviceWidth ?? settings.sharpWidth) * 1.2 < settings.sharpWidth
+    const stillAfter = (gap: number) => {
+      clearTimeout(scheduled)
+      scheduled = setTimeout(() => void still(), Math.max(0, stillAt + gap - Date.now()))
+    }
+    // Screencasts ignore the emulated device scale, so a phone page streams ~400 px wide. Sharp stills run through
+    // the agent's playwright-cli session, so they are taken only while Alexandre controls the browser (the agent is
+    // locked out then and never waits behind them).
+    const sharpens = () => this.controlled && !this.windowed && this.density >= settings.sharpDensity
 
     const offFrame = this.cdp.on("Page.screencastFrame", (frame, sessionId) => {
       if (sessionId !== this.sessionId) return
@@ -607,37 +759,62 @@ class Live {
         void this.cdp
           .send("Page.screencastFrameAck", { sessionId: frame.sessionId }, this.sessionId)
           .catch(() => undefined)
-      // A restarted screencast repeats its last frame; that would replace a sharper still with the same content.
-      if (frame.data === previous) return ack()
-      previous = frame.data
       const resized =
         this.metrics?.deviceWidth !== frame.metadata.deviceWidth ||
         this.metrics?.deviceHeight !== frame.metadata.deviceHeight
       this.metrics = frame.metadata
-      if (resized) this.publish()
-      if (inFlight > 0) mayHaveDropped = true
-      inFlight++
+      if (resized) {
+        this.publish()
+        void this.fitWindow()
+      }
+      // A restarted screencast repeats its last frame; that would replace a sharper still with the same content.
+      if (frame.data === previous) return ack()
+      // The first frame after a still repeats what the still just showed (sharper); it only seeds `previous`.
+      if (seeded) {
+        seeded = false
+        previous = frame.data
+        return ack()
+      }
+      // Chromium keeps up to three frames unacknowledged, so acknowledging each one `ackDelayMs` after it arrived
+      // caps the stream near 3 / ackDelayMs (about 15 fps), whatever the page repaints.
+      setTimeout(ack, settings.ackDelayMs)
+      previous = frame.data
+      burst++
       recent.push(arrived)
       while (recent.length > 0 && recent[0]! < arrived - settings.motionWindowMs) recent.shift()
       if (!motion && recent.length >= settings.motionFrames && arrived - this.scrolledAt < settings.motionWindowMs) {
         motion = true
         void start(0.5)
       }
-      clearTimeout(settle)
-      settle = setTimeout(() => {
-        if (!motion && !mayHaveDropped && !sharpens()) return
-        mayHaveDropped = false
-        motion = false
+      const interacting = arrived - this.interactedAt < settings.interactionMs
+      // A lone repaint while nobody interacts (a blinking caret, a clock) would swap the sharp still for a blurry
+      // frame; it is refreshed by a rate-limited still instead.
+      if (!(sharpens() && sharpShown && !motion && !interacting && burst === 1))
+        emit(
+          Buffer.from(frame.data, "base64"),
+          frame.metadata.timestamp ? frame.metadata.timestamp * 1000 : arrived,
+          false,
+        )
+      const settled = () => {
+        // Paced acks and the screencast restart leave gaps between motion frames; a finger still moving is no end.
+        if (motion && Date.now() - this.scrolledAt < settings.motionWindowMs) {
+          settle = setTimeout(settled, settings.settleMs)
+          return
+        }
+        const frames = burst
+        burst = 0
         recent.length = 0
-        void still()
-      }, settings.settleMs)
-      emit(Buffer.from(frame.data, "base64"), frame.metadata.timestamp ? frame.metadata.timestamp * 1000 : arrived)
-      const wait = Math.max(0, lastAck + settings.ackPaceMs - arrived)
-      setTimeout(() => {
-        lastAck = Date.now()
-        inFlight--
-        ack()
-      }, wait)
+        // The end of a scroll or animation gets its full-size still at once.
+        if (motion) {
+          motion = false
+          return void still()
+        }
+        if (!sharpens()) return
+        if (interacting || frames > 1 || !sharpShown) return stillAfter(settings.stillGapMs)
+        stillAfter(settings.idleStillGapMs)
+      }
+      clearTimeout(settle)
+      settle = setTimeout(settled, settings.settleMs)
     })
 
     const done = new Promise<void>((resolve) => {
@@ -663,11 +840,12 @@ class Live {
       this.publish()
       await start(1)
       // An idle page does not repaint for a new screencast; start from a still unless a frame beat it.
-      if (!started || sharpens()) await still()
+      if (!started) await still()
       await done
     } finally {
       offFrame()
       clearTimeout(settle)
+      clearTimeout(scheduled)
       this.follow = undefined
       this.sink = undefined
       await this.cdp.send("Page.stopScreencast", {}, this.sessionId).catch(() => undefined)
@@ -676,6 +854,7 @@ class Live {
   }
 
   async input(event: Input) {
+    this.interactedAt = Date.now()
     switch (event.type) {
       case "touch":
         return this.touchEvent(event)
@@ -713,6 +892,35 @@ class Live {
     }
   }
 
+  /**
+   * Once Playwright resizes a page (`playwright-cli resize`), headless Chrome screencasts and captures its window
+   * instead of the emulated viewport: an iPhone viewport (393 × 659) in the default window (500 × 572 inside) loses
+   * its bottom 87 px. When the window cuts the viewport it grows to hold it (the emulation itself is never touched);
+   * windows are at least 500 px wide, so a phone page then keeps a margin on the right.
+   */
+  private async fitWindow() {
+    const frame = this.metrics
+    if (!frame) return
+    const metrics = await this.cdp.send("Page.getLayoutMetrics", {}, this.sessionId).catch(() => undefined)
+    const viewport = metrics?.cssVisualViewport
+    if (!viewport) return
+    this.windowed =
+      Math.abs(viewport.clientWidth - frame.deviceWidth) > 1 || Math.abs(viewport.clientHeight - frame.deviceHeight) > 1
+    const grow = {
+      width: Math.max(0, Math.ceil(viewport.clientWidth - frame.deviceWidth)),
+      height: Math.max(0, Math.ceil(viewport.clientHeight - frame.deviceHeight)),
+    }
+    if (grow.width === 0 && grow.height === 0) return
+    const window = await this.cdp.send("Browser.getWindowForTarget", { targetId: this.targetId }).catch(() => undefined)
+    if (!window?.bounds.width || !window.bounds.height) return
+    await this.cdp
+      .send("Browser.setWindowBounds", {
+        windowId: window.windowId,
+        bounds: { width: window.bounds.width + grow.width, height: window.bounds.height + grow.height },
+      })
+      .catch(() => undefined)
+  }
+
   private async touchEvent(event: Extract<Input, { type: "touch" }>) {
     const viewport = await this.viewport()
     const x = event.x * viewport.width
@@ -725,6 +933,8 @@ class Live {
         cancelled: "touchCancel" as const,
       }[event.phase]
       const points = type === "touchEnd" || type === "touchCancel" ? [] : [{ x, y, id: event.pointer ?? 0 }]
+      // A moving finger scrolls a touch page natively: that is motion too.
+      if (type === "touchMove") this.scrolledAt = Date.now()
       await this.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points }, this.sessionId)
     }
     if (!this.touch) await this.mouseFromTouch(event.phase, x, y, event.pointer ?? 0)

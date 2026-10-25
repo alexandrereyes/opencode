@@ -240,25 +240,60 @@ stream) or asking agents to change how they open it, the plugin registers a `she
 which it writes to `<user-data-dir>/DevToolsActivePort`. Headless and headed work alike. The adapter finds the browser
 of `meta.session` from the process table: the `cliDaemon.js <session>` process, its Chrome child (`--user-data-dir`),
 and that file. It never attaches to a Chrome it did not find this way (a personal Chrome with its own debugging port
-is never a candidate). `--config`, a `.playwright/cli.config.json` in the working directory, or a browser opened before
+is never a candidate).
+
+**Identity.** `playwright-cli` keeps sessions per namespace: the nearest of up to ten ancestors of its working
+directory that holds `.playwright`, else one global namespace for every other directory (`namespaceOf`). `meta.workspace`
+is the agent shell's directory; a daemon's namespace comes from its working directory (`lsof -d cwd`). So `default`
+from `/a/projeto` and `/b/projeto` is the same browser (and the same lock) unless one of them is a Playwright
+workspace; IDs are `chrome:<session>` globally and `chrome:<session>@<full workspace path>` inside one. Registrations
+under the older `chrome:default@<folder>` IDs keep them (`upsert` merges by `sameResource`). Two candidate browsers
+are reported as ambiguous instead of guessing. The endpoint found this way is cached and revalidated per probe with
+`/json/version` (a relaunched Chrome has a new browser id even on a reused port): the process scan (~110 ms, plus
+`lsof`) runs only to recover, and a probe of known browsers costs a few milliseconds. `--config`, a `.playwright/cli.config.json` in the working directory, or a browser opened before
 the hook existed win over the environment: such browsers stay listed but live view reports that they were opened
 without a debugging port. Agent shell calls wait for the Location's plugins, so the hook is in place before the
-command runs; the raw `POST /api/shell` route does not wait, so its very first call in a cold Location can miss it.
+command runs. `POST /api/shell` waits for them too: the one custom line in `packages/server/src/handlers/shell.ts`
+(`Plugin.awaitActivation`, as `core/session/shell.ts` does), covered by `packages/server/test/shell.test.ts`; without
+it the first shell of a cold Location ran before plugins registered their `shell` hooks.
 Like the personal Chrome on 9222, the port accepts any local process; it closes with the browser.
 
 **Stream.** One browser WebSocket per resource (flattened target sessions), shared by snapshot, stream and input and
-closed after 60 s unused. `Page.startScreencast` (JPEG 70, at most 1280×2400) follows one tab; each frame is acked
-after at least 66 ms (about 15 fps), so Chrome never runs ahead of the hub. During a finger scroll the screencast
-restarts at half size and quality 50 and returns to full when frames settle (after t3code's `ServerBrowser`). Because
-screencasts ignore emulated device scale, a phone-sized page streams only ~400 px wide: 200 ms after frames stop, a
-still rendered up to 1200 px wide (`Page.captureScreenshot` with a scaled clip, screencast paused) replaces it, and the
-repeated frame of the restarted screencast is dropped. Idle pages start from such a still.
+closed after 60 s unused. `Page.startScreencast` (JPEG 70, at most 1280×2400) follows one tab. Chromium keeps up to
+three frames unacknowledged, so each frame is acknowledged 200 ms after it arrives: about 15 fps on a page that repaints
+continuously (it was 44 fps with acks paced from the previous ack). During a finger scroll, on the wheel or through
+touch emulation, the screencast restarts at half the *effective* viewport and quality 50 (a 393 px phone page goes to
+~196 px) and returns to full size once the finger stops; the end of the movement gets a still at once.
+
+Screencasts ignore the emulated device scale, so a phone page streams at its CSS width (~400 px). Never capture with
+`clip`: any clipped or scaled `Page.captureScreenshot` resets the device metrics Playwright emulates, leaving the
+agent's page at `devicePixelRatio` 1 (or the window's size). Sharp stills therefore come from Playwright itself
+(`page.screenshot({ scale: "device" })` through the session's `run-code`, which restores its emulation), downscaled to
+at most 2× CSS and 1200 px with `Bun.Image`, and only while Alexandre holds control (input since `released`): the agent
+is locked out then and never waits behind them. They follow an interaction or a burst at most once a second; a lone
+repaint while idle (a blinking caret) is not streamed blurry over the sharp still but refreshed by a still at most
+every 2.5 s (24 per minute instead of 120). The first frame of the restarted screencast repeats the still and is
+dropped. While only watching, the stream is the screencast alone.
+
+After `playwright-cli resize`, headless Chrome screencasts its window instead of the emulated viewport (a 393 × 659
+iPhone viewport in the default 500 × 572 window lost its bottom 87 px). The adapter then grows the window to hold the
+viewport (`Browser.setWindowBounds`, emulation untouched); windows are at least 500 px wide, so such a page keeps a
+margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry.
 
 **Meta** (`ChromeState`, replaced whole on every change): `{ url, title, canGoBack, canGoForward, targetID, tabs:
 [{ id, title, url }], focus: { editable, field? }, editTaps, viewport?: { width, height } }`. `focus.field` is one of
 `text multiline password email username url tel number search one-time-code`, classified in the page (through shadow
 roots and same-origin frames) after taps, Tab/Enter/Escape and loads; values are never read. `editTaps` counts taps
 that land on an editable field, so a viewer reopens its keyboard on the field that already had focus.
+
+**Control end.** The hub calls the optional `Adapter.released(entry)` when control is returned or expires; Chrome stops
+its Playwright stills there.
+
+**Viewport not negotiated.** Fitting the page to the iPhone (for example a 1280 × 800 page that a 377 pt width shows
+only 236 pt tall) was evaluated and left out: a DevTools `Emulation.setDeviceMetricsOverride` of ours replaces
+Playwright's, and clearing it (or closing our session) leaves the window's size, not the agent's viewport; resizing
+through the agent's own `playwright-cli resize` keeps Playwright consistent but switches headless Chrome to the window
+geometry above for the rest of the session. Either way the agent would get back a different browser than it left.
 
 **Input.** Pages with touch emulation (`--device`/`--mobile`) get `Input.dispatchTouchEvent`. Mouse-only pages
 (Playwright's default desktop context) turn a finger that stays put into a click at the release point and one that
@@ -268,7 +303,8 @@ wheel event; `key` maps DOM key names to `Input.dispatchKeyEvent`; `text` is `In
 history entries, `Page.reload`, and `tab` re-targets the stream (`Target.activateTarget` brings it to front).
 
 Checks: `bun test test/resources-chrome.test.ts` drives a real headless Chrome under a fake `cliDaemon.js` parent
-(skipped without Chrome); `script/chrome-resource-check.ts --session <s> --out <dir>` measures a real `playwright-cli`
+(skipped without Chrome) and real `playwright-cli` sessions (desktop and iPhone 15; skipped without the CLI) for the
+frame-rate cap, touch motion, sharp still and emulation survival, idle refreshes and `released`; `script/chrome-resource-check.ts --session <s> --out <dir>` measures a real `playwright-cli`
 session; `script/chrome-login-fixture.ts` is the local login page those and the iOS UI test use.
 
 ## Control lock

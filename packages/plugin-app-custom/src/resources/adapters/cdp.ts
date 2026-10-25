@@ -40,6 +40,11 @@ export interface Commands {
   "Target.setDiscoverTargets": { params: { discover: boolean }; result: {} }
   "Target.getTargetInfo": { params: { targetId: string }; result: { targetInfo: TargetInfo } }
   "Target.createTarget": { params: { url: string }; result: { targetId: string } }
+  "Browser.getWindowForTarget": {
+    params: { targetId: string }
+    result: { windowId: number; bounds: { width?: number; height?: number } }
+  }
+  "Browser.setWindowBounds": { params: { windowId: number; bounds: { width?: number; height?: number } }; result: {} }
   "Target.activateTarget": { params: { targetId: string }; result: {} }
   "Page.enable": { params: {}; result: {} }
   "Page.startScreencast": {

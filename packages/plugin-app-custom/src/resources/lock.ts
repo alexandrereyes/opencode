@@ -1,3 +1,4 @@
+import { sameNamespace } from "./adapters/chrome.js"
 import type { Lock } from "./hub/hub.js"
 
 const kindNames = {
@@ -51,7 +52,7 @@ function implicit(command: string, lock: Lock, workdir: string | undefined) {
   return (
     lock.meta.kind === "chrome" &&
     (lock.meta.session ?? "default") === "default" &&
-    (!lock.meta.workspace || !workdir || lock.meta.workspace === workdir) &&
+    sameNamespace(lock.meta.workspace, workdir) &&
     /\bplaywright-cli\b/.test(command) &&
     !/(\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)/.test(command)
   )

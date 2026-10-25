@@ -6,7 +6,10 @@ live in `docs/upstream-overrides.md`.
 
 Feature-specific custom integration points added after the last upstream merge are documented separately:
 [Sessão mestra](custom-master-session.md) records the reusable Session active/form-reply plugin surfaces, target-Location
-permission routing, fixed-baseline overlap and parity tests.
+permission routing, fixed-baseline overlap and parity tests. [Session resources](../packages/plugin-app-custom/docs/resources.md)
+adds one line to `packages/server/src/handlers/shell.ts`: `shell.create` waits for `Plugin.awaitActivation`, as
+`core/session/shell.ts` does, so plugin `shell` hooks apply to the first shell of a cold Location
+(`packages/server/test/shell.test.ts`).
 
 ## Upstream source branch
 

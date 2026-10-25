@@ -3,8 +3,11 @@ import os from "node:os"
 import path from "node:path"
 
 /** Runs a command without a shell and returns its stdout; throws with stderr on failure or timeout. */
-export async function run(command: readonly string[], options: { readonly timeout?: number } = {}) {
-  const child = Bun.spawn([...command], { stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+export async function run(
+  command: readonly string[],
+  options: { readonly timeout?: number; readonly cwd?: string } = {},
+) {
+  const child = Bun.spawn([...command], { stdout: "pipe", stderr: "pipe", stdin: "ignore", cwd: options.cwd })
   const timer = setTimeout(() => child.kill(), options.timeout ?? 15_000)
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).arrayBuffer().then((buffer) => new Uint8Array(buffer)),
@@ -15,7 +18,10 @@ export async function run(command: readonly string[], options: { readonly timeou
   return stdout
 }
 
-export async function text(command: readonly string[], options: { readonly timeout?: number } = {}) {
+export async function text(
+  command: readonly string[],
+  options: { readonly timeout?: number; readonly cwd?: string } = {},
+) {
   return new TextDecoder().decode(await run(command, options))
 }
 

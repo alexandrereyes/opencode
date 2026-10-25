@@ -9,12 +9,15 @@ import {
   locate,
   makeChromeAdapter,
   modifiers,
+  namespaceOf,
   normalizeURL,
   parseProcesses,
+  sameNamespace,
   shellEnvironment,
   writeConfig,
   type ChromeState,
 } from "../src/resources/adapters/chrome"
+import { size } from "../src/resources/adapters/process"
 import type { Entry, StreamSink } from "../src/resources/adapters/types"
 import type { Resources } from "../src/resources/rpc"
 
@@ -36,17 +39,48 @@ describe("locating the browser of a playwright-cli session", () => {
         "  300     1 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --remote-debugging-port=9222",
       ].join("\n"),
     )
-    expect(await locate("login", rows)).toEqual({
-      pid: 101,
-      daemonPID: 100,
-      userDataDir,
-      port: 62417,
-      headless: true,
-    })
+    expect(await locate("login", rows)).toEqual([
+      { pid: 101, daemonPID: 100, userDataDir, port: 62417, headless: true },
+    ])
     // A browser opened without the debugging port is found, but has no port to attach to.
-    expect((await locate("other", rows))?.port).toBeUndefined()
+    expect((await locate("other", rows))[0]?.port).toBeUndefined()
     // Chrome processes that no playwright-cli daemon launched are never candidates.
-    expect(await locate("default", rows)).toBeUndefined()
+    expect(await locate("default", rows)).toEqual([])
+  })
+
+  test("tells same-named sessions apart by the playwright-cli namespace of the agent's directory", async () => {
+    await using dir = await temporary()
+    const scoped = path.join(dir.path, "scoped")
+    const plain = path.join(dir.path, "plain", "repo")
+    await fs.mkdir(path.join(scoped, ".playwright"), { recursive: true })
+    await fs.mkdir(path.join(scoped, "packages", "app"), { recursive: true })
+    await fs.mkdir(plain, { recursive: true })
+    expect(namespaceOf(path.join(scoped, "packages", "app"))).toBe(scoped)
+    expect(namespaceOf(plain)).toBe("")
+    const rows = parseProcesses(
+      [
+        "  400     1 /usr/bin/node /x/lib/entry/cliDaemon.js default",
+        "  401   400 /Applications/Chrome --user-data-dir=/tmp/one --remote-debugging-pipe",
+        "  500     1 /usr/bin/node /x/lib/entry/cliDaemon.js default",
+        "  501   500 /Applications/Chrome --user-data-dir=/tmp/two --remote-debugging-pipe",
+      ].join("\n"),
+    )
+    // Daemon 400 started in the `.playwright` workspace; 500 (the newer PID) in a directory without one.
+    const directories = async () =>
+      new Map([
+        [400, path.join(scoped, "packages")],
+        [500, plain],
+      ])
+    const pick = async (workspace?: string) =>
+      (await locate("default", rows, workspace, directories)).map((browser) => browser.pid)
+    expect(await pick(path.join(scoped, "packages", "app"))).toEqual([401])
+    // Any directory outside a `.playwright` workspace shares the global `default` session.
+    expect(await pick(path.join(dir.path, "elsewhere"))).toEqual([501])
+    // Without a known directory, two candidates are ambiguous rather than guessed.
+    expect(await pick()).toEqual([401, 501])
+    expect(sameNamespace(plain, path.join(dir.path, "elsewhere"))).toBe(true)
+    expect(sameNamespace(plain, scoped)).toBe(false)
+    expect(sameNamespace(undefined, scoped)).toBe(true)
   })
 
   test("agent shells get the CDP config unless they chose one", async () => {
@@ -271,6 +305,173 @@ describe.skipIf(!live)("a real headless Chrome", () => {
       await streaming
     },
     { timeout: 30_000 },
+  )
+})
+
+const cli = live && Bun.which("playwright-cli") !== null
+
+/**
+ * Real `playwright-cli` sessions (desktop and an emulated iPhone), opened the way the plugin's shell hook makes agents
+ * open them. Frame-rate and still checks count frames over a few seconds with wide margins: a regression to the
+ * uncapped stream (about 44 fps on a spinner) or to stills on every caret blink (one every 500 ms) trips them.
+ */
+describe.skipIf(!cli)("playwright-cli sessions", () => {
+  const prefix = `opencode-perf-${process.pid}`
+  let dir: string
+  let server: Bun.Server<undefined>
+  const adapter = makeChromeAdapter()
+  const at = Date.now()
+  const entry = (session: string, workspace: string): Entry => ({
+    id: `chrome:${session}`,
+    kind: "chrome",
+    meta: { kind: "chrome", session, workspace },
+    status: "running",
+    discoveredAt: at,
+    lastUsedAt: at,
+    updatedAt: at,
+  })
+  // Asynchronous: `open` waits for the page, which this process serves.
+  const cliRun = (args: string[]) =>
+    Bun.spawn(["playwright-cli", ...args], {
+      cwd: dir,
+      env: { ...process.env, PLAYWRIGHT_MCP_CONFIG: path.join(dir, "playwright-cli.json") },
+      stdout: "ignore",
+      stderr: "ignore",
+    }).exited
+
+  beforeAll(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "chrome-perf-"))
+    await writeConfig(path.join(dir, "playwright-cli.json"))
+    server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) =>
+        new Response(
+          new URL(request.url).pathname === "/spin"
+            ? `<style>@keyframes s { to { transform: rotate(360deg) } }</style><div style="width:120px;height:120px;border:12px solid #ccd;border-top-color:#1f6feb;border-radius:50%;animation:s 1s linear infinite"></div>`
+            : `<meta name="viewport" content="width=device-width, initial-scale=1"><input id="email" autofocus style="width:90%;height:40px"><div style="height:4000px;background:linear-gradient(#fff,#888)"></div>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        ),
+    })
+    await Promise.all([
+      cliRun([`-s=${prefix}-desktop`, "open", "--browser=chrome", `http://127.0.0.1:${server.port}/spin`]),
+      cliRun([
+        `-s=${prefix}-phone`,
+        "open",
+        "--browser=chrome",
+        "--device=iPhone 15",
+        `http://127.0.0.1:${server.port}/`,
+      ]),
+    ])
+  }, 60_000)
+
+  afterAll(async () => {
+    await adapter.close()
+    for (const name of ["desktop", "phone"]) {
+      await cliRun([`-s=${prefix}-${name}`, "close"])
+      await cliRun([`-s=${prefix}-${name}`, "delete-data"])
+    }
+    server?.stop(true)
+    await fs.rm(dir, { recursive: true, force: true })
+    // `delete-data` keeps the daemon's error logs; remove this run's.
+    const daemons = path.join(os.homedir(), "Library", "Caches", "ms-playwright", "daemon")
+    for (const hash of await fs.readdir(daemons).catch(() => [])) {
+      const files = await fs.readdir(path.join(daemons, hash)).catch(() => [])
+      await Promise.all(
+        files
+          .filter((file) => file.startsWith(`${prefix}-`))
+          .map((file) => fs.rm(path.join(daemons, hash, file), { force: true })),
+      )
+    }
+  })
+
+  const evaluateIn = async (target: Entry, expression: string) => {
+    const probed = (await adapter.probe([target])).get(target.id)
+    if (probed?.meta?.kind !== "chrome") throw new Error("expected Chrome metadata")
+    return evaluate(probed.meta, expression)
+  }
+
+  const watch = (target: Entry) => {
+    const frames: { at: number; width: number }[] = []
+    const states: ChromeState[] = []
+    const controller = new AbortController()
+    const sink: StreamSink = {
+      hello: () => undefined,
+      frame: (payload) => void frames.push({ at: Date.now(), width: size(payload)?.width ?? 0 }),
+      // The Chrome adapter publishes exactly `ChromeState`.
+      meta: (value) => void states.push(value as unknown as ChromeState),
+    }
+    const streaming = adapter.stream!(target, sink, controller.signal)
+    const until = async (condition: () => boolean) => {
+      const deadline = Date.now() + 15_000
+      while (!condition()) {
+        if (Date.now() > deadline) throw new Error(`timed out; last state ${JSON.stringify(states.at(-1))}`)
+        await Bun.sleep(20)
+      }
+    }
+    const stop = async () => {
+      controller.abort()
+      await streaming
+    }
+    return { frames, states, until, stop }
+  }
+
+  test(
+    "a continuously repainting page streams near 15 fps, not at the page's rate",
+    async () => {
+      const view = watch(entry(`${prefix}-desktop`, dir))
+      await view.until(() => view.frames.length > 0)
+      await Bun.sleep(500)
+      const from = Date.now()
+      await Bun.sleep(3_000)
+      const counted = view.frames.filter((frame) => frame.at >= from).length
+      await view.stop()
+      expect(counted).toBeGreaterThan(15)
+      expect(counted).toBeLessThan(60)
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "a phone page shrinks frames while a finger scrolls, ends sharp, and refreshes a blinking caret sparingly",
+    async () => {
+      const target = entry(`${prefix}-phone`, dir)
+      const view = watch(target)
+      await view.until(() => view.states.at(-1)?.viewport !== undefined && view.frames.length > 0)
+      const viewport = view.states.at(-1)!.viewport!
+      expect(viewport.width).toBe(393)
+
+      const from = view.frames.length
+      await adapter.input!(target, { type: "touch", phase: "began", x: 0.5, y: 0.8 })
+      for (let step = 1; step <= 15; step++) {
+        await adapter.input!(target, { type: "touch", phase: "moved", x: 0.5, y: 0.8 - step * 0.04 })
+        await Bun.sleep(40)
+      }
+      await adapter.input!(target, { type: "touch", phase: "ended", x: 0.5, y: 0.2 })
+      // Motion frames are about half the viewport wide; the still after the scroll is twice the viewport.
+      await view.until(() => view.frames.slice(from).some((frame) => frame.width <= viewport.width * 0.6))
+      await view.until(() => (view.frames.at(-1)?.width ?? 0) >= viewport.width * 1.9)
+
+      // The autofocused field blinks its caret every 500 ms; idle refreshes come at most every 2.5 s.
+      await Bun.sleep(3_000)
+      const idle = Date.now()
+      await Bun.sleep(6_000)
+      const refreshed = view.frames.filter((frame) => frame.at >= idle)
+      expect(refreshed.length).toBeLessThanOrEqual(4)
+      expect(refreshed.every((frame) => frame.width >= viewport.width * 1.9)).toBe(true)
+      // Sharp stills come from Playwright, so the agent's emulated device survives them.
+      const density = await evaluateIn(target, "[visualViewport.width, visualViewport.height, devicePixelRatio]")
+      expect(density).toEqual([393, 659, 3])
+      // Giving control back stops the Playwright stills: the agent's session is never kept waiting behind them.
+      await adapter.released!(target)
+      const released = view.frames.length
+      // A repaint the agent causes (no input from the viewer).
+      await evaluateIn(target, "(document.body.style.background = '#ddd', 1)")
+      await Bun.sleep(2_000)
+      expect(view.frames.slice(released).every((frame) => frame.width < viewport.width * 1.5)).toBe(true)
+      await view.stop()
+    },
+    { timeout: 40_000 },
   )
 })
 
