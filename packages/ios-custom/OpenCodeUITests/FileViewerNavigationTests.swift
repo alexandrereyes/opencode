@@ -18,22 +18,17 @@ import XCTest
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
     return app
   }
+  /// Joined response prose exposes no per-link accessibility elements, so each link has its own session whose
+  /// whole message is that link (see `script/test-file-viewer.py`); opening one relaunches into it.
   private func open(_ label: String, app: XCUIApplication) {
-    let link = app.links[label].firstMatch
-    XCTAssertTrue(link.waitForExistence(timeout: 10), label)
-    let transcript = app.collectionViews["conversation-transcript"]
-    let pinned = app.descendants(matching: .any)["conversation-pinned-user"]
-    for _ in 0..<8 {
-      let top = max(transcript.frame.minY, pinned.exists ? pinned.frame.maxY : 0) + 24
-      if link.frame.minY >= top && link.frame.maxY <= transcript.frame.maxY - 24 { break }
-      let down = link.frame.minY < top
-      transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: down ? 0.35 : 0.75))
-        .press(forDuration: 0.01, thenDragTo: transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: down ? 0.75 : 0.35)),
-          withVelocity: .slow, thenHoldForDuration: 0.1)
-    }
-    let target = app.links.matching(identifier: label).allElementsBoundByIndex.min { $0.frame.width < $1.frame.width } ?? link
-    // TextKit exposes a full-width parent as a Link as well as its inline range.
-    target.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: min(40, target.frame.width / 2), dy: 10)).tap()
+    let key = String(label.dropFirst("Abrir ".count)).replacingOccurrences(of: "doc ", with: "DOC_").uppercased()
+    guard let session = environment["OPENCODE_VIEWER_LINK_" + key] else { return XCTFail("No session for \(label)") }
+    app.terminate()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme, "-OpenCodeOpenSession", session]
+    app.launch()
+    let text = app.descendants(matching: .any).matching(NSPredicate(format: "elementType != %d AND (value CONTAINS %@ OR label CONTAINS %@)", XCUIElement.ElementType.navigationBar.rawValue, label, label)).firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 25), label)
+    text.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 10)).tap()
   }
   private func screenshot(_ name: String) {
     let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -234,6 +229,103 @@ import XCTest
     XCTAssertTrue(app.buttons["file-previous"].waitForExistence(timeout: 5))
     screenshot("explorer-above-root")
     app.navigationBars["acima.txt"].buttons["Fechar"].tap()
+    app.terminate()
+  }
+
+  func testMarkdownDocumentsOpenRendered() throws {
+    let app = try launch("DOCS")
+    for (label, name, text) in [("FORMATACAO", "a-formatacao.md", "Formatação"), ("README", "b-readme.md", "OpenCode iOS (custom)"),
+      ("OUTRO", "d-outro.md", "Outro documento"), ("VAZIO", "e-vazio.md", "")] {
+      open("Abrir doc " + label, app: app)
+      title(app, name)
+      if text.isEmpty {
+        XCTAssertTrue(app.staticTexts["Documento vazio"].waitForExistence(timeout: 20), name)
+      } else {
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 20), name)
+      }
+      if label == "README" {
+        // A long document scrolls to its end while only nearby slices are mounted.
+        let top = app.textViews.matching(NSPredicate(format: "value CONTAINS 'Native iOS client'")).firstMatch
+        for _ in 0..<40 { app.swipeUp(velocity: .fast) }
+        // Far from the top, its slice is unmounted rather than kept in memory.
+        XCTAssertFalse(top.exists)
+        XCTAssertGreaterThan(app.textViews.count, 0)
+        screenshot("markdown-readme-end")
+      }
+      XCTAssertEqual(app.state, .runningForeground, name)
+      screenshot("markdown-" + label.lowercased())
+      app.buttons["Fechar"].tap()
+      XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+    }
+    app.terminate()
+  }
+
+  func testMarkdownTablesCodeImagesLinksAndSource() throws {
+    let app = try launch("DOCS")
+    open("Abrir doc RECURSOS", app: app)
+    title(app, "c-recursos.md")
+    // Front matter is a YAML code block, not a heading.
+    XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value CONTAINS 'title: Recursos do visualizador' OR label CONTAINS 'title: Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 20))
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Texto um pouco mais longo'")).firstMatch.waitForExistence(timeout: 10))
+    screenshot("markdown-recursos-top")
+    let document = app.windows.firstMatch
+    let relative = app.buttons["feed-image-Imagem relativa"]
+    for _ in 0..<8 where !relative.exists || !relative.isHittable {
+      document.swipeUp(velocity: .slow)
+    }
+    XCTAssertTrue(relative.waitForExistence(timeout: 20), "image relative to the file")
+    XCTAssertTrue(app.buttons["feed-image-Imagem da pasta acima"].waitForExistence(timeout: 20))
+    screenshot("markdown-recursos-images")
+    let link = app.descendants(matching: .any).matching(NSPredicate(format: "(value CONTAINS %@ OR label CONTAINS %@) AND elementType IN %@",
+      "Abrir o outro documento", "Abrir o outro documento",
+      [XCUIElement.ElementType.textView, .link, .staticText].map(\.rawValue))).firstMatch
+    for _ in 0..<6 where !link.exists || !link.isHittable { document.swipeUp(velocity: .slow) }
+    XCTAssertTrue(link.waitForExistence(timeout: 10))
+    link.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 10)).tap()
+    title(app, "d-outro.md")
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Outro documento'")).firstMatch.waitForExistence(timeout: 20))
+    screenshot("markdown-linked-file")
+    app.buttons["file-back"].tap()
+    title(app, "c-recursos.md")
+    XCTAssertFalse(app.buttons["file-back"].exists)
+    let toggle = app.buttons["file-markdown-source"]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+    toggle.tap()
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS '## Tabela' AND value CONTAINS 'tags: [ios, markdown]'")).firstMatch.waitForExistence(timeout: 10))
+    screenshot("markdown-source")
+    toggle.tap()
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 10))
+    app.terminate()
+  }
+
+  func testMarkdownFromExplorerAndSiblingPaging() throws {
+    let app = try launch("DOCS")
+    app.buttons["Mais opções"].tap()
+    app.buttons["Detalhes da sessão"].tap()
+    let directory = app.buttons["session-details-directory"]
+    XCTAssertTrue(directory.waitForExistence(timeout: 10))
+    directory.tap()
+    let folder = app.buttons["file-explorer-folder-docs"]
+    XCTAssertTrue(folder.waitForExistence(timeout: 15))
+    folder.tap()
+    let file = app.buttons["file-explorer-file-a-formatacao.md"]
+    XCTAssertTrue(file.waitForExistence(timeout: 15))
+    file.tap()
+    title(app, "a-formatacao.md")
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Formatação'")).firstMatch.waitForExistence(timeout: 20))
+    screenshot("markdown-explorer")
+    let next = app.buttons["file-next"]
+    XCTAssertTrue(next.waitForExistence(timeout: 15))
+    next.tap()
+    title(app, "b-readme.md")
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 20))
+    drag(app, dx: -220)
+    title(app, "c-recursos.md")
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 20))
+    XCTAssertEqual(app.state, .runningForeground)
+    screenshot("markdown-explorer-paged")
+    app.navigationBars["c-recursos.md"].buttons["Fechar"].tap()
     app.terminate()
   }
 

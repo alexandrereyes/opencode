@@ -231,6 +231,9 @@ struct FileViewer: View {
   @State private var sharing = false
   @State private var copied = false
   @State private var siblings: [String]?
+  /// Files opened from links inside the viewer, for Voltar.
+  @State private var history: [String] = []
+  @State private var markdownSource = false
   init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
   }
@@ -243,6 +246,23 @@ struct FileViewer: View {
     guard let next = neighbor(step) else { return }
     store.close()
     store = FileViewerStore(source: next, context: store.context, exact: true)
+    copied = false
+    store.start()
+  }
+  /// A link inside a file opens here, relative to that file; its directory becomes the paging sequence.
+  private func follow(_ link: String) {
+    guard let path = MarkdownDocument.linkedFile(link, from: store.path ?? store.source) else { return }
+    history.append(store.path ?? store.source)
+    show(path)
+  }
+  private func back() {
+    guard let previous = history.popLast() else { return }
+    show(previous)
+  }
+  private func show(_ path: String) {
+    store.close()
+    siblings = nil
+    store = FileViewerStore(source: path, context: store.context, exact: true)
     copied = false
     store.start()
   }
@@ -281,6 +301,7 @@ struct FileViewer: View {
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .environment(\.openFile, FileOpenAction(open: follow))
       // A new file always starts with fresh viewer state, including zoom.
       .id(store.source)
       .gesture(FilePageSwipe(previous: neighbor(-1) != nil, next: neighbor(1) != nil, page: page))
@@ -298,8 +319,20 @@ struct FileViewer: View {
       .background(theme.color(.background)).foregroundStyle(theme.color(.text))
       .navigationTitle(store.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .topBarLeading) { Button("Fechar") { dismiss() } }
+        ToolbarItemGroup(placement: .topBarLeading) {
+          Button("Fechar") { dismiss() }
+          if !history.isEmpty {
+            Button("Voltar", systemImage: "chevron.backward", action: back).accessibilityIdentifier("file-back")
+          }
+        }
         ToolbarItemGroup(placement: .topBarTrailing) {
+          if store.markdown, store.text != nil {
+            Button(markdownSource ? "Ver renderizado" : "Ver fonte",
+              systemImage: markdownSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right") {
+              markdownSource.toggle()
+            }
+            .accessibilityIdentifier("file-markdown-source")
+          }
           Button(copied ? "Caminho copiado" : "Copiar caminho", systemImage: "doc.on.doc") {
             UIPasteboard.general.string = store.path ?? store.source
             copied = true
@@ -340,7 +373,9 @@ struct FileViewer: View {
       FileAVPlayer(file: file).accessibilityIdentifier("file-player")
     case .preview:
       ZStack {
-        if let text = store.text, store.markdown { FileMarkdownPreview(text: text, path: store.path ?? store.source) }
+        if let text = store.text, store.markdown, !markdownSource {
+          FileMarkdownPreview(text: text, path: store.path ?? store.source, context: store.context)
+        }
         else if let text = store.text { FileTextPreview(text: text, code: file.pathExtension.lowercased() != "txt") }
         else if file.pathExtension.lowercased() == "pdf" { FilePDFPreview(file: file) }
         else if file.pathExtension.lowercased() == "svg" || store.metadata?.mime == "image/svg+xml",
@@ -419,22 +454,76 @@ private struct FileTextPreview: UIViewRepresentable {
   }
 }
 
-private struct FileMarkdownPreview: View {
+/// A Markdown file through the response engine. Unlike a conversation row, a document can be thousands of points
+/// tall, and a text view draws its whole height: slices mount lazily so only the visible ones hold bitmaps.
+struct FileMarkdownPreview: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var scale
   let text: String
   let path: String
+  let context: ConversationImageContext
   @State private var toast = ToastCenter()
+  @State private var blocks: [MarkdownBlock]?
+  @State private var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
+  @State private var note: Note?
+  private struct Note: Identifiable { let id: String }
+  private var source: String { MarkdownDocument.renderable(text) }
   var body: some View {
-    ScrollView {
-      ResponseMarkdown(text: text, messageID: "file-preview", partID: path)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+    Group {
+      if let blocks, MarkdownDocument.oversized(blocks) {
+        // One block taller than many screens (a huge code listing) is read in the scrolling source view.
+        FileTextPreview(text: text, code: true)
+      } else if let blocks, blocks.isEmpty {
+        Text("Documento vazio").foregroundStyle(theme.color(.textSecondary))
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if let blocks {
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(MarkdownDocument.chunks(blocks)) { chunk in
+              ResponseBlocks(blocks: chunk.blocks, source: source, messageID: "file-preview", partID: path,
+                rasters: rasters, openNote: { note = Note(id: $0) })
+                .padding(.top, chunk.spacing)
+            }
+          }
+          .padding(16)
+        }
+      } else {
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    .sheet(item: $note) { note in
+      if let block = blocks?.first(where: { if case .footnote(let id, _) = $0.kind { id == note.id } else { false } }) {
+        NavigationStack {
+          ScrollView {
+            ResponseBlocks(blocks: block.children, source: source, messageID: "file-preview", partID: path,
+              rasters: rasters, openNote: { self.note = Note(id: $0) }).padding(20)
+          }
+          .background(theme.color(.background))
+          .navigationTitle("Nota de rodapé").navigationBarTitleDisplayMode(.inline)
+          .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { self.note = nil } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+      }
     }
     .toastOverlay(toast)
     .environment(toast)
+    // Prose joins inside each slice, so a selection spans its paragraphs, headings and lists.
+    .environment(\.responseProse, true)
+    .environment(\.responseFilesStable, true)
+    // Relative images and links belong to the file's directory, not the Session's.
+    .environment(\.conversationImages, ConversationImageContext(client: context.client,
+      directory: URL(fileURLWithPath: path).deletingLastPathComponent().path, sessionID: context.sessionID))
     // A file is not a chat message: no quote, comment or side-question actions.
     .environment(\.responseSelection, nil)
     .environment(\.responseSelectionChanged, nil)
     .environment(\.conversationQuotes, ConversationQuoteContext())
     .environment(\.conversationSearch, ConversationSearchHighlight())
+    .task(id: "\(theme.id)\n\(text)") {
+      let parsed = await ResponseMarkdownCache.shared.parse(source)
+      let images = await ResponseFormulas.shared.rasters(parsed, theme: theme.id, color: theme.value(.markdownBody), scale: scale)
+      guard !Task.isCancelled else { return }
+      rasters = images
+      blocks = parsed
+    }
   }
 }
 

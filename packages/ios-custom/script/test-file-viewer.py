@@ -96,6 +96,66 @@ try:
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660", "-t", "30", "-c:a", "aac", str(folder / "l-audio.m4a")], check=True)
     (folder / "m-binario.opaque").write_bytes(bytes(range(256)))
     (folder / "n-texto.txt").write_text("Texto simples do visualizador.\n", encoding="utf8")
+    # Markdown documents: the app's formatting fixture, a large real README and edge cases.
+    docs = folder / "docs"
+    docs.mkdir()
+    package = Path(__file__).resolve().parents[1]
+    shutil.copyfile(package / "OpenCode/Fixtures/markdown-fixture.md", docs / "a-formatacao.md")
+    shutil.copyfile(package / "README.md", docs / "b-readme.md")
+    (docs / "imagem-docs.png").write_bytes(png(480, 240, 220))
+    (docs / "c-recursos.md").write_text("""---
+title: Recursos do visualizador
+tags: [ios, markdown]
+---
+
+# Recursos do visualizador
+
+Parágrafo com **negrito**, *itálico*, `código` e um [link externo](https://example.com).
+
+## Tabela
+
+| Coluna | Valor | Observação |
+| --- | ---: | --- |
+| Primeira | 10 | Texto curto |
+| Segunda | 200 | Texto um pouco mais longo para quebrar a linha da célula |
+
+## Código
+
+```swift
+struct Visualizador {
+  let nome = "Markdown renderizado"
+}
+```
+
+> Citação com **ênfase** e um segundo parágrafo.
+>
+> Fim da citação.
+
+- [x] Tarefa concluída
+- [ ] Tarefa pendente
+
+![Imagem relativa](imagem-docs.png)
+
+![Imagem da pasta acima](../a-imagem.png)
+
+```text
+Bloco antes do link
+```
+
+[Abrir o outro documento](d-outro.md)
+
+```text
+Bloco depois do link
+```
+
+<details><summary>HTML simples</summary>Conteúdo<br>com quebra.</details>
+
+## Seção final
+
+Último parágrafo do documento de recursos.
+""", encoding="utf8")
+    (docs / "d-outro.md").write_text("# Outro documento 🚀\n\nAcentuação: ação, coração, pinguim, über. Emoji: 👩🏽‍💻 ✅\n\n1. Um\n2. Dois\n", encoding="utf8")
+    (docs / "e-vazio.md").write_text("", encoding="utf8")
     # Above the Session directory, reachable through the session file explorer's `../`.
     (root / "acima.png").write_bytes(png(600, 400, 160))
     (root / "acima.txt").write_text("Arquivo acima da sessão.\n", encoding="utf8")
@@ -107,7 +167,15 @@ try:
         "WAV": "k-audio.wav", "M4A": "l-audio.m4a", "OPAQUE": "m-binario.opaque", "TXT": "n-texto.txt"}
     text = "Arquivos do visualizador:\n\n" + "\n".join("- [Abrir " + key + "](" + value + ")" for key, value in links.items()) \
         + "\n- [Abrir externo](" + str(outside / "fora.png") + ")"
-    messages = {"LINKS": text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
+    docs_text = "Documentos:\n\n" + "\n".join("- [Abrir doc " + key + "](docs/" + value + ")" for key, value in
+        {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md"}.items())
+    # Joined response prose exposes one text view without per-link elements, so each link also gets a session
+    # whose whole message is that link.
+    single = {**{"LINK_" + key: "[Abrir " + key + "](" + value + ")" for key, value in links.items()},
+        "LINK_EXTERNO": "[Abrir externo](" + str(outside / "fora.png") + ")",
+        **{"LINK_DOC_" + key: "[Abrir doc " + key + "](docs/" + value + ")" for key, value in
+            {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md"}.items()}}
+    messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():
         session = "ses_" + uuid.uuid4().hex

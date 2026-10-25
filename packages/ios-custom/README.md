@@ -829,6 +829,20 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   URL under a CSP; audio/video keep AVPlayer. Larger or non-UTF-8 text keeps Quick Look. Unsupported files show
   **Pré-visualização indisponível** with Share (which includes “Abrir em…”).
 
+#### Markdown files — 24 October
+
+- **Termination on open:** the viewer drew the whole document at once (`ScrollView` around one `ResponseMarkdown`).
+  Each text view keeps bitmaps for its full height, so opening this README took the footprint from 57 MB to 1.9 GB
+  in the iOS 27 Simulator and grew with document length; on a phone that ends in a jetsam kill, which leaves no
+  crash report in App Store Connect. No TestFlight crash log was available for the reported build.
+- `FileMarkdownPreview` now uses the response engine in slices (`MarkdownDocument.chunks`, ≤ 1,500 UTF-16 units or
+  12 blocks) inside a `LazyVStack`: the same README stays near 160 MB while scrolling to its end. Prose joins within
+  each slice, so selection spans its paragraphs, headings and lists; quote/comment/side-question actions are off.
+  A single block over 40,000 units (a huge listing) opens in the scrolling source view instead.
+- Images and links resolve against the file's directory; a link to another file opens in the same viewer with
+  **Voltar**. YAML front matter renders as a YAML code block. The `</>` button switches to the selectable source.
+  In-document anchors (`#secao`) are not links yet.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).
