@@ -5,6 +5,7 @@ import UIKit
 
 /// Synthetic data only. The transport never falls through to URLSession, including writes.
 @MainActor enum ScreenCatalogFixture {
+  static let scripts = try! JSONDecoder().decode([ShellInfo].self, from: Data(#"[{"id":"catalog-script","status":"running","command":"bun run preview --port 4321","metadata":{"sessionID":"ses_scroll_0000"},"time":{"started":1792576830000}}]"#.utf8))
   static let children = try! JSONDecoder().decode([Session].self, from: Data(#"[{"id":"ses_catalog_review","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Verificar a acessibilidade","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"},"location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576830000,"updated":1792576830000}}]"#.utf8))
   static let resources: [SessionResource] = [
     .init(id: "catalog-ios", kind: .iosSimulator, label: "iPhone de demonstração", purpose: "Conferir a navegação",
@@ -41,7 +42,22 @@ import UIKit
       .replacingOccurrences(of: "Sessão de exemplo 000 — revisão do projeto e ferramentas", with: "Revisar a navegação do aplicativo")
       .replacingOccurrences(of: "Sessão de exemplo 001 — revisão do projeto e ferramentas", with: "Organizar o roteiro da próxima versão")
       .replacingOccurrences(of: "/Projetos/exemplo-1", with: "/Chats/roteiro")
-    let entries = try! JSONDecoder().decode([NavigationEntry].self, from: Data(encoded.utf8))
+    let entries: [NavigationEntry]
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogUnread") {
+      let values = try! JSONDecoder().decode([[String: JSONValue]].self, from: Data(encoded.utf8)).map { value in
+        var value = value
+        var session = value["session"]!.object!
+        var time = session["time"]!.object!
+        // A watermark after all fixed fixture timestamps leaves only the selected repository unread.
+        time["viewed"] = .number(session["projectID"]?.string == "project_scroll_3" ? 0 : 2_000_000_000_000)
+        session["time"] = .object(time)
+        value["session"] = .object(session)
+        return value
+      }
+      entries = try! JSONDecoder().decode([NavigationEntry].self, from: JSONEncoder().encode(values))
+    } else {
+      entries = try! JSONDecoder().decode([NavigationEntry].self, from: Data(encoded.utf8))
+    }
     var messages = try! JSONDecoder().decode([ConversationMessage].self, from: Data(#"""
       [{"id":"msg_catalog_user","type":"user","time":{"created":1792576800000},"text":"Revise a navegação do aplicativo e proponha uma organização mais simples.\n\nConsidere as abas principais, o acesso às conversas e os atalhos de criação. Preserve a hierarquia visual e os controles de acessibilidade.\n\nApresente um resumo das mudanças, sem alterar os arquivos por enquanto."},
        {"id":"msg_catalog_answer","type":"assistant","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture","variant":"high"},"tokens":{"input":6000,"output":7000,"reasoning":0,"cache":{"read":63000,"write":0}},"time":{"created":1792576810000,"completed":1792576815000},"finish":"stop","content":[{"type":"text","text":"## Uma navegação mais simples\n\nA proposta mantém as cinco abas e dá mais destaque às **conversas recentes**.\n\n- Criar uma sessão em um único toque.\n- Agrupar filtros por projeto.\n- Manter os ajustes na aba Você.\n\nNenhum arquivo foi alterado. Podemos começar pelos filtros e validar o resultado antes de seguir."}]}]

@@ -145,7 +145,13 @@ struct SideQuestionSheet: View {
       }
       .toastOverlay(state.toast)
       // Opens ready to type, like the expanded composer: focusing during the presentation stalled it.
-      .background(ComposerCoverAppearance { focused = true }.frame(width: 0, height: 0))
+      .background(ComposerCoverAppearance {
+        #if DEBUG
+        // The prepared reference captures an answered question, without opening the system keyboard.
+        if ScrollFixtures.mode == "catalog", ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogSideQuestion") { return }
+        #endif
+        focused = true
+      }.frame(width: 0, height: 0))
     }
     .environment(state.toast).environment(\.responseSelection, nil).environment(
       \.responseSelectionChanged, nil

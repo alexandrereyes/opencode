@@ -17,6 +17,13 @@ import XCTest
   }
 
   private func shot(_ name: String) {
+    // A fresh simulator may cover its first keyboard with Apple's QuickPath introduction.
+    let introduction = XCUIApplication().buttons.matching(
+      NSPredicate(format: "label == 'Continue' OR label == 'Continuar'")).firstMatch
+    if introduction.exists {
+      introduction.tap()
+      XCTAssertTrue(introduction.waitForNonExistence(timeout: 5))
+    }
     // Let native sheet and keyboard transitions finish before asking the compositor for pixels.
     RunLoop.current.run(until: Date().addingTimeInterval(0.8))
     let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -31,19 +38,42 @@ import XCTest
     element.tap()
   }
 
+  private func chip(_ id: String, _ app: XCUIApplication) {
+    let element = app.buttons[id]
+    XCTAssertTrue(element.waitForExistence(timeout: 10))
+    let strip = app.scrollViews.containing(.button, identifier: "filter-chats").firstMatch
+    for _ in 0..<5 {
+      if element.isHittable && element.frame.minX >= 0 && element.frame.maxX <= app.frame.width { break }
+      if element.frame.minX < 0 { strip.swipeRight() }
+      else { strip.swipeLeft() }
+    }
+    element.tap()
+  }
+
   func testTabs() {
     let app = launch()
     defer { app.terminate() }
     shot("sessions-list-all")
-    tap("Chats", app)
+    chip("filter-chats", app)
     shot("sessions-list-chats")
-    tap("Projeto Exemplo 0", app)
+    chip("filter-project-Projeto Exemplo 0", app)
     shot("sessions-list-repository")
     for (title, name) in [("Painel", "dashboard-tab-default"), ("Pedidos", "requests-tab-default"),
                            ("Projetos", "projects-tab-default"), ("Você", "you-settings-default")] {
       app.tabBars.buttons[title].tap()
       shot(name)
     }
+  }
+
+  func testUnreadChips() {
+    let app = launch(["-OpenCodeCatalogUnread"])
+    defer { app.terminate() }
+    let unread = app.buttons["filter-project-Projeto Exemplo 3"]
+    let chats = app.buttons["filter-chats"]
+    XCTAssertTrue(unread.waitForExistence(timeout: 10))
+    XCTAssertEqual(unread.label, "Projeto Exemplo 3, com não lidas")
+    XCTAssertLessThan(unread.frame.minX, chats.frame.minX)
+    shot("sessions-chips-unread")
   }
 
   func testSettings() {
@@ -115,7 +145,13 @@ import XCTest
     defer { app.terminate() }
     tap("session-row-ses_scroll_0000", app)
     tap("conversation-agents", app)
+    XCTAssertTrue(app.buttons["Agentes (1)"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.staticTexts["Sem recursos"].exists)
     shot("session-agents-resources")
+    tap("Scripts (1)", app)
+    XCTAssertTrue(app.buttons["agent-work-catalog-script"].waitForExistence(timeout: 10))
+    shot("session-agents-scripts")
+    tap("Agentes (1)", app)
     app.navigationBars.buttons.firstMatch.tap()
     tap("conversation-usage", app)
     let directory = app.buttons["session-details-directory"]
@@ -130,6 +166,16 @@ import XCTest
     tap("file-explorer-file-preview.png", app)
     XCTAssertTrue(app.navigationBars["preview.png"].waitForExistence(timeout: 10))
     shot("files-image-default")
+  }
+
+  func testScriptsEmpty() {
+    let app = launch(["-OpenCodeCatalogNoScripts"])
+    defer { app.terminate() }
+    tap("session-row-ses_scroll_0000", app)
+    tap("conversation-agents", app)
+    tap("Scripts (0)", app)
+    XCTAssertTrue(app.descendants(matching: .any)["scripts-empty"].waitForExistence(timeout: 10))
+    shot("session-agents-scripts-empty")
   }
 
   func testAddRepository() {
@@ -197,15 +243,11 @@ import XCTest
   }
 
   func testSideQuestion() {
-    let app = launch(["-OpenCodeSideQuestionFixture"])
+    let app = launch(["-OpenCodeSideQuestionFixture", "-OpenCodeCatalogSideQuestion"])
     defer { app.terminate() }
     tap("session-row-ses_scroll_0000", app)
-    let editor = app.textViews["conversation-composer"]
-    XCTAssertTrue(editor.waitForExistence(timeout: 10))
-    editor.tap()
-    editor.typeText("/btw Qual deve ser o primeiro passo?")
-    tap("composer-send", app)
     XCTAssertTrue(app.textViews["side-question-composer"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.scrollViews["side-question-scroll"].buttons["Copiar resposta"].waitForExistence(timeout: 10))
     shot("conversation-side-question")
   }
 

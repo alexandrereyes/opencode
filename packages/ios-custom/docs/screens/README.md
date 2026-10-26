@@ -56,6 +56,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Sessões · Todas | Aba Sessões, filtro Todas; inclui a faixa da mestra | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
 | Sessões · repositório | Sessões → Projeto Exemplo 0 | [PNG](sessions-list-repository-dark.png) | [PNG](sessions-list-repository-light.png) |
+| Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
 | Você / Ajustes | Aba Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
 | Temas | Você → Tema | [PNG](you-themes-default-dark.png) | — |
 | Dados do iPhone | Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | — |
@@ -76,7 +77,9 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Agente | Conversa → build, abaixo do composer | [PNG](conversation-agent-picker-dark.png) | — |
 | MCPs | Conversa → pílula de MCPs, ao lado do modelo | [PNG](conversation-mcp-picker-dark.png) | — |
 | Detalhes da sessão | Conversa → contexto/cache; uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
-| Agentes e recursos | Conversa → pílula no cabeçalho; iOS, Android e tarefa com Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
+| Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (1); iOS, Android e agente com Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
+| Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
+| Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
 | Explorador de arquivos | Detalhes → Diretório de trabalho | [PNG](files-explorer-default-dark.png) | — |
 | Arquivo Markdown | Explorador → README.md; renderização e player de leitura | [PNG](files-markdown-default-dark.png) | — |
 | Arquivo de imagem | Explorador → preview.png; imagem sintética | [PNG](files-image-default-dark.png) | — |
@@ -86,6 +89,17 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Comentário | Citação no rascunho → Editar citação | [PNG](conversation-quote-comment-dark.png) | — |
 | Citação · 1 | Citação → Ir ao trecho citado → marcador | [PNG](conversation-quote-details-dark.png) | — |
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
+
+## Revisão da navegação
+
+Atualizado para os chips com não lidas (`27c3f84534c`) e as abas Agentes/Scripts (`6387448303a`).
+O script de exemplo é apenas um registro em memória: nenhum comando é executado. As conversas
+mostram o contador de um agente e um script; a fixture vazia usa `-OpenCodeCatalogNoScripts`.
+`-OpenCodeCatalogUnread` deixa somente o Projeto Exemplo 3 não lido para evidenciar ponto e ordenação.
+A pergunta paralela é preparada por `-OpenCodeCatalogSideQuestion`, sem digitar `/btw` no XCTest
+(essa digitação pode travar a consulta de acessibilidade). A folha respondida fica com o teclado fechado,
+evitando o onboarding do teclado num simulador novo; folha e resposta usam os componentes reais.
+Nas capturas que incluem teclado, o aviso inicial do QuickPath é dispensado antes de salvar o PNG.
 
 ## Limites
 

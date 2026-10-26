@@ -612,6 +612,7 @@ import OpenCodeKit
       if ScrollFixtures.mode == "catalog" {
         resources = ScreenCatalogFixture.resources
         children = ScreenCatalogFixture.children
+        shells = arguments.contains("-OpenCodeCatalogNoScripts") ? [] : ScreenCatalogFixture.scripts
         active = ["ses_catalog_review"]
         preferences = fixture.preferences
         providers = [.init(id: "fixture", name: "Modelos de demonstração")]
@@ -628,6 +629,10 @@ import OpenCodeKit
       hasTranscript = true
       ready = true
       revision += 1
+      // Reference capture only: avoid XCTest's intermittent AX stall while typing a slash command.
+      if ScrollFixtures.mode == "catalog", arguments.contains("-OpenCodeCatalogSideQuestion") {
+        sideQuestion = SideQuestionLaunch(text: "Qual deve ser o primeiro passo?", submit: true)
+      }
       if let index = arguments.firstIndex(of: "-OpenCodeFixtureStream"), arguments.indices.contains(index + 1),
         let interval = Int(arguments[index + 1])
       {
