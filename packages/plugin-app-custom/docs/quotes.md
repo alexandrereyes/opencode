@@ -100,7 +100,7 @@ The `location` is the caller's, not necessarily the viewer's: **listen globally 
 
 The two clients render Markdown differently, so a single offset system cannot serve both. Each quote keeps the offsets in the creating client's native system plus renderer-independent text context:
 
-- **Web** captures `coordinate: "rendered"` (it may keep omitting it): offsets and `exact` in `body.textContent` of the part's `[data-slot="text-part-body"]`, as `captureChatQuoteAnchor` does today.
+- **Web** captures `coordinate: "rendered"` (always written explicitly since the web migration; older web drafts omit it): offsets and `exact` in `body.textContent` of the part's `[data-slot="text-part-body"]` (`captureChatQuoteAnchor`).
 - **iOS** captures `coordinate: "source"`: offsets and `exact` in the part's raw Markdown (`part.text`), as `ChatQuote.selection` does today.
 - **Both** add `prefix` and `suffix`: up to 64 characters (max 256) of _rendered plain text_ immediately around the selection (web: `textContent`; iOS: the flattened rendered text used by `ConversationSearch`). `text` stays the trimmed, copyable selection.
 
@@ -110,7 +110,7 @@ Resolution, in the part identified by `partID` (load `messageID` when the part i
 2. **Text search** in the rendered plain text with whitespace-insensitive matching (collapse every whitespace run to one space and trim, on both sides; map the match back to original offsets). The needle is `exact` for `rendered` anchors and `text` for `source` anchors (raw Markdown syntax never appears in rendered text). One occurrence: use it. Several: score each by the length of the common suffix between the normalized `prefix` and the text before it plus the common prefix between the normalized `suffix` and the text after it; use the single best score; a tie is unresolved.
 3. **Unresolved**: draw no mark. The quote stays in the list and the panel, and "go to quote" scrolls to the message with the existing "o trecho foi alterado" message. Never delete or silently move a quote because its anchor failed.
 
-Quotes without `anchor` (old drafts) keep today's rule: search `text`, accept only a unique occurrence.
+A `rendered` anchor without `prefix` and `suffix` (web drafts written before this contract) skips step 2: when its offsets no longer match it is unresolved, never moved to another occurrence. Quotes without `anchor` (old drafts) keep today's rule: search `text`, accept only a unique occurrence.
 
 ## Attachments
 
@@ -182,13 +182,7 @@ Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<s
 
 ## Phase 2 checklist
 
-**Web (`packages/app-custom`, `session-ui-custom`)**
-
-- Probe `info`; in server mode, back `ComposerStore.quotes` of a Session with `list` + `rpc.custom.quotes.updated` instead of the IndexedDB document; keep local mode as is.
-- Create (`save` with empty comment, as today), debounce comment `save`s (flush on Done/hide), `remove` on trash and on the empty-comment Done rule, upload pasted images with `upload` and reference them by `blob.id`.
-- Add `prefix`/`suffix` on capture; resolve `coordinate: "source"` anchors from iOS with the text search (step 2).
-- On send, clear only after admission, with the sent IDs; stop removing quotes optimistically from the server copy.
-- Migrate local quotes once per Session; leave prompt history local.
+**Web (`packages/app-custom`): done.** `src/composer/quote-sync.ts` binds every Session composer to its server: `info` probe (again on reconnect, focus and visibility), one-time import of the IndexedDB drafts, `list` mirrored into the composer, `rpc.custom.quotes.updated` read from the app's shared event stream, comment saves debounced by 400 ms and flushed on Done, trash and page hide, images uploaded before the save, `clear` with `reason: "sent"` only after admission. Without `custom.quotes` the composer keeps its IndexedDB drafts. History browsing and editing a queued prompt show their quotes as a local preview that is never published. Quotes restored from a sent message (revert, an undone queued prompt) are saved under new IDs when the server reports `already_sent`; a stale edit of a quote sent elsewhere is dropped.
 
 **iOS (`packages/ios-custom`)**
 

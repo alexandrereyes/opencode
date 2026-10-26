@@ -196,7 +196,7 @@ export function createSessionQueue(input: {
     })
     const prompt = queuedPrompt(item)
     input.draft.mode.set("normal")
-    input.draft.quotes.replace(queuedQuotes(item).quotes)
+    input.draft.quotes.preview(queuedQuotes(item).quotes, false)
     input.draft.set(prompt, promptLength(prompt))
     input.restoreFocus(promptLength(prompt))
     return true
@@ -209,7 +209,7 @@ export function createSessionQueue(input: {
     // the retry marker.
     input.draft.mode.set(editing.stash.mode)
     input.draft.set(editing.stash.prompt, editing.stash.cursor)
-    input.draft.quotes.replace(editing.stash.quotes)
+    input.draft.quotes.preview(editing.stash.quotes, true)
     if (editing.stash.retry) input.draft.retry.set(editing.stash.retry)
     input.restoreFocus(editing.stash.cursor)
   }

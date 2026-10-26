@@ -4,7 +4,8 @@ import { useParams, useSearchParams } from "@solidjs/router"
 import { createMemo, createResource, createRoot, getOwner, onCleanup } from "solid-js"
 import { requireServerKey } from "@/shell/routes/session"
 import { ServerConnection } from "@/runtime/server/registry"
-import { useServerSDK } from "@/runtime/server/client"
+import { useServerSDK, type ServerSDK } from "@/runtime/server/client"
+import { connectChatQuotes } from "./quote-sync"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useTabs, type Tab } from "@/shell/tabs/tabs"
 import type { ServerScope } from "@/runtime/server/scope"
@@ -66,8 +67,17 @@ type ComposerCacheEntry = {
 export const createTabComposerState = (
   tabs: ReturnType<typeof useTabs>,
   tab: Tab,
+  sdk: ServerSDK | undefined,
   ...args: Parameters<typeof createComposerState>
-) => tabs.state(tab, "prompt", () => createComposerState(...args))
+) => tabs.state(tab, "prompt", () => createSessionComposerState(sdk, ...args))
+
+// Session drafts keep their chat quotes on the server that owns the Session when it supports `custom.quotes`.
+function createSessionComposerState(sdk: ServerSDK | undefined, ...args: Parameters<typeof createComposerState>) {
+  const state = createComposerState(...args)
+  const scope = args[1]
+  if (sdk && "dir" in scope && scope.id) connectChatQuotes(state, sdk, { dir: scope.dir, id: scope.id })
+  return state
+}
 
 export const { use: useComposerState, provider: ComposerPersistenceProvider } = createSimpleContext({
   name: "ComposerState",
@@ -104,7 +114,9 @@ export const { use: useComposerState, provider: ComposerPersistenceProvider } = 
       search.draftId ? { draftID: search.draftId } : { dir: base64Encode(sdk().directory), id: params.id }
     const load = (scope: PromptScope, target?: { server?: ServerConnection.Key; scope: ServerScope }) => {
       const current = selectPromptTab(tabs.store, scope, target?.server ?? serverKey())
-      if (current) return createTabComposerState(tabs, current, target?.scope ?? serverSDK.scope, scope)
+      // Only the current server's SDK can reach a Session's quotes; other servers keep local drafts.
+      const sdk = !target?.server || target.server === serverKey() ? serverSDK : undefined
+      if (current) return createTabComposerState(tabs, current, sdk, target?.scope ?? serverSDK.scope, scope)
 
       const key = target ? `${target.scope}:${scopeKey(scope)}` : scopeKey(scope)
       const existing = cache.get(key)
@@ -116,7 +128,7 @@ export const { use: useComposerState, provider: ComposerPersistenceProvider } = 
 
       const entry = createRoot(
         (dispose) => ({
-          value: createComposerState(target?.scope ?? serverSDK.scope, scope),
+          value: createSessionComposerState(sdk, target?.scope ?? serverSDK.scope, scope),
           dispose,
         }),
         owner,

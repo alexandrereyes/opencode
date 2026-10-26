@@ -34,12 +34,8 @@ export function ChatQuotes(props: {
     editorHeight: 240,
   })
   let popover: HTMLElement | undefined
-  let previous = new Set(props.quotes.all().map((quote) => quote.id))
   createEffect(() => {
     const quotes = props.quotes.all()
-    const added = quotes.find((quote) => !previous.has(quote.id))
-    previous = new Set(quotes.map((quote) => quote.id))
-    if (added) props.quotes.editor.open(added.id)
     if (props.quotes.editor.current() && !quotes.some((quote) => quote.id === props.quotes.editor.current()))
       props.quotes.editor.close()
   })
@@ -67,6 +63,7 @@ export function ChatQuotes(props: {
     const quote = editing()
     if (quote && !quote.comment.trim() && chatQuoteAttachments([quote]).length === 0) props.quotes.remove(quote.id)
     flushPersisted()
+    props.quotes.flush()
     props.quotes.editor.close()
     setState("open", false)
     props.onDone()

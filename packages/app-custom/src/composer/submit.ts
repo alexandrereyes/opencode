@@ -107,6 +107,7 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
     if (value.mode === "normal" && !command) value.prompt = withSlashSkill(value.prompt, input.skills())
     const active = input.adapter.kind === "active-session" ? input.adapter.session() : undefined
     const ownsView = () => input.adapter.kind !== "active-session" || (input.adapter.active?.() ?? true)
+    const quoteIDs = value.quotes.map((quote) => quote.id)
     const clearedComments = delayed
       ? (() => {
           input.addToHistory(value.prompt, value.mode)
@@ -117,7 +118,7 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
               .forEach((item) => submission.target().context.remove(item.key))
             input.comments.clear()
           }
-          if (value.mode === "normal") value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
+          if (value.mode === "normal") submission.target().quotes.sending(quoteIDs)
           clearSubmission(input, submission)
           return input.comments.current?.()
         })()
@@ -176,10 +177,13 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
             .filter((item) => !!item.comment?.trim())
             .forEach((item) => submission.target().context.remove(item.key))
           input.comments.clear()
-          value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
+          submission.target().quotes.sending(quoteIDs)
           clearSubmission(input, submission)
         }
+        const quotes = submission.target().quotes
         void sending.then((result) => {
+          // Server drafts are cleared only once the prompt carrying them was admitted.
+          if (result.ok) quotes.sent(quoteIDs)
           if (!result.ok)
             failSubmission(input, session, "prompt", result.error, restore, value.id, () => {
               if (optimisticBusy) session.data.session.setStatus(session.id, "idle")
@@ -200,16 +204,19 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 
       if (command) {
         if (!delayed) {
-          value.quotes.forEach((quote) => submission.target().quotes.remove(quote.id))
+          submission.target().quotes.sending(quoteIDs)
           clearSubmission(input, submission)
         }
+        const quotes = submission.target().quotes
         void sendCommand(
           session,
           value,
           command,
           input.destination(),
           input.adapter.controls().model.selection.trackSessionCommit,
-        ).catch((error) => failSubmission(input, session, "command", error, restore, value.id))
+        )
+          .then(() => quotes.sent(quoteIDs))
+          .catch((error) => failSubmission(input, session, "command", error, restore, value.id))
         return
       }
     } finally {

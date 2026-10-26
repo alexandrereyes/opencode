@@ -173,6 +173,7 @@ export const dict = {
   "chatQuotes.editNumber": "Comment {{number}}",
   "chatQuotes.remove": "Remove quote",
   "chatQuotes.done": "Done",
+  "chatQuotes.syncFailed": "Could not save the quote on the server",
   "context.overview.session": "Session",
   "context.overview.context": "Context",
   "context.overview.cacheHit": "Cache hit {{percent}}",

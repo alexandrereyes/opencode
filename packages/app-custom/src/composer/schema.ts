@@ -190,7 +190,17 @@ export const ChatQuote = Persistence.struct({
   text: Schema.String,
   comment: Schema.String,
   commentPrompt: Persistence.optional(Prompt),
-  anchor: Persistence.optional(Persistence.struct({ start: Schema.Number, end: Schema.Number, exact: Schema.String })),
+  anchor: Persistence.optional(
+    Persistence.struct({
+      start: Schema.Number,
+      end: Schema.Number,
+      exact: Schema.String,
+      // `custom.quotes` contract: absent means rendered text; iOS writes `source` (raw Markdown) offsets.
+      coordinate: Persistence.optional(Schema.Literals(["rendered", "source"])),
+      prefix: Persistence.optional(Schema.String),
+      suffix: Persistence.optional(Schema.String),
+    }),
+  ),
 })
 export type ChatQuote = typeof ChatQuote.Type
 

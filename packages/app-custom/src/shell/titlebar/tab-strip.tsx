@@ -177,7 +177,7 @@ function SessionTabEntry(props: {
     if (!value) return
     const current = sdk()
     if (!current) return
-    createTabComposerState(tabs, props.tab, current.scope, {
+    createTabComposerState(tabs, props.tab, current, current.scope, {
       dir: base64Encode(value.location.directory),
       id: value.id,
     })

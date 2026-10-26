@@ -431,11 +431,16 @@ export function createComposerModel(
           mode === "shell" ? [] : historyComments(),
           mode === "shell" ? [] : prompt.quotes.all(),
         ),
-      capture: () => ({ comments: historyComments(), quotes: prompt.quotes.all().map((quote) => ({ ...quote })) }),
+      // The captured draft is marked live so returning to it shows the Session's drafts again.
+      capture: () => ({
+        comments: historyComments(),
+        quotes: prompt.quotes.all().map((quote) => ({ ...quote })),
+        live: true,
+      }),
       restore: (metadata) => {
-        const entry = metadata as { comments: PromptHistoryComment[]; quotes: ChatQuote[] } | undefined
+        const entry = metadata as { comments: PromptHistoryComment[]; quotes: ChatQuote[]; live?: boolean } | undefined
         restoreHistoryComments(entry?.comments ?? [])
-        prompt.quotes.replace(entry?.quotes ?? [])
+        prompt.quotes.preview(entry?.quotes ?? [], entry?.live === true)
       },
     },
     commands,

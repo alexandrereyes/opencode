@@ -1,5 +1,5 @@
 import { batch, untrack, type Accessor } from "solid-js"
-import { createStore, type SetStoreFunction } from "solid-js/store"
+import { createStore, reconcile, type SetStoreFunction } from "solid-js/store"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { ServerScope } from "@/runtime/server/scope"
 import type { Platform } from "@/runtime/platform/platform"
@@ -87,9 +87,32 @@ function initialComposerStore(initial?: InitialPrompt): ComposerStore {
   }
 }
 
+export type ChatQuoteSync = {
+  changed(id: string): void
+  removed(id: string): void
+  replaced(before: ChatQuote[], after: ChatQuote[]): void
+  sending(ids: string[]): void
+  sent(ids: string[]): void
+  flush(): void
+}
+
 export type RevertProgress =
   | { phase: "planning" | "session" | "inbox" }
   | { phase: "descendants"; completed: number; total: number }
+
+function cloneQuotes(items: readonly ChatQuote[]): ChatQuote[] {
+  return items.map((item) => ({
+    ...item,
+    ...(item.commentPrompt
+      ? {
+          commentPrompt: clonePrompt(item.commentPrompt).map((part) =>
+            part.type === "image" ? { ...part, blob: { ...part.blob } } : part,
+          ),
+        }
+      : {}),
+    ...(item.anchor ? { anchor: { ...item.anchor } } : {}),
+  }))
+}
 
 function createComposerStateValue(store: ComposerStore, setStore: SetStoreFunction<ComposerStore>) {
   // Selection/editor geometry is transient; only the text anchor belongs in the draft.
@@ -98,6 +121,12 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
     position?: { left: number; top: number; bottom: number }
     uploading: boolean
   }>({ id: "", uploading: false })
+  // Drafts mirrored from `custom.quotes`; they replace the persisted `store.quotes` while the server stores them.
+  const [remote, setRemote] = createStore<{ sync: boolean; live: ChatQuote[]; preview?: ChatQuote[] }>({
+    sync: false,
+    live: [],
+  })
+  let sync: ChatQuoteSync | undefined
   const actions = createComposerActions(setStore)
   const settled = Promise.resolve(true)
   let pendingRevert: Promise<boolean> | undefined
@@ -191,7 +220,7 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
       set: (retry: NonNullable<ComposerStore["retry"]>) => setStore("retry", retry),
     },
     quotes: {
-      all: () => store.quotes ?? [],
+      all: () => (remote.sync ? (remote.preview ?? remote.live) : (store.quotes ?? [])),
       editor: {
         current: () => quoteEditor.id,
         position: () => quoteEditor.position,
@@ -202,27 +231,110 @@ function createComposerStateValue(store: ComposerStore, setStore: SetStoreFuncti
         uploading: () => quoteEditor.uploading,
         setUploading: (uploading: boolean) => setQuoteEditor("uploading", uploading),
       },
+      // A new quote opens its comment editor; quotes arriving from another client do not.
       add(input: Omit<ChatQuote, "id" | "comment">) {
         const quote = { ...input, id: uuid(), comment: "" }
-        setStore("quotes", (items) => [...(items ?? []), quote])
         clearRetry()
+        batch(() => {
+          if (!remote.sync) setStore("quotes", (items) => [...(items ?? []), quote])
+          else if (remote.preview) setRemote("preview", (items) => [...(items ?? []), quote])
+          else setRemote("live", (items) => [...items, quote])
+          setQuoteEditor({ id: quote.id, position: undefined })
+        })
+        if (remote.sync && !remote.preview) sync?.changed(quote.id)
         return quote.id
       },
       update(id: string, comment: string, commentPrompt?: Prompt) {
-        if (!store.quotes) return
-        setStore("quotes", (item) => item.id === id, { comment, commentPrompt })
         clearRetry()
+        if (!remote.sync) {
+          if (!store.quotes) return
+          setStore("quotes", (item) => item.id === id, { comment, commentPrompt })
+          return
+        }
+        if (remote.preview) {
+          setRemote("preview", (item) => item.id === id, { comment, commentPrompt })
+          return
+        }
+        setRemote("live", (item) => item.id === id, { comment, commentPrompt })
+        sync?.changed(id)
       },
       remove(id: string) {
-        setStore("quotes", (items) => (items ?? []).filter((item) => item.id !== id))
         clearRetry()
+        if (!remote.sync) {
+          setStore("quotes", (items) => (items ?? []).filter((item) => item.id !== id))
+          return
+        }
+        if (remote.preview) {
+          setRemote("preview", (items) => (items ?? []).filter((item) => item.id !== id))
+          return
+        }
+        setRemote("live", (items) => items.filter((item) => item.id !== id))
+        sync?.removed(id)
       },
       replace(items: ChatQuote[]) {
-        setStore(
-          "quotes",
-          items.map((item) => ({ ...item })),
-        )
         clearRetry()
+        if (!remote.sync) {
+          setStore(
+            "quotes",
+            items.map((item) => ({ ...item })),
+          )
+          return
+        }
+        const before = untrack(() => remote.live.map((item) => ({ ...item })))
+        setRemote("preview", undefined)
+        setRemote("live", reconcile(cloneQuotes(items), { key: "id" }))
+        sync?.replaced(before, items)
+      },
+      /**
+       * Shows quotes that are not the session's drafts (a history entry, a queued prompt being edited)
+       * without publishing them; `live` returns to the drafts. Local drafts have no separate view.
+       */
+      preview(items: ChatQuote[], live: boolean) {
+        if (!remote.sync) return value.quotes.replace(items)
+        clearRetry()
+        setRemote("preview", live ? undefined : cloneQuotes(items))
+      },
+      /** The quotes left in a prompt being sent; they stay on the server until `sent`. */
+      sending(ids: string[]) {
+        clearRetry()
+        if (!remote.sync) {
+          setStore("quotes", (items) => (items ?? []).filter((item) => !ids.includes(item.id)))
+          return
+        }
+        setRemote({ preview: undefined, live: remote.live.filter((item) => !ids.includes(item.id)) })
+        sync?.sending(ids)
+      },
+      /** The server admitted the prompt carrying these quotes. */
+      sent(ids: string[]) {
+        if (remote.sync) sync?.sent(ids)
+      },
+      flush() {
+        if (remote.sync) sync?.flush()
+      },
+      server: {
+        active: () => remote.sync,
+        connect(hooks: ChatQuoteSync) {
+          sync = hooks
+          return () => {
+            if (sync === hooks) sync = undefined
+          }
+        },
+        enable(items: ChatQuote[]) {
+          setRemote({ sync: true, preview: undefined })
+          setRemote("live", reconcile(cloneQuotes(items), { key: "id" }))
+        },
+        disable() {
+          setRemote({ sync: false, preview: undefined, live: [] })
+        },
+        live: () => remote.live,
+        apply(items: ChatQuote[]) {
+          setRemote("live", reconcile(cloneQuotes(items), { key: "id" }))
+        },
+        /** Local drafts written before the server stored them, for the one-time import. */
+        local: () => store.quotes ?? [],
+        forget(ids: string[]) {
+          setStore("quotes", (items) => (items ?? []).filter((item) => !ids.includes(item.id)))
+        },
       },
     },
     context: {
