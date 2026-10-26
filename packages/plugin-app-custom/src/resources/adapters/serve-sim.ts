@@ -163,7 +163,14 @@ function start(udid: string, exited: () => void): Running {
         udid,
       ],
       {
-        env: { ...process.env, BUN_BE_BUN: "1", SERVE_SIM_STATE_DIR: state },
+        env: {
+          ...process.env,
+          BUN_BE_BUN: "1",
+          SERVE_SIM_STATE_DIR: state,
+          // Our patch of serve-sim (patches/@expo%2Fserve-sim@*.patch): without it, every start asks Device Hub to
+          // open a separate window for the simulator. Capture and input do not need one.
+          SERVE_SIM_NO_HOST_WINDOW: "1",
+        },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "ignore",

@@ -177,6 +177,11 @@ have their own section below):
 Without `stream`, the hub streams `snapshot` as JPEG frames (about 3 per second, 828 px wide), so every kind is
 viewable from the start.
 
+The iOS Simulator adapter runs a patched serve-sim (`patches/@expo%2Fserve-sim@0.10.3.patch`, enabled by
+`SERVE_SIM_NO_HOST_WINDOW=1`) so that streaming a simulator does not make Device Hub open a separate window for it,
+which would outlive the simulator. Why, and what to do when serve-sim's version changes:
+`docs/resources-ios-simulator.md` ("Patch").
+
 ### Android Emulator
 
 `adapters/android-emulator.ts` and `adapters/android-grpc.ts` (a minimal gRPC client over `node:http2` with

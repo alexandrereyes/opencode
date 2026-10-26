@@ -276,6 +276,11 @@ describe("input translation", () => {
     expect(await Bun.file(locate({})).exists()).toBe(true)
     expect(locate({ OPENCODE_SERVE_SIM: "/custom/serve-sim.js" })).toBe("/custom/serve-sim.js")
   })
+
+  test("the installed serve-sim carries the patch that skips Device Hub windows", async () => {
+    // Fails after a serve-sim upgrade until patches/@expo%2Fserve-sim@<version>.patch is redone (docs/resources.md).
+    expect(await Bun.file(locate({})).text()).toContain('if(process.env.SERVE_SIM_NO_HOST_WINDOW!=="1")try{')
+  })
 })
 
 describe("input channel", () => {

@@ -37,8 +37,9 @@ Each `releases/<sha>` contains:
 - `bin/opencode`: relative symlink to the bundle executable, used by launchers and hashed
   through the link;
 - `plugin/index.js`: standalone custom plugin bundle, with Standard Schema RPC codec boundaries;
-- `serve-sim/node_modules/`: Expo's `@expo/serve-sim` and its `ws` dependency, copied from the plugin's
-  dependencies on Apple silicon, which the resources hub runs to stream and drive iOS simulators
+- `serve-sim/node_modules/`: Expo's `@expo/serve-sim` (with the repository's patch that stops it from opening a
+  Device Hub window per simulator) and its `ws` dependency, copied from the plugin's installed dependencies on
+  Apple silicon, which the resources hub runs to stream and drive iOS simulators
   (see `docs/resources-ios-simulator.md`). It is read-only like the rest of the release but outside the
   hashed artifacts;
 - `server-config.json`: update disabled, the absolute release-owned plugin path, and the

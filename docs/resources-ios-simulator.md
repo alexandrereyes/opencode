@@ -18,6 +18,23 @@ The reference integration is t3code's (`pingdotgg/t3code` at `5b35402`, `docs/in
 - **Version:** pinned to `0.10.3` in `packages/plugin-app-custom/package.json`. The repository installs only versions
   published at least three days earlier (`bunfig.toml`); `0.10.4` was two days old when this was added. Verified with
   Xcode 27.1 (27A9275), iOS 27.0 simulators, on Apple silicon (the package ships arm64 binaries only).
+- **Patch (no Device Hub windows):** unpatched serve-sim, before streaming each simulator, runs
+  `open -g -a <Xcode>/Contents/Applications/DeviceHub.app "devices://device/open?id=<UDID>"` (`bootDevice` →
+  `openSimulatorHost` in its `src/index.ts`/`simulator-host.ts`). Device Hub then opens a separate window per
+  simulator, outside the Devices window, and the window stays (as "… is unavailable") after an agent deletes the
+  simulator; neither `simctl shutdown` nor `simctl delete` closes it. Capture and HID do not need that window (verified
+  with a simulator booted by `simctl` only, which never gets one). `patches/@expo%2Fserve-sim@0.10.3.patch`
+  (root `package.json` `patchedDependencies`, applied by `bun install`) guards that call with
+  `process.env.SERVE_SIM_NO_HOST_WINDOW !== "1"` in `dist/serve-sim.js`; without the variable serve-sim behaves as
+  upstream. The adapter (`adapters/serve-sim.ts`, `start()`) sets `SERVE_SIM_NO_HOST_WINDOW=1`, which its stream
+  helper child inherits. `custom:prepare` installs dependencies with the patch before copying the package into the
+  release, so `custom:update` brings it.
+  **Upgrading serve-sim:** the patch only applies to `0.10.3`. For a new version, run
+  `bun patch @expo/serve-sim@<version>`, add the same guard in front of the `openSimulatorHost` call inside
+  `bootDevice` (minified as `try{<name>($)}catch{}` right after the `simctl boot` block), `bun patch --commit`, delete
+  the old patch and its `patchedDependencies` entry. `test/resources-ios-simulator.test.ts` and
+  `packages/cli/test/custom-serve-sim.test.ts` fail while the installed or released copy lacks the guard. Drop the
+  patch if upstream gains an equivalent option (proposed: `--no-host-window`).
 - **Packaging:** `custom:prepare` copies the package and its only runtime dependency, `ws`, to
   `<release>/serve-sim/node_modules/` (`bundleServeSim` in `packages/cli/script/custom-release.ts`, about 20 MB), so a
   `custom:update` brings it. The release binary runs it as Bun (`BUN_BE_BUN=1`); no Node or network is needed. In

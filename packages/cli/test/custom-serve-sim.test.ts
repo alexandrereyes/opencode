@@ -19,6 +19,10 @@ test.skipIf(process.platform !== "darwin" || process.arch !== "arm64")(
     const modules = path.join(staging, "serve-sim/node_modules")
     expect(await Bun.file(path.join(modules, "@expo/serve-sim/NOTICE")).exists()).toBe(true)
     expect(await Bun.file(path.join(modules, "@expo/serve-sim/dist/native/serve-sim-native.node")).exists()).toBe(true)
+    // The release copy keeps our patch (no Device Hub window per simulator).
+    expect(await Bun.file(path.join(modules, "@expo/serve-sim/dist/serve-sim.js")).text()).toContain(
+      "SERVE_SIM_NO_HOST_WINDOW",
+    )
     // `ws` must resolve from the copy alone, outside the workspace's node_modules.
     const help = Bun.spawn([process.execPath, path.join(modules, "@expo/serve-sim/dist/serve-sim.js"), "--help"], {
       cwd: staging,
