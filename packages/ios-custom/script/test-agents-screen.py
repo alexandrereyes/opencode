@@ -3,8 +3,9 @@
 
 It owns a temporary git checkout and imports a parent with four direct children: three finished ones (succeeded,
 failed, interrupted) and one made genuinely running by a Luna 6 / low prompt that runs `sleep` through the shell
-tool. The parent then delegates a real `subagent` call that also sleeps, so the app opens on a reloaded running
-call whose part has no child `sessionID` (it only travels in ephemeral progress) beside its active child. Running
+tool. The parent then starts a background subagent, a background `sleep` script and a foreground `subagent` call that also
+sleeps, so the app opens on a reloaded running call whose part has no child `sessionID` (it only travels in
+ephemeral progress) beside its active child, plus one agent and one script running in the background. Running
 work is interrupted and the whole family deleted afterwards. Run after `build-for-testing`:
   python3 packages/ios-custom/script/test-agents-screen.py --device <sim-udid> --derived <DerivedData> \\
     --home <sandbox-home> --server-url http://127.0.0.1:<port> --evidence <prints-dir> [--theme openchamber-light]
@@ -56,6 +57,8 @@ model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
 parent = None
 running = None
 delegated = None
+background = None
+script = None
 def imported(title, minutes_ago, parent_id=None, agent="build", outcome="succeeded", lasted=2):
     now = int(time.time() * 1000)
     created = now - minutes_ago * 60_000
@@ -96,31 +99,44 @@ try:
             raise SystemExit("The running child did not start its shell")
         time.sleep(1)
     api("/api/session/" + parent + "/prompt", {"id": "msg_" + uuid.uuid4().hex, "delivery": "steer",
-        "text": 'Chame a ferramenta subagent uma única vez com agent="general", description="Delegar verificação real", '
-            'model="llm-proxy/gpt-6-luna#low", prompt="Use a ferramenta shell uma única vez para executar exatamente '
-            '`sleep 300`. Depois responda apenas: OK.", background=false. Depois responda apenas: OK.'})
-    deadline = time.time() + 180
+        "text": 'Faça exatamente estas três chamadas de ferramenta, uma de cada vez e nesta ordem, sem nenhuma outra. '
+            '1) subagent com agent="general", description="Vigiar em segundo plano", model="llm-proxy/gpt-6-luna#low", '
+            'background=true, prompt="Use a ferramenta shell uma única vez para executar exatamente `sleep 300`. Depois '
+            'responda apenas: OK." 2) shell com command="sleep 301", background=true. 3) subagent com agent="general", '
+            'description="Delegar verificação real", model="llm-proxy/gpt-6-luna#low", background=false, prompt="Use a '
+            'ferramenta shell uma única vez para executar exatamente `sleep 300`. Depois responda apenas: OK." '
+            'Depois responda apenas: OK.'})
+    deadline = time.time() + 240
+    q = "location%5Bdirectory%5D=" + urllib.request.quote(str(root), safe="")
     while True:
         members = api("/api/rpc/custom.session-family/page", {"input": {"sessionID": parent, "limit": 100}})["output"]["data"]
-        delegated = next((m["id"] for m in members if m.get("parentID") == parent
-            and m["id"] not in list(finished.values()) + [running]), None)
+        titles = {m.get("title"): m["id"] for m in members if m.get("parentID") == parent}
+        background = titles.get("Vigiar em segundo plano")
+        delegated = titles.get("Delegar verificação real")
+        shells = [sh for sh in api("/api/shell?" + q, method="GET")["data"] if sh["status"] == "running"]
+        script = next((sh["id"] for sh in shells
+            if (sh.get("metadata") or {}).get("sessionID") == parent and sh["command"] == "sleep 301"), None)
+        # Each delegated child must really be sleeping, or it may finish before the app counts it.
+        sleeping = {(sh.get("metadata") or {}).get("sessionID") for sh in shells}
         page = api("/api/session/" + parent + "/message?limit=20&order=desc", method="GET")["data"]
         calls = [part for message in page if message["type"] == "assistant" for part in message["content"]
             if part["type"] == "tool" and part["name"] == "subagent"]
         live = active()
-        if delegated and delegated in live and parent in live and any(c["state"]["status"] == "running" for c in calls):
+        if (background in live and delegated in live and parent in live and script
+                and {background, delegated} <= sleeping and any(c["state"]["status"] == "running" for c in calls)):
             # The stored running part carries no child ID; that is the case the app must merge.
             assert all(not (c["state"].get("metadata") or {}).get("sessionID") for c in calls if c["state"]["status"] == "running")
             break
         if time.time() > deadline:
-            raise SystemExit("The delegated subagent did not start")
+            raise SystemExit("The delegations and the background script did not start: " + json.dumps(
+                {"background": background, "delegated": delegated, "script": script}))
         time.sleep(1)
-    order = [delegated, finished["interrupted"], finished["failed"], running, finished["succeeded"]]
+    order = [delegated, background, finished["interrupted"], finished["failed"], running, finished["succeeded"]]
 
     environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": args.theme,
         "OPENCODE_TEST_SERVER_URL": args.server_url, "OPENCODE_AGENTS_PARENT": parent, "OPENCODE_AGENTS_RUNNING": running,
         "OPENCODE_AGENTS_ORDER": ",".join(order),
-        "OPENCODE_AGENTS_DELEGATED": delegated}
+        "OPENCODE_AGENTS_DELEGATED": delegated, "OPENCODE_AGENTS_BACKGROUND": background, "OPENCODE_AGENTS_SCRIPT": script}
     run = plistlib.loads(next(args.derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run
         else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
@@ -151,13 +167,16 @@ try:
     shutil.rmtree(exported)
     if status == 0:
         shutil.rmtree(result)
-    print(json.dumps({"status": status, "parent": parent, "order": order, "running": running, "delegated": delegated}))
+    print(json.dumps({"status": status, "parent": parent, "order": order, "running": running, "delegated": delegated,
+        "background": background, "script": script}))
     sys.exit(status)
 finally:
     configured.unlink(missing_ok=True)
-    owned = [session for session in (parent, delegated, running) if session]
+    owned = [session for session in (parent, delegated, background, running) if session]
     for session in owned:
         api("/api/session/" + session + "/interrupt", {})
+    if script:
+        api("/api/shell/" + script + "?location%5Bdirectory%5D=" + urllib.request.quote(str(root), safe=""), method="DELETE")
     deadline = time.time() + 30
     while set(owned).intersection(active()) and time.time() < deadline:
         time.sleep(1)

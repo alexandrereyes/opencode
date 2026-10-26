@@ -627,7 +627,7 @@ struct ConversationView: View {
           .padding(.horizontal, 9).frame(minWidth: 36).frame(height: 36).glassEffect(
             .regular.interactive(), in: .capsule)
         }.buttonStyle(.plain).accessibilityLabel(
-          (running == 0 ? "Agentes e tarefas" : running == 1 ? "1 agente em execução" : "\(running) agentes em execução")
+          ConversationAgentsView.runningLabel(agents: conversation.runningAgents, scripts: running - conversation.runningAgents)
             + (conversation.resources.isEmpty ? "" : resources == 1 ? ", 1 recurso ativo" : ", \(resources) recursos ativos"))
           .accessibilityIdentifier("conversation-agents")
       }

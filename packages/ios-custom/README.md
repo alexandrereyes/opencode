@@ -1281,14 +1281,30 @@ child. A running call with no child yet is shown as **Iniciando**, without chevr
 the owner is active; stale running parts and failed calls without a child stay in the transcript only. The header
 count uses the same deduplicated rows; the "Respondeu · N agentes rodando" banner already counts active sessions.
 
+**Tabs (26 October).** A native segmented `Picker` below the title splits the screen into **Agentes (N)** and
+**Scripts (N)**; it always opens on Agentes (not remembered). `SessionWork.kind` separates them in
+`ConversationProjection.work`, keeping the newest-start-first order in each tab. **Agentes** lists every subagent
+session, including `background=true` ones, with resources nested per agent and **Esta sessão** above, as before.
+**Scripts** lists background shells: every completed `shell` call whose result moved it to the background
+(`metadata.status == "running"` with a `shellID`, from `background: true` or the Background action), plus any running
+shell of the owner no foreground call waits on. Their state comes from `/api/shell` (running, exited 0 → Concluído,
+non-zero exit or timeout → Erro, killed → Interrompido, unknown → Encerrado) with duration; rows show the command,
+stop while running and reveal the tool when tapped. An empty tab says so. A subagent call the model is still writing
+(`streaming`, partial JSON input) is an agent **Iniciando** row: its already complete `agent`/`description` fields are
+read from the partial JSON, otherwise "Subagente · Preparando subagente…". Before, such a row had no agent and the
+view rendered agent-less rows as "Shell em background", which is what production showed. The header pill keeps one
+running number for agents plus scripts (both are work still running that this screen lists and can stop), the
+devices count beside it, and an accessibility label such as "3 agentes e 1 script em execução".
+
 Opening a child pushes it above the list, so Back returns to the list and then to the conversation; **Voltar à sessão
 principal** returns straight to the parent conversation, skipping its agents screen. A shell row without a child pops
 back and reveals its tool. No other screen had an agent list (Detalhes da sessão shows only the descendants' cost),
 so there is a single list component. Verify after `build-for-testing` with
 `python3 packages/ios-custom/script/test-agents-screen.py --device … --derived … --home <sandbox> --server-url … --evidence …`
 (optionally `--theme openchamber-light`): it imports a parent with succeeded, failed and interrupted children plus one
-child made running by a Luna 6 / low `sleep`, runs `OpenCodeUITests/ConversationAgentsTests`, then interrupts and
-deletes the family.
+child made running by a Luna 6 / low `sleep`, has the parent start a background subagent, a background `sleep 301`
+script and a foreground delegation, runs `OpenCodeUITests/ConversationAgentsTests`, then interrupts, stops the script
+and deletes the family.
 
 ### Recursos das sessões (simulador, emulador, Chrome) — 25 October
 
@@ -1321,7 +1337,8 @@ theme background, hairline border, shadow) rather than Liquid Glass, for contras
 
 **Agentes e tarefas (layout 1B):** the conversation header pill adds a devices icon and the count of running
 resources of the family beside the agents. The screen lists **Esta sessão · <agente>** (resources the session itself
-used) above **Subagentes**, where each subagent row carries its resources on a tree line (or **Sem recursos**). Rows
+used) above **Subagentes**, where each subagent row carries its resources on a tree line; a subagent without resources shows nothing below
+its row (the former **Sem recursos** line was removed on 26 October), and **Esta sessão** only appears with resources. Rows
 show a snapshot thumbnail (refreshed every 5 s while visible, `custom.resources/snapshot` at 240 px), an **AO VIVO**
 badge, kind, name and state (Agente usando, Ao vivo, Livre, Você no controle, Desligado, Encerrado); tapping opens the
 viewer, and stopped/ended ones can be removed from the list. `ConversationStore.resources` reloads on

@@ -10,46 +10,38 @@ struct ConversationAgentsView: View {
   let sessions: SessionStore
   @State private var stopping: SessionWork?
   @State private var thumbnails = ResourceThumbnails()
+  /// Not remembered: the screen always opens on Agentes.
+  @State private var tab = Tab.agents
+  enum Tab: Hashable { case agents, scripts }
+  private var agents: [SessionWork] { store.work.filter { $0.kind == .agent } }
+  private var scripts: [SessionWork] { store.work.filter { $0.kind == .script } }
   /// Resources used by this session itself (or by descendants without a row here).
   private var ownResources: [SessionResource] {
-    store.resources.filter { resource in !store.work.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID } }
+    store.resources.filter { resource in !agents.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID } }
+  }
+  static func runningLabel(agents: Int, scripts: Int) -> String {
+    let parts = [
+      agents == 0 ? nil : agents == 1 ? "1 agente" : "\(agents) agentes",
+      scripts == 0 ? nil : scripts == 1 ? "1 script" : "\(scripts) scripts",
+    ].compactMap { $0 }
+    return parts.isEmpty ? "Agentes e tarefas" : parts.joined(separator: " e ") + " em execução"
   }
   var body: some View {
     List {
-      if !ownResources.isEmpty {
-        Section {
-          ForEach(ownResources) { resource in
-            resourceRow(resource, via: resource.owner?.sessionID == store.id ? nil : resource.owner?.agent)
-          }
-        } header: {
-          Text("Esta sessão" + (store.session?.agent.map { " · \($0)" } ?? ""))
-        }
+      switch tab {
+      case .agents: agentsTab
+      case .scripts: scriptsTab
       }
-      Section {
-        ForEach(store.work) { work in
-          row(work)
-            .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
-            .contextMenu {
-              if work.running { Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work } }
-            }
-            .listRowBackground(theme.color(.surface))
-          if !store.resources.isEmpty, let child = work.sessionID {
-            let nested = store.resources.filter { $0.owner?.sessionID == child }
-            ForEach(nested) { resource in resourceRow(resource, nested: true) }
-            if nested.isEmpty {
-              Text("Sem recursos").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-                .padding(.leading, 30).listRowBackground(theme.color(.surface))
-            }
-          }
-        }
-        if store.work.isEmpty {
-          Text(store.resources.isEmpty ? "Nenhum agente nesta sessão." : "Nenhum subagente nesta sessão.")
-            .foregroundStyle(theme.color(.textSecondary))
-            .listRowBackground(theme.color(.surface))
-        }
-      } header: {
-        if !store.resources.isEmpty { Text("Subagentes") }
+    }
+    .safeAreaInset(edge: .top, spacing: 0) {
+      Picker("Lista", selection: $tab) {
+        Text("Agentes (\(agents.count))").tag(Tab.agents)
+        Text("Scripts (\(scripts.count))").tag(Tab.scripts)
       }
+      .pickerStyle(.segmented)
+      .padding(.horizontal, AppLayout.margin).padding(.vertical, 8)
+      .background(theme.color(.background))
+      .accessibilityIdentifier("agents-tabs")
     }
     .scrollContentBackground(.hidden).background(theme.color(.background))
     .foregroundStyle(theme.color(.textStrong))
@@ -78,6 +70,55 @@ struct ConversationAgentsView: View {
       Text(stopping?.title ?? "")
     }
   }
+  @ViewBuilder private var agentsTab: some View {
+    if !ownResources.isEmpty {
+      Section {
+        ForEach(ownResources) { resource in
+          resourceRow(resource, via: resource.owner?.sessionID == store.id ? nil : resource.owner?.agent)
+        }
+      } header: {
+        Text("Esta sessão" + (store.session?.agent.map { " · \($0)" } ?? ""))
+      }
+    }
+    Section {
+      ForEach(agents) { work in
+        workRow(work)
+        // A subagent without resources shows nothing below its row.
+        if let child = work.sessionID {
+          ForEach(store.resources.filter { $0.owner?.sessionID == child }) { resource in
+            resourceRow(resource, nested: true)
+          }
+        }
+      }
+      if agents.isEmpty {
+        Text("Nenhum subagente nesta sessão.").foregroundStyle(theme.color(.textSecondary))
+          .listRowBackground(theme.color(.surface))
+      }
+    } header: {
+      if !store.resources.isEmpty { Text("Subagentes") }
+    }
+  }
+  @ViewBuilder private var scriptsTab: some View {
+    Section {
+      ForEach(scripts) { work in workRow(work) }
+      if scripts.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Nenhum script em segundo plano.").foregroundStyle(theme.color(.text))
+          Text("Comandos que o agente deixa rodando em segundo plano aparecem aqui.")
+            .appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+        }.padding(.vertical, 4).listRowBackground(theme.color(.surface))
+          .accessibilityElement(children: .combine).accessibilityIdentifier("scripts-empty")
+      }
+    }
+  }
+  private func workRow(_ work: SessionWork) -> some View {
+    row(work)
+      .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
+      .contextMenu {
+        if work.running { Button("Parar", systemImage: "stop.fill", role: .destructive) { stopping = work } }
+      }
+      .listRowBackground(theme.color(.surface))
+  }
   private func row(_ work: SessionWork) -> some View {
     HStack(alignment: .top, spacing: 8) {
       Button {
@@ -86,17 +127,23 @@ struct ConversationAgentsView: View {
         VStack(alignment: .leading, spacing: 6) {
           HStack(spacing: 12) {
             let agent = store.agents.first { $0.id == work.agent }
-            if let id = work.agent {
-              AgentPixels(color: theme.agentColor(agent, id: id), running: work.running)
-            } else {
+            if work.kind == .script {
               Image(systemName: "terminal").foregroundStyle(theme.color(.textSecondary))
+            } else {
+              AgentPixels(color: work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.textSecondary),
+                running: work.running || work.state == .starting)
             }
             VStack(alignment: .leading, spacing: 4) {
-              Text(agent?.name ?? work.agent ?? "Shell em background")
-                .appFont(.secondary, weight: .medium).foregroundStyle(
-                  work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
-              Text(work.title).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-                .lineLimit(2)
+              if work.kind == .script {
+                Text(work.title).appFont(.caption, design: .monospaced).foregroundStyle(theme.color(.text))
+                  .lineLimit(3)
+              } else {
+                Text(agent?.name ?? work.agent ?? "Subagente")
+                  .appFont(.secondary, weight: .medium).foregroundStyle(
+                    work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+                Text(work.title).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+                  .lineLimit(2)
+              }
               state(work)
             }
             Spacer(minLength: 3)

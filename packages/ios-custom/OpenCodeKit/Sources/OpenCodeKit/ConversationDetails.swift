@@ -2,6 +2,8 @@ import Foundation
 
 /// A subagent or background shell of the conversation's owner, running or finished.
 public struct SessionWork: Identifiable, Sendable, Equatable {
+  /// Agents are subagent sessions, in the foreground or background; scripts are background shells.
+  public enum Kind: Sendable, Equatable { case agent, script }
   public enum State: Sendable, Equatable {
     case starting, running, completed, failed, interrupted, ended
     public var label: String {
@@ -16,6 +18,7 @@ public struct SessionWork: Identifiable, Sendable, Equatable {
     }
   }
   public let id: String
+  public let kind: Kind
   public let sessionID: String?
   public let shellID: String?
   public let toolID: String?
@@ -63,12 +66,22 @@ public struct ContextDetails: Sendable {
 }
 
 extension ConversationProjection {
-  /// Every subagent of the owner, running or finished, plus its running background shells, newest start first.
+  /// Every subagent of the owner and every background shell it started, running or finished, newest start
+  /// first. Agents and scripts never mix: a shell is never an agent placeholder.
   public static func work(
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
     active: Set<String>, shells: [ShellInfo]
   ) -> [SessionWork] {
     let tools = messages.flatMap(\.tools)
+    return (agents(ownerID: ownerID, viewedID: viewedID, tools: tools, children: children, active: active, shells: shells)
+      + scripts(ownerID: ownerID, tools: tools, shells: shells))
+      .sorted { $0.created != $1.created ? $0.created > $1.created : $0.id < $1.id }
+  }
+
+  private static func agents(
+    ownerID: String, viewedID: String, tools: [ConversationPart], children: [Session], active: Set<String>,
+    shells: [ShellInfo]
+  ) -> [SessionWork] {
     let links = subagentLinks(tools: tools, children: children, ownerID: ownerID)
     var work: [SessionWork] = children.filter { $0.parentID == ownerID && $0.id != viewedID }.map { child in
       let linked = tools.filter { $0.name == "subagent" && $0.id.flatMap { links[$0] } == child.id }
@@ -77,7 +90,7 @@ extension ConversationProjection {
       let created = tool?.time?.ran ?? tool?.time?.created ?? child.time.created
       let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: linked.last?.status)
       return SessionWork(
-        id: child.id, sessionID: child.id, shellID: nil, toolID: tool?.id,
+        id: child.id, kind: .agent, sessionID: child.id, shellID: nil, toolID: tool?.id,
         agent: tool?.input["agent"]?.string ?? child.agent,
         title: tool?.input["description"]?.string ?? child.displayTitle, state: state, created: created,
         started: current.flatMap { $0.time?.ran ?? $0.time?.created } ?? workStarted(child: child, shells: shells),
@@ -85,16 +98,38 @@ extension ConversationProjection {
     }
     // A call whose child does not exist yet is only shown while the owner is still running it; it has
     // nothing to open. Stale running parts and failures without a child stay in the transcript only.
-    if active.contains(ownerID) {
-      for tool in tools where tool.name == "subagent" && tool.running {
-        guard let id = tool.id, links[id] == nil else { continue }
-        let created = tool.time?.ran ?? tool.time?.created ?? 0
-        work.append(
-          SessionWork(
-            id: id, sessionID: nil, shellID: nil, toolID: nil, agent: tool.input["agent"]?.string,
-            title: tool.input["description"]?.string ?? "Iniciando agente…", state: .starting,
-            created: created, started: created, duration: nil))
-      }
+    guard active.contains(ownerID) else { return work }
+    for tool in tools where tool.name == "subagent" && tool.running {
+      guard let id = tool.id, links[id] == nil else { continue }
+      let created = tool.time?.ran ?? tool.time?.created ?? 0
+      // While the model still writes the call, its input is partial JSON: read the fields already complete.
+      work.append(
+        SessionWork(
+          id: id, kind: .agent, sessionID: nil, shellID: nil, toolID: nil,
+          agent: tool.input["agent"]?.string ?? tool.partialInput("agent"),
+          title: tool.input["description"]?.string ?? tool.partialInput("description") ?? "Preparando subagente…",
+          state: .starting, created: created, started: created, duration: nil))
+    }
+    return work
+  }
+
+  /// Background shells: those a completed `shell` call moved to the background (its result says `running`),
+  /// plus any running shell of the owner that no foreground call is waiting on.
+  private static func scripts(ownerID: String, tools: [ConversationPart], shells: [ShellInfo]) -> [SessionWork] {
+    let info = Dictionary(shells.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let calls = tools.filter {
+      $0.name == "shell" && $0.status == "completed" && $0.metadata["status"]?.string == "running"
+        && $0.metadata["shellID"]?.string != nil
+    }
+    var work: [SessionWork] = calls.map { call in
+      let id = call.metadata["shellID"]!.string!
+      let shell = info[id]
+      let created = shell?.time.started ?? call.time?.ran ?? call.time?.created ?? 0
+      let state = shell.map(shellState) ?? .ended
+      return SessionWork(
+        id: id, kind: .script, sessionID: nil, shellID: id, toolID: call.id,
+        agent: nil, title: call.input["command"]?.string ?? shell?.command ?? id, state: state, created: created,
+        started: created, duration: state == .running ? nil : shell?.time.completed.map { $0 - created })
     }
     var foreground = Set(
       tools.filter { $0.name == "shell" && $0.running }.compactMap {
@@ -111,17 +146,28 @@ extension ConversationProjection {
       }
       if let candidate { foreground.insert(candidate.id) }
     }
+    let listed = Set(work.map(\.id))
     work += shells.filter {
       $0.status == "running" && $0.metadata?["sessionID"]?.string == ownerID
-        && !foreground.contains($0.id)
+        && !foreground.contains($0.id) && !listed.contains($0.id)
     }.map { shell in
       SessionWork(
-        id: shell.id, sessionID: nil, shellID: shell.id,
+        id: shell.id, kind: .script, sessionID: nil, shellID: shell.id,
         toolID: tools.first { $0.metadata["shellID"]?.string == shell.id || $0.id == shell.id }?.id,
         agent: nil, title: shell.command, state: .running, created: shell.time.started,
         started: shell.time.started, duration: nil)
     }
-    return work.sorted { $0.created != $1.created ? $0.created > $1.created : $0.id < $1.id }
+    return work
+  }
+
+  private static func shellState(_ shell: ShellInfo) -> SessionWork.State {
+    switch shell.status {
+    case "running": .running
+    case "exited": shell.exit.map { $0 == 0 } == false ? .failed : .completed
+    case "timeout": .failed
+    case "killed": .interrupted
+    default: .ended
+    }
   }
 
   /// Links each `subagent` call to its child session. The child's ID reaches the part only through

@@ -57,6 +57,13 @@ import XCTest
       XCTAssertTrue(row.waitForExistence(timeout: 15), id)
       XCTAssertLessThan(row.frame.minY, nested.frame.minY, "own resources come before the subagents")
     }
+    // A subagent without resources shows nothing below its row: no "Sem recursos" line.
+    let plain = app.buttons["agent-work-" + (try XCTUnwrap(environment["OPENCODE_TEST_PLAIN_CHILD"]))]
+    for _ in 0..<6 where !plain.exists { app.swipeUp() }
+    XCTAssertTrue(plain.waitForExistence(timeout: 15))
+    XCTAssertFalse(app.staticTexts["Sem recursos"].exists)
+    screenshot("plain-agent")
+    for _ in 0..<6 where !nested.isHittable { app.swipeDown() }
     // Thumbnails arrive by snapshot; give the first ones time to load.
     sleep(4)
     screenshot("list")

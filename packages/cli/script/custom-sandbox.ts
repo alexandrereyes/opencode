@@ -118,6 +118,8 @@ async function up() {
       OPENCODE_CUSTOM_HOME: home,
       OPENCODE_CUSTOM_COMMIT: commit,
       OPENCODE_CUSTOM_PORT: String(port),
+      // Production's fixed resources hub port (4179) must not be inherited: let the sandbox hub pick a free one.
+      OPENCODE_RESOURCES_HUB_PORT: undefined,
       OPENCODE_CUSTOM_DB: path.join(home, "data/opencode/custom.db"),
       OPENCODE_DB: path.join(home, "data/opencode/custom.db"),
       OPENCODE_CONFIG_DIR: configTarget,

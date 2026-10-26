@@ -251,6 +251,7 @@ import OpenCodeKit
       children: children, active: active, shells: shells)
   }
   var runningCount: Int { work.filter(\.running).count }
+  var runningAgents: Int { work.filter { $0.kind == .agent && $0.running }.count }
   /// The child session of one of this conversation's `subagent` calls, including a reloaded running call
   /// whose part does not carry the child's ID.
   func subagentChild(_ part: ConversationPart) -> String? {

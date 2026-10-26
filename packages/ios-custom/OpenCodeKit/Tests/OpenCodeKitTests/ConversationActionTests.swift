@@ -543,3 +543,56 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(ConversationProjection.work(
     ownerID: "ses_root", viewedID: "ses_root", messages: orphan, children: [], active: [], shells: []).isEmpty)
 }
+
+/// "Agentes e tarefas" tabs: subagents (foreground and background) are agents, background shells are scripts,
+/// and a subagent call still being written is a starting agent, never a shell.
+@Test func workSeparatesAgentsFromScriptsAndNeverTreatsAShellAsAStartingAgent() throws {
+  let message = try JSONDecoder().decode(ConversationMessage.self, from: Data("""
+    {"id":"msg_tabs","type":"assistant","agent":"build","time":{"created":1},"content":[
+     {"type":"tool","id":"call_bg_agent","name":"subagent","time":{"created":100,"ran":110,"completed":120},
+      "state":{"status":"completed","input":{"agent":"explore","description":"Mapear em segundo plano","background":true},
+       "content":[{"type":"text","text":"working"}],"metadata":{"sessionID":"ses_bg","status":"running"}}},
+     {"type":"tool","id":"call_bg_shell","name":"shell","time":{"created":200,"ran":210,"completed":220},
+      "state":{"status":"completed","input":{"command":"bun run dev","background":true},
+       "content":[{"type":"text","text":"moved"}],"metadata":{"status":"running","shellID":"sh_dev"}}},
+     {"type":"tool","id":"call_done_shell","name":"shell","time":{"created":250,"ran":260,"completed":270},
+      "state":{"status":"completed","input":{"command":"make test","background":true},
+       "content":[{"type":"text","text":"moved"}],"metadata":{"status":"running","shellID":"sh_test"}}},
+     {"type":"tool","id":"call_fg_shell","name":"shell","time":{"created":280,"ran":290,"completed":295},
+      "state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a"}],"metadata":{"exit":0}}},
+     {"type":"tool","id":"call_writing","name":"subagent","time":{"created":300},
+      "state":{"status":"streaming","input":"{\\"agent\\":\\"general\\",\\"description\\":\\"Revisar \\\\\\"tudo\\\\\\"\\",\\"prompt\\":\\"Leia"}},
+     {"type":"tool","id":"call_blank","name":"subagent","time":{"created":310},
+      "state":{"status":"streaming","input":"{\\"ag"}}
+    ]}
+    """.utf8))
+  let child = try JSONDecoder().decode(Session.self, from: Data("""
+    {"id":"ses_bg","parentID":"ses_root","projectID":"p","title":"Mapear","agent":"explore",
+     "location":{"directory":"/repo"},"time":{"created":112,"updated":113}}
+    """.utf8))
+  let shells = try JSONDecoder().decode([ShellInfo].self, from: Data("""
+    [{"id":"sh_dev","status":"running","command":"bun run dev","metadata":{"sessionID":"ses_root"},"time":{"started":215}},
+     {"id":"sh_test","status":"exited","exit":1,"command":"make test","metadata":{"sessionID":"ses_root"},
+      "time":{"started":265,"completed":5265}},
+     {"id":"sh_orphan","status":"running","command":"tail -f log","metadata":{"sessionID":"ses_root"},"time":{"started":50}}]
+    """.utf8))
+  let work = ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: [message], children: [child],
+    active: ["ses_root", "ses_bg"], shells: shells)
+  let agents = work.filter { $0.kind == .agent }
+  let scripts = work.filter { $0.kind == .script }
+  #expect(agents.map(\.id) == ["call_blank", "call_writing", "ses_bg"])
+  #expect(agents.first { $0.id == "ses_bg" }?.state == .running)
+  let writing = try #require(agents.first { $0.id == "call_writing" })
+  #expect(writing.state == .starting && writing.agent == "general" && writing.title == #"Revisar "tudo""#)
+  let blank = try #require(agents.first { $0.id == "call_blank" })
+  #expect(blank.agent == nil && blank.title == "Preparando subagente…" && blank.shellID == nil)
+  #expect(scripts.map(\.id) == ["sh_test", "sh_dev", "sh_orphan"])
+  #expect(scripts.allSatisfy { $0.state != .starting && $0.agent == nil && $0.sessionID == nil })
+  #expect(scripts.first { $0.id == "sh_dev" }?.toolID == "call_bg_shell")
+  #expect(scripts.first { $0.id == "sh_dev" }?.title == "bun run dev")
+  #expect(scripts.first { $0.id == "sh_test" }?.state == .failed)
+  #expect(scripts.first { $0.id == "sh_test" }?.duration == 5000)
+  #expect(scripts.first { $0.id == "sh_orphan" }?.state == .running)
+  #expect(!agents.contains { $0.shellID != nil })
+}

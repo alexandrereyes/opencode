@@ -136,6 +136,15 @@ try:
         assert child_browser["owner"]["sessionID"] != session and child_browser["owner"]["rootSessionID"] == session, child_browser
         assert child_browser["meta"]["session"] == browser, child_browser
         report["child"] = {"id": child_browser["id"], "state": child_browser["state"], "agent": child_browser["owner"].get("agent")}
+        # A finished subagent without resources: nothing may appear below its row.
+        plain = "ses_" + uuid.uuid4().hex
+        created = int(time.time() * 1000) - 60_000
+        api("/api/experimental/session/import", {"info": {"id": plain, "parentID": session, "title": "Sem recursos de teste",
+            "projectID": "global", "location": {"directory": str(root)}, "agent": "explore", "model": model, "cost": 0,
+            "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}, "outcome": "succeeded",
+            "time": {"created": created, "updated": created + 1000, "idle": created + 1000, "viewed": created + 1000}},
+            "location": {"directory": str(root)}, "messages": []})
+        report["plain"] = plain
     else:
         resource = admin("/admin/resources", {"kind": "ios-simulator", "meta": {"kind": "ios-simulator", "udid": args.target},
             "owner": {"sessionID": session, "rootSessionID": session, "agent": "opushigh"}, "used": True}, "PUT")["id"]
@@ -170,6 +179,7 @@ console.log(JSON.stringify({ frames: ages.length, fps: +(ages.length / ((Date.no
             "OPENCODE_TEST_SESSION": session}
         if args.discovery:
             environment["OPENCODE_TEST_CHILD_RESOURCE"] = report["child"]["id"]
+            environment["OPENCODE_TEST_PLAIN_CHILD"] = report["plain"]
             if args.android:
                 environment["OPENCODE_TEST_ANDROID_RESOURCE"] = report["android"]["id"]
         run = plistlib.loads(next(args.derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())

@@ -168,6 +168,14 @@ public struct ConversationPart: Codable, Sendable, Equatable {
   }
   public var metadata: [String: JSONValue] { state?.object?["metadata"]?.object ?? [:] }
   public var childID: String? { metadata["sessionID"]?.string }
+  /// A string field already complete in a streaming call's partial JSON input.
+  public func partialInput(_ key: String) -> String? {
+    guard status == "streaming", let text = state?.object?["input"]?.string,
+      let match = text.firstMatch(of: try! Regex(#""\#(key)"\s*:\s*"((?:[^"\\]|\\.)*)""#)),
+      let value = match.output[1].substring
+    else { return nil }
+    return try? JSONDecoder().decode(String.self, from: Data(("\"" + value + "\"").utf8))
+  }
   public var running: Bool { status == "running" || status == "streaming" }
   public var failed: Bool {
     if status == "error" { return true }
@@ -300,7 +308,11 @@ public struct ShellInfo: Codable, Sendable {
   public let command: String
   public let metadata: [String: JSONValue]?
   public let time: Time
-  public struct Time: Codable, Sendable { public let started: Double }
+  public var exit: Double?
+  public struct Time: Codable, Sendable {
+    public let started: Double
+    public var completed: Double?
+  }
 }
 public struct ShellOutput: Codable, Sendable {
   public let output: String
