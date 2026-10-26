@@ -107,6 +107,20 @@ struct FileViewerHost: ViewModifier {
     expected = 0
     task = Task { [self] in
       do {
+        #if DEBUG
+        if ScrollFixtures.mode == "catalog" {
+          guard let fixture = ScreenCatalogFixture.file(source) else { throw FileTransferFailure.notFound }
+          path = source
+          metadata = FileMetadata(size: Int64(fixture.data.count), mime: fixture.mime)
+          file = try FilePreviewStorage.store(fixture.data, name: name)
+          preview = file
+          text = fixture.text
+          markdown = fixture.text != nil
+          kind = fixture.text == nil ? .image : .preview
+          loading = false
+          return
+        }
+        #endif
         if case .data(let value) = FeedImageReference(source) {
           guard let comma = value.firstIndex(of: ","), value[..<comma].contains(";base64"),
             let data = Data(base64Encoded: String(value[value.index(after: comma)...])) else { throw FileTransferFailure.failed }

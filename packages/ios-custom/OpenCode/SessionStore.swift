@@ -119,7 +119,8 @@ final class SessionStore {
     // "<sessionID|*|create>:<delay ms>:admit|fail", for optimistic-send checks against an isolated sandbox.
     let promptFixture = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_PROMPT_FIXTURE"]?.split(separator: ":").map(String.init) : nil
-    let client = suppliedClient ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
+    let injected = suppliedClient ?? (ScrollFixtures.mode == "catalog" ? ScreenCatalogFixture.client(configuration) : nil)
+    let client = injected ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
       ?? promptFixture.flatMap { parts in
         parts.count == 3 ? OpenCodeClient.promptAdmissionFixture(configuration: configuration, sessionID: parts[0],
           delay: .milliseconds(Int(parts[1]) ?? 0), fail: parts[2] == "fail") : nil
@@ -150,6 +151,10 @@ final class SessionStore {
       entries = fixture.entries
       projects = fixture.projects
       preferences = fixture.preferences
+      if ScrollFixtures.mode == "catalog" {
+        chatRoot = "/Chats"
+        masterAvailability = .available
+      }
       active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
       previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
         var preview = SessionPreview()

@@ -1,5 +1,7 @@
 # OpenCode iOS (custom)
 
+**Mockups:** see the versioned [native screen references](docs/screens/README.md) and their offline regeneration script.
+
 Native iOS client, written in Swift, for the OpenCode backend. It talks to the same server as the TUI and the custom
 web app (`packages/app-custom`), and adds no separate backend of its own.
 

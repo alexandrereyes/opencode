@@ -121,7 +121,7 @@ private struct AppRoot: View {
   }
 }
 
-private struct AppTabs: View {
+struct AppTabs: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
   @State private var floatingVoice = FloatingVoicePresentation()

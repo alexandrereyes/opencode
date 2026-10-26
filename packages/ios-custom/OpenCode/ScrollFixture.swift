@@ -14,6 +14,7 @@ import SwiftUI
     let snapshot = try! JSONDecoder().decode(
       ScrollFixtureSnapshot.self,
       from: Data(contentsOf: Bundle.main.url(forResource: "scroll-fixture", withExtension: "json")!))
+    if mode == "catalog" { return ScreenCatalogFixture.snapshot(snapshot) }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeContextUsageFixture") {
       return ContextUsageFixture.snapshot(snapshot)
     }
@@ -58,7 +59,7 @@ struct ScrollFixtureRoot: View {
 
   init() {
     let store = SessionStore(
-      configuration: ServerConfiguration(url: URL(string: "http://127.0.0.1:1")!),
+      configuration: ScrollFixtures.mode == "catalog" ? .launch() : ServerConfiguration(url: URL(string: "http://127.0.0.1:1")!),
       acceptsLaunchSession: false)
     let arguments = ProcessInfo.processInfo.arguments
     let index = arguments.firstIndex(of: "-OpenCodeFixturePosition")
@@ -78,7 +79,11 @@ struct ScrollFixtureRoot: View {
   var body: some View {
     let theme = appearance.theme(systemDark: systemScheme == .dark)
     Group {
-      if ScrollFixtures.mode == "conversation" {
+      if ScrollFixtures.mode == "catalog" {
+        AppTabs(store: store, runtime: AppRuntime.shared)
+          .environment(\.voiceController, AppRuntime.shared.voice)
+          .environment(\.voiceSessionStore, store)
+      } else if ScrollFixtures.mode == "conversation" {
         NavigationStack {
           ConversationView(id: "ses_scroll_0000", sessions: store)
         }
@@ -98,7 +103,20 @@ struct ScrollFixtureRoot: View {
     .background(ScrollFixtureDriver().frame(width: 0, height: 0))
     .background(ComposerTypingDriver().frame(width: 0, height: 0))
     .background(MarkdownFixtureCaptureDriver().frame(width: 0, height: 0))
-    .task { await store.run() }
+    .task {
+      if ScrollFixtures.mode == "catalog" {
+        let draft = store.drafts.draft("ses_scroll_0000")
+        await draft.load()
+        await draft.clear()
+        if ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogQuote") {
+          draft.quotes = [.init(id: "catalog-quote", messageID: "msg_catalog_answer",
+            partID: "msg_catalog_answer:text:0", text: "Criar uma sessão em um único toque.",
+            comment: "Podemos destacar este atalho na próxima proposta?")]
+        }
+        await store.quota.refresh()
+      }
+      await store.run()
+    }
   }
 }
 #endif

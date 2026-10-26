@@ -4,11 +4,14 @@ import Foundation
 /// Server-free side-question answers for the offline conversation fixture (`-OpenCodeSideQuestionFixture`).
 @MainActor enum SideQuestionFixture {
   static var enabled: Bool {
-    ScrollFixtures.mode == "conversation"
+    ["conversation", "catalog"].contains(ScrollFixtures.mode ?? "")
       && ProcessInfo.processInfo.arguments.contains("-OpenCodeSideQuestionFixture")
   }
   static func answer() async throws -> String {
     try await Task.sleep(for: .milliseconds(300))
+    if ScrollFixtures.mode == "catalog" {
+      return "Comece pelos **filtros de projetos**.\n\n1. Compare os caminhos mais usados.\n2. Faça uma mudança pequena.\n3. Valide a navegação nos temas claro e escuro.\n\nA conversa principal continua no mesmo ponto."
+    }
     return """
       Para você avaliar um caso, precisa existir uma resposta para avaliar. Explico em três passos:
 
