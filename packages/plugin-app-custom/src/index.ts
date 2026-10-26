@@ -20,6 +20,7 @@ import { registerSpeech } from "./speech/index.js"
 import { registerMacData } from "./mac-data/index.js"
 import { registerDevice } from "./device/index.js"
 import { registerResources } from "./resources/index.js"
+import { registerQuotes } from "./quotes/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -48,5 +49,6 @@ export default Plugin.define({
       yield* registerMacData(ctx)
       yield* registerDevice(ctx)
       yield* registerResources(ctx)
+      yield* registerQuotes(ctx)
     }),
 })

@@ -35,7 +35,8 @@
     "./resources/protocol": "./src/resources/protocol.ts",
     "./chats/rpc": "./src/chats/rpc.ts",
     "./session-family/rpc": "./src/session-family/rpc.ts",
-    "./transcript/rpc": "./src/transcript/rpc.ts"
+    "./transcript/rpc": "./src/transcript/rpc.ts",
+    "./quotes/rpc": "./src/quotes/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
