@@ -11,7 +11,8 @@ import SwiftUI
   }()
   static func suggestions(_ trigger: ComposerTrigger) -> [ComposerSuggestion] {
     let files = try! JSONDecoder().decode([ComposerFile].self, from: Data(#"[{"path":"README.md","type":"file"}]"#.utf8))
-    return sources.suggestions(trigger, files: files, directory: "/fixture")
+    let agents = try! JSONDecoder().decode([AgentInfo].self, from: Data(#"[{"id":"explore","name":"explore","mode":"subagent"}]"#.utf8))
+    return sources.suggestions(trigger, agents: agents, files: files, directory: "/fixture")
   }
 }
 

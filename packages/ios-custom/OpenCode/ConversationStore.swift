@@ -458,7 +458,7 @@ import OpenCodeKit
       composerCatalog = try await client.composerSources(directory: directory)
     }
     async let files =
-      trigger.character == "@"
+      trigger.character == "!"
       ? client.composerFiles(trigger.query, directory: directory) : []
     async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
     let apps = trigger.character == "@" ? appScope.map(ComposerAppMentions.shared.apps) ?? [] : []

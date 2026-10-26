@@ -67,13 +67,55 @@ import XCTest
     editor.typeText("\n")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "#nada\n"), evaluatedWith: editor)], timeout: 5), .completed)
     // Still loading (the panel waits 180 ms): Return keeps the line break.
-    editor.typeText("@REA\n")
-    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "@REA\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    editor.typeText("!REA\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "!REA\n"), evaluatedWith: editor)], timeout: 5), .completed)
     XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
     let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
     shot.name = "composer-return-suggestion"
     shot.lifetime = .keepAlways
     add(shot)
+  }
+  func testBangListsFilesAndAtDoesNot() throws {
+    let app = try launch()
+    defer { app.terminate() }
+    app.buttons["Limpar"].tap()
+    let editor = app.textViews["conversation-composer"]
+    let file = app.buttons["suggestion-README.md"]
+    editor.tap()
+    // `@` keeps agents (and sessions/apps) but no longer lists files.
+    editor.typeText("@")
+    XCTAssertTrue(app.buttons["suggestion-explore"].waitForExistence(timeout: 5))
+    XCTAssertFalse(file.exists)
+    XCTAssertFalse(app.staticTexts["Arquivos"].exists)
+    shot("composer-at-without-files")
+    editor.typeText("REA")
+    XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 5))
+    XCTAssertFalse(file.exists)
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
+    // `!` lists files and inserts the same `@path` token.
+    editor.typeText("Veja !REA")
+    XCTAssertTrue(file.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Arquivos"].exists)
+    XCTAssertFalse(app.buttons["suggestion-explore"].exists)
+    shot("composer-bang-files")
+    file.tap()
+    XCTAssertTrue(file.waitForNonExistence(timeout: 5))
+    expect("Veja @README.md ", app: app)
+    XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
+    // `!` after a letter, punctuation or an emoji is prose.
+    for prose in ["ok!", " Pode arrumar!", " Sério?!", " 👍!"] {
+      editor.typeText(prose)
+      XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 1.5), prose)
+      XCTAssertFalse(app.staticTexts["Nenhum item correspondente"].exists, prose)
+    }
+    expect("Veja @README.md ok! Pode arrumar! Sério?! 👍!", app: app)
+    shot("composer-bang-prose")
+  }
+  private func shot(_ name: String) {
+    let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    attachment.name = name + "-" + (ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    attachment.lifetime = .keepAlways
+    add(attachment)
   }
   func testNativeSelectAllAndUndo() throws {
     let app = try launch()

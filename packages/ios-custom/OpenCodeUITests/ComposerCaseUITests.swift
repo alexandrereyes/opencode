@@ -29,7 +29,7 @@ import XCTest
     let agent = try XCTUnwrap(environment["OPENCODE_CASE_AGENT"])
     let target = try XCTUnwrap(environment["OPENCODE_CASE_TARGET"])
     let cases: [(String, String)] = [
-      ("@readme", "README.md"), ("@README", "README.md"), ("@SAFARIBRIDGE", "src/SafariBridge.ts"),
+      ("!readme", "README.md"), ("!README", "README.md"), ("!SAFARIBRIDGE", "src/SafariBridge.ts"),
       ("@especial", target), ("@ESPECIAL", target), ("@SESSÃO", target), ("@sessão", target),
       ("@" + agent.uppercased(), agent), ("$" + skill.uppercased(), skill), ("$" + skill.capitalized, skill),
       ("#COMMIT", "snip-commit"), ("#Commit", "snip-commit"), ("#commit", "snip-commit"),
@@ -53,5 +53,45 @@ import XCTest
         timeout: 5), .completed)
     shot("case-return")
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
+  }
+
+  /// Files moved from `@` to `!`; the script then checks the sent message's file reference on the server.
+  func testBangSendsTheFileReferenceAtNoLongerLists() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
+                           "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_CASE_SESSION"])]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    let editor = app.textViews["conversation-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 30))
+    editor.tap()
+    let agent = try XCTUnwrap(environment["OPENCODE_CASE_AGENT"])
+    let readme = app.buttons["suggestion-README.md"]
+    editor.typeText("@")
+    XCTAssertTrue(app.buttons["suggestion-" + agent].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["suggestion-" + (try XCTUnwrap(environment["OPENCODE_CASE_TARGET"]))].exists)
+    XCTAssertFalse(readme.exists)
+    XCTAssertFalse(app.staticTexts["Arquivos"].exists)
+    shot("at-without-files")
+    editor.typeText("readme")
+    XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 10))
+    XCTAssertFalse(readme.exists)
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7))
+    editor.typeText("Leia !READ")
+    XCTAssertTrue(readme.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["Arquivos"].exists)
+    shot("bang-files")
+    readme.tap()
+    XCTAssertTrue(readme.waitForNonExistence(timeout: 5))
+    editor.typeText("e responda ok!")
+    XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 2))
+    shot("bang-token")
+    let send = app.buttons["composer-send"]
+    XCTAssertTrue(send.waitForExistence(timeout: 10) && send.isEnabled)
+    send.tap()
+    XCTAssertTrue(app.staticTexts["Leia @README.md e responda ok!"].waitForExistence(timeout: 30))
+    shot("bang-sent")
   }
 }

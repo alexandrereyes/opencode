@@ -114,7 +114,8 @@ public struct ComposerSources: Sendable {
     apps: [ComposerApp], current: String, server: String, directory: String, project: String?
   ) -> [ComposerSuggestion] {
     switch character {
-    case "@":
+    case "!":
+      // The token keeps the `@path` text the `@` panel used to insert, so the sent prompt is unchanged.
       return files.map {
         .init(
           section: "Arquivos", title: $0.path, icon: $0.type == "directory" ? "folder" : "doc",
@@ -122,7 +123,8 @@ public struct ComposerSources: Sendable {
             kind: .file, id: $0.path, text: "@\($0.path)",
             value: (directory.hasSuffix("/") ? directory : directory + "/") + $0.path))
       }
-        + sessions.filter {
+    case "@":
+      return sessions.filter {
           $0.id != current && $0.parentID == nil
         }.map {
           let title = $0.title ?? $0.id

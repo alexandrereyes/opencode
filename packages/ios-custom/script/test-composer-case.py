@@ -93,7 +93,17 @@ try:
     with (evidence / (label + ".log")).open("w") as log:
         result = subprocess.run(command_line, stdout=log, stderr=subprocess.STDOUT)
     report["result"] = result.returncode
-    print("Result:", result.returncode, "Log:", evidence / (label + ".log"))
+    # The `!` case sends one prompt; its file reference must be the one `@` used to send.
+    sent = [m for m in api("/api/session/" + conversation + "/message?limit=20&order=desc")["data"]
+            if m["type"] == "user" and "@README.md" in json.dumps(m)]
+    if sent:
+        report["bangMessage"] = sent[0]
+        uris = [f.get("source", {}).get("uri") or f.get("uri") for f in sent[0].get("files", [])]
+        report["bangFileURIs"] = uris
+        if ("file://" + str(directory / "README.md")) not in uris and ("file://" + str(directory.resolve() / "README.md")) not in uris:
+            report["result"] = 1
+            print("The sent `!` message lacks the README.md file reference")
+    print("Result:", report["result"], "Log:", evidence / (label + ".log"))
 finally:
     configured.unlink(missing_ok=True)
     api("/api/rpc/custom.snippets/remove?" + query, {"input": {"id": "snip-commit"}}, "POST")

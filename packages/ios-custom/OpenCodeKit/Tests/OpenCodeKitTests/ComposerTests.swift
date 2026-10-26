@@ -105,15 +105,59 @@ private func detected(_ text: String) -> ComposerTrigger? {
     {"id":"ses_other","projectID":"p","title":"Infra anterior","location":{"directory":"/repo"},"time":{"created":1,"updated":1}},
     {"id":"ses_child","projectID":"p","parentID":"ses_other","title":"Infra filha","location":{"directory":"/repo"},"time":{"created":1,"updated":1}}]
     """, [Session].self)
-  let all = source.suggestions(
+  let mentions = source.suggestions(
     try #require(detected("@")), agents: agents, files: files, sessions: sessions,
     current: "ses_current", directory: "/repo")
-  #expect(all.map(\.token.id) == ["docs/infra.md", "src/index.ts", "ses_other", "explore"])
+  #expect(mentions.map(\.token.id) == ["ses_other", "explore"])
+  #expect(
+    source.suggestions(
+      try #require(detected("@infra")), agents: agents, files: files, sessions: sessions,
+      current: "ses_current"
+    ).map(\.section) == ["Sessões"])
+  let all = source.suggestions(
+    try #require(detected("!")), agents: agents, files: files, sessions: sessions,
+    current: "ses_current", directory: "/repo")
+  #expect(all.map(\.token.id) == ["docs/infra.md", "src/index.ts"])
+  #expect(all.map(\.section) == ["Arquivos", "Arquivos"])
   let filtered = source.suggestions(
-    try #require(detected("@infra")), agents: agents, files: files, sessions: sessions,
-    current: "ses_current")
-  #expect(filtered.map(\.section) == ["Arquivos", "Sessões"])
-  #expect(all.first?.token.value == "/repo/docs/infra.md")
+    try #require(detected("Veja !infra")), agents: agents, files: files, sessions: sessions,
+    current: "ses_current", directory: "/repo")
+  #expect(filtered.map(\.token.id) == ["docs/infra.md"])
+  // The same token the `@` panel inserted before, so the prompt sent is unchanged.
+  let token = try #require(all.first?.token)
+  #expect(token == ComposerToken(kind: .file, id: "docs/infra.md", text: "@docs/infra.md", value: "/repo/docs/infra.md"))
+  let request = PromptRequest(
+    document: .init(text: "Veja \(token.text)", tokens: [.init(start: 5, end: 5 + token.text.utf16.count, token: token)]),
+    delivery: .steer, agent: "build", model: composerModel)
+  #expect(request.text == "Veja @docs/infra.md")
+  #expect(request.files?.first?.object?["uri"] == .string("file:///repo/docs/infra.md"))
+  #expect(
+    request.files?.first?.object?["mention"]
+      == .object(["start": .number(5), "end": .number(19), "text": .string("@docs/infra.md")]))
+}
+
+@Test func bangOpensFilesOnlyAtTheStartOrAfterWhitespace() {
+  #expect(detected("!")?.character == "!")
+  #expect(detected("!READ")?.query == "READ")
+  #expect(detected("Veja !src/ind")?.query == "src/ind")
+  #expect(detected("linha\n!doc")?.query == "doc")
+  #expect(detected("tab\t!doc")?.character == "!")
+  #expect(detected("Veja !READ")?.range == NSRange(location: 5, length: 5))
+  for prose in [
+    "ok!", "Pode arrumar!", "Pronto!!", "Sério?!", "fim.!", "(!doc", "\"!doc", "'!doc", "[!doc",
+    "😀!", "👍🏽!", "Olá !!", "a !=", "a !==", "!READ ", "e-mail!x",
+  ] {
+    #expect(detected(prose) == nil, "\(prose)")
+  }
+  // Editor text: tokens are U+FFFC, and the word scan restarts after them.
+  #expect(ComposerTrigger.detect(in: "\u{FFFC}!" as NSString, cursor: 2) == nil)
+  #expect(ComposerTrigger.detect(in: "\u{FFFC} !RE" as NSString, cursor: 5)?.query == "RE")
+  #expect(ComposerTrigger.detect(in: "Pode arrumar!" as NSString, cursor: 13) == nil)
+  #expect(ComposerTrigger.detect(in: "!" as NSString, cursor: 1)?.character == "!")
+  let agent = ComposerToken(kind: .agent, id: "build", text: "@build")
+  #expect(
+    ComposerTrigger.detect(in: .init(text: "@build!", tokens: [.init(start: 0, end: 6, token: agent)]), cursor: 7)?
+      .character != "!")
 }
 
 @Test func snippetsUseAliasesAndProjectOverrideCaseInsensitively() throws {
@@ -179,7 +223,11 @@ private func detected(_ text: String) -> ComposerTrigger? {
   #expect(
     source.suggestions(try #require(detected("@ÍNFRA")), agents: agents, files: files).map(
       \.token.id)
-      == ["docs/infra.md", "infra-agent", "docs/my-infra.md", "library"])
+      == ["infra-agent", "library"])
+  #expect(
+    source.suggestions(try #require(detected("!ÍNFRA")), agents: agents, files: files).map(
+      \.token.id)
+      == ["docs/infra.md", "docs/my-infra.md"])
 }
 
 @Test func snippetRankingIncludesAliasPrefixesAndSubstrings() throws {
