@@ -338,7 +338,7 @@ public enum ConversationProjection {
     return seconds >= 60 ? "\(seconds / 60)m\(seconds % 60)s" : "\(seconds)s"
   }
   public static func context(_ messages: [ConversationMessage], models: [ModelInfo]) -> Double? {
-    guard let message = messages.last(where: { $0.type == "assistant" && $0.tokens != nil }),
+    guard let message = latestMeasurement(messages),
       let tokens = message.tokens,
       let model = models.first(where: {
         $0.id == message.model?.id && $0.providerID == message.model?.providerID

@@ -85,6 +85,32 @@ func contextUsageAbbreviationsArePortuguese(value: Double, expected: String) {
   #expect(ContextUsage.limit(measured.model, models: models) == 1_000_000)
 }
 
+@Test func contextUsageEndsAtCompletedCompactionUntilTheNextMeasuredStep() throws {
+  var before = ConversationMessage(id: "before", type: "assistant", time: .init(created: 1, completed: 2))
+  before.tokens = usageTokens()
+  var compaction = ConversationMessage(id: "compaction", type: "compaction", time: .init(created: 3))
+  compaction.status = "running"
+  #expect(ConversationProjection.latestMeasurement([before, compaction])?.id == "before")
+  compaction.status = "failed"
+  #expect(ConversationProjection.latestMeasurement([before, compaction])?.id == "before")
+  compaction.status = "completed"
+  let user = ConversationMessage(id: "user", type: "user", time: .init(created: 4))
+  let streaming = ConversationMessage(id: "streaming", type: "assistant", time: .init(created: 5))
+  #expect(ConversationProjection.latestMeasurement([before, compaction]) == nil)
+  #expect(ConversationProjection.latestMeasurement([before, compaction, user, streaming]) == nil)
+  var after = streaming
+  after.id = "after"
+  after.tokens = usageTokens()
+  #expect(ConversationProjection.latestMeasurement([before, compaction, user, after])?.id == "after")
+  let models = try JSONDecoder().decode([ModelInfo].self, from: Data("""
+    [{"id":"m","providerID":"p","name":"M","limit":{"context":100}}]
+    """.utf8))
+  before.model = ModelReference(id: "m", providerID: "p")
+  #expect(ConversationProjection.context([before], models: models) != nil)
+  #expect(ConversationProjection.context([before, compaction], models: models) == nil)
+  #expect(ContextDetails(messages: [before, compaction], models: models, session: nil, family: nil).tokens == nil)
+}
+
 @MainActor @Test func contextUsageFormattingCacheReusesVersionsAndInvalidatesTokensAndLimits() throws {
   let cache = ContextUsageCache()
   _ = cache.value(id: "one", tokens: usageTokens(), model: nil, models: [])

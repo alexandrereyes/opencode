@@ -54,7 +54,7 @@ public struct ContextDetails: Sendable {
   public init(
     messages: [ConversationMessage], models: [ModelInfo], session: Session?, family: FamilySnapshot?
   ) {
-    let latest = messages.last { $0.type == .assistant && $0.tokens != nil }
+    let latest = ConversationProjection.latestMeasurement(messages)
     tokens = latest?.tokens
     reference = latest?.model
     model = models.first {

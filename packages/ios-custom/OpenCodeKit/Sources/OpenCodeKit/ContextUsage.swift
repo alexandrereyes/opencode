@@ -119,8 +119,10 @@ public struct ContextUsage: Sendable, Equatable {
 }
 
 extension ConversationProjection {
-  /// Unmeasured streaming steps keep the preceding measurement visible.
+  /// Unmeasured streaming steps keep the preceding measurement visible. Like the TUI and web
+  /// (`lastAssistantWithUsage`), a completed compaction ends it: nothing is measured until the next step.
   public static func latestMeasurement(_ messages: [ConversationMessage]) -> ConversationMessage? {
-    messages.last { $0.type == .assistant && $0.tokens != nil }
+    let start = messages.lastIndex { $0.type == .compaction && $0.status == "completed" }.map { $0 + 1 } ?? 0
+    return messages[start...].last { $0.type == .assistant && $0.tokens != nil }
   }
 }
