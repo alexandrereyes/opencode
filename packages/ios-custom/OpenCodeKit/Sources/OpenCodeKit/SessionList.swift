@@ -108,6 +108,21 @@ public enum SessionList {
     }
   }
 
+  /// One pass over the rows for the Sessões filter chips. `manual` is the chips' saved order (Chats first,
+  /// then the selected repositories); groups with unread rows come first, keeping that order within each half.
+  /// Unread follows the list's orange dot: a root row that is unread and not muted.
+  public static func chipGroups(_ rows: [SessionRow], manual: [String], chats: String) -> [ChipGroup] {
+    var groups = Dictionary(uniqueKeysWithValues: manual.map { ($0, ChipGroup(key: $0)) })
+    for row in rows {
+      guard let key = row.chat ? chats : row.project?.id, groups[key] != nil else { continue }
+      if row.state == .running { groups[key]?.running = true }
+      if row.requestCount > 0 { groups[key]?.requests += 1 }
+      if row.unread && !row.muted { groups[key]?.unread = true }
+    }
+    let ordered = manual.compactMap { groups[$0] }
+    return ordered.filter(\.unread) + ordered.filter { !$0.unread }
+  }
+
   public static func monogram(_ name: String) -> String {
     let words = name.split { !$0.isLetter && !$0.isNumber }
     if words.count > 1 { return String(words.prefix(2).compactMap(\.first)).uppercased() }
@@ -159,5 +174,19 @@ public struct RecentOrder: Sendable {
       changed.forEach { ranks[$0] = last }
     }
     known.forEach { phases[$0] = active.contains($0) }
+  }
+}
+
+public struct ChipGroup: Sendable, Equatable {
+  public let key: String
+  public var running = false
+  /// Rows needing a permission or answer.
+  public var requests = 0
+  public var unread = false
+  public init(key: String, running: Bool = false, requests: Int = 0, unread: Bool = false) {
+    self.key = key
+    self.running = running
+    self.requests = requests
+    self.unread = unread
   }
 }

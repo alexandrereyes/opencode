@@ -121,6 +121,48 @@ private func entry(
   #expect(rows.first { $0.id == "ses_repo" }?.chat == false)
 }
 
+@Test func chipGroupsPutUnreadFirstKeepingManualOrderWithinEachHalf() throws {
+  func project(_ id: String) throws -> Project {
+    try JSONDecoder().decode(Project.self, from: Data(#"{"id":"\#(id)","canonical":"/\#(id)","sandboxes":[]}"#.utf8))
+  }
+  func entry(_ id: String, project: String, directory: String, unread: Bool = false, permission: Bool = false)
+    throws -> NavigationEntry
+  {
+    var row: [String: JSONValue] = [
+      "session": .object([
+        "id": .string(id), "projectID": .string(project), "title": .string(id),
+        "location": .object(["directory": .string(directory)]),
+        "time": .object(["created": .number(100), "updated": .number(100), "viewed": .number(100)]),
+      ])
+    ]
+    if unread { row["unreadAt"] = .number(200) }
+    if permission { row["permissionAt"] = .number(300) }
+    return try JSONDecoder().decode(NavigationEntry.self, from: JSONEncoder().encode(row))
+  }
+  let projects = try ["a", "b", "c", "d"].map(project)
+  let entries = [
+    try entry("ses_a", project: "a", directory: "/a"),
+    try entry("ses_b", project: "b", directory: "/b", unread: true),
+    try entry("ses_c", project: "c", directory: "/c", unread: true),
+    try entry("ses_muted", project: "d", directory: "/d", unread: true, permission: true),
+    try entry("ses_chat", project: "global", directory: "/chats/day/one"),
+    try entry("ses_other", project: "z", directory: "/z", unread: true),
+  ]
+  let muted = entries[3].session.key
+  let rows = SessionList.rows(
+    entries: entries, projects: projects, active: ["ses_a"], pins: [], muted: [muted],
+    autoApprove: false, ranks: [:], chatRoot: "/chats")
+  let groups = SessionList.chipGroups(rows, manual: ["chats", "a", "c", "b", "d"], chats: "chats")
+  // Muted unread rows keep the list's gray dot, so they do not mark their chip.
+  #expect(groups.map(\.key) == ["c", "b", "chats", "a", "d"])
+  #expect(groups.first { $0.key == "a" } == ChipGroup(key: "a", running: true))
+  #expect(groups.first { $0.key == "d" } == ChipGroup(key: "d", requests: 1))
+  // Reading a chat keeps the manual order of the remaining chips.
+  let read = rows.filter { $0.id != "ses_b" && $0.id != "ses_c" }
+  #expect(SessionList.chipGroups(read, manual: ["chats", "a", "c", "b", "d"], chats: "chats").map(\.key)
+    == ["chats", "a", "c", "b", "d"])
+}
+
 @Test func missingAndArchivedAncestorsNeverBecomeRoots() throws {
   let rows = SessionList.rows(
     entries: [
