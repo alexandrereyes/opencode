@@ -162,3 +162,29 @@ struct FileExplorerView: View {
     }
   }
 }
+
+/// The explorer opened from a folder link in the conversation, with the same navigation as from
+/// Detalhes da sessão: `../`, search, and files opening in the viewer over it.
+struct FileFolderBrowser: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  let path: String
+  let context: ConversationImageContext
+  @State private var changes: [String: FileExplorer.Change] = [:]
+  var body: some View {
+    NavigationStack {
+      FileExplorerView(path: path, changes: changes)
+        .navigationDestination(for: FileExplorerRoute.self) { FileExplorerView(path: $0.path, changes: changes) }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { dismiss() } } }
+    }
+    .tint(theme.color(.primary))
+    .modifier(FileViewerHost())
+    .environment(\.conversationImages, context)
+    .task {
+      async let located = try? context.client.locate([context.directory])
+      async let working = try? context.client.workingChanges(directory: context.directory)
+      let root = await located?.first?.worktree ?? context.directory
+      changes = FileExplorer.changes(await working ?? [], root: root)
+    }
+  }
+}

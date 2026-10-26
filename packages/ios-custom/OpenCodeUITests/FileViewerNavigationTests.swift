@@ -375,6 +375,68 @@ import XCTest
     }
   }
 
+  /// Taps the only text of a Session whose message is a single folder reference, retrying while the server
+  /// confirms it and the link appears.
+  private func tapFolder(_ role: String, text: String, app: XCUIApplication) -> Bool {
+    let element = app.collectionViews["conversation-transcript"].descendants(matching: .any).matching(NSPredicate(
+      format: "identifier BEGINSWITH 'response-' AND (value CONTAINS %@ OR label CONTAINS %@)", text, text)).firstMatch
+    XCTAssertTrue(element.waitForExistence(timeout: 25), role)
+    let header = app.staticTexts["file-explorer-path"]
+    for _ in 0..<6 {
+      element.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5)).withOffset(CGVector(dx: 20, dy: 0)).tap()
+      if header.waitForExistence(timeout: 3) { return true }
+    }
+    return false
+  }
+
+  func testFolderLinksOpenTheExplorerAndFilesTheViewer() throws {
+    let folder = try XCTUnwrap(environment["OPENCODE_VIEWER_DOCS_FOLDER"])
+    let outside = try XCTUnwrap(environment["OPENCODE_VIEWER_OUTSIDE_FOLDER"])
+    for (role, text, path) in [("FOLDER_CODE", "docs/", folder), ("FOLDER_CODE_BARE", "./docs", folder),
+      ("LINK_PASTA", "Abrir pasta", folder), ("FOLDER_ABSOLUTE", outside, outside)] {
+      let app = try launch(role)
+      XCTAssertTrue(tapFolder(role, text: text, app: app), role)
+      let header = app.staticTexts["file-explorer-path"]
+      XCTAssertEqual(header.label, path, role)
+      if role == "FOLDER_CODE" {
+        // The explorer lists the folder, opens its files in the viewer and climbs with ../.
+        let file = app.buttons["file-explorer-file-d-outro.md"]
+        XCTAssertTrue(file.waitForExistence(timeout: 15))
+        screenshot("folder-explorer")
+        file.tap()
+        title(app, "d-outro.md")
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Outro documento'")).firstMatch.waitForExistence(timeout: 20))
+        screenshot("folder-explorer-file")
+        app.navigationBars["d-outro.md"].buttons["Fechar"].tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        app.buttons["file-explorer-up"].tap()
+        let parent = NSPredicate(format: "label == %@", URL(fileURLWithPath: folder).deletingLastPathComponent().path)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: parent, object: header)], timeout: 15), .completed)
+        XCTAssertTrue(app.buttons["file-explorer-folder-docs"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+      }
+      if role == "FOLDER_ABSOLUTE" {
+        XCTAssertTrue(app.buttons["file-explorer-file-fora.png"].waitForExistence(timeout: 15))
+        screenshot("folder-explorer-outside")
+      }
+      app.buttons["Fechar"].firstMatch.tap()
+      XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10), role)
+      app.terminate()
+    }
+    // A missing folder stays plain text: tapping it opens nothing.
+    let missing = try launch("FOLDER_MISSING")
+    XCTAssertFalse(tapFolder("FOLDER_MISSING", text: "docs/inexistente/", app: missing))
+    XCTAssertFalse(missing.navigationBars.matching(NSPredicate(format: "identifier CONTAINS 'inexistente'")).firstMatch.exists)
+    screenshot("folder-missing")
+    missing.terminate()
+    // A file link still opens the viewer.
+    let file = try launch("LINKS")
+    open("Abrir MD", app: file)
+    title(file, "f-notas.md")
+    file.terminate()
+  }
+
   func testFileKinds() throws {
     let app = try launch("LINKS")
     let kinds: [(String, String, String)] = [("PNG", "a-imagem.png", "image"), ("JPG", "b-foto.jpg", "image"),

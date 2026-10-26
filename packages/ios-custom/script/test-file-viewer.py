@@ -218,6 +218,12 @@ Bloco depois do link
         "LINK_EXTERNO": "[Abrir externo](" + str(outside / "fora.png") + ")",
         **{"LINK_DOC_" + key: "[Abrir doc " + key + "](docs/" + value + ")" for key, value in
             {"FORMATACAO": "a-formatacao.md", "README": "b-readme.md", "RECURSOS": "c-recursos.md", "OUTRO": "d-outro.md", "VAZIO": "e-vazio.md", "LEITURA": "f-leitura.md"}.items()}}
+    # Folder links: an explicit relative link, inline code with and without a trailing slash, an absolute
+    # folder outside the Session directory and a missing folder.
+    environment["OPENCODE_VIEWER_DOCS_FOLDER"] = str(folder / "docs")
+    environment["OPENCODE_VIEWER_OUTSIDE_FOLDER"] = str(outside)
+    single.update({"LINK_PASTA": "[Abrir pasta](docs/)", "FOLDER_CODE": "`docs/`", "FOLDER_CODE_BARE": "`./docs`",
+        "FOLDER_ABSOLUTE": "`" + str(outside) + "`", "FOLDER_MISSING": "`docs/inexistente/`"})
     messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():

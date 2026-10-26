@@ -96,6 +96,55 @@ import Testing
     == ["/tmp/a.png", "/tmp/B.md", "/tmp/c.mp4"])
 }
 
+@Test func fileLinkTargetsDistinguishFoldersFilesAndMissingPaths() async throws {
+  // Server tree: /repo/{docs/, docs/screens/, docs/notes.md, app/docs/screens/}, /tmp/{shots/, a.png}
+  let tree: [String: [(String, String)]] = [
+    "/repo": [("docs", "directory"), ("app", "directory"), ("README.md", "file")],
+    "/repo/docs": [("screens", "directory"), ("notes.md", "file")],
+    "/repo/app": [("docs", "directory")],
+    "/repo/app/docs": [("screens", "directory")],
+    "/tmp": [("shots", "directory"), ("a.png", "file")],
+  ]
+  let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "https://server.test")!)) { request in
+    let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+    let value = { (name: String) in query.first { $0.name == name }?.value }
+    let ok = { (body: String) in (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
+    if request.url?.path == "/api/fs/list" {
+      // The resolver lists with `path` in the Session Location; the file matcher lists the parent as Location.
+      let location = value("location[directory]")!
+      let folder = value("path") ?? location
+      guard let entries = tree[folder] else {
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+      }
+      let items = entries.map { name, type in
+        let absolute = folder + "/" + name
+        let relative = absolute.hasPrefix(location + "/") ? String(absolute.dropFirst(location.count + 1))
+          : "../" + absolute.dropFirst(1)
+        return #"{"path":"\#(relative)\#(type == "directory" ? "/" : "")","type":"\#(type)"}"#
+      }
+      return ok(#"{"location":{"directory":"\#(location)"},"data":[\#(items.joined(separator: ","))]}"#)
+    }
+    #expect(request.url?.path == "/api/fs/find")
+    #expect(value("location[directory]") == "/repo")
+    let all = [("docs/", "directory"), ("docs/screens/", "directory"), ("app/docs/screens/", "directory"),
+      ("app/", "directory"), ("app/docs/", "directory"), ("docs/notes.md", "file"), ("README.md", "file")]
+    let items = all.filter { $0.1 == value("type") }.map { #"{"path":"\#($0.0)","type":"\#($0.1)"}"# }
+    return ok(#"{"location":{"directory":"/repo"},"data":[\#(items.joined(separator: ","))]}"#)
+  }
+  #expect(try await client.fileLinkTarget("docs/screens/", directory: "/repo") == .directory("/repo/docs/screens"))
+  #expect(try await client.fileLinkTarget("docs/screens", directory: "/repo") == .directory("/repo/docs/screens"))
+  #expect(try await client.fileLinkTarget("./docs", directory: "/repo") == .directory("/repo/docs"))
+  #expect(try await client.fileLinkTarget("/tmp/shots/", directory: "/repo") == .directory("/tmp/shots"))
+  #expect(try await client.fileLinkTarget("../tmp/shots", directory: "/repo") == .directory("/tmp/shots"))
+  // A unique folder ending with the path, like files; an ambiguous suffix is not guessed.
+  #expect(try await client.fileLinkTarget("app/docs/screens", directory: "/repo") == .directory("/repo/app/docs/screens"))
+  #expect(try await client.fileLinkTarget("screens/", directory: "/repo") == nil)
+  #expect(try await client.fileLinkTarget("docs/notes.md", directory: "/repo") == .file)
+  #expect(try await client.fileLinkTarget("/tmp/a.png", directory: "/repo") == .file)
+  #expect(try await client.fileLinkTarget("docs/missing/", directory: "/repo") == nil)
+  #expect(try await client.fileLinkTarget("https://github.com/o/r/tree/main/docs", directory: "/repo") == nil)
+}
+
 @Test func filePreviewStorageKeepsOriginalNameAndDeletesOnlyOwnedFiles() throws {
   let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try Data("fixture".utf8).write(to: source)

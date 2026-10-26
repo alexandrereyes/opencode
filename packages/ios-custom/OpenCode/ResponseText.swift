@@ -33,6 +33,7 @@ final class ResponseTextView: UITextView {
   var gutterBorderColor = UIColor.clear
   var openNote: ((String) -> Void)?
   var openFile: ((String) -> Void)?
+  var openFolder: ((String) -> Void)?
   var quoteHighlights: [ResponseQuoteHighlight] = []
   var quoteRects: [(ChatQuoteMark, [CGRect])] = []
   var quoteButtons: [UIButton] = []
@@ -209,6 +210,7 @@ struct SelectableResponseText: UIViewRepresentable {
   var openNote: ((String) -> Void)? = nil
   var fileContextOverride: ConversationImageContext? = nil
   var fileOpenOverride: ((String) -> Void)? = nil
+  var folderOpenOverride: ((String) -> Void)? = nil
   var filesStableOverride: Bool? = nil
   var contentSizeOverride: UIContentSizeCategory? = nil
   var quotesOverride: ResponseQuoteContext? = nil
@@ -253,13 +255,14 @@ struct SelectableResponseText: UIViewRepresentable {
     view.selectionChanged = selectionChanged
     view.openNote = openNote
     view.openFile = fileOpenOverride ?? fileAction?.open
+    view.openFolder = folderOpenOverride ?? fileAction?.folder
     view.configureQuotes(quotesOverride ?? quotes, block: block, theme: theme)
     if filesStableOverride ?? filesStable {
       coordinator.resolveFiles(view, block: block, context: fileContextOverride ?? imageContext)
     } else {
       coordinator.fileTask?.cancel()
       coordinator.fileKey = nil
-      coordinator.knownFiles = []
+      coordinator.knownFiles = [:]
     }
     view.tintColor = theme.uiColor(.markdownLink)
     view.searchMatch = highlights.matches.first { $0.partID == partID && $0.id == highlights.current }
@@ -328,7 +331,7 @@ struct SelectableResponseText: UIViewRepresentable {
     coordinator.rendering = nil
     coordinator.fileTask?.cancel()
     coordinator.fileKey = nil
-    coordinator.knownFiles = []
+    coordinator.knownFiles = [:]
     view.clearSelection()
     view.attributedText = nil
     view.sourceBlock = nil
@@ -341,6 +344,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.searchAlign = nil
     view.openNote = nil
     view.openFile = nil
+    view.openFolder = nil
     view.openQuote = nil
     view.quoteAlign = nil
     view.quoteHighlights = []
@@ -364,13 +368,14 @@ struct SelectableResponseText: UIViewRepresentable {
     var rendering: Rendering?
     var fileTask: Task<Void, Never>?
     var fileKey: String?
-    var knownFiles: Set<String> = []
+    var knownFiles: [String: FileLinkTarget] = [:]
     func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
       if case .link(let url) = textItem.content, let path = FileReference.path(url) {
-        return UIAction(title: "Abrir arquivo") { [weak textView] _ in
+        let folder = FileReference.isFolder(url)
+        return UIAction(title: folder ? "Abrir pasta" : "Abrir arquivo") { [weak textView] _ in
           guard let view = textView as? ResponseTextView else { return }
           view.selectionChanged?()
-          view.openFile?(path)
+          if folder, let openFolder = view.openFolder { openFolder(path) } else { view.openFile?(path) }
         }
       }
       if case .link(let url) = textItem.content, let resource = ResourceLink.id(from: url) {

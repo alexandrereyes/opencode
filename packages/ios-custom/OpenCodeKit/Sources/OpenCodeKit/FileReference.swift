@@ -38,10 +38,17 @@ public enum FileReference {
     return path.isEmpty ? nil : path
   }
 
-  public static func link(_ path: String) -> URL {
+  /// A server folder confirmed by `fileLinkTarget`; it opens in the file explorer.
+  public static func folderLink(_ path: String) -> URL { link(path, host: "folder") }
+
+  public static func isFolder(_ url: URL) -> Bool { url.scheme == "opencode-file" && url.host == "folder" }
+
+  public static func link(_ path: String) -> URL { link(path, host: "open") }
+
+  private static func link(_ path: String, host: String) -> URL {
     var url = URLComponents()
     url.scheme = "opencode-file"
-    url.host = "open"
+    url.host = host
     url.queryItems = [URLQueryItem(name: "path", value: path)]
     return url.url!
   }

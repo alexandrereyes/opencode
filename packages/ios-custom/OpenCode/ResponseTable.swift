@@ -56,7 +56,7 @@ struct ResponseTable: View {
           block: block, table: table, source: source, messageID: messageID, partID: partID,
           theme: theme, wrap: wrap, actions: actions, selected: selection?.selected,
           highlights: highlights, rasters: rasters, openNote: openNote,
-          imageContext: imageContext, fileOpen: fileAction?.open, filesStable: filesStable, quotes: quotes)
+          imageContext: imageContext, fileOpen: fileAction?.open, folderOpen: fileAction?.folder, filesStable: filesStable, quotes: quotes)
       }
     }
     .fileExporter(isPresented: $exporting, document: document, contentType: exportType,
@@ -113,6 +113,7 @@ private struct ResponseTableContent: UIViewRepresentable {
   let openNote: (String) -> Void
   let imageContext: ConversationImageContext?
   let fileOpen: ((String) -> Void)?
+  let folderOpen: ((String) -> Void)?
   let filesStable: Bool
   let quotes: ResponseQuoteContext
 
@@ -146,7 +147,7 @@ private struct ResponseTableContent: UIViewRepresentable {
           block: block.cell(runs, alignment: table.alignments[column]), messageID: messageID, partID: partID,
           theme: theme, source: source, actions: actions, selectionChanged: selected,
           highlights: highlights, rasters: rasters, wrap: wrap, tableHeader: row == 0, openNote: openNote,
-          fileContextOverride: imageContext, fileOpenOverride: fileOpen, filesStableOverride: filesStable,
+          fileContextOverride: imageContext, fileOpenOverride: fileOpen, folderOpenOverride: folderOpen, filesStableOverride: filesStable,
           contentSizeOverride: typeSize.uiCategory, quotesOverride: quotes)
         view.cells[row][column].delegate = view.coordinators[row][column]
         cell.configure(view.cells[row][column], coordinator: view.coordinators[row][column])

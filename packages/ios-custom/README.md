@@ -934,6 +934,15 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   away, and the decoded image is not reloaded when the view reappears. Images inside a file viewer still present
   over it.
 
+#### Folder links — 26 October
+
+- Inline code and explicit Markdown links naming a **local folder** (relative to the Session directory, absolute or
+  `~`, with or without a trailing `/`) open the file explorer listing it, with `../`, search, working-copy markers
+  and files opening in the viewer over it. `fileLinkTarget` lists the parent to confirm the exact folder, then, for
+  relative paths, accepts one unique folder ending with the path (as files are matched); ambiguous or missing
+  folders stay plain text, files keep opening the viewer. The result is cached for 60 s like file existence.
+- GitHub links keep their web destination even when their label is a local path; nothing is opened locally from them.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

@@ -86,7 +86,7 @@ extension OpenCodeClient {
     ])
     return response.data.branch.current
   }
-  private func workingChanges(directory: String) async throws -> [WorkingChange] {
+  public func workingChanges(directory: String) async throws -> [WorkingChange] {
     let response: DataResponse<[WorkingChange]> = try await get("/api/vcs/diff", query: [
       URLQueryItem(name: "location[directory]", value: directory),
       URLQueryItem(name: "mode", value: "working"),

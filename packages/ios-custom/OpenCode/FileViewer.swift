@@ -9,6 +9,8 @@ import WebKit
 
 struct FileOpenAction {
   let open: (String) -> Void
+  /// A folder link opens the file explorer; without it a folder falls back to `open`.
+  var folder: ((String) -> Void)? = nil
 }
 /// The handler only presents the host's viewer state, so any two copies are interchangeable.
 extension FileOpenAction: Equatable {
@@ -36,22 +38,26 @@ struct FileViewerHost: ViewModifier {
   @State private var selection: Selection?
   private enum Selection: Identifiable {
     case file(String)
+    case folder(String)
     case image(source: String, name: String, context: ConversationImageContext)
     var id: String {
       switch self {
       case .file(let path): "file:" + path
+      case .folder(let path): "folder:" + path
       case .image(let source, _, _): "image:" + source
       }
     }
   }
   func body(content: Content) -> some View {
-    content.environment(\.openFile, FileOpenAction(open: { selection = .file($0) }))
+    content.environment(\.openFile, FileOpenAction(open: { selection = .file($0) }, folder: { selection = .folder($0) }))
       .environment(\.openImage, ImageOpenAction(open: { selection = .image(source: $0, name: $1, context: $2) }))
       .fullScreenCover(item: $selection) { selection in
         Group {
           switch selection {
           case .file(let path):
             if let context { FileViewer(source: path, context: context) }
+          case .folder(let path):
+            if let context { FileFolderBrowser(path: path, context: context) }
           case .image(let source, let name, let context):
             // Server files open in the file viewer, which can page through their directory.
             if case .local = FeedImageReference(source) {

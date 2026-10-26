@@ -13,7 +13,7 @@ import XCTest
       let view = ResponseTextView(frame: .zero, textContainer: nil)
       view.sourceBlock = block
       view.attributedText = text
-      view.applyFileLinks(["notes.txt"])
+      view.applyFileLinks(["notes.txt": .file])
       XCTAssertEqual(view.attributedText.string, block.text)
       let notes = (block.text as NSString).range(of: "notes.txt")
       XCTAssertEqual(FileReference.path(try XCTUnwrap(view.attributedText.attribute(.link, at: notes.location, effectiveRange: nil) as? URL)), "notes.txt")
@@ -22,6 +22,32 @@ import XCTest
       let selection = try XCTUnwrap(block.sourceRange(for: notes))
       XCTAssertEqual((source as NSString).substring(with: selection), "notes.txt")
     }
+  }
+  func testConfirmedFoldersOpenTheExplorerFromCodeAndExplicitLinksButNotFromGitHub() throws {
+    let source = "`docs/screens/` e [telas](docs/screens) e [`docs/screens/`](https://github.com/o/r/tree/main/docs/screens) e [nota](notes.txt)"
+    let block = try XCTUnwrap(MarkdownBlocks.parse(source).first)
+    let view = ResponseTextView(frame: .zero, textContainer: nil)
+    view.sourceBlock = block
+    view.attributedText = ResponseTextStyle.text(block, theme: AppTheme.load("openchamber-dark"))
+    XCTAssertEqual(Set(block.runs.compactMap { ResponseFileLinks.path($0)?.0 }), ["docs/screens/", "docs/screens", "notes.txt"])
+    view.applyFileLinks(["docs/screens/": .directory("/repo/docs/screens"), "docs/screens": .directory("/repo/docs/screens"),
+      "notes.txt": .file])
+    XCTAssertEqual(view.attributedText.string, block.text)
+    func link(_ text: String, from start: Int = 0) throws -> URL {
+      let range = (block.text as NSString).range(of: text, range: NSRange(location: start, length: block.text.utf16.count - start))
+      return try XCTUnwrap(view.attributedText.attribute(.link, at: range.location, effectiveRange: nil) as? URL)
+    }
+    let code = try link("docs/screens/")
+    XCTAssertTrue(FileReference.isFolder(code))
+    XCTAssertEqual(FileReference.path(code), "/repo/docs/screens")
+    XCTAssertTrue(FileReference.isFolder(try link("telas")))
+    // A GitHub link keeps its web destination even when its label names a local folder.
+    let github = try link("docs/screens/", from: (block.text as NSString).range(of: "telas").location)
+    XCTAssertEqual(github.host, "github.com")
+    // An explicit file link stays a file link.
+    let note = try link("nota")
+    XCTAssertFalse(FileReference.isFolder(note))
+    XCTAssertEqual(FileReference.path(note), "notes.txt")
   }
   func testProseFencesAndEllipsisRemainPlainWhileLocalTableLinksAreInteractive() throws {
     let theme = AppTheme.load("openchamber-dark")
