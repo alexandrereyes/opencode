@@ -437,6 +437,102 @@ import XCTest
     file.terminate()
   }
 
+  private func webText(_ app: XCUIApplication, _ text: String, timeout: TimeInterval = 20) -> Bool {
+    app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text))
+      .firstMatch.waitForExistence(timeout: timeout)
+  }
+
+  func testHTMLPreviewSourcePagingAndLargeFiles() throws {
+    let app = try launch("LINKS")
+    open("Abrir HTML_A", app: app)
+    title(app, "a-estatico.html")
+    XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+    XCTAssertTrue(webText(app, "Página estática do visualizador"))
+    screenshot("html-static")
+    let toggle = app.buttons["file-markdown-source"]
+    XCTAssertEqual(toggle.label, "Ver código")
+    toggle.tap()
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS '<h1>Página estática do visualizador</h1>'")).firstMatch.waitForExistence(timeout: 10))
+    screenshot("html-source")
+    toggle.tap()
+    XCTAssertTrue(webText(app, "Página estática do visualizador"))
+    // A single-file report built by its own script, reached with the paging arrow.
+    let next = app.buttons["file-next"]
+    XCTAssertTrue(next.waitForExistence(timeout: 15))
+    next.tap()
+    title(app, "b-relatorio.html")
+    XCTAssertTrue(webText(app, "3 testes, 2 passaram"), "script-built report")
+    screenshot("html-report")
+    drag(app, dx: 220)
+    title(app, "a-estatico.html")
+    XCTAssertTrue(webText(app, "Página estática do visualizador"))
+    app.buttons["Fechar"].firstMatch.tap()
+
+    open("Abrir HTML_E", app: app)
+    title(app, "e-pagina.htm")
+    XCTAssertTrue(webText(app, "Página HTM unificada"), ".htm renders in the same web view")
+    app.buttons["Fechar"].firstMatch.tap()
+
+    open("Abrir HTML_D", app: app)
+    title(app, "d-grande.htm")
+    XCTAssertTrue(app.staticTexts["Este arquivo tem mais de 25 MB. Deseja baixá-lo?"].waitForExistence(timeout: 15))
+    XCTAssertTrue(app.buttons["Baixar arquivo"].exists)
+    screenshot("html-large")
+    app.buttons["Cancelar"].tap()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+
+    // From the explorer of Detalhes da sessão.
+    app.buttons["Mais opções"].tap()
+    app.buttons["Detalhes da sessão"].tap()
+    let directory = app.buttons["session-details-directory"]
+    XCTAssertTrue(directory.waitForExistence(timeout: 10))
+    directory.tap()
+    let folder = app.buttons["file-explorer-folder-html"]
+    XCTAssertTrue(folder.waitForExistence(timeout: 15))
+    folder.tap()
+    let file = app.buttons["file-explorer-file-b-relatorio.html"]
+    XCTAssertTrue(file.waitForExistence(timeout: 15))
+    file.tap()
+    title(app, "b-relatorio.html")
+    XCTAssertTrue(webText(app, "3 testes, 2 passaram"))
+    screenshot("html-explorer")
+    app.terminate()
+  }
+
+  func testHTMLPreviewIsIsolatedAndOnlyTappedLinksLeave() throws {
+    let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+    safari.terminate()
+    let app = try launch("LINKS")
+    open("Abrir HTML_C", app: app)
+    title(app, "c-seguranca.html")
+    XCTAssertTrue(webText(app, "Página de segurança"))
+    XCTAssertTrue(webText(app, "arquivo: bloqueado"), "file: URL from the page")
+    // window.open, location = … and a script click on a link all ran by now; nothing left the viewer.
+    Thread.sleep(forTimeInterval: 4)
+    XCTAssertEqual(app.state, .runningForeground)
+    XCTAssertNotEqual(safari.state, .runningForeground)
+    XCTAssertTrue(app.navigationBars["c-seguranca.html"].exists)
+    XCTAssertTrue(webText(app, "Página de segurança", timeout: 2), "the page was not replaced")
+    screenshot("html-isolated")
+    // The page reached the network, never with a credential, even when challenged.
+    let log = URL(fileURLWithPath: try XCTUnwrap(environment["OPENCODE_VIEWER_PROBE_LOG"]))
+    let requests = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: log)) as? [[String: Any]])
+    XCTAssertFalse(requests.isEmpty)
+    XCTAssertFalse(requests.contains { $0["authorization"] as? Bool == true || $0["cookie"] as? Bool == true }, "\(requests)")
+    // A link the person taps opens in Safari, also with target="_blank".
+    for name in ["Abrir site externo", "Abrir em nova janela"] {
+      let link = app.webViews.links[name]
+      XCTAssertTrue(link.waitForExistence(timeout: 10), name)
+      link.tap()
+      XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 15), name)
+      app.activate()
+      XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+      XCTAssertTrue(app.navigationBars["c-seguranca.html"].waitForExistence(timeout: 10), name)
+    }
+    safari.terminate()
+    app.terminate()
+  }
+
   func testFileKinds() throws {
     let app = try launch("LINKS")
     let kinds: [(String, String, String)] = [("PNG", "a-imagem.png", "image"), ("JPG", "b-foto.jpg", "image"),

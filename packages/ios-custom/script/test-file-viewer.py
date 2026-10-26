@@ -9,6 +9,7 @@ Usage (after `xcodebuild … build-for-testing`):
   python3 packages/ios-custom/script/test-file-viewer.py [OpenCodeUITests/FileViewerNavigationTests/testName …]
 """
 import base64
+import http.server
 import json
 import os
 from pathlib import Path
@@ -224,6 +225,68 @@ Bloco depois do link
     environment["OPENCODE_VIEWER_OUTSIDE_FOLDER"] = str(outside)
     single.update({"LINK_PASTA": "[Abrir pasta](docs/)", "FOLDER_CODE": "`docs/`", "FOLDER_CODE_BARE": "`./docs`",
         "FOLDER_ABSOLUTE": "`" + str(outside) + "`", "FOLDER_MISSING": "`docs/inexistente/`"})
+    # HTML previews. A local probe records the page's own requests, so the test can check that they reach the
+    # network without any credential, even when challenged.
+    probe_log = signals_dir / "probe.json"
+    probe_requests = []
+    class Probe(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            probe_requests.append({"path": self.path, "authorization": self.headers.get("Authorization") is not None,
+                "cookie": self.headers.get("Cookie") is not None})
+            probe_log.write_text(json.dumps(probe_requests))
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="probe"')
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        def log_message(self, *args):
+            pass
+    probe = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Probe)
+    threading.Thread(target=probe.serve_forever, daemon=True).start()
+    probe_url = "http://127.0.0.1:" + str(probe.server_address[1])
+    pages = folder / "html"
+    pages.mkdir()
+    (pages / "a-estatico.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Estático</title>
+<style>body{font-family:-apple-system;margin:24px;color:#222;background:#fdfbf7}h1{color:#b4501e}td,th{border:1px solid #ccc;padding:6px}</style>
+</head><body><h1>Página estática do visualizador</h1><p>Parágrafo com <strong>negrito</strong> e <a href="#fim">âncora interna</a>.</p>
+<table><tr><th>Item</th><th>Valor</th></tr><tr><td>Primeiro</td><td>10</td></tr></table>
+<p id="fim">Fim da página estática.</p></body></html>""", encoding="utf8")
+    (pages / "b-relatorio.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Relatório</title>
+<style>body{font-family:-apple-system;margin:24px}.ok{color:#1a7f37}.falha{color:#cf222e}</style></head>
+<body><div id="app">Carregando relatório…</div>
+<script id="dados" type="application/json">{"testes":[{"nome":"abre o visualizador","ok":true},{"nome":"mostra a prévia","ok":true},{"nome":"bloqueia a saída","ok":false}]}</script>
+<script>
+const dados = JSON.parse(document.getElementById("dados").textContent)
+const passou = dados.testes.filter((t) => t.ok).length
+document.getElementById("app").innerHTML = "<h1>Relatório sintético</h1><p>" + dados.testes.length + " testes, " + passou +
+  " passaram</p><ul>" + dados.testes.map((t) => "<li class='" + (t.ok ? "ok" : "falha") + "'>" + t.nome + "</li>").join("") + "</ul>"
+</script></body></html>""", encoding="utf8")
+    (pages / "c-seguranca.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Segurança</title>
+<style>body{font-family:-apple-system;margin:24px}a{display:block;font-size:22px;margin:24px 0}</style></head>
+<body><h1>Página de segurança</h1>
+<p id="arquivo">arquivo: testando</p><p id="rede">rede: testando</p>
+<a href="https://example.com/tocado">Abrir site externo</a>
+<a href="https://example.com/nova-janela" target="_blank">Abrir em nova janela</a>
+<img src="PROBE/imagem" alt="" width="1" height="1">
+<script>
+fetch("file:///etc/hosts").then((r) => r.text()).then((t) => { document.getElementById("arquivo").textContent = "arquivo: lido " + t.length })
+  .catch(() => { document.getElementById("arquivo").textContent = "arquivo: bloqueado" })
+fetch("PROBE/fetch", { credentials: "include" }).then((r) => { document.getElementById("rede").textContent = "rede: respondeu " + r.status })
+  .catch(() => { document.getElementById("rede").textContent = "rede: falhou" })
+setTimeout(() => { window.open("https://example.com/janela-automatica") }, 400)
+setTimeout(() => { location.href = "https://example.com/fuga" }, 900)
+setTimeout(() => { document.querySelector("a").click() }, 1400)
+</script></body></html>""".replace("PROBE", probe_url), encoding="utf8")
+    with (pages / "d-grande.htm").open("wb") as output:
+        output.write(b"<!doctype html><p>Grande</p>")
+        output.truncate(26 * 1024 * 1024)
+    (pages / "e-pagina.htm").write_text("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><h1>Página HTM unificada</h1>", encoding="utf8")
+    environment["OPENCODE_VIEWER_PROBE_LOG"] = str(probe_log)
+    single.update({"LINK_HTML_A": "[Abrir HTML_A](html/a-estatico.html)", "LINK_HTML_B": "[Abrir HTML_B](html/b-relatorio.html)",
+        "LINK_HTML_C": "[Abrir HTML_C](html/c-seguranca.html)", "LINK_HTML_D": "[Abrir HTML_D](html/d-grande.htm)",
+        "LINK_HTML_E": "[Abrir HTML_E](html/e-pagina.htm)"})
     messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():
@@ -322,6 +385,7 @@ Bloco depois do link
     worker.start()
     status = subprocess.call(command)
     (signals / "stop").write_text("1")
+    probe.shutdown()
     exported = evidence / ("attachments-" + token)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result), "--output-path", str(exported)], check=True)
     for test in json.loads((exported / "manifest.json").read_text()):

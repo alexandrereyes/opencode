@@ -165,7 +165,7 @@ struct FileViewerHost: ViewModifier {
         }
         try Task.checkCancellation()
         kind = FileViewerKind(path: path, mime: metadata?.mime)
-        if !confirmed && FileViewerKind.requiresConfirmation(metadata?.size) {
+        if !confirmed && kind.requiresConfirmation(metadata?.size) {
           confirmation = true
           loading = false
           return
@@ -180,8 +180,8 @@ struct FileViewerHost: ViewModifier {
         let stored = try FilePreviewStorage.store(downloaded, name: URL(fileURLWithPath: path).lastPathComponent)
         let ext = stored.pathExtension.lowercased()
         // Some source extensions (notably .ts) have a registered media UTI, not a code preview.
-        let textual = kind == .preview && (ext.isEmpty
-          || ["md", "markdown", "json", "csv", "tsv", "swift", "ts", "tsx", "js", "jsx", "py", "rb", "rs", "go", "sh", "yaml", "yml", "toml", "log", "sql", "html", "css", "xml", "c", "h", "cpp"].contains(ext)
+        let textual = kind == .html || kind == .preview && (ext.isEmpty
+          || ["md", "markdown", "json", "csv", "tsv", "swift", "ts", "tsx", "js", "jsx", "py", "rb", "rs", "go", "sh", "yaml", "yml", "toml", "log", "sql", "css", "xml", "c", "h", "cpp"].contains(ext)
           || metadata?.mime == "text/plain" && ext != "txt")
         if textual {
           let copy = stored.deletingLastPathComponent().appendingPathComponent("prévia.txt")
@@ -298,7 +298,7 @@ struct FileViewer: View {
   @State private var siblings: [String]?
   /// Files opened from links inside the viewer, for Voltar.
   @State private var history: [String] = []
-  @State private var markdownSource = false
+  @State private var showSource = false
   init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
   }
@@ -349,7 +349,7 @@ struct FileViewer: View {
               Text(error).accessibilityIdentifier("file-error")
               Button("Tentar novamente") { store.start() }
             } else if store.confirmation {
-              Text("Este arquivo tem mais de 50 MB. Deseja baixá-lo?")
+              Text("Este arquivo tem mais de \(store.kind.confirmationBytes / 1024 / 1024) MB. Deseja baixá-lo?")
               Button("Baixar arquivo") { store.start(confirmed: true) }
               Button("Cancelar", role: .cancel) { dismiss() }
             } else if store.cancelled {
@@ -393,10 +393,11 @@ struct FileViewer: View {
           }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-          if store.markdown, store.text != nil {
-            Button(markdownSource ? "Ver renderizado" : "Ver fonte",
-              systemImage: markdownSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right") {
-              markdownSource.toggle()
+          if store.markdown && store.text != nil || store.kind == .html && store.file != nil {
+            let html = store.kind == .html
+            Button(showSource ? (html ? "Ver prévia" : "Ver renderizado") : (html ? "Ver código" : "Ver fonte"),
+              systemImage: showSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right") {
+              showSource.toggle()
             }
             .accessibilityIdentifier("file-markdown-source")
           }
@@ -440,7 +441,7 @@ struct FileViewer: View {
       FileAVPlayer(file: file).accessibilityIdentifier("file-player")
     case .preview:
       ZStack {
-        if let text = store.text, store.markdown, !markdownSource {
+        if let text = store.text, store.markdown, !showSource {
           FileMarkdownPreview(text: text, path: store.path ?? store.source, context: store.context)
         }
         else if let text = store.text { FileTextPreview(text: text, code: file.pathExtension.lowercased() != "txt") }
@@ -452,6 +453,14 @@ struct FileViewer: View {
       .accessibilityElement(children: .contain).accessibilityIdentifier("file-preview")
       .modifier(ReadAloudHost(text: store.markdown ? store.text : nil, title: store.name, path: store.path ?? store.source,
         client: store.context.client))
+    case .html:
+      ZStack {
+        if !showSource { FileHTMLPreview(file: file) }
+        else if let text = store.text { FileTextPreview(text: text, code: true) }
+        // Source over the in-process text limit, as for other code files.
+        else { FileQuickLook(file: store.preview ?? file, name: store.name) }
+      }
+      .accessibilityElement(children: .contain).accessibilityIdentifier("file-preview")
     case .unknown:
       if UTType(filenameExtension: file.pathExtension)?.isDeclared == true,
         QLPreviewController.canPreview(file as NSURL) {

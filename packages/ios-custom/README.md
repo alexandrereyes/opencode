@@ -1003,6 +1003,19 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   folders stay plain text, files keep opening the viewer. The result is cached for 60 s like file existence.
 - GitHub links keep their web destination even when their label is a local path; nothing is opened locally from them.
 
+#### HTML preview — 26 October
+
+- `.html`/`.htm` (`FileViewerKind.html`) open in a `WKWebView` preview like the web app's sandboxed iframe: scripts
+  and the network work, files next to the page do not load (no base URL). The `</>` button switches to the code
+  (plain text up to 2 MiB, Quick Look above). Downloads over **25 MB** ask first. Read-aloud stays Markdown-only.
+- Isolation: a non-persistent data store, no script message handlers or user scripts, `loadHTMLString(_, baseURL:
+  nil)` (never `loadFileURL`, so other previews in the temporary folder are unreachable), every HTTP authentication
+  challenge refused, link previews off. `HTMLPreviewPolicy` allows only the document itself (and its anchors);
+  a link opens in Safari only when the person touched the page in the last 1.5 s, so `location =`, script clicks,
+  form posts and `window.open` go nowhere. A crashed web content process shows **Tentar novamente**.
+- The app's server credential is an `Authorization` header on its own `URLSession`, never in shared credential
+  storage, so WebKit has nothing to send; the UI test's local probe answers 401 Basic and records no credential.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

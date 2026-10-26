@@ -154,3 +154,43 @@ import Testing
   FilePreviewStorage.remove(stored)
   #expect(!FileManager.default.fileExists(atPath: stored.path))
 }
+
+@Test func htmlFilesHaveTheirOwnViewerKindAndALowerDownloadConfirmation() {
+  for path in ["a.html", "b.HTM", "/repo/report/index.html"] { #expect(FileViewerKind(path: path) == .html, "\(path)") }
+  #expect(FileViewerKind(path: "page", mime: "text/html") == .html)
+  #expect(FileViewerKind(path: "notes.txt", mime: "text/html") == .preview)
+  #expect(FileViewerKind(path: "a.md") == .preview)
+  #expect(FileViewerKind.html.confirmationBytes == 25 * 1024 * 1024)
+  #expect(!FileViewerKind.html.requiresConfirmation(25 * 1024 * 1024))
+  #expect(FileViewerKind.html.requiresConfirmation(25 * 1024 * 1024 + 1))
+  #expect(!FileViewerKind.preview.requiresConfirmation(25 * 1024 * 1024 + 1))
+  #expect(FileViewerKind.image.requiresConfirmation(50 * 1024 * 1024 + 1))
+  #expect(FileSiblings.ordered([DirectoryEntry(name: "a.html", absolute: "/r/a.html", kind: .file),
+    DirectoryEntry(name: "b.htm", absolute: "/r/b.htm", kind: .file)], current: "/r/a.html") == ["/r/a.html", "/r/b.htm"])
+}
+
+@Test func htmlPreviewAllowsOnlyItsDocumentAndOpensTappedLinksOutside() {
+  func decide(_ link: String?, main: Bool = true, link activated: Bool = false, touch: Bool = false) -> HTMLPreviewPolicy.Decision {
+    HTMLPreviewPolicy.decide(link.flatMap(URL.init(string:)), mainFrame: main, linkActivated: activated, recentTouch: touch)
+  }
+  // The initial `loadHTMLString(_, baseURL: nil)` document and its in-page anchors.
+  #expect(decide("about:blank") == .allow)
+  #expect(decide("about:blank#resultados", link: true, touch: true) == .allow)
+  #expect(decide("about:srcdoc", main: false) == .allow)
+  #expect(decide("about:srcdoc") == .cancel)
+  // A tapped link leaves for the system browser; the same link clicked by script without a touch does not.
+  #expect(decide("https://example.com/docs", link: true, touch: true) == .openExternally(URL(string: "https://example.com/docs")!))
+  #expect(decide("mailto:a@example.com", link: true, touch: true) == .openExternally(URL(string: "mailto:a@example.com")!))
+  #expect(decide("https://example.com/docs", link: true, touch: false) == .cancel)
+  // Script navigation of the page (`location =`, form posts, reloads) and local or app schemes.
+  #expect(decide("https://example.com/escape") == .cancel)
+  #expect(decide("https://example.com/escape", touch: true) == .cancel)
+  #expect(decide("file:///etc/hosts", link: true, touch: true) == .cancel)
+  #expect(decide("opencode-file://open?path=/etc/hosts", link: true, touch: true) == .cancel)
+  #expect(decide("javascript:alert(1)", link: true, touch: true) == .cancel)
+  #expect(decide(nil) == .cancel)
+  // Embedded frames may load web content, like the web app's sandboxed iframe; not local files.
+  #expect(decide("https://example.com/embed", main: false) == .allow)
+  #expect(decide("data:text/html,oi", main: false) == .allow)
+  #expect(decide("file:///etc/hosts", main: false) == .cancel)
+}

@@ -60,9 +60,10 @@ public enum FileReference {
 }
 
 public enum FileViewerKind: Sendable, Equatable {
-  case image, audiovisual, preview, unknown
+  case image, audiovisual, preview, html, unknown
   public init(path: String, mime: String? = nil) {
     let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+    if ["html", "htm"].contains(ext) || ext.isEmpty && mime == "text/html" { self = .html; return }
     // ImageIO cannot draw SVG, although its MIME type is image/*.
     if ["ts", "tsx", "svg"].contains(ext) || mime == "image/svg+xml" { self = .preview; return }
     if mime?.hasPrefix("image/") == true || ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif", "bmp", "tiff", "ico"].contains(ext) {
@@ -78,5 +79,9 @@ public enum FileViewerKind: Sendable, Equatable {
       || mime?.hasPrefix("text/") == true ? .preview : .unknown
   }
   public static let confirmationBytes: Int64 = 50 * 1024 * 1024
+  /// A page is decoded and laid out whole by WebKit, so HTML asks sooner than a streamed download.
+  public static let htmlConfirmationBytes: Int64 = 25 * 1024 * 1024
+  public var confirmationBytes: Int64 { self == .html ? Self.htmlConfirmationBytes : Self.confirmationBytes }
+  public func requiresConfirmation(_ size: Int64?) -> Bool { (size ?? 0) > confirmationBytes }
   public static func requiresConfirmation(_ size: Int64?) -> Bool { (size ?? 0) > confirmationBytes }
 }
