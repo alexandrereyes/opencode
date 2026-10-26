@@ -722,12 +722,27 @@ retaining rendered-to-source UTF-16 selection mappings. H1–H6 use the shared t
 body uses the 17 pt/22.5 pt baseline and code the 15 pt secondary style (UIKit rounds scaled sizes);
 headings, list items and ordinary blocks have distinct spacing. Soft breaks remain spaces, explicit breaks remain
 newlines, and straight punctuation is not silently changed. Nested lists have hanging indents and depth-specific
-markers; disabled task checkboxes and nested quote borders retain their state/depth. General HTML, `<kbd>`, emoji
-shortcodes, `==highlight==` and GitHub-alert markers remain literal, as in the reference chat; the previously approved
-native HTML-image loader is preserved.
+markers; disabled task checkboxes and nested quote borders retain their state/depth. Inline HTML pairs of `<sub>`
+and `<small>` (smaller secondary text, like a sources note, not a tiny subscript), `<sup>`, `<kbd>`/`<code>` (inline
+code), `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`/`<ins>`, `<s>`/`<del>`/`<strike>` and `<br>` style their content without
+showing the tags; copying, selection mapping and read-aloud see only the content. Other tags, a known tag without its
+closing sibling, HTML blocks, emoji shortcodes, `==highlight==` and GitHub-alert markers remain literal, so no content
+is hidden; the previously approved native HTML-image loader is preserved.
+
+**Dollar math (Alexandre, 26/10):** `$…$` follows the custom web's Pandoc boundaries
+(`packages/ui-custom/src/context/marked-parser.tsx`): the opening `$` is followed by a non-space, the closing `$`
+follows a non-space and precedes no letter, digit or underscore, and the body has no unescaped `$`. In addition, a `$`
+glued to a preceding Latin letter (`R$`, `US$`) never opens a formula. Inline math never spans a line break or a table
+cell (unescaped `|` outside code); `$$…$$` inside a cell stays inline so the table remains one block. `\$` is a literal
+`$`, and the existing currency guard (`$100$`) still applies. So `R$ 30.982,69 | **Prejuízo de R$ 28.534,69**`,
+`$5 e $10` and `$HOME/$USER` stay text, while `$x^2$`, `$$…$$`, `\(…\)` and `\[…\]` still render.
 
 Tables are native, horizontally scrollable grids with header styling, column alignment, wrapping, per-cell selection,
-CSV/TSV/Markdown copy and CSV/Markdown export through Files. Code cards retain one selectable TextKit 2 text view,
+CSV/TSV/Markdown copy and CSV/Markdown export through Files. With wrapping on, `MarkdownTable.columnWidths` gives each
+column at least its longest word (up to 240 pt, so a URL may still break) and water-fills the remaining width: words
+and numbers break only between words, and when the minimums exceed the screen the table scrolls horizontally from its
+leading edge. Short inline code in prose (up to half a line) never breaks inside, so `/proventos` or `--all-pages`
+moves to the next line whole; table cells and longer spans wrap as before. Code cards retain one selectable TextKit 2 text view,
 including source-line numbers aligned to wrapped lines, a language header, wrap toggle and copy without the gutter.
 TextKit 2-backed caret geometry is cached; the legacy layout manager is never accessed. Inline-code backgrounds have
 native rounded drawing with compact 2.4 pt horizontal expansion rather than inserting invisible padding characters
@@ -756,7 +771,10 @@ diagrams are bounded to 400 lines/20k units and formulas to 8k units with bounde
 **Verification fixture:** Debug accepts `-OpenCodeScrollFixture conversation -OpenCodeMarkdownFixture
 -OpenCodeFixturePosition top` with the usual explicit sandbox URL/password. Its two-message transcript uses
 `OpenCode/Fixtures/markdown-fixture.md`, identical to `.agent-artifacts/formatacao/teste-formatacao.md`; the offline
-transport refuses every HTTP request. Release excludes both the fixture mode and its Markdown resource.
+transport refuses every HTTP request. `-OpenCodeMarkdownFixtureDocument markdown-currency-fixture` swaps in a
+synthetic financial answer (`R$` values in center/right-aligned columns, bold results, inline and display math, a
+`<sub>` sources note and the inline tags), checked by `OpenCodeUITests/MarkdownRenderingTests/testCurrencyTableAndInlineHTML{Dark,Light}`.
+Release excludes both the fixture mode and its Markdown resources.
 Use only **OpenCode Formatacao** (`7C70FB07-A886-43BD-8A39-42D92E0C9937`, iPhone 18 Pro/iOS 27) and
 `$TMPDIR/opencode/ios-formatacao-derived`. After `build-for-testing`, run `python3 script/test-markdown.py --label …`;
 pass `--regressions OpenCodeUITests/SessionReadingTests` for disposable owned sandbox action/missing-directory

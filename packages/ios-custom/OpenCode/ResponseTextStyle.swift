@@ -9,15 +9,19 @@ import UIKit
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
     let code: Bool = { if case .code = block.kind { true } else { false } }()
     let summary: Bool = { if case .details = block.kind { true } else { false } }()
+    // A paragraph wholly in `<sub>`/`<small>` (a sources note) also gets the smaller line height.
+    let note = block.runs.contains { $0.small } && block.runs.allSatisfy { $0.small || $0.text.allSatisfy(\.isWhitespace) }
     for run in block.runs {
+      let regular: AppTextStyle = heading.map { [.title, .heading, .message, .secondary, .secondary, .secondary][min(5, max(0, $0 - 1))] }
+        ?? (run.code || code || block.kind == .table ? .secondary : .body)
       let style: AppTextStyle = run.superscript ? .footnote
-        : heading.map { [.title, .heading, .message, .secondary, .secondary, .secondary][min(5, max(0, $0 - 1))] }
-          ?? (run.code || code || block.kind == .table ? .secondary : .body)
+        : run.small ? (regular == .title ? .message : [.secondary, .caption].contains(regular) ? .caption : .secondary)
+        : regular
       let weight: UIFont.Weight = heading != nil || run.strong || tableHeader || run.syntax == .function ? .semibold : summary ? .medium : .regular
       let base = AppTypography.font(style, weight: weight, monospaced: run.code || code, compatibleWith: traits)
       let font = run.emphasis ? UIFont(descriptor: base.fontDescriptor.withSymbolicTraits(base.fontDescriptor.symbolicTraits.union(.traitItalic)) ?? base.fontDescriptor, size: base.pointSize) : base
       let paragraph = NSMutableParagraphStyle()
-      paragraph.minimumLineHeight = AppTypography.lineHeight(heading == nil ? .body : style, compatibleWith: traits)
+      paragraph.minimumLineHeight = AppTypography.lineHeight(note ? style : heading == nil ? .body : style, compatibleWith: traits)
       if let marker = block.marker {
         let width = UIFontMetrics(forTextStyle: .body).scaledValue(for: max(24, marker.width), compatibleWith: traits)
         paragraph.headIndent = width
@@ -32,6 +36,7 @@ import UIKit
         : run.code ? .inlineCode
         : block.quoteDepth > 0 ? .markdownQuote
         : heading != nil ? .markdownHeading
+        : run.small ? .textSecondary
         : run.strong ? .markdownStrong
         : block.kind == .table ? (tableHeader ? .tableHeaderText : .tableText) : .markdownBody
       var attributes: [NSAttributedString.Key: Any] = [
@@ -39,6 +44,7 @@ import UIKit
         .foregroundColor: theme.uiColor(role),
       ]
       if run.strikethrough { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+      if run.underline { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
       if run.superscript { attributes[.baselineOffset] = 6 }
       if let link = run.link, let url = URL(string: link),
         ["http", "https", "mailto", "tel", "sms", "opencode-markdown", ResourceLink.scheme].contains(url.scheme) {

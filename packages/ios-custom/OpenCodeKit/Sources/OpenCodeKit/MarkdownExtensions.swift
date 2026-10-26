@@ -38,10 +38,14 @@ struct MarkdownExtensions {
       return starts[line] + String(decoding: lines[line].utf8.prefix(max(0, location.column - 1)), as: UTF8.self).utf16.count
     }
     var protected: [NSRange] = []
+    var tables: [NSRange] = []
     func protect(_ node: any Markup) {
       if node is CodeBlock || node is InlineCode || node is Link, let range = node.range {
         protected.append(NSRange(location: offset(range.lowerBound), length: offset(range.upperBound) - offset(range.lowerBound)))
         return
+      }
+      if node is Table, let range = node.range {
+        tables.append(NSRange(location: offset(range.lowerBound), length: offset(range.upperBound) - offset(range.lowerBound)))
       }
       for child in node.children { protect(child) }
     }
@@ -55,7 +59,7 @@ struct MarkdownExtensions {
       return Span(range: match.range, kind: .link(url.absoluteString))
     }
     protected.append(contentsOf: links.map(\.range))
-    let math = Self.math(source, protected: protected)
+    let math = Self.math(source, protected: protected, tables: tables)
     var specials = math.compactMap { span -> Block? in
       guard case .formula(let formula) = span.kind, formula.display else { return nil }
       return Block(range: span.range, kind: .formula(formula))
@@ -209,7 +213,11 @@ struct MarkdownExtensions {
     prefix.prefix { $0.isWhitespace || $0 == ">" }.filter { $0 == ">" }.count
   }
 
-  private static func math(_ source: String, protected: [NSRange]) -> [Span] {
+  /// Inline `$…$` follows Pandoc's boundaries, as the web does: the opening `$` is followed by a non-space and is
+  /// not glued to a preceding Latin letter (`R$`, `US$`); the closing `$` follows a non-space and precedes no
+  /// letter, digit or underscore; the body has no unescaped `$`. Inline math never spans a line or a table cell, and
+  /// display delimiters inside a cell stay inline so the table remains one block.
+  private static func math(_ source: String, protected: [NSRange], tables: [NSRange]) -> [Span] {
     let units = Array(source.utf16)
     let text = source as NSString
     var result: [Span] = []
@@ -219,23 +227,43 @@ struct MarkdownExtensions {
       while back >= 0 && units[back] == 92 { back -= 1 }
       return (index - back - 1) % 2 == 1
     }
+    func space(_ index: Int) -> Bool { index < 0 || index >= units.count || [9, 10, 13, 32].contains(units[index]) }
+    func word(_ index: Int) -> Bool {
+      guard index < units.count else { return false }
+      let unit = units[index]
+      return (48...57).contains(unit) || (65...90).contains(unit) || (97...122).contains(unit) || unit == 95
+    }
+    func latinLetter(_ index: Int) -> Bool {
+      guard index >= 0, let scalar = UnicodeScalar(units[index]) else { return false }
+      return scalar.value < 0x250 && scalar.properties.isAlphabetic
+    }
+    // Unescaped pipes outside code delimit table cells.
+    let cells = Set(tables.flatMap { table in
+      (table.location..<NSMaxRange(table)).filter { index in
+        units[index] == 124 && !escaped(index) && !protected.contains { NSLocationInRange(index, $0) }
+      }
+    })
     while cursor < units.count {
       if let range = protected.first(where: { NSLocationInRange(cursor, $0) }) { cursor = NSMaxRange(range); continue }
       let slash = units[cursor] == 92 && !escaped(cursor) && cursor + 1 < units.count && [40, 91].contains(units[cursor + 1])
       let dollar = units[cursor] == 36 && !escaped(cursor)
       guard slash || dollar else { cursor += 1; continue }
       let double = dollar && cursor + 1 < units.count && units[cursor + 1] == 36
-      let display = double || slash && units[cursor + 1] == 91
+      let cell = tables.contains { NSLocationInRange(cursor, $0) }
+      let display = (double || slash && units[cursor + 1] == 91) && !cell
       let length = slash || double ? 2 : 1
+      if dollar && !double && (space(cursor + 1) || latinLetter(cursor - 1)) { cursor += 1; continue }
       let close: [UInt16] = slash ? [92, units[cursor + 1] == 40 ? 41 : 93] : Array(repeating: 36, count: length)
       var end = cursor + length
       while end + close.count <= units.count {
-        if protected.contains(where: { NSLocationInRange(end, $0) }) { end = units.count; break }
+        if protected.contains(where: { NSLocationInRange(end, $0) }) || cells.contains(end) { end = units.count; break }
         if !display && units[end] == 10 { break }
         if !escaped(end), Array(units[end..<end + close.count]) == close { break }
         end += 1
       }
-      guard end + close.count <= units.count, Array(units[end..<end + close.count]) == close else { cursor += length; continue }
+      guard end + close.count <= units.count, Array(units[end..<end + close.count]) == close,
+        !(dollar && !double && (space(end - 1) || word(end + 1)))
+      else { cursor += length; continue }
       var body = text.substring(with: NSRange(location: cursor + length, length: end - cursor - length)).trimmingCharacters(in: .whitespacesAndNewlines)
       let currency = dollar && !double && (body.first?.isNumber == true && matches("[\\\\^_{}=+*/<>]", body).isEmpty || !matches("^[+-]?[\\d,.]+$", body).isEmpty)
       let before = text.substring(to: cursor).components(separatedBy: "\n").last ?? ""

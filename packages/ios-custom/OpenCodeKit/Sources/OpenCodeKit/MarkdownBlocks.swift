@@ -12,6 +12,9 @@ public struct MarkdownRun: Sendable, Equatable {
   public var formula: MarkdownFormula? = nil
   public var syntax: MarkdownSyntax? = nil
   public var superscript = false
+  /// `<sub>` and `<small>`: smaller, secondary text.
+  public var small = false
+  public var underline = false
   public var sourceEnd: Int? = nil
   /// Copied in place of the displayed text, for generated separators between prose blocks.
   public var copy: String? = nil
@@ -126,6 +129,30 @@ public struct MarkdownTable: Sendable, Equatable {
       }.joined(separator: separator)
     }.joined(separator: "\n")
   }
+
+  /// Column widths for `available` points. Each column wants its unwrapped `natural` width; with wrapping, a
+  /// column never narrows below `minimum` (its longest word), so words and numbers only break between words.
+  /// Columns share the space by water-filling: the narrow ones keep their natural width, the rest get an equal
+  /// level. When even the minimums do not fit, the table keeps them and scrolls horizontally. Leftover space is
+  /// shared equally.
+  public static func columnWidths(natural: [Double], minimum: [Double], available: Double, wrap: Bool) -> [Double] {
+    guard !natural.isEmpty else { return [] }
+    let floors = zip(natural, minimum).map { Swift.min($0, $1) }
+    let widths: [Double] = {
+      guard wrap, natural.reduce(0, +) > available else { return natural }
+      guard floors.reduce(0, +) < available else { return floors }
+      func total(_ level: Double) -> Double { zip(natural, floors).reduce(0) { $0 + Swift.min($1.0, Swift.max($1.1, level)) } }
+      var low = 0.0
+      var high = natural.max() ?? 0
+      for _ in 0..<40 {
+        let level = (low + high) / 2
+        if total(level) > available { high = level } else { low = level }
+      }
+      return zip(natural, floors).map { Swift.min($0, Swift.max($1, low)) }
+    }()
+    let extra = Swift.max(0, available - widths.reduce(0, +)) / Double(widths.count)
+    return widths.map { $0 + extra }
+  }
 }
 
 public enum MarkdownBlocks {
@@ -149,10 +176,7 @@ public enum MarkdownBlocks {
         + String(decoding: lines[line].utf8.prefix(max(0, location.column - 1)), as: UTF8.self)
         .utf16.count
     }
-    func run(
-      _ text: String, node: any Markup, strong: Bool = false, emphasis: Bool = false,
-      code: Bool = false, link: String? = nil, strikethrough: Bool = false
-    ) -> MarkdownRun {
+    func run(_ text: String, node: any Markup, style: InlineStyle = InlineStyle()) -> MarkdownRun {
       let start = node.range.map { offset($0.lowerBound) } ?? 0
       let end = node.range.map { offset($0.upperBound) } ?? start
       let raw = (source as NSString).substring(
@@ -161,9 +185,7 @@ public enum MarkdownBlocks {
           length: max(0, min(end, source.utf16.count) - start)))
       let found = (raw as NSString).range(of: text)
       if found.location != NSNotFound {
-        return MarkdownRun(
-          text: text, strong: strong, emphasis: emphasis, strikethrough: strikethrough, code: code, link: link,
-          offsets: (0..<text.utf16.count).map { start + found.location + $0 })
+        return style.run(text, offsets: (0..<text.utf16.count).map { start + found.location + $0 })
       }
       // Escaped Markdown text need not be a contiguous substring of the source.
       var cursor = 0
@@ -178,13 +200,9 @@ public enum MarkdownBlocks {
         cursor = NSMaxRange(range)
         return (0..<value.utf16.count).map { start + range.location + $0 }
       }
-      return MarkdownRun(
-        text: text, strong: strong, emphasis: emphasis, strikethrough: strikethrough, code: code, link: link, offsets: offsets)
+      return style.run(text, offsets: offsets)
     }
-    func inline(
-      _ node: any Markup, strong: Bool = false, emphasis: Bool = false, link: String? = nil,
-      strikethrough: Bool = false
-    ) -> [MarkdownRun] {
+    func inline(_ node: any Markup, style: InlineStyle = InlineStyle()) -> [MarkdownRun] {
       if let image = node as? Markdown.Image, let destination = image.source {
         var value = run(image.plainText, node: node)
         value.image = destination
@@ -196,24 +214,48 @@ public enum MarkdownBlocks {
           value.image = image.source
           return value
         }
-        return images.isEmpty ? [run(html.rawHTML, node: node)] : images
+        return images.isEmpty ? [run(html.rawHTML, node: node, style: style)] : images
       }
       if let text = node as? Markdown.Text {
-        return [run(text.string, node: node, strong: strong, emphasis: emphasis, link: link, strikethrough: strikethrough)]
+        return [run(text.string, node: node, style: style)]
       }
       if let code = node as? InlineCode {
-        return [
-          run(code.code, node: node, strong: strong, emphasis: emphasis, code: true, link: link, strikethrough: strikethrough)
-        ]
+        var value = style
+        value.code = true
+        return [run(code.code, node: node, style: value)]
       }
       if node is SoftBreak { return [run(" ", node: node)] }
       if node is LineBreak { return [run("\n", node: node)] }
-      return node.children.flatMap {
-        inline(
-          $0, strong: strong || node is Strong, emphasis: emphasis || node is Emphasis,
-          link: (node as? Link)?.destination ?? link,
-          strikethrough: strikethrough || node is Strikethrough)
+      var inner = style
+      inner.strong = style.strong || node is Strong
+      inner.emphasis = style.emphasis || node is Emphasis
+      inner.strikethrough = style.strikethrough || node is Strikethrough
+      inner.link = (node as? Link)?.destination ?? style.link
+      return children(Array(node.children), style: inner)
+    }
+    /// Siblings in order; a known inline HTML tag and its closing sibling style the nodes between them.
+    func children(_ nodes: [any Markup], style: InlineStyle) -> [MarkdownRun] {
+      var result: [MarkdownRun] = []
+      var index = 0
+      while index < nodes.count {
+        if let html = nodes[index] as? InlineHTML, let token = HTMLInlineTag.parse(html.rawHTML), !token.closing {
+          if token.tag == .lineBreak, let range = html.range {
+            var value = style.run("\n", offsets: [offset(range.lowerBound)])
+            value.sourceEnd = offset(range.upperBound)
+            result.append(value)
+            index += 1
+            continue
+          }
+          if let close = HTMLInlineTag.closing(token, in: nodes, after: index) {
+            result += children(Array(nodes[(index + 1)..<close]), style: style.applying(token.tag))
+            index = close + 1
+            continue
+          }
+        }
+        result += inline(nodes[index], style: style)
+        index += 1
       }
+      return result
     }
     func append(_ kind: MarkdownBlock.Kind, _ node: any Markup, depth: Int, prefix: String = "",
       quoteDepth: Int = 0, indent: Double = 0, marker: MarkdownMarker? = nil) {
@@ -255,7 +297,7 @@ public enum MarkdownBlocks {
       }
       if let code = node as? CodeBlock {
         blocks.append(
-          make(.code(code.language), depth: depth, runs: [run(code.code, node: node, code: true)],
+          make(.code(code.language), depth: depth, runs: [run(code.code, node: node, style: InlineStyle(code: true))],
             quoteDepth: quoteDepth, indent: indent))
         return
       }
@@ -365,5 +407,41 @@ public enum MarkdownBlocks {
         runs: children.flatMap(\.runs), children: children))
     }
     return blocks
+  }
+}
+
+/// Inline formatting inherited by a node's text, from Markdown emphasis and the supported HTML tags.
+struct InlineStyle {
+  var strong = false
+  var emphasis = false
+  var strikethrough = false
+  var code = false
+  var small = false
+  var superscript = false
+  var underline = false
+  var link: String? = nil
+
+  func applying(_ tag: HTMLInlineTag) -> InlineStyle {
+    var result = self
+    switch tag {
+    case .small: result.small = true
+    case .superscript: result.superscript = true
+    case .code: result.code = true
+    case .strong: result.strong = true
+    case .emphasis: result.emphasis = true
+    case .underline: result.underline = true
+    case .strikethrough: result.strikethrough = true
+    case .lineBreak: break
+    }
+    return result
+  }
+
+  func run(_ text: String, offsets: [Int?]) -> MarkdownRun {
+    var value = MarkdownRun(
+      text: text, strong: strong, emphasis: emphasis, strikethrough: strikethrough, code: code, link: link, offsets: offsets)
+    value.small = small
+    value.superscript = superscript
+    value.underline = underline
+    return value
   }
 }

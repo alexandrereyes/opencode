@@ -5,7 +5,12 @@ import SwiftUI
 
 enum MarkdownFixtures {
   static func snapshot(_ snapshot: ScrollFixtureSnapshot) -> ScrollFixtureSnapshot {
-    let source = try! String(contentsOf: Bundle.main.url(forResource: "markdown-fixture", withExtension: "md")!, encoding: .utf8)
+    // `-OpenCodeMarkdownFixtureDocument markdown-currency-fixture` swaps in another document from Fixtures.
+    let arguments = ProcessInfo.processInfo.arguments
+    let name = arguments.firstIndex(of: "-OpenCodeMarkdownFixtureDocument").flatMap {
+      arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+    } ?? "markdown-fixture"
+    let source = try! String(contentsOf: Bundle.main.url(forResource: name, withExtension: "md")!, encoding: .utf8)
     var user = snapshot.messages.first { $0.type == "user" }!
     user.text = "Mostre o documento de teste de formatação."
     var answer = snapshot.messages.first { $0.type == "assistant" && $0.content?.contains { $0.type == "text" } == true }!

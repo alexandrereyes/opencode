@@ -2,13 +2,14 @@ import Foundation
 import Testing
 @testable import OpenCodeKit
 
-@Test func markdownParityPreservesStylesBreaksAndLiteralHTML() throws {
-  let blocks = MarkdownBlocks.parse("**forte** *leve* ~~antigo~~ **`nome`**\nlinha suave  \nlinha explícita\n\n<kbd>⌘</kbd>")
+@Test func markdownParityPreservesStylesBreaksAndInlineHTML() throws {
+  let blocks = MarkdownBlocks.parse("**forte** *leve* ~~antigo~~ **`nome`**\nlinha suave  \nlinha explícita\n\n<kbd>⌘</kbd> <span>x</span>")
   let first = try #require(blocks.first)
   #expect(first.runs.contains { $0.strikethrough && $0.text == "antigo" })
   #expect(first.runs.contains { $0.code && $0.strong && $0.text == "nome" })
   #expect(first.text.contains("nome linha suave\nlinha explícita"))
-  #expect(blocks.map(\.text).joined().contains("<kbd>⌘</kbd>"))
+  #expect(blocks.last?.runs.contains { $0.code && $0.text == "⌘" } == true)
+  #expect(blocks.last?.text == "⌘ <span>x</span>")
 }
 
 @Test func markdownParityProjectsTableCellsAlignmentAndExports() throws {

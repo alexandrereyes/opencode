@@ -297,7 +297,7 @@ public enum ReadAloud {
     let text = runs.map { run -> String in
       if run.formula != nil { return " fórmula " }
       // Footnote references are superscript numbers; their notes are not read.
-      if run.superscript, run.text.allSatisfy(\.isNumber) { return "" }
+      if run.superscript, run.link?.hasPrefix("opencode-markdown://note/") == true { return "" }
       if !run.offsets.isEmpty, run.offsets.allSatisfy({ $0 == nil }), run.copy == nil { return "" }
       return run.text
     }.joined()

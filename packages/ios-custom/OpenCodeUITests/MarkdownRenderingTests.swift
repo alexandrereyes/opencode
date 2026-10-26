@@ -121,6 +121,52 @@ import UIKit
     capture(app, "native-\(theme)-footnotes")
   }
 
+  func testCurrencyTableAndInlineHTMLDark() throws { try currency("openchamber-dark") }
+  func testCurrencyTableAndInlineHTMLLight() throws { try currency("openchamber-light") }
+
+  /// The synthetic `markdown-currency-fixture` reproduces a financial answer: `R$` values in a right-aligned table,
+  /// bold results, an inline formula, display math and a `<sub>` sources note.
+  private func currency(_ theme: String) throws {
+    continueAfterFailure = false
+    app.launchArguments = ["-OpenCodeServerURL", ProcessInfo.processInfo.environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177", "-OpenCodeTheme", theme,
+      "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top", "-OpenCodeMarkdownFixture",
+      "-OpenCodeMarkdownFixtureDocument", "markdown-currency-fixture", "-OpenCodeMarkdownTableWrap", "YES"]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    let transcript = app.collectionViews["conversation-transcript"]
+    XCTAssertTrue(transcript.waitForExistence(timeout: 25))
+    let table = app.scrollViews.matching(NSPredicate(format: "identifier BEGINSWITH 'markdown-table-content-'")).firstMatch
+    XCTAssertTrue(table.waitForExistence(timeout: 20))
+    reveal(table, transcript: transcript)
+    capture(app, "currency-\(theme)-table")
+    func cell(_ value: String) -> XCUIElement {
+      table.textViews.matching(NSPredicate(format: "value == %@", value)).firstMatch
+    }
+    for value in ["Cenário", "Resultado estimado em reais", "R$ 24.310,55", "Prejuízo de R$ 19.875,42", "US$ 4.120,00"] {
+      XCTAssertTrue(cell(value).waitForExistence(timeout: 5), value)
+    }
+    // Cells hold their text, not a formula, and the first column starts at the table's leading edge.
+    XCTAssertGreaterThanOrEqual(cell("Cenário").frame.minX, table.frame.minX)
+    let rows = [["Cenário", "Venda", "Valor bruto estimado", "Resultado estimado em reais"],
+      ["Só ações A", "120 ACME", "R$ 24.310,55", "Prejuízo de R$ 19.875,42"]]
+    for row in rows {
+      let frames = row.map { cell($0).frame }
+      for (left, right) in zip(frames, frames.dropFirst()) { XCTAssertLessThanOrEqual(left.maxX, right.minX + 0.5, "\(row)") }
+    }
+    // A number is one word: at most `R$` and the number on two lines, never the number split across more.
+    let number = cell("R$ 24.310,55")
+    XCTAssertLessThan(number.frame.height, 2.5 * UIFontMetrics(forTextStyle: .body).scaledValue(for: 22.5))
+    let note = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value CONTAINS 'Fontes: Corretora Exemplo'")).firstMatch
+    reveal(note, transcript: transcript)
+    let text = note.value as? String ?? ""
+    for tag in ["<sub>", "</sub>", "<kbd>", "<b>", "<br>", "<small>"] { XCTAssertFalse(text.contains(tag), tag) }
+    XCTAssertTrue(text.contains("x2, negrito, itálico, sublinhado, riscado, código, texto pequeno, linha\nquebrada e <span>tag desconhecida</span>."))
+    let prices = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value CONTAINS 'Preços entre'")).firstMatch
+    XCTAssertTrue((prices.value as? String ?? "").contains("Preços entre $5 e $10, R$30 ou US$12, moedas R$x e US$. e $HOME continuam texto; x^2 + y^2 = r^2 continua"))
+    capture(app, "currency-\(theme)-note")
+  }
+
   private func reveal(_ element: XCUIElement, transcript: XCUIElement, align: Bool = false) {
     let deadline = Date().addingTimeInterval(45)
     while Date() < deadline {

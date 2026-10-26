@@ -23,11 +23,24 @@ extension EnvironmentValues {
 final class ResponseTextView: UITextView {
   private(set) var measuredSizes: [CGFloat: CGSize] = [:]
   override var attributedText: NSAttributedString! {
-    didSet { invalidateMeasurement() }
+    didSet { invalidateMeasurement(); lineBreaks.widths = [:] }
   }
+  private let lineBreaks = InlineCodeLineBreaks()
+  override init(frame: CGRect, textContainer: NSTextContainer?) {
+    super.init(frame: frame, textContainer: textContainer)
+    lineBreaks.install(self)
+  }
+  required init?(coder: NSCoder) { nil }
   var codeGutter = false
   var gutterWidth: CGFloat = 44
-  var inlineCodeRanges: [NSRange] = []
+  var inlineCodeRanges: [NSRange] = [] {
+    didSet {
+      guard inlineCodeRanges != oldValue, let manager = textLayoutManager else { return }
+      lineBreaks.widths = [:]
+      manager.invalidateLayout(for: manager.documentRange)
+      invalidateMeasurement()
+    }
+  }
   var inlineCodeColor = UIColor.clear
   var gutterColor = UIColor.clear
   var gutterBorderColor = UIColor.clear
@@ -185,6 +198,47 @@ final class ResponseTextView: UITextView {
     selectedRange = NSRange(location: 0, length: 0)
     resignFirstResponder()
   }
+}
+
+/// Keeps short inline code of prose on one line: TextKit may not break inside it, so `/proventos` or `--all-pages`
+/// moves to the next line instead of leaving `/` or `--` behind. Longer spans and table cells wrap as before.
+/// Other delegate calls reach UIKit's own delegate, if any.
+private final class InlineCodeLineBreaks: NSObject, NSTextLayoutManagerDelegate {
+  weak var view: ResponseTextView?
+  weak var original: NSTextLayoutManagerDelegate?
+  var widths: [NSRange: CGFloat] = [:]
+
+  func install(_ view: ResponseTextView) {
+    self.view = view
+    original = view.textLayoutManager?.delegate
+    view.textLayoutManager?.delegate = self
+  }
+
+  func textLayoutManager(_ textLayoutManager: NSTextLayoutManager, shouldBreakLineBefore location: any NSTextLocation,
+    hyphenating: Bool) -> Bool {
+    let allowed = original?.textLayoutManager?(textLayoutManager, shouldBreakLineBefore: location, hyphenating: hyphenating) ?? true
+    guard allowed, let view, !view.inlineCodeRanges.isEmpty, view.sourceBlock?.kind != .table, let text = view.attributedText,
+      let line = textLayoutManager.textContainer?.size.width, line > 0, line < 10_000 else { return allowed }
+    let offset = textLayoutManager.offset(from: textLayoutManager.documentRange.location, to: location)
+    guard let range = view.inlineCodeRanges.first(where: { $0.location < offset && offset < NSMaxRange($0) }),
+      NSMaxRange(range) <= text.length else { return true }
+    let width = widths[range] ?? {
+      let value = text.attributedSubstring(from: range).boundingRect(
+        with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).width
+      widths[range] = value
+      return value
+    }()
+    let indent = (text.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle)?.headIndent ?? 0
+    // Line breaking cannot split the space before `/` or `-`, so the preceding word moves along with the span;
+    // spans up to half a line leave room for it, and wider ones keep wrapping normally.
+    return width > (line - indent) / 2
+  }
+
+  override func responds(to selector: Selector!) -> Bool {
+    super.responds(to: selector) || original?.responds(to: selector) == true
+  }
+  override func forwardingTarget(for selector: Selector!) -> Any? { original }
 }
 
 struct SelectableResponseText: UIViewRepresentable {

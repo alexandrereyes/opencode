@@ -135,6 +135,10 @@ private struct ResponseTableContent: UIViewRepresentable {
       }
     }
     view.columns = table.alignments.count
+    if view.identity != "\(messageID)/\(partID)/\(block.id)" {
+      view.identity = "\(messageID)/\(partID)/\(block.id)"
+      view.contentOffset.x = 0
+    }
     view.accessibilityIdentifier = "markdown-table-content-\(block.id)"
     view.wrap = wrap
     view.backgroundColor = theme.uiColor(.tableSurface)
@@ -165,7 +169,7 @@ private struct ResponseTableContent: UIViewRepresentable {
   }
 }
 
-private final class ResponseTableView: UIScrollView {
+final class ResponseTableView: UIScrollView {
   struct Measurement {
     let widths: [CGFloat]
     let heights: [CGFloat]
@@ -175,6 +179,7 @@ private final class ResponseTableView: UIScrollView {
   var cells: [[ResponseTextView]] = []
   var coordinators: [[SelectableResponseText.Coordinator]] = []
   var columns = 0
+  var identity = ""
   var wrap = true
   var border = UIColor.clear
   private var measurements: [CGFloat: Measurement] = [:]
@@ -200,27 +205,14 @@ private final class ResponseTableView: UIScrollView {
     if let cached = measurements[width] { return cached }
     guard columns > 0 else { return Measurement(widths: [], heights: []) }
     let natural = (0..<columns).map { column in
-      max(120, cells.map { row in
-        row[column].attributedText.boundingRect(with: CGSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude),
-          options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).width + 32
-      }.max() ?? 120)
+      max(120, cells.map { row in ceil(Self.width(row[column].attributedText)) + 32 }.max() ?? 120)
     }
-    var widths = natural
-    if wrap && natural.reduce(0, +) > width {
-      var pending = Set(0..<columns)
-      var remaining = max(width, CGFloat(columns) * 120)
-      while !pending.isEmpty {
-        let share = remaining / CGFloat(pending.count)
-        let short = pending.filter { natural[$0] <= share }
-        if short.isEmpty {
-          pending.forEach { widths[$0] = share }
-          break
-        }
-        short.forEach { widths[$0] = natural[$0]; remaining -= natural[$0]; pending.remove($0) }
-      }
+    // A very long token (a URL) may still break rather than make the column wider than the screen.
+    let minimum = (0..<columns).map { column in
+      max(64, cells.map { row in min(240, ceil(Self.longestWord(row[column].attributedText))) + 32 }.max() ?? 64)
     }
-    let extra = max(0, width - widths.reduce(0, +)) / CGFloat(columns)
-    widths = widths.map { $0 + extra }
+    let widths = MarkdownTable.columnWidths(natural: natural.map(Double.init), minimum: minimum.map(Double.init),
+      available: Double(width), wrap: wrap).map { CGFloat($0) }
     let heights = cells.map { row in
       (row.enumerated().map { column, text in text.fittingSize(width: widths[column] - 32).height }.max() ?? 26) + 20
     }
@@ -229,12 +221,31 @@ private final class ResponseTableView: UIScrollView {
     measurements[width] = result
     return result
   }
+  static func width(_ text: NSAttributedString) -> CGFloat {
+    text.boundingRect(with: CGSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude),
+      options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).width
+  }
+  /// The widest run between spaces, measured with its own attributes (bold, code, formulas).
+  static func longestWord(_ text: NSAttributedString) -> CGFloat {
+    let units = text.string as NSString
+    var longest: CGFloat = 0
+    var start = 0
+    for index in 0...units.length {
+      guard index == units.length || CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(units.character(at: index)) ?? " ") else { continue }
+      if index > start { longest = max(longest, width(text.attributedSubstring(from: NSRange(location: start, length: index - start)))) }
+      start = index + 1
+    }
+    return longest
+  }
   override func layoutSubviews() {
     super.layoutSubviews()
     guard layoutWidth != bounds.width else { return }
     layoutWidth = bounds.width
     let layout = measure(bounds.width)
     contentSize = CGSize(width: layout.width, height: layout.height)
+    // A recycled or narrowed table starts at its leading edge, never past its new content.
+    let maximum = max(0, layout.width - bounds.width)
+    if contentOffset.x > maximum || contentOffset.x < 0 { contentOffset.x = min(max(0, contentOffset.x), maximum) }
     separators = []
     var y: CGFloat = 0
     for (row, texts) in cells.enumerated() {
