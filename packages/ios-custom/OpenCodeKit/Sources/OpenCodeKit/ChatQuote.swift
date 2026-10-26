@@ -13,11 +13,18 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
     public let end: Int
     public let exact: String
     public let coordinate: String?
-    public init(start: Int, end: Int, exact: String, coordinate: String? = nil) {
+    /// Rendered plain text around the selection, to resolve the anchor in another client's coordinates.
+    public let prefix: String?
+    public let suffix: String?
+    public init(
+      start: Int, end: Int, exact: String, coordinate: String? = nil, prefix: String? = nil, suffix: String? = nil
+    ) {
       self.start = start
       self.end = end
       self.exact = exact
       self.coordinate = coordinate
+      self.prefix = prefix
+      self.suffix = suffix
     }
   }
   public init(
@@ -38,9 +45,19 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
     else { return nil }
     let exact = (source as NSString).substring(with: mapped)
     guard !exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    // The selected block's rendered text, like ConversationSearch's flattened text (custom.quotes contract).
+    let rendered = block.text as NSString
+    let start = min(range.location, rendered.length)
+    let end = min(NSMaxRange(range), rendered.length)
+    // Whole composed characters only, so a context never begins or ends inside a surrogate pair.
+    let before = start > 0 ? rendered.rangeOfComposedCharacterSequence(at: max(0, start - Self.context)).location : 0
+    let after = end < rendered.length
+      ? NSMaxRange(rendered.rangeOfComposedCharacterSequence(at: min(rendered.length, end + Self.context) - 1)) - end : 0
     return Self(
       messageID: messageID, partID: partID, text: block.copyText(in: range).trimmingCharacters(in: .whitespacesAndNewlines),
-      anchor: Anchor(start: mapped.location, end: NSMaxRange(mapped), exact: exact, coordinate: "source"))
+      anchor: Anchor(start: mapped.location, end: NSMaxRange(mapped), exact: exact, coordinate: "source",
+        prefix: rendered.substring(with: NSRange(location: before, length: start - before)),
+        suffix: rendered.substring(with: NSRange(location: end, length: after))))
   }
   public var document: ComposerDocument {
     get { ComposerDocument(parts: commentPrompt ?? [], fallback: comment) }
@@ -79,6 +96,7 @@ public struct ChatQuote: Codable, Sendable, Equatable, Identifiable {
     }
     return quote
   }
+  static let context = 64
   public static func read(_ value: JSONValue?) -> [Self] {
     guard let value, let data = try? JSONEncoder().encode(value) else { return [] }
     return (try? JSONDecoder().decode([Self].self, from: data)) ?? []

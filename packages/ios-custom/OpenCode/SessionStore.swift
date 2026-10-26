@@ -90,6 +90,7 @@ final class SessionStore {
   @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let quoteDismissals: ChatQuoteDismissals
+  @ObservationIgnored let quoteModes = QuoteModes()
   @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored private var order = RecentOrder()
@@ -119,8 +120,9 @@ final class SessionStore {
     // "<sessionID|*|create>:<delay ms>:admit|fail", for optimistic-send checks against an isolated sandbox.
     let promptFixture = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_PROMPT_FIXTURE"]?.split(separator: ":").map(String.init) : nil
+    let quotesUnavailable = isolated && ProcessInfo.processInfo.environment["OPENCODE_TEST_QUOTES_UNAVAILABLE"] == "1"
     let injected = suppliedClient ?? (ScrollFixtures.mode == "catalog" ? ScreenCatalogFixture.client(configuration) : nil)
-    let client = injected ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
+    let base: OpenCodeClient = injected ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
       ?? promptFixture.flatMap { parts in
         parts.count == 3 ? OpenCodeClient.promptAdmissionFixture(configuration: configuration, sessionID: parts[0],
           delay: .milliseconds(Int(parts[1]) ?? 0), fail: parts[2] == "fail") : nil
@@ -129,6 +131,7 @@ final class SessionStore {
       ?? revertFailure.map { OpenCodeClient.revertFailureFixture(configuration: configuration, sessionID: $0) }
       ?? (ScrollFixtures.mode == nil
         ? OpenCodeClient(configuration: configuration) : .scrollFixture(configuration: configuration))
+    let client = quotesUnavailable ? .quotesUnavailableFixture(configuration: configuration, inner: base) : base
     #else
     let client = suppliedClient ?? OpenCodeClient(configuration: configuration)
     #endif

@@ -287,6 +287,25 @@ disappear. A rejected send keeps the draft quotes and marks. Sent marks from old
 remain: navigation briefly draws the dismissed passage's background (no number, so no reflow) for three seconds.
 Restoring a queued or undone message puts its quotes back into the draft, where they are marked again.
 
+**Alexandre, 26/10: citações no servidor.** With `custom.quotes` (`packages/plugin-app-custom/docs/quotes.md`, the
+contract the web follows too), the pending quotes of a Session and the hidden marks live on the server, shared with
+the web. `QuoteSync` (one per conversation, `OpenCode/QuoteSync.swift`) probes `info` when a conversation opens,
+after every SSE reconnect and on foreground: `rpc.unavailable`/`rpc.method_not_found` keep today's local storage
+untouched; network, 401 and 5xx keep the current mode and delete nothing. In server mode `draft.quotes` mirrors
+`list` (reloaded on `rpc.custom.quotes.updated` for this Session only and newer revision, never a transcript refresh),
+`draft.json` keeps only the rest of the draft, and Concluir uploads new attachments (content-addressed IDs) before
+`save`; an empty comment without attachments is removed, like the web. Trash calls `remove`; a send clears exactly
+the sent IDs with `reason: "sent"` after admission (a failed clear is retried and hidden meanwhile). Comment bytes
+are fetched with `attachment` before an editor or a send reads them and cached by ID. Listings older than this
+device's last write, or arriving while a send or a write is in flight, wait for the next one. Undo restores quotes
+as new quotes with new IDs that replace the pending ones (sent IDs are tombstoned); an edited queued prompt shows
+its quotes as an unpublished local preview, as on the web. Each Session migrates once: local attachments are
+uploaded, quotes imported with their IDs, `QuoteMarks` dismissed, and only then removed locally (idempotent).
+Selections add `prefix`/`suffix` (64 characters of the block's rendered text); web `rendered` anchors whose offsets
+fail resolve by whitespace-insensitive text search with that context, and older web anchors without it stay unmarked.
+`script/test-quotes.py` covers both modes (`--quotes-unavailable` for a server without the RPC) and
+`OpenCodeUITests/QuoteServerTests` the shared cases.
+
 New native anchors retain exact UTF-16 source coordinates with an optional `coordinate: "source"` discriminator;
 untagged old native anchors remain readable, and web rendered-text anchors use the existing Markdown source mapping.
 Exact offsets must still match: streaming append survives, edits before/inside the quote do not silently relocate it.

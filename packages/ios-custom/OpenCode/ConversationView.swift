@@ -201,7 +201,8 @@ struct ConversationView: View {
         id: id, client: sessions.client, hub: sessions.hub,
         expansions: sessions.expansions, catalog: sessions.catalog,
         reversion: sessions.reversions.value(id, client: sessions.client),
-        quoteDismissals: sessions.quoteDismissals)
+        quoteDismissals: sessions.quoteDismissals, quoteModes: sessions.quoteModes,
+        draft: sessions.drafts.draft(id))
     conversation.masterMode = master
     _conversation = State(initialValue: conversation)
   }

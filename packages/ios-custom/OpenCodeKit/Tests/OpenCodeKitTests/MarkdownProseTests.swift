@@ -66,7 +66,9 @@ private func proseSections() throws -> (blocks: [MarkdownBlock], prose: Markdown
   let sourceStart = source.range(of: "destaque").location
   let sourceEnd = NSMaxRange(source.range(of: "Item dois"))
   #expect(quote.anchor == .init(start: sourceStart, end: sourceEnd,
-    exact: source.substring(with: NSRange(location: sourceStart, length: sourceEnd - sourceStart)), coordinate: "source"))
+    exact: source.substring(with: NSRange(location: sourceStart, length: sourceEnd - sourceStart)), coordinate: "source",
+    prefix: quote.anchor?.prefix, suffix: quote.anchor?.suffix))
+  #expect(quote.anchor?.prefix == "Primeiro parágrafo com ")
   #expect(quote.text == "destaque.\n\nSeção\n\n•\tItem um\n•\tItem dois")
   // The anchor resolves from the original blocks and maps back onto the joined text without separators or markers.
   let ranges = ChatQuoteAnchoring.sourceRanges(quote, source: proseSource, blocks: blocks)

@@ -63,7 +63,12 @@ public enum ChatQuoteAnchoring {
       let rendered = rendering(blocks)
       if valid(anchor, in: rendered.text) { return mapped(range, offsets: rendered.offsets) }
       // Earlier native releases did not tag their source-coordinate anchors.
-      return valid(anchor, in: source) ? [range] : []
+      if valid(anchor, in: source) { return [range] }
+      // custom.quotes step 2: the web flattens rendered text differently, so find its exact text instead.
+      // Web drafts from before the contract have no context and are never moved to another occurrence.
+      guard anchor.prefix != nil || anchor.suffix != nil else { return [] }
+      return search(anchor.exact, prefix: anchor.prefix, suffix: anchor.suffix, in: rendered.text)
+        .map { mapped($0, offsets: rendered.offsets) } ?? []
     }
     guard !quote.text.isEmpty else { return [] }
     let rendered = rendering(blocks)
@@ -71,6 +76,55 @@ public enum ChatQuoteAnchoring {
       return unique(quote.text, in: rendered.text).map { mapped($0, offsets: rendered.offsets) } ?? []
     }
     return unique(quote.text, in: source).map { [$0] } ?? []
+  }
+  /// Whitespace-insensitive search; several matches are ranked by the common text with `prefix`
+  /// before and `suffix` after them, and a tie stays unresolved (`docs/quotes.md`, step 2).
+  static func search(_ needle: String, prefix: String?, suffix: String?, in text: String) -> NSRange? {
+    let haystack = normalized(text)
+    let target = normalized(needle).units
+    guard !target.isEmpty, target.count <= haystack.units.count else { return nil }
+    let starts = (0...(haystack.units.count - target.count)).filter {
+      haystack.units[$0] == target[0] && Array(haystack.units[$0..<($0 + target.count)]) == target
+    }
+    guard !starts.isEmpty else { return nil }
+    // Context keeps its edge spaces: it abuts the selection.
+    let before = normalized(prefix ?? "", trim: false).units
+    let after = normalized(suffix ?? "", trim: false).units
+    let scored = starts.map { start -> (Int, Int) in
+      let end = start + target.count
+      let common = zip(before.reversed(), haystack.units[..<start].reversed()).prefix { $0 == $1 }.count
+        + zip(after, haystack.units[end...]).prefix { $0 == $1 }.count
+      return (start, common)
+    }
+    let best = scored.map(\.1).max() ?? 0
+    let winners = scored.filter { $0.1 == best }
+    guard winners.count == 1, let start = winners.first?.0 else { return nil }
+    let location = haystack.offsets[start]
+    return NSRange(location: location, length: haystack.offsets[start + target.count - 1] + 1 - location)
+  }
+  /// Every whitespace run becomes one space and the ends are trimmed; `offsets` maps back to `text`.
+  private static func normalized(_ text: String, trim: Bool = true) -> (units: [UInt16], offsets: [Int]) {
+    var units: [UInt16] = []
+    var offsets: [Int] = []
+    var space: Int?
+    for (index, unit) in text.utf16.enumerated() {
+      if let scalar = Unicode.Scalar(unit), CharacterSet.whitespacesAndNewlines.contains(scalar) {
+        if space == nil { space = index }
+        continue
+      }
+      if let run = space, !units.isEmpty || !trim {
+        units.append(32)
+        offsets.append(run)
+      }
+      space = nil
+      units.append(unit)
+      offsets.append(index)
+    }
+    if let run = space, !trim {
+      units.append(32)
+      offsets.append(run)
+    }
+    return (units, offsets)
   }
   private static func valid(_ anchor: ChatQuote.Anchor, in text: String) -> Bool {
     guard anchor.start >= 0, anchor.end > anchor.start, anchor.end <= text.utf16.count else { return false }

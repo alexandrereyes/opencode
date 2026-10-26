@@ -8,7 +8,11 @@ import OpenCodeKit
   private(set) var messages: [ConversationMessage] = []
   var activity = ConversationActivity.empty
   var quoteIndex = ChatQuoteIndex()
-  private(set) var dismissedQuotes: Set<String> = []
+  private var localDismissed: Set<String> = []
+  /// Sent quote marks hidden in responses: the server's list (`custom.quotes`) or this device's.
+  var dismissedQuotes: Set<String> { quotes.dismissed ?? localDismissed }
+  /// Pending quotes on the server, when it has `custom.quotes`.
+  let quotes: QuoteSync
   private(set) var models: [ModelInfo] = []
   private(set) var defaultModel: ModelInfo?
   private(set) var agents: [AgentInfo] = []
@@ -113,7 +117,8 @@ import OpenCodeKit
   init(
     id: String, client: OpenCodeClient, hub: EventHub,
     expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil,
-    reversion: ConversationRevert? = nil, quoteDismissals: ChatQuoteDismissals? = nil
+    reversion: ConversationRevert? = nil, quoteDismissals: ChatQuoteDismissals? = nil,
+    quoteModes: QuoteModes? = nil, draft: ConversationDraft? = nil
   ) {
     self.id = id
     self.client = client
@@ -124,15 +129,34 @@ import OpenCodeKit
     expansionMemory = expansions
     expansionValues = expansions?.values(id) ?? [:]
     self.quoteDismissals = quoteDismissals
-    dismissedQuotes = quoteDismissals?.values(id) ?? []
+    localDismissed = quoteDismissals?.values(id) ?? []
+    quotes = QuoteSync(sessionID: id, client: client, modes: quoteModes ?? QuoteModes(), dismissals: quoteDismissals)
+    quotes.draft = draft
     mcps.changed = { [weak self] in self?.prepareApps() }
+    quotes.failed = { [weak self] message in self?.toast.show(message, kind: .error) }
   }
-  /// Hides sent quote marks in responses on this device; `metadata.quotes` is never rewritten.
+  /// Hides sent quote marks in responses; `metadata.quotes` is never rewritten. In server mode the
+  /// list is shared with the web, otherwise it stays on this device.
   @discardableResult func dismissQuotes(_ ids: Set<String>) -> Bool {
     guard !ids.isSubset(of: dismissedQuotes) else { return true }
-    dismissedQuotes.formUnion(ids)
+    if quotes.server {
+      Task {
+        if await !quotes.dismiss(ids) {
+          toast.show("A marcação foi removida, mas não pôde ser salva no servidor.", kind: .error)
+        }
+      }
+      return true
+    }
+    localDismissed.formUnion(ids)
     guard let quoteDismissals else { return true }
     return (try? quoteDismissals.dismiss(ids, sessionID: id)) != nil
+  }
+  /// Opening, reconnecting and returning to the foreground re-probe and relist the pending quotes.
+  func syncQuotes() {
+    guard let directory = session?.location.directory, let draft = quotes.draft else { return }
+    quotes.directory = directory
+    draft.quoteSync = quotes
+    Task { await quotes.start() }
   }
   /// Explicit navigation takes priority over the saved reading position (search/reveal, wave 5).
   func revealMessage(_ id: String, offset: Double = 0, persist: Bool = true) {
@@ -359,6 +383,8 @@ import OpenCodeKit
         submission = reusable
       } else {
         var attachments: [DeliveredAttachment] = []
+        // Server-stored comment attachments are fetched once, then cached by content ID.
+        try await quotes.download(snapshot.attachments)
         for attachment in snapshot.attachments {
           if let path = attachment.remotePath {
             attachments.append(.init(attachment: attachment, path: path, inline: nil))
@@ -398,9 +424,12 @@ import OpenCodeKit
         try await client.compact(id, id: submission.request.id)
       }
       // Admission was acknowledged: the carrying bubble now records the quote, so the response mark goes.
-      dismissQuotes(Set(ChatQuote.read(submission.request.metadata["quotes"]).map(\.id)))
+      let sent = ChatQuote.read(submission.request.metadata["quotes"]).map(\.id)
+      dismissQuotes(Set(sent))
       draft.didSend()
       await draft.clear()
+      // Only the IDs that went out: a quote added meanwhile on another device stays pending.
+      await quotes.sent(sent)
       catalog?.committed(submission.model)
       Haptics.play(.light)
       draft.focused = false
@@ -425,6 +454,8 @@ import OpenCodeKit
         "Não foi possível concluir o envio. Seu rascunho foi mantido. \(error.localizedDescription)"
       toast.show("Não foi possível enviar. Seu rascunho foi mantido.", kind: .error)
     }
+    // Listings that arrived while the optimistic send owned the composer were deferred.
+    Task { await quotes.reload() }
   }
   func askSideQuestion(_ request: SideQuestionRequest) async throws -> String {
     #if DEBUG
@@ -665,13 +696,18 @@ import OpenCodeKit
     let events = hub.events()
     await refresh()
     scheduleResources()
+    syncQuotes()
     for await frame in events {
       if Task.isCancelled { break }
       switch frame.event {
       case .connected:
         scheduleRefresh()
         scheduleResources()
+        syncQuotes()
       case .disconnected: break
+      case .update(let event) where event.type == QuoteServer.updated:
+        // Quote edits are per Session and revision: never a transcript refresh, and never another Session's.
+        if event.data.sessionID == id, let revision = event.data.revision { quotes.updated(revision: revision) }
       case .update(let event) where event.type == OpenCodeClient.resourcesChangedEvent:
         scheduleResources()
       case .update(let event):

@@ -89,6 +89,8 @@ extension View {
         store.toast.show("Não foi possível salvar os anexos restaurados. \(error.localizedDescription)", kind: .error)
         return false
       }
+      // In server mode the restored quotes replace the pending ones there too, like the local draft.
+      await store.quotes.restored()
       let result = await SessionRevert.perform(sessionID: session.id, target: target,
         directory: session.location.directory, active: store.active, pending: store.inbox, using: client,
         progress: { [weak self] value in await self?.report(value) })

@@ -116,7 +116,7 @@ struct QuoteCommentEditor: View {
       .task {
         guard !lent else { return }
         lent = true
-        draft.lend(quote, to: editor)
+        await draft.lend(quote, to: editor)
       }
       .onAppear { editor.focused = true }
       // A transcription lands in the comment, like the fullscreen review of the message composer.

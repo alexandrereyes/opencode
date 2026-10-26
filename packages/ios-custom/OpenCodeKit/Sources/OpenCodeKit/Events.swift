@@ -31,6 +31,8 @@ public struct ConversationEvent: Codable, Sendable {
     public let form: JSONValue?
     /// `rpc.custom.device.request` carries its request here.
     public let request: JSONValue?
+    /// `rpc.custom.quotes.updated` carries the Session's new quote revision.
+    public let revision: Double?
     public var owner: String? { sessionID ?? form?.object?["sessionID"]?.string }
   }
 }

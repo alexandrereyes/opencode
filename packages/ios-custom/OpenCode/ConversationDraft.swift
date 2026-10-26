@@ -129,7 +129,10 @@ extension ComposerTokenKind {
   @ObservationIgnored weak var input: ComposerInputView?
   var editorOwner: UUID?
   var dismissedTrigger: ComposerTrigger? { didSet { refreshTrigger() } }
-  var editing: InboxItem?
+  var editing: InboxItem? {
+    // A queued prompt's quotes were only a local preview; the server's list returns when editing ends.
+    didSet { if oldValue != nil, editing == nil, serverQuotes { Task { await quoteSync?.reload() } } }
+  }
   var replacing: String? { didSet { changed() } }
   var sending = false
   var importing = false
@@ -145,6 +148,11 @@ extension ComposerTokenKind {
 
   /// A quote comment's editor (QuoteCommentEditor) never saves a snapshot; Concluir commits it.
   @ObservationIgnored private var ephemeral = false
+  @ObservationIgnored private var loading: Task<Void, Never>?
+  /// In server mode (`custom.quotes`) the quotes and their attachments mirror the server: `draft.json`
+  /// keeps only the rest, and edits go through `quoteSync`.
+  @ObservationIgnored private(set) var serverQuotes = false
+  @ObservationIgnored weak var quoteSync: QuoteSync?
 
   init(server: String, id: String) { persistence = DraftPersistence(server: server, sessionID: id) }
   private init(comment quote: ChatQuote, recordingFactory: ((URL) -> VoiceRecordingComposer)?) {
@@ -161,8 +169,9 @@ extension ComposerTokenKind {
     ConversationDraft(comment: quote, recordingFactory: recordingFactory)
   }
   /// Gives a comment editor this draft's attachments of `quote`, as clones its chips and removals can use.
-  func lend(_ quote: ChatQuote, to editor: ConversationDraft) {
+  func lend(_ quote: ChatQuote, to editor: ConversationDraft) async {
     let lent = attachments.filter { $0.quoteID == quote.id }
+    await quoteSync?.cache(lent)
     try? FileManager.default.createDirectory(at: editor.persistence.directory, withIntermediateDirectories: true)
     for attachment in lent {
       try? FileManager.default.copyItem(at: persistence.file(attachment), to: editor.persistence.file(attachment))
@@ -203,6 +212,7 @@ extension ComposerTokenKind {
     }
     await persist()
     try? await persistence.cleanAttachments(retaining: attachments)
+    if serverQuotes { await quoteSync?.save(quote.id) }
   }
   var document: ComposerDocument { _ = contentRevision; return ComposerDocument(editor: editorText) }
   var snapshot: DraftSnapshot {
@@ -211,6 +221,15 @@ extension ComposerTokenKind {
       document: document, attachments: attachments, model: model, agent: agent,
       cursor: document.documentOffset(selection.location), replacing: replacing, quotes: quotes, newSession: newSession,
       revertedContext: revertedContext, dictationPending: dictationPending ? true : nil)
+  }
+  /// What `draft.json` keeps: server quotes would otherwise look like unmigrated local ones on relaunch.
+  private var persisted: DraftSnapshot {
+    var value = snapshot
+    if serverQuotes {
+      value.quotes = []
+      value.attachments = value.attachments.filter { $0.quoteID == nil }
+    }
+    return value
   }
   private func refreshEditorState() {
     // CFAttributedStringGetString reads the live TextKit string; bridging `string` copies it on every edit.
@@ -229,7 +248,14 @@ extension ComposerTokenKind {
     }()
     if trigger != next { trigger = next }
   }
+  /// Concurrent callers (the composer, the quote sync) wait for the same restoration.
   func load() async {
+    if let loading { return await loading.value }
+    let task = Task { await restoreFromDisk() }
+    loading = task
+    await task.value
+  }
+  private func restoreFromDisk() async {
     guard !restored, !deleted else { return }
     restored = true
     restoring = true
@@ -260,7 +286,7 @@ extension ComposerTokenKind {
   func persist() async {
     guard !deleted, !ephemeral else { return }
     saving?.cancel()
-    do { try await persistence.save(snapshot) } catch {
+    do { try await persistence.save(persisted) } catch {
       persistenceError = "Não foi possível salvar o rascunho."
     }
   }
@@ -271,7 +297,7 @@ extension ComposerTokenKind {
       guard holdsPersistence, !oldValue, restored, !deleted else { return }
       // Replace a pending debounced save with the unsent draft before the composer clears.
       saving?.cancel()
-      let snapshot = snapshot
+      let snapshot = persisted
       saving = Task { try? await persistence.save(snapshot) }
     }
   }
@@ -366,7 +392,52 @@ extension ComposerTokenKind {
     Task {
       await persist()
       try? await persistence.cleanAttachments(retaining: attachments)
+      if serverQuotes { await quoteSync?.remove(quote.id) }
     }
+  }
+  /// Replaces the quotes with the server's, keeping the rest of the draft.
+  func applyServerQuotes(_ value: [ChatQuote], attachments quoted: [DraftAttachment]) {
+    serverQuotes = true
+    if quotes != value { quotes = value }
+    let next = attachments.filter { $0.quoteID == nil } + quoted
+    if attachments != next { attachments = next }
+  }
+  /// Leaves server mode (a server without `custom.quotes`) from an empty local quote list.
+  func leaveServerQuotes() {
+    guard serverQuotes else { return }
+    serverQuotes = false
+    quotes = []
+    attachments.removeAll { $0.quoteID != nil }
+  }
+  /// After uploading, a quote's attachments take the server's content IDs, files and comment parts included.
+  func renameQuoteAttachments(_ quoteID: String, _ renamed: [String: DraftAttachment]) async {
+    guard !renamed.isEmpty else { return }
+    let names = renamed.mapValues(\.id)
+    attachments = attachments.map { $0.quoteID == quoteID ? renamed[$0.id] ?? $0 : $0 }
+    if let index = quotes.firstIndex(where: { $0.id == quoteID }) {
+      quotes[index] = QuoteServer.renamed(quotes[index], names)
+    }
+    try? await persistence.cleanAttachments(retaining: attachments)
+  }
+  /// Gives restored quotes new IDs: the server tombstones sent IDs, and these are drafts again.
+  func reidentifyQuotes() {
+    let ids = Dictionary(uniqueKeysWithValues: quotes.map { ($0.id, UUID().uuidString) })
+    quotes = quotes.map { quote in
+      var value = ChatQuote(id: ids[quote.id] ?? quote.id, messageID: quote.messageID, partID: quote.partID,
+        text: quote.text, comment: quote.comment, anchor: quote.anchor)
+      value.commentPrompt = quote.commentPrompt
+      return value
+    }
+    attachments = attachments.map { attachment in
+      guard let quote = attachment.quoteID, let id = ids[quote] else { return attachment }
+      return DraftAttachment(id: attachment.id, name: attachment.name, mime: attachment.mime, size: attachment.size,
+        remotePath: attachment.remotePath, quoteID: id)
+    }
+  }
+  /// Drops a quote the server refuses (`already_sent`) or that the empty-comment rule removed.
+  func dropQuote(_ id: String) {
+    quotes.removeAll { $0.id == id }
+    attachments.removeAll { $0.quoteID == id }
   }
   func restore(_ item: InboxItem) {
     revertedContext = nil
@@ -408,32 +479,31 @@ extension ComposerTokenKind {
       $0.element.object?["mention"] == nil
         && $0.element.object?["source"]?.object?["type"]?.string == "inline"
     }
-    if !inline.isEmpty {
-      importing = true
-      Task {
-        defer { importing = false }
-        for (index, file) in inline {
-          guard let object = file.object, let encoded = object["data"]?.string,
-            let bytes = Data(base64Encoded: encoded), let mime = object["mime"]?.string
-          else { continue }
-          guard
-            attachments.reduce(0, { $0 + $1.size }) + bytes.count <= AttachmentEncoding.draftLimit
-          else {
-            persistenceError = "Alguns anexos excedem o limite de 25 MiB do rascunho."
-            continue
-          }
-          let quote = firstQuote >= 0 && index >= firstQuote ? quoted[index - firstQuote] : nil
-          let attachment = DraftAttachment(
-            id: quote?.id ?? UUID().uuidString,
-            name: object["name"]?.string ?? "Anexo", mime: mime, size: bytes.count,
-            quoteID: quote?.quoteID)
-          do {
-            try await persistence.store(bytes, attachment: attachment)
-            attachments.append(attachment)
-          } catch { persistenceError = "Não foi possível restaurar o anexo da fila." }
+    guard !inline.isEmpty else { return }
+    importing = true
+    Task {
+      defer { importing = false }
+      for (index, file) in inline {
+        guard let object = file.object, let encoded = object["data"]?.string,
+          let bytes = Data(base64Encoded: encoded), let mime = object["mime"]?.string
+        else { continue }
+        guard
+          attachments.reduce(0, { $0 + $1.size }) + bytes.count <= AttachmentEncoding.draftLimit
+        else {
+          persistenceError = "Alguns anexos excedem o limite de 25 MiB do rascunho."
+          continue
         }
-        await persist()
+        let quote = firstQuote >= 0 && index >= firstQuote ? quoted[index - firstQuote] : nil
+        let attachment = DraftAttachment(
+          id: quote?.id ?? UUID().uuidString,
+          name: object["name"]?.string ?? "Anexo", mime: mime, size: bytes.count,
+          quoteID: quote?.quoteID)
+        do {
+          try await persistence.store(bytes, attachment: attachment)
+          attachments.append(attachment)
+        } catch { persistenceError = "Não foi possível restaurar o anexo da fila." }
       }
+      await persist()
     }
   }
 }

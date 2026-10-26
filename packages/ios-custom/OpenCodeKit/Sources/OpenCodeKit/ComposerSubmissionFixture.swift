@@ -20,6 +20,20 @@ extension OpenCodeClient {
     }
   }
 
+  /// A server without `custom.quotes` (before `custom:update`): its RPCs answer `rpc.method_not_found`.
+  /// Other requests go through `inner`, so it combines with the other failure fixtures.
+  public static func quotesUnavailableFixture(configuration: ServerConfiguration, inner: OpenCodeClient) -> Self {
+    precondition(configuration.isolatedTestSandbox)
+    return Self(configuration: configuration) { request in
+      guard request.url?.path.hasPrefix("/api/rpc/custom.quotes/") == true else {
+        let data = try await inner.data(request)
+        return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+      }
+      let body = Data(#"{"_tag":"RpcError","type":"rpc.method_not_found","message":"Unknown RPC"}"#.utf8)
+      return (body, HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+    }
+  }
+
   /// Delays one Session's prompt admission, then rejects it or admits it without waking
   /// execution, so optimistic-send checks need no model call. `*` matches every Session's prompt;
   /// `create` targets new-session creation instead. Sandbox-only.
