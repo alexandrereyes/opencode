@@ -2549,13 +2549,18 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   `attentionTotal/activeTotal`, the expanded header with `precisa`/`precisam`, the footer plurals, pending titles,
   row labels) are pure and tested. `AgentsActivityAttributes` (`VoiceShared/`, shared with the widget extension) is the
   APNs `attributes-type`; its `theme` carries `ThemeRole` names → `#RRGGBBAA` (the 12 required roles plus `info`).
-- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. The Lock Screen clips an activity at 160 points, less
-  than the approved mock with a focus *and* a pending block, so `AgentsLockScreenView` tries three densities through
-  `ViewThatFits`: the mock's layout (activity and question text on their own lines), then compact (activity after the
-  project, one-line pending rows), then tight (header row folded into the footer, at most two pending rows). The
-  footer drops its dots, then scales, before truncating. The expanded island shows the header and up to three rows,
-  dropping rows rather than clipping one. `há 3 min.` is a system-updated relative date. The mascot is drawn as a
-  vector shape in theme colors, so the extension needs no image asset.
+- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. **Rev. 27/10:** heights are deterministic. The
+  expanded Dynamic Island proposes an unbounded height and clips on device (the first `ViewThatFits` version cut a
+  row on the iPhone 17 Pro Max), so every block has a fixed frame from `AgentsLayout` (OpenCodeKit). A ruler measured
+  110 points for the bottom region on iPhone 17 Pro and Pro Max, with the rounded corners biting from about 95; the
+  island uses a 96-point ceiling: an 18-point header and up to three single-line 20-point rows (avatar, truncating
+  title, project, status), plus a `+N` line only when it fits. The Lock Screen (Apple: may truncate above 160 points)
+  picks one of three densities by computed height under 156 points, not by measurement. `AgentsActivityRenderTests`
+  checks that rendered heights equal the computed ones. On Apple Watch the Lock Screen closure branches on
+  `activityFamily`: `.supplementalActivityFamilies([.small])` shows the mascot inside a segmented subagent ring (up to
+  8 segments, a continuous arc above), the minimal island's `!N`/`?N`/hand badge and the first two sessions, in
+  fixed metrics for the smallest Smart Stack (152 × 69.5 points). `há 3 min.` is a system-updated relative date.
+  The mascot is drawn as a vector shape in theme colors, so the extension needs no image asset.
 - **Driver:** `OpenCode/LiveActivity/AgentsActivityAgent.swift`. The main-actor agent forwards each event-stream
   connection (launch and every foreground) and `rpc.custom.live-activity.changed` (routed by `EventHub` like
   `custom.device`, never to screens) to the `AgentsActivityDriver` actor, which does all ActivityKit and RPC work. On
@@ -2565,11 +2570,13 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   `activityStateUpdates` (`ended` with `ended`/`dismissed`). Tokens and endings of another server wait until it is the
   active one.
 - **Local updates:** with the app running, a non-null state starts the activity (`pushType: .token`, falling back to
-  a local-only activity) or updates it; a null state shows the last state with active/pending/failed cleared and ends
-  it 10 minutes after the last activity, dismissed 30 minutes later, as the backend does. A swiped-away activity is
+  a local-only activity) or updates it; a null state ends it at once with `.immediate` dismissal, never leaving an
+  idle-only card (the backend's `end` push also dismisses immediately). A swiped-away activity is
   not restarted locally until `activeTotal` returns to 0. While APNs is `unconfigured` this is the only update path.
-- **Duplicates:** one activity per `serverKey`; when a local start races a push start, the one seen last is kept and
-  the others are ended (and reported as `ended`).
+- **Duplicates (rev. 27/10):** at most one activity per `serverKey` on screen, in any state. At launch (also the
+  background launch after a push-to-start, `AgentsActivityAgent.watch()`), on every connection, on each
+  `activityUpdates` element and before a local start, `AgentsDuplicates.toEnd` keeps the newest live activity; the
+  others, including ended cards still visible, end with `.immediate` dismissal and are reported as `ended`.
 - **Server key:** the saved server's ID (`builtin` for the Mac); with a launch override (sandbox runs) the built-in
   entry becomes `launch-<host>-<port>`, so a sandbox never adopts the real server's activity.
 - **Environment:** the simulator is `sandbox`; on a device the app reads its `embedded.mobileprovision`:

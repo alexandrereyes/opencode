@@ -30,11 +30,23 @@ import os
     return PushEnvironment.resolve(profile: profile, simulator: simulator)
   }()
 
-  /// Called once at launch: watches push-to-start tokens and every activity, including ones started by push.
+  /// Called from the app's init, so also in background launches, which build no scene. A push-to-start wakes the app
+  /// that way: the new activity's update token must still reach the active server, or the backend can never update
+  /// or end that activity. The first event-stream connection replaces this context.
+  func watch() {
+    let servers = AppRuntime.shared.servers
+    let launch = fixture ? nil : (try? servers.configuration()).map {
+      AgentsActivityDriver.Context(client: OpenCodeClient(configuration: $0), serverKey: Self.serverKey(servers),
+        deviceID: DeviceAgent.shared.preferences.deviceID, environment: environment)
+    }
+    Task { await driver.begin(launch) }
+  }
+
+  /// Called once by the app root: also enables registration on each connection.
   func start() {
     guard !started else { return }
     started = true
-    Task { await driver.begin() }
+    Task { await driver.begin(nil) }
     #if DEBUG
     if let fixtures = AgentsActivityFixtures.requested { Task { await driver.show(fixtures) } }
     #endif
@@ -118,26 +130,34 @@ actor AgentsActivityDriver {
   private var tokens: [String: String] = [:]
   private var reported: [String: String] = [:]
   private var endings: [String: AgentsEndReason] = [:]
-  private var lastState: AgentsState?
   private var ending: Task<Void, Never>?
+  /// Activities this app ended itself (duplicates, local end): their `.dismissed` is not the user's swipe.
+  private var selfEnded: Set<String> = []
   /// Servers whose activity the user swiped away: like push-to-start, no new local start until `activeTotal`
   /// returns to 0 and rises again.
   private var dismissed: Set<String> = []
 
-  func begin() {
+  /// `launch` reports tokens and endings until the first event-stream connection replaces it.
+  func begin(_ launch: Context?) {
     guard !begun else { return }
     begun = true
+    if context == nil { context = launch }
     for activity in Activity<Attributes>.activities { watch(activity) }
+    Task { await enforceSingle() }
     Task {
       for await data in Activity<Attributes>.pushToStartTokenUpdates { await pushToStart(data.hexToken) }
     }
     Task {
-      for await activity in Activity<Attributes>.activityUpdates { watch(activity) }
+      // Each element, including the background wake after a push-to-start (`AgentsActivityAgent.watch()`).
+      for await activity in Activity<Attributes>.activityUpdates {
+        watch(activity)
+        await enforceSingle()
+      }
     }
   }
 
   func connect(_ context: Context, theme: [String: String]) async {
-    if self.context?.serverKey != context.serverKey { lastState = nil; cancelEnding() }
+    if self.context?.serverKey != context.serverKey { cancelEnding() }
     self.context = context
     self.theme = theme
     supported = true
@@ -146,6 +166,7 @@ actor AgentsActivityDriver {
       do { try await context.client.liveActivityUnregister(deviceID: context.deviceID) } catch { classify(error) }
       return
     }
+    await enforceSingle()
     await register()
     guard supported, self.context?.serverKey == context.serverKey else { return }
     do {
@@ -160,15 +181,18 @@ actor AgentsActivityDriver {
     if context != nil { await register() }
   }
 
-  /// `snapshot` and `changed` while the app runs: start, update or schedule the end of this server's activity.
+  /// `snapshot` and `changed` while the app runs: start, update or end this server's activity. A null state (nothing
+  /// working, waiting or failed) ends it at once, never leaving an idle-only card.
   func apply(_ state: AgentsState?, server: URL) async {
     guard let context, context.client.configuration.url == server, supported else { return }
-    let live = activities(context.serverKey)
-    guard let state = state ?? (lastState ?? live.last?.content.state).map(Self.settled) else {
-      if !live.isEmpty { scheduleEnding(after: 0) }
+    guard let state else {
+      cancelEnding()
+      dismissed.remove(context.serverKey)
+      await end(context.serverKey)
       return
     }
-    lastState = state
+    await enforceSingle()
+    let live = activities(context.serverKey)
     if state.activeTotal == 0 { dismissed.remove(context.serverKey) }
     let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(15 * 60))
     if live.isEmpty {
@@ -185,7 +209,10 @@ actor AgentsActivityDriver {
   #if DEBUG
   /// `-OpenCodeAgentsActivityFixture`: replaces every Agents activity with local, push-less fixture activities.
   func show(_ fixtures: [(attributes: AgentsActivityAttributes, state: AgentsState)]) async {
-    for activity in Activity<Attributes>.activities { await Self.end(activity.id, content: nil, policy: .immediate) }
+    for activity in Activity<Attributes>.activities {
+      selfEnded.insert(activity.id)
+      await Self.end(activity.id, content: nil, policy: .immediate)
+    }
     for fixture in fixtures {
       do {
         let activity = try Activity.request(attributes: fixture.attributes,
@@ -227,16 +254,20 @@ actor AgentsActivityDriver {
         break
       }
     }
-    Task { await removeDuplicates() }
   }
 
-  /// A local start racing a push-to-start can leave two activities for one server: keep the newest.
-  private func removeDuplicates() async {
-    let live = Activity<Attributes>.activities.filter { [.active, .stale].contains($0.activityState) }
-    for key in Set(live.map(\.attributes.serverKey)) {
-      let duplicates = live.filter { $0.attributes.serverKey == key }
-        .sorted { (order.firstIndex(of: $0.id) ?? -1) < (order.firstIndex(of: $1.id) ?? -1) }
-      for activity in duplicates.dropLast() { await Self.end(activity.id, content: nil, policy: .immediate) }
+  /// At most one activity per server on screen, in any state: keeps the newest live one and removes the others,
+  /// including ended cards still visible, with immediate dismissal (reported as `ended`).
+  private func enforceSingle() async {
+    let all = Activity<Attributes>.activities
+    let candidates = all.map { activity in
+      AgentsDuplicates.Candidate(id: activity.id, serverKey: activity.attributes.serverKey,
+        alive: [.active, .stale].contains(activity.activityState), updatedAt: activity.content.state.updatedAt,
+        sequence: order.firstIndex(of: activity.id) ?? -1)
+    }
+    for id in AgentsDuplicates.toEnd(candidates) {
+      selfEnded.insert(id)
+      await Self.end(id, content: nil, policy: .immediate)
     }
   }
 
@@ -260,13 +291,12 @@ actor AgentsActivityDriver {
     ending = nil
   }
 
-  /// Same as the backend's `end`: the final state, dismissed by the system 30 minutes later.
+  /// Same as the backend's `end`: removed at once (rev. 2026-10-27), including ended cards still on screen.
   private func end(_ key: String) async {
     ending = nil
-    let dismissal = ActivityUIDismissalPolicy.after(.now.addingTimeInterval(30 * 60))
-    for activity in activities(key) {
-      let state = lastState ?? activity.content.state
-      await Self.end(activity.id, content: ActivityContent(state: state, staleDate: nil), policy: dismissal)
+    for activity in Activity<Attributes>.activities where activity.attributes.serverKey == key {
+      selfEnded.insert(activity.id)
+      await Self.end(activity.id, content: nil, policy: .immediate)
     }
   }
 
@@ -279,19 +309,6 @@ actor AgentsActivityDriver {
     policy: ActivityUIDismissalPolicy) async
   {
     await Activity<Attributes>.activities.first { $0.id == id }?.end(content, dismissalPolicy: policy)
-  }
-
-  /// A null state means nothing is working, waiting or failed: show the last state with those parts cleared. It
-  /// keeps `updatedAt`, the latest moment something was still active, which bounds the 10-minute end delay.
-  private static func settled(_ state: AgentsState) -> AgentsState {
-    var settled = state
-    settled.counts = AgentsState.Counts(working: 0, question: 0, permission: 0, failed: 0, idle: state.counts.idle)
-    settled.activeTotal = 0
-    settled.focus = nil
-    settled.attention = []
-    settled.attentionTotal = 0
-    settled.sessions = state.sessions.filter { $0.status == .idle }
-    return settled
   }
 
   // MARK: Registration
@@ -318,7 +335,8 @@ actor AgentsActivityDriver {
     await flush()
   }
 
-  private func finished(_ id: String, _ reason: AgentsEndReason) {
+  private func finished(_ id: String, _ found: AgentsEndReason) {
+    let reason = selfEnded.contains(id) ? AgentsEndReason.ended : found
     if reason == .dismissed, let key = keys[id] { dismissed.insert(key) }
     tokens[id] = nil
     endings[id] = reason

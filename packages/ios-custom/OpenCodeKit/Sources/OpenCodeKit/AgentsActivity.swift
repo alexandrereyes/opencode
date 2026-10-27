@@ -260,6 +260,43 @@ public extension AgentsState.Row {
   }
 }
 
+/// The Apple Watch card's progress ring around the mascot.
+public enum AgentsRing: Equatable, Sendable {
+  /// One arc per subagent, the first `done` in `success` (at most `segmentLimit`).
+  case segments(done: Int, total: Int)
+  /// Above the segment limit: one continuous arc filled `done/total`.
+  case continuous(Double)
+  /// Working without subagent progress.
+  case full
+  /// Nothing working.
+  case track
+
+  public static let segmentLimit = 8
+}
+
+public extension AgentsState {
+  var ring: AgentsRing {
+    if let progress = focus?.progress, progress.total > 0 {
+      return progress.total <= AgentsRing.segmentLimit
+        ? .segments(done: min(max(progress.done, 0), progress.total), total: progress.total)
+        : .continuous(progress.fraction)
+    }
+    return counts.working > 0 ? .full : .track
+  }
+
+  /// Badge below the ring: the minimal island's priority, none without attention or failure.
+  var watchBadge: AgentsMinimal? { minimal == .mascot ? nil : minimal }
+
+  /// The watch shows the first two rows; questions and permissions add `há N min` from their attention item.
+  var watchRows: [AgentsState.Row] { Array(sessions.prefix(2)) }
+
+  func asked(_ row: AgentsState.Row) -> Date? {
+    guard row.status == .question || row.status == .permission else { return nil }
+    let kind: Kind = row.status == .question ? .question : .permission
+    return attention.first { $0.sessionID == row.sessionID && $0.kind == kind }?.asked
+  }
+}
+
 public enum AgentsText {
   /// `há 3 min.` for a request asked at `since`, as a system style that keeps itself current without updates.
   public static func ago(since: Date) -> Date.AnchoredRelativeFormatStyle {
@@ -318,6 +355,37 @@ public enum AgentsDeepLink: Equatable, Sendable {
   public static func card(_ state: AgentsState, serverKey: String) -> AgentsDeepLink {
     state.tapTarget.map { .session(serverKey: serverKey, sessionID: $0.sessionID, directory: $0.directory) }
       ?? .sessions(serverKey: serverKey)
+  }
+}
+
+// MARK: Duplicates
+
+/// At most one activity per `serverKey` on screen, in any state (contract rev. 2026-10-27).
+public enum AgentsDuplicates {
+  public struct Candidate: Equatable, Sendable {
+    public let id: String
+    public let serverKey: String
+    /// Active or stale; ended and dismissed activities are never kept.
+    public let alive: Bool
+    public let updatedAt: Double
+    /// Order in which this process first saw the activity, as a tie breaker.
+    public let sequence: Int
+    public init(id: String, serverKey: String, alive: Bool, updatedAt: Double, sequence: Int) {
+      self.id = id
+      self.serverKey = serverKey
+      self.alive = alive
+      self.updatedAt = updatedAt
+      self.sequence = sequence
+    }
+  }
+
+  /// IDs to end with immediate dismissal: per server, every activity except the newest live one (latest
+  /// `updatedAt`, then latest seen). Ended activities still on screen are always removed.
+  public static func toEnd(_ candidates: [Candidate]) -> [String] {
+    let keep = Dictionary(grouping: candidates.filter(\.alive), by: \.serverKey).compactMapValues { group in
+      group.max { ($0.updatedAt, $0.sequence) < ($1.updatedAt, $1.sequence) }?.id
+    }
+    return candidates.filter { keep[$0.serverKey] != $0.id }.map(\.id)
   }
 }
 

@@ -9,6 +9,7 @@ struct OpenCodeApp: App {
   init() {
     FilePreviewStorage.clean()
     VoiceLaunchRouter.launcher = AppVoiceLauncher()
+    AgentsActivityAgent.shared.watch()
   }
   var body: some Scene {
     WindowGroup {

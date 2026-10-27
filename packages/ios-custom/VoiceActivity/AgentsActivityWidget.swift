@@ -7,7 +7,7 @@ import WidgetKit
 struct AgentsActivityWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: AgentsActivityAttributes.self) { context in
-      AgentsLockScreenView(attributes: context.attributes, state: context.state)
+      AgentsActivityContent(attributes: context.attributes, state: context.state)
         .activityBackgroundTint(context.attributes.color(.background))
         .activitySystemActionForegroundColor(context.attributes.color(.textStrong))
         .widgetURL(AgentsDeepLink.card(context.state, serverKey: context.attributes.serverKey).url)
@@ -26,5 +26,6 @@ struct AgentsActivityWidget: Widget {
       .widgetURL(AgentsDeepLink.card(context.state, serverKey: context.attributes.serverKey).url)
       .keylineTint(context.attributes.color(.primary))
     }
+    .supplementalActivityFamilies([.small])
   }
 }

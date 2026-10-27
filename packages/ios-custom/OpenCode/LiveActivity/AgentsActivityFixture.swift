@@ -49,7 +49,21 @@ enum AgentsActivityFixtures {
 }
 """#
 
-  static let states: [String: String] = [
+  static let states: [String: String] = contract.merging(["state-long-rows": longRows]) { first, _ in first }
+
+  /// Not a contract fixture: four working rows with long titles and projects, like the device report.
+  static let longRows = #"""
+{"v":1,"updatedAt":1793104860000,"host":"MacBook Pro de Alexandre","counts":{"working":4,"question":0,"permission":0,
+"failed":0,"idle":0},"activeTotal":4,"focus":{"sessionID":"ses_long_1","title":"Revisar o acoplamento entre prompt e execução","project":"abacato-v2",
+"directory":"/Users/alexandremartins/Dev/abacato-v2","startedAt":1793104136000,"activity":"Editando SessionExecutionCoordinator.swift",
+"progress":{"done":1,"total":5,"unit":"subagents"}},"attention":[],"attentionTotal":0,"sessions":[
+{"sessionID":"ses_long_1","title":"Revisar o acoplamento entre prompt e execução","project":"abacato-v2","directory":"/d","status":"working","progress":{"done":1,"total":5,"unit":"subagents"}},
+{"sessionID":"ses_long_2","title":"Migrar a navegação das Sessões para o novo roteador","project":"opencode2","directory":"/d","status":"working"},
+{"sessionID":"ses_long_3","title":"Acoplamentos prompt","project":"abacato-v2","directory":"/d","status":"working"},
+{"sessionID":"ses_long_4","title":"Deploy no Swarm","project":"core-infra","directory":"/d","status":"working"}]}
+"""#
+
+  static let contract: [String: String] = [
     "state-one-question": #"""
 {
   "v": 1,

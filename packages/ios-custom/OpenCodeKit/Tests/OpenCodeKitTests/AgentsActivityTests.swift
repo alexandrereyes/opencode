@@ -257,3 +257,104 @@ import Testing
     #expect(!AgentsSupport.unsupported(URLError(.timedOut)))
   }
 }
+
+/// Fixed heights of `AgentsLayout`: the expanded island and the Lock Screen never pass their measured limits.
+@Suite struct AgentsLayoutTests {
+  @Test(arguments: ["state-one-question", "state-two-questions", "state-mixed", "state-working", "state-failed-only"])
+  func islandFitsUnderTheCeiling(_ name: String) throws {
+    let state = try AgentsActivityTests.state(name)
+    let island = AgentsLayout.island(state)
+    #expect(island.height <= AgentsLayout.islandCeiling)
+    #expect(AgentsLayout.islandCeiling < AgentsLayout.islandRegion)
+    #expect(island.rows == min(state.sessions.count, 3))
+    #expect(island.more == (state.sessions.count > 3 ? state.sessions.count - 3 : nil))
+  }
+
+  @Test func islandKeepsTheMoreLineOnlyWhenItFits() throws {
+    var state = try AgentsActivityTests.state("state-one-question")
+    #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 3, more: 1, height: 94))
+    state.sessions = Array(state.sessions.prefix(3))
+    #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 3, more: nil, height: 82))
+    state.sessions = []
+    #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 0, more: nil, height: 18))
+    // Even an out-of-contract list longer than four sessions stays at three rows.
+    state.sessions = Array(repeating: try AgentsActivityTests.state("state-mixed").sessions[0], count: 9)
+    #expect(AgentsLayout.island(state).rows == 3 && AgentsLayout.island(state).height <= AgentsLayout.islandCeiling)
+  }
+
+  @Test(arguments: ["state-one-question", "state-two-questions", "state-mixed", "state-working", "state-failed-only"])
+  func lockScreenPicksAFittingDensity(_ name: String) throws {
+    let state = try AgentsActivityTests.state(name)
+    let density = AgentsLayout.lockDensity(state)
+    #expect(AgentsLayout.Lock(density).height(state) <= AgentsLayout.lockCeiling)
+  }
+
+  @Test func lockScreenDensities() throws {
+    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-working")) == .regular)
+    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-failed-only")) == .regular)
+    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-one-question")) == .tight)
+    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-mixed")) == .tight)
+    // The worst case the contract allows (focus with activity and progress, three attention items) still fits.
+    var worst = try AgentsActivityTests.state("state-mixed")
+    worst.attention.append(worst.attention[0])
+    #expect(AgentsLayout.Lock(.tight).height(worst) <= AgentsLayout.lockCeiling)
+    // Without focus, three pending rows keep the header.
+    worst.focus = nil
+    #expect(AgentsLayout.lockDensity(worst) != .tight)
+  }
+}
+
+/// At most one activity per server on screen, in any state (contract Lifecycle, rev. 2026-10-27).
+@Suite struct AgentsDuplicatesTests {
+  typealias Candidate = AgentsDuplicates.Candidate
+
+  @Test func keepsTheNewestLiveActivityPerServer() {
+    let ended = Candidate(id: "old-ended", serverKey: "mac", alive: false, updatedAt: 300, sequence: 0)
+    let local = Candidate(id: "local", serverKey: "mac", alive: true, updatedAt: 100, sequence: 1)
+    let pushed = Candidate(id: "pushed", serverKey: "mac", alive: true, updatedAt: 200, sequence: 2)
+    let other = Candidate(id: "other", serverKey: "sandbox", alive: true, updatedAt: 50, sequence: 3)
+    // The ended "9 ociosas" card goes even though its final state is newer; the older live duplicate goes too.
+    #expect(Set(AgentsDuplicates.toEnd([ended, local, pushed, other])) == ["old-ended", "local"])
+  }
+
+  @Test func tieBreaksOnTheLastSeenActivity() {
+    let first = Candidate(id: "a", serverKey: "mac", alive: true, updatedAt: 100, sequence: 4)
+    let second = Candidate(id: "b", serverKey: "mac", alive: true, updatedAt: 100, sequence: 7)
+    #expect(AgentsDuplicates.toEnd([second, first]) == ["a"])
+  }
+
+  @Test func endedActivitiesNeverStayVisible() {
+    let ended = Candidate(id: "ended", serverKey: "mac", alive: false, updatedAt: 100, sequence: 0)
+    let dismissed = Candidate(id: "gone", serverKey: "mac", alive: false, updatedAt: 90, sequence: 1)
+    #expect(Set(AgentsDuplicates.toEnd([ended, dismissed])) == ["ended", "gone"])
+    #expect(AgentsDuplicates.toEnd([Candidate(id: "only", serverKey: "mac", alive: true, updatedAt: 1, sequence: 0)])
+      .isEmpty)
+    #expect(AgentsDuplicates.toEnd([]).isEmpty)
+  }
+}
+
+/// The Apple Watch Smart Stack card (`.small`).
+@Suite struct AgentsWatchTests {
+  @Test func ringFollowsTheFocusProgress() throws {
+    var state = try AgentsActivityTests.state("state-working")
+    #expect(state.ring == .segments(done: 2, total: 3))
+    state.focus?.progress = AgentsState.Progress(done: 3, total: 12, unit: "subagents")
+    #expect(state.ring == .continuous(0.25))
+    state.focus?.progress = AgentsState.Progress(done: 8, total: 8, unit: "subagents")
+    #expect(state.ring == .segments(done: 8, total: 8))
+    state.focus?.progress = nil
+    #expect(state.ring == .full)
+    #expect(try AgentsActivityTests.state("state-failed-only").ring == .track)
+  }
+
+  @Test func badgeAndRows() throws {
+    let mixed = try AgentsActivityTests.state("state-mixed")
+    #expect(mixed.watchBadge == .failed(2))
+    #expect(try AgentsActivityTests.state("state-one-question").watchBadge == .question(1))
+    #expect(try AgentsActivityTests.state("state-working").watchBadge == nil)
+    #expect(mixed.watchRows.map(\.title) == ["Escolher banco do cache", "Corrigir login OAuth"])
+    #expect(mixed.asked(mixed.watchRows[0]) == mixed.attention[0].asked)
+    #expect(mixed.asked(mixed.watchRows[1]) == mixed.attention[1].asked)
+    #expect(mixed.asked(mixed.sessions[2]) == nil)
+  }
+}
