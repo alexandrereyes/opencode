@@ -2712,6 +2712,51 @@ local activities and keeps the app off every server. `OpenCodeUITests/AgentsActi
 expanded island and the Lock Screen (`ios-<state>-<variant>.png`). `xcrun simctl push` only delivers user
 notifications, so APNs Live Activity pushes (start/update/end) need a physical device and the backend's APNs key.
 
+## Apple Watch — 27 October
+
+A native watchOS app, `OpenCodeWatch` (`br.com.alexandrem.opencode.watchkitapp`, watchOS 27), embedded in the iPhone
+app and shipped by the same TestFlight upload, with the complication extension `OpenCodeWatchWidgets`
+(`….watchkitapp.widgets`). It runs **without the iPhone nearby** (`WKRunsIndependentlyOfCompanionApp`), over the
+watch's own Wi-Fi or cellular. The contract with the backend is
+[`plugin-app-custom/docs/watch.md`](../plugin-app-custom/docs/watch.md); the approved references are in
+`.agent-artifacts/watch/` (not versioned).
+
+- **Pairing:** Você → Apple Watch → **Parear Apple Watch** calls `custom.watch` → `pair`, replaces the voice with the
+  local preference and sends the result over WatchConnectivity (`transferUserInfo` + `updateApplicationContext`).
+  The iPhone keeps nothing. The same screen lists `devices` and removes one (`revoke`, plus a WatchConnectivity
+  notice so that watch clears itself). The watch stores the pairing in its Keychain, in the access group
+  `ERRYZ68LX5.br.com.alexandrem.opencode.watch` (`keychain-access-groups`) so the complication reads it too.
+- **Gateway client:** `WatchGatewayClient` (OpenCodeKit) sends the device token, the Cloudflare Access service-token
+  headers and `User-Agent: OpenCodeWatch/<version>` on every request, and classifies failures (401 → pair again,
+  404/409 → already answered, 429, HTML or no answer → "Mac indisponível"). OpenCodeKit compiles for watchOS; the
+  contract types, ring, row priority, captions and storage live there and are tested with `swift test`, including a
+  real local HTTP server (`WatchTests`).
+- **Screens** (`OpenCodeWatch/`): Painel (ring, counts, pending requests first, sessions, Liquid Glass microphone,
+  refresh every 10 s while visible and on pull), Responder (options with the recommended one first, dictation through
+  `TextFieldLink`, permission decisions), Voz (CallKit call, live levels around the mascot, Sessão mestra line, last
+  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível" with the last update. Colors are
+  `openchamber-dark` (`WatchPalette`, checked against the theme JSON by `WatchPaletteTests`).
+- **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
+  mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
+  state in the same Keychain group and refreshes every 15 minutes, when the app updates it, and on WidgetKit push. The
+  push token is registered with `/watch/v1/widget-token` by the extension's `WidgetPushHandler` and by the app
+  (`WidgetCenter.currentPushInfo`).
+- **Voice** follows the proven path of the 27 October spike: CallKit outgoing call (no `contactIdentifier`), audio
+  and UDP only after `didActivate`, one UDP flow per remote with system-chosen interface and port, ICE seeing the
+  original IPv4 pair while the sockets carry the bytes (NAT64/CLAT on cellular). The gateway creates the call,
+  owns the sideband and delegation; the watch sends a heartbeat every 5 s and long-polls caption, status and master
+  events. Failures post transport diagnostics to `/watch/v1/diagnostics`.
+- **WebRTC engine:** `Vendor/OpenClawWatchRTC/` holds OpenClaw's `OpenClawWatchRTC` (Rust, `str0m` 0.24.1, commit
+  `e5cc2d9`) and its watch transport/audio Swift with the spike's fixes, under their MIT notices (`Licenses/`, also
+  bundled in the watch app). `script/setup-watch-rust.sh` installs the pinned nightly into
+  `~/.local/share/opencode-ios/rust` (no global Rust, no shell profile changes). The `Build Watch WebRTC` phase runs
+  `script/build-watch-rtc.sh`, which builds the current platform's slices in a clean environment and reuses finished
+  archives from `~/.local/share/opencode-ios/watch-rtc-cache` by content fingerprint.
+- **Simulator:** `script/capture-watch.sh <udid> <dir>` builds for the watchOS simulator and captures the DEBUG
+  fixtures (`-OpenCodeWatchFixture dashboard|question|permission|voice|complications|offline|unpaired`), which never
+  touch the network, Keychain or cache. The simulator has no CallKit and always allows UDP, so it proves neither the
+  call nor the TN3135 policy; voice needs the physical watch.
+
 ## Technical direction
 
 - Swift 6 with strict concurrency, SwiftUI, Observation (`@Observable`), and `async`/`await`.
@@ -2737,6 +2782,13 @@ packages/ios-custom/
   OpenCodeKit/           # local Swift package with no UI: API, models, SSE, pairing, Keychain
   OpenCodeUITests/       # sandbox-only native interaction/continuity tests
   OpenCodeTests/         # app-hosted UIKit key-command tests
+  VoiceActivity/         # widget extension: voice and Agentes Live Activities
+  VoiceShared/           # code shared by the app and VoiceActivity
+  SharedUI/              # SwiftUI shared by the iPhone and Apple Watch targets (mascot)
+  OpenCodeWatch/         # Apple Watch app
+  OpenCodeWatchWidgets/  # Apple Watch complications
+  WatchShared/           # code shared by the watch app and its complications
+  Vendor/OpenClawWatchRTC/  # vendored watch WebRTC engine (Rust + Swift, MIT)
 ```
 
 ## Development
@@ -2753,9 +2805,12 @@ packages/ios-custom/
   only through the APNs sandbox.
 - The physical test devices are shared with other agents. Reserve one through the device lease before installing or
   driving the app, and release it when you are done.
-- The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
-  `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
-  require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
+- The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`) with its `VoiceActivity` extension and
+  the embedded Apple Watch app (`OpenCodeWatch` + `OpenCodeWatchWidgets`), automatic signing for team `ERRYZ68LX5`,
+  and a local `OpenCodeKit` package. Targets use synchronized folders; adding a Swift file does not require editing
+  the project. Building the watch app needs the private Rust toolchain once:
+  `packages/ios-custom/script/setup-watch-rust.sh`. [Private TestFlight uploads](#private-testflight-uploads) use
+  the local script below.
 
 ### Parallel verification without shared-device races
 
@@ -2858,8 +2913,10 @@ keeps the 300-second limit; the legacy combined two-theme run has a 600-second a
    enable **automatic distribution**, and add only his App Store Connect user as a tester. Builds are internal-only;
    no external group or Beta App Review is involved. Apple's processing, binary validation, encryption questions and
    current developer agreements still apply. Stop for Alexandre if any login, 2FA or agreement acceptance is required.
-5. The future App Group is `group.br.com.alexandrem.opencode`; it is reserved in the design, not enabled as an
-   entitlement until an extension actually needs it.
+5. The App Group `group.br.com.alexandrem.opencode` remains reserved and is not enabled: automatic signing with
+   the API key cannot create or attach App Groups (Xcode reports "Authentication failed" for those targets), and
+   Xcode has no signed-in account. The Apple Watch app and its complication share data through the Keychain access
+   group `ERRYZ68LX5.br.com.alexandrem.opencode.watch` instead, which needs no portal capability.
 
 #### Commands (from the repository root)
 

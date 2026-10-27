@@ -59,6 +59,10 @@ struct SettingsView: View {
           NavigationLink("Dados do iPhone") { DeviceDataView(agent: .shared) }
             .accessibilityIdentifier("settings-device-data")
         }.listRowBackground(theme.color(.surface))
+        Section("Apple Watch") {
+          NavigationLink("Apple Watch") { WatchSettingsView(client: store.client, voice: runtime.voice.preferences) }
+            .accessibilityIdentifier("settings-watch")
+        }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {
             ServerListView(runtime: runtime, store: store)

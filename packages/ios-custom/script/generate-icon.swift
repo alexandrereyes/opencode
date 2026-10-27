@@ -68,4 +68,17 @@ try writeJSON([
     "blue": String(format: "%.8f", Double(background[2])), "alpha": "1.00000000",
   ]]]],
 ], to: "LaunchBackground.colorset/Contents.json")
-print("AppIcon rebuilt from script/icon-source.png; launch color from OpenChamber dark.")
+// The Apple Watch app uses the same opaque 1024-point image; watchOS applies its circular mask.
+let watchAssets = root.appendingPathComponent("OpenCodeWatch/Assets.xcassets")
+try write(data as Data, to: watchAssets.appendingPathComponent("AppIcon.appiconset/AppIcon.png"))
+for (path, value) in [
+  ("Contents.json", ["info": info] as [String: Any]),
+  ("AppIcon.appiconset/Contents.json", ["info": info, "images": [
+    ["filename": "AppIcon.png", "idiom": "universal", "platform": "watchos", "size": "1024x1024"],
+  ]] as [String: Any]),
+] {
+  var json = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+  json.append(10)
+  try write(json, to: watchAssets.appendingPathComponent(path))
+}
+print("AppIcon rebuilt from script/icon-source.png (iPhone and Apple Watch); launch color from OpenChamber dark.")

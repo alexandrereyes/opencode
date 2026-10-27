@@ -62,6 +62,9 @@ public struct AgentsState: Codable, Hashable, Sendable {
     public var kind: Kind
     public var since: Double
     public var text: String?
+    /// Watch gateway only (not in the Live Activity contract): the oldest pending request of this kind, which
+    /// the watch opens with `/watch/v1/requests/:requestID`. Absent from Live Activity pushes.
+    public var requestID: String?
     public var asked: Date { Date(timeIntervalSince1970: since / 1000) }
   }
 
