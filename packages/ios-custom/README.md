@@ -86,8 +86,10 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Visual only for now:** the other tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
-- **Filter chips:** "Todas" first, then Chats and the selected repositories ordered lexicographically by
-  `SessionList.chipGroups`: (1) chips with a running root session (green arc) first; (2) then chips with an unread,
+- **Filter chips:** "Todas" first, as a compact icon-only chip (`square.stack`, a stack of every session; at least
+  44 pt wide, same height and selected styling; VoiceOver "Todas" with its selected state, identifier `filter-all`). A
+  long-press state filter adds its name beside the icon. Then Chats and the selected repositories ordered
+  lexicographically by `SessionList.chipGroups`: (1) chips with a running root session (green arc) first; (2) then chips with an unread,
   unmuted root session (the rows' orange dot, as a small corner badge; muted rows keep their gray dot); (3) then the
   saved manual position, `projects["local"]` as reordered by "Mover para antes/depois"; (4) then the name (natural,
   case- and accent-insensitive, pt-BR). Running + unread precede running only. Chats is part of the saved order:

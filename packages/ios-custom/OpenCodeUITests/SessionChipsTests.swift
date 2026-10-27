@@ -33,6 +33,12 @@ import XCTest
     for name in manual {
       XCTAssertEqual(chip(name, app).label, unread.contains(name) ? name + ", com não lidas" : name)
     }
+    // "Todas" is a compact, icon-only chip that still reads and reports its selection.
+    let all = app.buttons["filter-all"]
+    XCTAssertEqual(all.label, "Todas")
+    XCTAssertTrue(all.isSelected)
+    XCTAssertTrue(all.frame.width >= 44 && all.frame.width <= 56, "Todas width \(all.frame.width)")
+    XCTAssertEqual(all.frame.height, chip(manual[0], app).frame.height, accuracy: 0.5)
     shot("chips-unread")
 
     // A running repository rises right after "Todas", above the unread ones.
@@ -72,7 +78,7 @@ import XCTest
       object: nil)
     XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, "Selected chip off screen")
     shot("chips-after-reading")
-    app.buttons["Todas"].firstMatch.tap()
+    app.buttons["filter-all"].tap()
 
     // Chats moves in the saved order like a repository, and the position persists on the server.
     move("Chats", "Mover para depois", app)
@@ -133,7 +139,7 @@ import XCTest
   private func chip(_ name: String, _ app: XCUIApplication) -> XCUIElement {
     switch name {
     case "Chats": app.buttons["filter-chats"]
-    case "Todas": app.buttons["Todas"].firstMatch
+    case "Todas": app.buttons["filter-all"]
     default: app.buttons["filter-project-" + name]
     }
   }

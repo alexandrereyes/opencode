@@ -157,7 +157,7 @@ import XCTest
     app.buttons["Voltar"].tap()
     XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
     // Reopen without a repository filter: the explicit draft survives independently of lastProject.
-    app.buttons["Todas"].firstMatch.tap()
+    app.buttons["filter-all"].tap()
     app.terminate()
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))

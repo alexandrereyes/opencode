@@ -71,7 +71,7 @@ import XCTest
   }
 
   private func selectProject(_ name: String, in app: XCUIApplication) {
-    let all = app.buttons["Todas"]
+    let all = app.buttons["filter-all"]
     for _ in 0..<40 {
       if all.isHittable { break }
       app.collectionViews.firstMatch.swipeDown(velocity: .fast)

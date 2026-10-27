@@ -135,7 +135,7 @@ import XCTest
     input.tap()
     input.typeText("rascunho em andamento")
     leave(app)
-    app.buttons["Todas"].firstMatch.tap()
+    app.buttons["filter-all"].tap()
     openNewSession(app)
     XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 10))
     XCTAssertEqual(input.value as? String, "rascunho em andamento")
@@ -161,7 +161,7 @@ import XCTest
     openNewSession(app)
     XCTAssertTrue(app.buttons["Projeto: " + other].waitForExistence(timeout: 10))
     leave(app)
-    app.buttons["Todas"].firstMatch.tap()
+    app.buttons["filter-all"].tap()
   }
 
   private func choose(_ project: String, _ app: XCUIApplication) {

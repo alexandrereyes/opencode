@@ -41,14 +41,18 @@ struct SessionChips: View {
               Button(filter.rawValue) { store.filter = filter }
             }
           } label: {
+            // "Todas" is an icon (a stack of every session); a state filter adds its name.
             Chip(
-              title: store.filter.rawValue,
-              selected: store.selectedProject == nil || store.filter != .all)
+              title: store.filter == .all ? nil : store.filter.rawValue,
+              selected: store.selectedProject == nil || store.filter != .all, symbol: "square.stack")
           } primaryAction: {
             store.filter = .all
             store.selectedProject = nil
           }
+          .accessibilityLabel(store.filter.rawValue)
+          .accessibilityAddTraits(store.selectedProject == nil || store.filter != .all ? .isSelected : [])
           .accessibilityHint("Mantenha pressionado para filtrar por estado")
+          .accessibilityIdentifier("filter-all")
           ForEach(order, id: \.self) { key in
             if let group = groups.first(where: { $0.key == key }) { chip(group, manual).id(key) }
           }
@@ -145,7 +149,8 @@ private struct Chip: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
   @ScaledMetric(relativeTo: .subheadline) private var minimumHeight = 36.0
-  let title: String
+  /// Nil draws an icon-only chip (its `symbol`), at least 44 pt wide.
+  let title: String?
   let selected: Bool
   var running = false
   var count = 0
@@ -156,8 +161,8 @@ private struct Chip: View {
   var body: some View {
     HStack(spacing: 8) {
       if running { RunningArc(size: 9, filled: true) }
-      if let symbol { Image(systemName: symbol).appSymbol(.inline) }
-      Text(title).appFont(.secondary, weight: selected ? .semibold : .regular).lineLimit(1)
+      if let symbol { Image(systemName: symbol).appSymbol(.inline, weight: selected ? .semibold : .medium) }
+      if let title { Text(title).appFont(.secondary, weight: selected ? .semibold : .regular).lineLimit(1) }
       if count > 0 {
         Text("\(count)").appFont(.footnote, weight: .medium).monospacedDigit().padding(.horizontal, 5).padding(
           .vertical, 1
@@ -165,7 +170,7 @@ private struct Chip: View {
       }
     }
     .foregroundStyle(theme.color(selected ? .textAccent : .text))
-    .padding(.horizontal, 16).frame(minHeight: minimumHeight)
+    .padding(.horizontal, title == nil ? 12 : 16).frame(minWidth: 44, minHeight: minimumHeight)
     .background(
       theme.color(selected ? .primary : .surface).opacity(selected ? 0.08 : 1), in: Capsule()
     )
