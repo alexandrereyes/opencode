@@ -82,9 +82,14 @@ struct UserBubble: View {
   @Environment(\.transcriptMemory) private var memory
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
   @State private var localExpanded = false
-  @State private var truncated = false
+  @State private var localTruncated = false
   /// The conversation's memory keeps the reader's choice when the bubble is rebuilt.
   private var expanded: Bool { memory?.bubble(message.id) ?? localExpanded }
+  /// Measured asynchronously by the prompt; remembered so a rebuilt bubble starts at its known height.
+  private var truncated: Bool { memory?.truncated(message.id) ?? localTruncated }
+  private func setTruncated(_ value: Bool) {
+    if let memory { memory.setTruncated(message.id, value: value) } else { localTruncated = value }
+  }
   let message: ConversationMessage
   let maximumTextHeight: CGFloat
   var body: some View {
@@ -102,7 +107,7 @@ struct UserBubble: View {
             if folded && message.displayText.isEmpty {
               UserPrompt(
                 text: contextSummary, theme: theme, collapsed: true, maximumHeight: maximumTextHeight,
-                revealRange: nil, truncationChanged: { truncated = $0 }, expand: { setExpanded(true) },
+                revealRange: nil, truncationChanged: { setTruncated($0) }, expand: { setExpanded(true) },
                 jump: promptJump.map { jump in { jump.perform(message.id) } }
               ).accessibilityIdentifier("user-context-summary-\(message.id)")
             }
@@ -130,7 +135,7 @@ struct UserBubble: View {
               UserPrompt(
                 text: promptText, theme: theme, collapsed: collapsible && !expanded,
                 maximumHeight: maximumTextHeight, revealRange: searchRange,
-                truncationChanged: { truncated = $0 }, expand: { setExpanded(true) },
+                truncationChanged: { setTruncated($0) }, expand: { setExpanded(true) },
                 jump: promptJump.map { jump in { jump.perform(message.id) } }
               ).accessibilityIdentifier("user-prompt-\(message.id)")
             }

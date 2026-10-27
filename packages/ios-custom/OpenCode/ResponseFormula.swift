@@ -12,7 +12,7 @@ struct ResponseFormulaKey: Hashable, Sendable {
   }
 }
 
-struct ResponseFormulaRaster: Sendable {
+struct ResponseFormulaRaster: Sendable, Equatable {
   let png: Data
   let scale: Double
 }

@@ -3,10 +3,17 @@ import Synchronization
 import UIKit
 
 /// The transcript's on-screen geometry, independent of how the transcript is implemented.
-@MainActor protocol TranscriptGeometry: AnyObject {
+@MainActor protocol TranscriptGeometrySource: AnyObject {
   var geometryView: UIScrollView? { get }
   /// Rows that scroll with the content (pinned prompts excluded), relative to the visible area.
   var geometryRows: [String: CGRect] { get }
+}
+
+/// What the offline scroll driver needs from the transcript: a virtual finger.
+@MainActor protocol TranscriptDriving: AnyObject {
+  var simulatedTouch: Bool { get set }
+  /// A real pan would start here; programmatic offsets do not.
+  func userScrollBegan()
 }
 
 /// Response text view lifetimes and whole-text replacements, read by the streaming checks.
@@ -32,7 +39,7 @@ enum TranscriptCounters {
 @MainActor final class TranscriptTrajectory {
   static let shared = TranscriptTrajectory()
   static let enabled = ProcessInfo.processInfo.arguments.contains("-OpenCodeTrajectory")
-  weak var geometry: TranscriptGeometry?
+  weak var geometry: TranscriptGeometrySource?
   private(set) var episode: Episode?
   private var episodes: [[String: Any]] = []
   private var link: CADisplayLink?
@@ -80,7 +87,8 @@ enum TranscriptCounters {
 
   /// Visible rows now; empty while no transcript is on screen.
   var rows: [String: CGRect] {
-    guard let view = geometry?.geometryView, view.window != nil else { return [:] }
+    // A hidden transcript shows nothing: its rows are not what the reader sees.
+    guard let view = geometry?.geometryView, view.window != nil, !view.isHidden, view.alpha > 0.01 else { return [:] }
     let visible = CGRect(origin: .zero, size: view.bounds.size)
     return (geometry?.geometryRows ?? [:]).filter { $0.value.intersects(visible) && $0.value.height > 0 }
   }
@@ -130,6 +138,15 @@ enum TranscriptCounters {
       "settledMS": (episode.changed - episode.started) * 1000,
       "finalTop": Self.top(final),
     ]
+    // The rows of the first wrong frame that differ, for diagnosis.
+    if let first = content.first(where: { (Self.deviation($0.rows, episode.reference ?? final) ?? .infinity) > 0.5 }) {
+      let target = episode.reference ?? final
+      report["firstWrong"] = first.rows.compactMap { id, frame -> String? in
+        guard let other = target[id], abs(other.minY - frame.minY) > 0.5 else { return nil }
+        return "\(id) \(String(format: "%.1f→%.1f h%.1f→%.1f", frame.minY, other.minY, frame.height, other.height))"
+      }.sorted().prefix(6).joined(separator: "; ")
+      report["firstWrongMS"] = (first.time - episode.started) * 1000
+    }
     if let reference = episode.reference {
       report["exitWrongFrames"] = wrong(reference)
       report["firstExitDeviation"] = content.first.map { Self.deviation($0.rows, reference) ?? -1 } ?? -1

@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor enum ScrollFixtures {
   static weak var scrollState: ConversationScrollState?
   static weak var conversation: ConversationStore?
+  static weak var driving: TranscriptDriving?
   static let mode: String? = argument("-OpenCodeScrollFixture")
   /// `pop` leaves and reopens the conversation; `child` covers it with another screen and returns.
   static let reentry: String? = argument("-OpenCodeFixtureReentry")

@@ -9,14 +9,14 @@ public enum PromptDelivery: String, Codable, Sendable {
   }
 }
 
-public struct InboxItem: Codable, Sendable, Identifiable {
+public struct InboxItem: Codable, Sendable, Identifiable, Equatable {
   public let id: String
   public let sessionID: String
   public let type: String
   public let delivery: PromptDelivery
   public let payload: Payload
   public var time: MessageTime?
-  public struct Payload: Codable, Sendable {
+  public struct Payload: Codable, Sendable, Equatable {
     public let text: String?
     public let metadata: [String: JSONValue]?
     public let files: [JSONValue]?

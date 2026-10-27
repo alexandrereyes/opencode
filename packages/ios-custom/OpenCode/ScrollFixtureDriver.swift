@@ -51,7 +51,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         for _ in 0..<200 {
           if let window, let scroll = findScroll(window) {
             self.scroll = scroll
-            if mode != .hold { ScrollFixtures.scrollState?.cancelAnchor() }
+            if mode != .hold { ScrollFixtures.driving?.userScrollBegan() }
             startCPU = cpuTime()
             startMainCPU = mainThreadCPUTime()
             counters = TranscriptCounters.values
@@ -84,7 +84,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
       let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
       // Unrequested on-screen movement of the visible rows (prepends, self-sizing, corrections, following).
       // A row that changed height still counts by its top edge: it is the response the reader is watching grow.
-      let state = ScrollFixtures.scrollState
+      let state = ScrollFixtures.driving
       let current = TranscriptTrajectory.shared.geometry?.geometryRows ?? [:]
       let viewport = CGRect(origin: .zero, size: scroll.bounds.size)
       var growing: [CGFloat] = []
@@ -100,7 +100,13 @@ struct ScrollFixtureDriver: UIViewRepresentable {
       }.sorted()
       if !moves.isEmpty {
         jumps.append(abs(moves[moves.count / 2]))
-        if abs(moves[moves.count / 2]) > 0.5 { moved += 1 }
+        if abs(moves[moves.count / 2]) > 0.5 {
+          moved += 1
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+            NSLog("DRIVER moved %.1f applied=%.1f offset=%.1f rows=%@", moves[moves.count / 2], applied,
+              scroll.contentOffset.y, current.keys.sorted().prefix(4).joined(separator: ","))
+          }
+        }
       }
       growingShift = max(growingShift, growing.max() ?? 0)
       // A small scroll step that shows none of the previous rows replaced the content (an uncorrected prepend).
@@ -121,12 +127,12 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         return
       case .flings:
         // Each fling begins a new pan, which cancels anchors; resting admits held pages.
-        if state?.simulatedTouch == false { state?.cancelAnchor() }
+        if state?.simulatedTouch == false { state?.userScrollBegan() }
         state?.simulatedTouch = true
         target = max(top, scroll.contentOffset.y - 1500 * interval)
       case .up:
-        // A real pan cancels reading and history anchors as it begins; programmatic offsets do not.
-        state?.cancelAnchor()
+        // A real pan begins here; programmatic offsets do not.
+        state?.userScrollBegan()
         target = max(top, scroll.contentOffset.y - 1500 * interval)
       case .oscillate:
         let phase = elapsed.truncatingRemainder(dividingBy: 6)
@@ -194,7 +200,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
     }
 
     func stop() {
-      ScrollFixtures.scrollState?.simulatedTouch = false
+      ScrollFixtures.driving?.simulatedTouch = false
       startup?.cancel()
       startup = nil
       link?.invalidate()

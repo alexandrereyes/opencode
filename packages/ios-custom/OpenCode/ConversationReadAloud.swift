@@ -46,13 +46,13 @@ import SwiftUI
 /// above it, so neither covers the other. Reports its height so the transcript ends above it.
 struct ConversationBottomControls: View {
   let readAloud: ConversationReadAloud
-  let viewport: ConversationViewport
+  let state: TranscriptState
   let jump: () -> Void
   let reveal: (String) -> Void
   let height: (CGFloat) -> Void
   var body: some View {
     VStack(alignment: .trailing, spacing: 8) {
-      if viewport.jumpToLatest {
+      if state.jumpToLatest {
         Button(action: jump) {
           Image(systemName: "arrow.down").frame(width: 42, height: 42)
         }.buttonStyle(.glass).buttonBorderShape(.circle).accessibilityLabel("Ir para a mais recente")

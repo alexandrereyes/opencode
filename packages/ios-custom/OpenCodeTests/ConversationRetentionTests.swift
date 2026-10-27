@@ -163,7 +163,7 @@ private final class ObservedFlag: @unchecked Sendable {
   func testLatestParseNeverStarvesDuringAFastStream() async throws {
     let parser = LatestMarkdownParse(interval: .milliseconds(50))
     var published: [String] = []
-    parser.publish = { blocks, _, _ in published.append(blocks.map(\.text).joined()) }
+    parser.publish = { published.append($0.blocks.map(\.text).joined()) }
     var text = ""
     let theme = AppTheme.load("openchamber-dark")
     let started = ContinuousClock.now

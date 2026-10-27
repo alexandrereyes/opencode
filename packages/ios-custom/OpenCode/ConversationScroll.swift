@@ -345,7 +345,7 @@ import SwiftUI
 }
 
 #if DEBUG
-extension ConversationScrollState: TranscriptGeometry {
+extension ConversationScrollState: TranscriptGeometrySource {
   var geometryView: UIScrollView? { view }
   var geometryRows: [String: CGRect] {
     let pinned = pinned

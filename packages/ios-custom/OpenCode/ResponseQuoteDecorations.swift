@@ -104,8 +104,8 @@ extension ResponseTextView {
       let rect = entry.1.first else { return }
     var parent = superview
     while let view = parent {
-      if view is UICollectionReusableView {
-        let offset = Double(convert(rect, to: view).minY)
+      if let view = view as? UICollectionReusableView {
+        let offset = Double(view.messageY(convert(rect, to: view).minY))
         guard offset.isFinite else { return }
         Task { @MainActor [weak self] in
           guard let self, quoteTarget == target else { return }

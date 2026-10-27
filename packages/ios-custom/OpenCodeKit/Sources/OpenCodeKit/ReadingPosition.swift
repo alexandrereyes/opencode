@@ -11,10 +11,20 @@ public struct ReadingPosition: Codable, Sendable, Equatable {
   /// The sticky header is an occlusion, not a stable coordinate origin. Keep its
   /// captured edge so pinning changes cannot move the same bookmark on reopening.
   public var viewportTop: Double?
-  public init(_ target: Target, updatedAt: Date = .now, viewportTop: Double? = nil) {
+  /// The transcript item under the reading line and the line's distance below that item's top. An item is a
+  /// block of a message, so restoring by it is exact even while the message's other blocks are not measured.
+  /// Optional: positions saved before items existed restore by message offset.
+  public var item: String?
+  public var itemOffset: Double?
+  public init(
+    _ target: Target, updatedAt: Date = .now, viewportTop: Double? = nil, item: String? = nil,
+    itemOffset: Double? = nil
+  ) {
     self.target = target
     self.updatedAt = updatedAt
     self.viewportTop = viewportTop
+    self.item = item
+    self.itemOffset = itemOffset
   }
 }
 

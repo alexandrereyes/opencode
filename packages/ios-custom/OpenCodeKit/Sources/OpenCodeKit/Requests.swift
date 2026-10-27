@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PermissionRequest: Codable, Sendable, Identifiable {
+public struct PermissionRequest: Codable, Sendable, Identifiable, Equatable {
   public let id: String
   public let sessionID: String
   public let action: String
@@ -8,7 +8,7 @@ public struct PermissionRequest: Codable, Sendable, Identifiable {
   public let metadata: [String: JSONValue]?
   public let message: String?
   public let source: Source?
-  public struct Source: Codable, Sendable {
+  public struct Source: Codable, Sendable, Equatable {
     public let type: String
     public let messageID: String?
     public let id: String?
@@ -20,14 +20,14 @@ public struct PermissionRequest: Codable, Sendable, Identifiable {
   }
 }
 
-public struct PendingForm: Codable, Sendable, Identifiable {
+public struct PendingForm: Codable, Sendable, Identifiable, Equatable {
   public let id: String
   public let sessionID: String
   public let title: String
   public let fields: [Field]
   public let metadata: [String: JSONValue]?
 
-  public struct Field: Codable, Sendable, Identifiable {
+  public struct Field: Codable, Sendable, Identifiable, Equatable {
     public let key: String
     public var id: String { key }
     public let type: Kind
@@ -40,13 +40,13 @@ public struct PendingForm: Codable, Sendable, Identifiable {
     public let when: [Condition]?
     public let minItems: Int?
     public let maxItems: Int?
-    public struct Option: Codable, Sendable, Identifiable {
+    public struct Option: Codable, Sendable, Identifiable, Equatable {
       public let value: String
       public let label: String
       public let description: String?
       public var id: String { value }
     }
-    public struct Condition: Codable, Sendable {
+    public struct Condition: Codable, Sendable, Equatable {
       public let key: String
       public let op: String
       public let value: JSONValue

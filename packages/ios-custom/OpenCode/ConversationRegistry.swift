@@ -64,12 +64,35 @@ import SwiftUI
 @MainActor final class TranscriptMemory {
   /// The passage last on screen, always a message and offset (even at the end), never persisted.
   var anchor: ReadingPosition?
+  let state = TranscriptState()
+  let heights = TranscriptHeights()
+  /// The prompt sent from this screen that may rise to the top, with trailing space below it.
+  var spacerPrompt: String?
+  /// The transcript view kept with the conversation; returning remounts this very view.
+  var controller: TranscriptViewController?
+  private var mounted: [WeakTranscript] = []
+  /// The mounted transcript that commands from the conversation screen act on: the most recently mounted.
+  var active: TranscriptViewController? { mounted.last?.controller }
+
+  func mount(_ controller: TranscriptViewController) {
+    mounted.removeAll { $0.controller == nil || $0.controller === controller }
+    mounted.append(WeakTranscript(controller: controller))
+  }
+  func unmount(_ controller: TranscriptViewController) {
+    mounted.removeAll { $0.controller == nil || $0.controller === controller }
+  }
+  private struct WeakTranscript {
+    weak var controller: TranscriptViewController?
+  }
   private var bubbles: [String: TranscriptValue<Bool>] = [:]
+  private var truncations: [String: TranscriptValue<Bool>] = [:]
   private var details: [String: TranscriptValue<Bool?>] = [:]
   private var outputs: [String: TranscriptValue<String?>] = [:]
   private var tableOffsets: [String: CGFloat] = [:]
 
   func bubble(_ id: String) -> Bool { Self.entry(&bubbles, id, false).value }
+  func truncated(_ id: String) -> Bool { Self.entry(&truncations, id, false).value }
+  func setTruncated(_ id: String, value: Bool) { Self.entry(&truncations, id, false).value = value }
   func setBubble(_ id: String, expanded: Bool) { Self.entry(&bubbles, id, false).value = expanded }
   func detail(_ key: String) -> Bool? { Self.entry(&details, key, nil).value }
   func setDetail(_ key: String, expanded: Bool) { Self.entry(&details, key, nil).value = expanded }
@@ -78,8 +101,12 @@ import SwiftUI
   func tableOffset(_ key: String) -> CGFloat { tableOffsets[key] ?? 0 }
   func setTableOffset(_ key: String, value: CGFloat) { tableOffsets[key] = value }
 
-  /// Fetched output can be read again on demand; expansion and offsets are the reader's own choices.
-  func releaseCaches() { outputs.values.forEach { $0.value = nil } }
+  /// Fetched output can be read again on demand, and an unmounted view rebuilt from cached heights;
+  /// expansion, offsets and the reading place are the reader's own state.
+  func releaseCaches() {
+    outputs.values.forEach { $0.value = nil }
+    if controller?.mounted == false { controller = nil }
+  }
 
   /// The observable box for one key; a reader of an absent key still observes its later value.
   private static func entry<Value>(
