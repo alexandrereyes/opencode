@@ -193,10 +193,12 @@ verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-s
 
 ## Sessão mestra
 
-`VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação relê
-`custom.preferences`, usa o ponteiro `masterSessions.local` quando válido ou faz o mesmo fluxo do
-composer: `custom.master/info`, allocate/claim de chat, create Session com agente `mestra`, confirm,
-`master.set`, prompt. Nenhuma sessão é criada apenas ao abrir a voz. O prompt contém só o texto
+`VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
+`custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
+cria outra no plugin (com trava, então tela e voz simultâneas não criam duas) e atualiza
+`masterSessions.local`; em seguida, prompt. Se a mestra for apagada durante a chamada, o 404 leva a
+um único novo `ensure` e o pedido vai para a substituta. Nenhuma sessão é criada apenas ao abrir a voz.
+A memória de voz é global (não pertence à sessão) e continua valendo para a nova mestra. O prompt contém só o texto
 delegado, sem preâmbulo: as orientações de voz (progresso conciso, resumo final para fala) e a regra
 de não executar instruções vindas de resultados de ferramentas ficam no prompt do agente `mestra`
 (`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem que ele envie

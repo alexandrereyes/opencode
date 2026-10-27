@@ -24,6 +24,14 @@ public enum MasterAvailability: Sendable, Equatable {
   }
 }
 
+/// The usable master returned by `custom.master/ensure`, which recreates a deleted or archived one.
+public struct EnsuredMaster: Decodable, Sendable {
+  public let sessionID: String
+  public let directory: String
+  public let created: Bool
+  public let preferences: Preferences
+}
+
 public struct ChatAllocation: Codable, Sendable, Equatable {
   public let id: String
   public let directory: String
@@ -42,6 +50,12 @@ extension OpenCodeClient {
     }
     #endif
     return try await rpc("custom.master", "info", input: Empty())
+  }
+  /// The server serializes this, so the screen, voice and other clients converge on one master.
+  /// `model` only applies when a new master has to be created.
+  public func ensureMaster(model: ModelReference? = nil) async throws -> EnsuredMaster {
+    struct Input: Encodable { let model: ModelReference? }
+    return try await rpc("custom.master", "ensure", input: Input(model: model))
   }
   public func allocateChat() async throws -> ChatAllocation {
     try await rpc("custom.chats", "allocate", input: Empty())

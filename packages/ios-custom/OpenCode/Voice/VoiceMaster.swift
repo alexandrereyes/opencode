@@ -15,8 +15,6 @@ enum VoiceMasterUpdate: Sendable {
   private let update: @MainActor (VoiceMasterUpdate) -> Void
   private var subscription: Task<Void, Never>?
   private var masterID: String?
-  private var allocation: ChatAllocation?
-  private var allocatedID = "ses_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
   private var messages: [ConversationMessage] = []
   private var waiting = false
   private var admitted = false
@@ -31,28 +29,22 @@ enum VoiceMasterUpdate: Sendable {
   func ask(_ request: VoiceMasterRequest) async throws {
     let info = try await sessions.client.masterInfo()
     guard info.version == 1 else { throw ClientError.operation("Atualize o servidor para usar a Sessão mestra.") }
+    do { try await send(request, info: info) } catch ClientError.http(404) where masterID != nil {
+      // Deleted during the call: ask the server for its replacement once.
+      masterID = nil
+      try await send(request, info: info)
+    }
+  }
+  private func send(_ request: VoiceMasterRequest, info: MasterSessionInfo) async throws {
     if masterID == nil {
-      // Re-read the pointer: a text composer may have created the master since call start.
-      let preferences = try await sessions.client.preferences()
-      sessions.adoptMaster(preferences)
-      if let id = sessions.masterID {
-        let session = try await sessions.client.session(id)
-        guard session.time.archived == nil else { throw ClientError.operation("A Sessão mestra foi arquivada. Inicie outra conversa por voz.") }
-        masterID = id
-      } else {
-        if allocation == nil { allocation = try await sessions.client.allocateChat() }
-        guard let allocation else { throw ClientError.operation("Não foi possível preparar a Sessão mestra.") }
-        let fallback = info.model == nil ? try await sessions.client.defaultModel(directory: allocation.directory) : nil
-        guard let model = info.model ?? fallback.map({ ModelReference(id: $0.id, providerID: $0.providerID) }) else {
-          throw ClientError.operation("Escolha um modelo para a Sessão mestra.")
-        }
-        try Task.checkCancellation()
-        try await sessions.client.claimChat(allocation, sessionID: allocatedID)
-        try await sessions.client.createSession(id: allocatedID, agent: "mestra", model: model, directory: allocation.directory)
-        try await sessions.client.claimChat(allocation, sessionID: allocatedID, confirm: true)
-        sessions.adoptMaster(try await sessions.client.mutate(.masterSet(allocatedID)))
-        masterID = allocatedID
-      }
+      // The server reuses the current master, or creates one if it is missing, deleted or archived.
+      let fallback = info.model == nil
+        ? try await sessions.client.defaultModel(directory: sessions.client.chatRoot()) : nil
+      try Task.checkCancellation()
+      let master = try await sessions.client.ensureMaster(
+        model: info.model ?? fallback.map { ModelReference(id: $0.id, providerID: $0.providerID) })
+      sessions.adoptMaster(master.preferences)
+      masterID = master.sessionID
     }
     guard let masterID else { return }
     let session = try await sessions.client.session(masterID)

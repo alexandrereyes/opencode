@@ -1873,6 +1873,8 @@ export const dict = {
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
 
   "session.delete.failed.title": "Failed to delete session",
+  "session.delete.master":
+    "This is the iPhone's Sessão mestra. Deleting it erases its history for good; a new, empty one is created the next time it is opened. Archive it instead to keep the history readable.",
   "session.delete.title": "Delete session",
   "session.delete.confirmCascade":
     'Delete session "{{name}}" and all its child sessions? This permanently deletes their messages and cannot be undone.',

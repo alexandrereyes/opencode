@@ -1,10 +1,11 @@
 import type { SessionInfo } from "@opencode/client/promise"
 import { Archive } from "@opencode/plugin-app-custom/archive/rpc"
+import { Master } from "@opencode/plugin-app-custom/master/rpc"
 import { Button } from "@opencode/ui-custom/button"
 import { useDialog } from "@opencode/ui-custom/context/dialog"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode/ui-custom/dialog"
 import { useQueryClient } from "@tanstack/solid-query"
-import { createMemo, For } from "solid-js"
+import { createMemo, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ServerConnection, useServers } from "@/runtime/server/registry"
@@ -236,6 +237,7 @@ function SessionBulkDeleteDialog(props: { targets: SessionLifecycleTarget[]; onC
             )}
           </For>
         </ul>
+        <MasterDeleteWarning sessions={targets().map((target) => target.session)} />
       </DialogBody>
       <DialogFooter>
         <Button variant="ghost" disabled={state.pending} onClick={() => dialog.close()}>
@@ -272,6 +274,11 @@ export function SessionDeleteDialog(props: { session: SessionInfo; onConfirm: ()
           })}
         />
       </DialogHeader>
+      <Show when={isMaster([props.session])}>
+        <DialogBody class="min-w-0 px-4 pb-2">
+          <MasterDeleteWarning sessions={[props.session]} />
+        </DialogBody>
+      </Show>
       <DialogFooter>
         <Button variant="ghost" disabled={state.pending} onClick={() => dialog.close()}>
           {language.t("common.cancel")}
@@ -281,5 +288,21 @@ export function SessionDeleteDialog(props: { session: SessionInfo; onConfirm: ()
         </Button>
       </DialogFooter>
     </Dialog>
+  )
+}
+
+// The iPhone's Sessão mestra is an ordinary session here; deleting it loses its history for good.
+function isMaster(sessions: readonly SessionInfo[]) {
+  return sessions.some((session) => session.agent === Master.agentID)
+}
+
+function MasterDeleteWarning(props: { sessions: readonly SessionInfo[] }) {
+  const language = useLanguage()
+  return (
+    <Show when={isMaster(props.sessions)}>
+      <p data-slot="master-delete-warning" class="mt-2 text-[13px] leading-4 text-v2-state-fg-warning">
+        {language.t("session.delete.master")}
+      </p>
+    </Show>
   )
 }

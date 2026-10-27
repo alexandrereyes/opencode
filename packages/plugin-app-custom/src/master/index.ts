@@ -13,10 +13,12 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionScan } from "@opencode/schema/session-scan"
 import { TokenUsage } from "@opencode/schema/token-usage"
 import { Tool } from "@opencode/schema/tool"
-import { DateTime, Effect, Option, Schema, Stream } from "effect"
+import { DateTime, Effect, Option, Schema, Semaphore, Stream } from "effect"
+import { Chats } from "../chats/rpc.js"
+import { Preferences } from "../preferences/rpc.js"
 import { Master } from "./rpc.js"
 
-export const agentID = Agent.ID.make("mestra")
+export const agentID = Master.agentID
 export const preferredModel = Model.Ref.parse("llm-proxy/gpt-6.1-sol-ultrafast#medium")
 export const instructions = `Você é a Sessão mestra de Alexandre: um oráculo para consultar e controlar sessões OpenCode, não subagentes. Responda em pt-BR, de forma concisa; resuma em vez de despejar transcrições.
 Alexandre conversa com você por texto ou por voz: na conversa por voz, um assistente de voz repassa as falas dele como mensagens comuns, sem marcação, e lê suas respostas em voz alta. Por isso, mantenha o progresso conciso e termine sempre com um resumo final adequado à fala: frases curtas, ressalvas preservadas, sem depender de código, Markdown, IDs ou caminhos longos para ser entendido.
@@ -121,6 +123,14 @@ export const registerMaster = Effect.fn("Master.register")(function* (ctx: Plugi
         resolveModel(ctx).pipe(
           Effect.map((model) => ({ version: 1 as const, agent: agentID, ...(model ? { model } : {}) })),
         ),
+      ensure: (input, context) =>
+        ensureMaster(ctx, input).pipe(
+          Effect.tapCause((cause) => Effect.logWarning("Mestra ensure failed", { cause })),
+          Effect.mapError((error) => {
+            const message = error instanceof Error ? error.message : "Mestra could not be prepared"
+            return context.error("operation_failed", message, { message })
+          }),
+        ),
     })
     .pipe(Effect.orDie)
   yield* ctx.session.hook("context", (event) =>
@@ -207,6 +217,52 @@ export const observeModel = Effect.fn("Master.observeModel")(function* (ctx: Mod
   }
   const session = yield* ctx.session.get({ sessionID: event.data.sessionID })
   if (session.agent === agentID) yield* rememberModel(ctx, event.data.model)
+})
+
+export type EnsureContext = Pick<ModelContext, "storage" | "model"> & {
+  session: Pick<Plugin.Context["session"], "scan" | "create">
+  rpc: Plugin.Context["rpc"]
+}
+
+// Module scope on purpose: every Location runs its own plugin instance, and all of them share one pointer.
+const ensureLock = Semaphore.makeUnsafe(1)
+
+/**
+ * The usable Mestra session: the stored pointer while its session exists and is not archived; otherwise a new one
+ * in a fresh managed chat, with the requested or remembered model, and the pointer moved to it.
+ */
+export const ensureMaster = Effect.fn("Master.ensure")(function* (
+  ctx: EnsureContext,
+  input: typeof Master.EnsureInput.Type,
+) {
+  return yield* ensureLock.withPermit(
+    Effect.gen(function* () {
+      const preferences = ctx.rpc(Preferences.Definition)
+      const profile = yield* preferences.get({})
+      const current = profile.data.masterSessions?.local
+      const existing = current
+        ? (yield* ctx.session.scan({ sessionID: current, limit: 1 })).data[0]?.session
+        : undefined
+      if (existing && !existing.time.archived)
+        return { sessionID: existing.id, directory: existing.location.directory, created: false, preferences: profile }
+      const model = input.model ?? (yield* resolveModel(ctx))
+      const chats = ctx.rpc(Chats.Definition)
+      const allocation = yield* chats.allocate({})
+      const sessionID = Session.ID.create()
+      yield* chats.claim({ ...allocation, sessionID })
+      const session = yield* ctx.session.create({
+        id: sessionID,
+        agent: agentID,
+        // A fixed title identifies it where it is an ordinary session, such as the web session list.
+        title: "Sessão mestra",
+        location: { directory: allocation.directory },
+        ...(model ? { model } : {}),
+      })
+      yield* chats.confirm({ ...allocation, sessionID })
+      const next = yield* preferences.mutate({ type: "master.set", server: "local", sessionID })
+      return { sessionID, directory: session.location.directory, created: true, preferences: next }
+    }),
+  )
 })
 
 export const controlNames = [

@@ -25,15 +25,15 @@ import XCTest
     attachment.lifetime = .keepAlways
     add(attachment)
   }
-  private func request(_ path: String, body: Data? = nil) async throws -> Data {
+  private func request(_ path: String, body: Data? = nil, method: String? = nil) async throws -> Data {
     var request = URLRequest(url: URL(string: serverURL + path)!)
-    request.httpMethod = body == nil ? "GET" : "POST"
+    request.httpMethod = method ?? (body == nil ? "GET" : "POST")
     request.httpBody = body
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
     let (data, response) = try await URLSession.shared.data(for: request)
-    XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    XCTAssertTrue((200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0))
     return data
   }
   func testEmptyFirstSendHiddenAndTrashStartsFresh() async throws {
@@ -126,6 +126,44 @@ import XCTest
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Arquivadas'")).firstMatch.tap()
     XCTAssertTrue(app.navigationBars["Arquivadas"].waitForExistence(timeout: 15))
     shot("archived")
+  }
+  func testDeletedMasterIsRecreatedWhenOpened() async throws {
+    struct Ensured: Decodable {
+      let output: Output
+      struct Output: Decodable { let sessionID: String; let created: Bool }
+    }
+    let ensure = Data(#"{"input":{}}"#.utf8)
+    let old = try JSONDecoder().decode(Ensured.self, from: await request("/api/rpc/custom.master/ensure", body: ensure))
+    // Deleting it elsewhere (as the web does) used to leave the app opening a 404.
+    _ = try await request("/api/session/" + old.output.sessionID, method: "DELETE")
+    let app = try launch()
+    defer { app.terminate() }
+    let accessory = app.buttons["master-accessory"]
+    XCTAssertTrue(accessory.waitForExistence(timeout: 30))
+    accessory.tap()
+    struct Profile: Decodable {
+      let output: Output
+      struct Output: Decodable { let data: Data }
+      struct Data: Decodable { let masterSessions: [String: String]? }
+    }
+    var pointer = old.output.sessionID
+    for _ in 0..<60 where pointer == old.output.sessionID {
+      try await Task.sleep(for: .milliseconds(500))
+      let profile = try JSONDecoder().decode(Profile.self, from: await request("/api/rpc/custom.preferences/get", body: ensure))
+      pointer = profile.output.data.masterSessions?["local"] ?? pointer
+    }
+    XCTAssertNotEqual(pointer, old.output.sessionID)
+    XCTAssertTrue(app.buttons["master-trash"].waitForExistence(timeout: 30))
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 30))
+    try await Task.sleep(for: .seconds(2))
+    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '404'")).firstMatch.exists)
+    let current = try JSONDecoder().decode(Ensured.self, from: await request("/api/rpc/custom.master/ensure", body: ensure))
+    XCTAssertEqual(current.output.sessionID, pointer)
+    XCTAssertFalse(current.output.created)
+    struct Info: Decodable { let data: Session; struct Session: Decodable { let agent: String } }
+    let info = try JSONDecoder().decode(Info.self, from: await request("/api/session/" + current.output.sessionID))
+    XCTAssertEqual(info.data.agent, "mestra")
+    shot("recreated")
   }
   func testOrdinaryChatHeaderUsesTitleAndHidesManagedDirectory() throws {
     let app = try launch(session: XCTUnwrap(environment["OPENCODE_TEST_CHAT"]))

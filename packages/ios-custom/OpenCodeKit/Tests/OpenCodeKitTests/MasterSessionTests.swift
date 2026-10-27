@@ -71,3 +71,24 @@ import Testing
   try await client.claimChat(allocation, sessionID: "ses_master")
   try await client.claimChat(allocation, sessionID: "ses_master", confirm: true)
 }
+
+@Test func ensureMasterSendsTheCreationModelOnlyWhenGiven() async throws {
+  let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4179")!)) { request in
+    #expect(request.url?.path == "/api/rpc/custom.master/ensure")
+    let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody!).object?["input"]?.object
+    let model = input?["model"]?.object
+    #expect(model == nil || (model?["providerID"]?.string == "llm-proxy" && model?["variant"]?.string == "medium"))
+    let body = """
+      {"output":{"sessionID":"ses_new","directory":"/chats/owned","created":\(model != nil),
+      "preferences":{"version":1,"revision":2,"imported":true,"data":{"projects":{},"pinnedSessions":[],
+      "masterSessions":{"local":"ses_new"},"settings":{"autoApprove":false}}}}}
+      """
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+  let reused = try await client.ensureMaster()
+  #expect(!reused.created)
+  let created = try await client.ensureMaster(model: ModelReference(id: "gpt-6.1-sol-ultrafast", providerID: "llm-proxy", variant: "medium"))
+  #expect(created.created)
+  #expect(created.sessionID == "ses_new" && created.directory == "/chats/owned")
+  #expect(created.preferences.data.masterSessions?["local"] == "ses_new")
+}

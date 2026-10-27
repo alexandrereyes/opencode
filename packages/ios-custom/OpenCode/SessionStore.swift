@@ -33,6 +33,21 @@ final class SessionStore {
     } catch { if !Task.isCancelled { masterAvailability = .classify(error) } }
   }
   func adoptMaster(_ preferences: Preferences) { self.preferences = preferences }
+  /// Bumped when the current master is deleted elsewhere, so an open master screen verifies it again.
+  private(set) var masterDeletions = 0
+  /// A master deleted or archived elsewhere (for example on the web) is replaced instead of opening a 404.
+  func verifyMaster() async {
+    guard masterAvailability == .available, let id = masterID else { return }
+    do {
+      guard try await client.session(id).time.archived != nil else { return }
+    } catch ClientError.http(404) {
+    } catch { return }
+    guard id == masterID, busy.insert("master-recover").inserted else { return }
+    defer { busy.remove("master-recover") }
+    do { preferences = try await client.ensureMaster().preferences } catch {
+      toast.show("Não foi possível recriar a Sessão mestra.", kind: .error)
+    }
+  }
   func resetMaster() async {
     guard let id = masterID, busy.insert("master-reset").inserted else { return }
     defer { busy.remove("master-reset") }
@@ -295,6 +310,7 @@ final class SessionStore {
         let id = event.data.owner
         // The current master is an accessory-only destination, not a global alert shortcut.
         if masterID == nil || id != masterID { await alerts.receive(event, store: self) }
+        if type == "session.deleted", id != nil, id == masterID { masterDeletions += 1 }
         if type.hasPrefix("session.") || type.hasPrefix("permission.")
           || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
           || type.hasPrefix("worktree.")

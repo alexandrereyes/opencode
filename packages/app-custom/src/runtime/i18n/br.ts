@@ -987,6 +987,8 @@ export const dict = {
   "settings.permissions.tool.doom_loop.title": "Loop Infinito",
   "settings.permissions.tool.doom_loop.description": "Detectar chamadas de ferramentas repetidas com entrada idêntica",
   "session.delete.failed.title": "Falha ao excluir sessão",
+  "session.delete.master":
+    "Esta é a Sessão mestra do iPhone. Excluir apaga o histórico definitivamente; uma nova, vazia, é criada no próximo acesso. Para manter o histórico legível, arquive em vez de excluir.",
   "session.delete.title": "Excluir sessão",
   "session.delete.confirm": 'Excluir sessão "{{name}}"?',
   "session.delete.button": "Excluir sessão",

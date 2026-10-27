@@ -13,6 +13,8 @@ struct MasterSessionView: View {
         EmptyMasterView(sessions: sessions).id(sessions.masterID)
       }
     }.toastOverlay(sessions.toast)
+      .task(id: [sessions.masterID ?? "", String(sessions.masterDeletions),
+        String(sessions.masterAvailability == .available)]) { await sessions.verifyMaster() }
   }
 }
 
@@ -67,8 +69,6 @@ private struct EmptyMasterView: View {
   let composer: ConversationStore
   let draft: ConversationDraft
   var error: String?
-  private var allocation: ChatAllocation?
-  private let id = "ses_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
   init(sessions: SessionStore) {
     self.sessions = sessions
     // A fresh local composer; no server session or managed chat is allocated until Send.
@@ -105,19 +105,17 @@ private struct EmptyMasterView: View {
         composer.toast.show("Este comando precisa de uma sessão existente.", kind: .error)
         return
       }
-      if allocation == nil { allocation = try await sessions.client.allocateChat() }
-      guard let allocation else { return }
+      // The server creates the master (or returns one voice or another client created meanwhile).
+      let master = try await sessions.client.ensureMaster(model: model)
+      let id = master.sessionID
       var delivered: [DeliveredAttachment] = []
       let input = composer.models.first { $0.id == model.id && $0.providerID == model.providerID }?.capabilities?.input ?? []
       for item in draft.attachments {
         if let path = item.remotePath { delivered.append(.init(attachment: item, path: path, inline: nil)); continue }
         delivered.append(try await sessions.client.deliver(item, bytes: draft.persistence.bytes(item),
-          directory: allocation.directory, input: input))
+          directory: master.directory, input: input))
       }
-      try await sessions.client.claimChat(allocation, sessionID: id)
-      try await sessions.client.createSession(id: id, agent: "mestra", model: model, directory: allocation.directory)
-      try await sessions.client.claimChat(allocation, sessionID: id, confirm: true)
-      let preferences = try await sessions.client.mutate(.masterSet(id))
+      let preferences = master.preferences
       do {
         let request = PromptRequest(document: document, delivery: .steer,
           agent: "mestra", model: model, attachments: delivered, quotes: draft.quotes)

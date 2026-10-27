@@ -2077,8 +2077,15 @@ between iterations, so this does not establish a fix for every live-server Sess√
 
 The bottom accessory is the only entry to the current master. With no master it opens an empty conversation using the
 existing composer, keyboard focused, hidden **Mestra** agent and **Sol 6.1 ultrafast / medium** preselected. Nothing is
-allocated until the first send. The plugin's preferred model wins over personal new-session defaults; when unavailable,
-the server's default model is used. The existing model/effort picker remains available; the agent stays Mestra.
+allocated until the first send, which calls `custom.master/ensure` with the picked model: the plugin creates the
+session (or returns one that voice or another client created meanwhile) and attachments go to its directory. The
+plugin's preferred model wins over personal new-session defaults; when unavailable, the server's default model is used.
+The existing model/effort picker remains available; the agent stays Mestra.
+
+Opening the master screen verifies the stored pointer (`GET /api/session/:id`, also after a `session.deleted` for it).
+A 404 or an archived session (for example deleted or archived on the web) calls `custom.master/ensure`, which creates a
+fresh master and moves the pointer; the old history is gone, since native delete is permanent. Voice does the same on
+its first delegation and retries once with the replacement if the master disappears during a call.
 
 The master header uses the accessory's icon inside its context ring, with model/status below the title. Ordinary managed
 chats use their conversation title for the avatar initials and the same model/status subtitle, never the allocation folder.
