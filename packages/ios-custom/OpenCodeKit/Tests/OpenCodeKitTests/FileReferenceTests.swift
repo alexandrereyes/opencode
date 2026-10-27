@@ -194,3 +194,80 @@ import Testing
   #expect(decide("data:text/html,oi", main: false) == .allow)
   #expect(decide("file:///etc/hosts", main: false) == .cancel)
 }
+
+@Test func htmlPreviewScopeServesOnlyThePageFolderAndItsSession() {
+  // Outside the Session (the reported temporary folder): only the page's folder and below.
+  let outside = HTMLPreviewScope(file: "/tmp/live/index.html", sessionDirectory: "/repo", token: "t")
+  #expect(outside.roots == ["/tmp/live"])
+  #expect(outside.pageURL.absoluteString == "opencode-preview://t/tmp/live/index.html")
+  func resolve(_ scope: HTMLPreviewScope, _ link: String) -> String? {
+    URL(string: link, relativeTo: scope.pageURL).flatMap { scope.resolve($0.absoluteURL) }.map { $0.root + " | " + $0.relative }
+  }
+  #expect(resolve(outside, "t3code/real-lockscreen-detail.png") == "/tmp/live | t3code/real-lockscreen-detail.png")
+  #expect(resolve(outside, "./css/estilo%20novo.css") == "/tmp/live | css/estilo novo.css")
+  #expect(resolve(outside, "a/../b/c.js") == "/tmp/live | b/c.js")
+  #expect(resolve(outside, "../segredo.txt") == nil)
+  #expect(resolve(outside, "../../../etc/hosts") == nil)
+  #expect(resolve(outside, "/etc/hosts") == nil)
+  #expect(resolve(outside, "/tmp/livedata/x.png") == nil, "a sibling sharing the prefix")
+  #expect(resolve(outside, "pasta/") == nil)
+  #expect(resolve(outside, "opencode-preview://outro/tmp/live/a.png") == nil, "another page's origin")
+  #expect(resolve(outside, "https://example.com/a.png") == nil)
+  #expect(resolve(outside, "file:///tmp/live/a.png") == nil)
+  // Inside the Session: the page's folder first (the innermost Location), then the Session directory.
+  let inside = HTMLPreviewScope(file: "/repo/docs/report/index.html", sessionDirectory: "/repo/", token: "t")
+  #expect(inside.roots == ["/repo/docs/report", "/repo"])
+  #expect(resolve(inside, "img/a.png") == "/repo/docs/report | img/a.png")
+  #expect(resolve(inside, "../../assets/base.css") == "/repo | assets/base.css")
+  #expect(resolve(inside, "../../../etc/hosts") == nil)
+  #expect(inside.isPage(URL(string: "opencode-preview://t/repo/docs/other.html")!))
+  #expect(!inside.isPage(URL(string: "opencode-preview://t/repo/docs/a.png")!))
+  #expect(HTMLPreviewScope(file: "/repo/index.html", sessionDirectory: "/repo", token: "t").roots == ["/repo"])
+}
+
+@Test func htmlPreviewResourcesHaveTheirWebTypes() {
+  for (path, mime) in [("a.html", "text/html"), ("a.HTM", "text/html"), ("s.css", "text/css"), ("m.mjs", "text/javascript"),
+    ("a.js", "text/javascript"), ("f.woff2", "font/woff2"), ("i.svg", "image/svg+xml"), ("p.png", "image/png"),
+    ("j.JPG", "image/jpeg"), ("d.json", "application/json"), ("x.wasm", "application/wasm"), ("blob", "application/octet-stream")] {
+    #expect(HTMLPreviewScope.mime(path) == mime, "\(path)")
+  }
+  #expect(HTMLPreviewScope.contentSecurityPolicy.contains("connect-src 'self' data: blob:"))
+  #expect(HTMLPreviewScope.contentSecurityPolicy.contains("form-action 'none'"))
+  #expect(HTMLPreviewScope.contentSecurityPolicy.contains("frame-src 'self' blob:"))
+}
+
+@Test func htmlPreviewResourcesReadWithTheScopeRootAsLocationAndALimit() async throws {
+  let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "https://server.test")!, password: "fixture")) { request in
+    #expect(request.url?.path(percentEncoded: false) == "/api/fs/read/t3code/a b.png")
+    #expect(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+      == [URLQueryItem(name: "location[directory]", value: "/tmp/live")])
+    #expect(request.value(forHTTPHeaderField: "Range") == "bytes=0-\(HTMLPreviewScope.resourceLimit)")
+    return (Data("png".utf8), HTTPURLResponse(url: request.url!, statusCode: 206, httpVersion: nil, headerFields: nil)!)
+  }
+  #expect(try await client.previewResource("t3code/a b.png", root: "/tmp/live") == Data("png".utf8))
+}
+
+@Test func htmlPreviewLocalModeNavigatesOnlyInsideItsOrigin() {
+  let scope = HTMLPreviewScope(file: "/tmp/cov/index.html", sessionDirectory: "/repo", token: "t")
+  let page = scope.pageURL
+  func decide(_ link: String, main: Bool = true, link activated: Bool = false, touch: Bool = false, initial: Bool = false,
+    back: Bool = false) -> HTMLPreviewPolicy.Decision {
+    HTMLPreviewPolicy.decide(URL(string: link, relativeTo: page)?.absoluteURL, mainFrame: main, linkActivated: activated,
+      recentTouch: touch, scope: scope, current: page, initial: initial, backForward: back)
+  }
+  #expect(decide(page.absoluteString, initial: true) == .allow)
+  #expect(decide("src/file.ts.html", link: true, touch: true) == .allow, "a tapped link to another page of the report")
+  #expect(decide("src/file.ts.html") == .cancel, "script navigation")
+  #expect(decide("src/file.ts.html", link: true) == .cancel, "script click")
+  #expect(decide("img/a.png", link: true, touch: true) == .cancel, "not a page")
+  #expect(decide("#?testId=1") == .allow, "hash routing on the same page")
+  #expect(decide("src/file.ts.html", back: true) == .allow)
+  #expect(decide("../fora.html", link: true, touch: true) == .cancel)
+  #expect(decide("frame.html", main: false) == .allow)
+  #expect(decide("opencode-preview://outro/tmp/cov/index.html", main: false) == .cancel)
+  // No network in this mode: web frames are refused; a tapped link still leaves for Safari.
+  #expect(decide("https://example.com/embed", main: false) == .cancel)
+  #expect(decide("data:text/html,oi", main: false) == .cancel)
+  #expect(decide("https://example.com/", link: true, touch: true) == .openExternally(URL(string: "https://example.com/")!))
+  #expect(decide("https://example.com/") == .cancel)
+}

@@ -1016,6 +1016,21 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
 - The app's server credential is an `Authorization` header on its own `URLSession`, never in shared credential
   storage, so WebKit has nothing to send; the UI test's local probe answers 401 Basic and records no credential.
 
+#### HTML with local files — 27 October
+
+- Every opened HTML file starts in **local files** mode: it is served as `opencode-preview://<token>/<path>` by
+  `HTMLAssetHandler`, so images (also `srcset` and lazy ones), stylesheets with `url()` and fonts, classic scripts
+  and ES modules next to it load. `HTMLPreviewScope` allows the page's folder and subfolders, plus the Session
+  directory when the page is inside it; each read uses that root as Location, so the server also refuses `..` and
+  symlinks leaving it. Resources are read whole (25 MB each), cached while the page is open and cancelled with
+  it. Video and audio with byte ranges are not served.
+- The network is blocked twice: a content rule list (`http(s)`, `ws(s)`, `ftp`) and a response CSP (`connect-src`
+  and frames on the page's own origin, `form-action 'none'`); WebRTC constructors are removed. A tapped link to
+  another HTML page of the scope opens inside the preview with a back button; script navigation, frames from
+  elsewhere and pages outside the scope are refused; links to the web still open in Safari after a touch.
+- **Permitir internet** in the mode bar reloads the page alone with the network (the previous mode, without local
+  files); **Usar arquivos locais** returns. The choice is not remembered between files.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

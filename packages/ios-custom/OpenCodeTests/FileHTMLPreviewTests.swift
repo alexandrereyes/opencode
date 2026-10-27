@@ -1,3 +1,4 @@
+import OpenCodeKit
 import UIKit
 import WebKit
 import XCTest
@@ -8,6 +9,16 @@ import XCTest
     let configuration = HTMLPageView.configuration()
     XCTAssertFalse(configuration.websiteDataStore.isPersistent)
     XCTAssertTrue(configuration.userContentController.userScripts.isEmpty)
+    XCTAssertNil(configuration.urlSchemeHandler(forURLScheme: HTMLPreviewScope.scheme))
+    // Local files: the scheme handler, and only a hardening script (no message handler is ever added).
+    let scope = HTMLPreviewScope(file: "/tmp/live/index.html", sessionDirectory: "/repo")
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:9")!))
+    let handler = HTMLAssetHandler(scope: scope, client: client, page: Data())
+    let local = HTMLPageView.configuration(scope: scope, handler: handler)
+    XCTAssertFalse(local.websiteDataStore.isPersistent)
+    XCTAssertTrue(local.urlSchemeHandler(forURLScheme: HTMLPreviewScope.scheme) === handler)
+    XCTAssertEqual(local.userContentController.userScripts.count, 1)
+    XCTAssertTrue(local.userContentController.userScripts[0].source.contains("RTCPeerConnection"))
     XCTAssertTrue(configuration.defaultWebpagePreferences.allowsContentJavaScript)
     XCTAssertFalse(configuration.preferences.javaScriptCanOpenWindowsAutomatically)
 

@@ -299,6 +299,8 @@ struct FileViewer: View {
   /// Files opened from links inside the viewer, for Voltar.
   @State private var history: [String] = []
   @State private var showSource = false
+  /// The HTML preview starts on local files for every opened file; the internet is allowed per file.
+  @State private var htmlInternet = false
   init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
   }
@@ -312,6 +314,7 @@ struct FileViewer: View {
     store.close()
     store = FileViewerStore(source: next, context: store.context, exact: true)
     copied = false
+    htmlInternet = false
     store.start()
   }
   /// A link inside a file opens here, relative to that file; its directory becomes the paging sequence.
@@ -329,6 +332,7 @@ struct FileViewer: View {
     siblings = nil
     store = FileViewerStore(source: path, context: store.context, exact: true)
     copied = false
+    htmlInternet = false
     store.start()
   }
   var body: some View {
@@ -455,7 +459,9 @@ struct FileViewer: View {
         client: store.context.client))
     case .html:
       ZStack {
-        if !showSource { FileHTMLPreview(file: file) }
+        if !showSource {
+          FileHTMLPreview(file: file, path: store.path ?? store.source, context: store.context, internet: $htmlInternet)
+        }
         else if let text = store.text { FileTextPreview(text: text, code: true) }
         // Source over the in-process text limit, as for other code files.
         else { FileQuickLook(file: store.preview ?? file, name: store.name) }

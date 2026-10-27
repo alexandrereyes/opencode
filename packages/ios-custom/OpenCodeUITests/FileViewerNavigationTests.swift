@@ -241,7 +241,8 @@ import XCTest
       if text.isEmpty {
         XCTAssertTrue(app.staticTexts["Documento vazio"].waitForExistence(timeout: 20), name)
       } else {
-        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 20), name)
+        // The 300 KB README highlights dozens of code blocks; a loaded Simulator can take over 20 s.
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 60), name)
       }
       if label == "README" {
         // A long document scrolls to its end while only nearby slices are mounted.
@@ -319,7 +320,7 @@ import XCTest
     XCTAssertTrue(next.waitForExistence(timeout: 15))
     next.tap()
     title(app, "b-readme.md")
-    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 20))
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 60))
     drag(app, dx: -220)
     title(app, "c-recursos.md")
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 20))
@@ -507,6 +508,16 @@ import XCTest
     title(app, "c-seguranca.html")
     XCTAssertTrue(webText(app, "Página de segurança"))
     XCTAssertTrue(webText(app, "arquivo: bloqueado"), "file: URL from the page")
+    // Local files by default: no network.
+    XCTAssertTrue(webText(app, "rede: falhou"))
+    XCTAssertTrue(webText(app, "local: carregou"))
+    XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "file-html-mode").firstMatch.label, "Arquivos locais, sem internet")
+    // Permitir internet reloads the page alone with the network: the file next to it no longer loads.
+    app.buttons["file-html-internet"].tap()
+    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "file-html-mode").firstMatch.waitForExistence(timeout: 5))
+    XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "file-html-mode").firstMatch.label, "Internet, sem arquivos locais")
+    XCTAssertTrue(webText(app, "local: falhou"), "no local files with the internet allowed")
+    XCTAssertTrue(webText(app, "arquivo: bloqueado"))
     // window.open, location = … and a script click on a link all ran by now; nothing left the viewer.
     Thread.sleep(forTimeInterval: 4)
     XCTAssertEqual(app.state, .runningForeground)
@@ -517,7 +528,7 @@ import XCTest
     // The page reached the network, never with a credential, even when challenged.
     let log = URL(fileURLWithPath: try XCTUnwrap(environment["OPENCODE_VIEWER_PROBE_LOG"]))
     let requests = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: log)) as? [[String: Any]])
-    XCTAssertFalse(requests.isEmpty)
+    XCTAssertTrue(requests.contains { ($0["path"] as? String)?.hasPrefix("/fetch") == true || ($0["path"] as? String)?.hasPrefix("/imagem") == true })
     XCTAssertFalse(requests.contains { $0["authorization"] as? Bool == true || $0["cookie"] as? Bool == true }, "\(requests)")
     // A link the person taps opens in Safari, also with target="_blank".
     for name in ["Abrir site externo", "Abrir em nova janela"] {
@@ -530,6 +541,60 @@ import XCTest
       XCTAssertTrue(app.navigationBars["c-seguranca.html"].waitForExistence(timeout: 10), name)
     }
     safari.terminate()
+    app.terminate()
+  }
+
+  func testHTMLLocalFilesLoadInScopeAndNothingLeaks() throws {
+    let app = try launch("LINKS")
+    let mode = app.descendants(matching: .any).matching(identifier: "file-html-mode").firstMatch
+    // Images in subfolders, a stylesheet with url() and a font, a classic script and an ES module.
+    open("Abrir LOCAL_INDEX", app: app)
+    title(app, "index.html")
+    XCTAssertTrue(webText(app, "estado: imagens 2/2 · css ok · fonte ok · js ok · modulo ok"), "local resources")
+    XCTAssertEqual(mode.label, "Arquivos locais, sem internet")
+    screenshot("html-local-resources")
+    app.buttons["file-html-internet"].tap()
+    XCTAssertTrue(webText(app, "estado: imagens 0/2"), "the internet mode has no local files")
+    screenshot("html-internet-mode")
+    app.buttons["file-html-internet"].tap()
+    XCTAssertTrue(webText(app, "estado: imagens 2/2 · css ok · fonte ok · js ok · modulo ok"))
+    // Relative links between pages of the same scope navigate inside the preview, with a back step.
+    let report = app.webViews.links["Abrir relatório de várias páginas"]
+    XCTAssertTrue(report.waitForExistence(timeout: 10))
+    report.tap()
+    XCTAssertTrue(webText(app, "Relatório · página 1"))
+    app.webViews.links["Ir para a página 2"].tap()
+    XCTAssertTrue(webText(app, "Relatório · página 2"))
+    XCTAssertTrue(webText(app, "fora: negado"), "../ above the Session directory")
+    screenshot("html-local-report-page")
+    let back = app.buttons["file-html-back"]
+    XCTAssertTrue(back.waitForExistence(timeout: 5))
+    back.tap()
+    XCTAssertTrue(webText(app, "Relatório · página 1"))
+    app.buttons["Fechar"].firstMatch.tap()
+
+    // A page that reads a local file finds no way out.
+    open("Abrir LOCAL_VAZAMENTO", app: app)
+    title(app, "vazamento.html")
+    XCTAssertTrue(webText(app, "segredo: lido"))
+    XCTAssertTrue(webText(app, "fora: negado"))
+    XCTAssertTrue(webText(app, "saída: bloqueada"))
+    Thread.sleep(forTimeInterval: 3)
+    XCTAssertTrue(app.navigationBars["vazamento.html"].exists)
+    XCTAssertTrue(webText(app, "Tentativas de vazamento", timeout: 2), "the form post did not navigate")
+    screenshot("html-local-leak-blocked")
+    let log = URL(fileURLWithPath: try XCTUnwrap(environment["OPENCODE_VIEWER_PROBE_LOG"]))
+    let requests = (try? JSONSerialization.jsonObject(with: Data(contentsOf: log)) as? [[String: Any]]) ?? []
+    XCTAssertFalse(requests.contains { ($0["path"] as? String)?.hasPrefix("/vazamento") == true }, "\(requests)")
+    app.buttons["Fechar"].firstMatch.tap()
+
+    // The reported case: a page outside the Session with images in a subfolder; always opens on local files.
+    open("Abrir LIVE", app: app)
+    title(app, "index.html")
+    XCTAssertTrue(webText(app, "estado: 2 de 2 imagens"))
+    XCTAssertTrue(webText(app, "fora: negado"), "the page folder is the scope outside the Session")
+    XCTAssertEqual(mode.label, "Arquivos locais, sem internet")
+    screenshot("html-live-activities")
     app.terminate()
   }
 

