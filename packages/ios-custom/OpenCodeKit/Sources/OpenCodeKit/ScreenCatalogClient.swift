@@ -22,5 +22,16 @@ extension OpenCodeClient {
       return (Data(json.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
   }
+
+  /// `inMemory` with an answer that may wait, for fixtures that hold a request (a slow action, a read that
+  /// never ends); `nil` still fails the request.
+  public static func inMemory(
+    configuration: ServerConfiguration, answer: @escaping @Sendable (URLRequest) async -> String?
+  ) -> Self {
+    Self(configuration: configuration) { request in
+      guard let url = request.url, let json = await answer(request) else { throw URLError(.notConnectedToInternet) }
+      return (Data(json.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+  }
 }
 #endif

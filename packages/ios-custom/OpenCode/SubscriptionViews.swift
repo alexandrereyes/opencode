@@ -1,7 +1,7 @@
 import OpenCodeKit
 import SwiftUI
 
-private func proxyRole(_ tone: SubscriptionTone) -> ThemeRole {
+func proxyRole(_ tone: SubscriptionTone) -> ThemeRole {
   switch tone {
   case .neutral: .textSecondary
   case .success: .success
@@ -53,19 +53,12 @@ struct SubscriptionCompactRow: View {
 struct SubscriptionDetailSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Bindable var store: SubscriptionStore
   let initialProvider: SubscriptionProvider
   @State private var provider = SubscriptionProvider.codex
-  @State private var toast = ToastCenter()
-  @State private var presentedConfirmation: SubscriptionStore.Confirmation?
-  @State private var confirmationVisible = false
   private var activeProvider: SubscriptionProvider { store.providers.contains(provider) ? provider : .codex }
   private var accounts: [Subscriptions.Account] {
     SubscriptionProjection.sorted(store.snapshot?.pool(activeProvider).accounts ?? [], now: store.now)
-  }
-  private var plans: [String?] {
-    accounts.reduce(into: [String?]()) { if !$0.contains($1.plan) { $0.append($1.plan) } }
   }
   var body: some View {
     NavigationStack {
@@ -98,66 +91,53 @@ struct SubscriptionDetailSheet: View {
       #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
       #endif
-        .toastOverlay(toast)
-        .onChange(of: store.feedback?.id) {
-          guard let feedback = store.feedback else { return }
-          toast.show(feedback.text, kind: feedback.failure ? .error : .success)
-          Haptics.play(feedback.failure ? .warning : .success)
-        }
-        .onChange(of: store.confirmation?.id) {
-          guard let confirmation = store.confirmation else { return }
-          presentedConfirmation = confirmation
-          confirmationVisible = true
-        }
-        .alert(confirmationTitle, isPresented: $confirmationVisible) {
-            Button(confirmationAction, role: .destructive) {
-              // Keep the confirmed value after SwiftUI dismisses the dialog binding.
-              store.confirmation = presentedConfirmation
-              presentedConfirmation = nil
-              Task { await store.confirm() }
-            }.accessibilityIdentifier("proxy-confirm")
-            Button("Cancelar", role: .cancel) { store.confirmation = nil; presentedConfirmation = nil }
-          } message: { Text(confirmationMessage) }
+        .proxyActions(store)
     }.presentationDetents([.large]).presentationDragIndicator(.visible)
       .task { provider = initialProvider; await store.refresh(ifDue: true) }
   }
 
   @ViewBuilder private var content: some View {
-    if let snapshot = store.snapshot {
-      let data = snapshot.pool(activeProvider)
-      if data.status == "ok" {
-        if accounts.isEmpty {
-          ContentUnavailableView("Nenhuma conta", systemImage: "person.crop.circle.badge.questionmark",
-                                 description: Text("Nenhuma assinatura foi informada pelo LLM proxy."))
-        } else {
-          header
-          ForEach(Array(plans.enumerated()), id: \.offset) { index, plan in
-            let outside = !SubscriptionProjection.includes(plan, in: activeProvider.plan)
-            if outside && (index == 0 || SubscriptionProjection.includes(plans[index - 1], in: activeProvider.plan)) {
-              Text("Outros planos · fora do saldo acima").font(.headline)
-                .foregroundStyle(theme.color(.textSecondary)).padding(.top, 4)
-            }
-            let group = accounts.filter { $0.plan == plan }
-            let projection = SubscriptionProjection(accounts: group, plan: plan ?? "", now: store.now)
-            HStack {
-              Text(Subscriptions.planLabel(plan).uppercased()).font(.caption.weight(.semibold))
-              Spacer()
-              Text("\(projection.ready)/\(group.count) disponíveis").font(.caption)
-            }.foregroundStyle(theme.color(.textSecondary))
-            ForEach(group) { account in
-              ProxyAccountCard(store: store, provider: activeProvider, account: account) {
-                store.toggleSelection(account, provider: activeProvider)
-                Haptics.play(.selection)
-                dismiss()
-              }
-            }
-          }
-          Label("A seleção altera só o resumo, não a conta usada pelo modelo.", systemImage: "info.circle")
-            .font(.footnote).foregroundStyle(theme.color(.textSecondary))
-          automation
-          Text(updated).font(.caption).foregroundStyle(theme.color(.textWeak))
-            .accessibilityIdentifier("proxy-updated")
+    if store.snapshot?.pool(activeProvider).status == "ok", !accounts.isEmpty {
+      ProxyPoolHeader(store: store, provider: activeProvider, accounts: accounts)
+      ForEach(SubscriptionGroup.groups(accounts, provider: activeProvider, now: store.now)) { group in
+        if group.opensOthers {
+          Text("Outros planos · fora do saldo acima").font(.headline)
+            .foregroundStyle(theme.color(.textSecondary)).padding(.top, 4)
         }
+        HStack {
+          Text(Subscriptions.planLabel(group.plan).uppercased()).font(.caption.weight(.semibold))
+          Spacer()
+          Text("\(group.projection.ready)/\(group.count) disponíveis").font(.caption)
+        }.foregroundStyle(theme.color(.textSecondary))
+        ForEach(group.rows) { row in
+          ProxyAccountCard(store: store, provider: activeProvider, account: row.account) {
+            store.toggleSelection(row.account, provider: activeProvider)
+            Haptics.play(.selection)
+            dismiss()
+          }
+        }
+      }
+      Label("A seleção altera só o resumo, não a conta usada pelo modelo.", systemImage: "info.circle")
+        .font(.footnote).foregroundStyle(theme.color(.textSecondary))
+      ProxyResetsCard(store: store, provider: activeProvider)
+      Text(store.projection(activeProvider).freshness(now: store.now)).font(.caption).foregroundStyle(theme.color(.textWeak))
+        .accessibilityIdentifier("proxy-updated")
+    } else {
+      ProxyPoolState(store: store, provider: activeProvider)
+    }
+  }
+}
+
+/// Loading, an unconfigured or unavailable proxy, and a provider without accounts.
+struct ProxyPoolState: View {
+  let store: SubscriptionStore
+  let provider: SubscriptionProvider
+  var body: some View {
+    if let snapshot = store.snapshot {
+      let data = snapshot.pool(provider)
+      if data.status == "ok" {
+        ContentUnavailableView("Nenhuma conta", systemImage: "person.crop.circle.badge.questionmark",
+                               description: Text("Nenhuma assinatura foi informada pelo LLM proxy."))
       } else {
         ContentUnavailableView {
           Label(data.status == "unconfigured" ? "LLM proxy não configurado" : "LLM proxy indisponível", systemImage: "network")
@@ -168,54 +148,113 @@ struct SubscriptionDetailSheet: View {
       }
     } else { ProgressView("Consultando o LLM proxy…").frame(maxWidth: .infinity).padding(.vertical, 40) }
   }
+}
 
-  private var header: some View {
-    let pool = store.projection(activeProvider)
-    return VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        ProxyProviderIcon(provider: activeProvider).frame(width: 28, height: 28)
-        Text(activeProvider.title).font(.title2.bold())
-        Spacer(minLength: 0)
-        if activeProvider == .anthropic, let value = pool.fiveHourRemaining {
-          Text("5 horas · \(SubscriptionFormat.percent(value))").font(.caption.weight(.medium))
-            .proxyBadge(SubscriptionFormat.tone(value), theme: theme)
+/// The pool card: combined weekly balance, availability, next renewal, plans and paid credits. `wide` is the
+/// Mac window's layout, with the logo beside the text and the renewal on the right.
+struct ProxyPoolHeader: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  let store: SubscriptionStore
+  let provider: SubscriptionProvider
+  let accounts: [Subscriptions.Account]
+  var wide = false
+  private var plans: [String?] {
+    accounts.reduce(into: [String?]()) { if !$0.contains($1.plan) { $0.append($1.plan) } }
+  }
+  var body: some View {
+    let pool = store.projection(provider)
+    Group {
+      if wide {
+        HStack(alignment: .top, spacing: 16) {
+          ProxyProviderIcon(provider: provider).frame(width: 36, height: 36)
+          VStack(alignment: .leading, spacing: 8) {
+            Text(provider.title).font(.title3.bold())
+            balance(pool)
+            details
+          }
+          Spacer(minLength: 24)
+          VStack(alignment: .leading, spacing: 10) {
+            fiveHour(pool)
+            renewal(pool)
+          }.frame(minWidth: 220, alignment: .leading)
         }
-      }
-      if dynamicTypeSize.isAccessibilitySize {
-        VStack(alignment: .leading, spacing: 12) { balance(pool); renewal(pool) }
       } else {
-        HStack(alignment: .top, spacing: 18) { balance(pool); renewal(pool) }
-      }
-      let credits = accounts.compactMap(\.credits)
-      Text("\(plans.map { Subscriptions.planLabel($0) }.joined(separator: " · ")) · \(accounts.count) contas")
-        .font(.caption).foregroundStyle(theme.color(.textWeak))
-      if !credits.isEmpty {
-        Text("Créditos pagos · \(SubscriptionFormat.number(credits.reduce(0, +), decimals: 0))")
-          .font(.caption).foregroundStyle(theme.color(.textSecondary))
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            ProxyProviderIcon(provider: provider).frame(width: 28, height: 28)
+            Text(provider.title).font(.title2.bold())
+            Spacer(minLength: 0)
+            fiveHour(pool)
+          }
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) { balance(pool); renewal(pool) }
+          } else {
+            HStack(alignment: .top, spacing: 18) { balance(pool); renewal(pool) }
+          }
+          details
+        }
       }
     }.proxyCard(theme).accessibilityIdentifier("proxy-pool-header")
   }
+  @ViewBuilder private func fiveHour(_ pool: SubscriptionProjection) -> some View {
+    if provider == .anthropic, let value = pool.fiveHourRemaining {
+      Text("5 horas · \(SubscriptionFormat.percent(value))").font(.caption.weight(.medium))
+        .proxyBadge(SubscriptionFormat.tone(value), theme: theme)
+    }
+  }
+  @ViewBuilder private var details: some View {
+    let credits = accounts.compactMap(\.credits)
+    Text("\(plans.map { Subscriptions.planLabel($0) }.joined(separator: " · ")) · \(accounts.count) contas")
+      .font(.caption).foregroundStyle(theme.color(.textWeak))
+    if !credits.isEmpty {
+      Text("Créditos pagos · \(SubscriptionFormat.number(credits.reduce(0, +), decimals: 0))")
+        .font(.caption).foregroundStyle(theme.color(.textSecondary))
+    }
+  }
   private func balance(_ pool: SubscriptionProjection) -> some View {
     VStack(alignment: .leading, spacing: 7) {
-      Text("\(SubscriptionFormat.number(pool.equivalents)) \(activeProvider.unit)")
+      Text("\(SubscriptionFormat.number(pool.equivalents)) \(provider.unit)")
         .font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
       Text("Cota semanal combinada").font(.subheadline).foregroundStyle(theme.color(.textSecondary))
-      ProxyQuotaBar(value: pool.remaining, label: "Cota semanal combinada", pace: pool.expectedRemaining)
-      Text("\(SubscriptionFormat.percent(pool.remaining)) restantes").font(.subheadline)
-        .foregroundStyle(theme.color(proxyRole(SubscriptionFormat.tone(pool.remaining))))
-    }.frame(maxWidth: .infinity, alignment: .leading)
+      if wide {
+        HStack(spacing: 14) {
+          ProxyQuotaBar(value: pool.remaining, label: "Cota semanal combinada", pace: pool.expectedRemaining)
+            .frame(maxWidth: 360)
+          remaining(pool)
+        }
+      } else {
+        ProxyQuotaBar(value: pool.remaining, label: "Cota semanal combinada", pace: pool.expectedRemaining)
+        remaining(pool)
+      }
+    }.frame(maxWidth: wide ? nil : .infinity, alignment: .leading)
+  }
+  private func remaining(_ pool: SubscriptionProjection) -> some View {
+    Text("\(SubscriptionFormat.percent(pool.remaining)) restantes").font(.subheadline)
+      .foregroundStyle(theme.color(proxyRole(SubscriptionFormat.tone(pool.remaining))))
   }
   private func renewal(_ pool: SubscriptionProjection) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Text("\(pool.ready) de \(pool.total) \(pool.total == 1 ? "conta disponível" : "contas disponíveis")").font(.caption)
       Text("Próxima renovação").font(.caption).foregroundStyle(theme.color(.textSecondary))
-      Text(SubscriptionFormat.date(pool.renewal)).font(.caption)
-      Text(SubscriptionFormat.countdown(pool.renewal, now: store.now)).font(.caption).foregroundStyle(theme.color(.textWeak))
+      if wide {
+        Text(SubscriptionFormat.date(pool.renewal) + " · " + SubscriptionFormat.countdown(pool.renewal, now: store.now)).font(.caption)
+      } else {
+        Text(SubscriptionFormat.date(pool.renewal)).font(.caption)
+        Text(SubscriptionFormat.countdown(pool.renewal, now: store.now)).font(.caption).foregroundStyle(theme.color(.textWeak))
+      }
     }.fixedSize(horizontal: false, vertical: true)
   }
-  private var automation: some View {
-    let pool = store.projection(activeProvider)
-    return VStack(alignment: .leading, spacing: 10) {
+}
+
+/// A provider's banked resets (count, first and last expiry, how many never expire) and its automation switch.
+struct ProxyResetsCard: View {
+  @Environment(\.appTheme) private var theme
+  let store: SubscriptionStore
+  let provider: SubscriptionProvider
+  var body: some View {
+    let pool = store.projection(provider)
+    VStack(alignment: .leading, spacing: 10) {
       Text("Redefinições").font(.headline)
       Text(pool.inventory.map { SubscriptionFormat.resets($0.available) + ($0.available == 1 ? " disponível" : " disponíveis") } ?? "Inventário desconhecido")
         .font(.subheadline).foregroundStyle(theme.color(.textSecondary))
@@ -224,98 +263,147 @@ struct SubscriptionDetailSheet: View {
         if let latest = inventory.latest, latest != inventory.earliest { Text("Última expiração · \(SubscriptionFormat.date(latest))").font(.caption) }
         if inventory.nonExpiring > 0 { Text("\(SubscriptionFormat.number(inventory.nonExpiring, decimals: 0)) sem expiração").font(.caption) }
       }
-      if let automation = store.snapshot?.pool(activeProvider).automation {
-        Toggle(isOn: Binding(get: { store.pending[activeProvider] ?? automation.enabled },
-                             set: { store.requestAutomation(activeProvider, enabled: $0) })) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Redefinição automática").font(.subheadline)
-            Text(store.pending[activeProvider] != nil ? "Aplicando…" : automation.enabled ? "Ativada" : "Pausada")
-              .font(.caption).foregroundStyle(theme.color(.textSecondary))
-          }
-        }
-        // A deferred/denied change must also reset UISwitch's native optimistic value.
-        .id("\(activeProvider.rawValue):\(automation.enabled):\(store.pending[activeProvider] != nil):\(store.confirmation?.id ?? "")")
-        .disabled(store.pending[activeProvider] != nil).accessibilityIdentifier("proxy-automation")
-      } else { Text("Automação não informada pelo servidor").font(.caption) }
+      ProxyAutomationToggle(store: store, provider: provider)
     }.foregroundStyle(theme.color(.textStrong)).proxyCard(theme)
-  }
-  private var updated: String {
-    let pool = store.projection(activeProvider)
-    guard let observed = pool.observedAt else { return "\(pool.measured) de \(pool.total) medições confirmadas" }
-    let minutes = max(0, Int(store.now.timeIntervalSince(observed) / 60))
-    return minutes == 0 ? "Atualizado agora" : "Medição mais antiga · há \(minutes) min"
-  }
-  private var confirmationTitle: String {
-    switch presentedConfirmation {
-    case .automation(_, let enabled): enabled ? "Ativar redefinição automática?" : "Pausar redefinição automática?"
-    case .reset: "Consumir uma redefinição?"
-    case nil: "Confirmar ação"
-    }
-  }
-  private var confirmationAction: String {
-    switch presentedConfirmation {
-    case .automation(_, let enabled): enabled ? "Ativar" : "Pausar"
-    case .reset: "Consumir redefinição"
-    case nil: "Confirmar"
-    }
-  }
-  private var confirmationMessage: String {
-    switch presentedConfirmation {
-    case .automation(let provider, let enabled):
-      enabled ? "O LLM proxy poderá consumir redefinições guardadas automaticamente para \(provider.title). Isso afeta todo o provedor no servidor."
-        : "O LLM proxy deixará de consumir redefinições automaticamente para \(provider.title). Isso afeta todo o provedor no servidor."
-    case .reset(_, let account):
-      "Uma redefinição guardada de \(account.name) será consumida. A operação pode levar cerca de 90 segundos e não pode ser desfeita."
-    case nil: ""
-    }
   }
 }
 
-private struct ProxyAccountCard: View {
+/// "Redefinição automática": the change waits for confirmation and shows "Aplicando…" while it runs.
+struct ProxyAutomationToggle: View {
+  @Environment(\.appTheme) private var theme
+  let store: SubscriptionStore
+  let provider: SubscriptionProvider
+  var body: some View {
+    if let automation = store.snapshot?.pool(provider).automation {
+      Toggle(isOn: Binding(get: { store.pending[provider] ?? automation.enabled },
+                           set: { store.requestAutomation(provider, enabled: $0) })) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Redefinição automática").font(.subheadline)
+          Text(store.pending[provider] != nil ? "Aplicando…" : automation.enabled ? "Ativada" : "Pausada")
+            .font(.caption).foregroundStyle(theme.color(.textSecondary))
+        }
+      }
+      // A deferred/denied change must also reset UISwitch's native optimistic value.
+      .id("\(provider.rawValue):\(automation.enabled):\(store.pending[provider] != nil):\(store.confirmation?.id ?? "")")
+      .disabled(store.pending[provider] != nil).accessibilityIdentifier("proxy-automation")
+    } else { Text("Automação não informada pelo servidor").font(.caption) }
+  }
+}
+
+extension View {
+  /// The confirmation dialog of "Usar redefinição" and of the automation switch, and the toast with the result.
+  func proxyActions(_ store: SubscriptionStore) -> some View { modifier(ProxyActions(store: store)) }
+}
+
+private struct ProxyActions: ViewModifier {
+  let store: SubscriptionStore
+  @State private var toast = ToastCenter()
+  @State private var presentedConfirmation: SubscriptionStore.Confirmation?
+  @State private var confirmationVisible = false
+  func body(content: Content) -> some View {
+    content
+      .toastOverlay(toast)
+      .onChange(of: store.feedback?.id) {
+        guard let feedback = store.feedback else { return }
+        toast.show(feedback.text, kind: feedback.failure ? .error : .success)
+        Haptics.play(feedback.failure ? .warning : .success)
+      }
+      .onChange(of: store.confirmation?.id) {
+        guard let confirmation = store.confirmation else { return }
+        presentedConfirmation = confirmation
+        confirmationVisible = true
+      }
+      .alert(presentedConfirmation?.title ?? "Confirmar ação", isPresented: $confirmationVisible) {
+          Button(presentedConfirmation?.action ?? "Confirmar", role: .destructive) {
+            // Keep the confirmed value after SwiftUI dismisses the dialog binding.
+            store.confirmation = presentedConfirmation
+            presentedConfirmation = nil
+            Task { await store.confirm() }
+          }.accessibilityIdentifier("proxy-confirm")
+          Button("Cancelar", role: .cancel) { store.confirmation = nil; presentedConfirmation = nil }
+        } message: { Text(presentedConfirmation?.message ?? "") }
+  }
+}
+
+/// An account's card: windows, renewals, "Mostrar no resumo" and its banked resets. `wide` is the Mac window's
+/// panel under the table, with the status and the resets on the right.
+struct ProxyAccountCard: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let store: SubscriptionStore
   let provider: SubscriptionProvider
   let account: Subscriptions.Account
+  var wide = false
   let select: () -> Void
   private var weeklyExhausted: Bool { account.value(account.remaining, at: store.now) == 0 }
   private var hasFiveHour: Bool { !weeklyExhausted && (account.fiveHourRemaining != nil || account.fiveHourResetAt != nil) }
   private var resetting: Bool { store.resetting.contains(provider.rawValue + ":" + account.id) }
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      ViewThatFits(in: .horizontal) {
-        HStack(alignment: .top) { identity; Spacer(minLength: 6); status }
-        VStack(alignment: .leading, spacing: 8) { identity; status }
-      }
-      if weeklyExhausted {
-        Text("Semana · 0%").font(.subheadline).foregroundStyle(theme.color(.error))
+    Group {
+      if wide {
+        HStack(alignment: .top, spacing: 28) {
+          VStack(alignment: .leading, spacing: 10) {
+            identity
+            windows.frame(maxWidth: 460)
+            HStack(alignment: .top, spacing: 28) {
+              if hasFiveHour { renewal("5 horas renovam", date: account.fiveHourResetAt) }
+              renewal("Semana renova", date: account.resetAt)
+            }
+            selectButton
+          }
+          Spacer(minLength: 0)
+          VStack(alignment: .trailing, spacing: 12) {
+            status
+            if let inventory = account.bankedResets {
+              inventoryCount(inventory).multilineTextAlignment(.trailing).foregroundStyle(theme.color(.textSecondary))
+              if inventory.available > 0 { resetButton.buttonStyle(.bordered) }
+              if resetting { waiting.multilineTextAlignment(.trailing).frame(maxWidth: 220, alignment: .trailing) }
+            } else { unknownInventory }
+          }
+        }
       } else {
-        if hasFiveHour { window("5 horas", value: account.fiveHourRemaining) }
-        window("Semana", value: account.remaining, pace: account.pace(at: store.now))
-      }
-      Rectangle().fill(theme.color(.border)).frame(height: 0.5)
-      if dynamicTypeSize.isAccessibilitySize {
         VStack(alignment: .leading, spacing: 12) {
-          if hasFiveHour { renewal("5 horas renovam", date: account.fiveHourResetAt) }
-          renewal("Semana renova", date: account.resetAt)
-        }
-      } else {
-        HStack(alignment: .top, spacing: 12) {
-          if hasFiveHour { renewal("5 horas renovam", date: account.fiveHourResetAt).frame(maxWidth: .infinity, alignment: .leading) }
-          renewal("Semana renova", date: account.resetAt).frame(maxWidth: .infinity, alignment: .leading)
+          ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top) { identity; Spacer(minLength: 6); status }
+            VStack(alignment: .leading, spacing: 8) { identity; status }
+          }
+          windows
+          Rectangle().fill(theme.color(.border)).frame(height: 0.5)
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) {
+              if hasFiveHour { renewal("5 horas renovam", date: account.fiveHourResetAt) }
+              renewal("Semana renova", date: account.resetAt)
+            }
+          } else {
+            HStack(alignment: .top, spacing: 12) {
+              if hasFiveHour { renewal("5 horas renovam", date: account.fiveHourResetAt).frame(maxWidth: .infinity, alignment: .leading) }
+              renewal("Semana renova", date: account.resetAt).frame(maxWidth: .infinity, alignment: .leading)
+            }
+          }
+          selectButton
+          inventory
         }
       }
-      Button(action: select) {
-        Label("Mostrar no resumo", systemImage: store.selectedIDs[provider] == account.id ? "largecircle.fill.circle" : "circle")
-          .font(.subheadline).foregroundStyle(theme.color(store.selectedIDs[provider] == account.id ? .primary : .text))
-          .frame(minHeight: 32)
-      }.buttonStyle(.plain).accessibilityIdentifier("proxy-select-" + account.id)
-        .accessibilityAddTraits(store.selectedIDs[provider] == account.id ? .isSelected : [])
-        .accessibilityLabel("Mostrar \(account.name) no resumo")
-        .accessibilityHint("Altera somente a apresentação. Toque novamente para voltar ao pool.")
-      inventory
     }.proxyCard(theme, selected: store.selectedIDs[provider] == account.id)
       .accessibilityElement(children: .contain).accessibilityLabel(account.name)
+  }
+  @ViewBuilder private var windows: some View {
+    if weeklyExhausted {
+      Text("Semana · 0%").font(.subheadline).foregroundStyle(theme.color(.error))
+    } else {
+      if hasFiveHour { window("5 horas", value: account.fiveHourRemaining) }
+      window("Semana", value: account.remaining, pace: account.pace(at: store.now))
+    }
+  }
+  private var selectButton: some View {
+    Button(action: select) {
+      Label("Mostrar no resumo", systemImage: store.selectedIDs[provider] == account.id ? "largecircle.fill.circle" : "circle")
+        .font(.subheadline).foregroundStyle(theme.color(store.selectedIDs[provider] == account.id ? .primary : .text))
+        .frame(minHeight: 32)
+    }.buttonStyle(.plain).accessibilityIdentifier("proxy-select-" + account.id)
+      .accessibilityAddTraits(store.selectedIDs[provider] == account.id ? .isSelected : [])
+      .accessibilityLabel("Mostrar \(account.name) no resumo")
+      .accessibilityHint("Altera somente a apresentação. Toque novamente para voltar ao pool.")
   }
   private var identity: some View {
     VStack(alignment: .leading, spacing: 5) {
@@ -353,27 +441,37 @@ private struct ProxyAccountCard: View {
       let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
         : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
       layout {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(SubscriptionFormat.resets(inventory.available))
-          if inventory.available > 0 {
-            Text(inventory.earliestExpiresAt.map { "Expira em " + SubscriptionFormat.countdown(Subscriptions.date($0), now: store.now) } ?? "Sem expiração")
-              .foregroundStyle(theme.color(.textWeak))
-          }
-        }.font(.caption)
+        inventoryCount(inventory)
         Spacer(minLength: 8)
-        if inventory.available > 0 {
-          Button { store.requestReset(provider, account: account) } label: {
-            if resetting { Label("Aplicando…", systemImage: "hourglass") }
-            else { Label("Usar redefinição", systemImage: "arrow.clockwise") }
-          }.font(.caption).disabled(resetting).accessibilityIdentifier("proxy-reset-" + account.id)
-        }
+        if inventory.available > 0 { resetButton }
       }.foregroundStyle(theme.color(.textSecondary))
-      if resetting { Text("Aguardando o proxy · pode levar cerca de 90 segundos").font(.caption).foregroundStyle(theme.color(.textSecondary)) }
-    } else { Text("Redefinições · inventário desconhecido").font(.caption).foregroundStyle(theme.color(.textWeak)) }
+      if resetting { waiting }
+    } else { unknownInventory }
+  }
+  private func inventoryCount(_ inventory: Subscriptions.BankedResets) -> some View {
+    VStack(alignment: wide ? .trailing : .leading, spacing: 4) {
+      Text(SubscriptionFormat.resets(inventory.available))
+      if inventory.available > 0 {
+        Text(inventory.earliestExpiresAt.map { "Expira em " + SubscriptionFormat.countdown(Subscriptions.date($0), now: store.now) } ?? "Sem expiração")
+          .foregroundStyle(theme.color(.textWeak))
+      }
+    }.font(.caption)
+  }
+  private var resetButton: some View {
+    Button { store.requestReset(provider, account: account) } label: {
+      if resetting { Label("Aplicando…", systemImage: "hourglass") }
+      else { Label("Usar redefinição", systemImage: "arrow.clockwise") }
+    }.font(.caption).disabled(resetting).accessibilityIdentifier("proxy-reset-" + account.id)
+  }
+  private var waiting: some View {
+    Text("Aguardando o proxy · pode levar cerca de 90 segundos").font(.caption).foregroundStyle(theme.color(.textSecondary))
+  }
+  private var unknownInventory: some View {
+    Text("Redefinições · inventário desconhecido").font(.caption).foregroundStyle(theme.color(.textWeak))
   }
 }
 
-private struct ProxyProviderIcon: View {
+struct ProxyProviderIcon: View {
   @Environment(\.appTheme) private var theme
   let provider: SubscriptionProvider
   var body: some View {
@@ -382,7 +480,7 @@ private struct ProxyProviderIcon: View {
   }
 }
 
-private struct ProxyQuotaBar: View {
+struct ProxyQuotaBar: View {
   @Environment(\.appTheme) private var theme
   let value: Double?
   let label: String
@@ -404,7 +502,7 @@ private struct ProxyQuotaBar: View {
   }
 }
 
-private extension View {
+extension View {
   func proxyCard(_ theme: AppTheme, selected: Bool = false) -> some View {
     padding(14).frame(maxWidth: .infinity, alignment: .leading)
       .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))

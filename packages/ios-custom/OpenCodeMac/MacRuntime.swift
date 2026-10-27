@@ -17,6 +17,8 @@ import SwiftUI
   /// The third column (Contexto) is an inspector that can be hidden.
   var contextVisible = true
   var selection = MacSelection()
+  /// What the LLM proxy window shows; a quota ring sets its provider before opening it.
+  var proxyPane: SubscriptionPane? = MacProxyLaunch.pane ?? .provider(.codex)
   @ObservationIgnored private var building: Task<Void, Never>?
 
   func prepare() async {

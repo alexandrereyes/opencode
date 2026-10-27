@@ -21,6 +21,14 @@ struct OpenCodeMacApp: App {
     }
     .defaultSize(width: 520, height: 860)
 
+    // One LLM proxy window; it keeps its frame between openings and is listed in the Window menu.
+    Window("LLM proxy", id: MacProxyWindow.id) {
+      MacThemed(runtime: runtime) { MacProxyWindow(runtime: runtime) }
+    }
+    .defaultSize(width: 1000, height: 640)
+    .windowResizability(.contentMinSize)
+    .keyboardShortcut("l", modifiers: [.command, .shift])
+
     Settings {
       MacThemed(runtime: runtime) { MacSettingsView(runtime: runtime) }
     }

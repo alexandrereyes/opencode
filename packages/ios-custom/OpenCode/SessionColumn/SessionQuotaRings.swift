@@ -38,17 +38,8 @@ private struct SessionQuotaRing: View {
     let percent = SubscriptionFormat.percent(summary?.remaining)
     let renewal = summary?.reset.map { SubscriptionFormat.countdown($0, now: now) }
     HStack(spacing: 10) {
-      ZStack {
-        Circle().stroke(theme.color(.highlight), lineWidth: 5)
-        Circle().trim(from: 0, to: min(1, max(0, (summary?.remaining ?? 0) / 100)))
-          .stroke(
-            theme.color(summary?.ready == true ? .primary : .warning),
-            style: StrokeStyle(lineWidth: 5, lineCap: .round)
-          )
-          .rotationEffect(.degrees(-90))
-      }
-      .padding(2.5)
-      .frame(width: size, height: size)
+      QuotaRing(remaining: summary?.remaining, ready: summary?.ready == true, lineWidth: 5)
+        .frame(width: size, height: size)
       VStack(alignment: .leading, spacing: 1) {
         Text("\(name) \(percent)").appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textStrong))
           .truncationMode(.middle)
@@ -64,5 +55,23 @@ private struct SessionQuotaRing: View {
     .accessibilityLabel(
       "\(name), \(summary?.remaining == nil ? "cota indisponível" : percent + " restantes")\(renewal.map { ", renova em " + $0 } ?? "")\(summary?.ready == false ? ", sem conta pronta" : "")"
     )
+  }
+}
+
+/// The quota ring: the remaining share, orange while an account is ready and amber otherwise.
+struct QuotaRing: View {
+  @Environment(\.appTheme) private var theme
+  let remaining: Double?
+  let ready: Bool
+  let lineWidth: Double
+
+  var body: some View {
+    ZStack {
+      Circle().stroke(theme.color(.highlight), lineWidth: lineWidth)
+      Circle().trim(from: 0, to: min(1, max(0, (remaining ?? 0) / 100)))
+        .stroke(theme.color(ready ? .primary : .warning), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+    }
+    .padding(lineWidth / 2)
   }
 }

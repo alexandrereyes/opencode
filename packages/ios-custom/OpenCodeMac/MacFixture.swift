@@ -15,7 +15,7 @@ import OpenCodeKit
     return MacFixture(root: root.count > 1 && root.hasSuffix("/") ? String(root.dropLast()) : root)
   }()
 
-  static func value(_ key: String) -> String? {
+  nonisolated static func value(_ key: String) -> String? {
     let arguments = ProcessInfo.processInfo.arguments
     guard let index = arguments.firstIndex(of: key), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
@@ -37,7 +37,13 @@ import OpenCodeKit
   func client() -> OpenCodeClient {
     let server = MacFixtureServer(root: root, now: Date.now.timeIntervalSince1970 * 1000,
       pictures: MacFixturePictures.make())
-    return .inMemory(configuration: Self.configuration) { server.respond($0) }
+    let proxy = MacFixtureProxy(now: .now)
+    return .inMemory(configuration: Self.configuration, answer: { request in
+      let path = request.url?.path ?? ""
+      guard path.hasPrefix("/api/rpc/custom.subscriptions/") else { return server.respond(request) }
+      let input = request.httpBody.flatMap { try? JSONDecoder().decode([String: JSONValue].self, from: $0) }?["input"]?.object
+      return await proxy.respond(String(path.dropFirst("/api/rpc/custom.subscriptions/".count)), input)
+    })
   }
 }
 
@@ -95,7 +101,6 @@ private struct MacFixtureServer: Sendable {
         let branch = directory == root ? "mac-app" : "main"
         return #"{"directory":"\#(directory)","worktree":"\#(directory)","canonical":"\#(directory)","branch":"\#(branch)"}"#
       }.joined(separator: ",") + "]"
-    case "custom.subscriptions/list": subscriptions
     case "custom.session-family/snapshot":
       input?["sessionID"]?.string == MacFixture.rootID
         ? #"{"count":\#(Self.children.count),"cost":63.89,"active":[\#(Self.live.map { session($0) }.joined(separator: ","))],"forms":[],"permissions":[\#(childPermission)]}"#
@@ -220,22 +225,6 @@ private struct MacFixtureServer: Sendable {
   }
   private var childPermission: String {
     #"{"id":"per_mac_c4","sessionID":"ses_mac_c4","action":"shell","resources":["gh api repos/jean/referencias"]}"#
-  }
-
-  private var subscriptions: String {
-    let formatter = ISO8601DateFormatter()
-    let date = Date(timeIntervalSince1970: now / 1000)
-    func account(_ id: String, _ remaining: Double, days: Double) -> Subscriptions.Account {
-      Subscriptions.Account(id: id, name: "Conta", remaining: remaining,
-        resetAt: formatter.string(from: date.addingTimeInterval(86_400 * days)), fiveHourRemaining: remaining,
-        fiveHourResetAt: formatter.string(from: date.addingTimeInterval(3_600 * 2)),
-        observedAt: formatter.string(from: date), hasCapacity: true, bankedResets: .init(available: 1))
-    }
-    var claude = account("claude", 18, days: 0.05)
-    claude.plan = "max20x"
-    let value = Subscriptions(status: "ok", accounts: [account("codex", 42, days: 6)], automation: .init(enabled: false),
-      anthropic: .init(status: "ok", accounts: [claude], automation: .init(enabled: false)))
-    return String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
   }
 
   // MARK: Transcripts

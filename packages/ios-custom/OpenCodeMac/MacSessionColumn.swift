@@ -7,6 +7,7 @@ import SwiftUI
 struct MacSessionColumn: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.openSettings) private var openSettings
+  @Environment(\.openWindow) private var openWindow
   @Bindable var store: SessionStore
   @Bindable var runtime: MacRuntime
   @State private var renameCandidate: SessionRow?
@@ -17,7 +18,6 @@ struct MacSessionColumn: View {
   @State private var showArchived = false
   @State private var showProjects = false
   @State private var showNewSession = false
-  @State private var proxyProvider: SubscriptionProvider?
 
   private struct ProjectAction: Identifiable {
     let name: String
@@ -29,7 +29,10 @@ struct MacSessionColumn: View {
   var body: some View {
     List {
       VStack(spacing: 14) {
-        SessionQuotaRings(quota: store.quota) { proxyProvider = $0 }
+        SessionQuotaRings(quota: store.quota) { provider in
+          runtime.proxyPane = .provider(provider)
+          openWindow(id: MacProxyWindow.id)
+        }
         SessionChips(store: store) { name, intent in
           projectAction = ProjectAction(name: name, intent: intent)
         } add: {
@@ -125,10 +128,6 @@ struct MacSessionColumn: View {
     .sheet(isPresented: $showProjects) { MacAddProject(store: store) }
     .sheet(isPresented: $showNewSession) { MacNewSession(store: store, runtime: runtime) }
     .onReceive(NotificationCenter.default.publisher(for: .macNewSession)) { _ in showNewSession = true }
-    // The LLM proxy's final Mac form is still open; the iPhone's subscription sheet stands in for now.
-    .sheet(item: $proxyProvider) { provider in
-      SubscriptionDetailSheet(store: store.quota, initialProvider: provider).frame(minWidth: 520, minHeight: 640)
-    }
   }
 
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {

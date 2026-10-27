@@ -6,6 +6,7 @@ import SwiftUI
 struct MacWindow: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.openWindow) private var openWindow
   @Bindable var store: SessionStore
   @Bindable var runtime: MacRuntime
   @State private var context: ContextColumnStore?
@@ -69,7 +70,10 @@ struct MacWindow: View {
         .first?.rows.first?.id
     }
     #if DEBUG
-    .task { await MacCapture.window(context: { context }, runtime: runtime, theme: theme) }
+    .task {
+      if MacProxyLaunch.pane != nil, MacCapture.folder != nil { openWindow(id: MacProxyWindow.id) }
+      await MacCapture.window(context: { context }, runtime: runtime, theme: theme)
+    }
     #endif
   }
 

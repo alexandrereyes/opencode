@@ -2331,24 +2331,27 @@ column (Contexto, option 3); the full chat is the next one.
   `br.com.alexandrem.opencode.mac`, team `ERRYZ68LX5`, automatic signing,
   hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
 - `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
-  one window per resource, `Settings`), `MacRuntime.swift`, `MacWindow.swift`, `MacSessionColumn.swift`,
-  `MacChatColumn.swift` + `MacTranscriptView.swift`, `MacNewSession.swift`, `ContextColumnStore.swift`,
-  `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` + `MacCodeView.swift`,
-  `MacResourceWindow.swift`, `MacSettingsView.swift`, and the DEBUG-only `MacFixture.swift` and `MacCapture.swift`.
+  one window per resource, the LLM proxy window, `Settings`), `MacRuntime.swift`, `MacWindow.swift`,
+  `MacSessionColumn.swift`, `MacChatColumn.swift` + `MacTranscriptView.swift`, `MacNewSession.swift`,
+  `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
+  `MacCodeView.swift`, `MacResourceWindow.swift`, `MacProxyWindow.swift`, `MacSettingsView.swift`, and the
+  DEBUG-only `MacFixture.swift`, `MacFixtureProxy.swift` and `MacCapture.swift`.
 - iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
   (`PBXFileSystemSynchronizedBuildFileExceptionSet` `D…024`), never by copying. To share another file, add it to that
-  list. The themes (`Resources/Themes/*.json`) and `Resources/Markdown/dist/markdown-engines.js` are shared the same way.
+  list. The themes (`Resources/Themes/*.json`), `Resources/Markdown/dist/markdown-engines.js` and `Assets.xcassets`
+  (the LLM proxy logos; the Mac sets no app icon from it) are shared the same way.
 
 ### What is shared with the iPhone
 
 | Shared file | Change for the Mac |
 | --- | --- |
-| `SessionColumn/*` (header, rings, chips, sections, rows, path line) | Glass through `adaptiveGlass`; the header gained `voiceDisabled`; chips use `.never` scroll indicators on macOS |
+| `SessionColumn/*` (header, rings, chips, sections, rows, path line) | Glass through `adaptiveGlass`; the header gained `voiceDisabled`; chips use `.never` scroll indicators on macOS; the ring drawing is `QuotaRing`, also used by the LLM proxy sidebar |
 | `SessionStore.swift` | `#if os(iOS)` around drafts, quote modes, reverts and the live-conversation registry; DEBUG fixtures are iOS-only |
 | `Theme.swift` | `uiColor`/`ThemeChrome` in `#if os(iOS)`; `nsColor` on macOS |
 | `AppTypography.swift` | UIKit metrics in `#if os(iOS)`; the Mac uses desktop sizes (about 2 pt smaller) for the same roles |
 | `Haptics.swift`, `EventHub.swift` | UIKit feedback and the iPhone device/Live Activity agents in `#if os(iOS)` |
-| `SessionAlertCenter.swift`, `Toast.swift`, `SubscriptionViews.swift` | `adaptiveGlass`/`adaptiveGlassButtonStyle`; the floating voice inset and the nav-bar hiding are iOS-only |
+| `SessionAlertCenter.swift`, `Toast.swift` | `adaptiveGlass`/`adaptiveGlassButtonStyle`; the floating voice inset is iOS-only |
+| `SubscriptionViews.swift` | The sheet's parts became shared views (see [LLM proxy window](#llm-proxy-window-stage-2)); the nav-bar hiding is iOS-only |
 | `ConversationRenameAlert.swift`, `ContextUsageViews.swift` | The UIKit alert and `SessionUsageSection` (needs `ConversationStore`) in `#if os(iOS)` |
 | `SessionResources/ResourceList.swift` | `ResourceImage` (`UIImage`/`NSImage`), wider snapshots on request, `frames` (capture time) |
 | `AgentPixels.swift` (new) | `AgentPixels` and `AppTheme.agentRole`, moved unchanged out of `ConversationComponents.swift` |
@@ -2367,8 +2370,8 @@ The iPhone target keeps its behavior: every change is either a no-op on iOS (`#i
   makes AppKit's constraint pass loop and crash; keep the widths on the column modifiers only.
 - **Sessões**: the shared column. Selecting a row selects the session; the iPhone's swipe and long-press actions are
   one right-click menu (open, rename, pin, mute, mark read, archive, delete). Configurações opens the `Settings`
-  scene; voice is shown disabled (calls stay on the iPhone in this stage); the quota rings open the iPhone's
-  `SubscriptionDetailSheet` in a sheet until the LLM proxy's Mac form is chosen.
+  scene; voice is shown disabled (calls stay on the iPhone in this stage); a quota ring opens the LLM proxy window
+  on its provider.
 - **Chat (provisional)**: the title bar holds `SessionHeaderTitle`, `…` and the orange `+` (Nova sessão sheet: a
   repository chip, the prompt, agent `build` and the default model). The content is a read-only SwiftUI transcript of
   `custom.transcript/list` (user bubbles, assistant text with inline Markdown) and a plain composer that sends through
@@ -2413,6 +2416,53 @@ step; per-subagent cache when the child has no `tokens`; the resource ↔ subage
 `resource.owner.sessionID` walked up to the direct subagent, so a resource registered without an owner shows
 `Agente usando · —`; file dates and sizes for checkouts that are not on this Mac (`/api/fs/list` returns names only).
 
+### LLM proxy window (stage 2)
+
+Approved option 4 (briefing and mock: `.agent-artifacts/mac-app/llm-proxy/` — `BRIEFING.md`,
+`referencia-janela.png`, `ios-hoje.png`). The content and actions are the iPhone's "LLM proxy" sheet; only the
+layout is the Mac's.
+
+- **Scene**: a single `Window` "LLM proxy" (⌘⇧L, listed in the Window menu), about 1000×640 at first; AppKit keeps
+  its frame between openings. The quota rings in Sessões set `MacRuntime.proxyPane` to their provider and open it.
+  It reads `SessionStore.quota`, the same `SubscriptionStore` as the rings (no second poller); opening it runs
+  `refresh(ifDue:)`.
+- **Toolbar**: refresh, and **Buscar conta** (`searchable`), which filters the tables by account name (case- and
+  accent-insensitive). The pool card and the `N/M disponíveis` headings keep counting the whole pool.
+- **Sidebar** (System Settings style): Codex and Claude (only the providers the server offers) with logo, percent
+  and a small `QuotaRing` showing what the Sessões ring shows (the "Mostrar no resumo" account, else the pool);
+  a separate section with **Redefinições**. There is no "Histórico": the server has no data for it. Rows are
+  buttons with a theme-colored highlight, because a List selection uses the system accent, not the theme.
+- **Provider**: `ProxyPoolHeader(wide: true)` (logo, `0,80 Pro 20x`, "Cota semanal combinada", bar with the pace
+  marker and `N% restantes` on one line, plans · accounts, paid credits; on the right the 5-hour badge for
+  Claude, `N de M contas disponíveis`, "Próxima renovação" `date · countdown`). Then, per plan, the heading and a
+  native `Table` in the `SubscriptionProjection.sorted` order: the "Mostrar no resumo" radio, Conta, Plano,
+  5 horas and Semana (thin bar + percent in the iPhone's tone colors, `—` when unknown or, for 5 horas, once the
+  week is exhausted), Renova (two lines), Status (dot + `SubscriptionAccountState` title and tone), Redefinições
+  and **Usar** (only with banked resets; "Usar redefinição" in its help and accessibility label; a spinner while it
+  runs). Every column but the radio and the action sorts from its header; the default order is the iPhone's.
+  The clicked row (else the "Mostrar no resumo" account, else the first visible) shows the iPhone's
+  `ProxyAccountCard` under its table. "Outros planos · fora do saldo acima" opens the first group outside the
+  pool. A footer card holds a **Redefinições** shortcut, the provider's **Redefinição automática** switch, the
+  note "A seleção altera só o resumo, não a conta usada pelo modelo." and the measurements' freshness.
+- **Redefinições**: per provider, the iPhone's inventory card (`N redefinições disponíveis`, first and last
+  expiry, how many never expire) with its automation switch.
+- **Actions and states**: both actions keep the iPhone flow through the shared `proxyActions` modifier
+  (confirmation dialog, `Aplicando…`, "Aguardando o proxy · pode levar cerca de 90 segundos" in the account card,
+  toast with the result). Unlike the iPhone, choosing "Mostrar no resumo" does not close the window. Loading,
+  unavailable/unconfigured with "Tentar novamente", no accounts ("Nenhuma assinatura foi informada pelo LLM
+  proxy.") and a search without matches (`ContentUnavailableView.search`) are the iPhone's `ProxyPoolState`.
+- **Not used from the mock**: the Codex | Claude segmented control (the sidebar already selects the provider) and
+  "Histórico".
+
+What is shared with the iPhone sheet, with no visible change there (the iPhone's `you-subscriptions-default`
+catalog capture was regenerated and compared):
+
+| Piece | Where |
+| --- | --- |
+| `SubscriptionGroup` (plan groups, "Outros planos", search, focus), `SubscriptionAccountRow` (row values, sort keys, `renewalLabel`), `SubscriptionPane` + `SubscriptionStore.sidebar`/`pane(_:)`, `SubscriptionProjection.freshness(now:)`, `SubscriptionStore.Confirmation.title/action/message` | OpenCodeKit `SubscriptionTable.swift`, covered by `SubscriptionTableTests` |
+| `ProxyPoolHeader` (with `wide`), `ProxyPoolState`, `ProxyResetsCard`, `ProxyAutomationToggle`, `proxyActions`, `ProxyAccountCard`, `ProxyQuotaBar`, `ProxyProviderIcon`, `proxyCard`/`proxyBadge`/`proxyRole` | `OpenCode/SubscriptionViews.swift`, extracted from `SubscriptionDetailSheet` (which now composes them) |
+| `QuotaRing` | `OpenCode/SessionColumn/SessionQuotaRings.swift` |
+
 ### Running against a sandbox
 
 ```sh
@@ -2444,11 +2494,27 @@ swift packages/ios-custom/script/mac-prints.swift compare <out> <mock> <app> [<m
 
 `-OpenCodeMacFixture` swaps the server for a closed in-memory one (`MacFixture`: 6 roots, 46 subagents with 4 live
 and one asking permission, 2 tasks, 5 resources with drawn pictures, working changes; folders and files come from the
-given checkout). `MacCapture` moves the window off-screen at 1600×1000, writes `<name>.png` from the window server's
+given checkout). Its LLM proxy (`MacFixtureProxy`) has Codex with seven accounts (Disponível, Cota semanal esgotada,
+Limite de 5 horas, Em espera, Desativada, and a stale Plus account under "Outros planos" with paid credits) and
+Claude with four (one needing reauthentication, one Max 5x outside the pool), banked resets with and without
+expiry, and automation off for Codex and on for Claude. Its actions change only that memory, after 2 s
+(automation) or 6 s (a reset, `-OpenCodeMacProxyResetSeconds`). `-OpenCodeMacProxyScenario loading|error|empty`
+holds the read forever, fails it, or returns no accounts. `MacCapture` moves the window off-screen at 1600×1000, writes `<name>.png` from the window server's
 picture of this app's own window (`CGWindowListCreateImage`, needs no permission for the app's own windows;
 `cacheDisplay` is the fallback but draws the Liquid Glass sidebar blank) and `<name>-coluna.png` with the whole
 column through `ImageRenderer`. The stage-1 captures are in
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-app-prints/`.
+
+The LLM proxy window is captured with `-OpenCodeMacProxy codex|anthropic|resets` (put these options **before**
+`-OpenCodeMacCaptureQuit`: a value after a valueless option is taken as a document to open, and then no window
+opens), optionally `-OpenCodeMacProxySearch <text>`, `-OpenCodeMacProxyAccount <id>`,
+`-OpenCodeMacProxyAction confirm|applying` (asks to use that account's reset; `confirm` keeps the dialog,
+drawn over the window, and `applying` confirms it against the fixture) and `-OpenCodeMacCaptureSize WxH`
+(1200×800 by default; AppKit clamps the height to the screen). While the screen is locked the window server
+returns blank pictures, so `MacCapture` draws the window with `cacheDisplay` (the window looks inactive) and,
+since that leaves the Liquid Glass sidebar blank, renders `MacProxySidebar`'s rows over that column. Stage-2
+captures, including the iPhone sheet before/after (`ios-you-subscriptions-*`):
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-app-prints/llm-proxy/`.
 
 ### Verification
 
@@ -2458,10 +2524,13 @@ default server), the iOS Debug build and `build-for-testing` with no new warning
 build. The FileMerge button was not clicked in automation (it would open FileMerge on Alexandre's screen); its plan
 is unit-tested.
 
+Stage 2 adds `SubscriptionTableTests` (groups and "Outros planos", search, table focus, row values and every sort
+key, sidebar rows and the Codex fallback, confirmation texts, freshness). "Usar redefinição" and the automation
+switch were exercised only against `MacFixtureProxy`, never against a server: they spend the proxy's real resets.
+
 ### Next stages
 
 - The full chat: port the iPhone transcript, activity group, tray and composer (UIKit today) to the Mac.
-- The LLM proxy's Mac form (rings, quotas, accounts) instead of the iPhone sheet.
 - Voice (GPT Live calls and dictation) on the Mac.
 - The interactive resource viewer (stream, taking control, input) in its window.
 - Nova sessão with worktrees, chats, MCPs and the model picker; menu bar, notifications and widgets stay out.
