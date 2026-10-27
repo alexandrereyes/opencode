@@ -13,12 +13,22 @@ const source = path.resolve(import.meta.dirname, "../../..")
 const args = parseArgs({
   args: Bun.argv.slice(2),
   allowPositionals: true,
-  options: { port: { type: "string", default: "4177" }, home: { type: "string" } },
+  options: {
+    port: { type: "string", default: "4177" },
+    home: { type: "string" },
+    // The watch gateway of a sandbox never takes production's 4192; 0 lets the OS pick a free port.
+    "watch-port": { type: "string", default: "0" },
+  },
 })
 const action = args.positionals[0] ?? "status"
 const port = Number(args.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535 || [4096, 4178].includes(port))
   throw new Error("Choose a non-production port between 1024 and 65535 (never 4096 or 4178)")
+const watchPort = Number(args.values["watch-port"])
+if (!Number.isInteger(watchPort) || watchPort < 0 || watchPort > 65535 || [4096, 4178, 4192, port].includes(watchPort))
+  throw new Error(
+    "Choose a sandbox watch gateway port other than 4096, 4178, 4192 and the server port (0 = any free port)",
+  )
 if (!["up", "down", "status"].includes(action))
   throw new Error("Usage: custom-sandbox.ts up|down|status [--port N] [--home PATH]")
 const home = path.resolve(
@@ -120,6 +130,7 @@ async function up() {
       OPENCODE_CUSTOM_PORT: String(port),
       // Production's fixed resources hub port (4179) must not be inherited: let the sandbox hub pick a free one.
       OPENCODE_RESOURCES_HUB_PORT: undefined,
+      OPENCODE_WATCH_GATEWAY_PORT: String(watchPort),
       OPENCODE_CUSTOM_DB: path.join(home, "data/opencode/custom.db"),
       OPENCODE_DB: path.join(home, "data/opencode/custom.db"),
       OPENCODE_CONFIG_DIR: configTarget,

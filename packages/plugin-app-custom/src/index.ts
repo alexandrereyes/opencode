@@ -22,6 +22,7 @@ import { registerDevice } from "./device/index.js"
 import { registerResources } from "./resources/index.js"
 import { registerQuotes } from "./quotes/index.js"
 import { registerLiveActivity } from "./live-activity/index.js"
+import { registerWatch } from "./watch/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -52,5 +53,6 @@ export default Plugin.define({
       yield* registerResources(ctx)
       yield* registerQuotes(ctx)
       yield* registerLiveActivity(ctx)
+      yield* registerWatch(ctx)
     }),
 })

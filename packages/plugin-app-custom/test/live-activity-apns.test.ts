@@ -150,6 +150,39 @@ it.effect("classifies APNs answers: 410 and 400 bad token are invalid, other err
   }),
 )
 
+it.effect("a WidgetKit push uses the widgets push type and the watch app's widget topic", () =>
+  Effect.gen(function* () {
+    const fake = yield* fakeApns
+    const client = makeClient({
+      key: keys().privateKey,
+      keyID: "KEY1234567",
+      teamID: defaults.teamID,
+      bundleID: defaults.bundleID,
+      origin: () => fake.origin,
+    })
+    yield* Effect.addFinalizer(() => client.close)
+    const body = { aps: { "content-changed": true } }
+    expect(
+      yield* client.send({
+        token: "c0ffee",
+        environment: "production",
+        priority: 5,
+        expiration: 1,
+        body,
+        type: "widgets",
+        bundleID: `${defaults.bundleID}.watchkitapp`,
+      }),
+    ).toEqual({ status: "sent" })
+    expect(fake.received[0]?.headers).toMatchObject({
+      ":path": "/3/device/c0ffee",
+      "apns-push-type": "widgets",
+      "apns-topic": "br.com.alexandrem.opencode.watchkitapp.push-type.widgets",
+      "apns-priority": "5",
+    })
+    expect(JSON.parse(fake.received[0]?.body ?? "")).toEqual(body)
+  }),
+)
+
 it.live("credentials come from the environment; a missing key or key ID means unconfigured", () =>
   Effect.gen(function* () {
     const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "apns-")))
