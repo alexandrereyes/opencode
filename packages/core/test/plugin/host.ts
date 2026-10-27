@@ -194,6 +194,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       wait: overrides.session?.wait ?? (() => Effect.die("unused session.wait")),
       context: overrides.session?.context ?? (() => Effect.die("unused session.context")),
       active: overrides.session?.active ?? (() => Effect.die("unused session.active")),
+      view: overrides.session?.view ?? (() => Effect.die("unused session.view")),
       form: overrides.session?.form ?? { reply: () => Effect.die("unused session.form.reply") },
       familyBoundaries: overrides.session?.familyBoundaries ?? (() => Effect.die("unused session.familyBoundaries")),
       family: overrides.session?.family ?? (() => Effect.die("unused session.family")),

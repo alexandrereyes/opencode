@@ -97,3 +97,29 @@ Live verification uses only `http://127.0.0.1:4179` and the fake repository unde
 sessions to search the complete `opencode` inventory without invoking control tools. Expected master counts: **0 / 8 / 0 / 0**.
 Evidence: `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/master-tool-visibility/summary.json`.
 Installed `1042585c28` predates this fix; Alexandre must trigger another `custom:update` to deploy it.
+
+## Conversational interface follow-up (2026-10-27)
+
+Goal: Mestra answers anything the app lists show and performs what their controls do. A baseline run against the owned
+4183 sandbox showed four tool-level gaps the prompt could not fix: no unread or failed state, subagent requests and work
+invisible to the root, no mark-as-read, and every turn starting with a catalog `search`. The plugin now owns a session
+inventory (`master/inventory.ts`) and thirteen pinned controls; see `packages/plugin-app-custom/docs/master-session.md`.
+
+The only runtime extension is `session.view` in the plugin context, the existing client operation, with the same shape
+as the earlier `active`/`form.reply` additions. Five upstream-owned files, **7 additions / 1 removal**:
+
+- `packages/plugin/src/effect/session.ts`, `packages/plugin/src/promise/session.ts`: inherit `SessionApi.view`.
+- `packages/plugin/src/promise/adapter.ts`: adapt it through its canonical `session.view` endpoint.
+- `packages/core/src/plugin/host.ts`: map it to native `Session.view` (idle instant as milliseconds).
+- `packages/core/test/plugin/host.ts`: the fixture member.
+
+No Protocol/HttpApi, schema, generated client or upstream implementation body changes.
+
+The custom web composer resolved a session's agent only among visible agents, so sending from the web to the hidden
+`mestra` agent fell back to `build` and switched the session away from Mestra (its controls disappeared mid-conversation).
+`packages/app-custom/src/providers/models` now keeps a session's current hidden agent while the picker still lists only
+visible agents.
+
+Live evaluation used fake repositories, seeded sessions in every state (unread, read, failed, muted, pinned, pending
+question, subagent permission, running) and fresh Mestra sessions driven through the HTTP API, checking both the answers
+and the resulting server state.
