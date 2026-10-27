@@ -2647,17 +2647,25 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   `attentionTotal/activeTotal`, the expanded header with `precisa`/`precisam`, the footer plurals, pending titles,
   row labels) are pure and tested. `AgentsActivityAttributes` (`VoiceShared/`, shared with the widget extension) is the
   APNs `attributes-type`; its `theme` carries `ThemeRole` names → `#RRGGBBAA` (the 12 required roles plus `info`).
-- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. **Rev. 27/10:** heights are deterministic. The
-  expanded Dynamic Island proposes an unbounded height and clips on device (the first `ViewThatFits` version cut a
-  row on the iPhone 17 Pro Max), so every block has a fixed frame from `AgentsLayout` (OpenCodeKit). A ruler measured
-  110 points for the bottom region on iPhone 17 Pro and Pro Max, with the rounded corners biting from about 95; the
-  island uses a 96-point ceiling: an 18-point header and up to three single-line 20-point rows (avatar, truncating
-  title, project, status), plus a `+N` line only when it fits. The Lock Screen (Apple: may truncate above 160 points)
-  picks one of three densities by computed height under 156 points, not by measurement. `AgentsActivityRenderTests`
-  checks that rendered heights equal the computed ones. On Apple Watch the Lock Screen closure branches on
-  `activityFamily`: `.supplementalActivityFamilies([.small])` shows the mascot inside a segmented subagent ring (up to
-  8 segments, a continuous arc above), the minimal island's `!N`/`?N`/hand badge and the first two sessions, in
-  fixed metrics for the smallest Smart Stack (152 × 69.5 points). `há 3 min.` is a system-updated relative date.
+- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. Heights are deterministic: the expanded Dynamic
+  Island proposes an unbounded height and clips on device (the first `ViewThatFits` version cut a row on the iPhone
+  17 Pro Max), so every block has a fixed frame from `AgentsLayout` (OpenCodeKit). A ruler measured 110 points for
+  the island's bottom region on iPhone 17 Pro and Pro Max, with the rounded corners biting from about 95; the island
+  uses a 96-point ceiling: an 18-point header and up to three single-line 20-point rows (avatar, truncating title,
+  project, status), plus a `+N` line only when it fits.
+- **Lock Screen, "ring and counters" (rev. 27/10, mock `v3-opcao-3-anel-contadores.png`):** the card summarizes every
+  session and no longer singles out the focus session. Below the unchanged header, a closed 72-point ring (7-point
+  stroke) splits into arcs proportional to working, question, permission, failed and recently finished (dimmed)
+  counts, with `activeTotal`/`ativas` in the centre; to its right one 18-point line per non-zero count (at most 4,
+  `concluídas há pouco` dropped first). A 16-point attention line (kind dot, first title, `há N min.`, `+K`) follows
+  only when a request is pending. Totals: 121 points, or 150 with the attention line (Apple: may truncate above 160).
+  The arcs, counters, plurals and `+K` are pure `AgentsState` functions (`gauge`, `counters`, `attentionLine`).
+  The system-updated `há N min.` keeps a fixed 64-point width and no `fixedSize`: grouped under one, the Lock Screen
+  failed to archive the card and showed it empty. `AgentsActivityRenderTests` checks rendered heights equal the
+  computed ones.
+- **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
+  shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
+  `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
   The mascot is drawn as a vector shape in theme colors, so the extension needs no image asset.
 - **Driver:** `OpenCode/LiveActivity/AgentsActivityAgent.swift`. The main-actor agent forwards each event-stream
   connection (launch and every foreground) and `rpc.custom.live-activity.changed` (routed by `EventHub` like

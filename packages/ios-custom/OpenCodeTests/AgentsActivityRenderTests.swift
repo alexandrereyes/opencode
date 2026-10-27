@@ -42,7 +42,7 @@ import XCTest
     }
   }
 
-  /// Rendered heights must equal `AgentsLayout`'s computed ones, so the row count and density chosen from them
+  /// Rendered heights must equal `AgentsLayout`'s computed ones, so the limits checked on them
   /// hold on device, where the system clips instead of proposing its limit.
   func testRenderedHeightsMatchTheFixedLayout() throws {
     for name in ["state-one-question", "state-two-questions", "state-mixed", "state-working", "state-failed-only",
@@ -50,18 +50,16 @@ import XCTest
     {
       let (attributes, state) = try fixture(name)
       for width in [360.0, 412.0] {
-        for density in AgentsLayout.Density.allCases {
-          let measured = try height(AgentsLockScreenLayout(attributes: attributes, state: state, density: density), width)
-          XCTAssertEqual(measured, AgentsLayout.Lock(density).height(state), accuracy: 0.5, "\(name) \(density) \(width)")
-        }
+        let measured = try height(AgentsLockScreenView(attributes: attributes, state: state), width)
+        XCTAssertEqual(measured, AgentsLayout.lockHeight(state), accuracy: 0.5, "\(name) lock \(width)")
         let island = try height(AgentsIslandExpanded(attributes: attributes, state: state), width - 12)
         XCTAssertEqual(island, AgentsLayout.island(state).height, accuracy: 0.5, "\(name) island \(width)")
         XCTAssertLessThanOrEqual(island, AgentsLayout.islandCeiling)
       }
-      let lock = AgentsLayout.Lock(AgentsLayout.lockDensity(state)).height(state)
-      XCTAssertLessThanOrEqual(lock, AgentsLayout.lockCeiling, name)
+      let lock = AgentsLayout.lockHeight(state)
+      XCTAssertLessThanOrEqual(lock, AgentsLayout.lockLimit, name)
       _ = try render(AgentsLockScreenView(attributes: attributes, state: state)
-        .background(attributes.color(.background)), size: CGSize(width: 374, height: lock), name: "v2-\(name)-lock-render")
+        .background(attributes.color(.background)), size: CGSize(width: 374, height: lock), name: "v3-\(name)-lock-render")
       _ = try render(AgentsIslandExpanded(attributes: attributes, state: state).padding(.horizontal, 26)
         .frame(height: AgentsLayout.islandRegion, alignment: .top).background(.black),
         size: CGSize(width: 371, height: AgentsLayout.islandRegion), name: "v2-\(name)-expanded-render")

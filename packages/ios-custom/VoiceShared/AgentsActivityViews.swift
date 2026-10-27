@@ -5,243 +5,119 @@ import WidgetKit
 /// Views of the "Agentes" Live Activity. They take plain attributes and state (not an `ActivityViewContext`), so
 /// app-hosted tests can render them too. Rendering rules: `plugin-app-custom/docs/live-activity.md`.
 ///
-/// Heights are deterministic: every block has a fixed frame from `AgentsLayout`, and the Lock Screen density is
-/// computed from the state, never measured with `ViewThatFits` (the system clips instead of proposing its limit).
+/// Heights are deterministic: every block has a fixed frame from `AgentsLayout`, never measured with `ViewThatFits`
+/// (the system clips instead of proposing its limit).
+
+/// Lock Screen card, "ring and counters": the ring of every count with `activeTotal` in the centre, one counter line
+/// per non-zero count, and the first pending request. It summarizes all sessions and never singles one out.
 struct AgentsLockScreenView: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
 
   var body: some View {
-    AgentsLockScreenLayout(attributes: attributes, state: state, density: AgentsLayout.lockDensity(state))
-      .environment(\.locale, Locale(identifier: "pt_BR"))
-  }
-}
-
-struct AgentsLockScreenLayout: View {
-  let attributes: AgentsActivityAttributes
-  let state: AgentsState
-  let density: AgentsLayout.Density
-
-  var body: some View {
-    let metrics = AgentsLayout.Lock(density)
-    VStack(alignment: .leading, spacing: metrics.spacing) {
-      if let header = metrics.header {
-        HStack(spacing: 6) {
-          AgentsMascot(attributes: attributes).frame(width: 19, height: 16)
-          Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
-          Spacer(minLength: 8)
-          host
-        }.frame(height: header)
-      }
-      if let focus = state.focus { AgentsFocusBlock(attributes: attributes, focus: focus, metrics: metrics) }
-      if !state.attention.isEmpty { AgentsPendingBlock(attributes: attributes, state: state, metrics: metrics) }
-      if state.focus == nil && state.attention.isEmpty && state.footer.isEmpty {
-        Text("Nenhuma sessão ativa").font(.system(size: 13)).foregroundStyle(attributes.color(.textSecondary))
-          .frame(height: metrics.empty)
-      }
-      Group {
-        if metrics.header == nil {
-          // Width is bounded on the Lock Screen, so a horizontal choice is reliable.
-          ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) {
-              AgentsFooter(attributes: attributes, state: state).fixedSize()
-              Spacer(minLength: 6)
-              AgentsMascot(attributes: attributes).frame(width: 14, height: 12)
-              host
-            }
-            AgentsFooter(attributes: attributes, state: state)
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 6) {
+        AgentsMascot(attributes: attributes).frame(width: 19, height: 16)
+        Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
+        Spacer(minLength: 8)
+        Text(state.host).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)).lineLimit(1)
+      }.frame(height: AgentsLayout.lockHeader)
+      rule
+      HStack(spacing: 16) {
+        AgentsGaugeView(attributes: attributes, state: state)
+          .frame(width: AgentsLayout.lockRing, height: AgentsLayout.lockRing)
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(state.counters, id: \.label) { counter in
+            AgentsCounterLine(attributes: attributes, counter: counter).frame(height: AgentsLayout.lockCounter)
           }
-        } else {
-          AgentsFooter(attributes: attributes, state: state)
-        }
-      }.frame(height: metrics.footer)
+          if state.counters.isEmpty {
+            Text("Nenhuma sessão ativa").font(.system(size: 14)).foregroundStyle(attributes.color(.textSecondary))
+              .frame(height: AgentsLayout.lockCounter)
+          }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+      }.frame(height: AgentsLayout.lockRing)
+      if let line = state.attentionLine {
+        rule
+        AgentsAttentionRow(attributes: attributes, line: line).frame(height: AgentsLayout.lockAttention)
+      }
     }
-    .padding(.horizontal, 14).padding(.vertical, metrics.padding)
+    .padding(.horizontal, 14).padding(.vertical, AgentsLayout.lockPadding)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .environment(\.locale, Locale(identifier: "pt_BR"))
   }
 
-  private var host: some View {
-    Text(state.host).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)).lineLimit(1)
+  /// A hairline with the fixed gap above and below it.
+  private var rule: some View {
+    Rectangle().fill(attributes.color(.border)).frame(height: 0.5)
+      .frame(height: AgentsLayout.lockRule).padding(.vertical, AgentsLayout.lockGap)
   }
 }
 
-struct AgentsFocusBlock: View {
+/// The closed ring of the Lock Screen card, with `activeTotal` and `ativas` in the centre.
+struct AgentsGaugeView: View {
   let attributes: AgentsActivityAttributes
-  let focus: AgentsState.Focus
-  let metrics: AgentsLayout.Lock
+  let state: AgentsState
 
   var body: some View {
-    VStack(alignment: .leading, spacing: metrics.focusSpacing) {
-      HStack(alignment: .center, spacing: 9) {
-        AgentsAvatar(attributes: attributes, project: focus.project, size: 30)
-        VStack(alignment: .leading, spacing: 0) {
-          Text(focus.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
-          Text(metrics.activity != nil ? focus.project : focus.activity.map { "\(focus.project) · \($0)" } ?? focus.project)
-            .font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
-        }.lineLimit(1)
-        Spacer(minLength: 6)
-        Text(timerInterval: focus.started...Date.distantFuture, countsDown: false)
-          .font(.system(size: 14, weight: .medium, design: .monospaced)).monospacedDigit()
+    let width = AgentsLayout.lockRingWidth
+    // The round caps cover `width` along the circle, so the gap also makes room for them.
+    let circumference = Double.pi * Double(AgentsLayout.lockRing - width)
+    let arcs = state.gauge(gap: (Double(width) + 4) / circumference)
+    ZStack {
+      if arcs.isEmpty { Circle().stroke(attributes.color(.border), lineWidth: width).padding(width / 2) }
+      ForEach(Array(arcs.enumerated()), id: \.offset) { _, arc in
+        AgentsArc(from: arc.from, to: arc.to)
+          .stroke(attributes.color(arc.role).opacity(arc.dim ? 0.55 : 1),
+            style: StrokeStyle(lineWidth: width, lineCap: arcs.count > 1 ? .round : .butt))
+          .padding(width / 2)
+      }
+      VStack(spacing: -2) {
+        Text(verbatim: "\(state.activeTotal)").font(.system(size: 26, weight: .bold)).monospacedDigit()
           .foregroundStyle(attributes.color(.textStrong))
-          .multilineTextAlignment(.trailing).frame(width: 70, alignment: .trailing)
-      }.frame(height: metrics.focusLine)
-      if let height = metrics.activity, let activity = focus.activity {
-        Text(activity).font(.system(size: 12)).foregroundStyle(attributes.color(.text)).lineLimit(1)
-          .frame(height: height)
-      }
-      if let progress = focus.progress {
-        HStack(spacing: 8) {
-          AgentsProgressBar(attributes: attributes, progress: progress).frame(height: 5)
-          Text(progress.label).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
-            .monospacedDigit().fixedSize()
-        }.frame(height: metrics.progress)
+        Text(state.gaugeLabel).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
       }
     }
   }
 }
 
-/// Segmented like the approved mock while the total is small; a continuous bar beyond that.
-struct AgentsProgressBar: View {
+struct AgentsCounterLine: View {
   let attributes: AgentsActivityAttributes
-  let progress: AgentsState.Progress
+  let counter: AgentsCounter
 
   var body: some View {
-    if progress.total <= 12 {
-      HStack(spacing: 3) {
-        ForEach(0..<max(progress.total, 1), id: \.self) { index in
-          Capsule().fill(index < progress.done ? attributes.color(.primary) : attributes.color(.border))
-        }
-      }
-    } else {
-      ProgressView(value: progress.fraction).progressViewStyle(.linear).tint(attributes.color(.primary))
-    }
-  }
-}
-
-struct AgentsPendingBlock: View {
-  let attributes: AgentsActivityAttributes
-  let state: AgentsState
-  let metrics: AgentsLayout.Lock
-
-  var body: some View {
-    let role = state.pendingRole
-    let regular = metrics.singleText != nil
-    VStack(alignment: .leading, spacing: metrics.pendingSpacing) {
-      HStack {
-        Text(state.pendingTitle).font(.system(size: 10, weight: .semibold)).tracking(0.6)
-          .foregroundStyle(attributes.color(role))
-        Spacer(minLength: 6)
-        if !state.pendingList, let first = state.attention.first { AgentsAgo(attributes: attributes, since: first.asked) }
-      }.frame(height: metrics.pendingTitle)
-      if state.pendingList {
-        ForEach(Array(state.attention.prefix(metrics.pendingRows).enumerated()), id: \.element.sessionID) { index, item in
-          Link(destination: link(item)) { listRow(item, regular: regular) }
-            .frame(height: metrics.listRow)
-            .overlay(alignment: .top) {
-              if index > 0 {
-                Rectangle().fill(attributes.color(.border)).frame(height: 0.5).offset(y: -metrics.pendingSpacing / 2)
-              }
-            }
-        }
-      } else if let item = state.attention.first {
-        Link(destination: link(item)) { singleRow(item, regular: regular) }.frame(height: metrics.singleRow)
-        if let height = metrics.singleText, let text = item.text {
-          Text(text).font(.system(size: 12)).foregroundStyle(attributes.color(.text)).lineLimit(1).frame(height: height)
-        }
-      }
-    }
-    .padding(.horizontal, 10).padding(.vertical, metrics.pendingPadding)
-    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(attributes.color(.surface).opacity(0.7)))
-    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-      .strokeBorder(attributes.color(role).opacity(state.pendingList ? 0.25 : 0.6), lineWidth: 1))
-  }
-
-  private func singleRow(_ item: AgentsState.Attention, regular: Bool) -> some View {
-    HStack(spacing: 9) {
-      AgentsAvatar(attributes: attributes, project: item.project, size: regular ? 26 : 24)
-      VStack(alignment: .leading, spacing: 0) {
-        Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
-        if regular || item.text == nil {
-          Text(item.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
-        } else if let text = item.text {
-          Text(text).font(.system(size: 12)).foregroundStyle(attributes.color(.text))
-        }
-      }.lineLimit(1)
-      Spacer(minLength: 4)
-      if !regular, item.text != nil {
-        Text(item.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)).lineLimit(1)
-      }
-      chevron
-    }
-  }
-
-  private func listRow(_ item: AgentsState.Attention, regular: Bool) -> some View {
     HStack(spacing: 8) {
-      AgentsAvatar(attributes: attributes, project: item.project, size: regular ? 24 : 18)
-      if regular {
-        VStack(alignment: .leading, spacing: 0) {
-          Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
-          Text(item.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
-        }.lineLimit(1).layoutPriority(1)
-      } else {
-        Text("\(Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))) \(Text(item.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)))")
-          .lineLimit(1).layoutPriority(1)
-      }
-      Spacer(minLength: 4)
-      if Set(state.attention.map(\.kind)).count > 1 {
-        Image(systemName: item.kind == .permission ? "hand.raised.fill" : "questionmark")
-          .font(.system(size: 10, weight: .bold)).foregroundStyle(attributes.color(item.kind.role))
-      }
-      AgentsAgo(attributes: attributes, since: item.asked)
-      chevron
+      Circle().fill(attributes.color(counter.role)).frame(width: 8, height: 8)
+      Text(verbatim: "\(counter.count) \(counter.label)")
+        .font(.system(size: 15, weight: counter.emphasized ? .semibold : .regular))
+        .foregroundStyle(attributes.color(counter.emphasized ? .textStrong : .textSecondary))
+        .lineLimit(1).minimumScaleFactor(0.8)
     }
-  }
-
-  private var chevron: some View {
-    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
-      .foregroundStyle(attributes.color(.textSecondary))
-  }
-
-  private func link(_ item: AgentsState.Attention) -> URL {
-    AgentsDeepLink.session(serverKey: attributes.serverKey, sessionID: item.sessionID, directory: item.directory).url
   }
 }
 
-/// `há 3 min.`, kept current by the system without activity updates.
-struct AgentsAgo: View {
+/// `● Escolher banco do cache · há 3 min. +1`: the title truncates first. Each run is its own view, and the
+/// system-updated date never gets `fixedSize`: the Lock Screen then failed to archive the card and showed it empty.
+struct AgentsAttentionRow: View {
   let attributes: AgentsActivityAttributes
-  let since: Date
-  var body: some View {
-    Text(.currentDate, format: AgentsText.ago(since: since))
-      .font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)).lineLimit(1)
-      .multilineTextAlignment(.trailing).frame(maxWidth: 62, alignment: .trailing)
-  }
-}
-
-/// The non-zero counts. When all five do not fit, the dots go first, then the text scales down.
-struct AgentsFooter: View {
-  let attributes: AgentsActivityAttributes
-  let state: AgentsState
+  let line: AgentsAttentionLine
 
   var body: some View {
-    ViewThatFits(in: .horizontal) {
-      row(dots: true, spacing: 6).fixedSize()
-      row(dots: false, spacing: 4).fixedSize()
-      row(dots: false, spacing: 3).minimumScaleFactor(0.7)
-    }
-    .font(.system(size: 11)).lineLimit(1)
-  }
-
-  private func row(dots: Bool, spacing: CGFloat) -> some View {
-    HStack(spacing: spacing) {
-      ForEach(Array(state.footer.enumerated()), id: \.element.label) { index, item in
-        if index > 0 { Text(verbatim: "·").foregroundStyle(attributes.color(.textWeak)) }
-        HStack(spacing: 4) {
-          if dots && item.dot { Circle().fill(attributes.color(item.role)).frame(width: 6, height: 6) }
-          Text(verbatim: "\(item.count)").foregroundStyle(attributes.color(item.role)).fontWeight(.semibold)
-          Text(item.label).foregroundStyle(attributes.color(item.dot ? .text : .textSecondary))
-        }
+    HStack(spacing: 0) {
+      Circle().fill(attributes.color(line.role)).frame(width: 8, height: 8).padding(.trailing, 8)
+      Text(line.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
+        .lineLimit(1).truncationMode(.tail)
+      Text(verbatim: " · ").font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
+        .layoutPriority(1)
+      // On the Lock Screen a system-updated date claims all free width, so it gets a fixed one ("há 59 min.").
+      Text(.currentDate, format: AgentsText.ago(since: line.since)).font(.system(size: 12))
+        .foregroundStyle(attributes.color(.textSecondary)).lineLimit(1).minimumScaleFactor(0.8)
+        .frame(width: AgentsLayout.lockAgo, alignment: .leading)
+      if let more = line.more {
+        // Neutral: the others may be of the other kind.
+        Text(verbatim: "  +\(more)").font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(attributes.color(.text)).lineLimit(1).layoutPriority(1)
       }
+      Spacer(minLength: 0)
     }
   }
 }

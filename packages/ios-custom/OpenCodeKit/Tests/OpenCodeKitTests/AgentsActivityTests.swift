@@ -145,34 +145,70 @@ import Testing
     #expect(one.header.map(\.text).joined() == "1 ativa")
   }
 
-  @Test func footerCountsAndPlurals() throws {
-    func text(_ state: AgentsState) -> String { state.footer.map { "\($0.count) \($0.label)" }.joined(separator: " · ") }
-    #expect(try text(Self.state("state-one-question")) == "3 trabalhando · 1 pergunta · 3 ociosas")
-    #expect(try text(Self.state("state-mixed"))
-      == "1 trabalhando · 1 pergunta · 1 permissão · 2 com erro · 1 ociosa")
-    #expect(try text(Self.state("state-failed-only")) == "1 com erro · 2 ociosas")
+  @Test func countersPluralsAndOrder() throws {
+    func text(_ state: AgentsState) -> [String] { state.counters.map { "\($0.count) \($0.label)" } }
+    #expect(try text(Self.state("state-one-question")) == ["3 trabalhando", "1 pergunta", "3 concluídas há pouco"])
+    #expect(try text(Self.state("state-two-questions")) == ["2 trabalhando", "2 perguntas", "3 concluídas há pouco"])
     var plural = try Self.state("state-mixed")
-    plural.counts = AgentsState.Counts(working: 0, question: 2, permission: 3, failed: 0, idle: 0)
-    #expect(text(plural) == "2 perguntas · 3 permissões")
-    let roles = try Self.state("state-mixed").footer.map(\.role)
-    #expect(roles == [.success, .accent, .warning, .error, .textSecondary])
+    plural.counts = AgentsState.Counts(working: 0, question: 1, permission: 3, failed: 0, idle: 1)
+    #expect(text(plural) == ["1 pergunta", "3 permissões", "1 concluída há pouco"])
+    plural.counts.permission = 1
+    #expect(text(plural)[1] == "1 permissão")
+    let mixed = try Self.state("state-mixed").counters
+    #expect(mixed.map(\.role) == [.success, .accent, .warning, .error])
+    #expect(try Self.state("state-working").counters.last == AgentsCounter(count: 1, label: "concluída há pouco",
+      role: .textSecondary, emphasized: false))
   }
 
-  @Test func pendingTitlesAndRoles() throws {
-    let one = try Self.state("state-one-question")
-    #expect(!one.pendingList && one.pendingTitle == "PERGUNTA PENDENTE" && one.pendingRole == .accent)
-    let two = try Self.state("state-two-questions")
-    #expect(two.pendingList && two.pendingTitle == "2 PERGUNTAS PENDENTES" && two.pendingRole == .accent)
+  @Test func countersStopAtFourDroppingRecentlyFinishedFirst() throws {
+    // state-mixed has all five counts non-zero.
     let mixed = try Self.state("state-mixed")
-    #expect(mixed.pendingTitle == "2 PENDÊNCIAS" && mixed.pendingRole == .warning)
-    var permission = one
-    permission.attention[0].kind = .permission
-    permission.counts = AgentsState.Counts(working: 3, question: 0, permission: 1, failed: 0, idle: 3)
-    #expect(permission.pendingTitle == "PERMISSÃO PENDENTE" && permission.pendingRole == .warning)
-    // The backend trims `attention` to fit APNs; `attentionTotal` still selects the list layout.
-    var trimmed = two
-    trimmed.attention.removeLast()
-    #expect(trimmed.pendingList && trimmed.pendingTitle == "2 PERGUNTAS PENDENTES")
+    #expect(mixed.counts.idle > 0)
+    #expect(mixed.counters.map(\.label) == ["trabalhando", "pergunta", "permissão", "com erro"])
+    #expect(mixed.counters.count == AgentsLayout.lockMaxCounters)
+  }
+
+  @Test func failedOnlyCard() throws {
+    let state = try Self.state("state-failed-only")
+    #expect(state.activeTotal == 0 && state.gaugeLabel == "ativas")
+    #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 concluídas há pouco"])
+    let arcs = state.gauge(gap: 0)
+    #expect(arcs.map(\.role) == [.error, .textSecondary] && arcs.map(\.dim) == [false, true])
+    #expect(state.attentionLine == nil)
+  }
+
+  @Test func gaugeArcsAreProportionalInContractOrder() throws {
+    let arcs = try Self.state("state-one-question").gauge(gap: 0)
+    // 3 working, 1 question, 3 idle out of 7.
+    #expect(arcs.map(\.role) == [.success, .accent, .textSecondary])
+    #expect(abs(arcs[0].to - 3.0 / 7) < 1e-9 && abs(arcs[1].from - 3.0 / 7) < 1e-9 && abs(arcs[1].to - 4.0 / 7) < 1e-9)
+    #expect(arcs.last?.to == 1)
+    let gapped = try Self.state("state-one-question").gauge(gap: 0.04)
+    #expect(abs(gapped[0].from - 0.02) < 1e-9 && abs(gapped[0].to - (3.0 / 7 - 0.02)) < 1e-9)
+    var single = try Self.state("state-working")
+    single.counts.idle = 0
+    #expect(single.gauge(gap: 0.04) == [AgentsGaugeArc(role: .success, dim: false, from: 0, to: 1)])
+    single.counts.working = 0
+    #expect(single.gauge(gap: 0.04).isEmpty)
+    // A tiny share never draws backwards.
+    single.counts = AgentsState.Counts(working: 200, question: 1, permission: 0, failed: 0, idle: 0)
+    #expect(single.gauge(gap: 0.05).allSatisfy { $0.to >= $0.from })
+  }
+
+  @Test func attentionLineWithMore() throws {
+    let one = try Self.state("state-one-question").attentionLine
+    #expect(one?.title == "Escolher banco do cache" && one?.role == .accent && one?.more == nil)
+    #expect(one?.since == Date(timeIntervalSince1970: 1_793_104_680))
+    #expect(try Self.state("state-two-questions").attentionLine?.more == 1)
+    var mixed = try Self.state("state-mixed")
+    #expect(mixed.attentionLine?.more == 1)
+    // The backend trims `attention`; `attentionTotal` still counts every request.
+    mixed.attention.removeLast()
+    mixed.attentionTotal = 5
+    #expect(mixed.attentionLine?.more == 4)
+    mixed.attention[0].kind = .permission
+    #expect(mixed.attentionLine?.role == .warning)
+    #expect(try Self.state("state-working").attentionLine == nil)
   }
 
   @Test func rowLabelsAndProgress() throws {
@@ -283,24 +319,15 @@ import Testing
   }
 
   @Test(arguments: ["state-one-question", "state-two-questions", "state-mixed", "state-working", "state-failed-only"])
-  func lockScreenPicksAFittingDensity(_ name: String) throws {
+  func lockScreenFitsTheLimit(_ name: String) throws {
     let state = try AgentsActivityTests.state(name)
-    let density = AgentsLayout.lockDensity(state)
-    #expect(AgentsLayout.Lock(density).height(state) <= AgentsLayout.lockCeiling)
+    #expect(AgentsLayout.lockHeight(state) <= AgentsLayout.lockLimit)
+    #expect(AgentsLayout.lockHeight(state) == (state.attention.isEmpty ? 121 : 150))
+    #expect(state.counters.count <= AgentsLayout.lockMaxCounters)
   }
 
-  @Test func lockScreenDensities() throws {
-    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-working")) == .regular)
-    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-failed-only")) == .regular)
-    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-one-question")) == .tight)
-    #expect(AgentsLayout.lockDensity(try AgentsActivityTests.state("state-mixed")) == .tight)
-    // The worst case the contract allows (focus with activity and progress, three attention items) still fits.
-    var worst = try AgentsActivityTests.state("state-mixed")
-    worst.attention.append(worst.attention[0])
-    #expect(AgentsLayout.Lock(.tight).height(worst) <= AgentsLayout.lockCeiling)
-    // Without focus, three pending rows keep the header.
-    worst.focus = nil
-    #expect(AgentsLayout.lockDensity(worst) != .tight)
+  @Test func counterLinesFitBesideTheRing() {
+    #expect(CGFloat(AgentsLayout.lockMaxCounters) * AgentsLayout.lockCounter <= AgentsLayout.lockRing)
   }
 }
 

@@ -195,14 +195,25 @@ app runs it does the same locally with `.immediate` dismissal; a null state neve
 
 Colors come from `attributes.theme` roles. Mascot = the app icon robot.
 
-**Lock Screen** (`progresso-pergunta-a.png`): header mascot + `OpenCode` and `host` on the right; focus block (avatar,
-title, project, timer from `startedAt` using a system timer text, `activity`, progress bar with `done/total` and the
-unit label `subagentes`); then, when `attention` is not empty, the pending block. With one item: caps label
-`PERGUNTA PENDENTE` (or `PERMISSÃO PENDENTE`), `há N min` from `since`, avatar + bold title + project + chevron, and
-`text`. With more items, the list layout of `progresso-duas-perguntas.png` (`N PERGUNTAS PENDENTES`, or
-`N PENDÊNCIAS` when kinds are mixed). Questions use `accent`, permissions `warning`. Footer with the non-zero counts:
-`trabalhando` (`success`), `pergunta(s)` (`accent`), `permissão(ões)` (`warning`), `com erro` (`error`), `ociosas`
-(`textSecondary`). Without focus, the card shows the pending block and the footer only.
+**Lock Screen — ring and counters** (rev. 2026-10-27, approved mock `v3-opcao-3-anel-contadores.png`; replaces the
+focus layout, which highlighted one arbitrary session). The card summarizes **all** top-level sessions and never
+singles one out as "the" session; `focus` is no longer rendered here (it stays in the state for other surfaces).
+
+- **Header:** mascot + `OpenCode`, `host` on the right (unchanged).
+- **Ring** (left): a closed circular gauge split into arcs proportional to the counts, in this order clockwise from
+  12 o'clock: `working` (`success`), `question` (`accent`), `permission` (`warning`), `failed` (`error`), `idle`
+  (`textSecondary` at reduced opacity), with small gaps between arcs. The total is the sum of those five counts. In
+  the centre: `activeTotal` in large bold `textStrong` and `ativas` in small `textSecondary` below it.
+- **Counters** (right of the ring), one line per **non-zero** count, coloured dot + bold number + label:
+  `trabalhando` (`success`), `pergunta`/`perguntas` (`accent`), `permissão`/`permissões` (`warning`), `com erro`
+  (`error`), `concluída há pouco`/`concluídas há pouco` (`textSecondary`, number and label not bold). At most 4 lines;
+  when 5 are non-zero, drop the `concluídas há pouco` line first.
+- **Attention line** (bottom, only when `attention` is not empty), after a hairline: dot in the kind colour (`accent`
+  question, `warning` permission) + bold first `attention` title + ` · há N min` (`textSecondary`, from `since`);
+  when `attentionTotal > 1`, append ` +K` with the remaining count. One line, title truncates first.
+- **Failed only** (`activeTotal == 0`, `failed > 0`): ring with the red and gray arcs, centre `0` / `ativas`, counters
+  `com erro` and `concluídas há pouco`, no attention line.
+- Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
 
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
 
