@@ -58,7 +58,12 @@ session is a native hard delete (messages and events are removed); the old trans
 is migrated: the remembered model and the global voice memory are independent of the session. The web delete dialogs
 warn when a target is a Mestra session and suggest archiving instead. Core's
 `test/tool-opencode-master-ensure.test.ts` covers concurrent creation, a deleted and an archived master and the
-remembered model on the real host.
+remembered model on the real host. `ensure` is the plugin's only caller of other plugin RPCs (`custom.preferences`,
+`custom.chats`) through `ctx.rpc`. The release bundles its own Effect runtime, so `cli/script/custom-plugin.ts` sends
+the host only portable Standard Schemas for those calls too and encodes inputs / decodes outputs with the bundled codecs;
+handing the bundled `Preferences.Profile` to the host made its parser run the bundled `Session.ID` check on a non-string
+(`s.startsWith is not a function`, HTTP 500). `test/tool-opencode-master-ensure-bundle.test.ts` loads the plugin from
+source and as the minified release bundle, with the real managed chats and a pointer to a deleted session.
 
 ## Reusable host integration points
 
