@@ -102,31 +102,35 @@ import XCTest
     filter.tap()
   }
 
-  /// Needs a selected repository (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`). Sends nothing.
-  func test02SessionsPlusPrefersChatsOverFilterButKeepsDraftInProgress() throws {
+  /// Needs two selected repositories (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`, and
+  /// `OPENCODE_TEST_CHATS_OTHER_PROJECT`). Sends nothing.
+  func test02SessionsPlusFollowsTheSelectedChip() throws {
     let name = environment["OPENCODE_TEST_CHATS_PROJECT"] ?? "demo"
+    let other = try XCTUnwrap(environment["OPENCODE_TEST_CHATS_OTHER_PROJECT"])
     let app = try launch()
     defer { app.terminate() }
-    // Requested literally: a repository filter does not override Chats for the Sessões "+".
-    let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+    // A repository chip preselects its project in the Projeto selector.
+    let chip = app.buttons["filter-project-" + name]
     XCTAssertTrue(chip.waitForExistence(timeout: 20))
     chip.tap()
     openNewSession(app)
-    XCTAssertTrue(app.buttons["Projeto: Chats"].waitForExistence(timeout: 10))
-    shot("chats-plus-with-filter")
-
-    // Work in progress in a project survives leaving and reopening from "+".
-    app.buttons["new-project"].tap()
-    // Search keeps the row on screen however many projects the sandbox has.
-    let search = app.textFields["selector-search"]
-    XCTAssertTrue(search.waitForExistence(timeout: 5))
-    search.tap()
-    search.typeText(name)
-    XCTAssertTrue(app.buttons["new-project-" + name].waitForExistence(timeout: 5))
-    app.buttons["new-project-" + name].tap()
     let label = "Projeto: " + name
     XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 10))
     XCTAssertTrue(enabled(app.buttons[label]))
+    XCTAssertTrue(app.buttons["new-directory"].waitForExistence(timeout: 20))
+    shot("plus-repository-chip")
+
+    // The selector still switches freely: another project, then Chats, then back.
+    choose(other, app)
+    XCTAssertTrue(app.buttons["Projeto: " + other].waitForExistence(timeout: 10))
+    app.buttons["new-project"].tap()
+    XCTAssertTrue(app.buttons["new-project-chats"].waitForExistence(timeout: 5))
+    app.buttons["new-project-chats"].tap()
+    XCTAssertTrue(app.buttons["Projeto: Chats"].waitForExistence(timeout: 10))
+    choose(name, app)
+    XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 10))
+
+    // Work in progress in a project survives leaving and reopening from "+" with "Todas".
     let input = app.textViews["conversation-composer"]
     input.tap()
     input.typeText("rascunho em andamento")
@@ -135,14 +139,39 @@ import XCTest
     openNewSession(app)
     XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 10))
     XCTAssertEqual(input.value as? String, "rascunho em andamento")
-    shot("chats-plus-restored-work")
+    shot("plus-restored-work")
 
-    // An emptied project draft is no longer work in progress: "+" returns to Chats.
+    // An emptied project draft is no longer work in progress: "+" with "Todas" opens Chats.
     input.tap()
     input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30))
     leave(app)
     openNewSession(app)
     XCTAssertTrue(app.buttons["Projeto: Chats"].waitForExistence(timeout: 10))
+    shot("plus-all")
     leave(app)
+
+    // The Chats chip opens Chats; the other repository chip preselects that project.
+    app.buttons["filter-chats"].tap()
+    openNewSession(app)
+    XCTAssertTrue(app.buttons["Projeto: Chats"].waitForExistence(timeout: 10))
+    shot("plus-chats-chip")
+    leave(app)
+    app.buttons["filter-chats"].tap()
+    app.buttons["filter-project-" + other].tap()
+    openNewSession(app)
+    XCTAssertTrue(app.buttons["Projeto: " + other].waitForExistence(timeout: 10))
+    leave(app)
+    app.buttons["Todas"].firstMatch.tap()
+  }
+
+  private func choose(_ project: String, _ app: XCUIApplication) {
+    app.buttons["new-project"].tap()
+    // Search keeps the row on screen however many projects the sandbox has.
+    let search = app.textFields["selector-search"]
+    XCTAssertTrue(search.waitForExistence(timeout: 5))
+    search.tap()
+    search.typeText(project)
+    XCTAssertTrue(app.buttons["new-project-" + project].waitForExistence(timeout: 5))
+    app.buttons["new-project-" + project].tap()
   }
 }

@@ -80,9 +80,8 @@ import XCTest
     chip.tap()
     openNewSession(app)
     ready(app)
-    // The Sessões "+" starts in Chats, even with a repository filter.
-    XCTAssertTrue(app.buttons["new-project"].label.contains("Chats"))
-    chooseProject("abacato-v2", app)
+    // A repository chip preselects its project.
+    XCTAssertTrue(app.buttons["new-project"].label.contains("abacato-v2"))
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
     if app.buttons["Continuar"].exists { app.buttons["Continuar"].tap() }

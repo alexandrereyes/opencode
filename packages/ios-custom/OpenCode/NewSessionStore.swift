@@ -29,6 +29,8 @@ import OpenCodeKit
   /// The originating conversation's model, applied to the draft; sending it unchanged is not a choice.
   private var inheritedModel: ModelReference?
   private let startInChats: Bool
+  /// The repository-chip project, remembered as the last project only once a session is sent.
+  @ObservationIgnored private var pendingTouch: String?
 
   init(
     sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false,
@@ -105,49 +107,44 @@ import OpenCodeKit
     guard !initialized else { return }
     await draft.load()
     if sessions.preferences == nil { await sessions.reload() }
-    let inherited = origin.flatMap { origin in projects.first { $0.id == origin.projectID } }
     // A restored draft with text or attachments is work in progress, not a default to replace.
-    let restoredWork =
-      !chat && draft.newSession != nil && (!draft.isEmpty || !draft.attachments.isEmpty)
-    // An originating session wins. The Sessões "+" defaults to Chats, even over a repository
-    // filter, unless it restores work in progress. Otherwise, like a repository filter, the Chats
-    // filter wins, and a restored chat draft stays a chat.
-    if chatsAvailable
-      && (origin?.chat == true
-        || (inherited == nil
-          && ((startInChats && !restoredWork) || sessions.chatsSelected
-            || (chat && !projects.contains { $0.id == sessions.selectedProject }))))
-    {
-      if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
-      if let model = origin?.model {
-        draft.model = model
-        inheritedModel = model
-      }
-      initialized = true
-      draft.focused = true
-      return
+    let start = NewSessionProjection.start(
+      projects: projects, origin: origin, chatsAvailable: chatsAvailable,
+      chatsFilter: sessions.chatsSelected, filterProjectID: sessions.selectedProject,
+      startInChats: startInChats, restoredChat: chat, restoredProjectID: draft.newSession?.projectID,
+      restoredWork: !chat && draft.newSession != nil && (!draft.isEmpty || !draft.attachments.isEmpty),
+      lastProject: sessions.preferences?.data.projects["local"]?.lastProject, categories: categories)
+    let inherits: Bool
+    switch start {
+    case .chats: inherits = true
+    case .project(let id, _, _): inherits = origin?.projectID == id
+    case .none: inherits = false
     }
-    let restored = chat ? nil : projects.first { $0.id == draft.newSession?.projectID }
-    let initial =
-      inherited ?? projects.first { $0.id == sessions.selectedProject } ?? restored
-      ?? NewSessionProjection.initialProject(
-        projects, filtered: nil, last: sessions.preferences?.data.projects["local"]?.lastProject)
-    if let origin, let inherited {
-      draft.newSession = NewSessionContext(
-        projectID: inherited.id, destination: origin.destination, mcp: draft.newSession?.mcp ?? [:])
-      if let model = origin.model {
-        draft.model = model
-        inheritedModel = model
-      }
-    } else if let initial, initial.id != restored?.id {
-      draft.newSession = NewSessionContext(
-        projectID: initial.id,
-        destination: .implicit(lastUsed: categories[initial.id]))
+    if inherits, let model = origin?.model {
+      draft.model = model
+      inheritedModel = model
     }
     initialized = true
-    draft.focused = initial != nil
-    if let initial {
-      do { try await sessions.touchProject(initial.canonical) } catch {
+    switch start {
+    case .chats:
+      if !chat { draft.newSession = .chat(mcp: draft.newSession?.mcp ?? [:]) }
+      draft.focused = true
+    case .none:
+      draft.focused = false
+    case .project(let id, let destination, let remember):
+      if let destination {
+        // An inherited checkout keeps this draft's MCP intents, as before.
+        draft.newSession = NewSessionContext(
+          projectID: id, destination: destination,
+          mcp: inherits ? draft.newSession?.mcp ?? [:] : [:])
+      }
+      draft.focused = true
+      guard let project = projects.first(where: { $0.id == id }) else { return }
+      guard remember else {
+        pendingTouch = project.canonical
+        return
+      }
+      do { try await sessions.touchProject(project.canonical) } catch {
         composer.toast.show("Não foi possível guardar o último projeto usado.", kind: .error)
       }
     }
@@ -158,6 +155,7 @@ import OpenCodeKit
   }
   func selectProject(_ project: Project) async {
     guard !draft.sending else { return }
+    pendingTouch = nil
     if self.project?.id != project.id {
       draft.newSession = NewSessionContext(
         projectID: project.id,
@@ -384,6 +382,10 @@ import OpenCodeKit
       }
       sessions.catalog.committed(model)
       remember(remembered)
+      if let touch = pendingTouch, !chat, touch == project?.canonical {
+        pendingTouch = nil
+        try? await sessions.touchProject(touch)
+      }
       draft.didSend()
       await finish(id: submission.id, restore: nil)
       Haptics.play(.light)

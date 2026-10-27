@@ -548,3 +548,46 @@ func newSessionChatFailureKeepsTheAllocationForRetry(_ point: String) async thro
   #expect(MCPServer(name: "safe", state: .connected).toggle(preview: true) == .intent)
   #expect(MCPServer(name: "safe", state: .connected).toggle(preview: false) == .live)
 }
+
+@Test func newSessionStartFollowsTheSessoesChipsOriginsAndRestoredDrafts() throws {
+  let projects = try newProjects()
+  func start(
+    origin: NewSessionOrigin? = nil, chats: Bool = false, filter: String? = nil, plus: Bool = true,
+    restoredChat: Bool = false, restored: String? = nil, work: Bool = false, available: Bool = true,
+    categories: [String: String] = [:]
+  ) -> NewSessionStart {
+    NewSessionProjection.start(
+      projects: projects, origin: origin, chatsAvailable: available, chatsFilter: chats,
+      filterProjectID: filter, startInChats: plus, restoredChat: restoredChat, restoredProjectID: restored,
+      restoredWork: work, lastProject: "/a-w", categories: categories)
+  }
+  // Repository chip: that project, its last-used destination category, remembered only on send.
+  #expect(start(filter: "b") == .project(id: "b", destination: .root, remember: false))
+  #expect(
+    start(filter: "b", categories: ["b": "workspace"])
+      == .project(id: "b", destination: .create, remember: false))
+  // The chip wins over a restored chat or another project's work; the same project keeps its context.
+  #expect(start(filter: "b", restoredChat: true) == .project(id: "b", destination: .root, remember: false))
+  #expect(start(filter: "b", restored: "a", work: true) == .project(id: "b", destination: .root, remember: false))
+  #expect(start(filter: "b", restored: "b", work: true) == .project(id: "b", destination: nil, remember: false))
+  // Chats chip, and "Todas" (no filter) from the Sessões "+".
+  #expect(start(chats: true) == .chats)
+  #expect(start() == .chats)
+  #expect(start(restored: "a", work: true) == .project(id: "a", destination: nil, remember: true))
+  #expect(start(restored: "a") == .chats)
+  // Without the Sessões "+" (e.g. a fixture), "Todas" restores, then the remembered last project.
+  #expect(start(plus: false) == .project(id: "a", destination: .root, remember: true))
+  #expect(start(plus: false, restoredChat: true) == .chats)
+  // An older server without Chats falls back to the remembered project; a chip still applies.
+  #expect(start(chats: true, available: false) == .project(id: "a", destination: .root, remember: true))
+  // The conversation menu's origin wins over every chip.
+  let origin = NewSessionOrigin(projectID: "a", destination: .worktree("/a-w"), model: newModel)
+  #expect(start(origin: origin, chats: true) == .project(id: "a", destination: .worktree("/a-w"), remember: true))
+  #expect(start(origin: origin, filter: "b") == .project(id: "a", destination: .worktree("/a-w"), remember: true))
+  let chat = NewSessionOrigin(projectID: "", destination: .root, chat: true, model: newModel)
+  #expect(start(origin: chat, filter: "b") == .chats)
+  #expect(NewSessionProjection.start(
+    projects: [], origin: nil, chatsAvailable: false, chatsFilter: false, filterProjectID: nil,
+    startInChats: true, restoredChat: false, restoredProjectID: nil, restoredWork: false, lastProject: nil,
+    categories: [:]) == .none)
+}

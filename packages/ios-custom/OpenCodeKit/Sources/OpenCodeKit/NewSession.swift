@@ -91,7 +91,48 @@ public struct VCSInfo: Codable, Sendable {
   public var supportsWorktrees: Bool { provider == "git" || branch.current != nil }
 }
 
+/// Where Nova sessão opens. `remember` is false for a Sessões repository-chip preselection, which updates the
+/// remembered last project only when the session is sent.
+public enum NewSessionStart: Equatable, Sendable {
+  case chats
+  /// `destination` is nil when the restored draft already targets this project and keeps its own context.
+  case project(id: String, destination: SessionDestination?, remember: Bool)
+  case none
+}
+
 public enum NewSessionProjection {
+  /// An originating session wins. Then the Sessões chips: a repository chip preselects that project (its
+  /// last-used destination category) and the Chats chip preselects Chats. With "Todas", the Sessões "+" opens
+  /// Chats unless the restored draft is project work in progress, a restored chat draft stays a chat, and
+  /// otherwise the restored draft, the remembered last project, then the first selected project apply.
+  public static func start(
+    projects: [Project], origin: NewSessionOrigin?, chatsAvailable: Bool, chatsFilter: Bool,
+    filterProjectID: String?, startInChats: Bool, restoredChat: Bool, restoredProjectID: String?,
+    restoredWork: Bool, lastProject: String?, categories: [String: String]
+  ) -> NewSessionStart {
+    let inherited = origin.flatMap { origin in projects.first { $0.id == origin.projectID } }
+    let filtered = projects.first { $0.id == filterProjectID }
+    if chatsAvailable
+      && (origin?.chat == true
+        || (inherited == nil
+          && ((startInChats && !restoredWork && filtered == nil) || chatsFilter
+            || (restoredChat && filtered == nil))))
+    {
+      return .chats
+    }
+    if let origin, let inherited {
+      return .project(id: inherited.id, destination: origin.destination, remember: true)
+    }
+    let restored = restoredChat ? nil : projects.first { $0.id == restoredProjectID }
+    guard
+      let initial = filtered ?? restored
+        ?? initialProject(projects, filtered: nil, last: lastProject)
+    else { return .none }
+    return .project(
+      id: initial.id,
+      destination: initial.id == restored?.id ? nil : .implicit(lastUsed: categories[initial.id]),
+      remember: initial.id != filtered?.id)
+  }
   public static func projects(
     _ inventory: [Project], preferences: Preferences?, chatRoot: String?,
     search: String = ""

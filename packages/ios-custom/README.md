@@ -1710,11 +1710,14 @@ the master) has no visible placeholder; its text view keeps the VoiceOver label 
 `OpenCodeUITests/NewSessionTypographyTests` checks that and captures project, Chats and, when the isolated sandbox
 has no selected projects, the empty state (otherwise it skips).
 
-- **Project:** the Sessões `+` starts in **Chats**, even with a repository filter active, unless the restored
-  new-session draft is project work in progress (text or attachments). Otherwise an active Sessões repository filter
-  takes precedence, then an explicitly restored draft keeps its project; a fresh draft uses
-  `custom.preferences.data.projects["local"].lastProject`, then the first selected project. The conversation menu's
-  Nova sessão still inherits its origin (Chats for a chat). The Projeto sheet lists **Chats** first (when the server
+- **Project:** `NewSessionProjection.start` decides. The conversation menu's Nova sessão inherits its origin (Chats
+  for a chat). From Sessões, a selected repository chip preselects that project, with its last-used destination
+  category (root, or Nova worktree when that project's last send used a worktree), even over a restored draft of
+  another project; this preselection updates the remembered `lastProject` only when the session is sent (an explicit
+  Projeto choice still touches it immediately). The Chats chip preselects Chats. With "Todas", the `+` starts in
+  **Chats** unless the restored new-session draft is project work in progress (text or attachments); a restored chat
+  stays a chat. Without the `+` (fixtures), the restored draft keeps its project, then
+  `custom.preferences.data.projects["local"].lastProject`, then the first selected project. The Projeto sheet lists **Chats** first (when the server
   has `custom.chats`), then preserves saved selection order and searches display names without sorting; see [Chats](#chats-destination) below. The `+` in the Projeto
   header ("Adicionar projeto") opens the folder explorer described below; selecting/opening the draft's
   project calls `project.touch` without reordering the saved list. No selected projects produces an honest empty state,
@@ -1822,9 +1825,10 @@ creation keep the allocation in the protected draft, so a retry claims the same 
 
 `NewSessionChatsTests` (UI) checks the Sessões `+` opens in Chats, Chats stays first in Projeto (also while searching
 "chat"), sends a Luna 6/low prompt, checks Recentes is unchanged and the Chats chip lists the new row and preselects
-Chats. Its second case checks the `+` with a repository filter, a restored project draft with text, and an emptied one.
-Run it against an isolated sandbox with one selected project (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`) and an
-empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts
+Chats. Its second case checks the `+` per chip (repository → that project, Chats → Chats, Todas → Chats or restored
+project work), switching projects and Chats in the selector, and an emptied draft. Run it against an isolated sandbox
+with two selected projects (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`, and `OPENCODE_TEST_CHATS_OTHER_PROJECT`)
+and an empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`, `OPENCODE_TEST_SIMULATOR` and
 `OPENCODE_TEST_EVIDENCE` to run `NewSessionTests` against another isolated sandbox and simulator.
 
