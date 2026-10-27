@@ -122,7 +122,7 @@ import XCTest
   }
 
   func testUnreadChips() {
-    let app = launch(["-OpenCodeCatalogUnread"])
+    let app = launch(["-OpenCodeCatalogUnread", "-OpenCodeCatalogNoRunning"])
     defer { app.terminate() }
     let unread = app.buttons["filter-project-Projeto Exemplo 3"]
     let chats = app.buttons["filter-chats"]
@@ -130,6 +130,28 @@ import XCTest
     XCTAssertEqual(unread.label, "Projeto Exemplo 3, com não lidas")
     XCTAssertLessThan(unread.frame.minX, chats.frame.minX)
     shot("sessions-chips-unread")
+  }
+
+  func testRunningChips() {
+    let app = launch(["-OpenCodeCatalogUnread"])
+    defer { app.terminate() }
+    let running = app.buttons["filter-project-Projeto Exemplo 0"]
+    let unread = app.buttons["filter-project-Projeto Exemplo 3"]
+    XCTAssertTrue(running.waitForExistence(timeout: 10))
+    XCTAssertGreaterThan(running.frame.minX, app.buttons["Todas"].firstMatch.frame.minX)
+    XCTAssertLessThan(running.frame.minX, unread.frame.minX)
+    XCTAssertLessThan(unread.frame.minX, app.buttons["filter-chats"].frame.minX)
+    shot("sessions-chips-running")
+  }
+
+  func testChatsOrderMenu() {
+    let app = launch(["-OpenCodeCatalogNoRunning"])
+    defer { app.terminate() }
+    chip("filter-chats", app)
+    app.buttons["filter-chats"].press(forDuration: 1)
+    XCTAssertTrue(app.buttons["Mover para depois"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["Mover para antes"].exists)
+    shot("sessions-chats-order-menu")
   }
 
   func testSettings() {

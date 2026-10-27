@@ -176,6 +176,9 @@ final class SessionStore {
         forms = ScreenCatalogFixture.forms
       }
       active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
+      if ScrollFixtures.mode == "catalog", ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogNoRunning") {
+        active = []
+      }
       previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
         var preview = SessionPreview()
         preview.text = "Resultado sintético com ferramentas, Markdown e código de exemplo."

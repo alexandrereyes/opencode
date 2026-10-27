@@ -59,6 +59,8 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
 | Sessões · repositório | Sessões → Projeto Exemplo 0 | [PNG](sessions-list-repository-dark.png) | [PNG](sessions-list-repository-light.png) |
 | Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
+| Chips · em execução | Todas → Projeto Exemplo 0 rodando → Projeto Exemplo 3 não lido → ordem manual | [PNG](sessions-chips-running-dark.png) | [PNG](sessions-chips-running-light.png) |
+| Chats · ordem manual | Manter pressionado Chats; primeiro por padrão, com Mover para depois disponível | [PNG](sessions-chats-order-menu-dark.png) | — |
 | Você / Ajustes | Aba Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
 | Temas | Você → Tema | [PNG](you-themes-default-dark.png) | — |
 | Dados do iPhone | Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | — |
@@ -96,6 +98,18 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão dos agrupamentos e chips (base `0d717fc1dbd`): `sessions-*` recapturadas após `d6db386fe2a`,
+`3ddf8f6b01e` e `0d717fc1dbd`. A ordenação dos chips é Todas, em execução, não lidas, posição manual
+(incluindo Chats, primeiro por padrão), nome. A captura de não lidas desliga apenas os estados ativos
+da fixture com `-OpenCodeCatalogNoRunning`; a de execução mantém o Projeto Exemplo 0 ativo antes do
+Projeto Exemplo 3 não lido. O menu do Chats é mostrado sem confirmar uma alteração de preferência.
+As seções de atenção, atividade e datas, os anéis de cota, o cabeçalho e o histórico continuam cobertos.
+
+Live Activity (`002107761f3`/`128d59e1838`) acrescenta o widget do sistema e o driver, não uma tela das
+abas já catalogadas. O catálogo usa `ScrollFixtureRoot`, que não inicia o driver de Live Activity de
+`AppRoot`: nenhum registro APNs, notificação ou atividade real é criado. As demais telas capturadas
+não tiveram alteração visual nesses commits; permanecem as referências da revisão anterior.
 
 Revisão de 27/10/2026 (base `19025d2c22a`): catálogo regenerado após a ordenação por execução
 (`19025d2c22a`) e herança do chip (`af7afcc7dae`). A fixture possui um agente ativo mais antigo que
