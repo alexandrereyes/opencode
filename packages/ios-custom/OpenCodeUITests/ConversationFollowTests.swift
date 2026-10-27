@@ -46,12 +46,14 @@ import XCTest
     }
   }
 
-  func testHeightChangesFollowMonotonicallyInBothThemes() throws {
+  /// Growth never scrolls the transcript, not even at the end: the offset stays put while the content grows,
+  /// and ↓ appears for what is now below.
+  func testGrowthNeverMovesTheScreenInBothThemes() throws {
     for theme in ["openchamber-dark", "openchamber-light"] {
       let app = XCUIApplication()
       app.launchArguments = [
         "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
-        "-OpenCodeTheme", theme, "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureFollow", "-OpenCodeScrollDiagnostics",
+        "-OpenCodeTheme", theme, "-OpenCodeFixturePosition", "tail", "-OpenCodeFixtureFollow",
       ]
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
       app.launch()
@@ -61,13 +63,13 @@ import XCTest
       XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
       let driver = app.buttons["follow-fixture"]
       XCTAssertTrue(driver.waitForExistence(timeout: 5))
+      let end = app.buttons["Ir para a mais recente"]
       for cycle in 0..<2 {
         if cycle > 0 {
-          for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
-          let end = app.buttons["Ir para a mais recente"]
           XCTAssertTrue(end.waitForExistence(timeout: 5))
           end.tap()
-          RunLoop.current.run(until: Date().addingTimeInterval(1))
+          let hidden = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: end)
+          XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         }
         driver.tap()
         let finished = expectation(for: NSPredicate(format: "value BEGINSWITH '{'"), evaluatedWith: driver)
@@ -75,13 +77,14 @@ import XCTest
         let json = try XCTUnwrap(driver.value as? String)
         let report = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Double])
         XCTAssertGreaterThan(try XCTUnwrap(report["samples"]), 30)
-        XCTAssertGreaterThan(try XCTUnwrap(report["heightChanges"]), 10)
-        XCTAssertGreaterThan(try XCTUnwrap(report["advance"]), 500)
+        XCTAssertGreaterThan(try XCTUnwrap(report["heightChanges"]), 10, json)
+        XCTAssertEqual(try XCTUnwrap(report["advance"]), 0, accuracy: 0.5, json)
         XCTAssertEqual(try XCTUnwrap(report["backward"]), 0, accuracy: 0.5, json)
-        XCTAssertEqual(try XCTUnwrap(report["gap"]), 0, accuracy: 2, json)
-        XCTAssertEqual(report["animations"], Double(cycle), json)
+        XCTAssertEqual(try XCTUnwrap(report["forward"]), 0, accuracy: 0.5, json)
+        XCTAssertGreaterThan(try XCTUnwrap(report["below"]), 24, json)
+        XCTAssertTrue(end.waitForExistence(timeout: 5), "the content grown below the viewport offers ↓")
         let attachment = XCTAttachment(string: json)
-        attachment.name = "follow-height-changes-\(cycle)-" + theme
+        attachment.name = "growth-still-\(cycle)-" + theme
         attachment.lifetime = .keepAlways
         add(attachment)
       }

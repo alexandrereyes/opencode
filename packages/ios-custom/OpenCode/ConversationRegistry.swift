@@ -39,7 +39,11 @@ import SwiftUI
   func existing(_ id: String) -> ConversationStore? { stores[id] }
 
   func remove(_ ids: Set<String>) {
-    for id in ids { stores[id] = nil }
+    for id in ids {
+      // The retained view refers back to its store; dropping it lets both go.
+      stores[id]?.memory.controller = nil
+      stores[id] = nil
+    }
     recent.removeAll { ids.contains($0) }
   }
 
@@ -92,7 +96,12 @@ import SwiftUI
 
   func bubble(_ id: String) -> Bool { Self.entry(&bubbles, id, false).value }
   func truncated(_ id: String) -> Bool { Self.entry(&truncations, id, false).value }
-  func setTruncated(_ id: String, value: Bool) { Self.entry(&truncations, id, false).value = value }
+  func setTruncated(_ id: String, value: Bool) {
+    measuredTruncations.insert(id)
+    Self.entry(&truncations, id, false).value = value
+  }
+  /// Prompts whose truncation is known, measured by the bubble or computed before it rendered.
+  private(set) var measuredTruncations: Set<String> = []
   func setBubble(_ id: String, expanded: Bool) { Self.entry(&bubbles, id, false).value = expanded }
   func detail(_ key: String) -> Bool? { Self.entry(&details, key, nil).value }
   func setDetail(_ key: String, expanded: Bool) { Self.entry(&details, key, nil).value = expanded }

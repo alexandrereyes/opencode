@@ -23,6 +23,12 @@ struct TranscriptHost: UIViewControllerRepresentable {
   let canPersist: () -> Bool
 
   func makeUIViewController(context: Context) -> TranscriptViewController {
+    Self.mount(store, reading: reading)
+  }
+
+  /// The retained view when it is free; otherwise a second view from the same store and memory, opening at
+  /// the passage last captured. Only the first is retained.
+  static func mount(_ store: ConversationStore, reading: ReadingPositionStore) -> TranscriptViewController {
     let memory = store.memory
     if let retained = memory.controller, !retained.mounted {
       retained.mount()

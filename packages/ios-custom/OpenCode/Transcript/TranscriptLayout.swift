@@ -3,7 +3,7 @@ import UIKit
 
 final class TranscriptLayoutAttributes: UICollectionViewLayoutAttributes {
   // Attributes are compared from `isEqual`, which UIKit declares nonisolated; they are only ever used on main.
-  /// A prompt pinned under the header, which draws a fade below itself.
+  /// A prompt pinned under the header with content passing under it, which draws a fade below itself.
   nonisolated(unsafe) var pinned = false
   /// How far the item starts below its message's top.
   nonisolated(unsafe) var messageOffset: CGFloat = 0
@@ -121,7 +121,8 @@ final class TranscriptLayout: UICollectionViewLayout {
     var y = CGFloat(geometry.tops[index])
     if let pinned, pinned.index == index {
       y = CGFloat(pinned.y)
-      attributes.pinned = true
+      // The fade shows once content passes under the prompt.
+      attributes.pinned = y > CGFloat(geometry.tops[index]) + 0.5
       attributes.zIndex = 20
     } else {
       attributes.zIndex = entry.sticky ? 10 : 0
@@ -167,17 +168,23 @@ final class TranscriptLayout: UICollectionViewLayout {
     let context = super.invalidationContext(forPreferredLayoutAttributes: preferred, withOriginalAttributes: original)
     let index = original.indexPath.item
     guard index < geometry.count else { return context }
-    let anchor = anchor.flatMap { geometry.index(of: $0.id) }
-    // An estimate replaced by the first real height had no content the reader saw. New cells appear at an
-    // edge: one entering at the top keeps everything below it still, one entering at the bottom changes
-    // nothing on screen. A measured item that changes (a streamed answer, an expansion) keeps its top.
-    let estimated = !isMeasured(index) && geometry.tops[index] < Double(visibleTop + viewport / 2)
+    // Above the reader's place everything below shifts by the same amount: move the offset with it. A
+    // measured place that changes (a streamed answer, an expansion) keeps its top; below it, nothing moves.
+    // An unmeasured place showed nothing yet: entering above everything already on screen (under the pinned
+    // prompt while scrolling up), it keeps what follows it still; below shown content, it keeps its top.
+    let place = anchor.flatMap { geometry.index(of: $0.id) }
+    var above = place.map { index < $0 } ?? false
+    if let place, index == place, !isMeasured(index) {
+      let displaced = pinned.flatMap { $0.y > geometry.tops[$0.index] + 0.5 ? $0.index : nil }
+      let shown = (collectionView?.indexPathsForVisibleItems ?? []).map(\.item)
+        .filter { $0 != index && $0 != displaced && isMeasured($0) }.min()
+      above = shown.map { index < $0 } ?? true
+    }
     let delta = geometry.setHeight(Double(preferred.frame.height), at: index)
     if measured.indices.contains(index) { measured[index] = true }
     delegate?.layout(self, measured: preferred.frame.height, at: index)
     context.contentSizeAdjustment = CGSize(width: 0, height: CGFloat(delta))
-    // Above the reader's place everything below shifts by the same amount: move the offset with it.
-    if estimated || (anchor.map { index < $0 } ?? false) {
+    if above {
       context.contentOffsetAdjustment = CGPoint(x: 0, y: CGFloat(delta))
     }
     let visible = collectionView?.indexPathsForVisibleItems ?? []

@@ -29,6 +29,8 @@ import Testing
   @Test func promptPinsWhileItsSectionCrossesTheTopAndIsPushedByTheNext() {
     let geometry = turns()
     #expect(geometry.pinned(visibleTop: 0) == nil, "inline at the top of the content")
+    #expect(geometry.pinned(visibleTop: 4) == .init(index: 0, y: 4), "at the top edge it is already pinned")
+    #expect(geometry.anchor(visibleTop: 4) == .init(id: "a", screenY: 70), "and the turn below it is the place")
     #expect(geometry.pinned(visibleTop: 100) == .init(index: 0, y: 100))
     #expect(geometry.usableTop(visibleTop: 100) == 60)
     // The next prompt starts at 610: the first one may not overlap it.

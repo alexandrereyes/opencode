@@ -99,8 +99,9 @@ public struct TranscriptGeometry: Sendable, Equatable {
   public func pinned(visibleTop: Double) -> Pinned? {
     let first = firstIndex(below: visibleTop)
     guard first < entries.count else { return nil }
-    // The section owning the top edge starts at the last prompt at or above it.
-    guard let start = (0...first).reversed().first(where: { entries[$0].sticky }), tops[start] < visibleTop
+    // The section owning the top edge starts at the last prompt at or above it; a prompt exactly at the top
+    // edge is already in its pinned place.
+    guard let start = (0...first).reversed().first(where: { entries[$0].sticky }), tops[start] <= visibleTop
     else { return nil }
     let next = entries.indices.dropFirst(start + 1).first { entries[$0].sticky }
     let limit = next.map { tops[$0] - entries[start].height } ?? .infinity

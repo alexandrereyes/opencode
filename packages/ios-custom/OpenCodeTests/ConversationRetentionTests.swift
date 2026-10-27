@@ -149,6 +149,51 @@ private final class ObservedFlag: @unchecked Sendable {
     XCTAssertNil(registry.existing("ses_3"))
   }
 
+  func testEvictedConversationIsReleasedWithItsRetainedView() {
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) { request in
+      (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+    }
+    let hub = EventHub(client: client)
+    let reading = ReadingPositionStore(server: "test", root: FileManager.default.temporaryDirectory
+      .appending(path: "retention-" + UUID().uuidString))
+    let registry = ConversationRegistry(capacity: 1)
+    weak var released: ConversationStore?
+    weak var view: TranscriptViewController?
+    autoreleasepool {
+      let store = registry.store("ses_a") { ConversationStore(id: "ses_a", client: client, hub: hub) }
+      let controller = TranscriptViewController(store: store, reading: reading)
+      store.memory.controller = controller
+      released = store
+      view = controller
+    }
+    XCTAssertNotNil(released)
+    _ = registry.store("ses_b") { ConversationStore(id: "ses_b", client: client, hub: hub) }
+    XCTAssertNil(registry.existing("ses_a"))
+    XCTAssertNil(view, "the retained view must not keep an evicted conversation alive")
+    XCTAssertNil(released)
+  }
+
+  func testTheSameConversationMountedTwiceGetsASecondView() {
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) { request in
+      (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+    }
+    let store = ConversationStore(id: "ses_twice", client: client, hub: EventHub(client: client))
+    let reading = ReadingPositionStore(server: "test", root: FileManager.default.temporaryDirectory
+      .appending(path: "retention-" + UUID().uuidString))
+    store.memory.anchor = ReadingPosition(.message(id: "msg_left", offset: 12), item: "text:a", itemOffset: 12)
+    let first = TranscriptHost.mount(store, reading: reading)
+    XCTAssertTrue(store.memory.controller === first)
+    // The same conversation again on the stack (a parent reopened from its child): never the mounted view.
+    let second = TranscriptHost.mount(store, reading: reading)
+    XCTAssertFalse(second === first)
+    XCTAssertTrue(store.memory.controller === first, "only the first view is kept")
+    XCTAssertTrue(store.memory.active === second, "commands act on the screen on top")
+    second.unmount()
+    XCTAssertTrue(store.memory.active === first)
+    first.unmount()
+    XCTAssertTrue(TranscriptHost.mount(store, reading: reading) === first, "returning remounts the kept view")
+  }
+
   func testMemoryObservesEachKeyAlone() {
     let memory = TranscriptMemory()
     let changed = ObservedFlag()

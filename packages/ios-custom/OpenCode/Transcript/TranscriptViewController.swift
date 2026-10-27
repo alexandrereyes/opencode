@@ -317,6 +317,7 @@ import SwiftUI
       collectionView.layoutIfNeeded()
     }
     layout.pendingAnchor = nil
+    if let animating { collectionView.setContentOffset(CGPoint(x: 0, y: clamp(animating())), animated: true) }
     #if DEBUG
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
       NSLog("TRANSCRIPT apply %d -> %d deleted=%d inserted=%d changed=%d reordered=%@ revealed=%@", old.count,
@@ -442,10 +443,15 @@ import SwiftUI
     let item = items[indexPath.item]
     if case .prose(let part, let prose) = item.kind {
       let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "text", for: indexPath) as! TranscriptTextCell
+      // Items, not parts, are unique: a part's text views all carry the part's identifier.
+      cell.accessibilityIdentifier = item.id
       cell.configure(part, prose: prose, context: context)
       return cell
     }
     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "host", for: indexPath) as! TranscriptHostCell
+    cell.accessibilityIdentifier = item.id
+    if case .prompt(let message, _) = item.kind { primeTruncation(message.id, text: message.displayText) }
+    if case .pending(let pending, _) = item.kind { primeTruncation(pending.id, text: pending.payload.displayText) }
     cell.configure(item, context: context)
     #if DEBUG
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
@@ -453,6 +459,15 @@ import SwiftUI
     }
     #endif
     return cell
+  }
+
+  /// A bubble learns whether its prompt is truncated only after it renders, then grows by its toggle; tell it
+  /// first, so its first height is its final one.
+  private func primeTruncation(_ id: String, text: String) {
+    guard !text.isEmpty, !memory.measuredTruncations.contains(id), size.width > 0 else { return }
+    // The bubble keeps 36 points beside it and 14 inside on each side.
+    let width = size.width - AppLayout.margin * 2 - 36 - 28
+    memory.setTruncated(id, value: UserPromptScrollView.truncates(text, width: width, traits: traitCollection))
   }
 
   // MARK: Opening
@@ -476,18 +491,37 @@ import SwiftUI
     var offset = resolved ?? latestOffset
     UIView.performWithoutAnimation {
       setOffset(offset)
+      // Rows measured in this pass may move the offset (an estimate replaced above the place) or the place
+      // itself; compare with where the view actually is.
       for _ in 0..<4 {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+          var owner = "-"
+          if case .message(let id, _) = position.target { owner = store.activity.anchors[id] ?? id }
+          let index = items.firstIndex { $0.message == owner }
+          NSLog("TRANSCRIPT position offset=%.1f actual=%.1f owner=%@ item=%@ top=%.1f", offset,
+            collectionView.contentOffset.y, owner, index.map { items[$0].id } ?? "-",
+            index.map { layout.messageTop($0) } ?? -1)
+        }
+        #endif
         collectionView.layoutIfNeeded()
-        let next = resolve(position) ?? latestOffset
-        guard abs(next - offset) > 0.25 else { break }
-        offset = next
+        offset = clamp(resolve(position) ?? latestOffset)
+        guard abs(offset - collectionView.contentOffset.y) > 0.25 else { break }
         setOffset(offset)
       }
     }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("TRANSCRIPT positioned offset=%.1f actual=%.1f resolve=%.1f", offset, collectionView.contentOffset.y,
+        resolve(position) ?? -1)
+    }
+    #endif
     requestVisibleParses()
-    // Markdown near the place must be parsed and laid out before the first frame; its parse lands
-    // through a rebuild that positions again.
-    if unparsedNear { return }
+    // Markdown near the place is parsed and laid out before the first frame: the rebuild positions again.
+    if parseNear(layout.visibleTop) {
+      rebuild()
+      return
+    }
     revealed = true
     target = nil
     collectionView.isHidden = false
@@ -495,6 +529,39 @@ import SwiftUI
     state.restoring = false
     memory.anchor = currentPosition()
     publishState()
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("TRANSCRIPT revealed pinned=%@ usable=%.1f anchor=%@ screenY=%.1f position=%@",
+        layout.pinned.map { items[$0.index].id } ?? "-", layout.usableTop, layout.anchor?.id ?? "-",
+        layout.anchor?.screenY ?? -1, String(describing: position))
+    }
+    #endif
+    #if DEBUG
+    let arguments = ProcessInfo.processInfo.arguments
+    if let flag = arguments.firstIndex(of: "-OpenCodeFixtureRevealTurn"), arguments.indices.contains(flag + 1) {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(2))
+        _ = self?.revealTurn(arguments[flag + 1])
+        try? await Task.sleep(for: .seconds(2))
+        guard let self, let pinned = layout.pinned else { return }
+        NSLog("TRANSCRIPT turn pinned=%@ y=%.1f visibleTop=%.1f next=%@ nextTop=%.1f", items[pinned.index].id, pinned.y,
+          layout.visibleTop, items[pinned.index + 1].id, layout.geometry.tops[pinned.index + 1])
+      }
+    }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureJumpLater") {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(2))
+        self?.scrollToLatest(animated: true)
+        for _ in 0..<6 {
+          try? await Task.sleep(for: .milliseconds(400))
+          guard let self else { return }
+          NSLog("TRANSCRIPT latest distance=%.1f offset=%.1f latest=%.1f max=%.1f size=%.1f jump=%@", distanceToLatest,
+            collectionView.contentOffset.y, latestOffset, layout.maximumOffset, collectionView.contentSize.height,
+            String(state.jumpToLatest))
+        }
+      }
+    }
+    #endif
   }
 
   /// The content offset that shows a reading position, if its item or message is loaded.
@@ -518,15 +585,17 @@ import SwiftUI
     return top
   }
 
-  private var unparsedNear: Bool {
-    let top = layout.visibleTop
+  /// Parses now, without highlighting, the text near `top` that has no parse yet, so its geometry is known
+  /// before a frame shows it (the full parse follows). True when anything was parsed.
+  private func parseNear(_ top: CGFloat) -> Bool {
     let geometry = layout.geometry
     var index = geometry.firstIndex(below: Double(top - size.height))
+    var parsed = false
     while index < items.count, geometry.tops[index] < Double(top + size.height * 2) {
-      if case .unparsed = items[index].kind { return true }
+      if case .unparsed(let part) = items[index].kind, parses.parseNow(part) { parsed = true }
       index += 1
     }
-    return false
+    return parsed
   }
 
   private func pageForRestoration() {
@@ -572,7 +641,7 @@ import SwiftUI
 
   func scrollToLatest(animated: Bool) {
     guard revealed else { return }
-    scroll(to: latestOffset, animated: animated)
+    scroll(to: { [unowned self] in latestOffset }, animated: animated)
   }
 
   /// Explicit navigation to a message (search, quotes, read aloud): pages history until it is loaded.
@@ -585,7 +654,11 @@ import SwiftUI
       }
       return
     }
-    scroll(to: visibleTop(line: layout.messageTop(index) + CGFloat(offset), viewportTop: nil), animated: animated)
+    // Resolved by message on every pass: parses landing on the way replace items and shift indices.
+    scroll(to: { [unowned self] in
+      let index = items.firstIndex { $0.message == owner } ?? index
+      return visibleTop(line: layout.messageTop(index) + CGFloat(offset), viewportTop: nil)
+    }, animated: animated)
     if persist { capture() }
   }
 
@@ -604,9 +677,16 @@ import SwiftUI
   func revealTurn(_ prompt: String) -> Bool {
     guard let pinned = layout.pinned, items[pinned.index].id == "prompt:" + prompt,
       pinned.index + 1 < items.count else { return false }
-    let geometry = layout.geometry
-    let target = CGFloat(geometry.tops[pinned.index + 1] - geometry.entries[pinned.index].height)
-    if abs(target - collectionView.contentOffset.y) < 1 {
+    let id = items[pinned.index].id
+    let first = items[pinned.index + 1].message
+    // The turn's first message starts right below the prompt (its top padding included). Both are found by
+    // identity on every pass: parses landing on the way replace items and shift indices.
+    let target = { [unowned self] () -> CGFloat in
+      guard let prompt = layout.geometry.index(of: id) else { return collectionView.contentOffset.y }
+      let start = items.indices.dropFirst(prompt + 1).first { first == nil || items[$0].message == first } ?? prompt + 1
+      return layout.messageTop(min(start, items.count - 1)) - CGFloat(layout.geometry.entries[prompt].height)
+    }
+    if abs(target() - collectionView.contentOffset.y) < 1 {
       Haptics.play(.selection)
       return true
     }
@@ -627,14 +707,49 @@ import SwiftUI
     layout.setSpacerPrompt(items[last].id)
     layout.invalidateLayout()
     collectionView.layoutIfNeeded()
-    scroll(to: CGFloat(layout.geometry.tops[last]), animated: true)
+    let id = items[last].id
+    scroll(to: { [unowned self] in CGFloat(layout.geometry.index(of: id).map { layout.geometry.tops[$0] } ?? 0) },
+      animated: true)
   }
 
-  private func scroll(to offset: CGFloat, animated: Bool) {
-    let target = min(max(0, offset), layout.maximumOffset)
-    collectionView.setContentOffset(CGPoint(x: 0, y: target), animated: animated && !UIAccessibility.isReduceMotionEnabled)
+  /// Explicit navigation. The destination is laid out first, invisibly in this same pass, until its rows
+  /// are measured and it stops moving; a distant one is then approached from one viewport away, so the
+  /// animation crosses only measured rows and lands exactly. Instant with Reduce Motion.
+  private func scroll(to target: @escaping () -> CGFloat, animated: Bool) {
+    let origin = collectionView.contentOffset.y
+    var destination = clamp(target())
+    UIView.performWithoutAnimation {
+      for _ in 0..<4 {
+        setOffset(destination)
+        collectionView.layoutIfNeeded()
+        if parseNear(collectionView.contentOffset.y) { rebuild() }
+        destination = clamp(target())
+        if abs(destination - collectionView.contentOffset.y) <= 0.5 { break }
+      }
+      guard animated, !UIAccessibility.isReduceMotionEnabled else { return }
+      let start = destination + min(size.height, max(-size.height, origin - destination))
+      setOffset(start)
+      collectionView.layoutIfNeeded()
+      destination = clamp(target())
+    }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("TRANSCRIPT scroll origin=%.1f destination=%.1f actual=%.1f", origin, destination, collectionView.contentOffset.y)
+    }
+    #endif
+    if animated, !UIAccessibility.isReduceMotionEnabled {
+      animating = target
+      collectionView.setContentOffset(CGPoint(x: 0, y: destination), animated: true)
+    } else {
+      setOffset(destination)
+    }
     scheduleCapture()
   }
+  /// The destination of the explicit scroll in flight: an update that lands meanwhile (a parse, a reload)
+  /// keeps the anchor and then continues toward the destination it moved.
+  private var animating: (() -> CGFloat)?
+
+  private func clamp(_ offset: CGFloat) -> CGFloat { min(max(0, offset), layout.maximumOffset) }
 
   private func setOffset(_ offset: CGFloat) {
     collectionView.contentOffset = CGPoint(x: 0, y: min(max(0, offset), layout.maximumOffset))
@@ -664,8 +779,8 @@ import SwiftUI
     else { return }
     state.resumeOffered = false
     page(until: { [weak self] in self?.items.contains { $0.message == id } ?? true }) { [weak self] in
-      guard let self, let offset = resolve(position) else { return }
-      scroll(to: offset, animated: false)
+      guard let self, resolve(position) != nil else { return }
+      scroll(to: { [unowned self] in resolve(position) ?? collectionView.contentOffset.y }, animated: false)
     }
   }
 
@@ -714,6 +829,7 @@ import SwiftUI
   // MARK: Scrolling
 
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    animating = nil
     store.scrolling = true
     store.mcps.close()
   }
@@ -729,7 +845,21 @@ import SwiftUI
     if !decelerate { settled() }
   }
   func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settled() }
-  func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { settled() }
+  func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("TRANSCRIPT ended offset=%.1f target=%.1f pinned=%@", collectionView.contentOffset.y,
+        animating.map { clamp($0()) } ?? -1, layout.pinned.map { items[$0.index].id } ?? "-")
+    }
+    #endif
+    // Rows measured on the way may have moved the destination a last time.
+    if let target = animating {
+      animating = nil
+      let destination = clamp(target())
+      if abs(destination - collectionView.contentOffset.y) > 0.5 { setOffset(destination) }
+    }
+    settled()
+  }
 
   private func settled() {
     store.scrolling = touching

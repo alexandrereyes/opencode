@@ -1,17 +1,32 @@
 import OpenCodeKit
 import SwiftUI
 
+/// The bubble's text and context, scrolling inside it beyond `maximumHeight`. Its height comes from the
+/// content's own measurement in the same layout pass, never from a size reported afterwards: the transcript
+/// lays the bubble out once, at its final height.
 struct UserMessageContent<Content: View>: View {
   let maximumHeight: CGFloat
   @ViewBuilder let content: Content
-  @State private var height: CGFloat = 1
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .trailing, spacing: 8) { content }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-    }.scrollIndicators(.hidden).scrollBounceBehavior(.basedOnSize)
-      .frame(height: min(height, maximumHeight))
+    CappedHeight(maximum: maximumHeight) {
+      ScrollView {
+        VStack(alignment: .trailing, spacing: 8) { content }
+      }.scrollIndicators(.hidden).scrollBounceBehavior(.basedOnSize)
+    }
+  }
+}
+
+/// Its content's ideal height (a scroll view's is its content's), at most `maximum`.
+private struct CappedHeight: Layout {
+  let maximum: CGFloat
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard let view = subviews.first else { return .zero }
+    let ideal = view.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+    return CGSize(width: ideal.width, height: min(ideal.height, maximum))
+  }
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
   }
 }
 

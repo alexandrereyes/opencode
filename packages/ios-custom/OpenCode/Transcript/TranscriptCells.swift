@@ -69,6 +69,9 @@ final class TranscriptTextCell: UICollectionViewCell, TranscriptMessageCell {
 final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
   private let fade = CAGradientLayer()
   private(set) var itemID = ""
+  /// A placeholder keeps the estimated height it was laid out with: measuring its empty content would cache
+  /// a height that no content has.
+  private var placeholder = false
   private(set) var messageOffset: CGFloat = 0
   private var fadeColor: UIColor?
 
@@ -84,6 +87,7 @@ final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
 
   func configure(_ item: TranscriptItem, context: TranscriptContext) {
     itemID = item.id
+    if case .unparsed = item.kind { placeholder = true } else { placeholder = false }
     contentConfiguration = UIHostingConfiguration { TranscriptItemView(item: item, context: context) }
       .margins(.all, 0)
     let color = context.theme.uiColor(.background)
@@ -111,6 +115,7 @@ final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
     let attributes = layoutAttributes.copy() as! UICollectionViewLayoutAttributes
+    if placeholder { return attributes }
     let size = contentView.systemLayoutSizeFitting(
       CGSize(width: layoutAttributes.frame.width, height: UIView.layoutFittingCompressedSize.height),
       withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)

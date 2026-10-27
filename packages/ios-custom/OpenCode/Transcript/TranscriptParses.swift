@@ -43,6 +43,15 @@ import SwiftUI
   /// Whether the part's shown blocks belong to its current text.
   func current(_ part: TranscriptPart) -> Bool { results[part.partID]?.source == part.source }
 
+  /// Parses the part's text on the spot, without code highlighting or formula metrics, when it has no parse
+  /// yet; the full parse is requested and replaces it. True when it parsed.
+  func parseNow(_ part: TranscriptPart) -> Bool {
+    guard results[part.partID] == nil else { return false }
+    results[part.partID] = Result(source: part.source, blocks: MarkdownBlocks.parse(part.source))
+    request(part)
+    return true
+  }
+
   /// Starts (or supersedes) the parse of the part's current text.
   func request(_ part: TranscriptPart) {
     let parser = parsers[part.partID] ?? LatestMarkdownParse()

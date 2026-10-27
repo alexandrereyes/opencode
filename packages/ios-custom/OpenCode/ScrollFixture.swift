@@ -7,7 +7,8 @@ import SwiftUI
   static weak var conversation: ConversationStore?
   static weak var driving: TranscriptDriving?
   static let mode: String? = argument("-OpenCodeScrollFixture")
-  /// `pop` leaves and reopens the conversation; `child` covers it with another screen and returns.
+  /// `pop` leaves and reopens the conversation; `child` covers it with another screen and returns; `memory`
+  /// opens seven conversations in turn and reports the process footprint after each.
   static let reentry: String? = argument("-OpenCodeFixtureReentry")
   /// Messages that arrived while the app was hidden, as the next tail read would return them.
   private(set) static var arrivals: [ConversationMessage] = []
@@ -117,6 +118,8 @@ struct ScrollFixtureRoot: View {
           Text("Sessões sintéticas").navigationDestination(for: String.self) { route in
             if route == "conversation" {
               ConversationView(id: "ses_scroll_0000", sessions: store)
+            } else if route.hasPrefix("ses_") {
+              ConversationView(id: route, sessions: store)
             } else {
               Text("Tela sobreposta").frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: .systemBackground))
@@ -166,6 +169,7 @@ struct ScrollFixtureRoot: View {
 
   /// Three departures and returns, each compared frame by frame with the passage shown when leaving.
   private func reenter() async {
+    if ScrollFixtures.reentry == "memory" { return await measureMemory() }
     let trajectory = TranscriptTrajectory.shared
     // Tasks start in no particular order; the opening episode must exist before waiting for it.
     trajectory.start()
@@ -186,6 +190,49 @@ struct ScrollFixtureRoot: View {
       }
       await trajectory.settled()
     }
+  }
+
+  /// Opens seven conversations one after another (the registry keeps five plus the stack) and records the
+  /// footprint after each settles, then after a memory warning, in `Documents/transcript-memory.json`.
+  private func measureMemory() async {
+    var samples: [[String: Any]] = [["opened": 0, "footprintMB": Self.footprint()]]
+    for index in 1...7 {
+      path = []
+      do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+      path = ["ses_scroll_\(String(format: "%04d", index))"]
+      do { try await Task.sleep(for: .seconds(3)) } catch { return }
+      let retained = (0...index).compactMap { store.conversations.existing("ses_scroll_\(String(format: "%04d", $0))") }
+      samples.append(["opened": index, "footprintMB": Self.footprint(), "retained": retained.count,
+        "views": retained.filter { $0.memory.controller != nil }.count,
+        "messages": retained.map(\.messages.count).reduce(0, +)])
+    }
+    path = []
+    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+    samples.append(["opened": 7, "afterLeaving": true, "footprintMB": Self.footprint()])
+    NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+    samples.append(["opened": 7, "afterWarning": true, "footprintMB": Self.footprint()])
+    let arguments = ProcessInfo.processInfo.arguments
+    let run = arguments.firstIndex(of: "-OpenCodeFixtureRunID").flatMap {
+      arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+    } ?? ""
+    if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+      let data = try? JSONSerialization.data(withJSONObject: ["runID": run, "samples": samples], options: .prettyPrinted)
+    {
+      try? data.write(to: url.appendingPathComponent("transcript-memory.json"), options: .atomic)
+    }
+    NSLog("MEMORY %@", String(describing: samples))
+  }
+
+  private static func footprint() -> Double {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+    let status = withUnsafeMutablePointer(to: &info) {
+      $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+        task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+      }
+    }
+    return status == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
   }
 }
 #endif

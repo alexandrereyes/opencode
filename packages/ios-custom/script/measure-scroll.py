@@ -10,6 +10,9 @@ with another screen, returning from the background) until the transcript settles
 show another passage than the one the reader left (`exitWrongFrames`) or than the final one (`wrongFrames`).
 `background-*` hides the app behind Settings for three seconds while two messages arrive.
 
+`memory` opens eight conversations in turn (the registry keeps five plus the stack) and reports the process
+footprint after each, after leaving them and after a memory warning.
+
 Build Debug with SWIFT_OPTIMIZATION_LEVEL=-O for representative numbers. Physical runs go through
 `device-lease exec iphone14`; acquire the lease from this worktree before starting.
 """
@@ -62,7 +65,7 @@ parser.add_argument("--simulator", help="Simulator UDID (required with --device 
 parser.add_argument("--app", action="append", required=True, metavar="LABEL=PATH",
                     help="Built OpenCode.app; repeat to alternate builds within each iteration")
 parser.add_argument("--iterations", type=int, default=3)
-parser.add_argument("--scenarios", nargs="*", default=list(SCENARIOS) + list(TRAJECTORIES))
+parser.add_argument("--scenarios", nargs="*", default=list(SCENARIOS) + list(TRAJECTORIES) + ["memory"])
 parser.add_argument("--theme", default="openchamber-dark")
 parser.add_argument("--output", type=Path, required=True, help="JSON lines file with every report")
 args = parser.parse_args()
@@ -189,6 +192,23 @@ def trajectory(arguments, run_id, expected, background):
         terminate(pid)
 
 
+def memory(run_id):
+    pid = launch(common(run_id, ["-OpenCodeFixtureReentry", "memory"]))
+    try:
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            report = read("transcript-memory.json", run_id)
+            if report:
+                samples = report["samples"]
+                peak = max(sample["footprintMB"] for sample in samples)
+                return {"samples": samples, "peakMB": peak, "afterSevenMB": samples[7]["footprintMB"],
+                        "afterWarningMB": samples[-1]["footprintMB"], "firstMB": samples[1]["footprintMB"]}
+            time.sleep(1 if physical else 0.5)
+        raise RuntimeError("the memory report did not arrive")
+    finally:
+        terminate(pid)
+
+
 def summary(episodes):
     """Sums over the return episodes (all but the opening one, unless it is the only one)."""
     returns = episodes[1:] or episodes
@@ -208,7 +228,11 @@ with args.output.open("a") as output:
             install(path)
             for scenario in args.scenarios:
                 run_id = uuid.uuid4().hex
-                if scenario in TRAJECTORIES:
+                if scenario == "memory":
+                    report = memory(run_id)
+                    record = {"app": label, "scenario": scenario, "iteration": iteration, **report}
+                    keys = ["firstMB", "afterSevenMB", "peakMB", "afterWarningMB"]
+                elif scenario in TRAJECTORIES:
                     arguments, expected, background = TRAJECTORIES[scenario]
                     episodes = trajectory(arguments, run_id, expected, background)
                     report = summary(episodes)
@@ -225,6 +249,7 @@ with args.output.open("a") as output:
 
 print("\nmedians")
 for (scenario, label), reports in sorted(results.items()):
-    keys = EPISODE_KEYS if scenario in TRAJECTORIES else KEYS
+    keys = (["firstMB", "afterSevenMB", "peakMB", "afterWarningMB"] if scenario == "memory"
+            else EPISODE_KEYS if scenario in TRAJECTORIES else KEYS)
     print(f"{scenario:18} {label:10}", "  ".join(
         f"{key}={statistics.median(r.get(key, 0) for r in reports):.1f}" for key in keys if any(key in r for r in reports)))

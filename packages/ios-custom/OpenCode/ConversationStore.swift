@@ -730,6 +730,18 @@ import OpenCodeKit
     // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
     fixtureHistory = paged ? Array(fixture.messages.dropLast(Self.fixturePage)) : []
     messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages + ScrollFixtures.arrivals
+    if ScrollFixtures.reentry == "memory" {
+      // Distinct text per conversation, so retained conversations share no strings or parses.
+      messages = messages.map { message in
+        var copy = message
+        copy.content = message.content?.map { part in
+          var part = part
+          if part.type == "text" { part.text = (part.text ?? "") + " (" + id + ")" }
+          return part
+        }
+        return copy
+      }
+    }
     ScrollFixtures.conversation = self
     models = fixture.models
     if ScrollFixtures.mode == "catalog" {
