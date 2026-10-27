@@ -65,11 +65,10 @@ private func page(_ name: String) throws -> [ConversationMessage] {
 @Test func stepsCountToolsNotReasoningAndPreserveCategories() throws {
   let messages = try page("transcript-working")
   let imported = try #require(messages.first { $0.tools.count == 5 })
-  #expect(
-    ConversationProjection.stepLabel(imported.content ?? []) == "Usou 5 · Ler, Agente e Editar")
-  #expect(
-    ConversationProjection.stepLabel(imported.content?.filter { $0.type == "reasoning" } ?? [])
-      == "Usou 2 · Raciocínios")
+  #expect(ConversationActivityHeader(parts: imported.content ?? [], now: 0).label
+    == "Atividade · Ler, Agente e Editar · 5 ferramentas · 2m11s")
+  #expect(ConversationActivityHeader(parts: imported.content?.filter { $0.type == "reasoning" } ?? [], now: 0).label
+    == "Pensou 8s")
   #expect(imported.content?.filter { $0.type == "reasoning" }.first?.time?.completed != nil)
 }
 
@@ -255,7 +254,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
     from: Data(
       #"{"id":"s","type":"shell","time":{"created":0,"completed":2000},"command":"printf OK","status":"completed","output":"OK","exit":0}"#
         .utf8))
-  #expect(ConversationProjection.stepLabel(shell.tools) == "Usou 1 · Shell")
+  #expect(ConversationActivityHeader(parts: shell.tools, now: 5000).label == "Atividade · Shell · 1 ferramenta · 2s")
   #expect(shell.tools.first?.summary(now: 5000) == "Rodou printf OK · 2s")
   #expect(shell.tools.first?.output == "OK")
 }
@@ -303,7 +302,7 @@ private func page(_ name: String) throws -> [ConversationMessage] {
 
 @Test func compactToolKindsDurationsAndDetails() throws {
   let tools = try page("transcript-history").flatMap(\.tools)
-  #expect(ConversationProjection.stepLabel(tools) == "Usou 10 · Glob, Grep, Pesquisa na web, Busca na web, Execute, Ler, Patch, Shell e Perguntas")
+  #expect(ConversationActivityHeader(parts: tools, now: 0).label.hasPrefix("Atividade · Glob, Grep, Pesquisa na web, Busca na web, Execute, Ler, Patch, Shell e Perguntas · 10 ferramentas"))
   #expect(tools.first { $0.name == "question" }?.summary(now: 0).hasPrefix("Perguntou: ") == true)
   #expect(tools.first { $0.name == "shell" }?.exitCode == 2)
   let diff = try #require(tools.first { $0.name == "patch" })

@@ -47,7 +47,7 @@ import XCTest
   func testStoredToolImagesLoadOnExpansion() throws {
     for role in ["READ", "MCP"] {
       let app = try launch(role)
-      let group = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Usou 1'")).firstMatch
+      let group = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atividade · ' AND label CONTAINS ' · 1 ferramenta'")).firstMatch
       XCTAssertTrue(group.waitForExistence(timeout: 15))
       group.tap()
       do {

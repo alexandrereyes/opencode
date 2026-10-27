@@ -300,8 +300,10 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   nonempty reasoning and ordinary notices share one disclosure **across backend steps**. Visible assistant text,
   user messages, answered questions, compaction, model/location changes and interruption delimit the groups.
   Running questions, empty parts and successful `todowrite` do not count or split them; failed tools remain visible.
-  Summaries count tool calls (reasoning only when there are no calls), deduplicate titles in first-use order, and
-  use native pt-BR copy: `Usou 33 · Patch, Shell, Ler e Grep`, `Pensou 1s`, `Raciocínio(s)` and `Atualizações`.
+  Each group is a card (see [Shared chat layout](#shared-chat-layout-iphone-and-mac--27-october)) whose header counts
+  tool calls, deduplicates titles in first-use order and uses native pt-BR copy:
+  `Atividade · Patch, Shell, Ler e Grep · 33 ferramentas · 4m`, `Pensou 4s` for reasoning alone, `Atividade ·
+  Raciocínio(s)` when that reasoning has no timestamps, and `Atividade · Atualizações`.
   The app localizes the web's untranslated fallbacks: `Loaded … skill(s)` becomes `Carregou a(s) habilidade(s) …`,
   `match(es)` becomes `correspondência(s)`, and `Browser` becomes `Navegador`. Tool identifiers remain identifiers.
   Groups start **closed even while running**; streaming never overwrites a disclosure choice. Expanded consecutive
@@ -346,10 +348,11 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
 - **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
   free answer) cards inside the conversation.
-- **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
-  the queued messages (`Enviar agora`, edit, `×`).
-- **Composer (V2):** one rounded card with the text at full width and, inside it below the text, a row with a small
-  outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space and a round button:
+- **Tray above the composer:** one card with the running line (`Opus 5.5 · trabalhando · 2m14s`, `Background`,
+  `■ Parar`) and one line per queued message (`Na fila: …`, `Editar`, `Enviar agora`, `×`).
+- **Composer (V2):** one rounded card with the text at full width (`Pergunte qualquer coisa…` while empty) and, inside
+  it below the text, a row with a small outlined `+` (attachments), the model (`Opus 5.5 · xhigh`) in the same subtle
+  capsule as the compact `MCP · N/M` pill, a flexible space and a round button:
   microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
   ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
 - **Triggers:** `@` context (sessions, apps, agents, references), `!` files, `/` commands, `$` skills, and `#`
@@ -375,6 +378,84 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
   `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
   `accent` palette colors.
+
+### Shared chat layout (iPhone and Mac) — 27 October
+
+Approved by Alexandre as the chat column shared with the future Mac app, from the mocks in
+`.agent-artifacts/mac-app/chat-comum/` of the `mac-app-mocks` worktree (`BRIEFING.md`, `referencia-ios.png`,
+`referencia-mac-janela.png`). Only the activity groups, the tray and the composer's chips change; the iPhone header,
+the response text, bubbles, footers and every behavior (scroll, reading, pinning, queue, requests, dictation) stay.
+
+- **Activity card:** a rounded `surface` card with a thin `border`, full width, closed on open and while running.
+  Its header is the chevron, then `Atividade · <titles> · N ferramentas · <duration>`, where the titles give way
+  with an ellipsis so the count and duration stay on one line (accessibility sizes wrap instead). The duration runs
+  from the first member's start (`time.ran ?? time.created`) to the last end, `now` while one runs; members
+  without timestamps are ignored and, without any, it is omitted. A settled card never ticks; a pending one
+  refreshes once a second. Its vertical padding draws into the transcript's row spacing (`padding(-inset)`), so a
+  collapsed group is no taller than the old disclosure line: taller collapsed rows made `measure-scroll.py
+  paged-up` show uncorrected prepends (below).
+- **Timeline:** open, a thin vertical line joins small dots, `primary` when the item completed (a finished call
+  without failure, or reasoning that stopped) and gray otherwise. Each item shows a line icon, the tool title, its
+  target in monospace (`activityTarget`: command, file name with offset/limit, URL, query, iPhone source, or the
+  error) and, at the right, its duration: the members' own run times added together, only when all have ended.
+  Grouped reads, `+N −M` file accordions with their diffs, searches, skills, notices, failures (red triangle) and
+  reasoning (`brain`, opening its text) keep their content; a subagent keeps its agent chip and the round
+  pixel-grid button that opens the child.
+- **Tray:** `ConversationRunTray`. The elapsed time is `ConversationProjection.executionStarted`: the first step
+  after the latest `idle` boundary, or the first step of a fully loaded history; otherwise (a partial page without
+  a boundary, or no step yet) it is omitted. The server has no execution start time; `session.execution.started`
+  carries none in its payload and `/api/session/active` only says `running`.
+- **Pendente and the queue:** different items. `PendingInputs.steers` lists undelivered `delivery: steer` inbox
+  items (they deliver at the next step boundary), and the tray lists `delivery: queue` items; **Mover para a fila**
+  turns a bubble into a tray line. The bubble therefore stays in the transcript, unchanged.
+- **Composer:** the placeholder `Pergunte qualquer coisa…` (the comment editor keeps its own), and the model in the
+  MCP pill's capsule (`composerCapsule()`); the 44-point tap height is unchanged.
+
+**Reuse on the Mac.** Logic lives in OpenCodeKit with Swift Testing coverage (`ConversationActivityHeaderTests`):
+`ConversationActivityHeader` (title, deduplicated titles, count, wall-clock span, `Pensou`), `ConversationActivityItem
+.completed`/`.duration`, `ConversationPart.activityTarget` and `ConversationProjection.executionStarted`. It replaced
+`ConversationProjection.stepLabel` and `ConversationPart.contextSummary`. The views in `OpenCode/ConversationColumn/`
+import only SwiftUI and OpenCodeKit and use no iOS-only modifier:
+
+| File | Contents |
+| --- | --- |
+| `ConversationActivityCard.swift` | The card and its header; the host owns expansion and draws the items |
+| `ConversationTimeline.swift` | Line, dots (`ConversationTimelineRow`) and the item line (`ConversationTimelineLabel`) |
+| `ConversationRunTray.swift` | Running line and queue lines, from plain values and closures |
+| `ComposerChips.swift` | `composerCapsule()` and `ComposerModelChip` |
+| `ConversationTitle.swift` | `ConversationAvatar` (context ring), `ConversationTitle` and the Mac's `ConversationTitleBar` |
+
+The iPhone hosts stay where they were: `ConversationStep` (`ConversationComponents.swift`) maps the store's state
+onto the card and items, `ConversationActivityItemView` draws reads/searches/skills/files, `ConversationTray`
+(`ConversationRequests.swift`) adapts the store to the tray, and `ComposerEditor` keeps the editor. `ConversationView`'s
+header now composes `ConversationAvatar` and `ConversationTitle`; captures before and after are pixel-identical apart
+from the animated agents grid. The Mac title bar (avatar, title, `<worktree> · trabalhando…`, `…`, primary `+`) is
+`ConversationTitleBar`, rendered by the DEBUG `-OpenCodeConversationTitleFixture` (`ScreenCatalogTests
+/testConversationTitleBar`).
+
+Still iOS-only, for the Mac to replace: the response text (`MarkdownProse`/`ResponseText`, `UITextView` → an
+`NSTextView`-based equivalent), the composer editor (`ComposerTextView`, `UITextView`), the scroll owner and
+transcript list (`ConversationScroll`, `ConversationViewport`), `UIPasteboard` in the tool output's Copiar,
+`ConversationActivityItemView`'s read-overflow measurement (`UIFont`), and the glass header buttons (macOS 26).
+`AppTypography.swift` and `Theme.swift` still need `#if os(iOS)` around their UIKit parts.
+
+Verification: `swift test`; `ScreenCatalogTests/testActivity` (offline `-OpenCodeCatalogActivity`, both themes;
+`OPENCODE_CATALOG_ACCESSIBILITY=1` adds a capture for accessibility sizes) and `testConversationTitleBar`; and, on an
+owned sandbox, `test-groups.py` (which now accepts `OPENCODE_TEST_SERVER_URL`/`OPENCODE_TEST_HOME` and runs
+`ToolGroupingTests` alone without the conversation seed), `test-pending.py`, `test-subagents-alerts.py`, and the
+MCP, dictation and composer suites through `test-isolated.py`. `measure-scroll.py`, base `2fe84bbaa7` against this
+change on an iPhone 17 Pro simulator (Debug `-O`, medians of three alternating runs; frames / p95 / main-thread CPU):
+
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| `read` | 707 / 16.7 ms / 2.08 s | 706 / 16.7 ms / 2.14 s |
+| `history-up` | 703 / 16.7 ms / 2.40 s | 701 / 16.7 ms / 2.39 s |
+| `stream-reading` | 704 / 16.7 ms / 4.61 s | 701 / 16.7 ms / 4.68 s |
+| `stream-follow` | 622 / 36.3 ms / 6.49 s | 619 / 33.4 ms / 6.43 s |
+| `paged-up` (replaced frames) | 694 / 16.7 ms / 1.60 s (0) | 695 / 16.7 ms / 1.55 s (0) |
+
+With the card's 11-point header padding inside the row, `paged-up` had uncorrected prepends (replaced frames 1–4 and
+2,100-point jumps in most runs); drawing the padding into the row spacing removed them (0 in 8 runs).
 
 ### Quote marks — 23 October
 
@@ -839,7 +920,7 @@ Grouping verification uses **OpenCode Grupos2** (iPhone 18 Pro / iOS 27) and `io
 `OPENCODE_TEST_THEME=openchamber-light`. It supplies explicit sandbox credentials, imports/deletes only its own
 sanitized 19-step histories (33 tools, including eight patches and one patch failure; no model calls), and includes
 the existing session-reading regressions plus grouped-tool transport parity and parent/child expansion continuity.
-The older working fixture expects `Usou 5 · Ler, Agente e Editar` and a compact `Ler infra.md` row; continuity verifies
+The older working fixture expects `Atividade · Ler, Agente e Editar · 5 ferramentas` and a compact `Ler infra.md` row; continuity verifies
 expanded reasoning, since ordinary reads no longer expose their output. Tests reopen owned sessions by ID and scroll
 through the transcript gutter to avoid the pinned bubble's inner scrolling. The tool order/states come from a GET-only production child-session read;
 the fixture contains neutral content and paths. Native collapsed/expanded/running captures and headless PWA comparisons

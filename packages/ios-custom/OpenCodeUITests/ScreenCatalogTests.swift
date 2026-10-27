@@ -361,6 +361,67 @@ import XCTest
     shot("conversation-user-pending")
   }
 
+  /// A running conversation: the activity card open on its timeline (Ler, Shell, Agente, Editar), the tray
+  /// with the execution and two queued messages, and the empty composer with its placeholder.
+  func testActivity() {
+    let app = launch(["-OpenCodeCatalogActivity"])
+    defer { app.terminate() }
+    tap("session-row-ses_scroll_0000", app)
+    let transcript = app.collectionViews["conversation-transcript"]
+    let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:'")).firstMatch
+    XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+    // The pinned prompt covers the card's top at large text sizes; move until the card is clear of it.
+    let pinned = app.descendants(matching: .any)["conversation-pinned-user"].firstMatch
+    let tray = app.staticTexts["tray-running"]
+    let clear = {
+      group.exists && group.isHittable && (!pinned.exists || group.frame.minY >= pinned.frame.maxY)
+        && (!tray.exists || group.frame.maxY <= tray.frame.minY - 16)
+    }
+    // Short drags in the gutter, so the card never jumps past the gap between the prompt and the tray.
+    let drag = { (distance: CGFloat) in
+      let start = transcript.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.6))
+      start.press(forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)),
+        withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+    for _ in 0..<12 where !clear() {
+      drag(group.exists && group.frame.minY < (pinned.exists ? pinned.frame.maxY : app.frame.midY) ? 90 : -90)
+    }
+    XCTAssertTrue(group.waitForExistence(timeout: 10))
+    XCTAssertTrue(group.label.hasPrefix("Atividade · Ler, Shell, Agente e Editar · 4 ferramentas · "), group.label)
+    XCTAssertEqual(group.value as? String, "Recolhido")
+    // Its leading edge: Ir para a mais recente may float over the trailing end.
+    group.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+    XCTAssertEqual(group.value as? String, "Expandido")
+    XCTAssertTrue(app.buttons["activity-file-activity:file:call_catalog_3:/Projetos/exemplo-0/Sources/ChatView.swift"].exists)
+    XCTAssertTrue(app.staticTexts["tray-running"].label.hasPrefix("Modelo Exemplo · trabalhando · "))
+    for id in ["msg_catalog_queued_1", "msg_catalog_queued_2"] {
+      XCTAssertTrue(app.descendants(matching: .any)["tray-queued-" + id].exists, id)
+    }
+    XCTAssertEqual(app.buttons.matching(identifier: "Enviar agora").count, 2)
+    XCTAssertTrue(app.buttons["Parar"].exists)
+    XCTAssertFalse(app.descendants(matching: .any)["pending-user-msg_catalog_queued_1"].exists)
+    // Evidence at accessibility text sizes (not part of the catalog): the open card where it was tapped.
+    if ProcessInfo.processInfo.environment["OPENCODE_CATALOG_ACCESSIBILITY"] != nil {
+      drag(-120)
+      shot("activity-accessibility")
+    }
+    for _ in 0..<2 { transcript.swipeUp() }
+    shot("conversation-activity-open")
+  }
+
+  /// The Mac's chat header, built from the avatar and title the iPhone header also uses.
+  func testConversationTitleBar() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4183", "-OpenCodeTheme", "openchamber-" + theme,
+      "-OpenCodeConversationTitleFixture"]
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(app.staticTexts["conversation-header-title"].waitForExistence(timeout: 20))
+    XCTAssertEqual(app.staticTexts["conversation-header-subtitle"].label, "opencode2-mac-app-mocks · trabalhando…")
+    XCTAssertTrue(app.buttons["conversation-title-bar-new"].exists)
+    shot("conversation-title-bar-mac")
+  }
+
   func testShortPrompt() {
     let app = launch(["-OpenCodeCatalogShort"])
     defer { app.terminate() }

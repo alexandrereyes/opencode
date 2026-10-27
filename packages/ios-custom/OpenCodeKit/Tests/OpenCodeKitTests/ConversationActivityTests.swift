@@ -28,7 +28,7 @@ private func activityGroups(_ value: ConversationActivity) -> [ConversationActiv
   ])
   #expect(activityGroups(value).count == 1)
   #expect(activityGroups(value).first?.parts.map(\.id) == ["a", "b", "c", "d"])
-  #expect(activityGroups(value).first?.label == "Usou 4 · Grep, Ler e Shell")
+  #expect(activityGroups(value).first?.label == "Atividade · Grep, Ler e Shell · 4 ferramentas")
   #expect(value.messages.map(\.id) == ["user", "first"])
   #expect(value.anchors["third"] == "first")
 }
@@ -48,7 +48,7 @@ private func activityGroups(_ value: ConversationActivity) -> [ConversationActiv
   #expect(groups.count == 1)
   let group = try #require(groups.first)
   #expect(group.parts.count == 48)
-  #expect(group.label == "Usou 33 · Patch, Shell, Ler e Grep")
+  #expect(group.label == "Atividade · Patch, Shell, Ler e Grep · 33 ferramentas")
   #expect(group.parts.filter { $0.part.failed }.count == 1)
 }
 
@@ -142,7 +142,7 @@ func activityDiffsStayInsideGroup(_ name: String) {
   ])
   #expect(activityGroups(value).count == 1)
   #expect(activityGroups(value).first?.parts.map(\.id) == ["a", "a:reasoning:1", "b"])
-  #expect(activityGroups(value).first?.label == "Usou 2 · Ler")
+  #expect(activityGroups(value).first?.label == "Atividade · Ler · 2 ferramentas")
 }
 
 @Test func activityInvisiblePartsDoNotCreateFinalAnswerBoundaries() {
@@ -157,9 +157,9 @@ func activityDiffsStayInsideGroup(_ name: String) {
 @Test func activityReasoningCountAndPluralAreIndependentOfTools() {
   let thought = ConversationPart(type: "reasoning", text: "Conferir", time: MessageTime(created: 100, completed: 900))
   let one = ConversationActivity.project([activityMessage("a", [thought])])
-  #expect(activityGroups(one).first?.label == "Usou 1 · Raciocínio")
+  #expect(activityGroups(one).first?.label == "Pensou 1s")
   let two = ConversationActivity.project([activityMessage("a", [thought]), activityMessage("b", [thought])])
-  #expect(activityGroups(two).first?.label == "Usou 2 · Raciocínios")
+  #expect(activityGroups(two).first?.label == "Pensou 2s")
   #expect(activityGroups(two).first?.parts.map(\.id) == ["a:reasoning:0", "b:reasoning:0"])
   #expect(activityGroups(two).first?.parts.first?.part.time?.completed == 900)
   #expect(activityGroups(two).first?.parts.first?.reasoningLabel == "Pensou 1s")
@@ -171,7 +171,7 @@ func activityDiffsStayInsideGroup(_ name: String) {
   let value = ConversationActivity.project([activityMessage("a", [activityTool("running", status: "running"),
     activityTool("failed", "execute", status: "error"), activityTool("streaming", "shell", status: "streaming")])])
   #expect(activityGroups(value).first?.pending == true)
-  #expect(activityGroups(value).first?.label == "Usou 3 · Ler, Execute e Shell")
+  #expect(activityGroups(value).first?.label == "Atividade · Ler, Execute e Shell · 3 ferramentas")
   #expect(activityGroups(value).first?.parts.map { $0.part.status } == ["running", "error", "streaming"])
   #expect(activityGroups(value).first?.parts[1].part.failed == true)
 }
@@ -183,7 +183,7 @@ func activityDiffsStayInsideGroup(_ name: String) {
     #expect(group?.parts.first?.part.status == "completed")
     #expect(group?.parts.first?.part.failed == true)
     #expect(group?.pending == false)
-    #expect(group?.label == "Usou 1 · Shell")
+    #expect(group?.label == "Atividade · Shell · 1 ferramenta")
   }
 }
 
@@ -246,9 +246,9 @@ func activityDiffsStayInsideGroup(_ name: String) {
 
 @Test func activityLabelsUseAllDistinctLocalizedNamesInFirstAppearanceOrder() {
   let tools = [activityTool("1", "read"), activityTool("2", "grep"), activityTool("3", "glob"), activityTool("4", "shell"), activityTool("5", "skill"), activityTool("6", "read")]
-  #expect(ConversationProjection.stepLabel(tools) == "Usou 6 · Ler, Grep, Glob, Shell e Habilidade")
-  #expect(ConversationProjection.stepLabel([activityTool("w", "websearch", metadata: ["provider": .string("Provider")])]) == "Usou 1 · Provider Pesquisa na web")
-  #expect(ConversationProjection.stepLabel([]) == "Atualizações")
+  #expect(ConversationActivityHeader(parts: tools, now: 0).label == "Atividade · Ler, Grep, Glob, Shell e Habilidade · 6 ferramentas")
+  #expect(ConversationActivityHeader(parts: [activityTool("w", "websearch", metadata: ["provider": .string("Provider")])], now: 0).label == "Atividade · Provider Pesquisa na web · 1 ferramenta")
+  #expect(ConversationActivityHeader(parts: [], now: 0).label == "Atividade · Atualizações")
   #expect(activityTool("browser", "browser").groupTitle == "Navegador")
   for (provider, label) in [("tinyfish", "TinyFish"), ("opencode", "OpenCode"), ("exa", "Exa")] {
     #expect(activityTool("w", "websearch", metadata: ["provider": .string(provider)]).groupTitle == "\(label) Pesquisa na web")

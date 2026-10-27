@@ -13,52 +13,70 @@ struct ConversationActivityItemView: View {
     let names = item.parts.map { $0.part.readGroupName }.filter { !$0.isEmpty }
     return names.count > 1 ? names.dropLast().joined(separator: ", ") + " e " + names.last! : names.first ?? ""
   }
+  /// Whether the one-line filenames would be cut: the line's measured width against the icon, "Ler", the
+  /// monospaced names and the duration laid out by `ConversationTimelineLabel`.
   private var overflowing: Bool {
-    readWidth > 0 && (filenames as NSString).size(withAttributes: [.font: AppTypography.font(.caption,
-      compatibleWith: UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory))]).width > readWidth
+    // Accessibility sizes wrap the names in full.
+    guard readWidth > 0, !typeSize.isAccessibilitySize else { return false }
+    let traits = UITraitCollection(preferredContentSizeCategory: typeSize.uiCategory)
+    let regular = AppTypography.font(.caption, compatibleWith: traits)
+    let width = { (text: String, font: UIFont) in (text as NSString).size(withAttributes: [.font: font]).width }
+    let duration = item.duration.map { width(ConversationProjection.duration($0), regular) + 12 } ?? 0
+    return 26 + width("Ler", regular) + width("  " + filenames, AppTypography.font(.caption, monospaced: true,
+      compatibleWith: traits)) + duration > readWidth
   }
   var body: some View {
-    Group {
-      switch item.kind {
-      case .read:
-        HStack(alignment: .top, spacing: 6) {
-          Text("Ler").foregroundStyle(theme.color(.textSecondary))
-          Text(filenames).lineLimit(readOpen ? nil : 1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readWidth = $0 }
-          if overflowing || readOpen {
-            Image(systemName: readOpen ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
-          }
+    let duration = item.duration.map(ConversationProjection.duration)
+    switch item.kind {
+    case .read:
+      ConversationTimelineLabel(icon: "doc.text", name: "Ler", target: filenames, duration: duration,
+        lines: readOpen ? nil : 1) {
+        if overflowing || readOpen {
+          Image(systemName: readOpen ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
+            .foregroundStyle(theme.color(.icon))
         }
-        .contentShape(Rectangle()).onTapGesture {
-          guard overflowing || readOpen else { return }
-          store.expansionValues[readKey] = !readOpen
-        }
-        .accessibilityElement(children: .ignore).accessibilityLabel("Ler " + filenames)
-        .accessibilityValue(readOpen ? "Expandido" : "Recolhido")
-        .accessibilityAddTraits(overflowing || readOpen ? .isButton : [])
-        .accessibilityIdentifier("activity-read-\(item.id)")
-      case .skills:
-        let names = item.parts.compactMap { $0.part.skillName }.joined(separator: ", ")
-        Text(item.parts.count == 1 ? "Carregou a habilidade \(names)" : "Carregou as habilidades \(names)")
-          .accessibilityIdentifier("activity-skills-\(item.id)")
-      case .search:
-        if let part = item.parts.first?.part {
-          Text(searchLabel(part)).accessibilityIdentifier("activity-search-\(item.id)")
-        }
-      case .files:
-        if item.files.isEmpty {
-          Text(item.parts.first?.part.groupTitle ?? "Patch").foregroundStyle(theme.color(.textSecondary))
-        } else {
-          ForEach(item.files) { file in
-            ConversationActivityFileView(file: file, key: "activity:file:\(item.id):\(file.path)", store: store)
-          }
-        }
-      case .part: EmptyView()
       }
-    }.appFont(.caption).foregroundStyle(theme.color(.text))
+      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readWidth = $0 }
+      .contentShape(Rectangle()).onTapGesture {
+        guard overflowing || readOpen else { return }
+        store.expansionValues[readKey] = !readOpen
+      }
+      .accessibilityElement(children: .ignore).accessibilityLabel("Ler " + filenames)
+      .accessibilityValue(readOpen ? "Expandido" : "Recolhido")
+      .accessibilityAddTraits(overflowing || readOpen ? .isButton : [])
+      .accessibilityIdentifier("activity-read-\(item.id)")
+    case .skills:
+      let names = item.parts.compactMap { $0.part.skillName }.joined(separator: ", ")
+      ConversationTimelineLabel(icon: "sparkles", name: item.parts.count == 1 ? "Carregou a habilidade" : "Carregou as habilidades",
+        target: names, duration: duration)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.parts.count == 1 ? "Carregou a habilidade \(names)" : "Carregou as habilidades \(names)")
+        .accessibilityIdentifier("activity-skills-\(item.id)")
+    case .search:
+      if let part = item.parts.first?.part {
+        ConversationTimelineLabel(icon: part.icon, name: part.groupTitle, target: searchTarget(part), duration: duration)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel([part.groupTitle, searchTarget(part)].joined(separator: " "))
+          .accessibilityIdentifier("activity-search-\(item.id)")
+      }
+    case .files:
+      let title = item.parts.first?.part.groupTitle ?? "Patch"
+      if item.files.count == 1, let file = item.files.first {
+        ConversationActivityFileView(file: file, key: "activity:file:\(item.id):\(file.path)", store: store,
+          title: title, duration: duration)
+      } else {
+        ConversationTimelineLabel(icon: "pencil", name: title,
+          target: item.files.isEmpty ? "" : "\(item.files.count) arquivos", monospaced: false, duration: duration) { EmptyView() }
+        ForEach(item.files) { file in
+          ConversationActivityFileView(file: file, key: "activity:file:\(item.id):\(file.path)", store: store)
+            .padding(.leading, 26)
+        }
+      }
+    case .part: EmptyView()
+    }
   }
-  private func searchLabel(_ part: ConversationPart) -> String {
+  /// The searched directory relative to the session's, the pattern and the match count.
+  private func searchTarget(_ part: ConversationPart) -> String {
     let path = part.input["path"]?.string ?? "/"
     let slash = path.lastIndex(where: { $0 == "/" || $0 == "\\" })
     let parent = slash.map { String(path[...$0]) } ?? "/"
@@ -68,16 +86,20 @@ struct ConversationActivityItemView: View {
       part.input[key]?.string.map { "\(key)=\($0)" }
     }
     let count = part.metadata[part.name == "glob" ? "count" : "matches"]?.number
-    return ([part.groupTitle, directory] + args).joined(separator: " ")
+    return ([directory] + args).joined(separator: " ")
       + (count.flatMap { $0.isFinite && $0 != 0 ? " (\(Int($0)) \($0 == 1 ? "correspondência" : "correspondências"))" : nil } ?? "")
   }
 }
 
+/// One edited file: its path, `+N −M` (or Criado/Excluído) and a disclosure for its diff. A single-file
+/// item draws it on the timeline line itself, after the tool's name.
 private struct ConversationActivityFileView: View {
   @Environment(\.appTheme) private var theme
   let file: ConversationActivityFile
   let key: String
   let store: ConversationStore
+  var title: String?
+  var duration: String?
   private var expanded: Bool { store.expansionValues[key] == true }
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -86,22 +108,18 @@ private struct ConversationActivityFileView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) { store.expansionValues[key] = !expanded }
       } label: {
-        HStack(spacing: 6) {
-          Image(systemName: "doc.text")
-          Text(file.path).lineLimit(1).truncationMode(.middle)
-          Spacer(minLength: 0)
-          if file.status == "added" { Text("Criado").foregroundStyle(theme.color(.diffAdd)) }
-          else if file.status == "deleted" { Text("Excluído").foregroundStyle(theme.color(.diffDelete)) }
-          else {
-            Text("+\(file.additions)").foregroundStyle(theme.color(.diffAdd))
-            Text("−\(file.deletions)").foregroundStyle(theme.color(.diffDelete))
+        Group {
+          if let title {
+            ConversationTimelineLabel(icon: "pencil", name: title, target: (file.path as NSString).lastPathComponent,
+              duration: duration, lines: 1) { counts }
+          } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+              Text(file.path).monospaced().lineLimit(1).truncationMode(.middle)
+              counts
+              Spacer(minLength: 0)
+            }.appFont(.caption)
           }
-          Image(systemName: expanded ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(theme.color(.toolSurface), in: RoundedRectangle(cornerRadius: 6))
-        .overlay { RoundedRectangle(cornerRadius: 6).stroke(theme.color(.borderStrong), lineWidth: 0.5) }
-        .contentShape(Rectangle())
+        }.contentShape(Rectangle())
       }.buttonStyle(.plain).accessibilityIdentifier("activity-file-\(key)")
         .accessibilityValue(expanded ? "Expandido" : "Recolhido")
       if expanded {
@@ -116,5 +134,17 @@ private struct ConversationActivityFileView: View {
           .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 8))
       }
     }
+  }
+  @ViewBuilder private var counts: some View {
+    HStack(spacing: 6) {
+      if file.status == "added" { Text("Criado").foregroundStyle(theme.color(.diffAdd)) }
+      else if file.status == "deleted" { Text("Excluído").foregroundStyle(theme.color(.diffDelete)) }
+      else {
+        Text("+\(file.additions)").foregroundStyle(theme.color(.diffAdd))
+        Text("−\(file.deletions)").foregroundStyle(theme.color(.diffDelete))
+      }
+      Image(systemName: expanded ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
+        .foregroundStyle(theme.color(.icon))
+    }.appFont(.caption).monospacedDigit().fixedSize()
   }
 }

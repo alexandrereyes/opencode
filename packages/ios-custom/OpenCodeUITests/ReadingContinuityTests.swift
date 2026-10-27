@@ -165,7 +165,7 @@ import XCTest
         screenshot("reveal-failure-" + theme)
         XCTFail("O conteúdo deve estar visível abaixo da mensagem fixada")
       }
-      let step = app.buttons["Usou 5 · Ler, Agente e Editar"]
+      let step = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atividade · Ler, Agente e Editar · 5 ferramentas'")).firstMatch
       reveal(step)
       XCTAssertTrue(step.waitForExistence(timeout: 10))
       if step.value as? String != "Expandido" { step.tap() }

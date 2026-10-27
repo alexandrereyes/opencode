@@ -18,6 +18,7 @@ struct OpenCodeApp: App {
       else if DictationFixtures.mode != nil { DictationFixtureRoot() }
       else if MCPFixtures.mode != nil { MCPFixtureRoot() }
       else if ComposerFixtures.enabled { ComposerFixtureRoot() }
+      else if ConversationTitleFixtures.enabled { ConversationTitleFixtureRoot() }
       else if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
       #else
       AppRoot()

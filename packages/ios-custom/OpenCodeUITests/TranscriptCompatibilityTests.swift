@@ -44,7 +44,7 @@ import XCTest
   func testToolsReasoningAndChildThroughBothTransports() throws {
     for native in [false, true] {
       let app = try launch("WORKING", native: native)
-      let group = app.buttons["Usou 5 · Ler, Agente e Editar"]
+      let group = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atividade · Ler, Agente e Editar · 5 ferramentas'")).firstMatch
       reveal(group, app: app, topInset: 140)
       if group.value as? String != "Expandido" {
         group.tap()

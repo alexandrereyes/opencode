@@ -48,6 +48,17 @@ import UIKit
   static let failures = sections ? ["ses_scroll_0005": "bun test falhou"] : [:]
   /// `-OpenCodeCatalogSettingsButton` shows the header's Mac-only Configurações button.
   static let settingsButton = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogSettingsButton")
+  /// `-OpenCodeCatalogActivity` runs the conversation: its answer gains an activity group (Ler, Shell, Agente,
+  /// Editar) between two paragraphs, the tray shows the execution and two queued messages.
+  static let activity = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogActivity")
+  static let active: Set<String> = activity ? ["ses_catalog_review", "ses_scroll_0000"] : ["ses_catalog_review"]
+  static let inbox: [InboxItem] = {
+    if activity {
+      return try! JSONDecoder().decode([InboxItem].self, from: Data(#"[{"id":"msg_catalog_queued_1","sessionID":"ses_scroll_0000","type":"user","delivery":"queue","payload":{"text":"Depois, confira também a navegação por teclado."},"time":{"created":1792576799000}},{"id":"msg_catalog_queued_2","sessionID":"ses_scroll_0000","type":"user","delivery":"queue","payload":{"text":"Rode os testes de interface no tema claro e no escuro."},"time":{"created":1792576799500}}]"#.utf8))
+    }
+    guard ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogPending") else { return [] }
+    return try! JSONDecoder().decode([InboxItem].self, from: Data(#"[{"id":"msg_catalog_pending","sessionID":"ses_scroll_0000","type":"user","delivery":"steer","payload":{"text":"Depois, confira também a navegação por teclado."},"time":{"created":1792576799000}}]"#.utf8))
+  }()
 
   static func snapshot(_ source: ScrollFixtureSnapshot) -> ScrollFixtureSnapshot {
     let encoded = String(decoding: try! JSONEncoder().encode(Array(source.entries.prefix(11))), as: UTF8.self)
@@ -93,6 +104,29 @@ import UIKit
        {"id":"msg_catalog_answer","type":"assistant","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture","variant":"high"},"tokens":{"input":6000,"output":7000,"reasoning":0,"cache":{"read":63000,"write":0}},"time":{"created":1792576810000,"completed":1792576815000},"finish":"stop","content":[{"type":"text","text":"## Uma navegação mais simples\n\nA proposta mantém as cinco abas e dá mais destaque às **conversas recentes**.\n\n- Criar uma sessão em um único toque.\n- Agrupar filtros por projeto.\n- Manter os ajustes na aba Você.\n\nNenhum arquivo foi alterado. Podemos começar pelos filtros e validar o resultado antes de seguir."}]}]
       """#.utf8))
     messages[1].content?[0].text? += "\n\n### Próxima etapa\n\nVamos comparar os caminhos de entrada, organizar os atalhos e validar cada mudança com um cenário pequeno. A navegação deve continuar previsível, tanto com o teclado aberto quanto durante a leitura de uma resposta longa.\n\nO resultado esperado é uma interface com ações fáceis de encontrar e contexto suficiente para retomar o trabalho."
+    if activity {
+      // The running execution started 2m40s before launch, so the tray's elapsed time is stable between captures.
+      let start = now - 160_000
+      let text = messages[1].content![0].text!
+      let split = text.range(of: "\n\nO resultado esperado")!
+      messages[1].time.created = start
+      messages[1].time.completed = nil
+      messages[1].finish = nil
+      let old = (1...3).map { "  let rota\($0) = Rota.antiga(\($0))" }.joined(separator: "\\n")
+      let new = (1...12).map { "  let atalho\($0) = Atalho.novo(\($0))" }.joined(separator: "\\n")
+      let tools = [
+        ("read", #"{"path":"/Projetos/exemplo-0/Sources/SessionsView.swift"}"#, "{}", 2.0, 14.0),
+        ("shell", #"{"command":"git status"}"#, "{}", 15, 21),
+        ("subagent", #"{"agent":"explore","description":"Mapear navegação"}"#, #"{"sessionID":"ses_catalog_finished"}"#, 22, 94),
+        ("edit", #"{"path":"/Projetos/exemplo-0/Sources/ChatView.swift","oldString":"\#(old)","newString":"\#(new)"}"#, "{}", 95, 143),
+      ].enumerated().map { index, tool in
+        #"{"type":"tool","id":"call_catalog_\#(index)","name":"\#(tool.0)","state":{"status":"completed","input":\#(tool.1),"metadata":\#(tool.2)},"time":{"created":\#(start + tool.3 * 1000),"completed":\#(start + tool.4 * 1000)}}"#
+      }
+      var content = try! JSONDecoder().decode([ConversationPart].self, from: Data("[\(tools.joined(separator: ","))]".utf8))
+      content.insert(ConversationPart(type: "text", text: String(text[..<split.lowerBound])), at: 0)
+      content.append(ConversationPart(type: "text", text: "O resultado esperado" + text[split.upperBound...]))
+      messages[1].content = content
+    }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogShort") {
       messages[0].text = "Como podemos simplificar a navegação?"
     }

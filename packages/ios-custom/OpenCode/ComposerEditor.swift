@@ -117,8 +117,11 @@ struct ComposerEditor: View {
           submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion
         )
         .overlay(alignment: .topLeading) {
-          if let comment, draft.isEmpty {
-            Text(comment.placeholder).appFont(.body).foregroundStyle(theme.color(.textSecondary)).allowsHitTesting(false)
+          if draft.isEmpty {
+            // The message field's placeholder repeats nothing VoiceOver needs; its label already says "Mensagem".
+            Text(comment?.placeholder ?? "Pergunte qualquer coisa…").appFont(.body)
+              .foregroundStyle(theme.color(.textSecondary)).allowsHitTesting(false)
+              .accessibilityHidden(comment == nil)
           }
         }
         .onGeometryChange(for: Bool.self) {
@@ -290,11 +293,9 @@ struct ComposerEditor: View {
       draft.sending || draft.importing)
   }
   @ViewBuilder private var selectors: some View {
-    Button {
+    ComposerModelChip(label: store.modelLabel(store.selectedModel(draft))) {
       draft.focused = false
       models = true
-    } label: {
-      Text(store.modelLabel(store.selectedModel(draft))).appFont(.chrome).lineLimit(1).minimumScaleFactor(0.75)
     }.accessibilityLabel("Modelo e esforço")
       .accessibilityValue(store.modelLabel(store.selectedModel(draft))).accessibilityIdentifier("model-picker")
     if !expanded && !store.isNewSession && store.mcps.summary.visible {

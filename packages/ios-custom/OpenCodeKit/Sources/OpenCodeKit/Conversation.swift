@@ -221,6 +221,7 @@ public struct ConversationPart: Codable, Sendable, Equatable {
     case "shell": "terminal"
     case "read": "doc.text"
     case "edit", "write", "patch": "pencil"
+    case "subagent": "person.2"
     default: "wrench.and.screwdriver"
     }
   }
@@ -345,20 +346,6 @@ public enum ConversationProjection {
       }), model.limit.context > 0
     else { return nil }
     return tokens.total / model.limit.context
-  }
-  public static func stepLabel(_ parts: [ConversationPart]) -> String {
-    let tools = parts.filter {
-      $0.type == "tool" && (!$0.suppressed || $0.failed)
-    }
-    let count = tools.isEmpty ? parts.filter { $0.type == "reasoning" }.count : tools.count
-    if count == 0 { return "Atualizações" }
-    var names: [String] = []
-    for tool in tools where !names.contains(tool.groupTitle) { names.append(tool.groupTitle) }
-    let list =
-      names.count > 1
-        ? names.dropLast().joined(separator: ", ") + " e " + names.last!
-        : names.first ?? (count == 1 ? "Raciocínio" : "Raciocínios")
-    return "Usou \(count) · \(list)"
   }
   public static func footer(_ message: ConversationMessage, models: [ModelInfo]) -> String {
     let model = models.first {

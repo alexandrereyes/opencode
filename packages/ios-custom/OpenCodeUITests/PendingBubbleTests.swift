@@ -94,7 +94,8 @@ import XCTest
 
     app.buttons["user-pending-queue-" + queued].tap()
     wait(NSPredicate(format: "exists == false"), on: element(app, "pending-user-" + queued))
-    XCTAssertTrue(app.staticTexts["Pendente para mover · \(theme)"].waitForExistence(timeout: 10), "The moved steer waits in the queue tray")
+    XCTAssertTrue(element(app, "tray-queued-" + queued).waitForExistence(timeout: 10), "The moved steer waits in the queue tray")
+    XCTAssertTrue(app.staticTexts["Na fila: Pendente para mover · \(theme)"].exists)
     XCTAssertTrue(app.buttons["Enviar agora"].exists)
     let afterMove = try await inbox(session)
     XCTAssertEqual(afterMove.first { $0.id == queued }?.delivery, "queue")

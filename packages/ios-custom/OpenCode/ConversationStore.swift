@@ -644,16 +644,14 @@ import OpenCodeKit
         resources = ScreenCatalogFixture.resources
         children = ScreenCatalogFixture.children
         shells = arguments.contains("-OpenCodeCatalogNoScripts") ? [] : ScreenCatalogFixture.scripts
-        active = ["ses_catalog_review"]
+        active = ScreenCatalogFixture.active
         preferences = fixture.preferences
         providers = [.init(id: "fixture", name: "Modelos de demonstração")]
         agents = (try? await client.agents(directory: "/Projetos/exemplo-0")) ?? []
         await mcps.load(directory: "/Projetos/exemplo-0")
         // Mounting can cancel the view's first load after it sets the directory but before it fills the chips.
         await mcps.refresh()
-        if ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogPending") {
-          inbox = try! JSONDecoder().decode([InboxItem].self, from: Data(#"[{"id":"msg_catalog_pending","sessionID":"ses_scroll_0000","type":"user","delivery":"steer","payload":{"text":"Depois, confira também a navegação por teclado."},"time":{"created":1792576799000}}]"#.utf8))
-        }
+        inbox = ScreenCatalogFixture.inbox
       }
       branch = "exemplo-sintetico"
       hasOlder = !fixtureHistory.isEmpty

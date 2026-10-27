@@ -44,21 +44,6 @@ public struct ConversationActivityItem: Sendable, Equatable, Identifiable {
 }
 
 extension ConversationPart {
-  public var contextSummary: String {
-    if failed {
-      let error = errorText?.replacingOccurrences(of: "Error: ", with: "") ?? "Falhou"
-      return "\(groupTitle) \(error.components(separatedBy: ": ").first ?? error)"
-    }
-    switch name {
-    case "shell": return "Shell \(input["command"]?.string ?? metadata["command"]?.string ?? "")"
-    case "execute": return "Execute"
-    case "read": return "Ler \(readGroupName)"
-    case "webfetch": return "\(groupTitle) \(input["url"]?.string ?? "")"
-    case "websearch": return "\(groupTitle) \(input["query"]?.string ?? "")"
-    case "iphone_query", "iphone_status": return iphoneSummary
-    default: return groupTitle
-    }
-  }
   public var activityKind: ConversationActivityItem.Kind {
     guard type == .tool, status != "error" else { return .part }
     if ["edit", "write", "patch"].contains(name) { return .files }

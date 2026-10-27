@@ -28,7 +28,7 @@ import XCTest
     let disclosure = group(app)
     XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
     let disclosureID = disclosure.identifier
-    XCTAssertEqual(disclosure.label, "Usou 33 · Patch, Shell, Ler e Grep")
+    XCTAssertTrue(disclosure.label.hasPrefix("Atividade · Patch, Shell, Ler e Grep · 33 ferramentas"), disclosure.label)
     XCTAssertEqual(disclosure.value as? String, "Recolhido")
     XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:'")).count, 1)
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'activity-file-'")).firstMatch.exists)
@@ -62,7 +62,7 @@ import XCTest
     let app = try launch("RUNNING")
     let disclosure = group(app)
     XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
-    XCTAssertEqual(disclosure.label, "Usou 33 · Patch, Shell, Ler e Grep")
+    XCTAssertTrue(disclosure.label.hasPrefix("Atividade · Patch, Shell, Ler e Grep · 33 ferramentas"), disclosure.label)
     XCTAssertEqual(disclosure.value as? String, "Recolhido")
     screenshot("running")
     disclosure.tap()
