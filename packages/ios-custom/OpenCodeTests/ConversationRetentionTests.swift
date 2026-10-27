@@ -8,6 +8,9 @@ private actor RetainedReads {
   private var tail: [String] = ["msg_a", "msg_b"]
   private var history: [String: [String]] = [:]
   private(set) var olderReads = 0
+  /// Older pages never answer, like a request lost on a dead connection.
+  private var stalled = false
+  func stallOlderPages() { stalled = true }
   func setTail(_ ids: [String], history: [String: [String]] = [:]) {
     tail = ids
     self.history = history
@@ -23,6 +26,7 @@ private actor RetainedReads {
       let input = (try? JSONDecoder().decode(JSONValue.self, from: request.httpBody!))?.object?["input"]?.object
       let cursor = input?["cursor"]?.string
       if cursor != nil { olderReads += 1 }
+      if cursor != nil, stalled { try? await Task.sleep(for: .seconds(30)) }
       let ids = cursor.map { history[$0] ?? [] } ?? tail
       // Pages are newest first; each one points at the next older page by its oldest message.
       let data = ids.reversed().map { #"{"id":"\#($0)","type":"user","time":{"created":1},"text":"\#($0)"}"# }
@@ -192,6 +196,59 @@ private final class ObservedFlag: @unchecked Sendable {
     XCTAssertTrue(store.memory.active === first)
     first.unmount()
     XCTAssertTrue(TranscriptHost.mount(store, reading: reading) === first, "returning remounts the kept view")
+  }
+
+  /// The transcript waits for its final position before its first frame, but never stays hidden.
+  func testTranscriptShowsAtOnceWhenThereIsNothingToPlace() async throws {
+    let reads = RetainedReads()
+    await reads.setTail([])
+    let empty = store(reads)
+    await empty.refresh()
+    XCTAssertTrue(empty.hasTranscript)
+    try await assertShown(empty, within: .milliseconds(150), "an empty transcript has nothing to wait for")
+
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) { request in
+      (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+    }
+    let failed = ConversationStore(id: "ses_failed", client: client, hub: EventHub(client: client))
+    await failed.refresh()
+    XCTAssertFalse(failed.hasTranscript)
+    XCTAssertNotNil(failed.error)
+    try await assertShown(failed, within: .milliseconds(150), "a failed load shows the transcript under its error")
+  }
+
+  func testTranscriptShowsByItsDeadlineWhenItsPlaceNeverResolves() async throws {
+    let reads = RetainedReads()
+    let store = store(reads)
+    await store.refresh()
+    XCTAssertFalse(store.messages.isEmpty)
+    // A saved place older than the loaded page, whose history never arrives: the deadline shows the end.
+    await reads.stallOlderPages()
+    XCTAssertTrue(store.hasOlder)
+    store.memory.anchor = ReadingPosition(.message(id: "msg_never", offset: 0))
+    try await assertShown(store, within: TranscriptViewController.revealDeadline + .milliseconds(400),
+      "the transcript is never hidden for good")
+  }
+
+  private func assertShown(
+    _ store: ConversationStore, within limit: Duration, _ message: String, line: UInt = #line
+  ) async throws {
+    let reading = ReadingPositionStore(server: "test", root: FileManager.default.temporaryDirectory
+      .appending(path: "retention-" + UUID().uuidString))
+    let controller = TranscriptViewController(store: store, reading: reading)
+    let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+    let window = UIWindow(windowScene: scene)
+    window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+    window.rootViewController = controller
+    window.makeKeyAndVisible()
+    window.layoutIfNeeded()
+    defer { window.isHidden = true }
+    let start = ContinuousClock.now
+    while controller.collectionView.isHidden, start.duration(to: .now) < limit + .seconds(2) {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    XCTAssertFalse(controller.collectionView.isHidden, message, line: line)
+    XCTAssertLessThanOrEqual(start.duration(to: .now), limit + .milliseconds(150), message, line: line)
   }
 
   func testMemoryObservesEachKeyAlone() {

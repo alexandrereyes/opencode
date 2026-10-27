@@ -251,7 +251,7 @@ import SwiftUI
 
   private func projection(stale: @escaping (TranscriptPart) -> Void) -> [TranscriptItem] {
     let messages = store.messages
-    _ = store.submitted
+    _ = (store.submitted, store.error)
     let input = TranscriptProjection.Input(
       messages: store.activity.messages,
       marks: TranscriptMarks(messages, working: store.working),
@@ -475,9 +475,16 @@ import SwiftUI
   /// Resolves the opening place and shows the transcript only once it is laid out there, so its first frame
   /// is the final one. Missing history pages and unparsed Markdown near the place delay it, never move it.
   private func positionInitially() {
+    guard !revealed, isViewLoaded, size.width > 0, size.height > 0 else { return }
+    // A failed load has nothing to place: show the (empty) transcript under its error at once.
+    guard store.hasTranscript else {
+      if store.error != nil { show() }
+      return
+    }
+    armRevealDeadline()
     // Items must reflect the published transcript; a pending rebuild positions again when it lands.
-    guard !revealed, isViewLoaded, store.hasTranscript, !rebuildScheduled, size.width > 0, size.height > 0,
-      items.isEmpty == store.activity.messages.isEmpty else { return }
+    guard !rebuildScheduled, items.isEmpty == store.activity.messages.isEmpty else { return }
+    guard !items.isEmpty else { return show() }
     let position = target ?? ReadingPosition(.followTail)
     let resolved = resolve(position)
     if resolved == nil, case .message = position.target {
@@ -522,13 +529,7 @@ import SwiftUI
       rebuild()
       return
     }
-    revealed = true
-    target = nil
-    collectionView.isHidden = false
-    collectionView.accessibilityValue = "\(store.messages.count) mensagens carregadas"
-    state.restoring = false
-    memory.anchor = currentPosition()
-    publishState()
+    show()
     #if DEBUG
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
       NSLog("TRANSCRIPT revealed pinned=%@ usable=%.1f anchor=%@ screenY=%.1f position=%@",
@@ -562,6 +563,42 @@ import SwiftUI
       }
     }
     #endif
+  }
+
+  /// The first frame waits for the final position only so long: past the deadline (a parse that does not land,
+  /// history that does not arrive, a projection that never matches) the transcript shows at the best place
+  /// it can resolve now. It is never hidden for good.
+  private func armRevealDeadline() {
+    guard revealDeadline == nil else { return }
+    revealDeadline = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: Self.revealDeadline)
+      guard let self, !revealed else { return }
+      if !items.isEmpty {
+        let position = target ?? ReadingPosition(.followTail)
+        // A saved place still being paged in: show the end and offer to keep going.
+        if case .message = position.target, resolve(position) == nil { state.resumeOffered = true }
+        UIView.performWithoutAnimation {
+          setOffset(resolve(position) ?? latestOffset)
+          collectionView.layoutIfNeeded()
+          setOffset(resolve(position) ?? latestOffset)
+        }
+      }
+      show()
+    }
+  }
+  static let revealDeadline = Duration.milliseconds(400)
+  private var revealDeadline: Task<Void, Never>?
+
+  private func show() {
+    revealed = true
+    target = nil
+    revealDeadline?.cancel()
+    revealDeadline = nil
+    collectionView.isHidden = false
+    collectionView.accessibilityValue = "\(store.messages.count) mensagens carregadas"
+    state.restoring = false
+    memory.anchor = currentPosition()
+    publishState()
   }
 
   /// The content offset that shows a reading position, if its item or message is loaded.
