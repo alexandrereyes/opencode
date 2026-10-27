@@ -71,7 +71,10 @@ function browsers(command: string, workdir: string | undefined): Reference[] {
       .split(/\s+/)
       .slice(1)
       .find((word) => !word.startsWith("-"))
-    if (!verb || ["list", "close-all", "kill-all", "install", "install-browser", "close", "delete-data"].includes(verb))
+    if (
+      !verb ||
+      ["list", "close-all", "kill-all", "install", "install-browser", "close", "detach", "delete-data"].includes(verb)
+    )
       return []
     if (/\s--(help|version)\b/.test(invocation)) return []
     const named = /(?:\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)(?:"([^"]+)"|'([^']+)'|([^\s"']+))/.exec(

@@ -511,6 +511,159 @@ describe.skipIf(!cli)("playwright-cli sessions", () => {
   )
 })
 
+/**
+ * `attach --cdp=…` sessions (the default for Alexandre's own Chrome). An isolated headless Chrome with its own
+ * debugging port and profile stands in for his browser: a "personal" tab opened before the agent attaches, and the
+ * agent's tab opened by `tab-new`. The adapter reaches it only through the daemon's Playwright server.
+ */
+describe.skipIf(!cli)("attached playwright-cli sessions", () => {
+  const session = `opencode-attach-${process.pid}`
+  let dir: string
+  let server: Bun.Server<undefined>
+  let chrome: Bun.Subprocess
+  let port = 0
+  const adapter = makeChromeAdapter()
+  const at = Date.now()
+  const target = (): Entry => ({
+    id: `chrome:${session}`,
+    kind: "chrome",
+    meta: { kind: "chrome", session, workspace: dir },
+    status: "running",
+    discoveredAt: at,
+    lastUsedAt: at,
+    updatedAt: at,
+  })
+  const cli = async (args: string[]) => {
+    const child = Bun.spawn(["playwright-cli", `-s=${session}`, ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+    const [out, code] = await Promise.all([new Response(child.stdout).text(), child.exited])
+    return { out, code }
+  }
+
+  beforeAll(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "chrome-attach-"))
+    server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) => {
+        const name = new URL(request.url).pathname.slice(1)
+        return new Response(
+          `<title>${name}</title><input id="field" style="position:absolute;left:0;top:0;width:300px;height:60px">`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        )
+      },
+    })
+    chrome = Bun.spawn(
+      [
+        chromePath,
+        "--headless",
+        "--remote-debugging-port=0",
+        "--no-first-run",
+        "--no-default-browser-check",
+        `--user-data-dir=${path.join(dir, "profile")}`,
+        `http://127.0.0.1:${server.port}/pessoal`,
+      ],
+      { stdout: "ignore", stderr: "ignore" },
+    )
+    const deadline = Date.now() + 15_000
+    while (!port) {
+      if (Date.now() > deadline) throw new Error("Chrome did not start")
+      const contents = await Bun.file(path.join(dir, "profile", "DevToolsActivePort"))
+        .text()
+        .catch(() => "")
+      port = Number.parseInt(contents.split("\n")[0] ?? "", 10) || 0
+      await Bun.sleep(50)
+    }
+    expect((await cli(["attach", `--cdp=http://127.0.0.1:${port}`])).code).toBe(0)
+    expect((await cli(["tab-new", `http://127.0.0.1:${server.port}/agente`])).code).toBe(0)
+  }, 60_000)
+
+  afterAll(async () => {
+    await adapter.close()
+    await cli(["detach"])
+    chrome?.kill()
+    await chrome?.exited
+    server?.stop(true)
+    await fs.rm(dir, { recursive: true, force: true })
+    const daemons = path.join(os.homedir(), "Library", "Caches", "ms-playwright", "daemon")
+    for (const hash of await fs.readdir(daemons).catch(() => [])) {
+      const files = await fs.readdir(path.join(daemons, hash)).catch(() => [])
+      await Promise.all(
+        files
+          .filter((file) => file.startsWith(session))
+          .map((file) => fs.rm(path.join(daemons, hash, file), { force: true })),
+      )
+    }
+  })
+
+  test(
+    "is running, streams only the agent's tab, takes input, follows the agent's tab and leaves the session working",
+    async () => {
+      expect((await adapter.probe([target()])).get(target().id)?.status).toBe("running")
+
+      const frames: number[] = []
+      const states: ChromeState[] = []
+      const controller = new AbortController()
+      const sink: StreamSink = {
+        hello: () => undefined,
+        frame: () => void frames.push(Date.now()),
+        // The Chrome adapter publishes exactly `ChromeState`.
+        meta: (value) => void states.push(value as unknown as ChromeState),
+      }
+      const streaming = adapter.stream!(target(), sink, controller.signal)
+      const until = async (condition: () => boolean) => {
+        const deadline = Date.now() + 20_000
+        while (!condition()) {
+          if (Date.now() > deadline) throw new Error(`timed out; last state ${JSON.stringify(states.at(-1))}`)
+          await Bun.sleep(20)
+        }
+      }
+      await until(() => frames.length > 0 && states.at(-1)?.title === "agente" && states.at(-1)?.viewport !== undefined)
+      expect(states.at(-1)?.tabs.map((tab) => tab.title)).toEqual(["agente"])
+
+      // The agent's session keeps working while the viewer streams.
+      const title = await cli(["eval", "document.title"])
+      expect(title.code).toBe(0)
+      expect(title.out).toContain("agente")
+
+      // Alexandre's input goes to the agent's tab.
+      const viewport = states.at(-1)!.viewport!
+      const point = { x: 100 / viewport.width, y: 30 / viewport.height }
+      await adapter.input!(target(), { type: "touch", phase: "began", ...point })
+      await adapter.input!(target(), { type: "touch", phase: "ended", ...point })
+      await until(() => states.at(-1)?.focus.editable === true)
+      await adapter.input!(target(), { type: "text", text: "olá" })
+      const typed = async () => (await cli(["eval", "document.getElementById('field').value"])).out
+      const deadline = Date.now() + 10_000
+      while (!(await typed()).includes("olá") && Date.now() < deadline) await Bun.sleep(200)
+      expect(await typed()).toContain("olá")
+
+      // A new tab of the agent replaces the old one in the viewer; the personal tab never shows up.
+      await cli(["tab-new", `http://127.0.0.1:${server.port}/agente2`])
+      await until(() => states.at(-1)?.title === "agente2")
+      expect(states.flatMap((state) => state.tabs.map((tab) => tab.title))).not.toContain("pessoal")
+      expect(states.some((state) => state.title === "pessoal")).toBe(false)
+
+      await adapter.released!(target())
+      controller.abort()
+      await streaming
+      await adapter.close()
+      expect((await cli(["eval", "document.title"])).out).toContain("agente2")
+      // The browser itself is untouched by the relay disconnecting.
+      expect((await fetch(`http://127.0.0.1:${port}/json/version`)).ok).toBe(true)
+    },
+    { timeout: 60_000 },
+  )
+
+  test(
+    "is no longer running once the agent detaches",
+    async () => {
+      await cli(["detach"])
+      expect((await adapter.probe([target()])).get(target().id)?.status).not.toBe("running")
+    },
+    { timeout: 30_000 },
+  )
+})
+
 async function evaluate(meta: Resources.Meta, expression: string) {
   if (meta.kind !== "chrome" || !meta.cdp || !meta.targetID) throw new Error("no CDP target")
   const { CDP } = await import("../src/resources/adapters/cdp")

@@ -4,7 +4,8 @@ import os from "node:os"
 import path from "node:path"
 import type { Input } from "../protocol.js"
 import type { Resources } from "../rpc.js"
-import { CDP, type ScreencastMetadata, type TargetInfo } from "./cdp.js"
+import { CDP, type ScreencastMetadata, type TargetInfo, type Transport } from "./cdp.js"
+import { findRelay, Relay, relayAlive, type RelayEndpoint } from "./chrome-relay.js"
 import { size, text } from "./process.js"
 import type { Adapter, Entry, Image, Probe, StreamSink } from "./types.js"
 
@@ -162,6 +163,8 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
               status: (await sessionFileExists(session, options.daemonDir)) ? "stopped" : "gone",
             })
           }
+          // An attached browser (Alexandre's own Chrome) is alive while its daemon and Playwright server answer; its
+          // tab is read only while someone watches, so a probe never talks to his browser.
           if (found.port === undefined)
             return void result.set(entry.id, {
               status: "running",
@@ -213,6 +216,15 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 
   async function open(entry: Entry) {
     const found = await endpoint(entry, listProcesses)
+    if (found.relay) {
+      const relay = await Relay.connect(found.relay)
+      const browser = new Live(relay, undefined, true)
+      await browser.init().catch(async (error) => {
+        await relay.close()
+        throw error
+      })
+      return browser
+    }
     if (found.port === undefined)
       throw new Error(
         `O navegador da sessão ${sessionName(entry)} foi aberto sem porta de depuração; feche e abra de novo com playwright-cli open.`,
@@ -258,14 +270,16 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 
   /**
    * The browser endpoint of an entry. A cached endpoint is reused while `/json/version` still names the same browser
-   * (a relaunched Chrome gets a new browser id, even on a reused port); otherwise the process table is scanned again.
+   * (a relaunched Chrome gets a new browser id, even on a reused port), or while an attached session's sockets answer;
+   * otherwise the process table is scanned again.
    */
   async function endpoint(entry: Entry, scan: () => Promise<readonly ProcessRow[]>): Promise<Endpoint> {
     const cached = endpoints.get(entry.id)
+    if (cached?.relay && (await relayAlive(cached.relay))) return cached
     if (cached?.port !== undefined && (await browserURL(cached.port)) === cached.browser) return cached
     endpoints.delete(entry.id)
     const found = await resolve(entry, scan)
-    if (found.port !== undefined) endpoints.set(entry.id, found)
+    if (found.port !== undefined || found.relay) endpoints.set(entry.id, found)
     return found
   }
 }
@@ -281,7 +295,13 @@ async function resolve(entry: Entry, scan: () => Promise<readonly ProcessRow[]>)
   const session = sessionName(entry)
   const processes = await scan()
   const found = await locate(session, processes, meta?.workspace)
-  if (found.length === 0) throw new Error(`O navegador da sessão ${session} do playwright-cli não está aberto.`)
+  // `attach` sessions (`--cdp=chrome`: Alexandre's own Chrome) launch no browser of their own: reach it through the
+  // daemon's Playwright server instead (`chrome-relay.ts`).
+  if (found.length === 0) {
+    const relay = await findRelay(session, meta?.workspace === undefined ? "" : namespaceOf(meta.workspace))
+    if (relay) return { browser: "", relay }
+    throw new Error(`O navegador da sessão ${session} do playwright-cli não está aberto.`)
+  }
   if (found.length > 1)
     throw new Error(`Há ${found.length} navegadores da sessão ${session} e não dá para saber qual é o do agente.`)
   const located = found[0]!
@@ -294,6 +314,8 @@ async function resolve(entry: Entry, scan: () => Promise<readonly ProcessRow[]>)
 
 interface Endpoint {
   readonly port?: number
+  /** An attached session's browser, reached through its daemon (`chrome-relay.ts`). */
+  readonly relay?: RelayEndpoint
   /** The browser's `webSocketDebuggerUrl`, unique per launch. */
   readonly browser: string
   /** How to run `playwright-cli` against this browser's session: the daemon's Node, CLI and working directory. */
@@ -591,8 +613,10 @@ class Live {
   private follow?: (targetId?: string) => Promise<void>
 
   constructor(
-    readonly cdp: CDP,
+    readonly cdp: Transport,
     private readonly preferred?: string,
+    /** Alexandre's own browser through the relay: no Playwright stills, and a notice when the tab is hidden. */
+    readonly attached = false,
   ) {}
 
   async init() {
@@ -758,7 +782,7 @@ class Live {
     // Screencasts ignore the emulated device scale, so a phone page streams ~400 px wide. Sharp stills run through
     // the agent's playwright-cli session, so they are taken only while Alexandre controls the browser (the agent is
     // locked out then and never waits behind them).
-    const sharpens = () => this.controlled && !this.windowed && this.density >= settings.sharpDensity
+    const sharpens = () => !this.attached && this.controlled && !this.windowed && this.density >= settings.sharpDensity
 
     const offFrame = this.cdp.on("Page.screencastFrame", (frame, sessionId) => {
       if (sessionId !== this.sessionId) return
@@ -854,6 +878,14 @@ class Live {
       await start(1)
       // An idle page does not repaint for a new screencast; start from a still unless a frame beat it.
       if (!started) await still()
+      // Chrome paints no frames for a tab in the background or a minimized window; say why the picture is frozen.
+      if (this.attached) {
+        const visibility = await this.cdp
+          .send("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true }, this.sessionId)
+          .catch(() => undefined)
+        if (visibility?.result.value === "hidden")
+          sink.notice?.("A aba do agente está em segundo plano no seu Chrome; a imagem volta quando ela ficar visível.")
+      }
       await done
     } finally {
       offFrame()

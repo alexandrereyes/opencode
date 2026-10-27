@@ -124,6 +124,19 @@ export interface Events {
 
 export class CDPError extends Error {}
 
+/** What the Chrome adapter needs from a DevTools connection: the browser WebSocket (`CDP`) or the Playwright relay. */
+export interface Transport {
+  send<M extends keyof Commands>(
+    method: M,
+    params: Commands[M]["params"],
+    sessionId?: string,
+    timeout?: number,
+  ): Promise<Commands[M]["result"]>
+  on<E extends keyof Events>(event: E, listener: (params: Events[E], sessionId?: string) => void): () => void
+  readonly closed: Promise<void>
+  close(): Promise<void>
+}
+
 interface Message {
   readonly id?: number
   readonly method?: string
@@ -133,7 +146,7 @@ interface Message {
   readonly sessionId?: string
 }
 
-export class CDP {
+export class CDP implements Transport {
   private next = 1
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
   private readonly listeners = new Map<string, Set<(params: unknown, sessionId?: string) => void>>()

@@ -263,6 +263,30 @@ command runs. `POST /api/shell` waits for them too: the one custom line in `pack
 it the first shell of a cold Location ran before plugins registered their `shell` hooks.
 Like the personal Chrome on 9222, the port accepts any local process; it closes with the browser.
 
+**Attached sessions (Alexandre's own Chrome).** The `playwright-cli` skill now attaches to his visible Chrome by default
+(`playwright-cli -s=<name> attach --cdp=chrome`). Such a daemon launches no browser, so the process scan above finds
+nothing and the session used to show as **Desligado** (`stopped`: session file present, no Chrome child) while the agent
+worked. The adapter must not open its own DevTools connection to that browser: with chrome://inspect's "Allow remote
+debugging for this browser instance" Chrome asks him to approve every new client (a second client waits for his click)
+and serves no `/json/*` discovery (404). Instead, `adapters/chrome-relay.ts` reaches it through the daemon: every
+`playwright-cli` daemon also serves its browser as a Playwright server on a local socket
+(`~/Library/Caches/ms-playwright/b/<guid>`: `title` = session, `workspaceDir` = namespace, `playwrightLib`). The hub
+connects there with that same `playwright-core` (`chromium.connect`) and opens CDP sessions on the agent's tab over the
+connection he already approved. Disconnecting only detaches the client.
+
+- **Liveness**: the daemon's command socket and its Playwright server accept connections → `running`; the probe never
+  touches the browser itself. After `detach` (or with Chrome closed) both are gone → `gone`.
+- **Only the agent's tab**: the current tab of the session, read with a read-only `tab-list` over the daemon's command
+  socket every 1.5 s while someone watches (no polling otherwise). His other tabs never appear in `tabs`, frames or
+  meta. When the agent switches tabs, the relay reports the old tab gone and the viewer follows the new one.
+- **No interference**: no `Target.activateTarget` (no focus or active-tab change), no window bounds, no Playwright
+  stills through the agent's session; screencast, touches, keys and text go through a separate CDP session on that
+  tab. The agent's `playwright-cli` commands keep working during the stream.
+- **Limits**: Chrome paints nothing for a background tab or a minimized window, so the picture freezes; the viewer gets
+  the notice "A aba do agente está em segundo plano no seu Chrome…". `tab-list` waits for the tab's pending requests
+  (up to ~5.5 s on a busy page), so following a tab switch can lag by that much. Reattaching a session to the same
+  Chrome after `detach` takes ~35 s in Playwright itself (unrelated to the relay).
+
 **Stream.** One browser WebSocket per resource (flattened target sessions), shared by snapshot, stream and input and
 closed after 60 s unused. `Page.startScreencast` (JPEG 70, at most 1280×2400) follows one tab. Chromium keeps up to
 three frames unacknowledged, so each frame is acknowledged 200 ms after it arrives: about 15 fps on a page that repaints

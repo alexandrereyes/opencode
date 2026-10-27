@@ -455,6 +455,10 @@ describe("discovery", () => {
     expect(references("xcrun devicectl device info details --device 00008110-00065DA13A78401E")).toEqual([])
     expect(references("playwright-cli list")).toEqual([])
     expect(references("playwright-cli -s=login close")).toEqual([])
+    expect(references("playwright-cli -s=schwab detach")).toEqual([])
+    expect(references("playwright-cli -s=schwab attach --cdp=chrome", "", "/w/app")).toEqual([
+      { kind: "chrome", session: "schwab", workspace: "/w/app" },
+    ])
   })
 
   test("resolves simulator names, skips ambiguous ones and drops unknown UDIDs", () => {
