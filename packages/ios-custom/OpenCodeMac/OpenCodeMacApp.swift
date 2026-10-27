@@ -5,7 +5,12 @@ import SwiftUI
 struct OpenCodeMacApp: App {
   private let runtime = MacRuntime.shared
 
-  init() { FilePreviewStorage.clean() }
+  init() {
+    FilePreviewStorage.clean()
+    #if DEBUG
+    MacStress.openWindowIfNeeded()
+    #endif
+  }
 
   var body: some Scene {
     WindowGroup("OpenCode", id: "main") {
@@ -67,7 +72,10 @@ private struct MacRoot: View {
           ProgressView("Conectando…").frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
-      .frame(minWidth: 980, minHeight: 620)
+      // No minimum width here: the split view and the inspector derive the window's own, and a smaller one set
+      // on top of it lets the window shrink below what their columns need. Their minimum sizes then oscillate
+      // and AppKit aborts ("more Update Constraints in Window passes than there are views").
+      .frame(minHeight: 620)
       .task(id: runtime.servers.revision) { await runtime.prepare() }
     }
   }

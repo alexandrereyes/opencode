@@ -2366,8 +2366,15 @@ The iPhone target keeps its behavior: every change is either a no-op on iOS (`#i
 ### The window
 
 - `NavigationSplitView` (Sessões | chat) plus `.inspector` for Contexto: an inspector is the Mac's collapsible
-  trailing column (⌥⌘I, toolbar button, the `…` menu). A minimum width on the detail column next to an inspector
-  makes AppKit's constraint pass loop and crash; keep the widths on the column modifiers only.
+  trailing column (⌥⌘I, toolbar button, the `…` menu). The inspector is attached to the **detail column**, and the
+  window's minimum width comes only from the column modifiers (about 1400 pt with both side columns open, 860 with
+  Sessões hidden, 490 with Contexto hidden). Do not add a `minWidth` on the root, the detail or any column
+  content: a minimum below what the columns need (the root's `minWidth: 980` until the fix of 27 October) lets
+  AppKit size the window narrower than the split view's minimum. The split view and the inspector then keep
+  changing each other's minimum size and AppKit aborts ("more Update Constraints in Window passes than there are
+  views in the window"): the app closed at launch. With the inspector around the whole split view, the window's
+  minimum also counted the inspector's ideal width twice (about 1570 pt, wider than a 1512-pt laptop screen).
+  `script/test-mac-window.sh` guards both (see Verification).
 - **Sessões**: the shared column. Selecting a row selects the session; the iPhone's swipe and long-press actions are
   one right-click menu (open, rename, pin, mute, mark read, archive, delete). Configurações opens the `Settings`
   scene; voice is shown disabled (calls stay on the iPhone in this stage); a quota ring opens the LLM proxy window
@@ -2527,6 +2534,15 @@ is unit-tested.
 Stage 2 adds `SubscriptionTableTests` (groups and "Outros planos", search, table focus, row values and every sort
 key, sidebar rows and the Codex fallback, confirmation texts, freshness). "Usar redefinição" and the automation
 switch were exercised only against `MacFixtureProxy`, never against a server: they spend the proxy's real resets.
+
+**Window stability** (`script/test-mac-window.sh [runs] [idle seconds]`): builds OpenCodeMac and runs the DEBUG
+`MacStress` against the fixture, starting from the default size without saved window frames. It resizes the main
+window to its minimum, intermediate sizes and each screen's maximum on every connected screen, collapses and
+reopens Sessões and Contexto twice, opens and closes Arquivos and the LLM proxy window, then stays idle (30 s by
+default). A layout loop aborts the app (the old crash, exit 134); a minimum width wider than a screen fails the run.
+Run it after any change to the window's columns, widths or toolbar. It moves the window over the connected
+screens while it runs. Launched from a shell while the screen is locked, SwiftUI opens no window until the app is
+activated, so `MacStress` opens one through File ▸ New Window.
 
 ### Next stages
 

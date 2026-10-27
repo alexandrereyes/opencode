@@ -12,26 +12,13 @@ struct MacWindow: View {
   @State private var context: ContextColumnStore?
 
   var body: some View {
-    navigation
-    .inspector(isPresented: $runtime.contextVisible) {
-      Group {
-        if let context {
-          MacContextColumn(store: context, runtime: runtime)
-        } else {
-          ContentUnavailableView("Nenhuma sessão", systemImage: "sidebar.right",
-            description: Text("Escolha uma sessão para ver o contexto."))
-            .foregroundStyle(theme.color(.textSecondary))
-        }
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(theme.color(.background))
-      .inspectorColumnWidth(min: 400, ideal: 540, max: 760)
-      .toolbar {
-        ToolbarItem {
-          Button { runtime.contextVisible.toggle() } label: { Label("Contexto", systemImage: "sidebar.right") }
-            .help("Ocultar contexto (⌥⌘I)")
-        }
-      }
+    NavigationSplitView {
+      MacSessionColumn(store: store, runtime: runtime)
+        .navigationSplitViewColumnWidth(min: 300, ideal: 370, max: 480)
+    } detail: {
+      // No minimum width here: a detail minimum beside an inspector makes AppKit's constraint pass loop.
+      MacChatColumn(store: store, runtime: runtime, context: context)
+        .inspector(isPresented: $runtime.contextVisible) { inspector }
     }
     .background(theme.color(.background))
     .toastOverlay(store.toast)
@@ -74,16 +61,31 @@ struct MacWindow: View {
       if MacProxyLaunch.pane != nil, MacCapture.folder != nil { openWindow(id: MacProxyWindow.id) }
       await MacCapture.window(context: { context }, runtime: runtime, theme: theme)
     }
+    .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
     #endif
   }
 
-  private var navigation: some View {
-    NavigationSplitView {
-      MacSessionColumn(store: store, runtime: runtime)
-        .navigationSplitViewColumnWidth(min: 300, ideal: 370, max: 480)
-    } detail: {
-      // No minimum width here: a detail minimum beside an inspector makes AppKit's constraint pass loop.
-      MacChatColumn(store: store, runtime: runtime, context: context)
+  /// Contexto. Attached to the detail column, as AppKit expects for an inspector inside a split view: around
+  /// the whole split view the window's minimum width counted the inspector's ideal width twice (~1570 pt, wider
+  /// than a 1512-pt laptop screen).
+  private var inspector: some View {
+    Group {
+      if let context {
+        MacContextColumn(store: context, runtime: runtime)
+      } else {
+        ContentUnavailableView("Nenhuma sessão", systemImage: "sidebar.right",
+          description: Text("Escolha uma sessão para ver o contexto."))
+          .foregroundStyle(theme.color(.textSecondary))
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(theme.color(.background))
+    .inspectorColumnWidth(min: 400, ideal: 540, max: 760)
+    .toolbar {
+      ToolbarItem {
+        Button { runtime.contextVisible.toggle() } label: { Label("Contexto", systemImage: "sidebar.right") }
+          .help("Ocultar contexto (⌥⌘I)")
+      }
     }
   }
 

@@ -31,7 +31,7 @@ import SwiftUI
     window.setFrame(NSRect(x: -4000, y: 40, width: 1600, height: 1000), display: true)
     try? await Task.sleep(for: .seconds(MacFixture.current == nil ? 8 : 5))
     let path = folder + "/" + name + ".png"
-    if !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
+    if screenLocked || !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
       cached(view, to: path)
     }
     if let context = context(), runtime.selection.files == nil {
@@ -83,7 +83,7 @@ import SwiftUI
   /// hands back blank pictures, so AppKit draws the views instead; it cannot draw the Liquid Glass sidebar, so
   /// the sidebar's own rows are rendered over that column.
   private static func picture(_ window: NSWindow, sidebar: (some View)?) -> CGImage? {
-    let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
+    let locked = screenLocked
     func draw(_ window: NSWindow) -> CGImage? { (locked ? nil : image(of: window)) ?? drawn(window) }
     guard var base = draw(window) else { return nil }
     if locked, let sidebar, let column = sidebarColumn(window) {
@@ -92,6 +92,11 @@ import SwiftUI
       if let rows = renderer.cgImage { base = overlay(base, window, rows, column) ?? base }
     }
     return window.attachedSheet.flatMap { sheet in draw(sheet).flatMap { compose(base, window, $0, sheet) } } ?? base
+  }
+
+  /// While the screen is locked the window server returns blank pictures of every window.
+  private static var screenLocked: Bool {
+    (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
   }
 
   /// The split view's first column, in window coordinates.

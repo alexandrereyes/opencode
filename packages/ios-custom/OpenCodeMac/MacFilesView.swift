@@ -49,6 +49,7 @@ private struct MacFilesContent: View {
               Image(systemName: "chevron.left").appSymbol(.inline, weight: .semibold)
               Text("Contexto")
             }
+            .fixedSize()
             .appFont(.heading).foregroundStyle(theme.color(.primary))
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(theme.color(.surfaceRaised), in: RoundedRectangle(cornerRadius: 9))
