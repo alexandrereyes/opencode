@@ -176,6 +176,9 @@ final class SessionStore {
         forms = ScreenCatalogFixture.forms
       }
       active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
+      if ScrollFixtures.mode == "catalog", ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogNoRunning") {
+        active = []
+      }
       previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
         var preview = SessionPreview()
         preview.text = "Resultado sintético com ferramentas, Markdown e código de exemplo."
@@ -484,7 +487,11 @@ final class SessionStore {
       } else {
         removedSelection = false
       }
-      preferences = try await client.mutate(intent)
+      do { preferences = try await client.mutate(intent) } catch ClientError.rpc("rpc.invalid_input") {
+        // A server before `chats.move` rejects the intent; Chats then stays first.
+        if case .chatsMove = intent { throw ServerUpdateNeeded() }
+        throw ClientError.rpc("rpc.invalid_input")
+      }
       if removedSelection { selectedProject = nil }
     }
   }
@@ -568,4 +575,8 @@ final class SessionStore {
       await reload()
     } catch { self.error = "Não foi possível concluir a ação. \(error.localizedDescription)" }
   }
+}
+
+private struct ServerUpdateNeeded: LocalizedError {
+  var errorDescription: String? { "Atualize o servidor para mover o Chats." }
 }

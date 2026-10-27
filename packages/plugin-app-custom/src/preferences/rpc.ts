@@ -10,6 +10,8 @@ const ProjectLibrary = Schema.Struct({
   projects: Schema.Array(Project),
   recentlyClosed: Schema.Array(Schema.String),
   lastProject: optional(Schema.String),
+  /** How many of `projects` precede the managed Chats filter in the iOS chip strip; absent means first. */
+  chatsIndex: optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
 const Model = Schema.Struct({
   providerID: Schema.String,
@@ -69,6 +71,11 @@ export const Intent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("project.move"),
     ...ProjectTarget,
+    toIndex: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("chats.move"),
+    server: Schema.String,
     toIndex: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   }),
   Schema.Struct({ type: Schema.Literal("sidebar.order"), order: Schema.Array(Schema.String) }),

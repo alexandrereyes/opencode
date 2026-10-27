@@ -36,9 +36,17 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
   if ("directory" in intent) {
     const library = data.projects[intent.server] ?? { projects: [], recentlyClosed: [] }
     const project = library.projects.find((item) => item.worktree === intent.directory)
+    const index = project ? library.projects.indexOf(project) : -1
     if (intent.type === "project.open") {
       library.recentlyClosed = library.recentlyClosed.filter((item) => pathKey(item) !== pathKey(intent.directory))
-      if (!project) library.projects.unshift({ worktree: intent.directory, expanded: true })
+      if (!project) {
+        library.projects.unshift({ worktree: intent.directory, expanded: true })
+        // A prepended project keeps Chats after the same projects unless Chats is first.
+        if (library.chatsIndex) library.chatsIndex += 1
+      }
+    }
+    if ((intent.type === "project.close" || intent.type === "project.remove") && project) {
+      if (library.chatsIndex && index < library.chatsIndex) library.chatsIndex -= 1
     }
     if (intent.type === "project.close") {
       library.projects = library.projects.filter((item) => item.worktree !== intent.directory)
@@ -59,6 +67,11 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
         library.projects.splice(intent.toIndex, 0, project)
       }
     }
+    data.projects[intent.server] = library
+  }
+  if (intent.type === "chats.move") {
+    const library = data.projects[intent.server] ?? { projects: [], recentlyClosed: [] }
+    library.chatsIndex = Math.min(intent.toIndex, library.projects.length)
     data.projects[intent.server] = library
   }
   if (intent.type === "sidebar.order") data.sidebarOrder = [...intent.order]
@@ -163,6 +176,7 @@ function mutableData(data: Preferences.Data) {
           projects: library.projects.map((project) => ({ ...project })),
           recentlyClosed: [...library.recentlyClosed],
           lastProject: library.lastProject,
+          chatsIndex: library.chatsIndex,
         },
       ]),
     ),

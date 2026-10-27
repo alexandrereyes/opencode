@@ -74,6 +74,8 @@ manual = [Path(item["worktree"]).name
 unread = manual[1:3]
 assert len(manual) >= 4, "Needs at least four saved repositories (seed-sessions.ts, seed-conversation.ts)"
 settle_active()
+# The test starts with Chats first in the saved order and moves it.
+rpc("custom.preferences", "mutate", {"type": "chats.move", "server": "local", "toIndex": 0})
 read_all()
 active = set()
 targets = {}

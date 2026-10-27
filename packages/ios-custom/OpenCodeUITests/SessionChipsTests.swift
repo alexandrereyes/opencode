@@ -25,11 +25,11 @@ import XCTest
     XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
     app.tabBars.buttons["Sessões"].tap()
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
-    let read = manual.filter { !unread.contains($0) }
+    // The runner resets Chats to the start of the saved order.
+    var combined = ["Chats"] + manual
 
-    // Unread repositories first, in the saved order; then the rest in the saved order; Chats (no saved
-    // position) after every positioned chip.
-    XCTAssertTrue(settled(app, order: ["Todas"] + unread + read + ["Chats"]))
+    // Unread repositories first, then the rest, each in the saved order (Chats included).
+    XCTAssertTrue(settled(app, order: expected(combined, unread: Set(unread))))
     for name in manual {
       XCTAssertEqual(chip(name, app).label, unread.contains(name) ? name + ", com não lidas" : name)
     }
@@ -37,28 +37,33 @@ import XCTest
 
     // A running repository rises right after "Todas", above the unread ones.
     try prompt(runSession, password: password)
-    XCTAssertTrue(settled(app, order: ["Todas", run] + unread + read.filter { $0 != run } + ["Chats"], timeout: 60))
+    XCTAssertTrue(settled(app, order: expected(combined, running: [run], unread: Set(unread)), timeout: 60))
     shot("chips-running")
 
     // Once it finishes it is unread too, so it returns among the unread chips at its saved position.
-    let finished = manual.filter { unread.contains($0) || $0 == run }
-    XCTAssertTrue(
-      settled(app, order: ["Todas"] + finished + read.filter { $0 != run } + ["Chats"], timeout: 180))
+    let finished = Set(unread + [run])
+    XCTAssertTrue(settled(app, order: expected(combined, unread: finished), timeout: 180))
     shot("chips-finished")
 
+    // The finished run's completion banner can cover the chips; close it first.
+    if app.buttons["Fechar alerta"].waitForExistence(timeout: 3) { app.buttons["Fechar alerta"].tap() }
     chip(unread[1], app).tap()
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title + ",")).firstMatch
     XCTAssertTrue(row.waitForExistence(timeout: 20))
     row.tap()
-    XCTAssertTrue(app.staticTexts["conversation-header-title"].waitForExistence(timeout: 30))
+    let header = app.staticTexts["conversation-header-title"]
+    XCTAssertTrue(header.waitForExistence(timeout: 30))
+    XCTAssertEqual(header.label, title)
+    // The viewed watermark is acknowledged once the transcript tail has been shown.
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 30))
+    Thread.sleep(forTimeInterval: 2)
     app.buttons["Voltar"].firstMatch.tap()
     XCTAssertTrue(app.staticTexts["conversation-header-title"].waitForNonExistence(timeout: 10))
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 10))
 
     // Reading clears the dot; the chip returns to its saved place among the read chips.
-    let stillUnread = finished.filter { $0 != unread[1] }
-    XCTAssertTrue(
-      settled(app, order: ["Todas"] + stillUnread + manual.filter { !stillUnread.contains($0) } + ["Chats"]))
+    let stillUnread = finished.subtracting([unread[1]])
+    XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
     XCTAssertEqual(chip(unread[1], app).label, unread[1])
     // The active filter stays visible after moving.
     let selected = chip(unread[1], app)
@@ -68,6 +73,41 @@ import XCTest
     XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, "Selected chip off screen")
     shot("chips-after-reading")
     app.buttons["Todas"].firstMatch.tap()
+
+    // Chats moves in the saved order like a repository, and the position persists on the server.
+    move("Chats", "Mover para depois", app)
+    combined = [manual[0], "Chats"] + manual.dropFirst()
+    XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
+    shot("chips-chats-moved")
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    app.tabBars.buttons["Sessões"].tap()
+    XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
+    XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
+    shot("chips-chats-reopened")
+    // A repository passing Chats moves Chats back to the start.
+    move(manual[0], "Mover para depois", app)
+    combined = ["Chats"] + manual
+    XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
+  }
+
+  /// "Todas", then running (running + unread first), then unread, then the rest, each in the saved order.
+  private func expected(_ combined: [String], running: Set<String> = [], unread: Set<String>) -> [String] {
+    ["Todas"] + combined.filter { running.contains($0) && unread.contains($0) }
+      + combined.filter { running.contains($0) && !unread.contains($0) }
+      + combined.filter { !running.contains($0) && unread.contains($0) }
+      + combined.filter { !running.contains($0) && !unread.contains($0) }
+  }
+  private func move(_ name: String, _ direction: String, _ app: XCUIApplication) {
+    let target = chip(name, app)
+    for _ in 0..<6 where !target.isHittable { app.scrollViews.firstMatch.swipeLeft(velocity: .slow) }
+    target.press(forDuration: 1.0)
+    XCTAssertTrue(app.buttons[direction].waitForExistence(timeout: 5))
+    app.buttons[direction].tap()
+    let confirm = app.buttons["Confirmar nova posição"]
+    XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+    confirm.tap()
   }
 
   /// A short real execution: one foreground shell sleep, so the chip stays running for a few seconds.
