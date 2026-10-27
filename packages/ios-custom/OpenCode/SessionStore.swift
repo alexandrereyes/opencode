@@ -515,17 +515,54 @@ final class SessionStore {
   func archive(_ row: SessionRow) async {
     await perform(row.id, feedback: .light) { try await client.archive(row.id) }
   }
-  func delete(_ session: Session) async {
-    guard session.id != masterID, busy.insert(session.id).inserted else { return }
+  /// Like the web's bulk actions: serial requests, one per root (the server cascades children), no retries.
+  /// The failures stay selected; one toast summarizes the batch.
+  func archiveMany(_ ids: [String]) async -> SessionBulkResult {
+    guard busy.insert(Self.bulkKey).inserted else { return SessionBulkResult() }
+    defer { busy.remove(Self.bulkKey) }
+    var result = SessionBulkResult()
+    for id in ids {
+      do {
+        try await client.archive(id)
+        result.succeeded.append(id)
+      } catch { result.failed.append(id) }
+    }
+    await reload()
+    finishBulk(result, archived: true)
+    return result
+  }
+  func deleteMany(_ sessions: [Session]) async -> SessionBulkResult {
+    guard busy.insert(Self.bulkKey).inserted else { return SessionBulkResult() }
+    defer { busy.remove(Self.bulkKey) }
+    var result = SessionBulkResult()
+    for session in sessions {
+      if await delete(session, quiet: true) { result.succeeded.append(session.id) } else { result.failed.append(session.id) }
+    }
+    finishBulk(result, archived: false)
+    return result
+  }
+  static let bulkKey = "bulk"
+  private func finishBulk(_ result: SessionBulkResult, archived: Bool) {
+    if result.failed.isEmpty {
+      Haptics.play(.success)
+      toast.show(SessionBulkCopy.done(result.succeeded.count, archived: archived))
+      return
+    }
+    Haptics.play(.warning)
+    toast.show(SessionBulkCopy.failure(result), kind: .error)
+  }
+  /// `quiet` leaves failure reporting and haptics to the batch that called it.
+  @discardableResult func delete(_ session: Session, quiet: Bool = false) async -> Bool {
+    guard session.id != masterID, busy.insert(session.id).inserted else { return false }
     defer { busy.remove(session.id) }
     let plan: SessionDeletionPlan
     do {
       plan = try await client.deletionPlan(session.id)
-      guard !plan.ids.contains(masterID ?? "") else { return }
+      guard !plan.ids.contains(masterID ?? "") else { return false }
       try await client.deleteSession(session.id)
     } catch {
-      toast.show("Falha ao excluir sessão. \(error.localizedDescription)", kind: .error)
-      return
+      if !quiet { toast.show("Falha ao excluir sessão. \(error.localizedDescription)", kind: .error) }
+      return false
     }
     deletedIDs.formUnion(plan.ids)
     withAnimation {
@@ -543,7 +580,7 @@ final class SessionStore {
     expansions.remove(plan.ids)
     order.snapshot(entries, active: active)
     alerts.remove(plan.ids)
-    Haptics.play(.success)
+    if !quiet { Haptics.play(.success) }
     var cleanupFailed = false
     do { try reading.remove(plan.ids) } catch { cleanupFailed = true }
     do { try quoteDismissals.remove(plan.ids) } catch { cleanupFailed = true }
@@ -556,6 +593,7 @@ final class SessionStore {
     if cleanupFailed {
       toast.show("Sessão excluída, mas não foi possível limpar todos os dados salvos.", kind: .error)
     }
+    return true
   }
   func reply(_ row: SessionRow, allow: Bool) async {
     guard let permission = permission(row) else { return }

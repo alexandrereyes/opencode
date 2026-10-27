@@ -199,6 +199,16 @@ struct AppTabs: View {
     .environment(\.floatingVoice, floatingVoice)
     .onChange(of: runtime.voice.sessionID, initial: true) { _, id in floatingVoice.observe(id) }
     .background(theme.color(.background))
+    #if DEBUG
+    // UI tests read the connected server before destructive actions, so a relaunch that fell back to the
+    // default server fails instead of archiving or deleting real sessions.
+    .overlay(alignment: .topLeading) {
+      Text(store.client.configuration.url.absoluteString)
+        .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1).clipped()
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("debug-server-url")
+    }
+    #endif
     .toastOverlay(runtime.voice.toast)
     .sessionAlertOverlay(modal: false)
     .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in

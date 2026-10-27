@@ -14,6 +14,9 @@ struct SessionsView: View {
   @State private var showArchived = false
   @State private var appliedLaunch = false
   @State private var proxyProvider: SubscriptionProvider?
+  @State private var selection = SessionSelection()
+  @State private var bulkDelete: [SessionRow]?
+  @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
 
   private struct ProjectAction: Identifiable {
     let name: String
@@ -54,56 +57,26 @@ struct SessionsView: View {
           .listRowBackground(theme.color(.background))
         }
 
-        SessionColumnSections(store: store) { row in
-          store.conversationPath.append(.init(id: row.id))
-        } archived: {
-          showArchived = true
-        } decorate: { row, content in
+        SessionColumnSections(
+          store: store,
+          open: { store.conversationPath.append(.init(id: $0.id)) },
+          archived: { showArchived = true },
+          selection: selection,
+          toggle: { row in
+            guard !store.busy.contains(SessionStore.bulkKey) else { return }
+            Haptics.play(.selection)
+            withAnimation(.snappy(duration: 0.2)) { selection.toggle(row.id) }
+          }
+        ) { row, content in
+          // Selection turns off swipes and the long-press menu; their contents are empty while selecting.
           content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-              // A destructive swipe role removes the row before confirmation in SwiftUI.
-              Button {
-                Haptics.play(.warning)
-                deleteCandidate = row.session
-              } label: {
-                Label("Excluir", systemImage: "trash")
-              }.tint(theme.color(.error))
-              Button {
-                renameCandidate = row
-              } label: {
-                Label("Renomear", systemImage: "pencil")
-              }.tint(theme.color(.info))
-              Button {
-                archiveCandidate = row
-              } label: {
-                Label("Arquivar", systemImage: "archivebox")
-              }
-              .tint(theme.color(.primary))
-              Button {
-                Task { await store.mute(row) }
-              } label: {
-                Label(
-                  row.muted ? "Reativar" : "Silenciar",
-                  systemImage: row.muted ? "bell" : "bell.slash")
-              }.tint(theme.color(.icon))
+              if !selection.active { trailingActions(row) }
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
-              if row.unread {
-                Button {
-                  Task { await store.markRead(row.session) }
-                } label: {
-                  Label("Marcar como lida", systemImage: "envelope.open")
-                }
-                .tint(theme.color(.primary))
-              }
-              Button {
-                Task { await store.pin(row) }
-              } label: {
-                Label(
-                  row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin")
-              }.tint(theme.color(.info))
+              if !selection.active { leadingActions(row) }
             }
-            .contextMenu { rowActions(row) }
+            .contextMenu { if !selection.active { rowActions(row) } }
             .disabled(store.busy.contains(row.id))
         }
       }
@@ -122,7 +95,8 @@ struct SessionsView: View {
             store.conversationPath.append(
               .init(id: "draft_" + UUID().uuidString, newSession: true, startInChats: true))
           },
-          newSessionDisabled: store.preferences == nil)
+          newSessionDisabled: store.preferences == nil,
+          selection: selectionActions)
       }
       .environment(\.defaultMinListRowHeight, 0)
       .scrollContentBackground(.hidden)
@@ -186,6 +160,30 @@ struct SessionsView: View {
       .sheet(item: $proxyProvider) { provider in
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
       }
+      .alert(
+        SessionBulkCopy.deleteTitle(bulkDelete?.count ?? 0),
+        isPresented: Binding(get: { bulkDelete != nil }, set: { if !$0 { bulkDelete = nil } }),
+        presenting: bulkDelete
+      ) { rows in
+        Button("Cancelar", role: .cancel) { bulkDelete = nil }
+        Button("Arquivar") {
+          bulkDelete = nil
+          archiveSelection(rows)
+        }
+        Button(SessionBulkCopy.deleteTitle(rows.count), role: .destructive) {
+          bulkDelete = nil
+          Task { selection.complete(await store.deleteMany(rows.map(\.session))) }
+        }
+      } message: { rows in
+        Text(
+          SessionBulkCopy.deleteMessage(
+            count: rows.count, running: rows.filter { !$0.memberIDs.isDisjoint(with: store.active) }.count,
+            master: rows.contains { $0.session.agent == "mestra" }))
+      }
+      // Like the web, changing the view ends the selection, and hidden or removed rows leave it.
+      .onChange(of: store.filter) { selection.clear() }
+      .onChange(of: store.selectedProject) { selection.clear() }
+      .onChange(of: visibleIDs) { _, visible in selection.retain(Set(visible)) }
       .confirmationDialog(
         "Arquivar sessão?",
         isPresented: Binding(
@@ -239,8 +237,86 @@ struct SessionsView: View {
     return nil
   }
 
+  /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
+  private var visibleIDs: [String] {
+    SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
+      .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
+  }
+
+  private var selectedRows: [SessionRow] {
+    let rows = Dictionary(store.filtered.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return selection.ids.compactMap { rows[$0] }
+  }
+
+  private var selectionActions: SessionColumnSelection? {
+    guard selection.active else { return nil }
+    let visible = visibleIDs
+    return SessionColumnSelection(
+      count: selection.ids.count,
+      canSelectAll: visible.contains { !selection.contains($0) },
+      working: store.busy.contains(SessionStore.bulkKey),
+      archive: { archiveSelection(selectedRows) },
+      delete: {
+        Haptics.play(.warning)
+        bulkDelete = selectedRows
+      },
+      selectAll: { withAnimation(.snappy(duration: 0.2)) { selection.selectAll(visible) } },
+      cancel: { withAnimation(.snappy(duration: 0.2)) { selection.clear() } })
+  }
+
+  /// No confirmation and no undo: the backend has no unarchive, and the rows stay readable in Arquivadas.
+  private func archiveSelection(_ rows: [SessionRow]) {
+    Task { selection.complete(await store.archiveMany(rows.map(\.id))) }
+  }
+
+  @ViewBuilder private func trailingActions(_ row: SessionRow) -> some View {
+    // A destructive swipe role removes the row before confirmation in SwiftUI.
+    Button {
+      Haptics.play(.warning)
+      deleteCandidate = row.session
+    } label: {
+      Label("Excluir", systemImage: "trash")
+    }.tint(theme.color(.error))
+    Button {
+      renameCandidate = row
+    } label: {
+      Label("Renomear", systemImage: "pencil")
+    }.tint(theme.color(.info))
+    Button {
+      archiveCandidate = row
+    } label: {
+      Label("Arquivar", systemImage: "archivebox")
+    }
+    .tint(theme.color(.primary))
+    Button {
+      Task { await store.mute(row) }
+    } label: {
+      Label(row.muted ? "Reativar" : "Silenciar", systemImage: row.muted ? "bell" : "bell.slash")
+    }.tint(theme.color(.icon))
+  }
+
+  @ViewBuilder private func leadingActions(_ row: SessionRow) -> some View {
+    if row.unread {
+      Button {
+        Task { await store.markRead(row.session) }
+      } label: {
+        Label("Marcar como lida", systemImage: "envelope.open")
+      }
+      .tint(theme.color(.primary))
+    }
+    Button {
+      Task { await store.pin(row) }
+    } label: {
+      Label(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin")
+    }.tint(theme.color(.info))
+  }
+
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {
     Button("Abrir sessão", systemImage: "bubble.left") { store.conversationPath.append(.init(id: row.id)) }
+    Button("Selecionar", systemImage: "checkmark.circle") {
+      Haptics.play(.selection)
+      withAnimation(.snappy(duration: 0.2)) { selection.start(row.id) }
+    }
     Button("Renomear", systemImage: "pencil") { renameCandidate = row }
     Button(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin") {
       Task { await store.pin(row) }

@@ -4,7 +4,10 @@ import XCTest
   /// The Sessões column header's title; the screen has no navigation bar.
   var sessionsTitle: XCUIElement { staticTexts["sessions-title"] }
   /// The lowest edge of the header (title and buttons) plus its soft fade, above which rows are covered.
-  var sessionsTop: CGFloat { max(sessionsTitle.frame.maxY, buttons["voice-start"].frame.maxY) + 16 }
+  var sessionsTop: CGFloat {
+    let selection = buttons["sessions-selection-done"]
+    return max(sessionsTitle.frame.maxY, buttons["voice-start"].frame.maxY, selection.exists ? selection.frame.maxY : 0) + 16
+  }
   func revealSessionRow(_ row: XCUIElement) {
     XCTAssertTrue(sessionsTitle.waitForExistence(timeout: 10))
     let list = collectionViews.firstMatch

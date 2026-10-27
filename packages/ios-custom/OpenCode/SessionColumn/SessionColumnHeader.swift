@@ -1,6 +1,17 @@
 import OpenCodeKit
 import SwiftUI
 
+/// The batch actions of the column's selection mode, shown by the header only while it is active.
+struct SessionColumnSelection {
+  let count: Int
+  let canSelectAll: Bool
+  let working: Bool
+  let archive: () -> Void
+  let delete: () -> Void
+  let selectAll: () -> Void
+  let cancel: () -> Void
+}
+
 /// The title row of the Sessões column: "Sessões", then voice, the optional Configurações and Nova sessão.
 /// iOS keeps settings in Você and passes no `settings` action; the Mac passes one to show the gear.
 struct SessionColumnHeader: View {
@@ -11,9 +22,10 @@ struct SessionColumnHeader: View {
   var settings: (() -> Void)?
   let newSession: () -> Void
   var newSessionDisabled = false
+  var selection: SessionColumnSelection?
 
   var body: some View {
-    Group {
+    VStack(alignment: .leading, spacing: 6) {
       if dynamicTypeSize.isAccessibilitySize {
         // The scaled title gets its own line, below the buttons, like a native large title.
         VStack(alignment: .trailing, spacing: 6) {
@@ -27,6 +39,7 @@ struct SessionColumnHeader: View {
           buttons
         }
       }
+      if let selection { selectionBar(selection) }
     }
     .padding(.horizontal, AppLayout.margin)
     .padding(.top, 4)
@@ -56,6 +69,24 @@ struct SessionColumnHeader: View {
   private var buttons: some View {
     GlassEffectContainer(spacing: 10) {
       HStack(spacing: 10) {
+        if let selection {
+          Menu {
+            Button("Arquivar (\(selection.count))", systemImage: "archivebox", action: selection.archive)
+            Button("Excluir (\(selection.count))", systemImage: "trash", role: .destructive, action: selection.delete)
+            Divider()
+            Button("Cancelar", systemImage: "xmark", action: selection.cancel)
+          } label: {
+            if selection.working {
+              ProgressView().tint(theme.color(.textStrong)).frame(width: 48, height: 48)
+            } else {
+              symbol("ellipsis", color: .textStrong)
+            }
+          }
+          .disabled(selection.working)
+          .glassEffect(.regular.interactive(), in: .circle)
+          .accessibilityLabel("Ações das sessões selecionadas")
+          .accessibilityIdentifier("sessions-selection-menu")
+        }
         Button(action: voice) {
           symbol("waveform", color: voiceActive ? .primary : .textStrong)
         }
@@ -76,6 +107,27 @@ struct SessionColumnHeader: View {
       }
       .buttonStyle(.plain)
     }
+  }
+
+  private func selectionBar(_ selection: SessionColumnSelection) -> some View {
+    HStack(spacing: 16) {
+      Text(SessionBulkCopy.count(selection.count))
+        .appFont(.secondary, weight: .semibold).monospacedDigit()
+        .foregroundStyle(theme.color(.textStrong))
+        .accessibilityIdentifier("sessions-selection-count")
+      Spacer(minLength: 0)
+      Button("Selecionar todas", action: selection.selectAll)
+        .disabled(!selection.canSelectAll || selection.working)
+        .opacity(selection.canSelectAll && !selection.working ? 1 : 0.4)
+      Button("OK", action: selection.cancel)
+        .fontWeight(.semibold)
+        .accessibilityLabel("Sair da seleção")
+        .accessibilityIdentifier("sessions-selection-done")
+    }
+    .appFont(.secondary)
+    .buttonStyle(.plain)
+    .foregroundStyle(theme.color(.textAccent))
+    .frame(minHeight: 32)
   }
 
   private func symbol(_ name: String, color: ThemeRole) -> some View {

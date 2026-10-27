@@ -14,6 +14,7 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     if let failure { app.launchEnvironment["OPENCODE_TEST_DELETE_FAILURE"] = failure }
     app.launch()
+    try app.requireSandbox()
     return app
   }
   private func shot(_ name: String) {
@@ -22,10 +23,11 @@ import XCTest
     attachment.lifetime = .keepAlways
     add(attachment)
   }
-  private func confirm(_ app: XCUIApplication) {
+  private func confirm(_ app: XCUIApplication) throws {
     let alert = app.alerts["Excluir sessão"]
     XCTAssertTrue(alert.waitForExistence(timeout: 8))
     XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS 'todas as suas sessões filhas' AND label CONTAINS 'não pode ser desfeito'")).firstMatch.exists)
+    try app.requireSandbox()
     alert.buttons["Excluir sessão"].tap()
   }
   private func waitGone(_ element: XCUIElement) {
@@ -49,7 +51,7 @@ import XCTest
     XCTAssertTrue(row.exists)
     row.swipeLeft()
     app.buttons["Excluir"].tap()
-    confirm(app)
+    try confirm(app)
     waitGone(row)
     shot("deleted-list")
   }
@@ -61,7 +63,7 @@ import XCTest
     XCTAssertTrue(app.buttons["Excluir sessão"].waitForExistence(timeout: 5))
     shot("menu")
     app.buttons["Excluir sessão"].tap()
-    confirm(app)
+    try confirm(app)
     XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     XCTAssertFalse(app.buttons["session-row-" + (try id("MENU"))].exists)
     shot("menu-return")
@@ -73,7 +75,7 @@ import XCTest
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 30))
     app.buttons["Mais opções"].tap()
     app.buttons["Excluir sessão"].tap()
-    confirm(app)
+    try confirm(app)
     XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Falha ao excluir sessão.'")).firstMatch.waitForExistence(timeout: 15))
     XCTAssertTrue(app.collectionViews["conversation-transcript"].exists)
     shot("failure")
@@ -94,7 +96,7 @@ import XCTest
     XCTAssertTrue(row.waitForExistence(timeout: 15))
     row.press(forDuration: 1)
     app.buttons["Excluir sessão"].tap()
-    confirm(app)
+    try confirm(app)
     waitGone(row)
     shot("archived")
   }

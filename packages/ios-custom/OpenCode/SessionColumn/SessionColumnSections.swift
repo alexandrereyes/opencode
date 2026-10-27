@@ -10,6 +10,9 @@ struct SessionColumnSections<Decorated: View>: View {
   let store: SessionStore
   let open: (SessionRow) -> Void
   let archived: () -> Void
+  /// The selected IDs while the selection mode is on; tapping a row then calls `toggle` instead of `open`.
+  var selection: SessionSelection = SessionSelection()
+  var toggle: (SessionRow) -> Void = { _ in }
   @ViewBuilder let decorate: (SessionRow, SessionColumnRow) -> Decorated
 
   var body: some View {
@@ -26,7 +29,12 @@ struct SessionColumnSections<Decorated: View>: View {
         ForEach(section.rows) { row in
           let attention = section.kind == .attention
           let compact = section.kind != .attention && section.kind != .running
-          decorate(row, SessionColumnRow(store: store, row: row, kind: section.kind, open: open))
+          decorate(
+            row,
+            SessionColumnRow(
+              store: store, row: row, kind: section.kind,
+              selected: selection.active ? selection.contains(row.id) : nil,
+              open: selection.active ? toggle : open))
             .listRowInsets(
               attention
                 ? EdgeInsets(top: 12, leading: AppLayout.margin + 6, bottom: 12, trailing: AppLayout.margin + 6)
@@ -99,6 +107,7 @@ struct SessionColumnSections<Decorated: View>: View {
 
 /// One row of the column, drawn by its section: three lines for "Precisa de você" and "Trabalhando",
 /// compact elsewhere. Tapping opens the session; permissions keep their compact Negar and Permitir.
+/// In the selection mode a leading circle marks the row and tapping toggles it (Negar/Permitir hide).
 struct SessionColumnRow: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
@@ -106,27 +115,30 @@ struct SessionColumnRow: View {
   let store: SessionStore
   let row: SessionRow
   let kind: SessionSection.Kind
+  /// Whether the row is selected, or nil outside the selection mode.
+  var selected: Bool?
   let open: (SessionRow) -> Void
 
   var body: some View {
     VStack(alignment: .trailing, spacing: 12) {
       Button { open(row) } label: {
-        switch kind {
-        case .attention:
-          SessionRowView(
-            row: row, preview: preview, directory: store.directoryLabel(row.session),
-            detail: SessionSections.detail(
-              row, permission: store.permission(row)?.preview, question: store.question(row),
-              failure: store.previews[row.id]?.failure, now: now))
-        case .running:
-          SessionRowView(row: row, preview: preview, directory: store.directoryLabel(row.session))
-        default:
-          SessionCompactRowView(row: row, directory: store.directoryLabel(row.session))
+        HStack(spacing: 12) {
+          if let selected {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+              .appSymbol(.header)
+              .foregroundStyle(theme.color(selected ? .primary : .textWeak))
+              .accessibilityHidden(true)
+          }
+          content
         }
+        .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .accessibilityValue(selected == true ? "selecionada" : "")
+      .accessibilityAddTraits(selected == true ? .isSelected : [])
+      .accessibilityHint(selected == nil ? "" : "Toque para marcar ou desmarcar")
       .accessibilityIdentifier("session-row-" + row.id)
-      if kind == .attention && row.state == .permission {
+      if kind == .attention && row.state == .permission && selected == nil {
         HStack(spacing: 8) {
           Button("Negar") { Task { await store.reply(row, allow: false) } }
             .foregroundStyle(theme.color(.text))
@@ -142,6 +154,21 @@ struct SessionColumnRow: View {
         .buttonStyle(.plain)
         .disabled(store.busy.contains(row.id) || store.permission(row) == nil)
       }
+    }
+  }
+
+  @ViewBuilder private var content: some View {
+    switch kind {
+    case .attention:
+      SessionRowView(
+        row: row, preview: preview, directory: store.directoryLabel(row.session),
+        detail: SessionSections.detail(
+          row, permission: store.permission(row)?.preview, question: store.question(row),
+          failure: store.previews[row.id]?.failure, now: now))
+    case .running:
+      SessionRowView(row: row, preview: preview, directory: store.directoryLabel(row.session))
+    default:
+      SessionCompactRowView(row: row, directory: store.directoryLabel(row.session))
     }
   }
 

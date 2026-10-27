@@ -83,6 +83,20 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   `PATCH /api/session/:id` and toasts, then reloads the list once the server confirms. After `build-for-testing`,
   `python3 packages/ios-custom/script/test-session-swipe.py --device … --derived … --server-url … --home …` imports two
   owned sessions (no model calls), runs `OpenCodeUITests/SessionSwipeTests` and deletes them with their pin keys.
+- **Selection (27/10):** the long-press menu's **Selecionar** starts a selection mode with that row selected. Rows
+  show a leading circle and taps toggle them; swipes, the long-press menu and Negar/Permitir are off. The header adds
+  `N selecionadas`, **Selecionar todas** (rows of expanded sections) and **OK**, plus a `⋯` left of voice with
+  **Arquivar (N)**, **Excluir (N)** and **Cancelar**. Like the web sidebar (`sidebar-selection.ts`,
+  `lifecycle-actions.tsx`): changing the filter or chip ends the mode, hidden or removed rows leave it, requests are
+  serial (one per root; the server cascades children), finished rows leave the selection, failures stay selected
+  with one "N concluídas; M falharam" toast, and an empty selection ends the mode. Archive has no confirmation and no
+  undo (the backend has no unarchive). Delete confirms with the count, the permanence warning, running sessions that
+  will be interrupted, the web's Sessão mestra warning (agent `mestra`) and an **Arquivar** alternative. The current
+  master never appears in the rows. `script/test-session-selection.py --device … --derived … --server-url …
+  --home …` imports four owned sessions (no model calls) and runs `OpenCodeUITests/SessionSelectionTests`.
+  Destructive UI tests call `requireSandbox()`, which reads the DEBUG `debug-server-url` marker and throws, without
+  acting, unless the app is connected to the sandbox; recreate the simulator between themes, since a relaunch without
+  test arguments would use the default server.
 - **Visual only for now:** the other tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
@@ -123,7 +137,8 @@ app, without the web's "Projetos" and "Worktrees" groups.
 
 - **Header:** one shared row, **Sessões** at the left and voice, the optional Configurações and `+` at the right. The
   former `…` menu is gone: pull to refresh replaces "Atualizar"; "Marcar todas como lidas", "Selecionar sessões" and
-  the disabled "Configurações" were dropped; archived sessions moved to the last row of the list. iOS passes no
+  the disabled "Configurações" were dropped (selection now starts from the long-press menu, and a `⋯` with the batch
+  actions appears only while selecting); archived sessions moved to the last row of the list. iOS passes no
   settings action (settings stay in Você), so the gear is hidden; the Mac passes one. A soft gradient below the
   header fades rows out as they scroll under the title. At accessibility sizes the title takes its own line below the
   buttons. `-OpenCodeCatalogSettingsButton` (DEBUG catalog only) renders the Mac variant, opening Você.

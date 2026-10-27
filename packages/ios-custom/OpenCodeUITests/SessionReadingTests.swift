@@ -55,6 +55,7 @@ import XCTest
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
     app.openConversationOptions(expect: "Arquivar").tap()
     screenshot("archive-confirmation")
+    try app.requireSandbox()
     app.buttons["Arquivar"].tap()
     XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 15))
     screenshot("archived-toast")
