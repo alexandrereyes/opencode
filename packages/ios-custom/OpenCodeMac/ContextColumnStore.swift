@@ -24,7 +24,6 @@ import SwiftUI
   private(set) var loaded = false
   private(set) var error: String?
   private(set) var acting: Set<String> = []
-  let thumbnails = ResourceThumbnails(width: 640)
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var resourcesTask: Task<Void, Never>?
 
@@ -69,9 +68,7 @@ import SwiftUI
 
   func run() async {
     await load()
-    let events = sessions.hub.events()
-    async let pictures: Void = thumbnails.run({ [weak self] in self?.resources ?? [] }, client: client)
-    for await frame in events {
+    for await frame in sessions.hub.events() {
       if Task.isCancelled { break }
       switch frame.event {
       case .connected: schedule()
@@ -86,7 +83,6 @@ import SwiftUI
     }
     scheduled?.cancel()
     resourcesTask?.cancel()
-    _ = await pictures
   }
 
   func load() async {

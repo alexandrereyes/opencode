@@ -13,8 +13,14 @@ struct ConversationActivityCard<Content: View>: View {
   let toggle: () -> Void
   @ViewBuilder let content: () -> Content
   @Environment(\.dynamicTypeSize) private var typeSize
+  #if os(macOS)
+  // The Mac's desktop sizes, like `AppTypography` (about two points below the iPhone's).
+  private let titleSize: CGFloat = 13
+  private let detailSize: CGFloat = 12
+  #else
   @ScaledMetric(relativeTo: .subheadline) private var titleSize: CGFloat = 15
   @ScaledMetric(relativeTo: .footnote) private var detailSize: CGFloat = 13
+  #endif
   private let inset: CGFloat = 5
 
   var body: some View {

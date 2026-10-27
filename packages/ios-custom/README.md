@@ -2416,21 +2416,25 @@ checks that `iphone_query` for `device`, `network` and `location` completed with
 and Photos need the physical iPhone 14: a DEBUG launch with `-OpenCodeDeviceProbe` enables every source (answer the
 iOS prompts), collects each once plus the locked-cache answer, and writes `Documents/device-probe.json`.
 
-## Mac app (stage 1) — 27 October
+## Mac app (stages 1–3) — 27 October
 
 A native macOS client of the same server, built from this project with the iPhone code it can reuse. Briefing and
 approved mocks: `.agent-artifacts/mac-app/coluna3/` (`BRIEFING.md`, `final/contexto.png`, `final/arquivos.png`,
-`final/janela-mac.png`) of the `mac-app` worktree. This stage delivers the three-column window and the real third
-column (Contexto, option 3); the full chat is the next one.
+`final/janela-mac.png`) of the `mac-app` worktree. Stage 1 delivered the three-column window and the real third
+column; stage 2 the LLM proxy window; stage 3 the layout parity with the approved mocks and the shared chat (see
+[The window](#the-window)).
 
 ### Target and folders
 
 - Target **OpenCodeMac** (scheme `OpenCodeMac`) in `OpenCode.xcodeproj`: SwiftUI app, macOS 15+, bundle
-  `br.com.alexandrem.opencode.mac`, team `ERRYZ68LX5`, automatic signing,
+  `br.com.alexandrem.opencode.mac` (Release; Debug is `br.com.alexandrem.opencode.mac.debug`, so a development or
+  fixture run never shares window frames, defaults or saved state with the installed app), team `ERRYZ68LX5`,
+  automatic signing,
   hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
 - `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
   one window per resource, the LLM proxy window, `Settings`), `MacRuntime.swift`, `MacWindow.swift`,
-  `MacSessionColumn.swift`, `MacChatColumn.swift` + `MacTranscriptView.swift`, `MacNewSession.swift`,
+  `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift` + `MacTranscriptView.swift` +
+  `MacComposer.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
   `MacCodeView.swift`, `MacResourceWindow.swift`, `MacProxyWindow.swift`, `MacSettingsView.swift`, and the
   DEBUG-only `MacFixture.swift`, `MacFixtureProxy.swift` and `MacCapture.swift`.
@@ -2443,7 +2447,7 @@ column (Contexto, option 3); the full chat is the next one.
 
 | Shared file | Change for the Mac |
 | --- | --- |
-| `SessionColumn/*` (header, rings, chips, sections, rows, path line) | Glass through `adaptiveGlass`; the header gained `voiceDisabled`; chips use `.never` scroll indicators on macOS; the ring drawing is `QuotaRing`, also used by the LLM proxy sidebar |
+| `SessionColumn/*` (rings, chips, sections, rows, path line; the header is no longer shown on the Mac) | Glass through `adaptiveGlass`; the header gained `voiceDisabled` (unused since stage 3); chips use `.never` scroll indicators on macOS; the ring drawing is `QuotaRing`, also used by the LLM proxy sidebar |
 | `SessionStore.swift` | `#if os(iOS)` around drafts, quote modes, reverts and the live-conversation registry; DEBUG fixtures are iOS-only |
 | `Theme.swift` | `uiColor`/`ThemeChrome` in `#if os(iOS)`; `nsColor` on macOS |
 | `AppTypography.swift` | UIKit metrics in `#if os(iOS)`; the Mac uses desktop sizes (about 2 pt smaller) for the same roles |
@@ -2454,7 +2458,8 @@ column (Contexto, option 3); the full chat is the next one.
 | `SessionResources/ResourceList.swift` | `ResourceImage` (`UIImage`/`NSImage`), wider snapshots on request, `frames` (capture time) |
 | `AgentPixels.swift` (new) | `AgentPixels` and `AppTheme.agentRole`, moved unchanged out of `ConversationComponents.swift` |
 | `PlatformGlass.swift` (new) | Liquid Glass on iOS and macOS 26; material/bordered fallback on macOS 15 |
-| `SessionHeaderTitle.swift` (new) | Neutral avatar + context ring + title + `path · trabalhando…` (the Mac title bar) |
+| `ConversationColumn/*` | The chat pieces (see [Shared chat layout](#shared-chat-layout-iphone-and-mac--27-october)). For the Mac: `ConversationAvatar.size` (44 by default), the activity card's title/detail sizes at desktop density (13/12 pt) in `#if os(macOS)`, and `composerCapsule()` through `adaptiveGlass` (the same glass on iOS; macOS 15 has no `glassEffect`) |
+| `SessionColumn/ProjectIconImage.swift` | `ProjectIconRenderer` on macOS rasterizes the SVG with `NSImage` (AppKit reads SVG data); the iOS web-view renderer is unchanged inside `#if os(iOS)` |
 | `ModelCatalogCache`, `VoiceMemoryStore`, `SubscriptionTestClient`, `ResponseEngines`, `ArchivedSessionsView`, `SessionDeleteConfirmation` | Unchanged |
 
 The iPhone target keeps its behavior: every change is either a no-op on iOS (`#if`) or a move. OpenCodeKit gained
@@ -2463,58 +2468,95 @@ The iPhone target keeps its behavior: every change is either a no-op on iOS (`#i
 
 ### The window
 
-- `NavigationSplitView` (Sessões | chat) plus `.inspector` for Contexto: an inspector is the Mac's collapsible
-  trailing column (⌥⌘I, toolbar button, the `…` menu). The inspector is attached to the **detail column**, and the
-  window's minimum width comes only from the column modifiers (about 1400 pt with both side columns open, 860 with
-  Sessões hidden, 490 with Contexto hidden). Do not add a `minWidth` on the root, the detail or any column
-  content: a minimum below what the columns need (the root's `minWidth: 980` until the fix of 27 October) lets
-  AppKit size the window narrower than the split view's minimum. The split view and the inspector then keep
-  changing each other's minimum size and AppKit aborts ("more Update Constraints in Window passes than there are
-  views in the window"): the app closed at launch. With the inspector around the whole split view, the window's
-  minimum also counted the inspector's ideal width twice (about 1570 pt, wider than a 1512-pt laptop screen).
-  `script/test-mac-window.sh` guards both (see Verification).
-- **Sessões**: the shared column. Selecting a row selects the session; the iPhone's swipe and long-press actions are
-  one right-click menu (open, rename, pin, mute, mark read, archive, delete). Configurações opens the `Settings`
-  scene; voice is shown disabled (calls stay on the iPhone in this stage); a quota ring opens the LLM proxy window
+Stage 3 (27 October) brought the window to the approved mocks: option B of the title bar, the "Máximo" level of
+Contexto and the chat shared with the iPhone. Briefing, mocks and the parity images:
+`.agent-artifacts/mac-app/paridade/` of the `mac-app` worktree (`BRIEFING.md`, `1-janela-contexto.png` … and
+`paridade-*.png`).
+
+- **Columns**: `NavigationSplitView` (Sessões | detail). The detail is an `HStack` of the chat and Contexto with a
+  draggable hairline between them (`MacColumnDivider`, 400–760 pt, `@AppStorage("OpenCodeMacContextWidth")`);
+  Contexto is offered the room first (`layoutPriority(1)`, `minWidth: 400`), so a narrower window shrinks it before
+  the chat goes below 460 pt and the window's minimum is the sum of the minimums (1191 pt with Sessões at its 330-pt
+  ideal). Contexto is no longer an `.inspector`: an inspector gets its own, empty part of the title bar, so `…` and
+  Nova sessão could not sit over it. It hides with ⌥⌘I, Visualizar ▸ Ocultar contexto or the `…` menu. Do not add a
+  `minWidth` on the root: the stage-1 crash (a root minimum below the columns' made AppKit loop on "more Update
+  Constraints in Window passes than there are views") came from it. `script/test-mac-window.sh` guards it.
+- **Title bar (option B)**: one `unifiedCompact` strip, no title. Every item is a `MacPlainToolbarItem`, which on
+  macOS 26 hides the shared Liquid Glass capsule (`sharedBackgroundVisibility(.hidden)`): plain 15-pt icons with a
+  hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (disabled until calls come to the Mac),
+  Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
+  30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), a menu that switches to one of the
+  12 most recent sessions. Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
+  Mostrar/Ocultar contexto) and Nova sessão (`MacSessionActions`). The system sidebar button is removed
+  (`.toolbar(removing: .sidebarToggle)`; ⌃⌘S and Visualizar still collapse Sessões), and so is the old
+  `sidebar.right` button. The same holds for the LLM proxy window.
+- **Sessões**: the shared column without its big title: it starts under the bar with the quota rings and the chips;
+  sections and rows are unchanged. Selecting a row selects the session; the iPhone's swipe and long-press actions are
+  one right-click menu (open, rename, pin, mute, mark read, archive, delete). A quota ring opens the LLM proxy window
   on its provider.
-- **Chat (provisional)**: the title bar holds `SessionHeaderTitle`, `…` and the orange `+` (Nova sessão sheet: a
-  repository chip, the prompt, agent `build` and the default model). The content is a read-only SwiftUI transcript of
-  `custom.transcript/list` (user bubbles, assistant text with inline Markdown) and a plain composer that sends through
-  `PromptSubmission` with the session's own agent and model. File names in code spans open Arquivos at their folder.
+- **Chat**: the iPhone's shared pieces with Mac hosts (`MacTranscriptView.swift`, `MacComposer.swift`), over
+  `ConversationActivity.project` like the iPhone transcript:
+  - user bubble on the right with Desfazer (confirmation, then `SessionRevert.perform`, the prompt back in the
+    composer and a "Mensagens seguintes ocultas · Refazer" bar; the next prompt commits it through
+    `PromptSubmission(commitsRevert:)`), Copiar and the time;
+  - the assistant's Markdown at full width (`MacMarkdownText`: headings, paragraphs, bullet and numbered lists,
+    quotes, fenced code and rules as SwiftUI blocks; inline styles and links from `AttributedString(markdown:)`;
+    selectable per block; tables and formulas stay plain text);
+  - activity groups as `ConversationActivityCard` + `ConversationTimeline`, closed by default; open, the first four
+    items and `Mais N ferramentas…` (Mac-only fold). Items use `ConversationTimelineLabel`: reads, files with
+    `+N −M`, searches, skills, notices, reasoning, subagents (agent chip and the pixel button that opens the
+    child), other calls with their target; a call with output or an error opens it below;
+  - the footer (`Opus 5.5 · xhigh · 27/10 07:18`, Copiar, Ouvir with the system pt-BR voice) on `TranscriptMarks`
+    footers;
+  - `ConversationRunTray` (`trabalhando · <elapsed>` from `executionStarted`, Parar) and the queue
+    (`/api/session/:id/inbox` `delivery: queue`: Editar, Enviar agora, ×);
+  - the composer: `Pergunte qualquer coisa…`, `+` (puts a file's path in the prompt), the model capsule and the MCP
+    capsule (`composerCapsule()`, menus over `/api/model` variants and `/api/mcp` with connect/disconnect), the
+    microphone (the system dictation, `startDictation:`) that becomes Enviar with text, and below
+    `● build ⌄ · Contexto N% · used / limit · ⚡ Cache N%`. The chosen agent and model go with the next prompt
+    through `PromptSubmission`, like the iPhone.
+  File names in the answers open Arquivos at their folder. A short conversation sits at the bottom by the composer;
+  its content fills the viewport, or AppKit draws the document's top edge as a line across the column.
 - **Settings**: server address and password (Keychain through `ServerStore`, default `http://127.0.0.1:4096`, a
   "Testar conexão" button) and the iPhone themes. `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
   `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override it for a launch, as on the iPhone.
 
-### Coluna 3 — Contexto
+### Coluna 3 — Contexto ("Máximo")
 
 `ContextColumnStore` reads, for the selected root, the same sources as the iPhone's conversation and "Agentes e
 tarefas": `GET /api/session/:id`, `custom.session-family/snapshot` and `/page`, the root's transcript page (links
 `subagent` calls), `/api/shell`, `/api/model`, `/api/agent`, `/api/vcs/diff`, `custom.worktrees/locate` and
-`custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math:
+`custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math.
 
-- **Header**: branch `⌄` (copy, Finder) and path; `+N −M · N arquivos` from the working diff; `Arquivos ›`;
-  `Contexto N% · used / limit` (latest measured step, transcript fallback), `Cache hit` of the whole session, the
-  total cost and `Sessão` / `Subagentes` (the family snapshot's descendant cost, else the sum of loaded descendants).
-- **Subagentes `N · M ativos`**: `ConversationProjection.work` order (live first by latest start, then by last run);
-  live rows and the newest finished ones up to five, the rest behind `+N concluídos`. Each row: monogram with a state
-  ring, title, colored state, time, `›`; agent chip, context ring with `tokens · %` (`Session.context`), cache hit of
-  the subagent's session (amber below 80%), cost including its own subagents; `agora: <tool>` from the child's
-  preview; an orange chip for each resource it (or its descendants) is driving. A permission anywhere in the
-  subagent's branch turns the row lilac with Permitir/Negar; finished rows are dimmed; clicking opens the child in
-  the middle column (`‹` returns).
-- **Tarefas em segundo plano**: background shells (`SessionWork.kind == .script`), the command without its port
-  option plus `· :port`, elapsed time and a `⋯` with Parar and Copiar comando.
-- **Recursos ao vivo**: in use (`agent`/`user`) as large tiles with the live snapshot (`ResourceThumbnails`, every
-  5 s at 640 px), orange ring and `Agente usando · <direct subagent>`; free then stopped ones as compact rows with
-  `último quadro há N min`. Clicking opens a separate window with the enlarged live picture (1 s snapshots); the
-  iPhone's interactive viewer is UIKit and comes later.
-- **Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat): `‹ Contexto`, title, `Só alterados`,
-  search (`/api/fs/find`); a clickable breadcrumb from the checkout root; a Finder-style `Table` (folders first,
-  sortable by name, date and size read from this Mac when the path is local, amber dot and `+N −M`); the selected file
-  below in an `NSTextView` with line numbers and the highlight.js engine, or Quick Look. **Abrir no Xcode** and
-  **Mostrar no Finder** appear only when the path exists on this Mac; **Ver diff no FileMerge** also needs
-  `/usr/bin/opendiff` and FileMerge, writes `git show HEAD:<file>` (an empty file for a new one) to a temporary
-  folder and opens both. There is no review tab.
+Only neutral grays and hairlines, no cards and no colored icons. The only colors: `+N` green and `−N` coral, a cache
+hit below 80% amber, and the amber `?` of a subagent asking for permission. Top to bottom:
+
+1. `mac-app · +128 −14 · Arquivos ›`: the branch (its right-click menu copies it or the path, or shows it in the
+   Finder; the path is its tooltip), the working diff and a plain link to Arquivos.
+2. Three figures (22 pt semibold over an 11-pt gray caption, hairlines between them): `US$ 78,25` "custo total",
+   `28%` "contexto · 278,6k / 1M" (latest measured step, transcript fallback), `99,5%` "cache hit" of the session.
+3. `Sessão US$ … · Subagentes US$ …` (the family snapshot's descendant cost, else the sum of loaded descendants).
+4. `SUBAGENTES active/total` with the `contexto · cache · custo` headings. Rows keep `ConversationProjection.work`'s
+   order (live first, then the newest finished up to five, the rest behind `+N concluídos ›`): a 13-pt medium title,
+   the three metrics in fixed right-aligned 11-pt columns with tabular digits (cost brighter), then
+   `agora: <tool> · <resource it drives>` and the elapsed time. The state is a glyph in a small gutter: a gray
+   spinning ring while running, an amber `?` while asking (with `Permitir · Negar` links), nothing once ended
+   (finished rows dimmed). Clicking opens the child in the middle column (`‹` returns); right-click has Parar.
+5. `TAREFAS N`: background shells, 12-pt lines with a monochrome icon (a hammer for builds and tests, play
+   otherwise), the command without its port option plus `· :port`, the elapsed time; right-click Parar and Copiar
+   comando.
+6. `RECURSOS N`: 12-pt lines with a monochrome icon, the device (or kind · name) and the state in gray (`Agente
+   usando`, `Você no controle`, `Livre`, `Parado há N min`). Clicking opens the resource's window, as before; the
+   column no longer polls thumbnails (the large tiles are gone).
+
+**Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat), at the same level: `‹ Contexto`
+(Esc), the centered title and the search (`/api/fs/find`); a gray clickable breadcrumb; `PASTA` with
+`Todos · Alterados` as text; a Finder-like list with monochrome `doc`/`folder` icons, `+N −N` in color, a gray dot
+for folders holding changes (date and size, read from this Mac, in the tooltip); then
+`ARQUIVO · N LINHAS` with the links `Abrir no Xcode · Finder · Ver diff` (only when the path exists on this Mac; Ver
+diff also needs `/usr/bin/opendiff` and FileMerge and writes `git show HEAD:<file>`, or an empty file for a new one,
+next to the working copy) and the code in SF Mono with line numbers and the highlight.js colors blended halfway to
+the plain code color, or Quick Look.
 
 **Not provided by the server (shown as `—`, no backend change):** a subagent's context before its first measured
 step; per-subagent cache when the child has no `tokens`; the resource ↔ subagent link is inferred from
@@ -2597,17 +2639,24 @@ swift packages/ios-custom/script/mac-prints.swift crop <in> <out> x y w h       
 swift packages/ios-custom/script/mac-prints.swift compare <out> <mock> <app> [<mock> <app>…]
 ```
 
-`-OpenCodeMacFixture` swaps the server for a closed in-memory one (`MacFixture`: 6 roots, 46 subagents with 4 live
-and one asking permission, 2 tasks, 5 resources with drawn pictures, working changes; folders and files come from the
-given checkout). Its LLM proxy (`MacFixtureProxy`) has Codex with seven accounts (Disponível, Cota semanal esgotada,
+`-OpenCodeMacFixture` swaps the server for a closed in-memory one (`MacFixture`, the cases of the stage-3 mocks: 7
+roots in Trabalhando, Hoje and Ontem with nothing pending; 46 subagents with 4 live, one asking permission with a
+60,6% cache; 2 tasks; 3 resources with drawn pictures; 6 changed files, `+128 −14`; a root transcript with an ended
+turn (answer, a 15-call activity card, footer) and a running one (the live subagents), one queued prompt, four MCP
+servers with one connected; folders and files come from the given checkout). Its LLM proxy (`MacFixtureProxy`) has Codex with seven accounts (Disponível, Cota semanal esgotada,
 Limite de 5 horas, Em espera, Desativada, and a stale Plus account under "Outros planos" with paid credits) and
 Claude with four (one needing reauthentication, one Max 5x outside the pool), banked resets with and without
 expiry, and automation off for Codex and on for Claude. Its actions change only that memory, after 2 s
 (automation) or 6 s (a reset, `-OpenCodeMacProxyResetSeconds`). `-OpenCodeMacProxyScenario loading|error|empty`
-holds the read forever, fails it, or returns no accounts. `MacCapture` moves the window off-screen at 1600×1000, writes `<name>.png` from the window server's
+holds the read forever, fails it, or returns no accounts. `MacCapture` moves the window off-screen at 1600×1000
+(`-OpenCodeMacCaptureSize 1269x794` matches the stage-3 mocks, a 1269×794-pt window drawn at 1.25×; add
+`-OpenCodeMacContextWidth 427` for their Contexto width), writes `<name>.png` from the window server's
 picture of this app's own window (`CGWindowListCreateImage`, needs no permission for the app's own windows;
-`cacheDisplay` is the fallback but draws the Liquid Glass sidebar blank) and `<name>-coluna.png` with the whole
-column through `ImageRenderer`. The stage-1 captures are in
+`cacheDisplay` is the fallback while the screen is locked; it cannot draw the Liquid Glass sidebar, so the capture
+first gives the sidebar's list views an AppKit background of the theme's color) and `<name>-coluna.png` with the
+whole column through `ImageRenderer`. `-OpenCodeMacOpenActivity 1` opens the first activity card, like the chat
+mock. The stage-3 parity images (mock × app) are rebuilt by running the captures at the mocks' size and
+`mac-prints.swift compare`; `script/test-mac-window.sh` takes `OPENCODE_MAC_DERIVED` for another DerivedData. The stage-1 captures are in
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-app-prints/`.
 
 The LLM proxy window is captured with `-OpenCodeMacProxy codex|anthropic|resets` (put these options **before**
@@ -2644,8 +2693,10 @@ activated, so `MacStress` opens one through File ▸ New Window.
 
 ### Next stages
 
-- The full chat: port the iPhone transcript, activity group, tray and composer (UIKit today) to the Mac.
-- Voice (GPT Live calls and dictation) on the Mac.
+- The chat's remaining iPhone features: history paging and jump to latest, the composer's mentions, attachments,
+  quotes and Background, inline file diffs, questions and permissions in the transcript, rich Markdown (tables,
+  formulas, Mermaid) and search.
+- GPT Live voice calls on the Mac (the composer's microphone already starts the system dictation).
 - The interactive resource viewer (stream, taking control, input) in its window.
 - Nova sessão with worktrees, chats, MCPs and the model picker; menu bar, notifications and widgets stay out.
 

@@ -27,7 +27,7 @@ struct MacCodeView: NSViewRepresentable {
     textView.isSelectable = true
     textView.drawsBackground = false
     textView.isRichText = true
-    textView.textContainerInset = NSSize(width: 8, height: 10)
+    textView.textContainerInset = NSSize(width: 6, height: 10)
     textView.isHorizontallyResizable = true
     textView.textContainer?.widthTracksTextView = false
     textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -53,7 +53,7 @@ struct MacCodeView: NSViewRepresentable {
     textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: base))
     if let ruler = scroll.verticalRulerView as? LineNumberRuler {
       ruler.configure(text: text, font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
-        color: theme.nsColor(.codeLineNumber), separator: theme.nsColor(.codeGutterSeparator))
+        color: theme.nsColor(.codeLineNumber), separator: .clear)
     }
     context.coordinator.task?.cancel()
     guard let source = ContextColumn.highlightSource(text, path: path) else { return }
@@ -67,9 +67,11 @@ struct MacCodeView: NSViewRepresentable {
       for run in block.runs {
         let length = (run.text as NSString).length
         guard location + length <= storage.length else { break }
+        // Desaturated: each token color halfway to the plain code color, so the code reads as text first.
         if let syntax = run.syntax {
-          storage.addAttribute(.foregroundColor, value: theme.nsColor(syntax.role),
-            range: NSRange(location: location, length: length))
+          let color = theme.nsColor(syntax.role).blended(withFraction: 0.45, of: theme.nsColor(.codeText))
+            ?? theme.nsColor(syntax.role)
+          storage.addAttribute(.foregroundColor, value: color, range: NSRange(location: location, length: length))
         }
         location += length
       }
@@ -107,6 +109,9 @@ final class LineNumberRuler: NSRulerView {
   }
 
   @objc private func redraw() { needsDisplay = true }
+
+  /// Numbers only, over the code's own background: no gutter fill.
+  override func draw(_ dirtyRect: NSRect) { drawHashMarksAndLabels(in: dirtyRect) }
 
   override func drawHashMarksAndLabels(in rect: NSRect) {
     guard let textView = clientView as? NSTextView, let layout = textView.layoutManager,

@@ -1,8 +1,8 @@
 import OpenCodeKit
 import SwiftUI
 
-/// The main window: Sessões | chat in a split view, and Contexto as the inspector on the right. An inspector is
-/// the Mac's collapsible trailing column; a three-column split view cannot hide its last column.
+/// The main window: Sessões | chat in a split view, and Contexto beside the chat in the detail column, behind a
+/// draggable hairline. Contexto hides with ⌥⌘I, Visualizar or the `…` menu; Sessões with ⌃⌘S.
 struct MacWindow: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
@@ -10,15 +10,26 @@ struct MacWindow: View {
   @Bindable var store: SessionStore
   @Bindable var runtime: MacRuntime
   @State private var context: ContextColumnStore?
+  @AppStorage("OpenCodeMacContextWidth") private var contextWidth = 520.0
 
   var body: some View {
     NavigationSplitView {
       MacSessionColumn(store: store, runtime: runtime)
-        .navigationSplitViewColumnWidth(min: 300, ideal: 370, max: 480)
+        .navigationSplitViewColumnWidth(min: 300, ideal: 330, max: 480)
     } detail: {
-      // No minimum width here: a detail minimum beside an inspector makes AppKit's constraint pass loop.
-      MacChatColumn(store: store, runtime: runtime, context: context)
-        .inspector(isPresented: $runtime.contextVisible) { inspector }
+      // Contexto shares the detail column with the chat instead of being an inspector: an inspector gets its
+      // own, empty part of the title bar, while the approved window has one strip with `…` and Nova sessão
+      // over Contexto.
+      HStack(spacing: 0) {
+        MacChatColumn(store: store, runtime: runtime, context: context)
+          .frame(minWidth: 460, maxWidth: .infinity)
+        if runtime.contextVisible {
+          MacColumnDivider(width: $contextWidth)
+          // Offered the room first, up to the dragged width; a narrower window shrinks it to 400 pt before the
+          // chat goes below its 460, so the window's minimum stays the two minimums.
+          inspector.frame(minWidth: 400, maxWidth: min(max(contextWidth, 400), 760)).layoutPriority(1)
+        }
+      }
     }
     .background(theme.color(.background))
     .toastOverlay(store.toast)
@@ -65,9 +76,7 @@ struct MacWindow: View {
     #endif
   }
 
-  /// Contexto. Attached to the detail column, as AppKit expects for an inspector inside a split view: around
-  /// the whole split view the window's minimum width counted the inspector's ideal width twice (~1570 pt, wider
-  /// than a 1512-pt laptop screen).
+  /// Contexto, at the width the divider beside it sets.
   private var inspector: some View {
     Group {
       if let context {
@@ -80,13 +89,6 @@ struct MacWindow: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(theme.color(.background))
-    .inspectorColumnWidth(min: 400, ideal: 540, max: 760)
-    .toolbar {
-      ToolbarItem {
-        Button { runtime.contextVisible.toggle() } label: { Label("Contexto", systemImage: "sidebar.right") }
-          .help("Ocultar contexto (⌥⌘I)")
-      }
-    }
   }
 
   /// A child session selects its root and opens the child in the middle column.
@@ -100,5 +102,30 @@ struct MacWindow: View {
       return
     }
     runtime.selection = MacSelection(sessionID: id)
+  }
+}
+
+/// The hairline between the chat and Contexto; dragging it resizes Contexto.
+private struct MacColumnDivider: View {
+  @Environment(\.appTheme) private var theme
+  @Binding var width: Double
+  @State private var start: Double?
+
+  var body: some View {
+    Rectangle().fill(theme.color(.border)).frame(width: 1)
+      .overlay {
+        Color.clear.frame(width: 9).contentShape(Rectangle())
+          .onHover { inside in
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+          }
+          .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+              let origin = start ?? width
+              start = origin
+              width = min(max(origin - value.translation.width, 400), 760)
+            }
+            .onEnded { _ in start = nil })
+      }
+      .accessibilityHidden(true)
   }
 }

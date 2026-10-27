@@ -27,11 +27,14 @@ import SwiftUI
     // An inactive window desaturates its glass tints; the capture shows the window as it looks in use.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
-    // Outside the visible screens, so a capture run never sits under Alexandre's pointer.
-    window.setFrame(NSRect(x: -4000, y: 40, width: 1600, height: 1000), display: true)
+    // Outside the visible screens, so a capture run never sits under Alexandre's pointer. The approved mocks
+    // are a 1269×794-pt window drawn at 1.25×: `-OpenCodeMacCaptureSize 1269x794` matches them.
+    let size = MacFixture.value("-OpenCodeMacCaptureSize")?.split(separator: "x").compactMap { Double($0) }
+    window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
     try? await Task.sleep(for: .seconds(MacFixture.current == nil ? 8 : 5))
     let path = folder + "/" + name + ".png"
     if screenLocked || !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
+      if screenLocked { unglaze(view, background: theme.nsColor(.background)) }
       cached(view, to: path)
     }
     if let context = context(), runtime.selection.files == nil {
@@ -170,11 +173,32 @@ import SwiftUI
     try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
   }
 
-  /// The column's cards unscrolled, at the inspector's width, like the approved `contexto.png`.
+  /// AppKit cannot draw the Liquid Glass sidebar (`NSGlassEffectView`): the column's SwiftUI background lives in
+  /// the glass and comes out white, under light text. A locked-screen capture gives the sidebar's list views an
+  /// AppKit background of the theme's color instead; capture runs quit right after.
+  private static func unglaze(_ root: NSView, background: NSColor) {
+    func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+    for glass in all(root) where String(describing: type(of: glass)) == "NSGlassEffectView" {
+      for view in all(glass) {
+        if let scroll = view as? NSScrollView {
+          scroll.drawsBackground = true
+          scroll.backgroundColor = background
+          (scroll.contentView as NSClipView).drawsBackground = true
+          scroll.contentView.backgroundColor = background
+        }
+        if let table = view as? NSTableView { table.backgroundColor = background }
+      }
+      glass.superview?.wantsLayer = true
+      glass.superview?.layer?.backgroundColor = background.cgColor
+    }
+    root.display()
+  }
+
+  /// The column unscrolled, at its default width.
   private static func column(_ store: ContextColumnStore, runtime: MacRuntime, theme: AppTheme, to path: String) {
-    let content = ContextColumnCards(store: store, runtime: runtime)
-      .padding(12)
-      .frame(width: 512)
+    let content = ContextColumnSections(store: store, runtime: runtime)
+      .padding(.horizontal, 18).padding(.vertical, 12)
+      .frame(width: 430)
       .background(theme.color(.background))
       .environment(\.appTheme, theme)
       .environment(\.locale, Locale(identifier: "pt_BR"))

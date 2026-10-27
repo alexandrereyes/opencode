@@ -8,7 +8,7 @@ struct ComposerCapsule: ViewModifier {
 
   func body(content: Content) -> some View {
     content.padding(.horizontal, horizontal).frame(height: 20)
-      .glassEffect(.regular.interactive(), in: .capsule)
+      .adaptiveGlass(Capsule(), interactive: true)
       .overlay { Capsule().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
   }
 }

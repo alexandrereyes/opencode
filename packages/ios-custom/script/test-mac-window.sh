@@ -13,15 +13,15 @@ runs=${1:-1}
 idle=${2:-30}
 package=${0:A:h:h}
 root=${package:h:h}
-derived=${TMPDIR%/}/opencode/mac-app-work/mac-derived
+derived=${OPENCODE_MAC_DERIVED:-${TMPDIR%/}/opencode/mac-app-work/mac-derived}
 logs=$(mktemp -d "${TMPDIR%/}/opencode/mac-window-stress.XXXXXX")
 xcodebuild -project "$package/OpenCode.xcodeproj" -scheme OpenCodeMac -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived" build -quiet
 app="$derived/Build/Products/Debug/OpenCodeMac.app/Contents/MacOS/OpenCodeMac"
 failed=0
 for run in $(seq 1 "$runs"); do
-  defaults delete br.com.alexandrem.opencode.mac 2>/dev/null || true
-  rm -rf "$HOME/Library/Saved Application State/br.com.alexandrem.opencode.mac.savedState"
+  defaults delete br.com.alexandrem.opencode.mac.debug 2>/dev/null || true
+  rm -rf "$HOME/Library/Saved Application State/br.com.alexandrem.opencode.mac.debug.savedState"
   log="$logs/run-$run.log"
   set +e
   timeout $((idle + 240)) "$app" -OpenCodeMacFixture contexto -OpenCodeMacFixtureRoot "$root" \

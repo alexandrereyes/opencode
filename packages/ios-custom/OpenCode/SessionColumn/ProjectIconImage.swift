@@ -1,6 +1,10 @@
 import OpenCodeKit
 import SwiftUI
+#if os(iOS)
 import WebKit
+#else
+import AppKit
+#endif
 
 /// A project's own icon at text size, beside a chip's name.
 struct ProjectIconImage: View {
@@ -49,6 +53,7 @@ private struct ProjectIconBitmap: View {
   }
 }
 
+#if os(iOS)
 /// Rasterizes an SVG icon to PNG through an `<img>` in a throwaway web view: no JavaScript, no network and only
 /// `data:` images, like the Mermaid diagrams. WebKit paints only views in a window, so it sits behind the app's views.
 @MainActor enum ProjectIconRenderer {
@@ -120,3 +125,25 @@ private struct ProjectIconBitmap: View {
     }
   }
 }
+#else
+/// Rasterizes an SVG icon to PNG with AppKit's own SVG support (`NSImage` reads SVG data); the iPhone needs a web
+/// view for it.
+@MainActor enum ProjectIconRenderer {
+  static func render(_ svg: Data, pixels: Int) async -> Data? {
+    guard let image = NSImage(data: svg), image.size.width > 0, image.size.height > 0,
+      let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4,
+        hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+    else { return nil }
+    // Fitted like the iPhone's `object-fit: contain`.
+    let side = Double(pixels)
+    let scale = min(side / image.size.width, side / image.size.height)
+    let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    image.draw(in: NSRect(x: (side - size.width) / 2, y: (side - size.height) / 2, width: size.width, height: size.height))
+    NSGraphicsContext.restoreGraphicsState()
+    return bitmap.representation(using: .png, properties: [:])
+  }
+}
+#endif

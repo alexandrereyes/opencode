@@ -2,7 +2,6 @@ import AppKit
 import Observation
 import OpenCodeKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Arquivos, over the Contexto column: the session's checkout as a Finder-like list (`/api/fs/list`, like the
 /// iPhone explorer) with working-copy changes, and the selected file below it.
@@ -31,6 +30,8 @@ struct MacFilesView: View {
   }
 }
 
+/// Arquivos at the "Máximo" level: `‹ Contexto`, the title and search; a gray breadcrumb; `PASTA` with
+/// `Todos · Alterados`; a Finder-like list with monochrome icons and colored `+N −N`; the selected file below.
 private struct MacFilesContent: View {
   @Environment(\.appTheme) private var theme
   @Bindable var files: MacFilesStore
@@ -39,167 +40,192 @@ private struct MacFilesContent: View {
   @FocusState private var searchFocused: Bool
 
   var body: some View {
-    VStack(spacing: 10) {
-      ContextCard {
-        HStack(spacing: 12) {
-          Button {
-            runtime.selection.files = nil
-          } label: {
-            HStack(spacing: 8) {
-              Image(systemName: "chevron.left").appSymbol(.inline, weight: .semibold)
-              Text("Contexto")
-            }
-            .fixedSize()
-            .appFont(.heading).foregroundStyle(theme.color(.primary))
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(theme.color(.surfaceRaised), in: RoundedRectangle(cornerRadius: 9))
-            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(theme.color(.border), lineWidth: 1) }
-          }
-          .buttonStyle(.plain)
-          .keyboardShortcut(.cancelAction)
-          Divider().frame(height: 22)
-          Image(systemName: "doc.text").appSymbol(.action).foregroundStyle(theme.color(.text))
-          Text("Arquivos").appFont(.title, weight: .semibold).foregroundStyle(theme.color(.textStrong))
-          Spacer(minLength: 8)
-          Toggle("Só alterados", isOn: $files.onlyChanged)
-            .toggleStyle(.checkbox).appFont(.secondary)
-            .help("Mostrar só os arquivos alterados e as pastas que os contêm")
-          Button {
-            searching.toggle()
-            if searching { searchFocused = true } else { files.query = "" }
-          } label: {
-            Image(systemName: "magnifyingglass").appSymbol(.action).foregroundStyle(theme.color(.text))
-              .frame(width: 32, height: 32)
-              .background(theme.color(.surfaceRaised), in: RoundedRectangle(cornerRadius: 9))
-              .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(theme.color(.border), lineWidth: 1) }
-          }
-          .buttonStyle(.plain).help("Buscar arquivos").accessibilityLabel("Buscar arquivos")
-        }
-        if searching {
-          TextField("Buscar arquivos na sessão", text: $files.query)
-            .textFieldStyle(.roundedBorder).focused($searchFocused).padding(.top, 10)
-        } else {
-          breadcrumb.padding(.top, 10)
-        }
+    VStack(alignment: .leading, spacing: 0) {
+      header.padding(.top, 8).padding(.bottom, 8)
+      if searching {
+        TextField("Buscar arquivos na sessão", text: $files.query)
+          .textFieldStyle(.roundedBorder).focused($searchFocused)
+      } else {
+        breadcrumb
       }
+      ContextHairline().padding(.top, 10)
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text(searching && !files.query.isEmpty ? "RESULTADOS" : "PASTA")
+          .font(.system(size: 11, weight: .semibold)).tracking(0.9).foregroundStyle(theme.color(.text))
+        Spacer(minLength: 8)
+        filter("Todos", selected: !files.onlyChanged) { files.onlyChanged = false }
+        Text("·").foregroundStyle(theme.color(.textWeak))
+        filter("Alterados", selected: files.onlyChanged) { files.onlyChanged = true }
+      }
+      .appFont(.caption)
+      .padding(.vertical, 10)
       VSplitView {
-        listCard.frame(minHeight: 150, idealHeight: 330)
+        list.frame(minHeight: 120, idealHeight: 300)
         MacFilePane(files: files).frame(minHeight: 180, idealHeight: 420)
       }
     }
-    .padding(12)
+    .padding(.horizontal, 18)
     .task(id: files.query) { await files.find() }
     .onChange(of: files.folder) { _, folder in runtime.selection.files?.folder = folder }
     .onChange(of: files.selected) { _, file in runtime.selection.files?.file = file }
   }
 
+  private var header: some View {
+    ZStack {
+      HStack {
+        Button {
+          runtime.selection.files = nil
+        } label: {
+          HStack(spacing: 3) {
+            Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+            Text("Contexto")
+          }
+          .appFont(.secondary).foregroundStyle(theme.color(.text)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).fixedSize()
+        .keyboardShortcut(.cancelAction)
+        .help("Voltar ao contexto (Esc)")
+        Spacer()
+        Button {
+          searching.toggle()
+          if searching { searchFocused = true } else { files.query = "" }
+        } label: {
+          Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(theme.color(.text))
+            .frame(width: 26, height: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help("Buscar arquivos").accessibilityLabel("Buscar arquivos")
+      }
+      Text("Arquivos").font(.system(size: 15, weight: .semibold)).foregroundStyle(theme.color(.textStrong))
+        .accessibilityAddTraits(.isHeader)
+    }
+  }
+
+  private func filter(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    Button(title, action: action)
+      .buttonStyle(.plain)
+      .fontWeight(selected ? .semibold : .regular)
+      .foregroundStyle(theme.color(selected ? .textStrong : .textSecondary))
+      .accessibilityAddTraits(selected ? .isSelected : [])
+      .help(title == "Alterados" ? "Só os arquivos alterados e as pastas que os contêm" : "Todos os arquivos da pasta")
+  }
+
   private var breadcrumb: some View {
     ScrollView(.horizontal) {
-      HStack(spacing: 8) {
-        Image(systemName: "folder").foregroundStyle(theme.color(.text))
+      HStack(spacing: 5) {
         let crumbs = ContextColumn.breadcrumb(files.folder, root: files.context.root)
         ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
           if index > 0 {
-            Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(theme.color(.textWeak))
+            Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+              .foregroundStyle(theme.color(.textWeak))
           }
           Button(crumb.name) { Task { await files.open(folder: crumb.path, file: nil) } }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.color(index == crumbs.count - 1 ? .textStrong : .text))
+            .foregroundStyle(theme.color(index == crumbs.count - 1 ? .text : .textSecondary))
         }
       }
-      .appFont(.secondary)
-      .padding(.horizontal, 10).padding(.vertical, 7)
+      .appFont(.footnote)
     }
     .scrollIndicators(.never)
     // The current folder is the end of the path: keep it in view.
     .defaultScrollAnchor(.trailing)
-    .background(theme.color(.surfaceRaised).opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-    .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(theme.color(.border), lineWidth: 1) }
   }
 
-  private var listCard: some View {
+  private var list: some View {
     Group {
       if let failure = files.failure {
         VStack(spacing: 10) {
-          Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(theme.color(.error))
+          Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(theme.color(.textSecondary))
           Button("Tentar novamente") { Task { await files.load() } }
         }
+        .appFont(.caption)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        Table(files.rows, selection: $files.tableSelection, sortOrder: $files.sortOrder) {
-          TableColumn("Nome", value: \MacFileRow.name) { row in
-            HStack(spacing: 8) {
-              Image(nsImage: row.icon).resizable().frame(width: 18, height: 18)
-              Text(row.title).lineLimit(1).truncationMode(.middle).foregroundStyle(theme.color(.textStrong))
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(Array(files.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { ContextHairline().padding(.leading, 34) }
+                MacFileLine(row: row, selected: row.id == files.selected) { files.activate(row.id) }
+                  .id(row.id)
+              }
             }
+            .padding(.bottom, 8)
           }
-          .width(min: 120, ideal: 200)
-          TableColumn("Modificado") { row in
-            Text(row.modified.map { $0.formatted(.dateTime.day().month(.twoDigits).hour().minute()) } ?? "—")
-              .foregroundStyle(theme.color(.textSecondary)).monospacedDigit()
-          }
-          .width(min: 80, ideal: 96)
-          TableColumn("Tamanho") { row in
-            Text(row.size.map { $0.formatted(.byteCount(style: .file)) } ?? "—")
-              .foregroundStyle(theme.color(.textSecondary)).monospacedDigit()
-          }
-          .width(min: 50, ideal: 58)
-          TableColumn("Status") { row in
-            MacFileStatus(row: row)
-          }
-          .width(min: 64, ideal: 84)
-        }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .appFont(.secondary)
-        .contextMenu(forSelectionType: String.self) { ids in
-          if let id = ids.first, FileManager.default.fileExists(atPath: id) {
-            Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: id)]) }
-          }
-          if let id = ids.first {
-            Button("Copiar caminho") {
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(id, forType: .string)
-            }
-          }
-        } primaryAction: { ids in
-          if let id = ids.first { files.activate(id) }
+          .onAppear { if let selected = files.selected { proxy.scrollTo(selected, anchor: .center) } }
         }
         .overlay {
           if files.rows.isEmpty {
             Text(files.entries == nil && files.results == nil ? "Carregando…"
               : files.onlyChanged ? "Nenhum arquivo alterado aqui." : "Pasta vazia")
-              .foregroundStyle(theme.color(.textSecondary))
+              .appFont(.caption).foregroundStyle(theme.color(.textSecondary))
           }
         }
       }
     }
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 14))
-    .clipShape(RoundedRectangle(cornerRadius: 14))
-    .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(theme.color(.border), lineWidth: 1) }
   }
 }
 
-/// The amber dot and `+N −M` of a changed file; folders holding changes keep only the dot.
-private struct MacFileStatus: View {
+/// One entry of the list: a monochrome icon, the name and, for a changed file, `+N −N`; a folder holding
+/// changes shows a gray dot and every folder a chevron.
+private struct MacFileLine: View {
   @Environment(\.appTheme) private var theme
   let row: MacFileRow
+  let selected: Bool
+  let activate: () -> Void
+  @State private var hovering = false
+
   var body: some View {
-    HStack(spacing: 6) {
-      if let status = row.status {
-        Circle().fill(theme.color(status.change == .deleted ? .error : status.change == .added ? .success : .warning))
-          .frame(width: 8, height: 8)
-        if status.additions > 0 { Text("+\(status.additions)").foregroundStyle(theme.color(.text)) }
-        if status.deletions > 0 { Text("−\(status.deletions)").foregroundStyle(theme.color(.error)) }
-      } else if row.containsChanges {
-        Circle().fill(theme.color(.warning).opacity(0.6)).frame(width: 6, height: 6)
+    Button(action: activate) {
+      HStack(spacing: 10) {
+        Image(systemName: row.directory ? "folder" : "doc").font(.system(size: 14))
+          .foregroundStyle(theme.color(.icon)).frame(width: 18)
+        Text(row.title).appFont(.secondary).foregroundStyle(theme.color(.textStrong))
+          .lineLimit(1).truncationMode(.middle)
+        Spacer(minLength: 8)
+        if let status = row.status {
+          HStack(spacing: 6) {
+            if status.additions > 0 || status.change == .added {
+              Text("+\(status.additions)").foregroundStyle(theme.color(.success))
+            }
+            if status.deletions > 0 || status.change == .deleted {
+              Text("−\(status.deletions)").foregroundStyle(theme.color(.error))
+            }
+          }
+          .appFont(.caption).monospacedDigit()
+        } else if row.containsChanges {
+          Circle().fill(theme.color(.textSecondary)).frame(width: 5, height: 5)
+            .help("Contém arquivos alterados")
+        }
+        if row.directory {
+          Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(theme.color(.textWeak))
+        }
       }
-      Spacer(minLength: 0)
-      if row.directory {
-        Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(theme.color(.icon))
+      .padding(.horizontal, 8).padding(.vertical, 8)
+      .background(theme.color(.highlight).opacity(selected ? 1 : hovering ? 0.5 : 0), in: RoundedRectangle(cornerRadius: 7))
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .help(details)
+    .contextMenu {
+      if FileManager.default.fileExists(atPath: row.id) {
+        Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: row.id)]) }
+      }
+      Button("Copiar caminho") {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(row.id, forType: .string)
       }
     }
-    .monospacedDigit()
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+
+  /// Date and size, read from this Mac when the checkout is local.
+  private var details: String {
+    [
+      row.modified.map { "Modificado " + $0.formatted(.dateTime.day().month(.twoDigits).hour().minute()) },
+      row.size.map { $0.formatted(.byteCount(style: .file)) },
+    ].compactMap { $0 }.joined(separator: " · ")
   }
 }
 
@@ -213,10 +239,6 @@ struct MacFileRow: Identifiable {
   let size: Int64?
   let status: ContextColumn.FileStatus?
   let containsChanges: Bool
-  var icon: NSImage {
-    if directory { return NSWorkspace.shared.icon(for: .folder) }
-    return NSWorkspace.shared.icon(for: UTType(filenameExtension: URL(fileURLWithPath: name).pathExtension) ?? .data)
-  }
 }
 
 @MainActor @Observable final class MacFilesStore {
@@ -227,23 +249,10 @@ struct MacFileRow: Identifiable {
   private(set) var results: [String]?
   var query = ""
   var onlyChanged = false
-  var sortOrder = [KeyPathComparator(\MacFileRow.name)]
   var selected: String?
   private(set) var file: MacLoadedFile?
 
   init(context: ContextColumnStore) { self.context = context }
-
-  var tableSelection: String? {
-    get { selected }
-    set {
-      guard let newValue, newValue != selected else { return }
-      if rows.first(where: { $0.id == newValue })?.directory == true {
-        Task { await open(folder: newValue, file: nil) }
-      } else {
-        select(newValue)
-      }
-    }
-  }
 
   var rows: [MacFileRow] {
     let statuses = context.statuses
@@ -254,8 +263,7 @@ struct MacFileRow: Identifiable {
           title: relative(path), statuses: statuses, folders: folders)
       }
     }
-    let order: ContextColumn.SortOrder = sortOrder.first?.order == .reverse ? .descending : .ascending
-    return ContextColumn.entries(entries ?? [], statuses: statuses, onlyChanged: onlyChanged, order: order)
+    return ContextColumn.entries(entries ?? [], statuses: statuses, onlyChanged: onlyChanged, order: .ascending)
       .map { row($0, title: $0.name, statuses: statuses, folders: folders) }
   }
 

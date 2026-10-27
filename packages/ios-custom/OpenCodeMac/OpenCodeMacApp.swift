@@ -17,7 +17,8 @@ struct OpenCodeMacApp: App {
       MacRoot(runtime: runtime)
     }
     .defaultSize(width: 1500, height: 940)
-    .windowToolbarStyle(.unified(showsTitle: false))
+    // One thin strip level with the window buttons, like the approved option B.
+    .windowToolbarStyle(.unifiedCompact(showsTitle: false))
     .commands { MacCommands(runtime: runtime) }
 
     // A resource opens in its own window, like the iPhone's full-screen viewer.

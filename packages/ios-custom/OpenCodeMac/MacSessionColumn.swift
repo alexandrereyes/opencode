@@ -40,7 +40,7 @@ struct MacSessionColumn: View {
         }
       }
       .padding(.horizontal, AppLayout.margin)
-      .padding(.bottom, 6)
+      .padding(.top, 10).padding(.bottom, 6)
       .listRowInsets(EdgeInsets())
       .listRowSeparator(.hidden)
       .listRowBackground(theme.color(.background))
@@ -66,6 +66,8 @@ struct MacSessionColumn: View {
               RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
             }
           }
+          // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
+          .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
           .contextMenu { rowActions(row) }
           .disabled(store.busy.contains(row.id))
       }
@@ -74,14 +76,27 @@ struct MacSessionColumn: View {
     .environment(\.defaultMinListRowHeight, 1)
     .scrollContentBackground(.hidden)
     .background(theme.color(.background))
-    .safeAreaInset(edge: .top, spacing: 0) {
-      // Voice calls stay on the iPhone in this first Mac version.
-      SessionColumnHeader(
-        voiceDisabled: true,
-        voice: {},
-        settings: { openSettings() },
-        newSession: { showNewSession = true },
-        newSessionDisabled: store.preferences == nil)
+    // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
+    .toolbar(removing: .sidebarToggle)
+    .toolbar {
+      // Voice calls stay on the iPhone in this Mac version: the button is shown disabled.
+      MacPlainToolbarItem {
+        HStack(spacing: 4) {
+          Button {} label: { MacToolbarIcon(symbol: "waveform") }
+            .disabled(true)
+            .help("Conversa por voz (em breve no Mac)")
+            .accessibilityLabel("Conversar por voz")
+          Button { openSettings() } label: { MacToolbarIcon(symbol: "gearshape") }
+            .help("Configurações (⌘,)")
+            .accessibilityLabel("Configurações")
+          Button { showNewSession = true } label: { MacToolbarIcon(symbol: "square.and.pencil") }
+            .disabled(store.preferences == nil)
+            .help("Nova sessão")
+            .accessibilityLabel("Nova sessão")
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 6)
+      }
     }
     .alert("Renomear sessão", isPresented: Binding(
       get: { renameCandidate != nil }, set: { if !$0 { renameCandidate = nil } })

@@ -11,6 +11,8 @@ struct ConversationAvatar: View {
   let monogram: String
   /// The project's own icon, replacing the monogram inside the context ring.
   var icon: ProjectIcon? = nil
+  /// The ring's outer side; the Mac's thin title bar uses a smaller one.
+  var size: CGFloat = 44
 
   var body: some View {
     ZStack {
@@ -24,7 +26,7 @@ struct ConversationAvatar: View {
           .rotationEffect(.degrees(-90))
       }
       if let icon {
-        ProjectIconAvatar(icon: icon, size: 36)
+        ProjectIconAvatar(icon: icon, size: size - 8)
       } else {
         Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
       }
@@ -35,7 +37,7 @@ struct ConversationAvatar: View {
         Text(monogram).appFont(.message, weight: .medium).foregroundStyle(colors.text)
           .lineLimit(1).minimumScaleFactor(0.5)
       }
-    }.frame(width: 44, height: 44)
+    }.frame(width: size, height: size)
   }
 }
 

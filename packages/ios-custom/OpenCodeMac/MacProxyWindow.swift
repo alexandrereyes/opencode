@@ -34,7 +34,9 @@ private struct MacProxyContent: View {
     NavigationSplitView {
       List { MacProxySidebar(store: store, runtime: runtime) }
         .listStyle(.sidebar)
-      .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+        // Like the main window, no sidebar button in the title bar (⌃⌘S and Visualizar still hide it).
+        .toolbar(removing: .sidebarToggle)
+      .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
     } detail: {
       Group {
         switch store.pane(runtime.proxyPane ?? .provider(.codex)) {
@@ -221,20 +223,20 @@ private struct MacProxyTable: View {
       }
       .width(18)
       TableColumn("Conta", value: \.name) { row in Text(row.name).foregroundStyle(theme.color(.textStrong)) }
-        .width(min: 90, ideal: 130)
+        .width(min: 90, ideal: 110)
       TableColumn("Plano", value: \.plan) { row in Text(row.plan).foregroundStyle(theme.color(.textSecondary)) }
         .width(min: 50, ideal: 58)
       TableColumn("5 horas", value: \.fiveHourKey) { row in MacProxyMeter(value: row.fiveHour, name: "5 horas de " + row.name) }
-        .width(min: 80, ideal: 100)
+        .width(min: 80, ideal: 88)
       TableColumn("Semana", value: \.weeklyKey) { row in
         MacProxyMeter(value: row.weekly, name: "Semana de " + row.name, pace: row.account.pace(at: store.now))
       }
-      .width(min: 80, ideal: 100)
+      .width(min: 80, ideal: 88)
       TableColumn("Renova", value: \.renewalKey) { row in
         Text(row.renewalLabel).font(.callout).monospacedDigit()
           .foregroundStyle(theme.color(.textSecondary)).lineLimit(2)
       }
-      .width(min: 66, ideal: 74)
+      .width(min: 66, ideal: 70)
       TableColumn("Status", value: \.statusKey) { row in
         HStack(spacing: 6) {
           Circle().frame(width: 7, height: 7)
@@ -242,13 +244,13 @@ private struct MacProxyTable: View {
         }
         .foregroundStyle(theme.color(proxyRole(row.state.tone)))
       }
-      .width(min: 90, ideal: 124)
+      .width(min: 90, ideal: 104)
       TableColumn("Redefinições", value: \.resetsKey) { row in
         Text(row.resets.map { SubscriptionFormat.number($0, decimals: 0) } ?? "—").monospacedDigit()
           .frame(maxWidth: .infinity, alignment: .center)
       }
-      .width(min: 56, ideal: 84)
-      TableColumn("") { row in action(row) }.width(min: 76, ideal: 86)
+      .width(min: 56, ideal: 76)
+      TableColumn("") { row in action(row) }.width(min: 60, ideal: 64)
     }
     .tableStyle(.inset(alternatesRowBackgrounds: false))
     .scrollContentBackground(.hidden)
@@ -264,9 +266,13 @@ private struct MacProxyTable: View {
     if row.canReset {
       let resetting = store.resetting.contains(provider.rawValue + ":" + row.id)
       Button { store.requestReset(provider, account: row.account) } label: {
-        Text(resetting ? "Aplicando…" : "Usar")
+        Text(resetting ? "Aplicando…" : "Usar").foregroundStyle(theme.color(.primary))
+          .padding(.horizontal, 12).padding(.vertical, 4)
+          .background(theme.color(.primary).opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
+          .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(theme.color(.primary).opacity(0.35), lineWidth: 0.7) }
+          .contentShape(Rectangle())
       }
-      .buttonStyle(.bordered).controlSize(.small).tint(theme.color(.primary))
+      .buttonStyle(.plain)
       .disabled(resetting).help(resetting ? "Aplicando…" : "Usar redefinição")
       .accessibilityLabel(resetting ? "Aplicando…" : "Usar redefinição de " + row.name)
       .accessibilityIdentifier("proxy-reset-" + row.id)

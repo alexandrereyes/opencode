@@ -2,28 +2,27 @@ import AppKit
 import OpenCodeKit
 import SwiftUI
 
-/// The selected file below the list: name and folder, Abrir no Xcode, Mostrar no Finder and Ver diff no
-/// FileMerge (only when the path exists on this Mac), then the text or a Quick Look preview.
+/// The selected file below the list: `ARQUIVO · N LINHAS` with the links Abrir no Xcode · Finder · Ver diff
+/// (only when the path exists on this Mac), then the text in SF Mono with line numbers, or Quick Look.
 struct MacFilePane: View {
   @Environment(\.appTheme) private var theme
   let files: MacFilesStore
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 0) {
       if let path = files.selected {
-        header(path)
+        ContextHairline()
+        header(path).padding(.vertical, 9)
+        ContextHairline()
         content
       } else {
-        Text("Escolha um arquivo para ver o conteúdo.")
+        ContextHairline()
+        Text("Escolha um arquivo para ver o conteúdo.").appFont(.caption)
           .foregroundStyle(theme.color(.textSecondary))
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
-    .padding(12)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 14))
-    .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(theme.color(.border), lineWidth: 1) }
-    .padding(.top, 10)
   }
 
   private func header(_ path: String) -> some View {
@@ -32,68 +31,62 @@ struct MacFilePane: View {
     let status = files.context.statuses[path]
     let merge = local && MacTools.fileMerge != nil
       ? ContextColumn.fileMerge(path, root: files.context.root, status: status) : nil
-    return ViewThatFits(in: .horizontal) {
-      HStack(alignment: .center, spacing: 10) {
-        title(url)
-        Spacer(minLength: 8)
-        actions(url, local: local, merge: merge, changed: status != nil)
+    return HStack(alignment: .firstTextBaseline, spacing: 8) {
+      HStack(spacing: 0) {
+        Text(url.lastPathComponent.uppercased()).lineLimit(1).truncationMode(.middle)
+        if let lines = lines(url) { Text(lines).lineLimit(1).fixedSize() }
       }
-      VStack(alignment: .leading, spacing: 8) {
-        title(url)
-        actions(url, local: local, merge: merge, changed: status != nil)
-      }
-    }
-  }
-
-  private func title(_ url: URL) -> some View {
-    HStack(spacing: 10) {
-      Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 32, height: 32)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(url.lastPathComponent).appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.textStrong))
-          .lineLimit(1)
-        Text(folder(url)).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-          .lineLimit(1).truncationMode(.head)
-      }
-    }
-  }
-
-  @ViewBuilder private func actions(_ url: URL, local: Bool, merge: ContextColumn.FileMergePlan?, changed: Bool) -> some View {
-    HStack(spacing: 8) {
-      if local, let xcode = MacTools.xcode {
-        action("Abrir no Xcode", icon: "hammer") {
-          NSWorkspace.shared.open([url], withApplicationAt: xcode, configuration: .init())
+      .font(.system(size: 9.5, weight: .semibold)).tracking(0.5)
+      .foregroundStyle(theme.color(.text))
+      .help(folder(url) + url.lastPathComponent)
+      Spacer(minLength: 6)
+      HStack(spacing: 5) {
+        if local, let xcode = MacTools.xcode {
+          link("Abrir no Xcode") { NSWorkspace.shared.open([url], withApplicationAt: xcode, configuration: .init()) }
         }
-      }
-      if local {
-        action("Mostrar no Finder", icon: "folder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-      }
-      if let merge {
-        action("Ver diff no FileMerge", icon: "arrow.triangle.branch") {
-          Task {
-            if let error = await MacTools.openFileMerge(merge, file: url) {
-              files.context.sessions.toast.show(error, kind: .error)
+        if local {
+          if MacTools.xcode != nil { dot }
+          link("Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            .help("Mostrar no Finder")
+        }
+        if let merge {
+          dot
+          link("Ver diff") {
+            Task {
+              if let error = await MacTools.openFileMerge(merge, file: url) {
+                files.context.sessions.toast.show(error, kind: .error)
+              }
             }
           }
+          .disabled(status == nil)
+          .help(status != nil ? "Comparar com o último commit (HEAD) no FileMerge" : "Arquivo sem alterações")
         }
-        .disabled(!changed)
-        .help(changed ? "Comparar com a versão do último commit (HEAD)" : "Arquivo sem alterações")
       }
+      .fixedSize()
     }
   }
 
-  private func action(_ title: String, icon: String, perform: @escaping () -> Void) -> some View {
-    Button(action: perform) {
-      Label(title, systemImage: icon).appFont(.caption, weight: .medium).fixedSize()
-    }
-    .buttonStyle(.bordered)
-    .controlSize(.regular)
+  private var dot: some View { Text("·").foregroundStyle(theme.color(.textWeak)).font(.system(size: 10)) }
+
+  private func link(_ title: String, perform: @escaping () -> Void) -> some View {
+    Button(title, action: perform).buttonStyle(.plain).font(.system(size: 10))
+      .foregroundStyle(theme.color(.textSecondary))
+  }
+
+  /// ` · 193 LINHAS`, after the file's name in capitals.
+  private func lines(_ url: URL) -> String? {
+    guard let text = files.file?.text, files.file?.path == url.path else { return nil }
+    let lines = text.reduce(into: 1) { count, character in if character == "\n" { count += 1 } }
+      - (text.hasSuffix("\n") ? 1 : 0)
+    return " · \(lines) " + (lines == 1 ? "LINHA" : "LINHAS")
   }
 
   @ViewBuilder private var content: some View {
     Group {
       if let file = files.file {
         if let error = file.error {
-          Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(theme.color(.error))
+          Label(error, systemImage: "exclamationmark.triangle").appFont(.caption)
+            .foregroundStyle(theme.color(.textSecondary))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let text = file.text {
           MacCodeView(text: text, path: file.path)
@@ -101,13 +94,10 @@ struct MacFilePane: View {
           MacQuickLook(url: file.url)
         }
       } else {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 10))
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.codeBorder), lineWidth: 1) }
   }
 
   private func folder(_ url: URL) -> String {
