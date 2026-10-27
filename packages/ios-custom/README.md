@@ -1360,8 +1360,15 @@ The header's agent button pushes **Agentes e tarefas** onto the conversation's o
 back button, instead of a grabber sheet with **Concluir**. It is a `ConversationRoute` with `agents: true`; the screen
 reuses the live `ConversationStore` of the conversation below it (a weak registry in `SessionStore`) and keeps it
 listening while it covers that conversation, so counts, states and child context stay live without a second store.
-`ConversationProjection.work` lists **every** direct subagent of the owner, running or finished, plus running
-background shells, in one list ordered by start time, newest first (ties by ID); running work is not promoted. Each
+`ConversationProjection.work` lists **every** direct subagent of the owner, running or finished, plus background
+shells. **Order (27 October):** running and starting work first, by its latest start (a child continued through a
+`subagent` call with its `sessionID` counts from that call), then finished work by the last time it ran (`idle`),
+newest first, ties by ID. The first version (`303d929b27a`) ordered everything by first start with running work not
+promoted, as then requested; a background subagent started an hour earlier and still running sat below ~30 newer,
+finished ones (session "Live activity"). Scripts follow the same rule (running first, then by completion). A running
+row's elapsed time counts from its latest call, so a long background child no longer shows the age of the shell it
+happens to run. The screen applies a new order only while the list is idle (`onScrollPhaseChange`), with a 0.25 s
+snappy animation (none with Reduzir Movimento), so a row never moves under a finger; the header count is unchanged. Each
 row has the same layout: agent, task title, state (Em execução with elapsed time, Concluído, Erro, Interrompido or
 Encerrado with duration), chevron and child context/cache line. Only running rows show the stop button (and swipe/menu
 stop); the column stays reserved so rows line up. State comes from `/session/active` first, then the child's

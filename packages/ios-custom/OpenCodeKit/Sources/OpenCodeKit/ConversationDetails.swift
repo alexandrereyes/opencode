@@ -25,13 +25,16 @@ public struct SessionWork: Identifiable, Sendable, Equatable {
   public let agent: String?
   public let title: String
   public let state: State
-  /// When this work began; the list's stable newest-first order.
-  public let created: Double
+  /// The most recent activity: the latest start while running, otherwise the last time it ran. Running work
+  /// comes first and each group is ordered by this, newest first.
+  public let activity: Double
   /// The running elapsed-time origin: the current busy period of a resumed child.
   public let started: Double
   /// Total duration of finished work, when known.
   public let duration: Double?
   public var running: Bool { state == .running }
+  /// Running or about to run: listed before finished work.
+  public var live: Bool { state == .running || state == .starting }
 }
 
 public struct ContextDetails: Sendable {
@@ -66,8 +69,9 @@ public struct ContextDetails: Sendable {
 }
 
 extension ConversationProjection {
-  /// Every subagent of the owner and every background shell it started, running or finished, newest start
-  /// first. Agents and scripts never mix: a shell is never an agent placeholder.
+  /// Every subagent of the owner and every background shell it started. Running (or starting) work comes
+  /// first, then finished work, each by most recent activity. Agents and scripts never mix: a shell is never an
+  /// agent placeholder.
   public static func work(
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
     active: Set<String>, shells: [ShellInfo]
@@ -75,7 +79,10 @@ extension ConversationProjection {
     let tools = messages.flatMap(\.tools)
     return (agents(ownerID: ownerID, viewedID: viewedID, tools: tools, children: children, active: active, shells: shells)
       + scripts(ownerID: ownerID, tools: tools, shells: shells))
-      .sorted { $0.created != $1.created ? $0.created > $1.created : $0.id < $1.id }
+      .sorted {
+        if $0.live != $1.live { return $0.live }
+        return $0.activity != $1.activity ? $0.activity > $1.activity : $0.id < $1.id
+      }
   }
 
   private static func agents(
@@ -86,15 +93,17 @@ extension ConversationProjection {
     var work: [SessionWork] = children.filter { $0.parentID == ownerID && $0.id != viewedID }.map { child in
       let linked = tools.filter { $0.name == "subagent" && $0.id.flatMap { links[$0] } == child.id }
       let tool = linked.first
-      let current = linked.last { $0.running }
-      let created = tool?.time?.ran ?? tool?.time?.created ?? child.time.created
+      // A continued child is started again by its latest call; a background call completes at once.
+      let latest = linked.last.flatMap { $0.time?.ran ?? $0.time?.created }
       let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: linked.last?.status)
+      let ended = child.time.idle ?? child.time.updated
       return SessionWork(
         id: child.id, kind: .agent, sessionID: child.id, shellID: nil, toolID: tool?.id,
         agent: tool?.input["agent"]?.string ?? child.agent,
-        title: tool?.input["description"]?.string ?? child.displayTitle, state: state, created: created,
-        started: current.flatMap { $0.time?.ran ?? $0.time?.created } ?? workStarted(child: child, shells: shells),
-        duration: state == .running ? nil : (child.time.idle ?? child.time.updated) - child.time.created)
+        title: tool?.input["description"]?.string ?? child.displayTitle, state: state,
+        activity: state == .running ? max(latest ?? child.time.created, child.time.created) : ended,
+        started: latest ?? workStarted(child: child, shells: shells),
+        duration: state == .running ? nil : ended - child.time.created)
     }
     // A call whose child does not exist yet is only shown while the owner is still running it; it has
     // nothing to open. Stale running parts and failures without a child stay in the transcript only.
@@ -108,7 +117,7 @@ extension ConversationProjection {
           id: id, kind: .agent, sessionID: nil, shellID: nil, toolID: nil,
           agent: tool.input["agent"]?.string ?? tool.partialInput("agent"),
           title: tool.input["description"]?.string ?? tool.partialInput("description") ?? "Preparando subagente…",
-          state: .starting, created: created, started: created, duration: nil))
+          state: .starting, activity: created, started: created, duration: nil))
     }
     return work
   }
@@ -128,7 +137,8 @@ extension ConversationProjection {
       let state = shell.map(shellState) ?? .ended
       return SessionWork(
         id: id, kind: .script, sessionID: nil, shellID: id, toolID: call.id,
-        agent: nil, title: call.input["command"]?.string ?? shell?.command ?? id, state: state, created: created,
+        agent: nil, title: call.input["command"]?.string ?? shell?.command ?? id, state: state,
+        activity: state == .running ? created : shell?.time.completed ?? created,
         started: created, duration: state == .running ? nil : shell?.time.completed.map { $0 - created })
     }
     var foreground = Set(
@@ -154,7 +164,7 @@ extension ConversationProjection {
       SessionWork(
         id: shell.id, kind: .script, sessionID: nil, shellID: shell.id,
         toolID: tools.first { $0.metadata["shellID"]?.string == shell.id || $0.id == shell.id }?.id,
-        agent: nil, title: shell.command, state: .running, created: shell.time.started,
+        agent: nil, title: shell.command, state: .running, activity: shell.time.started,
         started: shell.time.started, duration: nil)
     }
     return work

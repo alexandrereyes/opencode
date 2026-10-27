@@ -409,7 +409,7 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(work.allSatisfy { $0.shellID == nil })
   // Finished direct children stay in the same list with their own state.
   #expect(Set(all.compactMap(\.sessionID)) == Set(children.filter { $0.parentID == owner }.map(\.id)))
-  #expect(all.map(\.created) == all.map(\.created).sorted(by: >))
+  #expect(all.map(\.live) == all.map(\.live).sorted { $0 && !$1 })
   #expect(
     ConversationProjection.work(
       ownerID: owner, viewedID: work[0].id, messages: messages, children: children, active: active,
@@ -439,11 +439,12 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   let work = ConversationProjection.work(
     ownerID: "ses_owner", viewedID: "ses_owner", messages: [], children: children, active: ["ses_running"],
     shells: [])
-  #expect(work.map(\.id) == ["ses_failed", "ses_stopped", "ses_running", "ses_done", "ses_unknown"])
-  #expect(work.map(\.state) == [.failed, .interrupted, .running, .completed, .ended])
+  // Running first, then finished by the last time they ran (idle), newest first.
+  #expect(work.map(\.id) == ["ses_running", "ses_failed", "ses_stopped", "ses_done", "ses_unknown"])
+  #expect(work.map(\.state) == [.running, .failed, .interrupted, .completed, .ended])
   #expect(work.first { $0.id == "ses_done" }?.duration == 60_000)
   #expect(work.first { $0.id == "ses_running" }?.duration == nil)
-  #expect(work.map(\.state.label) == ["Erro", "Interrompido", "Em execução", "Concluído", "Encerrado"])
+  #expect(work.map(\.state.label) == ["Em execução", "Erro", "Interrompido", "Concluído", "Encerrado"])
 }
 
 @Test func catalogPreferencesUseProviderPairVisibilityAndFavorites() throws {
@@ -587,7 +588,7 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(writing.state == .starting && writing.agent == "general" && writing.title == #"Revisar "tudo""#)
   let blank = try #require(agents.first { $0.id == "call_blank" })
   #expect(blank.agent == nil && blank.title == "Preparando subagente…" && blank.shellID == nil)
-  #expect(scripts.map(\.id) == ["sh_test", "sh_dev", "sh_orphan"])
+  #expect(scripts.map(\.id) == ["sh_dev", "sh_orphan", "sh_test"])
   #expect(scripts.allSatisfy { $0.state != .starting && $0.agent == nil && $0.sessionID == nil })
   #expect(scripts.first { $0.id == "sh_dev" }?.toolID == "call_bg_shell")
   #expect(scripts.first { $0.id == "sh_dev" }?.title == "bun run dev")
@@ -595,4 +596,57 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(scripts.first { $0.id == "sh_test" }?.duration == 5000)
   #expect(scripts.first { $0.id == "sh_orphan" }?.state == .running)
   #expect(!agents.contains { $0.shellID != nil })
+}
+
+/// Production case (27 Oct): a background subagent started long ago and still running sat below ~30 newer,
+/// finished ones. Running work comes first; finished work follows the last time it ran, so a continued child that
+/// ended recently is above an older one created later.
+@Test func runningAgentsComeFirstAndFinishedOnesFollowTheirLatestActivity() throws {
+  func call(_ id: String, ran: Double, completed: Double, child: String, continued: Bool = false) -> String {
+    let extra = continued ? #","sessionID":"\#(child)""# : ""
+    return """
+      {"type":"tool","id":"\(id)","name":"subagent","time":{"created":\(ran - 5),"ran":\(ran),"completed":\(completed)},
+       "state":{"status":"completed","input":{"agent":"opushigh","description":"\(id)","background":true\(extra)},
+       "content":[{"type":"text","text":"ok"}],"metadata":{"sessionID":"\(child)","status":"running"}}}
+      """
+  }
+  func child(_ id: String, created: Double, idle: Double?, outcome: String?) throws -> Session {
+    let idleField = idle.map { #","idle":\#($0)"# } ?? ""
+    let outcomeField = outcome.map { #""outcome":"\#($0)","# } ?? ""
+    return try JSONDecoder().decode(Session.self, from: Data("""
+      {"id":"\(id)","parentID":"ses_root","projectID":"p","title":"\(id)","agent":"opushigh",\(outcomeField)
+       "location":{"directory":"/repo"},"time":{"created":\(created),"updated":\((idle ?? created) + 1)\(idleField)}}
+      """.utf8))
+  }
+  let message = try JSONDecoder().decode(ConversationMessage.self, from: Data("""
+    {"id":"msg_order","type":"assistant","agent":"build","time":{"created":1},"content":[
+     \(call("call_long", ran: 1_000, completed: 1_001, child: "ses_long")),
+     \(call("call_new", ran: 5_000, completed: 5_001, child: "ses_new")),
+     \(call("call_old", ran: 2_000, completed: 2_001, child: "ses_old")),
+     \(call("call_resumed", ran: 8_000, completed: 8_001, child: "ses_old", continued: true)),
+     \(call("call_again", ran: 9_000, completed: 9_001, child: "ses_back", continued: true))
+    ]}
+    """.utf8))
+  let children = [
+    try child("ses_long", created: 1_002, idle: nil, outcome: nil),
+    try child("ses_new", created: 5_002, idle: 6_000, outcome: "succeeded"),
+    try child("ses_old", created: 2_002, idle: 8_500, outcome: "succeeded"),
+    try child("ses_back", created: 500, idle: 700, outcome: "succeeded"),
+  ]
+  let work = ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: [message], children: children,
+    active: ["ses_long", "ses_back"], shells: [])
+  // ses_back was continued at 9 000 and runs; ses_long has run since 1 000; then finished by their last run.
+  #expect(work.map(\.id) == ["ses_back", "ses_long", "ses_old", "ses_new"])
+  #expect(work.first { $0.id == "ses_back" }?.activity == 9_000)
+  #expect(work.first { $0.id == "ses_back" }?.started == 9_000)
+  // A long-running background child counts from its call, not from a shell it happens to be running.
+  #expect(work.first { $0.id == "ses_long" }?.started == 1_000)
+  #expect(work.first { $0.id == "ses_old" }?.activity == 8_500)
+
+  // When the running child finishes, it joins the finished group by when it ended.
+  let ended = [try child("ses_long", created: 1_002, idle: 7_000, outcome: "succeeded")] + children.dropFirst()
+  #expect(ConversationProjection.work(
+    ownerID: "ses_root", viewedID: "ses_root", messages: [message], children: ended,
+    active: ["ses_back"], shells: []).map(\.id) == ["ses_back", "ses_old", "ses_long", "ses_new"])
 }

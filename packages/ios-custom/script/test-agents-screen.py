@@ -83,7 +83,8 @@ try:
     subprocess.run(git + ["commit", "-qm", "fixture"], check=True)
 
     parent = imported("Agentes e tarefas", 60, lasted=1)
-    # Newest start first: interrupted (-30 min), failed (-40), running (-45), succeeded (-50).
+    # Finished children ran last at -28 (interrupted), -38 (failed) and -48 min (succeeded). The "running" child
+    # was created at -45 min and is resumed now, like a reused subagent: it must list above all finished ones.
     finished = {
         "succeeded": imported("Mapear dependências", 50, parent, "explore", "succeeded"),
         "failed": imported("Revisar migrações", 40, parent, "general", "failed"),
@@ -131,7 +132,8 @@ try:
             raise SystemExit("The delegations and the background script did not start: " + json.dumps(
                 {"background": background, "delegated": delegated, "script": script}))
         time.sleep(1)
-    order = [delegated, background, finished["interrupted"], finished["failed"], running, finished["succeeded"]]
+    # Running first by latest start (the resumed child keeps its old creation), then finished by last run.
+    order = [delegated, background, running, finished["interrupted"], finished["failed"], finished["succeeded"]]
 
     environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": args.theme,
         "OPENCODE_TEST_SERVER_URL": args.server_url, "OPENCODE_AGENTS_PARENT": parent, "OPENCODE_AGENTS_RUNNING": running,

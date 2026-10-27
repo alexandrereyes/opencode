@@ -13,8 +13,23 @@ struct ConversationAgentsView: View {
   /// Not remembered: the screen always opens on Agentes.
   @State private var tab = Tab.agents
   enum Tab: Hashable { case agents, scripts }
-  private var agents: [SessionWork] { store.work.filter { $0.kind == .agent } }
-  private var scripts: [SessionWork] { store.work.filter { $0.kind == .script } }
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// The order on screen. It follows `store.work` (running first, then by latest activity) but only changes
+  /// while the list is not being scrolled, with a short animation, so a finishing agent never moves under a finger.
+  @State private var shown: [String] = []
+  @State private var scrolling = false
+  private var ordered: [SessionWork] {
+    let index = Dictionary(shown.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+    return store.work.enumerated()
+      .sorted { (index[$0.element.id] ?? Int.max, $0.offset) < (index[$1.element.id] ?? Int.max, $1.offset) }
+      .map(\.element)
+  }
+  private var agents: [SessionWork] { ordered.filter { $0.kind == .agent } }
+  private var scripts: [SessionWork] { ordered.filter { $0.kind == .script } }
+  private func reorder(_ ids: [String]) {
+    guard !scrolling, ids != shown else { return }
+    withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { shown = ids }
+  }
   /// Resources used by this session itself (or by descendants without a row here).
   private var ownResources: [SessionResource] {
     store.resources.filter { resource in !agents.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID } }
@@ -32,6 +47,13 @@ struct ConversationAgentsView: View {
       case .agents: agentsTab
       case .scripts: scriptsTab
       }
+    }
+    .onScrollPhaseChange { _, phase in
+      scrolling = phase != .idle
+      reorder(store.work.map(\.id))
+    }
+    .onChange(of: store.work.map(\.id), initial: true) { _, ids in
+      if shown.isEmpty { shown = ids } else { reorder(ids) }
     }
     .safeAreaInset(edge: .top, spacing: 0) {
       Picker("Lista", selection: $tab) {

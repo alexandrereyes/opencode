@@ -1,9 +1,10 @@
 import XCTest
 
-/// Requires `OPENCODE_AGENTS_PARENT` with direct children listed newest start first in `OPENCODE_AGENTS_ORDER`:
-/// a real running delegation (`OPENCODE_AGENTS_DELEGATED`, whose reloaded running call has no child ID), a
-/// background subagent (`OPENCODE_AGENTS_BACKGROUND`), interrupted, failed, running (`OPENCODE_AGENTS_RUNNING`)
-/// and succeeded; the parent also runs one background script (`OPENCODE_AGENTS_SCRIPT`)
+/// Requires `OPENCODE_AGENTS_PARENT` with direct children in `OPENCODE_AGENTS_ORDER` (running first, then by
+/// latest activity): a real running delegation (`OPENCODE_AGENTS_DELEGATED`, whose reloaded running call has no
+/// child ID), a background subagent (`OPENCODE_AGENTS_BACKGROUND`), an old child resumed now
+/// (`OPENCODE_AGENTS_RUNNING`), then interrupted, failed and succeeded; the parent also runs one background
+/// script (`OPENCODE_AGENTS_SCRIPT`)
 /// (`script/test-agents-screen.py`).
 @MainActor final class ConversationAgentsTests: XCTestCase {
   override func setUp() { continueAfterFailure = false }
@@ -55,10 +56,11 @@ import XCTest
     XCTAssertFalse(app.staticTexts["Sem recursos"].exists)
     let rows = order.map { row(app, $0) }
     XCTAssertTrue(rows.allSatisfy { $0.waitForExistence(timeout: 20) })
-    XCTAssertEqual(rows.map(\.frame.minY), rows.map(\.frame.minY).sorted(), "newest start first, running not promoted")
+    XCTAssertEqual(rows.map(\.frame.minY), rows.map(\.frame.minY).sorted(), "running first, then by latest activity")
     XCTAssertEqual(rows.map { $0.value as? String },
-      ["Em execução", "Em execução", "Interrompido", "Erro", "Em execução", "Concluído"])
+      ["Em execução", "Em execução", "Em execução", "Interrompido", "Erro", "Concluído"])
     XCTAssertEqual(rows[1].identifier, "agent-work-" + background, "a background subagent is an agent")
+    XCTAssertEqual(rows[2].identifier, "agent-work-" + running, "an old child resumed now is above the finished ones")
     // One row per child: the delegation's running call merges into its session instead of a second row.
     XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agent-work-'")).count, order.count)
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agent-work-toolu' OR identifier BEGINSWITH 'agent-work-call'")).firstMatch.exists)
@@ -81,8 +83,24 @@ import XCTest
     agentsTab.tap()
     XCTAssertTrue(rows[0].waitForExistence(timeout: 10))
 
+    // Stopping the newest running child moves it down to the finished group, as the most recent one to have run.
+    app.buttons["Parar Delegar verificação real"].tap()
+    let confirm = app.buttons.matching(NSPredicate(format: "label == 'Parar'")).firstMatch
+    XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+    confirm.tap()
+    let stopped = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Interrompido'"), object: rows[0])
+    XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 30), .completed, rows[0].value as? String ?? "")
+    let after = [1, 2, 0, 3, 4, 5].map { rows[$0] }
+    // The reorder waits for the list to stop scrolling and animates briefly.
+    let deadline = Date().addingTimeInterval(10)
+    while after.map(\.frame.minY) != after.map(\.frame.minY).sorted() && Date() < deadline { usleep(200_000) }
+    XCTAssertEqual(after.map(\.frame.minY), after.map(\.frame.minY).sorted())
+    XCTAssertEqual(after.map { $0.value as? String },
+      ["Em execução", "Em execução", "Interrompido", "Interrompido", "Erro", "Concluído"])
+    screenshot("list-after-stop")
+
     // The delegated row opens its child, not the root.
-    rows[0].tap()
+    row(app, delegated).tap()
     let title = app.staticTexts["conversation-header-title"]
     XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 20))
     XCTAssertEqual(title.label, "Delegar verificação real")
@@ -108,7 +126,7 @@ import XCTest
     XCTAssertFalse(bar.exists)
     XCTAssertEqual(title.label, "Agentes e tarefas")
 
-    // A running child: "Voltar à sessão principal" skips the list and lands on the parent conversation.
+    // A child opened from the list: "Voltar à sessão principal" skips the list and lands on the parent conversation.
     agents.tap()
     XCTAssertTrue(agentsTab.waitForExistence(timeout: 10))
     XCTAssertTrue(agentsTab.isSelected)
