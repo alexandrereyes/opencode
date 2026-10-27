@@ -14,7 +14,6 @@ export const limits = {
   /** `activeTotal` and `counts.failed` must stay 0 this long before the activity ends. */
   endMs: 10 * 60_000,
   staleMs: 15 * 60_000,
-  dismissalMs: 30 * 60_000,
   bodyBytes: 4096,
 }
 
@@ -140,15 +139,29 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
     const marks = new Set(derived.marks.keys())
     const wakes: number[] = []
     const jobs: Effect.Effect<void>[] = []
-    const deliver = (device: Device, request: Push, after: (result: Result) => Effect.Effect<void>) =>
+    const deliver = (
+      device: Device,
+      event: BodyInput["event"],
+      request: Push,
+      after: (result: Result) => Effect.Effect<void>,
+    ) =>
       input.send(request).pipe(
         Effect.tap((result) => {
-          if (result.status === "sent") return Effect.void
+          if (result.status === "sent")
+            return Effect.logInfo("Live Activity push sent", {
+              event,
+              priority: request.priority,
+              environment: request.environment,
+            })
           if (result.status === "invalid")
             return input.registry
               .drop(device.deviceID, request.token, now)
-              .pipe(Effect.andThen(Effect.logInfo("Live Activity token dropped", { reason: result.reason })))
-          return Effect.logWarning("Live Activity push failed", { reason: result.reason })
+              .pipe(Effect.andThen(Effect.logInfo("Live Activity token dropped", { event, reason: result.reason })))
+          return Effect.logWarning("Live Activity push failed", {
+            event,
+            priority: request.priority,
+            reason: result.reason,
+          })
         }),
         Effect.flatMap(after),
       )
@@ -170,6 +183,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         jobs.push(
           deliver(
             device,
+            "start",
             push(device.pushToStartToken, device.environment, 10, {
               event: "start",
               state,
@@ -182,7 +196,8 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         )
         continue
       }
-      seen.activity.set(device.deviceID, now)
+      // An activity that covered active work spends that rise; one that ended while calm leaves the device armed.
+      if (state.activeTotal > 0) seen.activity.set(device.deviceID, now)
       const memo = activities.get(activity.activityID) ?? {
         lastPushAt: activity.registeredAt,
         sent: "",
@@ -198,13 +213,17 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
           memo.lastPushAt = now
           wakes.push(now + limits.coalesceMs)
           jobs.push(
-            deliver(device, push(activity.pushToken, device.environment, 10, { event: "end", state, now }), (result) =>
-              // Delivered or dropped, the activity is over for the backend; a failed end is retried.
-              result.status === "failed"
-                ? Effect.void
-                : input.registry
-                    .ended({ deviceID: device.deviceID, activityID: activity.activityID, reason: "ended" }, now)
-                    .pipe(Effect.andThen(Effect.sync(() => activities.delete(activity.activityID)))),
+            deliver(
+              device,
+              "end",
+              push(activity.pushToken, device.environment, 10, { event: "end", state, now }),
+              (result) =>
+                // Delivered or dropped, the activity is over for the backend; a failed end is retried.
+                result.status === "failed"
+                  ? Effect.void
+                  : input.registry
+                      .ended({ deviceID: device.deviceID, activityID: activity.activityID, reason: "ended" }, now)
+                      .pipe(Effect.andThen(Effect.sync(() => activities.delete(activity.activityID)))),
             ),
           )
           continue
@@ -225,6 +244,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
       jobs.push(
         deliver(
           device,
+          "update",
           push(activity.pushToken, device.environment, urgent ? 10 : 5, {
             event: "update",
             state,
@@ -271,7 +291,8 @@ export function body(input: BodyInput) {
       ...(input.attributes ? { "attributes-type": "AgentsActivityAttributes", attributes: input.attributes } : {}),
       ...(input.alert ? { alert: input.alert } : {}),
       ...(input.event === "start" ? { "input-push-token": 1 } : {}),
-      ...(input.event === "end" ? { "dismissal-date": timestamp + limits.dismissalMs / 1000 } : {}),
+      // An ended card leaves the screen at once, so it never lingers next to the next activity.
+      ...(input.event === "end" ? { "dismissal-date": timestamp } : {}),
     },
   }
 }

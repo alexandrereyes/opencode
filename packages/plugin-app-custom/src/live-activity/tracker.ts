@@ -82,10 +82,13 @@ export type Event =
       }
     }
   | {
-      readonly type: "permission.asked" | "permission.replied" | "form.created" | "form.replied" | "form.cancelled"
+      readonly type: "permission.asked" | "form.created"
       /** Read from `ctx.request.pending()` instead, which also covers requests that end without an event. */
       readonly data: unknown
     }
+  /** Published before the request leaves `ctx.request.pending()`, so the settled ID is excluded from that read. */
+  | { readonly type: "form.replied" | "form.cancelled"; readonly data: { readonly id: string } }
+  | { readonly type: "permission.replied"; readonly data: { readonly requestID: string } }
 
 export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
   "session.created",
@@ -121,18 +124,19 @@ type Entry = {
   title?: string
   directory: string
   subpath?: string
+  readonly created: number
+  /** Last idle transition known from storage (rebuild and hydration only). */
+  readonly idleAt?: number
   archived: boolean
   running: boolean
-  /** Start of the current (or latest) execution. */
-  startedAt: number
-  /** Latest observed activity, which orders working rows. */
+  /** Start of the session's own current (or most recent) execution, when known. */
+  startedAt?: number
+  /** Latest observed activity, which orders working rows and picks the family's activity text. */
   activityAt: number
   ended?: { readonly outcome: "succeeded" | "failed" | "interrupted"; readonly at: number; cleared: boolean }
   activity?: string
   /** Tool call ID → tool name of the current execution, to describe `session.tool.called`. */
   readonly tools: Map<string, string>
-  /** Child Session ID → creation time. */
-  readonly children: Map<string, number>
 }
 
 type Request = {
@@ -156,7 +160,8 @@ export type Derived = {
 
 /**
  * Folds server events into per-session status. Holds every top-level session that is running, waiting, failed or
- * recently idle, plus their subagent children, across all Locations.
+ * recently idle, plus their subagent descendants at any depth, across all Locations. Descendants never become rows:
+ * their running state and requests roll up into their top-level session.
  */
 export function makeTracker(ctx: TrackerContext) {
   const sessions = new Map<string, Entry>()
@@ -168,38 +173,45 @@ export function makeTracker(ctx: TrackerContext) {
       .get({ sessionID: Session.ID.make(sessionID) })
       .pipe(Effect.orElseSucceed(() => undefined))
     if (!info) return undefined
-    const created = DateTime.toEpochMillis(info.time.created)
-    const next = fromInfo(info, false, idleAt(info) ?? created)
+    const next = fromInfo(info, false)
     sessions.set(info.id, next)
-    const parent = info.parentID ? sessions.get(info.parentID) : undefined
-    if (parent?.running && created >= parent.startedAt && !parent.children.has(info.id))
-      parent.children.set(info.id, created)
     return next
   })
 
-  const refreshPending = Effect.fn("LiveActivity.refreshPending")(function* (now: number) {
+  /** The session and its ancestors up to the top level, reading the unknown ones (the child → parent cache). */
+  const lineage = (sessionID: string, depth = 0): Effect.Effect<Entry | undefined> =>
+    Effect.gen(function* () {
+      if (sessionID === "global") return undefined
+      const entry = sessions.get(sessionID) ?? (yield* hydrate(sessionID))
+      if (entry?.parentID && depth < 32) yield* lineage(entry.parentID, depth + 1)
+      return entry
+    })
+
+  const refreshPending = Effect.fn("LiveActivity.refreshPending")(function* (now: number, settled?: string) {
     const snapshots = yield* ctx.request.pending()
-    const found = snapshots.flatMap((snapshot) => [
-      ...snapshot.forms
-        .filter((form) => form.metadata?.kind === "question" || form.metadata?.kind === "websearch.provider")
-        .map((form) => ({
-          id: form.id,
-          kind: "question" as const,
-          sessionID: form.sessionID,
-          created: form.created,
-          text:
-            form.metadata?.kind === "question"
-              ? (form.fields[0]?.description ?? form.fields[0]?.title ?? form.title)
-              : form.title,
+    const found = snapshots
+      .flatMap((snapshot) => [
+        ...snapshot.forms
+          .filter((form) => form.metadata?.kind === "question" || form.metadata?.kind === "websearch.provider")
+          .map((form) => ({
+            id: form.id,
+            kind: "question" as const,
+            sessionID: form.sessionID,
+            created: form.created,
+            text:
+              form.metadata?.kind === "question"
+                ? (form.fields[0]?.description ?? form.fields[0]?.title ?? form.title)
+                : form.title,
+          })),
+        ...snapshot.permissions.map((request) => ({
+          id: request.id,
+          kind: "permission" as const,
+          sessionID: request.sessionID,
+          created: request.created,
+          text: [request.action, request.resources.join(" ")].filter(Boolean).join(" · "),
         })),
-      ...snapshot.permissions.map((request) => ({
-        id: request.id,
-        kind: "permission" as const,
-        sessionID: request.sessionID,
-        created: request.created,
-        text: [request.action, request.resources.join(" ")].filter(Boolean).join(" · "),
-      })),
-    ])
+      ])
+      .filter((item) => item.id !== settled)
     const ids = new Set<string>(found.map((item) => item.id))
     for (const id of firstSeen.keys()) if (!ids.has(id)) firstSeen.delete(id)
     for (const item of found) if (!firstSeen.has(item.id)) firstSeen.set(item.id, item.created ?? now)
@@ -210,16 +222,8 @@ export function makeTracker(ctx: TrackerContext) {
       since: firstSeen.get(item.id) ?? now,
       ...(item.text ? { text: item.text } : {}),
     }))
-    // Owners may be subagent children or sessions this process has not seen yet; walk them up to their root.
-    for (const owner of new Set(state.requests.map((request) => request.sessionID))) {
-      if (owner === "global") continue
-      const chain = (id: string, depth: number): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          const current = sessions.get(id) ?? (yield* hydrate(id))
-          if (current?.parentID && depth < 32) yield* chain(current.parentID, depth + 1)
-        })
-      yield* chain(owner, 0)
-    }
+    // Owners may be subagent descendants or sessions this process has not seen yet; walk them up to their root.
+    for (const owner of new Set(state.requests.map((request) => request.sessionID))) yield* lineage(owner)
   })
 
   /** Reconstructs running, waiting, failed and recently idle sessions, e.g. after a restart. */
@@ -235,49 +239,61 @@ export function makeTracker(ctx: TrackerContext) {
         }),
       )
     for (const info of yield* scan()) {
-      const running = Object.hasOwn(active, info.id)
       const idle = idleAt(info)
-      if (!running && (idle === undefined || now - idle >= limits.failedMs)) continue
-      const startedAt = running ? yield* executionStart(info) : (idle ?? DateTime.toEpochMillis(info.time.created))
-      const entry = fromInfo(info, running, startedAt)
-      sessions.set(info.id, entry)
-      if (!running) continue
+      if (Object.hasOwn(active, info.id) || (idle !== undefined && now - idle < limits.failedMs))
+        sessions.set(info.id, fromInfo(info, false))
+    }
+    // The running set includes subagents at any depth; each one and its ancestors join the model.
+    for (const id of Object.keys(active)) {
+      const entry = yield* lineage(id)
+      if (!entry) continue
+      entry.running = true
+      entry.ended = undefined
+      entry.startedAt = yield* executionStart(entry)
+    }
+    const roots = new Set(
+      [...sessions.values()].filter((entry) => entry.running).flatMap((entry) => rootOf(entry.id) ?? []),
+    )
+    for (const root of roots) {
+      // A top-level session waiting for background subagents: its most recent turn started at its latest prompt.
+      if (!root.running && root.startedAt === undefined) root.startedAt = yield* latestPrompt(root.id)
       const family = yield* ctx.session
-        .family({ sessionID: info.id, limit: 100 })
+        .family({ sessionID: Session.ID.make(root.id), limit: 100 })
         .pipe(Effect.orElseSucceed(() => undefined))
-      for (const child of family?.data ?? []) {
-        const created = DateTime.toEpochMillis(child.time.created)
-        if (child.parentID !== info.id || created < startedAt) continue
-        entry.children.set(child.id, created)
-        sessions.set(
-          child.id,
-          fromInfo(child, family?.active.some((item) => item.id === child.id) ?? false, idleAt(child) ?? created),
-        )
-      }
+      for (const child of family?.data ?? [])
+        if (child.parentID === root.id && !sessions.has(child.id)) sessions.set(child.id, fromInfo(child, false))
     }
     yield* refreshPending(now)
   })
 
-  const executionStart = (info: Session.Info) =>
-    ctx.message.list({ sessionID: info.id, limit: 1, type: "user" }).pipe(
+  const latestPrompt = (sessionID: string) =>
+    ctx.message.list({ sessionID: Session.ID.make(sessionID), limit: 1, type: "user" }).pipe(
       Effect.map((page) => page.data[0]),
       Effect.orElseSucceed(() => undefined),
-      Effect.map((message) =>
-        Math.max(
-          message ? DateTime.toEpochMillis(message.time.created) : 0,
-          idleAt(info) ?? DateTime.toEpochMillis(info.time.created),
-        ),
-      ),
+      Effect.map((message) => (message ? DateTime.toEpochMillis(message.time.created) : undefined)),
     )
+
+  /** Approximates the start of a running execution found by a rebuild: its latest prompt, after its last idle. */
+  const executionStart = (entry: Entry) =>
+    latestPrompt(entry.id).pipe(Effect.map((prompt) => Math.max(prompt ?? 0, entry.idleAt ?? entry.created)))
+
+  const rootOf = (id: string) => {
+    const visit = (current: Entry | undefined, depth: number): Entry | undefined =>
+      current?.parentID && depth < 32 ? visit(sessions.get(current.parentID), depth + 1) : current
+    const top = visit(sessions.get(id), 0)
+    return top && !top.parentID ? top : undefined
+  }
 
   const apply = Effect.fn("LiveActivity.apply")(function* (event: Event, now: number) {
     switch (event.type) {
       case "permission.asked":
-      case "permission.replied":
       case "form.created":
+        return yield* refreshPending(now)
       case "form.replied":
       case "form.cancelled":
-        return yield* refreshPending(now)
+        return yield* refreshPending(now, event.data.id)
+      case "permission.replied":
+        return yield* refreshPending(now, event.data.requestID)
     }
     const id = event.data.sessionID
     const entry = sessions.get(id)
@@ -293,15 +309,13 @@ export function makeTracker(ctx: TrackerContext) {
           ...(event.data.title ? { title: event.data.title } : {}),
           directory: event.data.location.directory,
           ...(event.data.subpath ? { subpath: event.data.subpath } : {}),
+          created: event.created,
           archived: false,
           running: false,
-          startedAt: event.created,
           activityAt: event.created,
           tools: new Map(),
-          children: new Map(),
         })
-        const parent = event.data.parentID ? sessions.get(event.data.parentID) : undefined
-        if (parent?.running) touch(parent)?.children.set(id, event.created)
+        if (event.data.parentID) touch(sessions.get(event.data.parentID))
         return
       }
       case "session.renamed":
@@ -322,7 +336,7 @@ export function makeTracker(ctx: TrackerContext) {
         if (entry?.ended?.outcome === "failed" && event.data.idle >= entry.ended.at) entry.ended.cleared = true
         return
       case "session.execution.started": {
-        const target = entry ?? (yield* hydrate(id))
+        const target = yield* lineage(id)
         if (target) {
           target.running = true
           target.startedAt = event.created
@@ -330,14 +344,13 @@ export function makeTracker(ctx: TrackerContext) {
           target.ended = undefined
           target.activity = undefined
           target.tools.clear()
-          target.children.clear()
         }
         return yield* refreshPending(now)
       }
       case "session.execution.succeeded":
       case "session.execution.failed":
       case "session.execution.interrupted": {
-        const target = entry ?? (yield* hydrate(id))
+        const target = yield* lineage(id)
         if (target) {
           target.running = false
           target.activityAt = event.created
@@ -378,16 +391,33 @@ export function makeTracker(ctx: TrackerContext) {
 
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
-    const root = (id: string) => {
-      const visit = (current: Entry | undefined, depth: number): Entry | undefined =>
-        current?.parentID && depth < 32 ? visit(sessions.get(current.parentID), depth + 1) : current
-      return visit(sessions.get(id), 0)
-    }
     const owned = new Map<string, Request[]>()
     for (const request of state.requests) {
-      const top = root(request.sessionID)
-      if (!top || top.parentID || top.archived) continue
+      const top = rootOf(request.sessionID)
+      if (!top || top.archived) continue
       owned.set(top.id, [...(owned.get(top.id) ?? []), request])
+    }
+    // Executing members of each family: the top-level session itself and its descendants at any depth.
+    const executing = new Map<string, Entry[]>()
+    for (const entry of sessions.values()) {
+      if (!entry.running || entry.archived) continue
+      const top = rootOf(entry.id)
+      if (top) executing.set(top.id, [...(executing.get(top.id) ?? []), entry])
+    }
+    const family = (entry: Entry) => {
+      const members = executing.get(entry.id) ?? []
+      const latest = members.toSorted((a, b) => b.activityAt - a.activityAt || a.id.localeCompare(b.id))[0]
+      const starts = members.map((member) => member.startedAt ?? member.created)
+      return {
+        running: members.length > 0,
+        startedAt: entry.startedAt ?? (starts.length > 0 ? Math.min(...starts) : entry.created),
+        // Subagents created since then belong to the most recent turn.
+        since:
+          entry.startedAt ??
+          (members.length > 0 ? Math.min(...members.map((member) => member.created)) : entry.created),
+        activityAt: Math.max(entry.activityAt, ...members.map((member) => member.activityAt)),
+        activity: latest?.activity,
+      }
     }
     const failed = (entry: Entry) =>
       entry.ended?.outcome === "failed" && !entry.ended.cleared && now - entry.ended.at < limits.failedMs
@@ -404,25 +434,27 @@ export function makeTracker(ctx: TrackerContext) {
         const oldest = requests
           .filter((request) => request.kind === kind)
           .toSorted((a, b) => a.since - b.since || a.id.localeCompare(b.id))[0]
+        const rollup = family(entry)
         const status: LiveActivity.RowStatus | undefined =
-          kind ?? (failed(entry) ? "failed" : entry.running ? "working" : idle(entry) ? "idle" : undefined)
+          kind ?? (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) ? "idle" : undefined)
         if (!status) return []
-        return [{ entry, status, oldest, ref: ref(entry) }]
+        return [{ entry, status, oldest, ref: ref(entry), rollup }]
       })
     const of = (status: LiveActivity.RowStatus) => rows.filter((row) => row.status === status)
     const working = of("working")
     const kept = working.find((row) => row.entry.id === state.focus)
     const focused =
       kept ??
-      working.toSorted((a, b) => b.entry.startedAt - a.entry.startedAt || a.entry.id.localeCompare(b.entry.id))[0]
+      working.toSorted((a, b) => b.rollup.startedAt - a.rollup.startedAt || a.entry.id.localeCompare(b.entry.id))[0]
     state.focus = focused?.entry.id
-    const progress = (entry: Entry): LiveActivity.Progress | undefined => {
-      const children = [...entry.children].filter(([, created]) => created >= entry.startedAt)
+    const progress = (row: (typeof rows)[number]): LiveActivity.Progress | undefined => {
+      const children = [...sessions.values()].filter(
+        (child) => child.parentID === row.entry.id && child.created >= row.rollup.since,
+      )
       if (children.length === 0) return undefined
-      const done = children.filter(([id, created]) => {
-        const child = sessions.get(id)
-        return child !== undefined && !child.running && child.ended !== undefined && child.ended.at >= created
-      }).length
+      const done = children.filter(
+        (child) => !child.running && child.ended !== undefined && child.ended.at >= child.created,
+      ).length
       return { done, total: children.length, unit: "subagents" }
     }
     const bySince = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
@@ -436,7 +468,7 @@ export function makeTracker(ctx: TrackerContext) {
       ...(focused ? [focused] : []),
       ...working
         .filter((row) => row !== focused)
-        .toSorted((a, b) => b.entry.activityAt - a.entry.activityAt || a.entry.id.localeCompare(b.entry.id)),
+        .toSorted((a, b) => b.rollup.activityAt - a.rollup.activityAt || a.entry.id.localeCompare(b.entry.id)),
       ...of("idle").toSorted(byEnded),
     ]
     const counts = {
@@ -447,7 +479,7 @@ export function makeTracker(ctx: TrackerContext) {
       idle: of("idle").length,
     }
     const waiting = rows.filter((row) => row.status === "question" || row.status === "permission").toSorted(bySince)
-    const focusProgress = focused ? progress(focused.entry) : undefined
+    const focusProgress = focused ? progress(focused) : undefined
     const marks = new Map(
       [...of("question"), ...of("permission"), ...of("failed")].map((row) => [
         `${row.status}:${row.entry.id}`,
@@ -480,8 +512,8 @@ export function makeTracker(ctx: TrackerContext) {
           ? {
               focus: {
                 ...focused.ref,
-                startedAt: focused.entry.startedAt,
-                ...(focused.entry.activity ? { activity: clip(focused.entry.activity, limits.activity) } : {}),
+                startedAt: focused.rollup.startedAt,
+                ...(focused.rollup.activity ? { activity: clip(focused.rollup.activity, limits.activity) } : {}),
                 ...(focusProgress ? { progress: focusProgress } : {}),
               },
             }
@@ -494,7 +526,7 @@ export function makeTracker(ctx: TrackerContext) {
         })),
         attentionTotal: counts.question + counts.permission,
         sessions: ordered.slice(0, limits.rows).map((row) => {
-          const rowProgress = row.status === "working" ? progress(row.entry) : undefined
+          const rowProgress = row.status === "working" ? progress(row) : undefined
           return { ...row.ref, status: row.status, ...(rowProgress ? { progress: rowProgress } : {}) }
         }),
       },
@@ -506,9 +538,13 @@ export function makeTracker(ctx: TrackerContext) {
   /** Forgets sessions that can no longer affect the state. */
   const prune = (now: number) => {
     const owners = new Set(state.requests.map((request) => request.sessionID))
+    const live = new Set(
+      [...sessions.values()].filter((entry) => entry.running).flatMap((entry) => rootOf(entry.id)?.id ?? []),
+    )
     for (const entry of sessions.values()) {
       if (entry.running || owners.has(entry.id)) continue
-      if (entry.parentID && sessions.get(entry.parentID)?.running) continue
+      // Members of a family that still runs keep the parent links and the progress of their top-level session.
+      if (live.has(rootOf(entry.id)?.id ?? entry.id)) continue
       if (now - Math.max(entry.activityAt, entry.ended?.at ?? 0) < limits.failedMs) continue
       sessions.delete(entry.id)
     }
@@ -587,7 +623,7 @@ function idleAt(info: Session.Info) {
   return info.time.idle ? DateTime.toEpochMillis(info.time.idle) : undefined
 }
 
-function fromInfo(info: Session.Info, running: boolean, startedAt: number): Entry {
+function fromInfo(info: Session.Info, running: boolean): Entry {
   const idle = idleAt(info)
   const viewed = info.time.viewed ? DateTime.toEpochMillis(info.time.viewed) : undefined
   return {
@@ -596,9 +632,10 @@ function fromInfo(info: Session.Info, running: boolean, startedAt: number): Entr
     ...(info.title ? { title: info.title } : {}),
     directory: info.location.directory,
     ...(info.subpath ? { subpath: info.subpath } : {}),
+    created: DateTime.toEpochMillis(info.time.created),
+    ...(idle === undefined ? {} : { idleAt: idle }),
     archived: info.time.archived !== undefined,
     running,
-    startedAt,
     activityAt: Math.max(DateTime.toEpochMillis(info.time.updated), idle ?? 0),
     ...(!running && info.outcome && idle !== undefined
       ? {
@@ -610,6 +647,5 @@ function fromInfo(info: Session.Info, running: boolean, startedAt: number): Entr
         }
       : {}),
     tools: new Map(),
-    children: new Map(),
   }
 }

@@ -246,6 +246,7 @@ export function scene(name: Scene, server = world()) {
     at({ type: "permission.asked", data: request })
   }
   if (name === "calm") {
+    at(execution("succeeded", "ses_child_3", T - 4 * minute))
     at(execution("succeeded", ids.oauth, T - 3 * minute))
     at(execution("succeeded", ids.cache, T - 2 * minute))
     at(execution("succeeded", ids.live, T - minute))

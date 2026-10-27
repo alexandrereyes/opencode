@@ -197,6 +197,12 @@ it.effect("a new failed session alerts; the end comes after 10 calm minutes with
     expect(endPushes.at(-1)).toMatchObject({ token: "cc33", priority: 10 })
     expect(endPushes.at(-1)?.body).toEqual(yield* Effect.promise(() => fixture("push-end")))
     expect((yield* endRegistry.list(T)).at(0)?.activity).toBeUndefined()
+    // The ended card leaves the screen at once, so the next push-to-start never sits next to it.
+    const ended = Math.floor((T + limits.endMs) / 1000)
+    expect(endPushes.at(-1)?.body).toHaveProperty(["aps", "dismissal-date"], ended)
+    yield* endEvaluate(yield* scene("working"), T + limits.endMs + minute)
+    expect(endPushes.at(-1)).toMatchObject({ token: "aa11", priority: 10 })
+    expect(endPushes.at(-1)?.body).toHaveProperty("aps.event", "start")
   }),
 )
 

@@ -90,6 +90,32 @@ test("status precedence: question beats permission, failed beats working, and ch
   expect(state.attentionTotal).toBe(2)
 })
 
+test("a reply or cancellation clears its request although the server still lists it while publishing", async () => {
+  const server = world()
+  const tracker = makeTracker(server.ctx)
+  const counts = () => tracker.derive(T, host).state.counts
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.cache, T - 10 * minute), T)
+      yield* tracker.apply(execution("started", ids.cache, T - 9 * minute), T)
+      const form = question("frm_1", ids.cache, T - 4 * minute, "Seguir?")
+      server.forms.push(form)
+      yield* tracker.apply({ type: "form.created", data: { form } }, T)
+      expect(counts()).toMatchObject({ working: 0, question: 1 })
+      // Core publishes `form.replied` before the form leaves the pending list.
+      yield* tracker.apply({ type: "form.replied", data: { id: form.id } }, T)
+      expect(counts()).toMatchObject({ working: 1, question: 0 })
+      server.forms.splice(0)
+      const request = permission("per_1", ids.cache, T - 3 * minute, "edit", ["src/a.ts"])
+      server.permissions.push(request)
+      yield* tracker.apply({ type: "permission.asked", data: request }, T)
+      expect(counts()).toMatchObject({ working: 0, permission: 1 })
+      yield* tracker.apply({ type: "permission.replied", data: { requestID: request.id } }, T)
+      expect(counts()).toMatchObject({ working: 1, permission: 0 })
+    }),
+  )
+})
+
 test("failed lasts until a new execution, a view of that failure, archival, deletion or 24 hours", async () => {
   const tracker = makeTracker(world().ctx)
   const failedAt = T - 2 * minute
@@ -365,4 +391,133 @@ test("rebuild restores running, waiting, failed and idle sessions without any ev
     [ids.idleA, "idle"],
   ])
   expect(state.attention[0]).toMatchObject({ sessionID: ids.cache, since: T - 3 * 3_600_000, text: "Ainda quer isso?" })
+})
+
+test("a parent waiting for background subagents is working until the last one ends (rev. 2026-10-27)", async () => {
+  const tracker = makeTracker(world().ctx)
+  const view = (now: number) => tracker.derive(now, host).state
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.live, T - 60 * minute), T)
+      yield* tracker.apply(execution("started", ids.live, T - 10 * minute), T)
+      for (const child of ["ses_bg_a", "ses_bg_b"]) {
+        yield* tracker.apply(created(child, T - 9 * minute, ids.live), T)
+        yield* tracker.apply(execution("started", child, T - 9 * minute + 1), T)
+      }
+      // The turn that launched them ends; both keep running in the background.
+      yield* tracker.apply(execution("succeeded", ids.live, T - 8 * minute), T)
+    }),
+  )
+  expect(view(T).counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 0 })
+  expect(view(T).activeTotal).toBe(1)
+  expect(view(T).focus).toMatchObject({
+    sessionID: ids.live,
+    startedAt: T - 10 * minute,
+    progress: { done: 0, total: 2, unit: "subagents" },
+  })
+  expect(view(T).sessions).toEqual([expect.objectContaining({ sessionID: ids.live, status: "working" })])
+  await run(tracker.apply(execution("succeeded", "ses_bg_a", T - minute), T))
+  expect(view(T).focus?.progress).toEqual({ done: 1, total: 2, unit: "subagents" })
+  await run(tracker.apply(execution("failed", "ses_bg_b", T), T))
+  // Nothing in the family runs any more: idle, and a subagent failure is not the parent's.
+  expect(view(T).counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 1 })
+  expect(view(T).focus).toBeUndefined()
+  expect(view(T).sessions).toEqual([expect.objectContaining({ sessionID: ids.live, status: "idle" })])
+})
+
+test("a running grandchild rolls up to the top level and supplies the focus activity", async () => {
+  const tracker = makeTracker(world().ctx)
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.live, T - 60 * minute), T)
+      yield* tracker.apply(execution("started", ids.live, T - 10 * minute), T)
+      yield* tracker.apply(created("ses_child", T - 9 * minute, ids.live), T)
+      yield* tracker.apply(execution("started", "ses_child", T - 9 * minute), T)
+      yield* tracker.apply(created("ses_grandchild", T - 8 * minute, "ses_child"), T)
+      yield* tracker.apply(execution("started", "ses_grandchild", T - 8 * minute), T)
+      yield* tracker.apply(execution("succeeded", "ses_child", T - 7 * minute), T)
+      yield* tracker.apply(execution("succeeded", ids.live, T - 6 * minute), T)
+      for (const event of tool("ses_grandchild", T - minute, "call_read", "read", { path: "src/App.swift" }))
+        yield* tracker.apply(event, T)
+    }),
+  )
+  const state = tracker.derive(T, host).state
+  expect(state.counts.working).toBe(1)
+  expect(state.focus).toMatchObject({ sessionID: ids.live, startedAt: T - 10 * minute, activity: "Lendo App.swift" })
+  // The parent runs again and acts later than the grandchild: its own activity wins.
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(execution("started", ids.live, T), T)
+      yield* tracker.apply({ type: "session.reasoning.started", created: T + 1, data: { sessionID: ids.live } }, T)
+    }),
+  )
+  expect(tracker.derive(T, host).state.focus).toMatchObject({ startedAt: T, activity: "Pensando" })
+  // An executing child's activity wins over the parent's older one, and deleting it recomputes the family.
+  for (const event of tool("ses_grandchild", T + 2, "call_grep", "grep", { pattern: "Island" }))
+    await run(tracker.apply(event, T))
+  expect(tracker.derive(T, host).state.focus?.activity).toBe("Buscando Island")
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(execution("succeeded", ids.live, T + minute), T)
+      yield* tracker.apply({ type: "session.deleted", created: T + minute, data: { sessionID: "ses_grandchild" } }, T)
+    }),
+  )
+  expect(tracker.derive(T + minute, host).state.counts).toEqual({
+    working: 0,
+    question: 0,
+    permission: 0,
+    failed: 0,
+    idle: 1,
+  })
+})
+
+test("rebuild with only subagents running maps them to their top-level sessions", async () => {
+  const server = world()
+  // Scroll em iOS e Android: idle top level (in the scan) with two background subagents.
+  server.add(
+    session(ids.live, {
+      outcome: "succeeded",
+      time: { created: T - 3_600_000, updated: T - 8 * minute, idle: T - 8 * minute },
+    }),
+  )
+  server.prompts.set(ids.live, T - 20 * minute)
+  for (const [index, id] of ["ses_kid_a", "ses_kid_b"].entries()) {
+    server.add(session(id, { parentID: ids.live, time: { created: T - 15 * minute + index, updated: T - minute } }))
+    server.prompts.set(id, T - 15 * minute + index)
+    server.active.add(id)
+  }
+  // An old top level outside the 24-hour scan whose grandchild still runs; only `get` can find it.
+  server.add(
+    session(ids.deploy, {
+      outcome: "succeeded",
+      time: { created: T - 3 * 86_400_000, updated: T - 2 * 86_400_000, idle: T - 2 * 86_400_000 },
+    }),
+  )
+  server.add(session("ses_deploy_child", { parentID: ids.deploy, time: { created: T - 30 * minute, updated: T } }))
+  server.add(
+    session("ses_deploy_grandchild", { parentID: "ses_deploy_child", time: { created: T - 25 * minute, updated: T } }),
+  )
+  server.prompts.set("ses_deploy_grandchild", T - 25 * minute)
+  server.active.add("ses_deploy_grandchild")
+  const tracker = makeTracker(server.ctx)
+  await run(tracker.rebuild(T))
+  const state = tracker.derive(T, host).state
+  expect(state.counts).toEqual({ working: 2, question: 0, permission: 0, failed: 0, idle: 0 })
+  expect(state.activeTotal).toBe(2)
+  expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([
+    [ids.live, "working"],
+    [ids.deploy, "working"],
+  ])
+  // The parent's turn starts at its latest prompt; progress counts the subagents of that turn.
+  expect(state.focus).toMatchObject({
+    sessionID: ids.live,
+    startedAt: T - 20 * minute,
+    progress: { done: 0, total: 2, unit: "subagents" },
+  })
+  expect(server.reads).toEqual(expect.arrayContaining(["ses_deploy_child", ids.deploy]))
+  // Without any known turn of its own, the top level starts with its earliest executing descendant.
+  server.prompts.delete(ids.live)
+  const fallback = makeTracker(server.ctx)
+  await run(fallback.rebuild(T))
+  expect(fallback.derive(T, host).state.focus).toMatchObject({ sessionID: ids.live, startedAt: T - 15 * minute })
 })

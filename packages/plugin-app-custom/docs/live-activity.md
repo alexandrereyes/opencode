@@ -97,19 +97,26 @@ Row = SessionRef & {
 ### Backend rules
 
 - **Tracked sessions:** top-level (no parent), not archived, across **all** Locations of the server. Subagent child
-  sessions never appear as rows; they feed their parent's `progress`.
+  sessions never appear as rows; their state **rolls up into their top-level session** (at any depth), the same way
+  the Sessões screen rolls up running state and requests.
+- **Working (rolled up, rev. 2026-10-27):** a top-level session is working when it **or any descendant** is
+  executing. A parent whose own execution ended while background subagents still run is working, not idle. Its
+  `startedAt` is the start of the top-level session's most recent execution (the turn that spawned the running
+  descendants), falling back to the earliest start among the executing descendants.
 - **Status precedence per session:** question > permission > failed > working > idle.
 - **Failed:** the session's latest execution ended with `session.execution.failed` (a user interruption is not a
   failure). It stays failed until a new execution starts, the session is viewed (`session.viewed`), archived or
   deleted, or 24 hours pass.
-- **Idle:** latest execution succeeded within the last 30 minutes.
+- **Idle:** neither the session nor any descendant is executing, and its latest execution succeeded within the last
+  30 minutes.
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
-- **activity** (from the focus session's latest step activity): edit/write/patch → `Editando <basename>`; read →
+- **activity** (from the latest step activity of the most recently active **executing** session in the focus
+  family: the focus itself or one of its descendants): edit/write/patch → `Editando <basename>`; read →
   `Lendo <basename>`; shell → `Rodando <command, first 40 chars>`; grep/glob → `Buscando <pattern>`; webfetch or
   websearch → `Pesquisando na web`; subagent → `Delegando para <agent>`; reasoning → `Pensando`; text →
   `Escrevendo resposta`; otherwise omit.
-- **progress:** subagent children created by the focus session's current execution; `done` = children whose
+- **progress:** subagent children created by the focus session's most recent execution; `done` = children whose
   execution finished (any outcome). Omit when there are none.
 - **sessions order:** question, permission (oldest `since` first), failed (most recent first), working (focus first,
   then most recent activity), idle (most recent first); cut to 4.
@@ -142,7 +149,8 @@ several Location plugin instances.
 
 ## Lifecycle
 
-**Start.** A device/serverKey may have at most one live activity.
+**Start.** A device/serverKey may have at most one live activity **on screen, in any state** (rev. 2026-10-27: the
+device showed an ended card lingering above a new one). Ended activities never stay visible.
 
 - In foreground the app starts it locally (`Activity.request(..., pushType: .token)`) when `snapshot`/`changed`
   returns a non-null state and none exists, then calls `activity` with its push token.
@@ -150,8 +158,10 @@ several Location plugin instances.
   `pushToStartToken`, and no activity is registered for it. At most one push-to-start per device per 5 minutes. If
   the user dismissed the previous activity (`ended` with `dismissed`), do not push-to-start again until `activeTotal`
   returns to 0 and rises again.
-- If two activities end up existing for the same `serverKey` (local start racing a push start), the app keeps the
-  newest, ends the others and reports them with `ended`.
+- If two activities end up existing for the same `serverKey` (local start racing a push start, or an older one still
+  on screen), the app keeps the newest, ends the others **with immediate dismissal** and reports them with `ended`.
+  It enforces this whenever it gets runtime: launch, foreground, each `activityUpdates` element (including the
+  background wake after a push-to-start) and before any local start.
 
 **Update.** The backend pushes `update` to every registered activity token:
 
@@ -162,7 +172,8 @@ several Location plugin instances.
 - A heartbeat update every 10 minutes while active. Every push sets `stale-date` = now + 15 minutes.
 
 **End.** When `activeTotal` and `counts.failed` have been 0 for 10 minutes, the backend pushes `end` with the final
-state and `dismissal-date` = now + 30 minutes. While the app runs it does the same locally.
+state and `dismissal-date` = now (**immediate removal**, rev. 2026-10-27; it used to linger 30 minutes). While the
+app runs it does the same locally with `.immediate` dismissal; a null state never keeps an idle-only card.
 
 ## APNs (backend)
 
@@ -200,11 +211,31 @@ unit label `subagentes`); then, when `attention` is not empty, the pending block
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
   failed > 0; then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
   `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Concluída` `textSecondary`).
+  **Rows are single-line** (rev. 2026-10-27): small avatar, title (truncating) followed by the project in
+  `textSecondary` on the same line, status at the right. At most 3 rows; the whole expanded presentation must fit
+  without clipping on every iPhone with Dynamic Island, so the row count is fixed by measured row height, never by
+  `ViewThatFits` (the expanded region proposes unbounded height and clips on device).
 - **Minimal** (the small circle), first match wins:
   1. `counts.failed > 0` → exclamation mark + `counts.failed`, in `error`;
   2. `counts.question > 0` → question mark + `counts.question`, in `accent`;
   3. `counts.permission > 0` → raised hand + `counts.permission`, in `warning`;
   4. otherwise the mascot with a `success` ring.
+
+**Apple Watch Smart Stack** (`.small` supplemental family, rev. 2026-10-27; approved mock
+`.agent-artifacts/watch/smartstack-b3-anel-segmentado.png`). No watchOS app: declare
+`.supplementalActivityFamilies([.small])` and branch on `@Environment(\.activityFamily)` in the Lock Screen closure.
+
+- Left: the mascot inside a **segmented progress ring**. With `focus.progress`: `total` arcs with small gaps, the
+  first `done` in `success`, the rest in a dim track (`border`); above 8 subagents, one continuous arc filled
+  `done/total`. Working without progress: full `success` ring. Nothing working: track only.
+- Badge overlapping the bottom of the ring, same priority as the minimal island: `!N` (`error`), `?N` (`accent`), hand
+  + N (`warning`); none when there is no attention or failure.
+- Right: the first 2 `sessions` rows, separated by a hairline. Each row: bold title (one line, truncating) and a status
+  line: `Pergunta · há N min` (`accent`), `Permissão · há N min` (`warning`), `since` taken from the matching
+  `attention` item; `Erro` (`error`); `Trabalhando` (`success`) with ` · done/total` when the row has progress;
+  `Concluída` (`textSecondary`).
+- Fixed metrics that fit the `.small` size on the smallest supported watch without clipping. Tap uses the same
+  `widgetURL` as the Lock Screen card.
 
 **Taps:** the Lock Screen card opens the first attention session, else the focus session, else the Sessões list;
 attention rows and expanded-island rows link to their own session. Deep links are an iOS concern.
@@ -243,11 +274,24 @@ carries it once. The RPC methods of every instance read and write the same hub a
 evaluation's code serves the process: after an in-process plugin reload with several Locations, the new code takes
 over only when every instance has left or the server restarts.
 
+**Family rollup.** The tracker keeps every session it meets with its `parentID` (the child → parent map); a session
+it does not know yet, reported by an execution event, the running set or a pending request, is read with
+`ctx.session.get` together with its unknown ancestors, and kept as the cache. Each derivation groups executing,
+nonarchived sessions by their top-level session, so creating, finishing, deleting or archiving any descendant
+recomputes its family. A family is working when any member executes; failed and idle still come from the top-level
+session's own latest execution, so a failed subagent does not mark its parent failed. `startedAt` is the top-level
+session's latest own execution start (from `session.execution.started`), else the earliest start among the executing
+members. `activity` comes from the executing member with the latest tool, reasoning or text event. `progress` counts
+direct children created since the top-level session's latest execution started (or, without one, since the earliest
+executing member was created), finished or not. Working rows are ordered by the family's latest activity.
+
 **Startup.** The aggregator subscribes first, then rebuilds from `ctx.session.active()`, a scan of top-level
 nonarchived sessions (running, or with a terminal outcome in the last 24 h: `outcome`, `time.idle`, `time.viewed`),
-the direct children of running sessions (`ctx.session.family`), and `ctx.request.pending()`. After a rebuild the
-execution start is approximated by the latest user message (or the previous idle time) and the activity text stays
-empty until the next step event. The hub exists only while some Location is instantiated, which happens as soon as a
+and `ctx.request.pending()`. Every running session, including subagents at any depth, joins the model with its
+ancestors (top-level sessions older than the scan window are read through `get`); families that run get their direct
+children from `ctx.session.family` for `progress`. After a rebuild a running execution's start is approximated by its
+latest user message (or the previous idle time); a top-level session that only waits for subagents starts at its
+latest user message. The activity text stays empty until the next step event. The hub exists only while some Location is instantiated, which happens as soon as a
 session runs or a client calls an RPC.
 
 **Field sources.** `title`: the session title (`Sem título` when empty). `project`: basename of the Location
@@ -256,12 +300,14 @@ questions are forms with `metadata.kind` `question` or `websearch.provider`; `te
 (the question), else its title, else the form title. Permission `text` is `<action> · <resources joined by space>`.
 Requests owned by subagent children count for their top-level session. `since` is the request's `created`, or when
 it was first seen. Pending requests are reread on every `form.*`, `permission.*` and `session.execution.*` event.
-Working rows are ordered by the latest tool, reasoning, text or execution event; `progress` is computed for every
-working row.
+`progress` is computed for every working row.
 
 **Push decisions.** The push-to-start alert is `OpenCode` / `N sessões trabalhando` (plus pending counts). A
-push-to-start requires an observed `activeTotal` of 0 after the device's last start push or registered activity, so
-work already running at boot or registration does not start one. Alerts: when several items are added at once, the
+push-to-start requires an observed `activeTotal` of 0 after the device's last start push and after the last moment a
+registered activity covered active work, so work already running at boot or registration does not start one, while an
+activity that ended during the calm (the backend's own `end`, sent with `dismissal-date` = now) leaves the device
+armed for the next rise. Push-to-start is only sent while no activity is registered: a failed `end` keeps the
+activity registered and is retried, so no new card starts beside it. Alerts: when several items are added at once, the
 first in the order question, permission, failed. An activity registered with `activity` gets a routine update within
 10 s. `end` is sent with priority 10 and also respects the 10 s per-activity spacing; after it is delivered (or the
 token is invalid) the activity is removed from the registration. A failed update clears the "already sent" marker so
