@@ -49,16 +49,15 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--themes", nargs="+", choices=["dark", "light"], default=["dark", "light"])
     parser.add_argument("--derived", type=Path, help="Reuse a build-for-testing directory; it is not deleted")
-    parser.add_argument("--simulator", help="Single theme only: use an explicitly owned fresh simulator; it is not deleted")
     parser.add_argument("--only", nargs="+", help="Only these ScreenCatalogTests methods (development)")
     args = parser.parse_args()
+    if not shutil.which("pngquant"):
+        parser.error("pngquant is required (brew install pngquant); quality 85–95 preserves readable 2x references")
     package = Path(__file__).resolve().parents[1]
     output = (args.output or package / "docs/screens").resolve()
     output.mkdir(parents=True, exist_ok=True)
     # App uninstall does not clear the simulator's Keychain. Never share a device between themes.
     if len(args.themes) > 1:
-        if args.simulator:
-            parser.error("--simulator requires exactly one theme; create a fresh device for each theme")
         for theme in args.themes:
             command = [sys.executable, str(Path(__file__).resolve()), "--themes", theme, "--output", str(output)]
             if args.derived:
@@ -75,7 +74,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="opencode-screen-catalog-", dir=base) as temporary:
         temporary = Path(temporary)
         derived = args.derived.resolve() if args.derived else temporary / "build"
-        device = args.simulator or subprocess.check_output([
+        device = subprocess.check_output([
             "xcrun", "simctl", "create", "OpenCode Screens " + uuid.uuid4().hex[:8],
             "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
             "com.apple.CoreSimulator.SimRuntime.iOS-27-0"], text=True).strip()
@@ -137,6 +136,14 @@ def main():
                             shutil.copyfile(source, destination)
                             # Native 3x -> 2x: retain readable text while avoiding multi-MB references.
                             run("sips", "-Z", "1748", str(destination), stdout=subprocess.DEVNULL)
+                            # Controlled palette quantization at 2x, not a further resolution reduction.
+                            optimized = temporary / (name + "-quant.png")
+                            quant = subprocess.run(["pngquant", "--quality=85-95", "--speed", "3", "--strip",
+                                                    "--skip-if-larger", "--output", str(optimized), str(destination)])
+                            if quant.returncode not in (0, 98, 99):
+                                raise RuntimeError(f"pngquant failed: {quant.returncode}")
+                            if optimized.exists():
+                                shutil.copyfile(optimized, destination)
                             compress_png(destination)
                             captures.append(destination.name)
                     if status:
@@ -148,9 +155,8 @@ def main():
                     configured.unlink(missing_ok=True)
             print(json.dumps({"captures": sorted(captures), "bytes": sum((output / f).stat().st_size for f in captures)}, indent=2))
         finally:
-            if not args.simulator:
-                subprocess.run(["xcrun", "simctl", "shutdown", device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                run("xcrun", "simctl", "delete", device)
+            subprocess.run(["xcrun", "simctl", "shutdown", device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run("xcrun", "simctl", "delete", device)
 
 
 if __name__ == "__main__":

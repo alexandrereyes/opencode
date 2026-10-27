@@ -16,14 +16,17 @@ salvo quando a proposta pedir uma mudança explícita. Os PNGs ficam versionados
   não existe fallback para rede. A URL de lançamento é apenas um identificador de isolamento.
 - Os recursos são exemplos da **lista**, não streams ativos. As três abas em construção são
   os placeholders reais do app, não funcionalidades simuladas.
-- Os PNGs são reduzidos de 3× para 2× (804 × 1748) pelo `sips` do macOS e recomprimidos
-  sem perda adicional com zlib, sem recortar a interface ou remover o perfil de cor.
+- Os PNGs são reduzidos de 3× para 2× (804 × 1748) pelo `sips` do macOS, quantizados com
+  `pngquant --quality=85-95 --speed 3 --strip --skip-if-larger` e recomprimidos com zlib.
+  A resolução continua 2×; apenas a paleta tem perdas controladas. PNGs que não atingem a qualidade
+  mínima ou não ficam menores são mantidos sem quantização. Textos e ícones são conferidos visualmente.
   Metadados de screenshot/EXIF são removidos, inclusive as dimensões antigas deixadas pelo `sips`.
   Datas relativas, animações nativas e versão do iOS podem mudar alguns pixels entre execuções.
 
 ## Regenerar
 
-Requer macOS, Xcode com o runtime **iOS 27.0**, Python 3 e os pacotes Swift resolvíveis pelo Xcode.
+Requer macOS, Xcode com o runtime **iOS 27.0**, Python 3, `pngquant` (`brew install pngquant`)
+e os pacotes Swift resolvíveis pelo Xcode.
 Da raiz do repositório:
 
 ```sh
@@ -36,10 +39,10 @@ Não usa aparelhos físicos, sandbox de backend, modelos pagos, `custom:update` 
 Não usa as portas 4096/4177/4178.
 
 Para iterar, `--themes dark`, `--only testTabs` e `--output /caminho/temporario` limitam a execução.
-`--derived /caminho/build` reaproveita um `build-for-testing`; `--simulator UDID` aceita apenas **um tema**
-e um simulador **novo e exclusivo da tarefa**. Esses dois recursos fornecidos explicitamente não são apagados
-pelo script. Não use simuladores compartilhados nem reutilize um dispositivo entre temas: desinstalar o app
-não limpa o Keychain. O padrão sem `--simulator` garante essa separação automaticamente.
+`--derived /caminho/build` reaproveita somente um `build-for-testing` (não é apagado pelo script).
+Não existe mais `--simulator`: **cada execução, inclusive parcial, cria e apaga seu próprio simulador**.
+Não use simuladores compartilhados nem reutilize um dispositivo entre execuções: desinstalar o app
+não limpa o Keychain. A separação por dispositivo é obrigatória e automática.
 Cada lançamento verifica a presença da sessão sintética `ses_scroll_0000` antes de qualquer interação.
 Novas telas devem ganhar uma captura nomeada
 em `OpenCodeUITests/ScreenCatalogTests.swift` e uma linha no índice abaixo.
@@ -56,7 +59,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Painel | Aba Painel; placeholder real | [PNG](dashboard-tab-default-dark.png) | [PNG](dashboard-tab-default-light.png) |
 | Pedidos | Aba Pedidos; placeholder real | [PNG](requests-tab-default-dark.png) | [PNG](requests-tab-default-light.png) |
 | Projetos | Aba Projetos; placeholder real | [PNG](projects-tab-default-dark.png) | [PNG](projects-tab-default-light.png) |
-| Sessões · Todas | Aba Sessões, filtro Todas: cabeçalho, anéis de cota e “Precisa de você” (permissão, pergunta, erro) | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
+| Sessões · Todas | Aba Sessões: chips/avatares com ícone PNG/SVG e fallback de iniciais, anéis de cota e atenção | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
 | Sessões · seções | Rolar até o fim: Trabalhando, Fixadas, Hoje, Ontem, Esta semana, Anteriores expandida e Arquivadas | [PNG](sessions-sections-history-dark.png) | [PNG](sessions-sections-history-light.png) |
 | Cabeçalho com Configurações | Variante do Mac do cabeçalho compartilhado (engrenagem entre voz e +) | [PNG](sessions-header-settings-dark.png) | — |
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
@@ -75,7 +78,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Nova sessão · Chats | Sessões → +; destino inicial Chats | [PNG](new-session-chats-empty-dark.png) | [PNG](new-session-chats-empty-light.png) |
 | Nova sessão · projeto | Nova sessão → Projeto → Projeto Exemplo 0 | [PNG](new-session-project-empty-dark.png) | [PNG](new-session-project-empty-light.png) |
 | Nova sessão pelo chip | Sessões → chip Projeto Exemplo 0 → +; projeto herdado sem abrir a folha Projeto | [PNG](new-session-from-repository-chip-dark.png) | [PNG](new-session-from-repository-chip-light.png) |
-| Folha Projeto | Nova sessão → nome do destino | [PNG](new-session-project-sheet-dark.png) | [PNG](new-session-project-sheet-light.png) |
+| Folha Projeto | Nova sessão → nome do destino; PNG no Projeto 0, SVG no Projeto 2 e iniciais nos demais | [PNG](new-session-project-sheet-dark.png) | [PNG](new-session-project-sheet-light.png) |
 | Folha Diretório | Nova sessão de projeto → main | [PNG](new-session-directory-sheet-dark.png) | [PNG](new-session-directory-sheet-light.png) |
 | Adicionar repositório | Folha Projeto → +; explorador do servidor sintético | [PNG](projects-add-repository-dark.png) | — |
 | Conversa · mensagem normal | Sessões → primeira conversa; prompt curto | [PNG](conversation-user-normal-dark.png) | [PNG](conversation-user-normal-light.png) |
@@ -109,6 +112,22 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão dos ícones (base `9ff33a3ce8`): Projeto Exemplo 0 recebe um PNG 128×128 verde/azul;
+Projeto Exemplo 2 recebe um SVG quadrado roxo autocontido. São desenhos genéricos produzidos em
+`ScreenCatalogFixture.projectIcons`, colocados em `project.icon.override` como data URLs inline —
+o mesmo campo usado pelo PATCH do projeto, **sem enviar PATCH a servidor algum**. Os demais projetos
+(por exemplo Projeto Exemplo 3) não têm ícone e preservam as iniciais. Chips, linhas, troca rápida,
+cabeçalho e seletor de projeto mostram os dois comportamentos no app real (`37e021a87b`/`9ff33a3ce8`).
+
+`cbc9c169df` já atualizava referências após o layout compartilhado de chat (`aff7111287`): cartão de
+atividade, bandeja de execução, chips e barra de título Mac continuam no índice e são recapturados.
+`3fbe859a42` altera as ferramentas/prompt da mestra no backend, sem mudar o layout nativo do estado
+vazio capturado; a referência da mestra é regenerada, sem executar prompts ou controles reais.
+
+Antes desta revisão, o catálogo na base ocupava **21.771.431 bytes (20,76 MiB)**, incluindo README e 81 PNGs.
+A nova versão ocupa aproximadamente **6,30 MiB**, redução de **69,6%**, mantendo os **81 PNGs em 2×**.
+A compressão controlada acima faz parte da regeneração, não de um passo manual oculto.
 
 Revisão da troca rápida e seleção em lote (base `cf17e904d67`): `sessions-*` agora mostra o chip Todas
 apenas com `square.stack`/`filter-all` (`b2ce2d9a4ed`); cabeçalhos de conversa têm ⌄ e abrem a folha

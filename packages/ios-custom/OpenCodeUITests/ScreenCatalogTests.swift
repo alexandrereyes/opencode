@@ -15,6 +15,8 @@ import XCTest
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))
     // Fail before any interaction if launch ever falls through to AppRoot/a real connection.
     XCTAssertTrue(app.buttons["session-row-ses_scroll_0000"].waitForExistence(timeout: 10), "Catálogo offline não carregou")
+    // Complete both inline icon decodes, including SVG rasterization, before capturing any screen.
+    RunLoop.current.run(until: Date().addingTimeInterval(2))
     return app
   }
 

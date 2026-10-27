@@ -5,6 +5,22 @@ import UIKit
 
 /// Synthetic data only. The transport never falls through to URLSession, including writes.
 @MainActor enum ScreenCatalogFixture {
+  /// Own artwork, inline like PATCH /api/project/:id {icon:{override:"data:…"}}, with no server mutation.
+  static let projectIcons: [String: String] = {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    let png = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { context in
+      UIColor(red: 0.08, green: 0.26, blue: 0.35, alpha: 1).setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+      UIColor(red: 0.36, green: 0.90, blue: 0.73, alpha: 1).setFill()
+      UIBezierPath(roundedRect: CGRect(x: 24, y: 24, width: 80, height: 80), cornerRadius: 18).fill()
+      UIColor(red: 0.08, green: 0.26, blue: 0.35, alpha: 1).setFill()
+      UIBezierPath(ovalIn: CGRect(x: 45, y: 45, width: 38, height: 38)).fill()
+    }.pngData()!
+    let svg = ##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#573878"/><path d="M64 20 108 64 64 108 20 64Z" fill="#e7b6ff"/><circle cx="64" cy="64" r="17" fill="#573878"/></svg>"##
+    return ["project_scroll_0": "data:image/png;base64," + png.base64EncodedString(),
+      "project_scroll_2": "data:image/svg+xml;base64," + Data(svg.utf8).base64EncodedString()]
+  }()
   static let scripts = try! JSONDecoder().decode([ShellInfo].self, from: Data(#"[{"id":"catalog-script","status":"running","command":"bun run preview --port 4321","metadata":{"sessionID":"ses_scroll_0000"},"time":{"started":1792576830000}}]"#.utf8))
   static let children = try! JSONDecoder().decode([Session].self, from: Data(#"[{"id":"ses_catalog_review","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Verificar a acessibilidade","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"},"location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576830000,"updated":1792576890000}},{"id":"ses_catalog_finished","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Revisar os filtros","agent":"plan","outcome":"succeeded","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576840000,"updated":1792576950000,"idle":1792576950000}},{"id":"ses_catalog_older","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Conferir os atalhos","agent":"build","outcome":"succeeded","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576850000,"updated":1792576900000,"idle":1792576900000}}]"#.utf8))
   static let resources: [SessionResource] = [
@@ -135,7 +151,13 @@ import UIKit
       .replacingOccurrences(of: "\"settings\":", with: #""models":{"user":[{"providerID":"fixture","modelID":"modelo-exemplo","visibility":"show"},{"providerID":"fixture","modelID":"modelo-rapido","visibility":"show"}],"variant":{}},"settings":"#)
     let preferences = try! JSONDecoder().decode(Preferences.self, from: Data(preferencesJSON.utf8))
     let models = try! JSONDecoder().decode([ModelInfo].self, from: Data(#"[{"id":"modelo-exemplo","providerID":"fixture","name":"Modelo Exemplo","limit":{"context":200000},"variants":[{"id":"low"},{"id":"high"}]},{"id":"modelo-rapido","providerID":"fixture","name":"Modelo Rápido","limit":{"context":128000}}]"#.utf8))
-    return ScrollFixtureSnapshot(messages: messages, entries: entries, projects: source.projects,
+    let projects = source.projects.map { project in
+      guard let icon = projectIcons[project.id] else { return project }
+      var value = try! JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(project))
+      value["icon"] = .object(["override": .string(icon)])
+      return try! JSONDecoder().decode(Project.self, from: JSONEncoder().encode(value))
+    }
+    return ScrollFixtureSnapshot(messages: messages, entries: entries, projects: projects,
       preferences: preferences, models: models)
   }
 
