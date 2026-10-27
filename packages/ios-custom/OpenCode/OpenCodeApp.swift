@@ -13,7 +13,8 @@ struct OpenCodeApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      if DictationFixtures.mode != nil { DictationFixtureRoot() }
+      if AgentsActivityFixtures.enabled { AgentsActivityFixtureRoot() }
+      else if DictationFixtures.mode != nil { DictationFixtureRoot() }
       else if MCPFixtures.mode != nil { MCPFixtureRoot() }
       else if ComposerFixtures.enabled { ComposerFixtureRoot() }
       else if ScrollFixtures.mode != nil { ScrollFixtureRoot() } else { AppRoot() }
@@ -109,6 +110,7 @@ private struct AppRoot: View {
     .task(id: runtime.servers.revision) { await runtime.prepare() }
     .task {
       TranscriptionController.shared.start()
+      AgentsActivityAgent.shared.start()
       #if DEBUG
       DeviceAgent.shared.probeIfRequested()
       #endif
@@ -117,7 +119,14 @@ private struct AppRoot: View {
       TranscriptionController.shared.setActive(phase == .active)
       if phase == .active { DeviceAgent.shared.sceneBecameActive() }
     }
-    .onChange(of: theme.id, initial: true) { runtime.voice.setTheme(theme) }
+    .onChange(of: theme.id, initial: true) {
+      runtime.voice.setTheme(theme)
+      AgentsActivityAgent.shared.setTheme(theme)
+    }
+    .onOpenURL { url in
+      guard let link = AgentsDeepLink(url: url) else { return }
+      Task { await runtime.open(link) }
+    }
   }
 }
 

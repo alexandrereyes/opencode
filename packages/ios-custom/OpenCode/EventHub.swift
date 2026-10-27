@@ -33,10 +33,16 @@ import OpenCodeKit
             connection += 1
             connected = true
             DeviceAgent.shared.connected(client)
+            AgentsActivityAgent.shared.connected(client)
           }
           // iPhone data requests go to the device agent only; they must not trigger screen reloads.
           if case .update(let update) = event, update.type.hasPrefix("rpc.custom.device.") {
             DeviceAgent.shared.receive(update, client: client)
+            continue
+          }
+          // The Live Activity state is not a screen change either.
+          if case .update(let update) = event, update.type.hasPrefix("rpc.custom.live-activity.") {
+            AgentsActivityAgent.shared.receive(update, client: client)
             continue
           }
           publish(event)

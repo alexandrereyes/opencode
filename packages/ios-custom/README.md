@@ -2287,8 +2287,9 @@ iOS prompts), collects each once plus the locked-cache answer, and writes `Docum
   distribution, so every processed build reaches the iPhone without Beta App Review. App Store requirements (review
   guidelines, public privacy disclosures, screenshots) do not apply.
 - **Signing:** Alexandre's personal Apple Developer team (`ERRYZ68LX5`), with automatic signing. The app carries
-  the HealthKit entitlement (`OpenCode/OpenCode.entitlements`), so device builds need `-allowProvisioningUpdates` with
-  the App Store Connect API key (Xcode has no signed-in account) to obtain the explicit App ID profile.
+  the HealthKit and Push Notifications (`aps-environment`) entitlements (`OpenCode/OpenCode.entitlements`), so device
+  builds need `-allowProvisioningUpdates` with the App Store Connect API key (Xcode has no signed-in account) to obtain
+  the explicit App ID profile.
 - **Identifiers:** bundle ID `br.com.alexandrem.opencode`, following the `alexandrem.com.br` domain already used by
   the Cloudflare One hostnames. Extensions use `br.com.alexandrem.opencode.<extension>`, and data shared between the
   app and its extensions uses the App Group `group.br.com.alexandrem.opencode`.
@@ -2492,8 +2493,72 @@ behavior and an `rpc.ts` with the contract):
 4. **Opening:** the payload carries the server and the Session, so tapping the notification opens the right session.
 
 TestFlight builds use the **production** APNs environment (`api.push.apple.com`), while builds installed from Xcode
-use **sandbox** (`api.sandbox.push.apple.com`). Store the environment with each token. Live Activity updates can later
-reuse the same delivery channel.
+use **sandbox** (`api.sandbox.push.apple.com`). Store the environment with each token. The Agentes Live Activity below
+already uses this channel.
+
+### Live Activity "Agentes" — 27 October
+
+One informative Live Activity per server (Lock Screen and Dynamic Island) summarizes its agent sessions: the focus
+session with a system timer, its activity and subagent progress, the pending questions/permissions, and the counts.
+There are **no buttons and no Live Activity intents**; tapping opens the app. The contract, fixtures and rendering
+rules are in [`plugin-app-custom/docs/live-activity.md`](../plugin-app-custom/docs/live-activity.md); the backend owns
+which sessions count and every push decision, the app owns the UI, tokens and local updates.
+
+- **Types:** `AgentsState` (OpenCodeKit, `AgentsActivity.swift`) mirrors the content state with epoch-millisecond
+  numbers (ActivityKit decodes push `Date`s with its own reference date) and computed `Date`s, tolerating omitted or
+  `null` optionals and unknown `unit`/`status`/`kind`. Its presentation helpers (minimal priority, compact
+  `attentionTotal/activeTotal`, the expanded header with `precisa`/`precisam`, the footer plurals, pending titles,
+  row labels) are pure and tested. `AgentsActivityAttributes` (`VoiceShared/`, shared with the widget extension) is the
+  APNs `attributes-type`; its `theme` carries `ThemeRole` names → `#RRGGBBAA` (the 12 required roles plus `info`).
+- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. The Lock Screen clips an activity at 160 points, less
+  than the approved mock with a focus *and* a pending block, so `AgentsLockScreenView` tries three densities through
+  `ViewThatFits`: the mock's layout (activity and question text on their own lines), then compact (activity after the
+  project, one-line pending rows), then tight (header row folded into the footer, at most two pending rows). The
+  footer drops its dots, then scales, before truncating. The expanded island shows the header and up to three rows,
+  dropping rows rather than clipping one. `há 3 min.` is a system-updated relative date. The mascot is drawn as a
+  vector shape in theme colors, so the extension needs no image asset.
+- **Driver:** `OpenCode/LiveActivity/AgentsActivityAgent.swift`. The main-actor agent forwards each event-stream
+  connection (launch and every foreground) and `rpc.custom.live-activity.changed` (routed by `EventHub` like
+  `custom.device`, never to screens) to the `AgentsActivityDriver` actor, which does all ActivityKit and RPC work. On
+  each connection: `register` (`deviceID` from `custom.device`, `serverKey`, `environment`, `theme`,
+  `pushToStartToken`), then `snapshot`. It watches `pushToStartTokenUpdates` (re-registering on change),
+  `activityUpdates` (activities started by push), each activity's `pushTokenUpdates` (`activity`) and
+  `activityStateUpdates` (`ended` with `ended`/`dismissed`). Tokens and endings of another server wait until it is the
+  active one.
+- **Local updates:** with the app running, a non-null state starts the activity (`pushType: .token`, falling back to
+  a local-only activity) or updates it; a null state shows the last state with active/pending/failed cleared and ends
+  it 10 minutes after the last activity, dismissed 30 minutes later, as the backend does. A swiped-away activity is
+  not restarted locally until `activeTotal` returns to 0. While APNs is `unconfigured` this is the only update path.
+- **Duplicates:** one activity per `serverKey`; when a local start races a push start, the one seen last is kept and
+  the others are ended (and reported as `ended`).
+- **Server key:** the saved server's ID (`builtin` for the Mac); with a launch override (sandbox runs) the built-in
+  entry becomes `launch-<host>-<port>`, so a sandbox never adopts the real server's activity.
+- **Environment:** the simulator is `sandbox`; on a device the app reads its `embedded.mobileprovision`:
+  `aps-environment` `development` (or `get-task-allow` without it) is `sandbox`; App Store Connect builds
+  (TestFlight) carry no embedded profile and are `production`. This follows the signing that actually happened,
+  unlike a `DEBUG` flag (a Release build installed from Xcode still uses the sandbox).
+- **Older servers:** `rpc.method_not_found`, `rpc.unavailable` or 404 make the driver silent until the next
+  connection; no error reaches the UI. Other failures retry on the next connection.
+- **Deep links:** `br.com.alexandrem.opencode://session?server=<serverKey>&id=<sessionID>&directory=<dir>` and
+  `…://sessions?server=<serverKey>`. The card opens the first attention session, else the focus, else Sessões; pending
+  rows and expanded-island rows link to their own session. Opening switches to that saved server when needed, selects
+  Sessões and pushes the conversation (which resolves its Location from the Session; `directory` is informative).
+- **Configuration:** `aps-environment` in `OpenCode/OpenCode.entitlements` (automatic signing adds Push Notifications to
+  the App ID; export for TestFlight switches it to `production`), `NSSupportsLiveActivitiesFrequentUpdates` and the
+  URL scheme in `Info.plist`. The APNs key, its ID and the backend configuration are not part of the app; until they
+  exist the backend answers `push: "unconfigured"`.
+
+Verification uses only the **OpenCode LiveActivity** simulator (iPhone 17 Pro, iOS 27) and
+`$TMPDIR/opencode/ios-liveactivity-derived`, with no server. `swift test --filter AgentsActivityTests` decodes every
+contract fixture (including the `push-*.json` content states and attributes, read from the plugin docs) and checks
+the presentation rules. The hosted `OpenCodeTests/AgentsActivityRenderTests` renders the production views with
+`ImageRenderer`, checks that a density fits 160 points and the island rows fit, and renders the minimal island, which
+the simulator never shows for a single app. The DEBUG-only `-OpenCodeAgentsActivityFixture <names>` (comma-separated
+`state-*` names of the contract, embedded verbatim and shifted to the current time; not compiled in Release) starts
+local activities and keeps the app off every server. `OpenCodeUITests/AgentsActivityCaptureTests`, with
+`TEST_RUNNER_OPENCODE_AGENTS_FIXTURE=<names>` and `TEST_RUNNER_OPENCODE_CAPTURE_DIR=<dir>`, captures the compact and
+expanded island and the Lock Screen (`ios-<state>-<variant>.png`). `xcrun simctl push` only delivers user
+notifications, so APNs Live Activity pushes (start/update/end) need a physical device and the backend's APNs key.
 
 ## Technical direction
 
@@ -2532,8 +2597,8 @@ packages/ios-custom/
   proxy**, especially the one serving live sessions.
 - The simulator shares the Mac's network and reaches `http://localhost:<port>` directly. A physical device uses the
   Cloudflare One route (see [Network access](#network-access)), the LAN address, or the tunnel.
-- Push notifications require a physical device. Builds installed from Xcode receive notifications only through the
-  APNs sandbox.
+- Push notifications and Live Activity pushes require a physical device. Builds installed from Xcode receive them
+  only through the APNs sandbox.
 - The physical test devices are shared with other agents. Reserve one through the device lease before installing or
   driving the app, and release it when you are done.
 - The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team

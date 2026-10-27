@@ -7,6 +7,7 @@ import WidgetKit
 @main struct VoiceActivityBundle: WidgetBundle {
   var body: some Widget {
     VoiceActivityWidget()
+    AgentsActivityWidget()
     VoiceStartControl()
   }
 }
