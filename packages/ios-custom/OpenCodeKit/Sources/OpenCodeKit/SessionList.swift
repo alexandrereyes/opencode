@@ -193,6 +193,38 @@ public struct RecentOrder: Sendable {
   }
 }
 
+/// The saved manual order of the Sessões filter chips: the selected repositories (`projects["local"]`) with Chats
+/// inserted after `chatsIndex` of them (absent: Chats first).
+public struct ChipManualOrder: Sendable {
+  public static let chats = "custom.chats"
+  /// Repository chips as (project ID, saved worktree), in saved order.
+  public let projects: [(id: String, directory: String)]
+  public let chatsIndex: Int?
+  public let showsChats: Bool
+  public init(projects: [(id: String, directory: String)], chatsIndex: Int?, showsChats: Bool) {
+    self.projects = projects
+    self.chatsIndex = chatsIndex
+    self.showsChats = showsChats
+  }
+  private var chatsAt: Int { min(max(chatsIndex ?? 0, 0), projects.count) }
+  public var keys: [String] {
+    var keys = projects.map(\.id)
+    if showsChats { keys.insert(Self.chats, at: chatsAt) }
+    return keys
+  }
+  /// The intent that swaps `key` with its previous (`offset` -1) or next (+1) chip in this order, if any.
+  public func move(_ key: String, by offset: Int) -> PreferenceIntent? {
+    let keys = keys
+    guard let from = keys.firstIndex(of: key), keys.indices.contains(from + offset) else { return nil }
+    let neighbour = keys[from + offset]
+    if key == Self.chats { return .chatsMove(toIndex: chatsAt + offset) }
+    // Passing Chats moves Chats the other way; the repositories keep their saved order.
+    if neighbour == Self.chats { return .chatsMove(toIndex: chatsAt - offset) }
+    guard let index = projects.firstIndex(where: { $0.id == key }) else { return nil }
+    return .move(directory: projects[index].directory, toIndex: index + offset)
+  }
+}
+
 /// A filter chip before its rows are counted: `position` is its index in the saved manual order, if any.
 public struct ChipEntry: Sendable, Equatable {
   public let key: String

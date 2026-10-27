@@ -16,10 +16,10 @@ struct SessionsView: View {
   @State private var proxyProvider: SubscriptionProvider?
 
   private struct ProjectAction: Identifiable {
-    let directory: String
     let name: String
-    let index: Int?
-    var id: String { directory }
+    let intent: PreferenceIntent
+    var id: String { name }
+    var removes: Bool { if case .close = intent { true } else { false } }
   }
 
   var body: some View {
@@ -27,8 +27,8 @@ struct SessionsView: View {
       List {
         VStack(spacing: 16) {
           SessionQuotaRings(quota: store.quota) { proxyProvider = $0 }
-          SessionChips(store: store) { directory, name, index in
-            projectAction = ProjectAction(directory: directory, name: name, index: index)
+          SessionChips(store: store) { name, intent in
+            projectAction = ProjectAction(name: name, intent: intent)
           } add: {
             showProjects = true
           }
@@ -203,27 +203,27 @@ struct SessionsView: View {
         )
       }
       .confirmationDialog(
-        projectAction?.index == nil ? "Remover dos filtros?" : "Reordenar repositório?",
+        projectAction?.removes == true
+          ? "Remover dos filtros?" : projectAction?.name == "Chats" ? "Reordenar Chats?" : "Reordenar repositório?",
         isPresented: Binding(
           get: { projectAction != nil }, set: { if !$0 { projectAction = nil } }),
         titleVisibility: .visible
       ) {
         if let action = projectAction {
           Button(
-            action.index == nil ? "Remover dos filtros" : "Confirmar nova posição",
-            role: action.index == nil ? .destructive : nil
+            action.removes ? "Remover dos filtros" : "Confirmar nova posição",
+            role: action.removes ? .destructive : nil
           ) {
-            Task {
-              await store.mutate(
-                action.index.map { .move(directory: action.directory, toIndex: $0) }
-                  ?? .close(directory: action.directory))
-            }
+            Task { await store.mutate(action.intent) }
             projectAction = nil
           }
         }
         Button("Cancelar", role: .cancel) { projectAction = nil }
       } message: {
-        Text("Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
+        Text(
+          projectAction?.name == "Chats"
+            ? "Isso altera apenas a ordem dos filtros."
+            : "Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
       }
     }
     .sessionRowTimeline(active: store.selectedTab == 3 && !store.conversationOpen && !showArchived)

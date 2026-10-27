@@ -194,3 +194,35 @@ test("project move rejects invalid wire indexes and ignores out-of-range indexes
     applyIntent(profile, { type: "project.move", server: "local", directory: "/repo", toIndex: 10 }).data.projects,
   ).toEqual(profile.data.projects)
 })
+
+test("chats position is optional, clamped and kept after the same projects", () => {
+  // Saved profiles without a Chats position still decode; absent means Chats first.
+  expect(profile.data.projects.local.chatsIndex).toBeUndefined()
+  const three = ["/b", "/c"].reduce(
+    (current, directory) => applyIntent(current, { type: "project.open", server: "local", directory }),
+    profile,
+  )
+  expect(three.data.projects.local.projects.map((item) => item.worktree)).toEqual(["/c", "/b", "/repo"])
+  expect(three.data.projects.local.chatsIndex).toBeUndefined()
+  const moved = applyIntent(three, { type: "chats.move", server: "local", toIndex: 2 })
+  expect(moved.data.projects.local.chatsIndex).toBe(2)
+  expect(applyIntent(three, { type: "chats.move", server: "local", toIndex: 9 }).data.projects.local.chatsIndex).toBe(3)
+  // Opening prepends a project before Chats; closing one before it keeps the same neighbours.
+  const opened = applyIntent(moved, { type: "project.open", server: "local", directory: "/new" })
+  expect(opened.data.projects.local.chatsIndex).toBe(3)
+  expect(applyIntent(opened, { type: "project.open", server: "local", directory: "/b" }).data.projects.local.chatsIndex).toBe(3)
+  const closed = applyIntent(opened, { type: "project.close", server: "local", directory: "/c" })
+  expect(closed.data.projects.local.chatsIndex).toBe(2)
+  expect(applyIntent(closed, { type: "project.remove", server: "local", directory: "/repo" }).data.projects.local.chatsIndex).toBe(2)
+  // Project moves and unrelated intents preserve it; Chats first stays first when a project is added.
+  expect(
+    applyIntent(closed, { type: "project.move", server: "local", directory: "/repo", toIndex: 0 }).data.projects.local
+      .chatsIndex,
+  ).toBe(2)
+  expect(applyIntent(closed, { type: "sidebar.pin", session: "s", pinned: true }).data.projects.local.chatsIndex).toBe(2)
+  const first = applyIntent(three, { type: "chats.move", server: "local", toIndex: 0 })
+  expect(applyIntent(first, { type: "project.open", server: "local", directory: "/x" }).data.projects.local.chatsIndex).toBe(0)
+  // The stored profile round-trips, and invalid wire indexes are rejected.
+  expect(Schema.decodeUnknownSync(Preferences.Profile)(Schema.encodeSync(Preferences.Profile)(closed))).toEqual(closed)
+  expect(() => Schema.decodeUnknownSync(Preferences.Intent)({ type: "chats.move", server: "local", toIndex: -1 })).toThrow()
+})

@@ -280,3 +280,38 @@ private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<Stri
   #expect(rows.allSatisfy { $0.pinned })
   #expect(rows.last?.muted == true)
 }
+
+@Test func chipManualOrderPlacesChatsAndMovesThroughOneIntent() throws {
+  let projects = [(id: "a", directory: "/a"), (id: "b", directory: "/b"), (id: "c", directory: "/c")]
+  func intent(_ value: PreferenceIntent?) throws -> JSONValue? {
+    try value.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) }
+  }
+  // Without a saved position (older servers or profiles) Chats is first; a saved index is clamped.
+  #expect(ChipManualOrder(projects: projects, chatsIndex: nil, showsChats: true).keys == ["custom.chats", "a", "b", "c"])
+  #expect(ChipManualOrder(projects: projects, chatsIndex: 2, showsChats: true).keys == ["a", "b", "custom.chats", "c"])
+  #expect(ChipManualOrder(projects: projects, chatsIndex: 9, showsChats: true).keys == ["a", "b", "c", "custom.chats"])
+  #expect(ChipManualOrder(projects: projects, chatsIndex: 1, showsChats: false).keys == ["a", "b", "c"])
+  let order = ChipManualOrder(projects: projects, chatsIndex: 1, showsChats: true)  // a, Chats, b, c
+  let chats: JSONValue = .object(["type": .string("chats.move"), "server": .string("local"), "toIndex": .number(0)])
+  #expect(try intent(order.move("custom.chats", by: -1)) == chats)
+  #expect(try intent(order.move("custom.chats", by: 1))?.object?["toIndex"] == .number(2))
+  // A repository passing Chats moves Chats the other way, keeping the repositories' saved order.
+  #expect(try intent(order.move("a", by: 1)) == chats)
+  #expect(try intent(order.move("b", by: -1))?.object?["toIndex"] == .number(2))
+  #expect(
+    try intent(order.move("b", by: 1))
+      == .object([
+        "type": .string("project.move"), "server": .string("local"), "directory": .string("/b"),
+        "toIndex": .number(2),
+      ]))
+  #expect(order.move("a", by: -1) == nil)
+  #expect(order.move("c", by: 1) == nil)
+  #expect(ChipManualOrder(projects: projects, chatsIndex: nil, showsChats: true).move("custom.chats", by: -1) == nil)
+  // Profiles saved before the Chats position still decode.
+  let saved: Preferences = try JSONDecoder().decode(
+    Preferences.self,
+    from: Data(
+      #"{"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"/a","expanded":true}]}},"pinnedSessions":[],"settings":{"autoApprove":false}}}"#
+        .utf8))
+  #expect(saved.data.projects["local"]?.chatsIndex == nil)
+}

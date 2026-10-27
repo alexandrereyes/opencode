@@ -39,6 +39,8 @@ public struct Preferences: Codable, Sendable {
   public struct Library: Codable, Sendable {
     public let projects: [Selection]
     public let lastProject: String?
+    /// How many `projects` precede the Chats filter chip; absent (older servers too) means Chats first.
+    public let chatsIndex: Int?
   }
   public struct Selection: Codable, Sendable {
     public let worktree: String
@@ -77,6 +79,7 @@ public enum PreferenceIntent: Encodable, Sendable {
   case touch(directory: String)
   case close(directory: String)
   case move(directory: String, toIndex: Int)
+  case chatsMove(toIndex: Int)
   case modelFavorite(providerID: String, modelID: String, favorite: Bool)
   case modelVisibility(providerID: String, modelID: String, visible: Bool)
   case modelDefault(ModelReference?)
@@ -129,6 +132,10 @@ public enum PreferenceIntent: Encodable, Sendable {
       try values.encode("sidebar.mute", forKey: .type)
       try values.encode(session, forKey: .session)
       try values.encode(muted, forKey: .muted)
+    case .chatsMove(let index):
+      try values.encode("chats.move", forKey: .type)
+      try values.encode("local", forKey: .server)
+      try values.encode(index, forKey: .toIndex)
     case .open(let directory), .touch(let directory), .close(let directory), .move(let directory, _):
       try values.encode("local", forKey: .server)
       try values.encode(directory, forKey: .directory)

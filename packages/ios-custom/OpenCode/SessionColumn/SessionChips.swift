@@ -5,7 +5,8 @@ import SwiftUI
 struct SessionChips: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let store: SessionStore
-  let action: (_ directory: String, _ name: String, _ index: Int?) -> Void
+  /// A confirmed preference change for a chip: removal or a move in the saved manual order.
+  let action: (_ name: String, _ intent: PreferenceIntent) -> Void
   let add: () -> Void
   /// The displayed order changes only while the strip is idle and after the new order has held for `settle`,
   /// so chips never move under a finger and brief running/idle flips do not make the strip dance.
@@ -16,14 +17,18 @@ struct SessionChips: View {
   @State private var states: [Set<String>] = []
   private let settle = Duration.milliseconds(1500)
 
-  /// Chats has no saved manual position; repositories use their index in `projects["local"]`.
-  private var chips: [ChipEntry] {
-    (store.chatRoot == nil ? [] : [ChipEntry(key: SessionStore.chatsSelection, name: "Chats", position: nil)])
-      + store.selectedProjects.enumerated().map {
-        ChipEntry(key: $0.element.project.id, name: $0.element.project.displayName, position: $0.offset)
-      }
+  private var manual: ChipManualOrder {
+    ChipManualOrder(
+      projects: store.selectedProjects.map { ($0.project.id, $0.directory) },
+      chatsIndex: store.preferences?.data.projects["local"]?.chatsIndex, showsChats: store.chatRoot != nil)
   }
   var body: some View {
+    let manual = manual
+    let names = Dictionary(
+      store.selectedProjects.map { ($0.project.id, $0.project.displayName) }, uniquingKeysWith: { first, _ in first })
+    let chips = manual.keys.enumerated().map {
+      ChipEntry(key: $0.element, name: names[$0.element] ?? "Chats", position: $0.offset)
+    }
     let groups = SessionList.chipGroups(store.rows, chips: chips, chats: SessionStore.chatsSelection)
     let desired = groups.map(\.key)
     let current = [Set(groups.filter(\.running).map(\.key)), Set(groups.filter(\.unread).map(\.key))]
@@ -45,7 +50,7 @@ struct SessionChips: View {
           }
           .accessibilityHint("Mantenha pressionado para filtrar por estado")
           ForEach(order, id: \.self) { key in
-            if let group = groups.first(where: { $0.key == key }) { chip(group).id(key) }
+            if let group = groups.first(where: { $0.key == key }) { chip(group, manual).id(key) }
           }
           Button(action: add) {
             Chip(title: "+", selected: false)
@@ -93,35 +98,36 @@ struct SessionChips: View {
       withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { proxy.scrollTo(selected) }
     }
   }
-  @ViewBuilder private func chip(_ group: ChipGroup) -> some View {
+  /// Antes/depois swap with the neighbour in the saved manual order (Chats included); running and unread chips may
+  /// visually bypass that order.
+  @ViewBuilder private func moves(_ key: String, _ name: String, _ manual: ChipManualOrder) -> some View {
+    if let intent = manual.move(key, by: -1) {
+      Button("Mover para antes", systemImage: "arrow.left") { action(name, intent) }
+    }
+    if let intent = manual.move(key, by: 1) {
+      Button("Mover para depois", systemImage: "arrow.right") { action(name, intent) }
+    }
+  }
+  @ViewBuilder private func chip(_ group: ChipGroup, _ manual: ChipManualOrder) -> some View {
     if group.key == SessionStore.chatsSelection {
-      Button {
-        store.selectedProject = store.chatsSelected ? nil : SessionStore.chatsSelection
+      Menu {
+        moves(group.key, "Chats", manual)
       } label: {
         Chip(
           title: "Chats", selected: store.chatsSelected, running: group.running,
           count: group.requests, unread: group.unread, symbol: "bubble.left")
+      } primaryAction: {
+        store.selectedProject = store.chatsSelected ? nil : SessionStore.chatsSelection
       }
       .accessibilityLabel(group.unread ? "Chats, com não lidas" : "Chats")
       .accessibilityIdentifier("filter-chats")
-    } else if let index = store.selectedProjects.firstIndex(where: { $0.project.id == group.key }) {
-      let selected = store.selectedProjects[index]
+    } else if let selected = store.selectedProjects.first(where: { $0.project.id == group.key }) {
       let name = selected.project.displayName
-      // Antes/depois edit the saved manual order; running and unread chips may visually bypass it.
       Menu {
         Button("Remover dos filtros", systemImage: "minus.circle", role: .destructive) {
-          action(selected.directory, name, nil)
+          action(name, .close(directory: selected.directory))
         }
-        if index > 0 {
-          Button("Mover para antes", systemImage: "arrow.left") {
-            action(selected.directory, name, index - 1)
-          }
-        }
-        if index + 1 < store.selectedProjects.count {
-          Button("Mover para depois", systemImage: "arrow.right") {
-            action(selected.directory, name, index + 1)
-          }
-        }
+        moves(group.key, name, manual)
       } label: {
         Chip(
           title: name, selected: store.selectedProject == group.key, running: group.running,
