@@ -47,6 +47,10 @@ private actor RetainedReads {
   }
 }
 
+private final class ObservedFlag: @unchecked Sendable {
+  var raised = false
+}
+
 @MainActor final class ConversationRetentionTests: XCTestCase {
   private func store(_ reads: RetainedReads) -> ConversationStore {
     let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {
@@ -121,6 +125,39 @@ private actor RetainedReads {
     XCTAssertTrue(registry.existing("ses_root") === root)
     XCTAssertNil(root.memory.output("tool"), "fetched output can be read again")
     XCTAssertTrue(root.memory.bubble("msg"), "the reader's own choices stay")
+  }
+
+  func testLookupsDoNotReorderButAppearingDoes() {
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) { request in
+      (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+    }
+    let hub = EventHub(client: client)
+    let registry = ConversationRegistry(capacity: 2)
+    func open(_ id: String) -> ConversationStore {
+      registry.store(id) { ConversationStore(id: id, client: client, hub: hub) }
+    }
+    let first = open("ses_1")
+    _ = open("ses_2")
+    // A destination view rebuilt by its parent looks its store up again; that is not an opening.
+    XCTAssertTrue(open("ses_1") === first)
+    registry.touch("ses_2")
+    _ = open("ses_3")
+    XCTAssertNil(registry.existing("ses_1"))
+    registry.touch("ses_2")
+    _ = open("ses_4")
+    XCTAssertNotNil(registry.existing("ses_2"), "the conversation that appeared last stays")
+    XCTAssertNil(registry.existing("ses_3"))
+  }
+
+  func testMemoryObservesEachKeyAlone() {
+    let memory = TranscriptMemory()
+    let changed = ObservedFlag()
+    withObservationTracking { _ = memory.output("shell-a") } onChange: { changed.raised = true }
+    memory.setOutput("shell-b", value: "polled")
+    memory.setBubble("msg", expanded: true)
+    XCTAssertFalse(changed.raised, "another row's output must not invalidate this one")
+    memory.setOutput("shell-a", value: "polled")
+    XCTAssertTrue(changed.raised)
   }
 
   func testLatestParseNeverStarvesDuringAFastStream() async throws {

@@ -18,13 +18,22 @@ import SwiftUI
     self.capacity = max(1, capacity)
   }
 
+  /// The conversation's store, created on first use. Looking one up is not an opening: SwiftUI rebuilds a
+  /// destination's view value whenever its parent renders, so recency changes only through `touch`.
   func store(_ id: String, make: () -> ConversationStore) -> ConversationStore {
-    let store = stores[id] ?? make()
+    if let store = stores[id] { return store }
+    let store = make()
     stores[id] = store
+    touch(id)
+    return store
+  }
+
+  /// Marks a conversation as the most recently shown one.
+  func touch(_ id: String) {
+    guard stores[id] != nil else { return }
     recent.removeAll { $0 == id }
     recent.append(id)
     trim()
-    return store
   }
 
   func existing(_ id: String) -> ConversationStore? { stores[id] }
@@ -51,25 +60,41 @@ import SwiftUI
 
 /// Per-conversation reading and presentation state that outlives the screen: the exact passage on screen
 /// when it was last left or hidden, prompt and disclosure expansion, fetched tool output and table offsets.
-@MainActor @Observable final class TranscriptMemory {
+/// Each key is observed on its own, so a shell output polled every second re-renders only the row showing it.
+@MainActor final class TranscriptMemory {
   /// The passage last on screen, always a message and offset (even at the end), never persisted.
-  @ObservationIgnored var anchor: ReadingPosition?
-  private(set) var bubbles: [String: Bool] = [:]
-  private(set) var details: [String: Bool] = [:]
-  private(set) var outputs: [String: String] = [:]
-  @ObservationIgnored private var tableOffsets: [String: CGFloat] = [:]
+  var anchor: ReadingPosition?
+  private var bubbles: [String: TranscriptValue<Bool>] = [:]
+  private var details: [String: TranscriptValue<Bool?>] = [:]
+  private var outputs: [String: TranscriptValue<String?>] = [:]
+  private var tableOffsets: [String: CGFloat] = [:]
 
-  func bubble(_ id: String) -> Bool { bubbles[id] ?? false }
-  func setBubble(_ id: String, expanded: Bool) { bubbles[id] = expanded }
-  func detail(_ key: String) -> Bool? { details[key] }
-  func setDetail(_ key: String, expanded: Bool) { details[key] = expanded }
-  func output(_ key: String) -> String? { outputs[key] }
-  func setOutput(_ key: String, value: String?) { outputs[key] = value }
+  func bubble(_ id: String) -> Bool { Self.entry(&bubbles, id, false).value }
+  func setBubble(_ id: String, expanded: Bool) { Self.entry(&bubbles, id, false).value = expanded }
+  func detail(_ key: String) -> Bool? { Self.entry(&details, key, nil).value }
+  func setDetail(_ key: String, expanded: Bool) { Self.entry(&details, key, nil).value = expanded }
+  func output(_ key: String) -> String? { Self.entry(&outputs, key, nil).value }
+  func setOutput(_ key: String, value: String?) { Self.entry(&outputs, key, nil).value = value }
   func tableOffset(_ key: String) -> CGFloat { tableOffsets[key] ?? 0 }
   func setTableOffset(_ key: String, value: CGFloat) { tableOffsets[key] = value }
 
   /// Fetched output can be read again on demand; expansion and offsets are the reader's own choices.
-  func releaseCaches() { outputs = [:] }
+  func releaseCaches() { outputs.values.forEach { $0.value = nil } }
+
+  /// The observable box for one key; a reader of an absent key still observes its later value.
+  private static func entry<Value>(
+    _ table: inout [String: TranscriptValue<Value>], _ key: String, _ initial: Value
+  ) -> TranscriptValue<Value> {
+    if let box = table[key] { return box }
+    let box = TranscriptValue(initial)
+    table[key] = box
+    return box
+  }
+}
+
+@MainActor @Observable final class TranscriptValue<Value> {
+  var value: Value
+  init(_ value: Value) { self.value = value }
 }
 
 extension EnvironmentValues {

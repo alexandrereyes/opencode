@@ -93,15 +93,16 @@ final class SessionStore {
   /// and returning to one finds it as it was left.
   @ObservationIgnored let conversations = ConversationRegistry()
   @ObservationIgnored private var memoryWarning: NSObjectProtocol?
+  /// Called while SwiftUI builds a destination view: it creates a missing store but never mutates an observed one.
   func conversation(_ id: String, master: Bool = false) -> ConversationStore {
-    let store = conversations.store(id) {
-      ConversationStore(
+    conversations.store(id) {
+      let store = ConversationStore(
         id: id, client: client, hub: hub, expansions: expansions, catalog: catalog,
         reversion: reversions.value(id, client: client), quoteDismissals: quoteDismissals,
         quoteModes: quoteModes, draft: drafts.draft(id))
+      store.masterMode = master
+      return store
     }
-    store.masterMode = master
-    return store
   }
   func liveConversation(_ id: String) -> ConversationStore? { conversations.existing(id) }
   var conversationOpen: Bool { !conversationPath.isEmpty }

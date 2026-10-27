@@ -469,6 +469,8 @@ struct ConversationView: View {
     .background(DraftTriggerObserver(draft: sessions.drafts.draft(conversation.id)) { conversation.mcps.close() })
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
+      sessions.conversations.touch(conversation.id)
+      if conversation.masterMode != master { conversation.masterMode = master }
       screenVisible = true
       scrollState.setVisible(true)
       scrollState.correctAnchor()
@@ -488,6 +490,7 @@ struct ConversationView: View {
       captureTask?.cancel()
     }
     .onChange(of: scenePhase) { _, phase in
+      if phase == .active { conversation.revalidate() }
       if phase != .active {
         captureTask?.cancel()
         capturePosition()

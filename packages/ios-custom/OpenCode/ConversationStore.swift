@@ -754,6 +754,15 @@ import OpenCodeKit
     revision += 1
   }
   #endif
+  /// Returning to the foreground merges the tail at once instead of waiting for the event stream to notice a
+  /// connection the suspension may have half-closed. The loop keeps running; an unchanged tail publishes nothing.
+  func revalidate() {
+    #if DEBUG
+    if ScrollFixtures.mode != nil { return }
+    #endif
+    guard hasTranscript else { return }
+    scheduleRefresh()
+  }
   /// Coalesced reload: resource events arrive for every session on the server.
   func scheduleResources() {
     guard resourcesTask == nil else { return }
