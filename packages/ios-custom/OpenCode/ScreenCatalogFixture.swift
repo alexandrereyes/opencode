@@ -40,28 +40,54 @@ import UIKit
     }.pngData()!
     return (data, "image/png", nil)
   }
+  /// `-OpenCodeCatalogSections` fills every Sessões section: a question, a permission and a failure in
+  /// "Precisa de você", a pinned session and older days. Without it, ses_scroll_0000 stays near the top.
+  static let sections = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogSections")
+  static let permissions: [PermissionRequest] = sections ? try! JSONDecoder().decode([PermissionRequest].self, from: Data(#"[{"id":"per_catalog","sessionID":"ses_scroll_0004","action":"shell","resources":["git push origin versao-teste"]}]"#.utf8)) : []
+  static let forms: [PendingForm] = sections ? try! JSONDecoder().decode([PendingForm].self, from: Data(#"[{"id":"frm_catalog","sessionID":"ses_scroll_0002","title":"Pergunta","fields":[{"key":"q0","type":"string","title":"Cache","description":"Qual banco usar no cache?"}]}]"#.utf8)) : []
+  static let failures = sections ? ["ses_scroll_0005": "bun test falhou"] : [:]
+  /// `-OpenCodeCatalogSettingsButton` shows the header's Mac-only Configurações button.
+  static let settingsButton = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogSettingsButton")
+
   static func snapshot(_ source: ScrollFixtureSnapshot) -> ScrollFixtureSnapshot {
-    let encoded = String(decoding: try! JSONEncoder().encode(Array(source.entries.prefix(8))), as: UTF8.self)
+    let encoded = String(decoding: try! JSONEncoder().encode(Array(source.entries.prefix(11))), as: UTF8.self)
       .replacingOccurrences(of: "\\/", with: "/")
       .replacingOccurrences(of: "Sessão de exemplo 000 — revisão do projeto e ferramentas", with: "Revisar a navegação do aplicativo")
       .replacingOccurrences(of: "Sessão de exemplo 001 — revisão do projeto e ferramentas", with: "Organizar o roteiro da próxima versão")
       .replacingOccurrences(of: "/Projetos/exemplo-1", with: "/Chats/roteiro")
-    let entries: [NavigationEntry]
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogUnread") {
-      let values = try! JSONDecoder().decode([[String: JSONValue]].self, from: Data(encoded.utf8)).map { value in
-        var value = value
-        var session = value["session"]!.object!
-        var time = session["time"]!.object!
-        // A watermark after all fixed fixture timestamps leaves only the selected repository unread.
-        time["viewed"] = .number(session["projectID"]?.string == "project_scroll_3" ? 0 : 2_000_000_000_000)
-        session["time"] = .object(time)
-        value["session"] = .object(session)
-        return value
-      }
-      entries = try! JSONDecoder().decode([NavigationEntry].self, from: JSONEncoder().encode(values))
-    } else {
-      entries = try! JSONDecoder().decode([NavigationEntry].self, from: Data(encoded.utf8))
+    let titles = ["Escolher o banco do cache", "Atualizar a documentação", "Publicar a versão de teste",
+      "Rodar a suíte de testes", "Planejar a próxima versão", "Ideias para a barra lateral",
+      "Revisar o contraste dos temas", "Atualizar o changelog", "Migrar as preferências antigas"]
+    // Times relative to launch keep the day sections and elapsed labels stable between captures.
+    let now = Date.now.timeIntervalSince1970 * 1000
+    let today = Calendar.current.startOfDay(for: .now).timeIntervalSince1970 * 1000
+    let minute = 60_000.0
+    let todayAt = { (ago: Double) in min(now, max(now - ago * minute, today + minute)) }
+    let times: [Double] = [
+      now - 5 * minute, todayAt(30), todayAt(sections ? 1 : 40), todayAt(120), todayAt(sections ? 3 : 180),
+      sections ? now - 12 * minute : today - 600 * minute, now - 3 * 1440 * minute, today - 840 * minute,
+      today - 3 * 1440 * minute + 600 * minute, today - 600 * minute, today - 12 * 1440 * minute,
+    ]
+    let unread = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogUnread")
+    let values = try! JSONDecoder().decode([[String: JSONValue]].self, from: Data(encoded.utf8)).enumerated().map { index, value in
+      var value = value
+      var session = value["session"]!.object!
+      var time = session["time"]!.object!
+      for key in ["created", "updated", "idle"] { time[key] = .number(times[index]) }
+      // Read sessions stay read at their new times; the failure is unseen.
+      if time["viewed"] != .number(0) { time["viewed"] = .number(sections && index == 5 ? 0 : times[index]) }
+      value["messageAt"] = .number(times[index])
+      if index >= 2 { session["title"] = .string(titles[index - 2]) }
+      if sections && index == 5 { session["outcome"] = .string("failed") }
+      if sections && index == 2 { value["questionAt"] = .number(times[index]) }
+      if sections && index == 4 { value["permissionAt"] = .number(times[index]) }
+      // A watermark after all fixture timestamps leaves only the selected repository unread.
+      if unread { time["viewed"] = .number(session["projectID"]?.string == "project_scroll_3" ? 0 : 4_000_000_000_000) }
+      session["time"] = .object(time)
+      value["session"] = .object(session)
+      return value
     }
+    let entries = try! JSONDecoder().decode([NavigationEntry].self, from: JSONEncoder().encode(values))
     var messages = try! JSONDecoder().decode([ConversationMessage].self, from: Data(#"""
       [{"id":"msg_catalog_user","type":"user","time":{"created":1792576800000},"text":"Revise a navegação do aplicativo e proponha uma organização mais simples.\n\nConsidere as abas principais, o acesso às conversas e os atalhos de criação. Preserve a hierarquia visual e os controles de acessibilidade.\n\nApresente um resumo das mudanças, sem alterar os arquivos por enquanto."},
        {"id":"msg_catalog_answer","type":"assistant","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture","variant":"high"},"tokens":{"input":6000,"output":7000,"reasoning":0,"cache":{"read":63000,"write":0}},"time":{"created":1792576810000,"completed":1792576815000},"finish":"stop","content":[{"type":"text","text":"## Uma navegação mais simples\n\nA proposta mantém as cinco abas e dá mais destaque às **conversas recentes**.\n\n- Criar uma sessão em um único toque.\n- Agrupar filtros por projeto.\n- Manter os ajustes na aba Você.\n\nNenhum arquivo foi alterado. Podemos começar pelos filtros e validar o resultado antes de seguir."}]}]
@@ -71,6 +97,7 @@ import UIKit
       messages[0].text = "Como podemos simplificar a navegação?"
     }
     let preferencesJSON = String(decoding: try! JSONEncoder().encode(source.preferences), as: UTF8.self)
+      .replacingOccurrences(of: #""pinnedSessions":[]"#, with: sections ? #""pinnedSessions":["ses_scroll_0006"]"# : #""pinnedSessions":[]"#)
       .replacingOccurrences(of: "\"settings\":", with: #""models":{"user":[{"providerID":"fixture","modelID":"modelo-exemplo","visibility":"show"},{"providerID":"fixture","modelID":"modelo-rapido","visibility":"show"}],"variant":{}},"settings":"#)
     let preferences = try! JSONDecoder().decode(Preferences.self, from: Data(preferencesJSON.utf8))
     let models = try! JSONDecoder().decode([ModelInfo].self, from: Data(#"[{"id":"modelo-exemplo","providerID":"fixture","name":"Modelo Exemplo","limit":{"context":200000},"variants":[{"id":"low"},{"id":"high"}]},{"id":"modelo-rapido","providerID":"fixture","name":"Modelo Rápido","limit":{"context":128000}}]"#.utf8))

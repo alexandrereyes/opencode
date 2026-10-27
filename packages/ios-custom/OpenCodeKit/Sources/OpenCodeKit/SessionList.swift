@@ -1,7 +1,8 @@
 import Foundation
 
+/// Ordered by precedence: permission > question > running > failed > unread > stopped.
 public enum SessionState: Int, Sendable {
-  case stopped, unread, running, question, permission
+  case stopped, unread, failed, running, question, permission
 }
 
 public struct SessionRow: Sendable, Identifiable {
@@ -20,6 +21,8 @@ public struct SessionRow: Sendable, Identifiable {
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
   public var interactionAt: Double { entry.messageAt ?? session.time.created }
+  /// A pending permission or question, or an unseen failure: the rows of "Precisa de você".
+  public var needsYou: Bool { state == .permission || state == .question || state == .failed }
   public var projectName: String {
     if chat { return session.displayTitle }
     return project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent
@@ -40,7 +43,7 @@ public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
     case .unread: row.unread
     case .pinned: row.pinned
     case .running: row.state == .running
-    case .attention: row.state == .permission || row.state == .question
+    case .attention: row.needsYou
     case .muted: row.muted
     }
   }
@@ -83,12 +86,15 @@ public enum SessionList {
       let idle =
         session.outcome == .succeeded || session.outcome == .failed ? session.time.idle : nil
       let unread = max(entry.unreadAt ?? 0, idle ?? 0) > (session.time.viewed ?? 0)
+      // Opening the session (viewed) or running it again clears the failure; an interruption is not one.
+      let failed = session.outcome == .failed && (session.time.idle ?? 0) > (session.time.viewed ?? 0)
       return SessionRow(
         entry: entry, project: projects.first { $0.id == session.projectID },
         memberIDs: Set(members.map { $0.session.id }),
         state: permissions > 0
           ? .permission
-          : questions > 0 ? .question : running ? .running : unread ? .unread : .stopped,
+          : questions > 0
+            ? .question : running ? .running : failed ? .failed : unread ? .unread : .stopped,
         unread: unread, pinned: pinnedIDs.contains(session.id),
         muted: mutedIDs.contains(session.id),
         activeChildren: members.filter {

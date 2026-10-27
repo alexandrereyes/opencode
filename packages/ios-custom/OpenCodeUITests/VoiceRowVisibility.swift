@@ -2,10 +2,10 @@ import XCTest
 
 @MainActor extension XCUIApplication {
   func revealVoiceRow(_ row: XCUIElement) {
-    XCTAssertTrue(navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(sessionsTitle.waitForExistence(timeout: 10))
     let deadline = Date().addingTimeInterval(45)
     while Date() < deadline {
-      let top = navigationBars.firstMatch.frame.maxY
+      let top = sessionsTop
       let bottom = descendants(matching: .any)["floating-voice-bar"].frame.minY
       if row.exists {
         let frame = row.frame

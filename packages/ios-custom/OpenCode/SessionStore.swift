@@ -172,12 +172,15 @@ final class SessionStore {
       if ScrollFixtures.mode == "catalog" {
         chatRoot = "/Chats"
         masterAvailability = .available
+        permissions = ScreenCatalogFixture.permissions
+        forms = ScreenCatalogFixture.forms
       }
       active = Set(entries.enumerated().filter { $0.offset % 17 == 0 }.map { $0.element.session.id })
       previews = Dictionary(uniqueKeysWithValues: entries.map { entry in
         var preview = SessionPreview()
         preview.text = "Resultado sintético com ferramentas, Markdown e código de exemplo."
         preview.activity = "lendo arquivo de exemplo"
+        preview.failure = ScreenCatalogFixture.failures[entry.session.id]
         return (entry.session.id, preview)
       })
       order.snapshot(entries, active: active)
@@ -208,15 +211,6 @@ final class SessionStore {
       filter.includes($0)
         && (chatsSelected
           ? $0.chat : selectedProject == nil || (!$0.chat && $0.project?.id == selectedProject))
-    }
-  }
-  var attention: [SessionRow] {
-    filtered.filter { $0.state == .permission || $0.state == .question }
-  }
-  /// Like the web's Recentes, chats are listed only under their own Chats filter.
-  var recent: [SessionRow] {
-    filtered.filter {
-      $0.state != .permission && $0.state != .question && ($0.chat == chatsSelected)
     }
   }
   var requestCount: Int { rows.reduce(0) { $0 + $1.requestCount } }
@@ -510,11 +504,6 @@ final class SessionStore {
   }
   func markRead(_ session: Session) async {
     await perform(session.id) { try await client.markViewed(session) }
-  }
-  func markAllRead() async {
-    await perform("read-all") {
-      for row in rows where row.unread { try await client.markViewed(row.session) }
-    }
   }
   func archive(_ row: SessionRow) async {
     await perform(row.id, feedback: .light) { try await client.archive(row.id) }

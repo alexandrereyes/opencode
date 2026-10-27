@@ -110,7 +110,7 @@ import XCTest
     _ = try await request("/api/session/" + id + "/form", body: Data(#"{"title":"Pedido da própria mestra","metadata":{"kind":"question"},"fields":[{"key":"answer","type":"string"}]}"#.utf8))
     shot("created")
     app.buttons["Voltar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
     // The fixed master title exists only inside the accessory, never as a session row.
     XCTAssertEqual(app.buttons.matching(identifier: "master-accessory").count, 1)
     XCTAssertFalse(app.buttons["session-row-" + id].exists)
@@ -123,7 +123,9 @@ import XCTest
     XCTAssertFalse(app.alerts.firstMatch.exists)
     shot("trash-empty")
     app.buttons["Voltar"].tap()
-    app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Arquivadas'")).firstMatch.tap()
+    let archived = app.buttons["sessions-archived"]
+    app.revealSessionRow(archived)
+    archived.tap()
     XCTAssertTrue(app.navigationBars["Arquivadas"].waitForExistence(timeout: 15))
     shot("archived")
   }
@@ -207,6 +209,6 @@ import XCTest
     XCTAssertFalse(app.textViews["conversation-composer"].exists)
     shot("old-server")
     app.buttons["Voltar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
   }
 }

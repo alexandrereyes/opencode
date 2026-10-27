@@ -13,17 +13,19 @@ import urllib.request
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
-derived = temporary / "ios-linhas-derived"
+# Overrides let an isolated worker use its own sandbox, build and simulator (never 4096/4178).
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", str(temporary / "custom-sandbox-4177")))
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", str(temporary / "ios-linhas-derived")))
 evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", str(temporary / "ios-onda10-prints")))
 evidence.mkdir(parents=True, exist_ok=True)
-device = "5212D3A2-53B3-42DF-826B-338FC95E1AED"
+device = os.environ.get("OPENCODE_TEST_DEVICE", "5212D3A2-53B3-42DF-826B-338FC95E1AED")
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def api(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path, headers=headers,
+    request = urllib.request.Request(server + path, headers=headers,
         data=json.dumps(body).encode() if body is not None else None, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -33,7 +35,8 @@ token = uuid.uuid4().hex[:10]
 configured = derived / ("Build/Products/SessionRows-" + token + ".xctestrun")
 owned = []
 manifest = json.loads((home / "seed-conversation.json").read_text())
-environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme}
+environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
+    "OPENCODE_TEST_SERVER_URL": server}
 for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1")]:
     environment["OPENCODE_TEST_" + key] = next(s["id"] for s in manifest["sessions"] if s["role"] == role)
 tests = sys.argv[1:] or ["OpenCodeUITests/SessionRowsTests", "OpenCodeTests/SessionRowLayoutTests"]
@@ -63,7 +66,7 @@ try:
                if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     subprocess.run(["xcrun", "simctl", "status_bar", device, "override", "--time", "10:58", "--dataNetwork", "wifi",

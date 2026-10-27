@@ -20,13 +20,16 @@ import XCTest
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 20))
-    let waiting = app.staticTexts.matching(
-      NSPredicate(format: "label BEGINSWITH 'Precisa de você · '")
-    ).firstMatch
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+    let waiting = app.buttons["session-section-attention"]
     XCTAssertTrue(waiting.waitForExistence(timeout: 25))
+    XCTAssertTrue(waiting.label.hasPrefix("Precisa de você, "))
     XCTAssertTrue(app.buttons["Permitir"].exists)
     XCTAssertTrue(app.buttons["Negar"].exists)
+    XCTAssertFalse(app.buttons["Responder"].exists)
+    // The column header replaces the navigation bar: no "…" menu, title beside voice and Nova sessão.
+    XCTAssertFalse(app.buttons["Mais opções"].exists)
+    XCTAssertEqual(app.sessionsTitle.frame.midY, app.buttons["Nova sessão"].frame.midY, accuracy: 12)
     let metadata = app.descendants(matching: .any).matching(
       NSPredicate(format: "label BEGINSWITH 'Diretório ' AND label CONTAINS ', branch '"))
     XCTAssertTrue(metadata.firstMatch.waitForExistence(timeout: 20))
@@ -39,8 +42,8 @@ import XCTest
     XCTAssertTrue(pinned.label.contains("há ") || pinned.label.contains("Agora mesmo"))
     XCTAssertFalse(pinned.label.contains("Ontem"))
     shot("sessions-main-pinned")
-    let archives = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Arquivadas' "))
-      .firstMatch
+    // "Arquivadas N" is the last row, after "Anteriores".
+    let archives = app.buttons["sessions-archived"]
     app.revealSessionRow(archives)
     archives.tap()
     XCTAssertTrue(app.navigationBars["Arquivadas"].waitForExistence(timeout: 10))
@@ -69,7 +72,7 @@ import XCTest
 
   private func selectProject(_ name: String, in app: XCUIApplication) {
     let all = app.buttons["Todas"]
-    for _ in 0..<20 {
+    for _ in 0..<40 {
       if all.isHittable { break }
       app.collectionViews.firstMatch.swipeDown(velocity: .fast)
     }

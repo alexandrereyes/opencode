@@ -225,7 +225,7 @@ import XCTest
         .press(
           forDuration: 0.05,
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
-      XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+      XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
       openFromSessions(app, title: "Conversa A — trabalhando")
       reveal(step)
       XCTAssertEqual(step.value as? String, "Expandido")

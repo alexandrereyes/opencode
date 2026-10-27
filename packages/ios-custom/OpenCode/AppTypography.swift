@@ -126,8 +126,10 @@ enum AppLayout {
   static let margin: CGFloat = 16
   static let composerMargin: CGFloat = 12
   static let avatar: CGFloat = 44
+  static let compactAvatar: CGFloat = 36
   static let avatarGap: CGFloat = 12
   static let rowTextInset = avatar + avatarGap
+  static let compactRowTextInset = compactAvatar + avatarGap
 }
 
 enum AppSymbolSize: CGFloat {

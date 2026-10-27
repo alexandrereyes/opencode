@@ -24,7 +24,7 @@ import XCTest
     defer { app.terminate() }
     let row = app.buttons["session-row-" + target]
     let other = app.buttons["session-row-" + anchor]
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     app.revealSessionRow(row)
     XCTAssertFalse(row.label.contains(", fixada"))
     assertBelowAnchor(row, other)
@@ -38,8 +38,11 @@ import XCTest
     wait(row, label: ", fixada", present: true)
     app.revealSessionRow(row)
     XCTAssertTrue(!other.exists || other.frame.minY >= row.frame.maxY, "A fixada deve subir acima das não fixadas.")
+    // "Precisa de você" and "Trabalhando" come first; within the list below them, pinned rows lead.
+    let pinned = app.buttons["session-section-pinned"]
+    XCTAssertTrue(pinned.exists && pinned.frame.maxY <= row.frame.minY, "A fixada deve entrar em Fixadas.")
     let above = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-'")).allElementsBoundByIndex
-      .filter { $0.identifier != row.identifier && $0.frame.maxY <= row.frame.minY }
+      .filter { $0.identifier != row.identifier && $0.frame.maxY <= row.frame.minY && $0.frame.minY >= pinned.frame.maxY }
     XCTAssertTrue(above.allSatisfy { $0.label.contains(", fixada") }, "Só sessões fixadas podem ficar acima.")
     shot("pinned")
 

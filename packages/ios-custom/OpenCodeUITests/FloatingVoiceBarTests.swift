@@ -145,7 +145,7 @@ import XCTest
     toggle()
     XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
     assertStacked()
-    XCTAssertGreaterThanOrEqual(bar.frame.minY, app.navigationBars.firstMatch.frame.minY)
+    XCTAssertGreaterThanOrEqual(bar.frame.minY, app.sessionsTitle.frame.minY)
     capture("stacked-large-expanded")
     app.tabBars.buttons["Você"].tap()
     assertStacked()

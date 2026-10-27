@@ -56,7 +56,7 @@ import XCTest
     app.openConversationOptions(expect: "Arquivar").tap()
     screenshot("archive-confirmation")
     app.buttons["Arquivar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 15))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 15))
     screenshot("archived-toast")
   }
   func testDetailsRootAndChild() throws {

@@ -13,25 +13,27 @@ import urllib.request
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4179"
-derived = temporary / "ios-mestra-derived"
-base_evidence = temporary / "ios-mestra-prints"
+# Overrides let an isolated worker use its own sandbox, build and simulator (never 4096/4178).
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4179")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", str(temporary / "custom-sandbox-4179")))
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", str(temporary / "ios-mestra-derived")))
+base_evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", str(temporary / "ios-mestra-prints")))
 evidence = base_evidence / "review-1" if "--review-1" in sys.argv else base_evidence
 evidence.mkdir(parents=True, exist_ok=True, mode=0o700)
-device = "EC672074-0EF6-47AB-9299-8AF7FE2658C1"
+device = os.environ.get("OPENCODE_TEST_DEVICE", "EC672074-0EF6-47AB-9299-8AF7FE2658C1")
 password = (home / "password").read_text().strip()
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
 regressions = "--regressions" in sys.argv
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 
 def rpc(id, method, input):
-    request = urllib.request.Request("http://127.0.0.1:4179/api/rpc/" + id + "/" + method,
+    request = urllib.request.Request(server + "/api/rpc/" + id + "/" + method,
         data=json.dumps({"input": input}).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=60) as response:
         return json.load(response)["output"]
 
 def api(path, input=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4179" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(input).encode() if input is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read()
@@ -107,10 +109,10 @@ for target in targets:
     target.setdefault("EnvironmentVariables", {}).update({
         "OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
         "OPENCODE_TEST_THEME": theme, "OPENCODE_TEST_MASTER_TARGET": live["root"],
-        "OPENCODE_TEST_SERVER_URL": "http://127.0.0.1:4179", **extra,
+        "OPENCODE_TEST_SERVER_URL": server, **extra,
     })
-    target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4179"]
-    target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4179"]
+    target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
+    target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", server]
     target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
 configured = derived / ("Build/Products/Master-" + uuid.uuid4().hex + ".xctestrun")
 configured.write_bytes(plistlib.dumps(run))
@@ -130,7 +132,7 @@ try:
             source = export / attachment["exportedFileName"]
             if source.suffix == ".png" and not attachment["isAssociatedWithFailure"]:
                 shutil.copyfile(source, evidence / (attachment["suggestedHumanReadableName"].split("_0_")[0] + ".png"))
-    (evidence / (("regressions-" if regressions else "ui-") + theme + ".json")).write_text(json.dumps({"status": status, "result": str(result), "server": "http://127.0.0.1:4179", "device": device}, indent=2))
+    (evidence / (("regressions-" if regressions else "ui-") + theme + ".json")).write_text(json.dumps({"status": status, "result": str(result), "server": server, "device": device}, indent=2))
     if status:
         raise SystemExit(status)
 finally:

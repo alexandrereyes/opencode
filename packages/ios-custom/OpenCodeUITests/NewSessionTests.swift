@@ -18,7 +18,7 @@ import XCTest
     if app.buttons["Fechar alerta"].exists { app.buttons["Fechar alerta"].tap() }
     app.buttons["Nova sessão"].tap()
     if !app.buttons["new-project"].waitForExistence(timeout: 3),
-      app.navigationBars["Sessões"].exists, !app.staticTexts["Nova sessão"].exists
+      app.sessionsTitle.exists, !app.staticTexts["Nova sessão"].exists
     {
       // A completion banner can cover the toolbar just after leaving a sent session.
       if app.buttons["Fechar alerta"].exists { app.buttons["Fechar alerta"].tap() }
@@ -69,7 +69,7 @@ import XCTest
       text.contains("raiz")
         ? "sent-root" : text.contains("existente") ? "sent-existing" : "sent-new")
     app.buttons["Voltar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
     XCTAssertFalse(app.staticTexts["Nova sessão"].exists)
   }
   func test01SelectorsPreviewAndPersistentDraft() throws {
@@ -155,7 +155,7 @@ import XCTest
     app.buttons["base-feat/redesign-identidade"].tap()
     ready(app)
     app.buttons["Voltar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
     // Reopen without a repository filter: the explicit draft survives independently of lastProject.
     app.buttons["Todas"].firstMatch.tap()
     app.terminate()
@@ -264,7 +264,7 @@ import XCTest
     // Unicode injection temporarily hides the simulator keyboard; relaunch the real saved draft
     // rather than retapping an already focused editor and opening its native edit menu.
     app.buttons["Voltar"].tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
     app.terminate()
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))

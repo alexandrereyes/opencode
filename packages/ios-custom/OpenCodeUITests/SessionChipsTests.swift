@@ -37,7 +37,7 @@ import XCTest
     row.tap()
     XCTAssertTrue(app.staticTexts["conversation-header-title"].waitForExistence(timeout: 30))
     app.buttons["Voltar"].firstMatch.tap()
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
 
     // Reading the last unread session clears the dot; the chip returns to its saved place.
     XCTAssertTrue(settled(app, order: [unread[0], "Chats"] + manual.filter { $0 != unread[0] }))

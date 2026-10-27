@@ -3,6 +3,7 @@ import Foundation
 public enum TranscriptMessage: Codable, Sendable {
   case user(User)
   case assistant(Assistant)
+  case idle(Idle)
   case unknown(type: String, created: Double)
 
   public struct User: Codable, Sendable {
@@ -15,6 +16,13 @@ public enum TranscriptMessage: Codable, Sendable {
   public struct Assistant: Codable, Sendable {
     public let content: [Part]
     public let time: Time
+  }
+  /// The end of an execution (`Session.Message.Idle`); a failure carries the server's error message.
+  public struct Idle: Codable, Sendable {
+    public let outcome: Session.Outcome?
+    public let error: Failure?
+    public let time: Time
+    public struct Failure: Codable, Sendable { public let message: String }
   }
   public enum Part: Codable, Sendable {
     case text(String)
@@ -76,6 +84,7 @@ public enum TranscriptMessage: Codable, Sendable {
     switch type {
     case "user": self = .user(try User(from: decoder))
     case "assistant": self = .assistant(try Assistant(from: decoder))
+    case "idle": self = .idle(try Idle(from: decoder))
     default:
       self = .unknown(type: type, created: try values.decode(Time.self, forKey: .time).created)
     }
@@ -89,6 +98,9 @@ public enum TranscriptMessage: Codable, Sendable {
     case .assistant(let assistant):
       try values.encode("assistant", forKey: .type)
       try assistant.encode(to: encoder)
+    case .idle(let idle):
+      try values.encode("idle", forKey: .type)
+      try idle.encode(to: encoder)
     case .unknown(let type, let created):
       try values.encode(type, forKey: .type)
       try values.encode(Time(created: created), forKey: .time)
@@ -98,6 +110,7 @@ public enum TranscriptMessage: Codable, Sendable {
     switch self {
     case .user(let value): value.time.created
     case .assistant(let value): value.time.created
+    case .idle(let value): value.time.created
     case .unknown(_, let created): created
     }
   }
@@ -114,9 +127,15 @@ public struct SessionPreview: Sendable, Equatable {
   /// The first nonblank line of `text` when the latest message with text is the assistant's;
   /// `nil` when the user wrote last. Session alerts show it verbatim, without summarizing.
   public var reply: String?
+  /// The error message when the latest message is a failed execution's `idle`.
+  public var failure: String?
 
   public init(messages: [TranscriptMessage] = []) {
     let ordered = messages.sorted { $0.created > $1.created }
+    if case .idle(let idle) = ordered.first, idle.outcome == .failed {
+      let message = (idle.error?.message ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+      failure = message.isEmpty ? nil : String(message.prefix(240))
+    }
     for message in ordered {
       switch message {
       case .user(let value):
@@ -143,7 +162,7 @@ public struct SessionPreview: Sendable, Equatable {
           image = true
           text = "Imagem"
         }
-      case .unknown: break
+      case .idle, .unknown: break
       }
       if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { break }
     }

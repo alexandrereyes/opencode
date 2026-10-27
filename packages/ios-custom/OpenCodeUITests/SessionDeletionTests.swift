@@ -36,7 +36,7 @@ import XCTest
     let app = try launch()
     defer { app.terminate() }
     let row = app.buttons["session-row-" + session]
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     app.revealSessionRow(row)
     XCTAssertTrue(row.exists)
     row.swipeLeft()
@@ -62,7 +62,7 @@ import XCTest
     shot("menu")
     app.buttons["Excluir sessão"].tap()
     confirm(app)
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     XCTAssertFalse(app.buttons["session-row-" + (try id("MENU"))].exists)
     shot("menu-return")
   }
@@ -84,8 +84,8 @@ import XCTest
   func testArchivedContextMenuDeletion() throws {
     let app = try launch()
     defer { app.terminate() }
-    let button = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Arquivadas'")).firstMatch
-    XCTAssertTrue(app.navigationBars["Sessões"].waitForExistence(timeout: 30))
+    let button = app.buttons["sessions-archived"]
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     app.revealSessionRow(button)
     XCTAssertTrue(button.exists)
     button.tap()

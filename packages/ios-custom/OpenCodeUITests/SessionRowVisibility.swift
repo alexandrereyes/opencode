@@ -1,16 +1,28 @@
 import XCTest
 
 @MainActor extension XCUIApplication {
+  /// The Sessões column header's title; the screen has no navigation bar.
+  var sessionsTitle: XCUIElement { staticTexts["sessions-title"] }
+  /// The lowest edge of the header (title and buttons) plus its soft fade, above which rows are covered.
+  var sessionsTop: CGFloat { max(sessionsTitle.frame.maxY, buttons["voice-start"].frame.maxY) + 16 }
   func revealSessionRow(_ row: XCUIElement) {
-    XCTAssertTrue(navigationBars["Sessões"].waitForExistence(timeout: 10))
+    XCTAssertTrue(sessionsTitle.waitForExistence(timeout: 10))
     let list = collectionViews.firstMatch
     let deadline = Date().addingTimeInterval(60)
     if !row.exists { list.swipeDown(velocity: .fast) }
     while Date() < deadline {
-      let top = navigationBars.firstMatch.frame.maxY
+      let top = sessionsTop
       let bar = tabBars.firstMatch.frame
       let accessory = buttons["master-accessory"]
       let bottom = accessory.exists ? min(bar.minY, accessory.frame.minY) : bar.minY
+      // Rows older than seven days start inside the collapsed "Anteriores".
+      let older = buttons["session-section-older"]
+      if !row.exists, older.exists, older.isHittable, older.frame.minY >= top, older.frame.maxY <= bottom,
+        older.value as? String == "recolhida"
+      {
+        older.tap()
+        continue
+      }
       if row.exists {
         let frame = row.frame
         if frame.minY >= top && frame.maxY <= bottom && row.isHittable { return }

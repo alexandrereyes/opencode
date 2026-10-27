@@ -51,8 +51,9 @@ import XCTest
   }
 
   func testTabs() {
-    let app = launch()
+    let app = launch(["-OpenCodeCatalogSections"])
     defer { app.terminate() }
+    XCTAssertTrue(app.buttons["session-section-attention"].waitForExistence(timeout: 10))
     shot("sessions-list-all")
     chip("filter-chats", app)
     shot("sessions-list-chats")
@@ -63,6 +64,61 @@ import XCTest
       app.tabBars.buttons[title].tap()
       shot(name)
     }
+  }
+
+  /// Every section of the column: the top of the list, then the days with "Anteriores" expanded.
+  func testSections() {
+    let app = launch(["-OpenCodeCatalogSections"])
+    defer { app.terminate() }
+    let headers = ["attention", "running", "pinned", "today", "yesterday", "week", "older"]
+      .map { app.buttons["session-section-" + $0] }
+    XCTAssertTrue(headers[0].waitForExistence(timeout: 10))
+    XCTAssertEqual(headers[0].label, "Precisa de você, 3")
+    XCTAssertTrue(app.buttons["session-row-ses_scroll_0005"].label.contains("erro · bun test falhou · há 12 min"))
+    XCTAssertTrue(app.buttons["Permitir"].exists && app.buttons["Negar"].exists)
+    XCTAssertFalse(app.buttons["Responder"].exists)
+    let list = app.collectionViews.firstMatch
+    // Short drags, so no section header scrolls past unseen.
+    let drag = {
+      let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+      start.press(forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)),
+        withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+    for header in headers.dropFirst() {
+      for _ in 0..<8 where !(header.exists && header.isHittable) { drag() }
+      XCTAssertTrue(header.isHittable, header.identifier)
+    }
+    XCTAssertEqual(headers[6].value as? String, "recolhida")
+    XCTAssertFalse(app.buttons["session-row-ses_scroll_0010"].exists)
+    headers[6].tap()
+    XCTAssertTrue(app.buttons["session-row-ses_scroll_0010"].waitForExistence(timeout: 5))
+    let archived = app.buttons["sessions-archived"]
+    // The master accessory covers the last row while AX still reports it hittable.
+    for _ in 0..<3 where !archived.exists || archived.frame.maxY > app.buttons["master-accessory"].frame.minY { drag() }
+    XCTAssertTrue(archived.label.hasPrefix("Arquivadas"))
+    shot("sessions-sections-history")
+    headers[6].tap()
+    XCTAssertEqual(headers[6].value as? String, "recolhida")
+  }
+
+  /// The Mac's variant of the shared header: Configurações between voice and Nova sessão.
+  func testSettingsHeader() {
+    let plain = launch()
+    XCTAssertFalse(plain.buttons["sessions-settings"].exists)
+    XCTAssertFalse(plain.buttons["Mais opções"].exists)
+    plain.terminate()
+    let app = launch(["-OpenCodeCatalogSettingsButton"])
+    defer { app.terminate() }
+    let settings = app.buttons["sessions-settings"]
+    XCTAssertTrue(settings.waitForExistence(timeout: 10))
+    XCTAssertEqual(settings.label, "Configurações")
+    let voice = app.buttons["voice-start"].frame
+    let add = app.buttons["Nova sessão"].frame
+    XCTAssertTrue(voice.maxX <= settings.frame.minX && settings.frame.maxX <= add.minX)
+    XCTAssertEqual(app.sessionsTitle.frame.midY, settings.frame.midY, accuracy: 12)
+    shot("sessions-header-settings")
+    settings.tap()
+    XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 10))
   }
 
   func testUnreadChips() {
@@ -224,6 +280,9 @@ import XCTest
     tap("master-accessory", app)
     XCTAssertTrue(app.staticTexts["master-empty"].waitForExistence(timeout: 10))
     shot("master-session-empty")
+    app.buttons["Voltar"].tap()
+    if !app.sessionsTitle.waitForExistence(timeout: 10) { print(app.debugDescription) }
+    XCTAssertTrue(app.sessionsTitle.exists)
   }
 
   func testPending() {

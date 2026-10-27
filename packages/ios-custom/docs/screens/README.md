@@ -53,7 +53,9 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Painel | Aba Painel; placeholder real | [PNG](dashboard-tab-default-dark.png) | [PNG](dashboard-tab-default-light.png) |
 | Pedidos | Aba Pedidos; placeholder real | [PNG](requests-tab-default-dark.png) | [PNG](requests-tab-default-light.png) |
 | Projetos | Aba Projetos; placeholder real | [PNG](projects-tab-default-dark.png) | [PNG](projects-tab-default-light.png) |
-| Sessões · Todas | Aba Sessões, filtro Todas; inclui a faixa da mestra | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
+| Sessões · Todas | Aba Sessões, filtro Todas: cabeçalho, anéis de cota e “Precisa de você” (permissão, pergunta, erro) | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
+| Sessões · seções | Rolar até o fim: Trabalhando, Fixadas, Hoje, Ontem, Esta semana, Anteriores expandida e Arquivadas | [PNG](sessions-sections-history-dark.png) | [PNG](sessions-sections-history-light.png) |
+| Cabeçalho com Configurações | Variante do Mac do cabeçalho compartilhado (engrenagem entre voz e +) | [PNG](sessions-header-settings-dark.png) | — |
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
 | Sessões · repositório | Sessões → Projeto Exemplo 0 | [PNG](sessions-list-repository-dark.png) | [PNG](sessions-list-repository-light.png) |
 | Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
@@ -112,6 +114,9 @@ Atualizado para os chips com não lidas (`27c3f84534c`) e as abas Agentes/Script
 O script de exemplo é apenas um registro em memória: nenhum comando é executado. As conversas
 mostram o contador de um agente e um script; a fixture vazia usa `-OpenCodeCatalogNoScripts`.
 `-OpenCodeCatalogUnread` deixa somente o Projeto Exemplo 3 não lido para evidenciar ponto e ordenação.
+`-OpenCodeCatalogSections` preenche todas as seções da coluna de Sessões (pergunta, permissão e erro sintéticos,
+uma fixada e dias relativos ao lançamento); sem ela, a primeira conversa continua logo abaixo dos filtros.
+`-OpenCodeCatalogSettingsButton` mostra a engrenagem de Configurações que só o Mac usa.
 A pergunta paralela é preparada por `-OpenCodeCatalogSideQuestion`, sem digitar `/btw` no XCTest
 (essa digitação pode travar a consulta de acessibilidade). A folha respondida fica com o teclado fechado,
 evitando o onboarding do teclado num simulador novo; folha e resposta usam os componentes reais.

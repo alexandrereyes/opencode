@@ -55,7 +55,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   subagents roll up into their root session. Managed chats (`custom.chats`) are listed only under the **Chats** chip,
   after the status chip and before repositories, like the web sidebar's separate Chats section; their requests still
   count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
-  several states, the priority is permission > question > running > unread.
+  several states, the priority is permission > question > running > failed > unread > stopped. The rows are grouped
+  into the sections described in [Layout D](#layout-d-precisa-de-você--27-october).
 - **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
   at 60 seconds, 60 minutes and 24 hours, using `messageAt ?? time.created`, never metadata updates or recent rank.
   `shell/time.ts` and `shell/titlebar/sidebar.tsx` are the reference; `br.ts` has no compact overrides, so their `en.ts`
@@ -69,12 +70,11 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   match installed `1de0005…`. Missing RPCs hide branch metadata/leave absolute paths, without affecting the list.
 - **Data:** the `custom.navigation` RPC (paginated by 500), `custom.preferences` (selected repositories, pinned and
   muted sessions), `custom.subscriptions` (usage strip), and `custom.transcript/list` for previews. Previews read the
-  latest messages of each visible session, as `packages/app-custom/src/agent-dashboard/preview.ts` does.
-- **"Precisa de você" card:** sessions with a pending question or permission, which leave the main list while pending.
-  "Permitir" and "Negar" answer the permission; "Responder" opens the session.
+  latest messages of each three-line row ("Precisa de você" and "Trabalhando"), as
+  `packages/app-custom/src/agent-dashboard/preview.ts` does; compact rows show no preview and read no transcript.
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
-  a session (the native conversation reader), Permitir/Negar, archive, pin, mute, "Marcar todas como lidas",
-  "Atualizar", deletion, and the list of archived sessions (open/delete; the backend has no unarchive).
+  a session (the native conversation reader), Permitir/Negar, archive, pin, mute, pull to refresh, deletion, and the
+  list of archived sessions (open/delete; the backend has no unarchive).
 - **Swipe actions:** trailing, from left to right, **Silenciar/Reativar**, **Arquivar**, **Renomear** and
   **Excluir**; leading, **Marcar como lida** (unread only) and **Fixar/Desafixar**. There is no "Mais" action: the
   long-press menu keeps the full row action list (Abrir sessão, Renomear, Fixar, Silenciar, Marcar como lida, Excluir
@@ -83,8 +83,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   `PATCH /api/session/:id` and toasts, then reloads the list once the server confirms. After `build-for-testing`,
   `python3 packages/ios-custom/script/test-session-swipe.py --device … --derived … --server-url … --home …` imports two
   owned sessions (no model calls), runs `OpenCodeUITests/SessionSwipeTests` and deletes them with their pin keys.
-- **Visual only for now:** "Selecionar sessões", "Configurações", and the other
-  tabs except Você.
+- **Visual only for now:** the other tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
 - **Filter chips:** "Todas" first, then Chats and the selected repositories. A chip with an unread, unmuted root
@@ -103,7 +102,86 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   letters of a single word: `abacato-v2` → `AV`, `opencode2` → `OP`). The color comes from `project.icon.color`, or a
   stable choice from the project ID when the project has none, through the theme's avatar tokens.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
-  "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and a large title with toolbar buttons.
+  "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a
+  `safeAreaBar` (the navigation bar is hidden on this screen only; pushed screens keep theirs).
+
+### Layout D ("Precisa de você") — 27 October
+
+Approved by Alexandre from the Mac app mocks (`.agent-artifacts/mac-app/sessoes-d/` of the `mac-app-mocks` worktree:
+`BRIEFING.md`, `referencia-coluna-d.png`, `referencia-janela-d.png`). The same column will be reused by the future Mac
+app, without the web's "Projetos" and "Worktrees" groups.
+
+- **Header:** one shared row, **Sessões** at the left and voice, the optional Configurações and `+` at the right. The
+  former `…` menu is gone: pull to refresh replaces "Atualizar"; "Marcar todas como lidas", "Selecionar sessões" and
+  the disabled "Configurações" were dropped; archived sessions moved to the last row of the list. iOS passes no
+  settings action (settings stay in Você), so the gear is hidden; the Mac passes one. A soft gradient below the
+  header fades rows out as they scroll under the title. At accessibility sizes the title takes its own line below the
+  buttons. `-OpenCodeCatalogSettingsButton` (DEBUG catalog only) renders the Mac variant, opening Você.
+- **Quota rings:** one ring per `store.quota.providers` entry showing `summary.remaining` (the former bar's value),
+  "Codex 42%" and "renova 5,9d" (`SubscriptionFormat.countdown`). The ring uses `primary`, or `warning` when the pool
+  is not ready; it opens `SubscriptionDetailSheet`; rings stack at accessibility sizes; VoiceOver reads provider,
+  percentage and renewal.
+- **Chips:** unchanged. The state filter and the selected chip narrow the rows **before** grouping.
+- **Sections** (`SessionSections.group` in OpenCodeKit), each with a dot, its name, its count and a chevron. Collapsed
+  sections are saved on the device (`OpenCodeSessionSections`, only choices that differ from the default); empty
+  sections are hidden.
+
+  | Order | Section | Rows | Order inside |
+  | --- | --- | --- | --- |
+  | 1 | Precisa de você (`primary` dot) | permission, question or failure, chats included | permissions, questions, then failures by `time.idle` (newest first) |
+  | 2 | Trabalhando (`success`) | running, nothing pending | `SessionList.rows` |
+  | 3 | Fixadas (pin icon) | other pinned rows | pin order |
+  | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
+  | 5 | Anteriores (neutral, collapsed by default) | older than the seven local days (the web's `localDays`) | `SessionList.rows` |
+
+  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Outside "Precisa de você", chats
+  appear only under the Chats chip, as before. Muted sessions stay in "Precisa de você"; the master stays out of the
+  rows. The day sections follow the web only for the seven-day window; Alexandre chose four date sections instead
+  of one per weekday.
+- **Rows:** swipe, long press, avatar, running ring and `+N` are unchanged in every section. "Precisa de você" rows
+  have a light tint of their state color and rounded corners, `path · branch`, then a colored state line:
+  `pergunta · <question>` (`accent`), `permissão · <preview>` (`warning`, with the compact Negar/Permitir) or
+  `erro · <message> · há 12 min` (`error`). Tapping opens the session; "Responder" is gone. The avatar badge uses the
+  same colors (shield, question mark, exclamation mark). "Trabalhando" keeps the three-line row with
+  `trabalhando · <activity or pensando>`. Pinned, day and older rows are compact: title and time, then
+  `path · branch`; unread titles are bold `textStrong` with the orange dot, read titles use `text`.
+- **Failure (new state):** a root is failed when `outcome == .failed` and `time.idle > (time.viewed ?? 0)`, while not
+  running and with nothing pending; opening it (viewed) or running it again clears it, and a user interruption
+  (`interrupted`) is not a failure — the Live Activity contract's "Failed" rule. The message comes from the preview:
+  the app now decodes `idle` transcript messages (`TranscriptMessage.idle`), and `SessionPreview.failure` holds
+  `error.message` when the latest message is a failed `idle`. Without it the line says `erro · parou com erro`; the
+  elapsed time comes from `time.idle`. The "Precisa de você" filter includes failures; the tab badge and chip request
+  counts still count only permissions and questions. No server change was needed.
+
+**Reuse on the Mac.** Logic lives in OpenCodeKit (iOS 27 + macOS 15) with Swift Testing coverage
+(`SessionSectionsTests`): `SessionList.rows` (failure state and precedence), `SessionSections` (grouping, order, days,
+details, elapsed time), `SessionSectionCollapse` and `TranscriptMessage.idle`/`SessionPreview.failure`. The visual
+files in `OpenCode/SessionColumn/` import only SwiftUI and OpenCodeKit and use no iOS-only modifier:
+
+| File | Contents |
+| --- | --- |
+| `SessionColumnHeader.swift` | Title, voice, optional Configurações (`settings: (() -> Void)?`) and Nova sessão |
+| `SessionQuotaRings.swift` | The provider rings |
+| `SessionChips.swift` | Filter chips (moved unchanged from `SessionsView`) |
+| `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, empty state and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
+| `SessionRowView.swift` | Three-line and compact rows, avatar and running arc |
+| `SessionDirectoryLine.swift` | `path · branch` and the shared row clock |
+
+`SessionsView` is the thin iOS host: `NavigationStack`, the header in a `safeAreaBar`, swipe and long-press actions
+(through `decorate`), sheets, dialogs and destinations. The Mac host will place the same header in its column with a
+settings action, pass its own `open` (selection instead of a push) and its own row actions. These files still depend
+on app-target pieces the Mac target must also compile: `SessionStore`, `AppTheme`, `appFont`/`appSymbol`/`AppLayout`
+(`AppTypography.swift`, `Theme.swift`) and `ConversationRenameAlert`; `AppTypography.swift` and `Theme.swift` still
+contain UIKit code that needs `#if os(iOS)` when the Mac target arrives. The glass header buttons need macOS 26.
+
+Verification: `swift test` in OpenCodeKit; `ScreenCatalogTests/testSections`, `testTabs` and `testSettingsHeader`
+(offline catalog, `-OpenCodeCatalogSections`); and, against an owned sandbox, `SessionRowsTests`, `SessionSwipeTests`,
+`SessionChipsTests`, `SessionDeletionTests`, the Sessões cases of `SessionReadingTests` and
+`MasterSessionTests/testEmptyFirstSendHiddenAndTrashStartsFresh` in both themes. `test-session-rows.py`,
+`test-session-reading.py`, `test-session-deletion.py` and `test-master.py` accept `OPENCODE_TEST_SERVER_URL`,
+`OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`, `OPENCODE_TEST_DEVICE` and `OPENCODE_TEST_EVIDENCE` for an isolated
+worker. `revealSessionRow` expands a collapsed
+"Anteriores" when the row is not visible, and `app.sessionsTitle` replaces the old Sessões navigation bar in tests.
 
 ### Excluir sessão
 
@@ -160,7 +238,7 @@ in Chats) and optionally `OPENCODE_TEST_ORIGIN_PROJECT` (the project name, or `C
 
 ## Second screen: Conversa
 
-The conversation of one session, opened from "Sessões" (row tap and "Responder"). It replaces the provisional session
+The conversation of one session, opened from "Sessões" (row tap). It replaces the provisional session
 screen. The layout was approved through mockups; the mockups and the full layout briefing live outside the repository,
 in `.agent-artifacts/tela-conversa/` of the working tree that produced them (`BRIEFING.md`, `r2-*`, `r4-*`, `r5-*`,
 `r6-*`). The custom web app is the behavior reference (`packages/app-custom/src/session`, `src/composer`, and
