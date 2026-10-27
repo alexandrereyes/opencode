@@ -9,6 +9,8 @@ struct ConversationAvatar: View {
   let master: Bool
   let colors: (background: Color, text: Color)
   let monogram: String
+  /// The project's own icon, replacing the monogram inside the context ring.
+  var icon: ProjectIcon? = nil
 
   var body: some View {
     ZStack {
@@ -21,11 +23,15 @@ struct ConversationAvatar: View {
           )
           .rotationEffect(.degrees(-90))
       }
-      Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
+      if let icon {
+        ProjectIconAvatar(icon: icon, size: 36)
+      } else {
+        Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
+      }
       if master {
         Image(systemName: "point.3.connected.trianglepath.dotted")
           .appSymbol(.action).foregroundStyle(theme.color(.accent))
-      } else {
+      } else if icon == nil {
         Text(monogram).appFont(.message, weight: .medium).foregroundStyle(colors.text)
           .lineLimit(1).minimumScaleFactor(0.5)
       }

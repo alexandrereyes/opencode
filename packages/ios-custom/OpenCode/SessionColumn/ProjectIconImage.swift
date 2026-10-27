@@ -2,20 +2,46 @@ import OpenCodeKit
 import SwiftUI
 import WebKit
 
-/// A project's own icon at text size; blank until the first decode of its revision.
+/// A project's own icon at text size, beside a chip's name.
 struct ProjectIconImage: View {
   let icon: ProjectIcon
   @ScaledMetric(relativeTo: .subheadline) private var side = 18.0
+
+  var body: some View {
+    ProjectIconBitmap(icon: icon).frame(width: side, height: side)
+      .clipShape(RoundedRectangle(cornerRadius: side * 0.24, style: .continuous))
+  }
+}
+
+/// A project's own icon filling a circular avatar, over a neutral disc for transparent icons and with a hairline
+/// edge so dark or light icons stay legible in both themes.
+struct ProjectIconAvatar: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  let icon: ProjectIcon
+  let size: CGFloat
+
+  var body: some View {
+    ProjectIconBitmap(icon: icon, fill: true).frame(width: size, height: size)
+      .background(theme.color(.surfaceRaised))
+      .clipShape(Circle())
+      .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale) }
+  }
+}
+
+/// The decoded icon filling its frame; blank until the first decode of its revision.
+private struct ProjectIconBitmap: View {
+  let icon: ProjectIcon
+  var fill = false
   @State private var image: CGImage?
 
   var body: some View {
     ZStack {
       if let image = ProjectIconCache.shared.cached(icon) ?? image {
         Image(decorative: image, scale: 1).resizable().interpolation(.high)
+          .aspectRatio(contentMode: fill ? .fill : .fit)
       }
     }
-    .frame(width: side, height: side)
-    .clipShape(RoundedRectangle(cornerRadius: side * 0.24, style: .continuous))
     .task(id: icon.key) {
       image = nil
       image = await ProjectIconCache.shared.image(icon) { await ProjectIconRenderer.render($0, pixels: $1) }

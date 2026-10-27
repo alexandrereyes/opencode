@@ -24,8 +24,8 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = password
     app.launch()
     defer { app.terminate() }
-    try app.requireSandbox()
     XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    try app.requireSandbox()
     app.tabBars.buttons["Sessões"].tap()
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
     // The runner resets Chats to the start of the saved order.
@@ -91,8 +91,8 @@ import XCTest
     shot("chips-chats-moved")
     app.terminate()
     app.launch()
-    try app.requireSandbox()
     XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    try app.requireSandbox()
     app.tabBars.buttons["Sessões"].tap()
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
     XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
@@ -152,23 +152,12 @@ import XCTest
     _ = try request("PATCH", "/api/project/" + live[1], ["icon": ["override": source]], password: password)
     XCTAssertTrue(wait({ self.pixels(target, near: color, app) > 20 && abs(target.frame.width - width) < 1 }))
   }
-  /// On-screen pixels of an element close to `hex`, the color an icon clearly shows.
+  /// Scrolls the strip to a chip, then counts its pixels close to `hex`.
   private func pixels(_ element: XCUIElement, near hex: String, _ app: XCUIApplication) -> Int {
     let strip = app.scrollViews.firstMatch
     for _ in 0..<6 where element.frame.maxX > app.frame.maxX { strip.swipeLeft(velocity: .slow) }
     for _ in 0..<6 where element.frame.minX < 0 { strip.swipeRight(velocity: .slow) }
-    guard let image = element.screenshot().image.cgImage, let value = UInt32(hex, radix: 16) else { return 0 }
-    let target = [Int(value >> 16 & 255), Int(value >> 8 & 255), Int(value & 255)]
-    var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
-    guard
-      let context = CGContext(
-        data: &buffer, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-    else { return 0 }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-    return stride(from: 0, to: buffer.count, by: 4).filter { index in
-      (0..<3).allSatisfy { abs(Int(buffer[index + $0]) - target[$0]) <= 24 }
-    }.count
+    return element.pixels(near: hex)
   }
   private func wait(_ condition: @escaping () -> Bool, timeout: TimeInterval = 20) -> Bool {
     let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)

@@ -135,7 +135,7 @@ struct SessionChips: View {
       } label: {
         Chip(
           title: name, selected: store.selectedProject == group.key, running: group.running,
-          count: group.requests, unread: group.unread, icon: ProjectIcon(selected.project))
+          count: group.requests, unread: group.unread, icon: .of(selected.project))
       } primaryAction: {
         store.selectedProject = store.selectedProject == group.key ? nil : group.key
       }

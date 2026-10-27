@@ -126,8 +126,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   `override`, else the discovered `url` unless a `color` was chosen. Only inline data URLs up to 256 KB count
   (`ProjectIcon`); nothing remote is fetched. PNG/JPEG decode with ImageIO; SVG is rasterized once per revision by
   `ProjectIconRenderer`, an `<img>` in a throwaway web view (no JavaScript, network or non-`data:` resources, like the
-  Mermaid diagrams) snapshotted to 96 px PNG. `ProjectIconCache` keeps decoded icons in memory and SVG renders under
-  `Caches/ProjectIcons-v1/<sha256 of the image>.png`, so a new icon gets a new file and scrolling never re-renders.
+  Mermaid diagrams) snapshotted to 144 px PNG. `ProjectIconCache` keeps decoded icons in memory and SVG renders under
+  `Caches/ProjectIcons-v2/<sha256 of the image>.png`, so a new icon gets a new file and scrolling never re-renders.
   `project.updated` reloads the projects, so a change shows without reopening the app. `test-session-chips.py
   --icon NAME=FILE=RRGGBB` sets icons (and clears the others) for `SessionChipsTests`, which checks each chip's pixels
   for the icon color, its absence elsewhere, and a live removal and restore through the API.
@@ -136,7 +136,12 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   its unread dot in a neutral color. It still appears in "Precisa de você".
 - **Avatar:** two-letter monogram of the repository (the first letters of the first two words, or the first two
   letters of a single word: `abacato-v2` → `AV`, `opencode2` → `OP`). The color comes from `project.icon.color`, or a
-  stable choice from the project ID when the project has none, through the theme's avatar tokens.
+  stable choice from the project ID when the project has none, through the theme's avatar tokens. A project with its
+  own icon (see Project icons) shows it instead, cropped to the circle over a neutral `surfaceRaised` disc with a
+  hairline `border`, in the rows, the session switcher, the conversation header (inside the context ring) and the Nova
+  sessão project selector (`ProjectAvatar`). The running arc, `+N` subagents, state badge and unread dot stay on top;
+  Chats rows, the Sessão mestra and the in-app alert banner keep their current avatars. `ProjectIcon.of` resolves each
+  icon source once, so row re-renders never decode it again.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
   "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a
   `safeAreaBar` (the navigation bar is hidden on this screen only; pushed screens keep theirs).

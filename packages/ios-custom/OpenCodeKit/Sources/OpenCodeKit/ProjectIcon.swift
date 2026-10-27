@@ -12,11 +12,22 @@ public struct ProjectIcon: Sendable, Hashable {
   /// Content hash, so a replaced icon never reuses an earlier render.
   public let key: String
 
-  public init?(_ project: Project?) {
+  // NSCache is thread-safe; NSString keys hash only a few characters, so a hit stays cheap for every row render.
+  private nonisolated(unsafe) static let resolved = NSCache<NSString, Resolved>()
+  private final class Resolved: Sendable {
+    let icon: ProjectIcon?
+    init(_ icon: ProjectIcon?) { self.icon = icon }
+  }
+
+  /// Decoded once per icon source, so chips and rows re-rendering never decode or hash it again.
+  public static func of(_ project: Project?) -> ProjectIcon? {
     guard let icon = project?.icon, let source = icon.override ?? (icon.color == nil ? icon.url : nil) else {
       return nil
     }
-    self.init(dataURL: source)
+    if let hit = resolved.object(forKey: source as NSString) { return hit.icon }
+    let value = ProjectIcon(dataURL: source)
+    resolved.setObject(Resolved(value), forKey: source as NSString)
+    return value
   }
 
   public init?(dataURL: String) {
@@ -40,7 +51,7 @@ public struct ProjectIcon: Sendable, Hashable {
 /// revision is rasterized once, not on every render, scroll or launch.
 public actor ProjectIconCache {
   public static let shared = ProjectIconCache()
-  public static let pixels = 96
+  public static let pixels = 144
   private let disk: URL
   // NSCache is thread-safe; reading it synchronously lets a view draw a decoded icon on its first frame.
   private nonisolated(unsafe) let memory = NSCache<NSString, CGImage>()
@@ -49,7 +60,7 @@ public actor ProjectIconCache {
 
   public init(directory: URL? = nil) {
     disk = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("ProjectIcons-v1", isDirectory: true)
+      .appendingPathComponent("ProjectIcons-v2", isDirectory: true)
   }
 
   /// Already decoded in this process.

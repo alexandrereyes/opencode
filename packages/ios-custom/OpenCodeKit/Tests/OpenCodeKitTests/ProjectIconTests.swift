@@ -38,12 +38,14 @@ private let svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'><re
 @Test func projectIconFollowsTheWebSidebarAndAcceptsOnlySmallInlineImages() throws {
   let encoded = "data:image/svg+xml," + svg.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
   let base64 = "data:image/png;base64," + (try png(4)).base64EncodedString()
-  #expect(ProjectIcon(try project(nil)) == nil)
-  #expect(ProjectIcon(try project(["color": "pink"])) == nil)
+  #expect(ProjectIcon.of(try project(nil)) == nil)
+  #expect(ProjectIcon.of(try project(["color": "pink"])) == nil)
   // The override wins over a discovered url and a color; a discovered url shows only without a color.
-  #expect(ProjectIcon(try project(["override": encoded, "url": base64, "color": "pink"]))?.svg == true)
-  #expect(ProjectIcon(try project(["url": base64]))?.svg == false)
-  #expect(ProjectIcon(try project(["url": base64, "color": "pink"])) == nil)
+  #expect(ProjectIcon.of(try project(["override": encoded, "url": base64, "color": "pink"]))?.svg == true)
+  #expect(ProjectIcon.of(try project(["url": base64]))?.svg == false)
+  #expect(ProjectIcon.of(try project(["url": base64, "color": "pink"])) == nil)
+  // Resolved once per source: the same value again, without decoding.
+  #expect(ProjectIcon.of(try project(["url": base64])) == ProjectIcon(dataURL: base64))
   #expect(ProjectIcon(dataURL: encoded)?.data == Data(svg.utf8))
   #expect(ProjectIcon(dataURL: "data:image/svg+xml;base64," + Data(svg.utf8).base64EncodedString())?.data == Data(svg.utf8))
   // Same content, same cache key, whichever encoding; another icon gets another key.

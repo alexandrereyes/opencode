@@ -594,7 +594,9 @@ struct ConversationView: View {
         Button {
           detailsOpen = true
         } label: {
-          ConversationAvatar(context: context, master: master, colors: colors, monogram: monogram)
+          ConversationAvatar(
+            context: context, master: master, colors: colors, monogram: monogram,
+            icon: master || chat ? nil : ProjectIcon.of(project))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
