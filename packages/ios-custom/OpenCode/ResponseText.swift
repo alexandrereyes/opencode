@@ -516,7 +516,7 @@ struct ResponseMarkdown: View {
   @State private var blocks: [MarkdownBlock] = []
   @State private var measuredHeight: CGFloat?
   @State private var mounted = false
-  @State private var parsing: Task<Void, Never>?
+  @State private var parser = LatestMarkdownParse()
   @State private var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
   @State private var rasterTheme = ""
   @State private var note: Note?
@@ -550,7 +550,7 @@ struct ResponseMarkdown: View {
     .onChange(of: theme.id) { _, _ in if mounted { parse() } }
     .onDisappear {
       mounted = false
-      parsing?.cancel()
+      parser.cancel()
       // List can recycle a still-measured cell; clearing its blocks creates an empty layout pass.
     }
     .sheet(item: $note) { note in
@@ -580,22 +580,57 @@ struct ResponseMarkdown: View {
     }
   }
   private func parse() {
-    parsing?.cancel()
     let source = text
     // Recycling must not insert an empty row and then reflow it after another parse.
     if let cached = ResponseMarkdownCache.shared.cached(source) {
       blocks = cached
     }
-    let theme = theme
-    let scale = displayScale
-    parsing = Task { @MainActor in
-      let parsed = await ResponseMarkdownCache.shared.parse(source)
-      let images = await ResponseFormulas.shared.rasters(parsed, theme: theme.id, color: theme.value(.markdownBody), scale: scale)
-      guard !Task.isCancelled, mounted else { return }
+    parser.publish = { parsed, images, theme in
       rasters = images
-      rasterTheme = theme.id
+      rasterTheme = theme
       blocks = parsed
     }
+    parser.request(source, theme: theme, scale: displayScale)
+  }
+}
+
+/// Parses the newest text of one response. A newer text never cancels the parse in flight: during a fast
+/// stream that cancelled every parse before it landed, so nothing published until the stream paused. It
+/// runs once the current parse lands, skipping the texts in between. A landed parse that a newer text
+/// already superseded publishes only when nothing did for `interval`, so the text keeps advancing without
+/// rendering twice per parse.
+@MainActor final class LatestMarkdownParse {
+  private var next: (source: String, theme: AppTheme, scale: CGFloat)?
+  private var running = false
+  private var published = ContinuousClock.now
+  private let interval: Duration
+  var publish: (([MarkdownBlock], [ResponseFormulaKey: ResponseFormulaRaster], String) -> Void)?
+
+  init(interval: Duration = .milliseconds(100)) {
+    self.interval = interval
+  }
+
+  func request(_ source: String, theme: AppTheme, scale: CGFloat) {
+    next = (source, theme, scale)
+    guard !running else { return }
+    running = true
+    Task {
+      while let request = next {
+        next = nil
+        let parsed = await ResponseMarkdownCache.shared.parse(request.source)
+        let images = await ResponseFormulas.shared.rasters(
+          parsed, theme: request.theme.id, color: request.theme.value(.markdownBody), scale: request.scale)
+        guard next == nil || published.duration(to: .now) >= interval else { continue }
+        published = .now
+        publish?(parsed, images, request.theme.id)
+      }
+      running = false
+    }
+  }
+
+  func cancel() {
+    next = nil
+    publish = nil
   }
 }
 

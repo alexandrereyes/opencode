@@ -79,9 +79,12 @@ struct UserBubble: View {
   @Environment(ToastCenter.self) private var toast
   @Environment(\.conversationSearch) private var highlights
   @Environment(\.conversationQuotes) private var quoteContext
+  @Environment(\.transcriptMemory) private var memory
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
-  @State private var expanded = false
+  @State private var localExpanded = false
   @State private var truncated = false
+  /// The conversation's memory keeps the reader's choice when the bubble is rebuilt.
+  private var expanded: Bool { memory?.bubble(message.id) ?? localExpanded }
   let message: ConversationMessage
   let maximumTextHeight: CGFloat
   var body: some View {
@@ -213,7 +216,9 @@ struct UserBubble: View {
   private func setExpanded(_ value: Bool) {
     var transaction = Transaction()
     transaction.disablesAnimations = true
-    withTransaction(transaction) { expanded = value }
+    withTransaction(transaction) {
+      if let memory { memory.setBubble(message.id, expanded: value) } else { localExpanded = value }
+    }
   }
   @ViewBuilder private func pendingActions(_ pending: UserMessagePendingAction) -> some View {
     Button(action: pending.queue) {
@@ -279,14 +284,13 @@ struct ConversationStep: View {
   var items: [ConversationActivityItem] = []
   var grouped = true
   var busy = false
-  @State private var outputs: [String: String] = [:]
   private var expanded: Bool { !grouped || (store.expansionValues[id] ?? revealed) }
   private func detail(_ key: String) -> Bool {
     store.expansionValues["activity:detail:\(key)"] == true
   }
   private func toggleDetail(_ key: String) {
     store.expansionValues["activity:detail:\(key)"] = !detail(key)
-    if !detail(key) { outputs.removeValue(forKey: key) }
+    if !detail(key) { store.memory.setOutput(key, value: nil) }
   }
   private var pending: Bool {
     busy || parts.contains { $0.running }
@@ -358,8 +362,10 @@ struct ConversationStep: View {
         store.revealedToolID = nil
       }
     }
-    .onChange(of: expanded) { _, open in if !open { outputs.removeAll() } }
-    .onDisappear { outputs.removeAll() }
+    // Fetched output stays with the conversation while the step is open, so a rebuilt row keeps its height.
+    .onChange(of: expanded) { _, open in
+      if !open { entries.forEach { store.memory.setOutput($0.id, value: nil) } }
+    }
   }
   private var entries: [ConversationActivityPart] {
     if !references.isEmpty { return references }
@@ -458,7 +464,7 @@ struct ConversationStep: View {
             }
           } else {
             Text(
-              outputs[key]
+              store.memory.output(key)
                 ?? (part.output.isEmpty
                   ? (part.state?.object?["input"]?.formatted ?? "Sem saída disponível")
                   : part.output))
@@ -479,7 +485,7 @@ struct ConversationStep: View {
           Button("Copiar", systemImage: "doc.on.doc") {
             UIPasteboard.general.string =
               part.diffs.isEmpty
-              ? outputs[key] ?? part.output
+              ? store.memory.output(key) ?? part.output
               : part.diffs.compactMap { $0["patch"]?.string }.joined(separator: "\n")
             Haptics.play(.selection)
             store.toast.show(part.diffs.isEmpty ? "Saída copiada" : "Diff copiado")
@@ -496,7 +502,7 @@ struct ConversationStep: View {
       guard detail(key), part.name == "shell" else { return }
       repeat {
         if let output = try? await store.shellOutput(part), !Task.isCancelled {
-          outputs[key] = output
+          store.memory.setOutput(key, value: output)
         }
         if !part.running { return }
         do { try await Task.sleep(for: .seconds(1)) } catch { return }

@@ -193,17 +193,13 @@ struct ConversationView: View {
     self.master = master
     self.parentOnStack = parentOnStack
     _requestedTool = State(initialValue: toolID)
+    let conversation = sessions.conversation(id, master: master)
     let position = sessions.reading.position(id)
     _savedPosition = State(initialValue: position)
-    initialFollowTail = position?.target == nil || position?.target == .followTail
+    // A retained conversation returns to the exact passage it last showed, even one at the end.
+    let resumed = conversation.hasTranscript && conversation.memory.anchor != nil
+    initialFollowTail = !resumed && (position?.target == nil || position?.target == .followTail)
     _atBottom = State(initialValue: initialFollowTail && toolID == nil)
-    let conversation = ConversationStore(
-        id: id, client: sessions.client, hub: sessions.hub,
-        expansions: sessions.expansions, catalog: sessions.catalog,
-        reversion: sessions.reversions.value(id, client: sessions.client),
-        quoteDismissals: sessions.quoteDismissals, quoteModes: sessions.quoteModes,
-        draft: sessions.drafts.draft(id))
-    conversation.masterMode = master
     _conversation = State(initialValue: conversation)
   }
   private var chat: Bool {
@@ -291,6 +287,7 @@ struct ConversationView: View {
     .modifier(ConversationMCPOverlay(store: conversation.mcps))
     .modifier(FileViewerHost())
     .environment(conversation.toast)
+    .environment(\.transcriptMemory, conversation.memory)
     .environment(\.conversationQuotes, ConversationQuoteContext(
       index: conversation.quoteIndex, pending: sessions.drafts.draft(conversation.id).quotes,
       dismissed: conversation.dismissedQuotes, revealing: quoteRevealed, revealedMessage: quoteMessage,
@@ -456,7 +453,9 @@ struct ConversationView: View {
         }
       }
     }
-    .task(id: scenePhase) { if scenePhase == .active { await conversation.run() } }
+    // One event loop while the screen is shown. Hiding the app does not restart it: the reconnection that
+    // follows merges the tail without republishing an unchanged transcript.
+    .task { await conversation.run() }
     .task(id: conversation.session) {
       if screenVisible { await conversation.presented() }
     }
@@ -470,7 +469,6 @@ struct ConversationView: View {
     .background(DraftTriggerObserver(draft: sessions.drafts.draft(conversation.id)) { conversation.mcps.close() })
     .task(id: conversation.revision) { await ResponseMarkdownCache.shared.prepare(conversation.messages) }
     .onAppear {
-      sessions.register(conversation)
       screenVisible = true
       scrollState.setVisible(true)
       scrollState.correctAnchor()
@@ -493,6 +491,7 @@ struct ConversationView: View {
       if phase != .active {
         captureTask?.cancel()
         capturePosition()
+        freezePassage()
         Task { await sessions.drafts.draft(conversation.id).persist() }
       }
     }
@@ -687,7 +686,7 @@ struct ConversationView: View {
       let dividers = ConversationProjection.finalAnswerDividers(conversation.messages)
       let marks = TranscriptMarks(conversation.messages, working: conversation.working)
       List {
-        if conversation.hasOlder && conversation.ready && !resumeOffered {
+        if conversation.hasOlder && conversation.hasTranscript && !resumeOffered {
           HStack {
             Spacer()
             if conversation.paging || restoring {
@@ -824,8 +823,11 @@ struct ConversationView: View {
       .coordinateSpace(name: "conversation-scroll")
       .onAppear {
         scrollState.reveal = { proxy.scrollTo($0, anchor: .top) }
-        if !firstLoad && conversation.ready && requestedTool == nil {
-          restore(savedPosition, proxy: proxy)
+        // A retained conversation reopens at once from what it already holds; a screen covered by
+        // another one is still where it was and is not restored again.
+        if firstLoad && conversation.hasTranscript && requestedTool == nil {
+          firstLoad = false
+          restore(conversation.memory.anchor ?? savedPosition, proxy: proxy)
         }
       }
       .onScrollPhaseChange { _, phase in
@@ -867,8 +869,8 @@ struct ConversationView: View {
           scrollState.cancelAnchor()
         }
         viewport.stickyHeight = scrollState.usableTop
-        if arrived && !atBottom && !interacting && !selectionPaused && !firstLoad && !restoring
-          && !resumeOffered && screenVisible { resumeFollowing() }
+        // Following resumes only when the reader's own scroll ends at the end (scroll phase `idle`):
+        // content shrinking or the viewport growing never starts it.
         // Fetching earlier admits pages while the reader is mid-history, where List's re-estimation of the
         // inserted rows shows; at the top, the held page lands where the reader expects it.
         if !search.open && !atBottom && new.offset < 40 && !firstLoad && !restoring && !resumeOffered { loadOlder() }
@@ -891,9 +893,9 @@ struct ConversationView: View {
           requestedTool = nil
           return
         }
-        if firstLoad && conversation.ready {
+        if firstLoad && conversation.hasTranscript {
           firstLoad = false
-          restore(savedPosition, proxy: proxy)
+          restore(conversation.memory.anchor ?? savedPosition, proxy: proxy)
         } else if atBottom && !userScrolling && !restoring && screenVisible
           && scrollState.view.map({ !$0.isTracking && !$0.isDragging && !$0.isDecelerating })
             != false
@@ -911,8 +913,8 @@ struct ConversationView: View {
       .onChange(of: conversation.submitted) { _, _ in
         if screenVisible { resumeFollowing() }
       }
-      .task(id: "\(conversation.ready):\(requestedTool ?? "")") {
-        guard conversation.ready, let tool = requestedTool else { return }
+      .task(id: "\(conversation.hasTranscript):\(requestedTool ?? "")") {
+        guard conversation.hasTranscript, let tool = requestedTool else { return }
         cancelRestoration()
         atBottom = false
         firstLoad = false
@@ -1011,8 +1013,25 @@ struct ConversationView: View {
     // callbacks must not overwrite that snapshot with transition geometry.
     guard screenVisible else { return }
     capturePosition()
+    if let exact = exactPosition() { conversation.memory.anchor = exact }
     screenVisible = false
     scrollState.setVisible(false)
+  }
+  /// The passage on screen as a message and offset, even at the end, for returning to it in this process.
+  private func exactPosition() -> ReadingPosition? {
+    guard conversation.hasTranscript, !firstLoad, !restoring, !resumeOffered,
+      let target = scrollState.capture(followTail: false) else { return nil }
+    let anchored: String? = if case .message(let id, _) = target { id } else { nil }
+    return ReadingPosition(target, viewportTop: Double(scrollState.usableTop(excluding: anchored)))
+  }
+  /// Hiding the app keeps the exact passage: what arrives meanwhile lands outside it, and ↓ shows it.
+  private func freezePassage() {
+    guard screenVisible, let exact = exactPosition() else { return }
+    conversation.memory.anchor = exact
+    guard atBottom, case .message(let id, let offset) = exact.target else { return }
+    atBottom = false
+    scrollState.cancelAnchor()
+    scrollState.readingAnchor = (id, offset, exact.viewportTop)
   }
   private func cancelRestoration() {
     restorationTask?.cancel()
@@ -1032,7 +1051,7 @@ struct ConversationView: View {
   }
   private func capturePosition() {
     guard !sessions.deletedIDs.contains(conversation.id) else { return }
-    guard screenVisible, conversation.ready, !firstLoad, !restoring, !resumeOffered else { return }
+    guard screenVisible, conversation.hasTranscript, !firstLoad, !restoring, !resumeOffered else { return }
     // Restoring and layout are not new reading intent, including navigation's
     // safe-area changes. Never persist a drifted copy of a restored bookmark.
     if !captureRequested {
@@ -1144,7 +1163,7 @@ struct ConversationView: View {
     }
   }
   private func loadOlder() {
-    guard conversation.ready, conversation.hasOlder, !conversation.paging, !restoring,
+    guard conversation.hasTranscript, conversation.hasOlder, !conversation.paging, !restoring,
       !resumeOffered
     else { return }
     Task {

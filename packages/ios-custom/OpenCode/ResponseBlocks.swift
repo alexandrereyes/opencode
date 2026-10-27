@@ -133,7 +133,11 @@ private struct ResponseBlock: View {
 private struct ResponseDisclosure: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.responseSelectionChanged) private var selection
-  @State private var expanded: Bool
+  @Environment(\.transcriptMemory) private var memory
+  @State private var initial: Bool
+  /// The conversation's memory keeps the reader's choice when the response is rebuilt.
+  private var expanded: Bool { memory?.detail(key) ?? initial }
+  private var key: String { "\(messageID):\(partID):\(block.id)" }
   let block: MarkdownBlock
   let source: String
   let messageID: String
@@ -150,14 +154,17 @@ private struct ResponseDisclosure: View {
     self.openNote = openNote
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
-    _expanded = State(initialValue: initiallyOpen || arguments.contains("-OpenCodeMarkdownFixture") && arguments.contains("-OpenCodeMarkdownExpandDetails"))
+    _initial = State(initialValue: initiallyOpen || arguments.contains("-OpenCodeMarkdownFixture") && arguments.contains("-OpenCodeMarkdownExpandDetails"))
     #else
-    _expanded = State(initialValue: initiallyOpen)
+    _initial = State(initialValue: initiallyOpen)
     #endif
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Button { expanded.toggle(); selection?.selected() } label: {
+      Button {
+        if let memory { memory.setDetail(key, expanded: !expanded) } else { initial.toggle() }
+        selection?.selected()
+      } label: {
         HStack(alignment: .top, spacing: 6) {
           Image(systemName: "chevron.right").appSymbol(.inline).frame(width: 14, height: 26).rotationEffect(.degrees(expanded ? 90 : 0))
           SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme,

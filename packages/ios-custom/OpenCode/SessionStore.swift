@@ -89,10 +89,21 @@ final class SessionStore {
     }
   }
   var selectedTab = 3
-  /// Conversations currently on a navigation stack, so screens pushed above one share its live store.
-  @ObservationIgnored private let liveConversations = NSMapTable<NSString, ConversationStore>.strongToWeakObjects()
-  func register(_ conversation: ConversationStore) { liveConversations.setObject(conversation, forKey: conversation.id as NSString) }
-  func liveConversation(_ id: String) -> ConversationStore? { liveConversations.object(forKey: id as NSString) }
+  /// Recently opened conversations and those on the stack, so screens pushed above one share its store
+  /// and returning to one finds it as it was left.
+  @ObservationIgnored let conversations = ConversationRegistry()
+  @ObservationIgnored private var memoryWarning: NSObjectProtocol?
+  func conversation(_ id: String, master: Bool = false) -> ConversationStore {
+    let store = conversations.store(id) {
+      ConversationStore(
+        id: id, client: client, hub: hub, expansions: expansions, catalog: catalog,
+        reversion: reversions.value(id, client: client), quoteDismissals: quoteDismissals,
+        quoteModes: quoteModes, draft: drafts.draft(id))
+    }
+    store.masterMode = master
+    return store
+  }
+  func liveConversation(_ id: String) -> ConversationStore? { conversations.existing(id) }
   var conversationOpen: Bool { !conversationPath.isEmpty }
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
@@ -163,6 +174,16 @@ final class SessionStore {
     quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
+    conversations.stack = { [weak self] in
+      guard let self else { return [] }
+      let ids = conversationPath.map(\.id)
+      return Set(ids + (conversationPath.contains(where: \.master) ? [masterID].compactMap { $0 } : []))
+    }
+    memoryWarning = NotificationCenter.default.addObserver(
+      forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.conversations.releaseMemory() }
+    }
     #if DEBUG
     if ScrollFixtures.mode != nil {
       let fixture = ScrollFixtures.snapshot
@@ -534,6 +555,7 @@ final class SessionStore {
     permissions.removeAll { plan.ids.contains($0.sessionID) }
     forms.removeAll { plan.ids.contains($0.sessionID) }
     expansions.remove(plan.ids)
+    conversations.remove(plan.ids)
     order.snapshot(entries, active: active)
     alerts.remove(plan.ids)
     Haptics.play(.success)
