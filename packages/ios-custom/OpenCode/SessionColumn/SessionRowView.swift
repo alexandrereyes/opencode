@@ -71,6 +71,8 @@ struct SessionCompactRowView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let row: SessionRow
   let directory: SessionDirectoryLabel?
+  /// Adds a "trabalhando" line under a running row (the session switcher, which has no Trabalhando section).
+  var showsWorking = false
 
   var body: some View {
     HStack(spacing: AppLayout.avatarGap) {
@@ -90,13 +92,19 @@ struct SessionCompactRowView: View {
             SessionRowMarks(row: row)
           }
         }
+        if showsWorking && row.state == .running {
+          HStack(spacing: 6) {
+            Circle().fill(theme.color(.success)).frame(width: 7, height: 7)
+            Text("trabalhando").appFont(.caption)
+          }.foregroundStyle(theme.color(.success))
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(directory.map { ", " + $0.accessibilityLabel } ?? "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(directory.map { ", " + $0.accessibilityLabel } ?? "")\(showsWorking && row.state == .running ? ", trabalhando" : "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
     )
   }
 }

@@ -159,6 +159,9 @@ struct ConversationView: View {
   @State private var scrollState = ConversationScrollState()
   @State private var contextOpen = false
   @State private var detailsOpen = false
+  @State private var switcherOpen = false
+  /// What the switcher chose, applied once the sheet has dismissed (a session ID, or nil for Nova sessão).
+  @State private var switcherChoice: String??
   @State private var renameOpen = false
   @State private var renameTitle = ""
   @State private var archiveOpen = false
@@ -401,6 +404,23 @@ struct ConversationView: View {
         }
       }, close: { quoteDetail = nil })
     }
+    .sheet(
+      isPresented: $switcherOpen,
+      onDismiss: {
+        guard let choice = switcherChoice else { return }
+        switcherChoice = nil
+        if let id = choice { switchSession(to: id) } else { startNewSession() }
+      }
+    ) {
+      SessionSwitcherSheet(sessions: sessions, current: conversation.id) { id in
+        switcherChoice = .some(id)
+        switcherOpen = false
+      } newSession: {
+        switcherChoice = .some(nil)
+        switcherOpen = false
+      }
+      .sessionAlertOverlay()
+    }
     .sheet(isPresented: $detailsOpen) {
       SessionDetailsSheet(store: conversation, project: sessions.projects.first { $0.id == conversation.session?.projectID }, isChat: chat, showLocation: showLocation) {
         contextOpen = true
@@ -563,6 +583,10 @@ struct ConversationView: View {
         ).glassEffect(.regular.interactive(), in: .circle)
       }
       .buttonStyle(.plain).accessibilityLabel("Voltar")
+      // Root conversations switch sessions from the avatar and title; the master and children keep the avatar's
+      // Detalhes da sessão (also in the … menu and the context footer).
+      let switches = !master && conversation.session.map { $0.parentID == nil } == true
+      HStack(spacing: 9) {
       if let session = conversation.session {
         let project = sessions.projects.first { $0.id == session.projectID }
         let colors = theme.avatar(SessionList.avatarColor(project, fallback: session.projectID))
@@ -598,9 +622,15 @@ struct ConversationView: View {
         .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
       VStack(alignment: .leading, spacing: 2) {
-        Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa")
-          .appFont(.navigation).lineLimit(1)
-          .accessibilityIdentifier("conversation-header-title")
+        HStack(spacing: 4) {
+          Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa")
+            .appFont(.navigation).lineLimit(1)
+            .accessibilityIdentifier("conversation-header-title")
+          if switches {
+            Image(systemName: "chevron.down").appSymbol(.disclosure).foregroundStyle(theme.color(.textSecondary))
+              .accessibilityHidden(true)
+          }
+        }
         if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
           Text(
             "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
@@ -609,6 +639,21 @@ struct ConversationView: View {
           .accessibilityIdentifier("conversation-header-subtitle")
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
+      }
+      // A clear button over the avatar and title keeps their readouts while VoiceOver also gets the action.
+      .overlay {
+        if switches {
+          Button {
+            sessions.drafts.draft(conversation.id).focused = false
+            switcherOpen = true
+          } label: {
+            Color.clear.contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Trocar de sessão")
+          .accessibilityIdentifier("conversation-switcher")
+        }
+      }
       if !conversation.work.isEmpty || !conversation.resources.isEmpty {
         let resources = conversation.resources.filter(\.state.running).count
         Button {
@@ -665,22 +710,34 @@ struct ConversationView: View {
           sessions.drafts.draft(conversation.id).focused = false
           Haptics.play(.warning)
           deleteCandidate = conversation.session
-        }, newSession: {
-          let draft = sessions.drafts.draft(conversation.id)
-          draft.focused = false
-          leavePosition()
-          let origin = conversation.session.flatMap {
-            NewSessionOrigin(session: $0, projects: sessions.projects, chatRoot: sessions.chatRoot,
-              model: draft.model ?? $0.model)
-          }
-          sessions.conversationPath.append(
-            .init(id: "draft_" + UUID().uuidString, newSession: true, origin: origin))
-        }))
+        }, newSession: startNewSession))
         .frame(width: 36, height: 36).glassEffect(.regular.interactive(), in: .circle)
       }
     }
     .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 6)
     .background(theme.color(.background))
+  }
+  /// Nova sessão inheriting this session's project, checkout and model (the … menu and the switcher).
+  private func startNewSession() {
+    let draft = sessions.drafts.draft(conversation.id)
+    draft.focused = false
+    leavePosition()
+    let origin = conversation.session.flatMap {
+      NewSessionOrigin(session: $0, projects: sessions.projects, chatRoot: sessions.chatRoot,
+        model: draft.model ?? $0.model)
+    }
+    sessions.conversationPath.append(
+      .init(id: "draft_" + UUID().uuidString, newSession: true, origin: origin))
+  }
+  /// Replaces this conversation in place, so Back still returns to Sessões.
+  private func switchSession(to id: String) {
+    guard id != conversation.id,
+      let index = sessions.conversationPath.lastIndex(where: {
+        $0.id == conversation.id && !$0.agents && !$0.newSession && !$0.master
+      })
+    else { return }
+    leavePosition()
+    sessions.conversationPath.replaceSubrange(index..., with: [.init(id: id)])
   }
   private var timeline: some View {
     ScrollViewReader { proxy in

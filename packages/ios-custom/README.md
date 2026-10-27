@@ -1784,6 +1784,24 @@ cases plus light-mode server/child repeats pass. Existing regressions also pass:
 continuity cases (one additional unread case correctly skips after viewed acknowledgement), four session/reading
 cases and six subagent/alert cases. The sandbox seed's permission and question remain pending; no seed reset was run.
 
+## Troca rápida de sessão
+
+In a root conversation, the header's avatar and title (with a small `⌄`) open **Sessões**, a native medium/large
+sheet (VoiceOver: **Trocar de sessão**, a clear button over the avatar and title so their readouts stay). It lists the
+rows the Sessões tab already keeps (roots, without archived sessions or the master; chats included), most recent
+activity first (`SessionSwitcher.rows`: `messageAt ?? created`, then rank), reusing the compact Sessões row with a
+"trabalhando" line for running sessions, the running arc, unread dot and muted bell. The current session is
+highlighted with ✓ and scrolled into view. Search is local and instant over title, project (or Chats), branch and
+path. Choosing a session replaces the conversation route in place after the sheet dismisses (Back still returns to
+Sessões; the previous draft stays saved; the destination has `.id(route.id)` so its state is rebuilt); choosing the
+current one only closes. **Nova sessão** at the end follows the … menu's Nova sessão (project, checkout and model).
+The sheet is its own view over `SessionStore` (no server reload; the conversation's streaming does not re-render it).
+Before, tapping the avatar opened Detalhes da sessão; on root conversations Detalhes stays in the … menu and the
+context footer (the avatar's VoiceOver element still opens it). Children and the master keep the avatar's Detalhes and
+have no switcher: a child returns to its parent, and the master is reached only through its accessory.
+`SessionSwitcherTests` (UI, seed-sessions sandbox) cover opening, the marked current row, running/unread rows, search,
+switching in place, tapping the current row and Nova sessão.
+
 ## Nova sessão (wave 9)
 
 The orange **+** in Sessões pushes a local draft, not a server Session. The tab bar and "Sessão mestra" accessory are

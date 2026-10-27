@@ -156,7 +156,9 @@ struct SessionsView: View {
           NewSessionView(sessions: store, origin: route.origin, startInChats: route.startInChats)
             .id(route.id)
         } else {
+          // The switcher replaces this route in place; a new identity rebuilds the conversation's state.
           ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)
+            .id(route.id)
             .toastOverlay(store.toast)
         }
       }

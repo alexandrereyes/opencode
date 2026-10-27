@@ -179,7 +179,9 @@ import XCTest
     XCTAssertTrue(subtitle.label.contains("Luna"))
     XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", folder)).firstMatch.exists)
     shot("ordinary-chat-header")
-    avatar.tap()
+    // A root chat's avatar and title switch sessions; Detalhes da sessão stays in the … menu.
+    XCTAssertTrue(app.buttons["conversation-switcher"].exists)
+    app.openConversationOptions(expect: "Detalhes da sessão").tap()
     XCTAssertTrue(app.navigationBars["Detalhes da sessão"].waitForExistence(timeout: 10))
     XCTAssertFalse(app.staticTexts["Diretório"].exists)
     XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", folder)).firstMatch.exists)

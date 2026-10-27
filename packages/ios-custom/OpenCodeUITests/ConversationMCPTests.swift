@@ -92,7 +92,7 @@ import XCTest
     XCTAssertEqual(input.value as? String, "Meu rascunho com MCPsxy")
     pill.tap()
     XCTAssertTrue(panel(app).waitForExistence(timeout: 5))
-    app.buttons["conversation-header-avatar"].tap()
+    app.collectionViews["conversation-transcript"].tap()
     XCTAssertTrue(panel(app).waitForNonExistence(timeout: 5))
   }
   func testLoginFailureAndReopenOrdering() throws {
