@@ -129,6 +129,15 @@ The package suite runs in the default locale or `LC_ALL=C`; worktree checks asse
 `script/verify-master.ts` uses only the owned 4179 sandbox, managed chat and fake repositories, never service discovery or
 production. It requires actual tool calls (not just catalog search) before recording its transcript.
 
+`script/eval-master.ts` is the conversational evaluation used to tune the prompt and tools. Against an owned sandbox
+(`custom-sandbox.ts up --port 4183`; 4096/4178 are refused) `prepare` keeps worktrees inside the sandbox home, creates
+three fake repositories and real Terra sessions in every attention state (unread, read, failed, muted, pinned, pending
+question, subagent permission, running) and snapshots them; `suite <prefix> [--model=…]` drives fresh Mestra sessions
+through realistic requests in batches that do not interfere and saves each transcript, with every Code Mode call and
+result, under `<home>/eval/runs`; `reset` rebuilds from the worktree and restores the snapshot, repositories and the
+in-memory pending requests; `chat` and `state` support one-off checks. Judge both the answer and the resulting server
+state (`state`), since a fluent answer can hide a tool that never ran.
+
 `script/verify-master-visibility.ts` verifies read-only Code Mode discovery in fresh build, Mestra, general-child and
 late-configured-agent sessions in the owned 4179 sandbox. It saves bounded tool inventories under
 `$TMPDIR/opencode/master-tool-visibility/` and removes only its own sessions. Core's
