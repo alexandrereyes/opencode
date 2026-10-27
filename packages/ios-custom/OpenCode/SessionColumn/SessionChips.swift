@@ -7,16 +7,26 @@ struct SessionChips: View {
   let store: SessionStore
   let action: (_ directory: String, _ name: String, _ index: Int?) -> Void
   let add: () -> Void
-  /// The displayed order changes only while the strip is idle, so chips never move under a finger.
+  /// The displayed order changes only while the strip is idle and after the new order has held for `settle`,
+  /// so chips never move under a finger and brief running/idle flips do not make the strip dance.
   @State private var shown: [String] = []
   @State private var scrolling = false
+  @State private var pending: Task<Void, Never>?
+  /// Running/unread chip keys of the shown order; a saved-order edit alone (Mover) applies without the delay.
+  @State private var states: [Set<String>] = []
+  private let settle = Duration.milliseconds(1500)
 
-  private var manual: [String] {
-    (store.chatRoot == nil ? [] : [SessionStore.chatsSelection]) + store.selectedProjects.map(\.project.id)
+  /// Chats has no saved manual position; repositories use their index in `projects["local"]`.
+  private var chips: [ChipEntry] {
+    (store.chatRoot == nil ? [] : [ChipEntry(key: SessionStore.chatsSelection, name: "Chats", position: nil)])
+      + store.selectedProjects.enumerated().map {
+        ChipEntry(key: $0.element.project.id, name: $0.element.project.displayName, position: $0.offset)
+      }
   }
   var body: some View {
-    let groups = SessionList.chipGroups(store.rows, manual: manual, chats: SessionStore.chatsSelection)
+    let groups = SessionList.chipGroups(store.rows, chips: chips, chats: SessionStore.chatsSelection)
     let desired = groups.map(\.key)
+    let current = [Set(groups.filter(\.running).map(\.key)), Set(groups.filter(\.unread).map(\.key))]
     let order = shown.filter(desired.contains) + desired.filter { !shown.contains($0) }
     ScrollViewReader { proxy in
       ScrollView(.horizontal) {
@@ -47,20 +57,33 @@ struct SessionChips: View {
       .buttonStyle(.plain)
       .onScrollPhaseChange { _, phase in
         scrolling = phase != .idle
-        if !scrolling { apply(desired, proxy) }
+        if !scrolling { schedule(desired, current, proxy) }
       }
       .onAppear {
         shown = desired
+        states = current
         // Reordering while a conversation covered the strip cannot scroll it; reveal the filter on return.
         reveal(proxy)
       }
-      .onChange(of: desired) { _, value in if !scrolling { apply(value, proxy) } }
+      .onDisappear { pending?.cancel() }
+      // `desired` changes only when some chip's running/unread state or the saved order changes.
+      .onChange(of: desired) { _, value in schedule(value, current, proxy) }
     }
   }
-  private func apply(_ desired: [String], _ proxy: ScrollViewProxy) {
-    guard shown != desired else { return }
-    withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { shown = desired }
-    reveal(proxy)
+  private func schedule(_ desired: [String], _ current: [Set<String>], _ proxy: ScrollViewProxy) {
+    pending?.cancel()
+    guard shown != desired else {
+      states = current
+      return
+    }
+    let delay = current == states ? Duration.zero : settle
+    pending = Task { @MainActor in
+      try? await Task.sleep(for: delay)
+      guard !Task.isCancelled, !scrolling, shown != desired else { return }
+      withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { shown = desired }
+      states = current
+      reveal(proxy)
+    }
   }
   /// Keeps the active filter on screen once the new positions are laid out (after the reorder animation).
   private func reveal(_ proxy: ScrollViewProxy) {
@@ -84,7 +107,7 @@ struct SessionChips: View {
     } else if let index = store.selectedProjects.firstIndex(where: { $0.project.id == group.key }) {
       let selected = store.selectedProjects[index]
       let name = selected.project.displayName
-      // Antes/depois refer to the saved manual order, which unread chips may visually bypass.
+      // Antes/depois edit the saved manual order; running and unread chips may visually bypass it.
       Menu {
         Button("Remover dos filtros", systemImage: "minus.circle", role: .destructive) {
           action(selected.directory, name, nil)

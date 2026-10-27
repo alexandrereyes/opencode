@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """SessionChipsTests on an owned sandbox seeded by seed-sessions.ts; never 4096/4178.
 
-Marks every root session read, then completes one tiny Luna 6 / low prompt in a seeded session of the second
-and third saved repositories so exactly those chips are unread, and runs the UI case through test-isolated.py.
+Interrupts every live execution of the owned sandbox (so no chip is running and seeded requests are dropped), marks
+every root session read, completes one tiny Luna 6 / low prompt in a seeded session of the second and third saved
+repositories so exactly those chips are unread, prepares a session of the fourth to run briefly during the test, and
+runs the UI case through test-isolated.py. Run other Sessões UI tests that need seeded requests before this one.
 
   python3 packages/ios-custom/script/test-session-chips.py --url http://127.0.0.1:4188 --home <sandbox-home> \\
     --device <simulator-udid> --derived <derived-data> --evidence <dir> [--theme openchamber-light]
@@ -13,6 +15,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -54,21 +57,38 @@ def read_all():
         if idle and idle > (session["time"].get("viewed") or 0):
             api("/api/session/" + session["id"] + "/view", {"idle": idle})
 
+def settle_active():
+    deadline = time.monotonic() + 120
+    while api("/api/session/active")["data"]:
+        if time.monotonic() > deadline:
+            raise SystemExit("Live executions did not stop")
+        for session in api("/api/session/active")["data"]:
+            try:
+                api("/api/session/" + session + "/interrupt", {})
+            except urllib.error.HTTPError:
+                pass
+        time.sleep(1)
+
 manual = [Path(item["worktree"]).name
     for item in rpc("custom.preferences", "get", {})["data"]["projects"]["local"]["projects"]]
 unread = manual[1:3]
-assert len(unread) == 2, "Needs at least three saved repositories (run seed-sessions.ts)"
+assert len(manual) >= 4, "Needs at least four saved repositories (seed-sessions.ts, seed-conversation.ts)"
+settle_active()
 read_all()
-active = set(api("/api/session/active")["data"])
+active = set()
 targets = {}
 for name in unread:
     root = str(args.home / "repos" / name)
     targets[name] = next(s for s in sorted(roots(), key=lambda s: s["title"])
         if s["location"]["directory"].startswith(root) and s["id"] not in active and s.get("outcome") == "succeeded")
-for target in targets.values():
+run_root = str(args.home / "repos" / manual[3])
+run = next(s for s in sorted(roots(), key=lambda s: s["title"])
+    if s["location"]["directory"].startswith(run_root) and s.get("outcome") == "succeeded")
+for target in [*targets.values(), run]:
     api("/api/session/" + target["id"] + "/agent", {"agent": "build"})
     api("/api/session/" + target["id"] + "/model", {"model": {"id": "gpt-6-luna", "providerID": "llm-proxy", "variant": "low"}})
-    api("/api/session/" + target["id"] + "/prompt", {"text": "Responda apenas: ok"})
+    if target is not run:
+        api("/api/session/" + target["id"] + "/prompt", {"text": "Responda apenas: ok"})
 deadline = time.monotonic() + 300
 while time.monotonic() < deadline:
     state = {s["id"]: s for s in roots()}
@@ -82,7 +102,8 @@ else:
 environment = args.evidence / "chips-environment.json"
 args.evidence.mkdir(parents=True, exist_ok=True)
 environment.write_text(json.dumps({"OPENCODE_TEST_CHIP_MANUAL": ",".join(manual),
-    "OPENCODE_TEST_CHIP_UNREAD": ",".join(unread), "OPENCODE_TEST_CHIP_SESSION": targets[unread[1]]["title"]}))
+    "OPENCODE_TEST_CHIP_UNREAD": ",".join(unread), "OPENCODE_TEST_CHIP_SESSION": targets[unread[1]]["title"],
+    "OPENCODE_TEST_CHIP_RUN_PROJECT": manual[3], "OPENCODE_TEST_CHIP_RUN_SESSION": run["id"]}))
 environment.chmod(0o600)
 status = subprocess.call(["python3", str(Path(__file__).with_name("test-isolated.py")), "--device", args.device,
     "--derived", str(args.derived), "--evidence", str(args.evidence), "--label", "chips-" + args.theme,

@@ -86,15 +86,19 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Visual only for now:** the other tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
-- **Filter chips:** "Todas" first, then Chats and the selected repositories. A chip with an unread, unmuted root
-  session (the rows' orange dot; muted rows keep their gray dot) shows a small orange corner badge, beside the green
-  running arc and the request count; VoiceOver appends "com não lidas". Chips with unread sessions come first, and
-  within each half the saved manual order applies: Chats, then `projects["local"]` as reordered by "Mover para
-  antes/depois" (those menu items still edit that saved order). `SessionList.chipGroups` derives running, requests and
-  unread for every chip in one pass, inside its own `SessionChips` view, so preview/streaming updates never re-evaluate
-  it. The displayed order changes only while the strip is idle, animates briefly (none with Reduce Motion) and keeps
-  the active filter visible. `SessionChipsTests` (via `script/test-session-chips.py`, which reads every session and
-  completes two Luna 6 / low prompts on an owned sandbox) checks the badge, the order and that reading clears it.
+- **Filter chips:** "Todas" first, then Chats and the selected repositories ordered lexicographically by
+  `SessionList.chipGroups`: (1) chips with a running root session (green arc) first; (2) then chips with an unread,
+  unmuted root session (the rows' orange dot, as a small corner badge; muted rows keep their gray dot); (3) then the
+  saved manual position, `projects["local"]` as reordered by "Mover para antes/depois"; (4) then the name (natural,
+  case- and accent-insensitive, pt-BR). Running + unread precede running only. Chats has no saved position, so it
+  follows every positioned chip in its state block and rises only by its own running/unread state. Antes/depois still
+  edit the saved order, so a chip lifted by running/unread may not visibly move until it returns to its block. VoiceOver
+  appends "com não lidas". `chipGroups` derives running, requests and unread for every chip in one pass, inside its own
+  `SessionChips` view, so preview/streaming updates never re-evaluate it. A new order is applied only while the strip is
+  idle and after it has held for 1.5 s (immediately when only the saved order changed), animates briefly (none with
+  Reduce Motion) and keeps the active filter visible. `SessionChipsTests` (via `script/test-session-chips.py`, which
+  stops live work, reads every session and completes two Luna 6 / low prompts on an owned sandbox) checks unread, a
+  short real run rising to the front and returning, and that reading clears the badge.
 - **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
   A muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
   its unread dot in a neutral color. It still appears in "Precisa de você".

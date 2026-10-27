@@ -114,19 +114,29 @@ public enum SessionList {
     }
   }
 
-  /// One pass over the rows for the Sessões filter chips. `manual` is the chips' saved order (Chats first,
-  /// then the selected repositories); groups with unread rows come first, keeping that order within each half.
+  /// One pass over the rows for the Sessões filter chips, ordered lexicographically: running chips first, then
+  /// chips with unread rows, then the saved manual position, then the name (natural, case- and accent-insensitive,
+  /// pt-BR). Chips without a manual position (Chats) follow every positioned chip of their state.
   /// Unread follows the list's orange dot: a root row that is unread and not muted.
-  public static func chipGroups(_ rows: [SessionRow], manual: [String], chats: String) -> [ChipGroup] {
-    var groups = Dictionary(uniqueKeysWithValues: manual.map { ($0, ChipGroup(key: $0)) })
+  public static func chipGroups(_ rows: [SessionRow], chips: [ChipEntry], chats: String) -> [ChipGroup] {
+    var groups = Dictionary(uniqueKeysWithValues: chips.map { ($0.key, ChipGroup(key: $0.key)) })
     for row in rows {
       guard let key = row.chat ? chats : row.project?.id, groups[key] != nil else { continue }
       if row.state == .running { groups[key]?.running = true }
       if row.requestCount > 0 { groups[key]?.requests += 1 }
       if row.unread && !row.muted { groups[key]?.unread = true }
     }
-    let ordered = manual.compactMap { groups[$0] }
-    return ordered.filter(\.unread) + ordered.filter { !$0.unread }
+    let locale = Locale(identifier: "pt_BR")
+    return chips.sorted { left, right in
+      let a = groups[left.key]!
+      let b = groups[right.key]!
+      if a.running != b.running { return a.running }
+      if a.unread != b.unread { return a.unread }
+      if left.position != right.position { return (left.position ?? .max) < (right.position ?? .max) }
+      let names = left.name.compare(
+        right.name, options: [.caseInsensitive, .diacriticInsensitive, .numeric], locale: locale)
+      return names == .orderedSame ? left.key < right.key : names == .orderedAscending
+    }.map { groups[$0.key]! }
   }
 
   public static func monogram(_ name: String) -> String {
@@ -180,6 +190,18 @@ public struct RecentOrder: Sendable {
       changed.forEach { ranks[$0] = last }
     }
     known.forEach { phases[$0] = active.contains($0) }
+  }
+}
+
+/// A filter chip before its rows are counted: `position` is its index in the saved manual order, if any.
+public struct ChipEntry: Sendable, Equatable {
+  public let key: String
+  public let name: String
+  public let position: Int?
+  public init(key: String, name: String, position: Int?) {
+    self.key = key
+    self.name = name
+    self.position = position
   }
 }
 
