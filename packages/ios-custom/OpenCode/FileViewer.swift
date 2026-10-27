@@ -121,8 +121,8 @@ struct FileViewerHost: ViewModifier {
           file = try FilePreviewStorage.store(fixture.data, name: name)
           preview = file
           text = fixture.text
-          markdown = fixture.text != nil
-          kind = fixture.text == nil ? .image : .preview
+          markdown = fixture.mime == "text/markdown"
+          kind = fixture.mime == "text/html" ? .html : fixture.text == nil ? .image : .preview
           loading = false
           return
         }

@@ -63,6 +63,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | LLM proxy | Você → Codex; contas e cotas sintéticas | [PNG](you-subscriptions-default-dark.png) | — |
 | Nova sessão · Chats | Sessões → +; destino inicial Chats | [PNG](new-session-chats-empty-dark.png) | [PNG](new-session-chats-empty-light.png) |
 | Nova sessão · projeto | Nova sessão → Projeto → Projeto Exemplo 0 | [PNG](new-session-project-empty-dark.png) | [PNG](new-session-project-empty-light.png) |
+| Nova sessão pelo chip | Sessões → chip Projeto Exemplo 0 → +; projeto herdado sem abrir a folha Projeto | [PNG](new-session-from-repository-chip-dark.png) | [PNG](new-session-from-repository-chip-light.png) |
 | Folha Projeto | Nova sessão → nome do destino | [PNG](new-session-project-sheet-dark.png) | [PNG](new-session-project-sheet-light.png) |
 | Folha Diretório | Nova sessão de projeto → main | [PNG](new-session-directory-sheet-dark.png) | [PNG](new-session-directory-sheet-light.png) |
 | Adicionar repositório | Folha Projeto → +; explorador do servidor sintético | [PNG](projects-add-repository-dark.png) | — |
@@ -77,12 +78,14 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Agente | Conversa → build, abaixo do composer | [PNG](conversation-agent-picker-dark.png) | — |
 | MCPs | Conversa → pílula de MCPs, ao lado do modelo | [PNG](conversation-mcp-picker-dark.png) | — |
 | Detalhes da sessão | Conversa → contexto/cache; uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
-| Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (1); iOS, Android e agente com Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
+| Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (3); ativo antes dos encerrados, iOS/Android e Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
+| Agentes encerrados | Agentes (3) → rolar; encerrados pela última execução, não pela criação | [PNG](session-agents-finished-dark.png) | — |
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
 | Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
 | Explorador de arquivos | Detalhes → Diretório de trabalho | [PNG](files-explorer-default-dark.png) | — |
 | Arquivo Markdown | Explorador → README.md; renderização e player de leitura | [PNG](files-markdown-default-dark.png) | — |
 | Arquivo de imagem | Explorador → preview.png; imagem sintética | [PNG](files-image-default-dark.png) | — |
+| Prévia HTML offline | Explorador → index.html; página e theme.css sintéticos no modo Arquivos locais, sem internet | [PNG](files-html-preview-dark.png) | — |
 | Sessão mestra | Faixa Sessão mestra; estado antes da primeira mensagem | [PNG](master-session-empty-dark.png) | — |
 | Voz | Faixa de voz falando, acima da faixa da mestra | [PNG](sessions-voice-speaking-dark.png) | — |
 | Citação no rascunho | Conversa com citação sintética → Citações · 1 | [PNG](conversation-quote-draft-dark.png) | — |
@@ -91,6 +94,19 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão de 27/10/2026 (base `19025d2c22a`): catálogo regenerado após a ordenação por execução
+(`19025d2c22a`) e herança do chip (`af7afcc7dae`). A fixture possui um agente ativo mais antigo que
+dois encerrados; entre os encerrados, a última execução inverte a ordem de criação. O tempo do ativo
+usa sua atualização mais recente, sem uma chamada real a modelo. A aba Scripts mantém um registro ativo e o estado vazio.
+
+Também foram conferidos contexto pós-compactação (`0f765c8f026`), sugestões em `!` (`3818eb6c825`),
+Markdown (`de10f5133b9`), citações (`0fee486030d`), HTML (`c2bb792fbba`/`eeccf4c8ac2`) e mestra
+(`ea4a54f3317`). As capturas comuns não têm compactação, sugestões de arquivos nem mestra persistida;
+esses estados específicos continuam fora do índice. As referências de contexto, Markdown, citações e mestra
+são renderizadas novamente no app atual. As citações da fixture continuam locais: não há serviço de quotes real.
+O HTML usa o visualizador real e seu handler de arquivos locais, com CSS entregue pelo transporte em memória;
+a internet permanece bloqueada. Nenhum sandbox de backend ou servidor de arquivos é necessário.
 
 Atualizado para os chips com não lidas (`27c3f84534c`) e as abas Agentes/Scripts (`6387448303a`).
 O script de exemplo é apenas um registro em memória: nenhum comando é executado. As conversas

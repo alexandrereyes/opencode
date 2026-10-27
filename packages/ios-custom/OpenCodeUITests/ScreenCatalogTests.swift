@@ -105,6 +105,16 @@ import XCTest
     shot("new-session-directory-sheet")
   }
 
+  func testNewSessionFromRepository() {
+    let app = launch()
+    defer { app.terminate() }
+    chip("filter-project-Projeto Exemplo 0", app)
+    tap("Nova sessão", app)
+    XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["new-project"].label.contains("Projeto Exemplo 0"))
+    shot("new-session-from-repository-chip")
+  }
+
   func testConversation() {
     let app = launch()
     defer { app.terminate() }
@@ -145,13 +155,18 @@ import XCTest
     defer { app.terminate() }
     tap("session-row-ses_scroll_0000", app)
     tap("conversation-agents", app)
-    XCTAssertTrue(app.buttons["Agentes (1)"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["Agentes (3)"].waitForExistence(timeout: 10))
+    let running = app.buttons["agent-work-ses_catalog_review"]
+    let finished = app.buttons["agent-work-ses_catalog_finished"]
+    XCTAssertLessThan(running.frame.minY, finished.frame.minY)
     XCTAssertFalse(app.staticTexts["Sem recursos"].exists)
     shot("session-agents-resources")
+    app.swipeUp()
+    shot("session-agents-finished")
     tap("Scripts (1)", app)
     XCTAssertTrue(app.buttons["agent-work-catalog-script"].waitForExistence(timeout: 10))
     shot("session-agents-scripts")
-    tap("Agentes (1)", app)
+    tap("Agentes (3)", app)
     app.navigationBars.buttons.firstMatch.tap()
     tap("conversation-usage", app)
     let directory = app.buttons["session-details-directory"]
@@ -166,6 +181,11 @@ import XCTest
     tap("file-explorer-file-preview.png", app)
     XCTAssertTrue(app.navigationBars["preview.png"].waitForExistence(timeout: 10))
     shot("files-image-default")
+    tap("Fechar", app)
+    tap("file-explorer-file-index.html", app)
+    XCTAssertTrue(app.webViews.firstMatch.staticTexts["Próxima versão"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.descendants(matching: .any)["file-html-mode"].exists)
+    shot("files-html-preview")
   }
 
   func testScriptsEmpty() {

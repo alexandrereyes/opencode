@@ -6,7 +6,7 @@ import UIKit
 /// Synthetic data only. The transport never falls through to URLSession, including writes.
 @MainActor enum ScreenCatalogFixture {
   static let scripts = try! JSONDecoder().decode([ShellInfo].self, from: Data(#"[{"id":"catalog-script","status":"running","command":"bun run preview --port 4321","metadata":{"sessionID":"ses_scroll_0000"},"time":{"started":1792576830000}}]"#.utf8))
-  static let children = try! JSONDecoder().decode([Session].self, from: Data(#"[{"id":"ses_catalog_review","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Verificar a acessibilidade","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"},"location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576830000,"updated":1792576830000}}]"#.utf8))
+  static let children = try! JSONDecoder().decode([Session].self, from: Data(#"[{"id":"ses_catalog_review","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Verificar a acessibilidade","agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"},"location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576830000,"updated":1792576890000}},{"id":"ses_catalog_finished","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Revisar os filtros","agent":"plan","outcome":"succeeded","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576840000,"updated":1792576950000,"idle":1792576950000}},{"id":"ses_catalog_older","parentID":"ses_scroll_0000","projectID":"project_scroll_0","title":"Conferir os atalhos","agent":"build","outcome":"succeeded","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576850000,"updated":1792576900000,"idle":1792576900000}}]"#.utf8))
   static let resources: [SessionResource] = [
     .init(id: "catalog-ios", kind: .iosSimulator, label: "iPhone de demonstração", purpose: "Conferir a navegação",
       owner: .init(sessionID: "ses_scroll_0000", rootSessionID: "ses_scroll_0000"), state: .idle,
@@ -20,6 +20,10 @@ import UIKit
   ]
 
   static func file(_ source: String) -> (data: Data, mime: String, text: String?)? {
+    if source.hasSuffix("index.html") {
+      let text = #"<!doctype html><html lang="pt-BR"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="theme.css"></head><body><span class="badge">PROJETO DE EXEMPLO</span><h1>Uma navegação<br>mais simples.</h1><p>Um protótipo sintético para organizar ideias e validar os próximos passos.</p><section><h2>Próxima versão</h2><p>Filtros claros, atalhos acessíveis e conversas sempre à mão.</p><div class="metric">3 <small>melhorias planejadas</small></div></section><footer>HTML + CSS local · demonstração offline</footer></body></html>"#
+      return (Data(text.utf8), "text/html", text)
+    }
     if source.hasSuffix("README.md") {
       let text = "# Projeto de exemplo\n\nUma referência sintética para a navegação do aplicativo.\n\n## Próximos passos\n\n- Revisar os filtros.\n- Validar a acessibilidade.\n- Conferir os temas claro e escuro.\n\n> Nenhum dado pessoal é utilizado nesta demonstração."
       return (Data(text.utf8), "text/markdown", text)
@@ -99,7 +103,8 @@ import UIKit
       "/api/session": #"{"data":[],"cursor":{}}"#,
       "/api/rpc/custom.directories/home": #"{"output":"/Projetos"}"#,
       "/api/rpc/custom.worktrees/locate": #"{"output":[]}"#,
-      "/api/fs/list": #"{"location":{"directory":"/Projetos/exemplo-0"},"data":[{"path":"Sources","type":"directory"},{"path":"README.md","type":"file"},{"path":"preview.png","type":"file"}]}"#,
+      "/api/fs/list": #"{"location":{"directory":"/Projetos/exemplo-0"},"data":[{"path":"Sources","type":"directory"},{"path":"README.md","type":"file"},{"path":"index.html","type":"file"},{"path":"preview.png","type":"file"}]}"#,
+      "/api/fs/read/theme.css": "body{margin:0;padding:32px 24px;background:#12202b;color:#f3f4f0;font:17px -apple-system,sans-serif}h1{font-size:42px;line-height:1.1;margin:24px 0}p{line-height:1.6;color:#bdcdd4}.badge{font-size:11px;letter-spacing:2px;color:#7ee0bf}section{margin-top:32px;padding:24px;border:1px solid #38515e;border-radius:20px;background:#1b303c}h2{margin-top:0;font-size:23px}.metric{color:#7ee0bf;font-size:46px;font-weight:700}small{display:block;color:#bdcdd4;font-size:14px;font-weight:400}footer{margin-top:28px;font-size:12px;color:#8da5b2}",
       "/api/rpc/custom.chats/info": #"{"output":{"root":"/Chats"}}"#,
       "/api/rpc/custom.master/info": #"{"output":{"version":1,"agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"}}}"#,
     ]
