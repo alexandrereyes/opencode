@@ -421,7 +421,8 @@ bun packages/cli/script/custom-sandbox.ts down
 
 The default is `http://127.0.0.1:4177`, tmux session `custom-sandbox-4177`, and
 `<os.tmpdir()>/opencode/custom-sandbox-4177` (canonicalized on macOS). Override with
-`--port` and `--home`; ports 4096 and 4178 are always refused. Dependencies must already
+`--port` and `--home`; ports 4096 and 4178 are always refused. The sandbox's watch gateway listens on
+`--watch-port` (default `0`, any free port, logged as `Watch gateway listening`); 4192, production's, is refused. Dependencies must already
 be installed. `up` builds the plugin and custom web assets with service-worker registration
 disabled, starts `custom-server.ts`, and waits for authenticated `/api/info`. An already
 healthy owned sandbox is left untouched; use `down` then `up` to rebuild changed source.

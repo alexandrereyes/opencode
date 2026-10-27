@@ -62,6 +62,9 @@ public struct AgentsState: Codable, Hashable, Sendable {
     public var kind: Kind
     public var since: Double
     public var text: String?
+    /// Watch gateway only (not in the Live Activity contract): the oldest pending request of this kind, which
+    /// the watch opens with `/watch/v1/requests/:requestID`. Absent from Live Activity pushes.
+    public var requestID: String?
     public var asked: Date { Date(timeIntervalSince1970: since / 1000) }
   }
 
@@ -152,12 +155,31 @@ public struct AgentsSegment: Equatable, Sendable {
   }
 }
 
-public struct AgentsFooterItem: Equatable, Sendable {
+/// One counter line of the Lock Screen card: coloured dot, number and label.
+public struct AgentsCounter: Equatable, Sendable {
   public let count: Int
   public let label: String
   public let role: ThemeRole
-  /// Idle sessions have no dot and use the secondary color throughout.
-  public let dot: Bool
+  /// Recently finished sessions use plain secondary text; the others a bold number and label.
+  public let emphasized: Bool
+}
+
+/// One arc of the Lock Screen ring, as fractions of the circle clockwise from 12 o'clock.
+public struct AgentsGaugeArc: Equatable, Sendable {
+  public let role: ThemeRole
+  /// Recently finished sessions draw at reduced opacity.
+  public let dim: Bool
+  public let from: Double
+  public let to: Double
+}
+
+/// The Lock Screen card's bottom line: the first pending request and how many others wait.
+public struct AgentsAttentionLine: Equatable, Sendable {
+  public let role: ThemeRole
+  public let title: String
+  public let since: Date
+  /// `+K`: the other pending requests, when there are any.
+  public let more: Int?
 }
 
 public extension AgentsState {
@@ -189,35 +211,52 @@ public extension AgentsState {
     return parts
   }
 
-  var footer: [AgentsFooterItem] {
-    [
-      AgentsFooterItem(count: counts.working, label: "trabalhando", role: .success, dot: true),
-      AgentsFooterItem(count: counts.question, label: counts.question == 1 ? "pergunta" : "perguntas",
-        role: .accent, dot: true),
-      AgentsFooterItem(count: counts.permission, label: counts.permission == 1 ? "permissão" : "permissões",
-        role: .warning, dot: true),
-      AgentsFooterItem(count: counts.failed, label: "com erro", role: .error, dot: true),
-      AgentsFooterItem(count: counts.idle, label: counts.idle == 1 ? "ociosa" : "ociosas",
-        role: .textSecondary, dot: false),
-    ].filter { $0.count > 0 }
-  }
-
-  /// The pending block uses the list layout when more than one request waits, even if the backend trimmed
-  /// `attention` to a single item.
-  var pendingList: Bool { attentionTotal > 1 || attention.count > 1 }
-
-  var pendingTitle: String {
-    if !pendingList {
-      return attention.first?.kind == .permission ? "PERMISSÃO PENDENTE" : "PERGUNTA PENDENTE"
+  /// The ring's arcs in contract order (working, question, permission, failed, idle), proportional to the counts,
+  /// with `gap` (a fraction of the circle) between them. A single non-zero count closes the circle; none draws no
+  /// arc (the view shows only the track).
+  func gauge(gap: Double) -> [AgentsGaugeArc] {
+    let parts: [(Int, ThemeRole, Bool)] = [
+      (counts.working, .success, false), (counts.question, .accent, false), (counts.permission, .warning, false),
+      (counts.failed, .error, false), (counts.idle, .textSecondary, true),
+    ].filter { $0.0 > 0 }
+    let total = Double(parts.reduce(0) { $0 + $1.0 })
+    guard total > 0 else { return [] }
+    if parts.count == 1 { return [AgentsGaugeArc(role: parts[0].1, dim: parts[0].2, from: 0, to: 1)] }
+    var start = 0.0
+    return parts.map { count, role, dim in
+      let end = start + Double(count) / total
+      defer { start = end }
+      let from = start + gap / 2
+      return AgentsGaugeArc(role: role, dim: dim, from: from, to: max(from, end - gap / 2))
     }
-    let total = max(attentionTotal, attention.count)
-    let kinds = Set(attention.map(\.kind))
-    if counts.question > 0 && counts.permission > 0 || kinds.count > 1 { return "\(total) PENDÊNCIAS" }
-    return kinds == [.permission] ? "\(total) PERMISSÕES PENDENTES" : "\(total) PERGUNTAS PENDENTES"
   }
 
-  /// Questions use `accent`; permissions and mixed lists use `warning`.
-  var pendingRole: ThemeRole { Set(attention.map(\.kind)) == [.question] ? .accent : .warning }
+  /// `ativas` below the ring's number.
+  var gaugeLabel: String { activeTotal == 1 ? "ativa" : "ativas" }
+
+  /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`; with all five, `concluídas há pouco`
+  /// goes first.
+  var counters: [AgentsCounter] {
+    let all = [
+      AgentsCounter(count: counts.working, label: "trabalhando", role: .success, emphasized: true),
+      AgentsCounter(count: counts.question, label: counts.question == 1 ? "pergunta" : "perguntas", role: .accent,
+        emphasized: true),
+      AgentsCounter(count: counts.permission, label: counts.permission == 1 ? "permissão" : "permissões",
+        role: .warning, emphasized: true),
+      AgentsCounter(count: counts.failed, label: "com erro", role: .error, emphasized: true),
+      AgentsCounter(count: counts.idle, label: counts.idle == 1 ? "concluída há pouco" : "concluídas há pouco",
+        role: .textSecondary, emphasized: false),
+    ].filter { $0.count > 0 }
+    return all.count > AgentsLayout.lockMaxCounters ? all.filter(\.emphasized) : all
+  }
+
+  /// The first pending request, with `+K` for the others; none without attention.
+  var attentionLine: AgentsAttentionLine? {
+    guard let first = attention.first else { return nil }
+    let others = max(attentionTotal, attention.count) - 1
+    return AgentsAttentionLine(role: first.kind.role, title: first.title, since: first.asked,
+      more: others > 0 ? others : nil)
+  }
 
   /// Session opened by tapping the Lock Screen card: the first attention item, else the focus, else none
   /// (the Sessões list).

@@ -23,6 +23,10 @@ export type Push = {
   /** Epoch seconds; the contract sets it to the body's `stale-date`. */
   readonly expiration: number
   readonly body: unknown
+  /** APNs push type; Live Activity updates when omitted. Its topic suffix follows Apple's naming for each type. */
+  readonly type?: "liveactivity" | "widgets"
+  /** Bundle ID the topic is built from; the app's own when omitted (a watch widget uses its watch app's). */
+  readonly bundleID?: string
 }
 
 export type Result =
@@ -102,8 +106,8 @@ export function makeClient(input: {
               ":method": "POST",
               ":path": `/3/device/${push.token}`,
               authorization: `bearer ${token(now)}`,
-              "apns-push-type": "liveactivity",
-              "apns-topic": `${input.bundleID}.push-type.liveactivity`,
+              "apns-push-type": push.type ?? "liveactivity",
+              "apns-topic": `${push.bundleID ?? input.bundleID}.push-type.${push.type ?? "liveactivity"}`,
               "apns-priority": String(push.priority),
               "apns-expiration": String(push.expiration),
               "content-type": "application/json",

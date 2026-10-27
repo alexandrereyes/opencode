@@ -26,7 +26,7 @@ public struct ConversationActivityRow: Sendable, Equatable, Identifiable {
   public let parts: [ConversationActivityPart]
   public var items: [ConversationActivityItem] = []
   public var busy = false
-  public var label: String { ConversationProjection.stepLabel(parts.map(\.part)) }
+  public var label: String { header(now: Date().timeIntervalSince1970 * 1000).label }
   public var pending: Bool { busy || parts.contains { $0.part.running || $0.thinking } }
 }
 

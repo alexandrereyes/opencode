@@ -119,6 +119,18 @@ export function makeHub(options: HubOptions) {
     runtime.current ? Effect.succeed(runtime.current) : Effect.die(new Error("Live Activity is not running")),
   )
 
+  /**
+   * The `snapshot` state with the host name and each attention session's oldest pending request, for other
+   * surfaces of the same hub (the watch gateway). The request IDs never enter the Live Activity state or pushes.
+   */
+  const view = Effect.gen(function* () {
+    const running = yield* current
+    const ready = yield* Deferred.await(running.ready)
+    const now = yield* Clock.currentTimeMillis
+    const derived = running.tracker.derive(now, ready.host)
+    return { state: visible(derived.state, now), host: ready.host, requests: derived.requests }
+  })
+
   const change = <A>(run: (running: Running, now: number) => Effect.Effect<A>) =>
     Effect.gen(function* () {
       const running = yield* current
@@ -141,13 +153,7 @@ export function makeHub(options: HubOptions) {
       change((running, now) => running.registry.ended(input, now).pipe(Effect.as({}))),
     unregister: (input: { readonly deviceID: string }) =>
       change((running, now) => running.registry.unregister(input.deviceID, now).pipe(Effect.as({}))),
-    snapshot: () =>
-      Effect.gen(function* () {
-        const running = yield* current
-        const ready = yield* Deferred.await(running.ready)
-        const now = yield* Clock.currentTimeMillis
-        return { state: visible(running.tracker.derive(now, ready.host).state, now) }
-      }),
+    snapshot: () => view.pipe(Effect.map((result) => ({ state: result.state }))),
   }
 
   const attach = (member: Member) =>
@@ -173,7 +179,7 @@ export function makeHub(options: HubOptions) {
   /** Joins the hub for the lifetime of the calling scope. */
   const join = (member: Member) => Effect.acquireRelease(attach(member), () => detach(member))
 
-  return { join, handlers, members, runtime }
+  return { join, handlers, view, members, runtime }
 }
 
 export type Hub = ReturnType<typeof makeHub>

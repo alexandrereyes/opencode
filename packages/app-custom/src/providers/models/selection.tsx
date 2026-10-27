@@ -9,7 +9,7 @@ import { useSettings } from "@/settings/model"
 import { useProviders } from "@/providers/catalog/providers"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
-import { hasCustomAgent, resolveAgent } from "./agent"
+import { hasCustomAgent, resolveAgent, resolveCurrentAgent } from "./agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./variant"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useData } from "@/runtime/server/current"
@@ -86,11 +86,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const configuredModel = useConfiguredModel()
 
     const id = createMemo(() => params.id || undefined)
-    const list = createMemo(() =>
+    const primary = createMemo(() =>
       normalizeAgentList(data.location.agent.list({ directory: sdk().directory }) ?? []).filter(
-        (item) => item.mode !== "subagent" && !item.hidden,
+        (item) => item.mode !== "subagent",
       ),
     )
+    const list = createMemo(() => primary().filter((item) => !item.hidden))
     const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
@@ -185,7 +186,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       list,
       visible: agentsVisible,
       current() {
-        return pickAgent(scope()?.agent ?? durable()?.agent ?? (agentsVisible() ? store.current : "build"))
+        return resolveCurrentAgent(
+          primary(),
+          scope()?.agent ?? durable()?.agent ?? (agentsVisible() ? store.current : "build"),
+        )
       },
       set(name: string | undefined) {
         const item = pickAgent(name)

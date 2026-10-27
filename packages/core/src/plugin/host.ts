@@ -8,7 +8,7 @@ import type { Event } from "@opencode/schema/event"
 import { ServerConfig } from "@opencode/schema/mcp"
 import { MessagePage } from "@opencode/schema/session-message-page"
 import { App } from "../app.js"
-import { Context, Effect, Option, RcMap, Schema, Stream } from "effect"
+import { Context, DateTime, Effect, Option, RcMap, Schema, Stream } from "effect"
 import { Agent } from "../agent.js"
 import { AISDK } from "../aisdk.js"
 import { Command } from "../command.js"
@@ -668,6 +668,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         sessions.active.pipe(
           Effect.map((ids) => Object.fromEntries([...ids].map((id) => [id, { type: "running" as const }]))),
         ),
+      view: (input) => sessions.view({ sessionID: input.sessionID, idle: DateTime.toEpochMillis(input.idle) }),
       form: {
         reply: Effect.fn("PluginHost.formReply")(function* (input) {
           const session = yield* sessions.get(Session.ID.make(input.sessionID))

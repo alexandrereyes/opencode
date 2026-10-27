@@ -132,6 +132,35 @@ Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active
 - Confirme com `bun run custom:status`: `current` e `prepared` iguais ao commit esperado, `running` = `0.0.0-custom.<sha>` e `health: ready`. TUIs abertas continuam na versão antiga até serem reabertas com `opencode2`.
 - Falha de ativação não faz downgrade automático; siga `docs/custom-macos.md` para correção ou `custom:rollback --database-compatible`.
 
+## Ícone de projeto
+
+O ícone de um projeto é o `project.icon` do Core V2: fica na coluna `icon_url_override` da tabela `project`, no banco do servidor, e sobrevive a `custom:update`. A web custom o mostra na barra lateral, nas abas e no seletor de projeto; o app iOS, nos chips da aba Sessões. Não há tela para escolhê-lo. Quando Alexandre pedir, um agente o define pela API. Na produção (4178), isso é uma escrita: altere só os projetos pedidos e anote antes o valor anterior.
+
+1. **Encontrar o projeto.** Um repositório pode ter mais de um projeto com o mesmo `canonical`; defina em todos.
+
+   ```sh
+   P=$(cat ~/.local/share/opencode-custom-v2/password)
+   curl -s -u opencode:$P http://127.0.0.1:4178/api/project \
+     | jq -r '.[] | select(.canonical | endswith("/abacato-v2")) | [.id, (.icon.override // "" | .[0:60])] | @tsv'
+   ```
+
+2. **Definir ou trocar.** É REST, não RPC: `PATCH /api/project/<id>` com corpo `{"icon":{"override":"<data URL>"}}`, sem `{"input":…}`.
+
+   ```sh
+   jq -n --arg u "data:image/svg+xml;base64,$(base64 -i icone.svg)" '{icon:{override:$u}}' > /tmp/icone.json
+   curl -s -u opencode:$P -X PATCH -H 'content-type: application/json' --data @/tmp/icone.json \
+     http://127.0.0.1:4178/api/project/<id> | jq '.icon.override[0:40]'
+   ```
+
+   Para PNG, use `data:image/png;base64,$(base64 -i icone.png)`.
+
+3. **Remover.** Envie `{"icon":{"override":""}}`. O projeto volta às iniciais ou à cor (`icon.color`).
+
+- **Formatos:** só data URL inline. Aceita SVG autocontido (`data:image/svg+xml;base64,…`, `viewBox` quadrado, sem scripts nem referências externas) ou PNG quadrado (`data:image/png;base64,…`; 128×128 basta). O iOS não busca URLs remotas.
+- **Tamanho:** no máximo 256 KB depois de decodificado; o iOS ignora ícones maiores. Prefira menos de 32 KB. O servidor não valida tamanho nem formato, então confira antes de enviar.
+- **Precedência**, igual à da web: `override`; senão, o `icon.url` descoberto pelo servidor, mas só se o projeto não tiver `color`.
+- **Reabrir o app:** não é preciso. O servidor emite `project.updated`, e a web e o iOS recarregam os projetos. O iOS guarda em cache o PNG rasterizado de cada revisão do SVG, pelo hash do conteúdo. Versões do app iOS anteriores ao suporte simplesmente ignoram o ícone.
+
 ## Resposta de conclusão
 
 Informe de forma curta:

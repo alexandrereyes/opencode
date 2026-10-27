@@ -140,7 +140,7 @@ struct SessionChips: View {
       } label: {
         Chip(
           title: name, selected: store.selectedProject == group.key, running: group.running,
-          count: group.requests, unread: group.unread)
+          count: group.requests, unread: group.unread, icon: .of(selected.project))
       } primaryAction: {
         store.selectedProject = store.selectedProject == group.key ? nil : group.key
       }
@@ -162,11 +162,14 @@ private struct Chip: View {
   /// The list rows' orange unread dot, as a corner badge that coexists with the running arc.
   var unread = false
   var symbol: String?
+  /// The project's own icon (`project.icon`), beside the name.
+  var icon: ProjectIcon?
 
   var body: some View {
     HStack(spacing: 8) {
       if running { RunningArc(size: 9, filled: true) }
       if let symbol { Image(systemName: symbol).appSymbol(.inline, weight: selected ? .semibold : .medium) }
+      if let icon { ProjectIconImage(icon: icon) }
       if let title { Text(title).appFont(.secondary, weight: selected ? .semibold : .regular).lineLimit(1) }
       if count > 0 {
         Text("\(count)").appFont(.footnote, weight: .medium).monospacedDigit().padding(.horizontal, 5).padding(

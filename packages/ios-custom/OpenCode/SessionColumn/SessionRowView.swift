@@ -149,10 +149,15 @@ struct SessionAvatar: View {
   var body: some View {
     let colors = theme.avatar(SessionList.avatarColor(row.project, fallback: row.session.projectID))
     ZStack {
-      Circle().fill(colors.background)
-      Text(SessionList.monogram(row.projectName)).appFont(.message, weight: .medium)
-        .minimumScaleFactor(0.6).lineLimit(1)
-        .foregroundStyle(colors.text)
+      // Chats keep the monogram; a project's own icon replaces it under the same arc and badges.
+      if !row.chat, let icon = ProjectIcon.of(row.project) {
+        ProjectIconAvatar(icon: icon, size: size)
+      } else {
+        Circle().fill(colors.background)
+        Text(SessionList.monogram(row.projectName)).appFont(.message, weight: .medium)
+          .minimumScaleFactor(0.6).lineLimit(1)
+          .foregroundStyle(colors.text)
+      }
       if row.state == .running { RunningArc(size: size + 5).allowsHitTesting(false) }
     }
     .frame(width: size, height: size)

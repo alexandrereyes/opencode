@@ -235,63 +235,23 @@ struct ConversationStep: View {
   }
   private var revealed: Bool { parts.contains { $0.id != nil && $0.id == store.revealedToolID } }
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    Group {
       if grouped {
-        Button {
+        ConversationActivityCard(parts: entries, expanded: expanded, pending: pending, identifier: "tool-group-\(id)") {
           var transaction = Transaction()
           transaction.disablesAnimations = true
           withTransaction(transaction) { store.expansionValues[id] = !expanded }
-        } label: {
-          HStack(spacing: 6) {
-            if pending { ProgressView().controlSize(.mini) }
-            let label = ConversationProjection.stepLabel(parts).components(separatedBy: " · ")
-            Text("\(Text(label[0]))\(Text(label.count > 1 ? " · " + label.dropFirst().joined(separator: " · ") : "").foregroundColor(theme.color(.text)))")
-              .appFont(.secondary)
-            Image(systemName: expanded ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
-          }.foregroundStyle(theme.color(.textSecondary)).frame(
-            maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.plain).accessibilityLabel(ConversationProjection.stepLabel(parts))
-        .accessibilityValue(expanded ? "Expandido" : "Recolhido")
-        .accessibilityIdentifier("tool-group-\(id)")
-      }
-      if expanded {
-        ForEach(items.isEmpty ? ConversationActivityItem.project(entries) : items) { item in
-          if item.kind != .part {
-            ConversationActivityItemView(item: item, store: store)
-          } else if let entry = item.parts.first {
-            let part = entry.part
-            if let notice = entry.notice {
-              Text(notice.notice).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-            } else if part.type == "reasoning" {
-              let key = entry.id
-              Button {
-                toggleDetail(key)
-              } label: {
-                HStack(spacing: 12) {
-                  Text(entry.reasoningLabel)
-                  Image(systemName: detail(key) ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
-                  Spacer()
-                }
-              }.buttonStyle(.plain).appFont(.caption).foregroundStyle(
-                theme.color(.textSecondary))
-                .accessibilityLabel(entry.reasoningLabel)
-                .accessibilityValue(detail(key) ? "Expandido" : "Recolhido")
-                .accessibilityIdentifier("reasoning-\(entry.id)")
-              if detail(key) {
-                ResponseMarkdown(text: part.text ?? "", messageID: entry.messageID, partID: entry.id)
-              }
-            } else if part.type == "tool", !part.suppressed || part.failed {
-              if part.name == "subagent", !part.failed {
-                subagent(part)
-              } else {
-                tool(part, key: entry.id)
-              }
-            } else if part.type != "tool" {
-              Text("Conteúdo da sessão · \(part.type.description)").appFont(.caption).foregroundStyle(
-                theme.color(.textSecondary))
+        } content: {
+          ConversationTimeline {
+            ForEach(shownItems) { item in
+              ConversationTimelineRow(done: item.completed) { row(item) }
             }
           }
-        }.padding(.leading, grouped ? 12 : 0)
+        }
+      } else {
+        VStack(alignment: .leading, spacing: 12) {
+          ForEach(shownItems) { row($0) }
+        }
       }
     }.onChange(of: store.revealedToolID, initial: true) { _, id in
       guard let id else { return }
@@ -302,6 +262,42 @@ struct ConversationStep: View {
     }
     .onChange(of: expanded) { _, open in if !open { outputs.removeAll() } }
     .onDisappear { outputs.removeAll() }
+  }
+  private var shownItems: [ConversationActivityItem] { items.isEmpty ? ConversationActivityItem.project(entries) : items }
+  @ViewBuilder private func row(_ item: ConversationActivityItem) -> some View {
+    let duration = item.duration.map(ConversationProjection.duration)
+    if item.kind != .part {
+      ConversationActivityItemView(item: item, store: store)
+    } else if let entry = item.parts.first {
+      let part = entry.part
+      if let notice = entry.notice {
+        ConversationTimelineLabel(icon: "info.circle", name: notice.notice, lines: 6)
+      } else if part.type == "reasoning" {
+        let key = entry.id
+        Button {
+          toggleDetail(key)
+        } label: {
+          ConversationTimelineLabel(icon: "brain", name: entry.reasoningLabel) {
+            Image(systemName: detail(key) ? "chevron.down" : "chevron.right").appSymbol(.disclosure)
+              .foregroundStyle(theme.color(.icon))
+          }.contentShape(Rectangle())
+        }.buttonStyle(.plain)
+          .accessibilityLabel(entry.reasoningLabel)
+          .accessibilityValue(detail(key) ? "Expandido" : "Recolhido")
+          .accessibilityIdentifier("reasoning-\(entry.id)")
+        if detail(key) {
+          ResponseMarkdown(text: part.text ?? "", messageID: entry.messageID, partID: entry.id)
+        }
+      } else if part.type == "tool", !part.suppressed || part.failed {
+        if part.name == "subagent", !part.failed {
+          subagent(part)
+        } else {
+          tool(part, key: entry.id, duration: duration)
+        }
+      } else if part.type != "tool" {
+        ConversationTimelineLabel(icon: "questionmark.square.dashed", name: "Conteúdo da sessão · \(part.type.description)")
+      }
+    }
   }
   private var entries: [ConversationActivityPart] {
     if !references.isEmpty { return references }
@@ -315,52 +311,59 @@ struct ConversationStep: View {
     let childID = store.subagentChild(part)
     let running = childID.map(store.active.contains) ?? part.running
     let child = store.children.first { $0.id == childID }
+    let color = theme.agentColor(agent, id: id)
     return Button {
       if let childID { openChild(childID) }
     } label: {
       TimelineView(.periodic(from: running ? .now : .distantFuture, by: 1)) { context in
-        HStack(spacing: 9) {
-          AgentPixels(color: theme.agentColor(agent, id: id), running: running)
-          HStack(spacing: 7) {
-            Text(agent?.name ?? id).appFont(.caption, weight: .medium).foregroundStyle(
-              theme.agentColor(agent, id: id))
-            Text(part.input["description"]?.string ?? "Subagente").appFont(.caption)
-              .foregroundStyle(theme.color(.text)).lineLimit(2)
-          }
-          Spacer(minLength: 3)
-          Text(
-            running && child != nil
-              ? ConversationProjection.duration(
-                context.date.timeIntervalSince1970 * 1000
-                  - ConversationProjection.workStarted(child: child!, shells: store.shells))
-              : part.elapsed(now: context.date.timeIntervalSince1970 * 1000) ?? ""
-          )
-          .appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-          Image(systemName: "chevron.right").appSymbol(.disclosure).foregroundStyle(
-            theme.color(.icon))
-        }.padding(10).background(theme.color(.toolSurface), in: RoundedRectangle(cornerRadius: 9))
+        let elapsed = running && child != nil
+          ? ConversationProjection.duration(
+            context.date.timeIntervalSince1970 * 1000
+              - ConversationProjection.workStarted(child: child!, shells: store.shells))
+          : part.elapsed(now: context.date.timeIntervalSince1970 * 1000)
+        ConversationTimelineLabel(icon: part.icon, name: "Agente ·", target: part.input["description"]?.string ?? "Subagente",
+          monospaced: false, duration: elapsed) {
+          Text(agent?.name ?? id).appFont(.footnote, weight: .medium).foregroundStyle(color).lineLimit(1)
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .overlay { Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.7) }
+            .fixedSize()
+          AgentPixels(color: color, size: 11, running: running, grid: true)
+            .frame(width: 24, height: 24)
+            .background(theme.color(.surfaceRaised), in: Circle())
+            .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 0.7) }
+            // Centered on the text and overhanging its line instead of making it taller, so the row's dot
+            // stays on the text.
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            .padding(.vertical, -5)
+        }.contentShape(Rectangle())
       }
     }.buttonStyle(.plain).disabled(childID == nil)
   }
-  private func tool(_ part: ConversationPart, key: String) -> some View {
+  private func tool(_ part: ConversationPart, key: String, duration: String? = nil) -> some View {
     let waiting = store.pendingTool(part)
     return VStack(alignment: .leading, spacing: 8) {
       Button {
         toggleDetail(key)
       } label: {
+        if grouped {
+          ConversationTimelineLabel(
+            icon: part.failed ? "exclamationmark.triangle" : part.icon, name: waiting ?? part.groupTitle,
+            target: waiting != nil ? "" : part.activityTarget + (part.exitCode.map { " · código \($0)" } ?? ""),
+            tone: waiting != nil ? (part.name == "question" ? .info : .error) : part.failed ? .error : .text,
+            duration: duration
+          ).contentShape(Rectangle())
+        } else {
         TimelineView(.periodic(from: part.running && waiting == nil ? .now : .distantFuture, by: 1))
         { context in
           HStack(alignment: .top, spacing: 10) {
-            if !grouped || part.failed {
             Image(
               systemName: part.failed
                 ? "exclamationmark.triangle"
                 : part.icon
             )
             .frame(width: 18)
-            }
             Text(
-              "\(Text(waiting ?? (grouped ? part.contextSummary : part.summary(now: context.date.timeIntervalSince1970 * 1000))))\(Text(part.exitCode.map { " · código \($0)" } ?? "").foregroundColor(theme.color(.error)))"
+              "\(Text(waiting ?? part.summary(now: context.date.timeIntervalSince1970 * 1000)))\(Text(part.exitCode.map { " · código \($0)" } ?? "").foregroundColor(theme.color(.error)))"
             )
             .appFont(.caption).multilineTextAlignment(.leading)
             Spacer(minLength: 0)
@@ -371,10 +374,11 @@ struct ConversationStep: View {
                 ? (part.name == "question" ? .info : .error)
                 : part.failed ? .error : .text)
           )
-          .padding(grouped ? 0 : part.running ? 9 : 2)
+          .padding(part.running ? 9 : 2)
           .background(
-            theme.color(.codeSurface).opacity(!grouped && part.running ? 1 : 0),
+            theme.color(.codeSurface).opacity(part.running ? 1 : 0),
             in: RoundedRectangle(cornerRadius: 8))
+        }
         }
       }.buttonStyle(.plain)
       if detail(key) {

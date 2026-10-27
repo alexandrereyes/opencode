@@ -120,12 +120,29 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   Reduce Motion) and keeps the active filter visible. `SessionChipsTests` (via `script/test-session-chips.py`, which
   stops live work, reads every session and completes two Luna 6 / low prompts on an owned sandbox) checks unread, a
   short real run rising to the front and returning, that reading clears the badge, and moving Chats persists.
+- **Project icons:** a repository chip shows the project's own icon left of its name, at text size (18 pt scaled
+  with `.subheadline`, rounded corners), keeping the running arc, unread dot and compact width; without one it is
+  unchanged. The source is the Core's `project.icon` (no app UI to change it; agents set it with `PATCH
+  /api/project/{id}` `{"icon":{"override":"data:…"}}`, see the `opencode-custom` skill), picked like the web sidebar:
+  `override`, else the discovered `url` unless a `color` was chosen. Only inline data URLs up to 256 KB count
+  (`ProjectIcon`); nothing remote is fetched. PNG/JPEG decode with ImageIO; SVG is rasterized once per revision by
+  `ProjectIconRenderer`, an `<img>` in a throwaway web view (no JavaScript, network or non-`data:` resources, like the
+  Mermaid diagrams) snapshotted to 144 px PNG. `ProjectIconCache` keeps decoded icons in memory and SVG renders under
+  `Caches/ProjectIcons-v2/<sha256 of the image>.png`, so a new icon gets a new file and scrolling never re-renders.
+  `project.updated` reloads the projects, so a change shows without reopening the app. `test-session-chips.py
+  --icon NAME=FILE=RRGGBB` sets icons (and clears the others) for `SessionChipsTests`, which checks each chip's pixels
+  for the icon color, its absence elsewhere, and a live removal and restore through the API.
 - **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
   A muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
   its unread dot in a neutral color. It still appears in "Precisa de você".
 - **Avatar:** two-letter monogram of the repository (the first letters of the first two words, or the first two
   letters of a single word: `abacato-v2` → `AV`, `opencode2` → `OP`). The color comes from `project.icon.color`, or a
-  stable choice from the project ID when the project has none, through the theme's avatar tokens.
+  stable choice from the project ID when the project has none, through the theme's avatar tokens. A project with its
+  own icon (see Project icons) shows it instead, cropped to the circle over a neutral `surfaceRaised` disc with a
+  hairline `border`, in the rows, the session switcher, the conversation header (inside the context ring) and the Nova
+  sessão project selector (`ProjectAvatar`). The running arc, `+N` subagents, state badge and unread dot stay on top;
+  Chats rows, the Sessão mestra and the in-app alert banner keep their current avatars. `ProjectIcon.of` resolves each
+  icon source once, so row re-renders never decode it again.
 - **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
   "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a
   `safeAreaBar` (the navigation bar is hidden on this screen only; pushed screens keep theirs).
@@ -289,8 +306,10 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   nonempty reasoning and ordinary notices share one disclosure **across backend steps**. Visible assistant text,
   user messages, answered questions, compaction, model/location changes and interruption delimit the groups.
   Running questions, empty parts and successful `todowrite` do not count or split them; failed tools remain visible.
-  Summaries count tool calls (reasoning only when there are no calls), deduplicate titles in first-use order, and
-  use native pt-BR copy: `Usou 33 · Patch, Shell, Ler e Grep`, `Pensou 1s`, `Raciocínio(s)` and `Atualizações`.
+  Each group is a card (see [Shared chat layout](#shared-chat-layout-iphone-and-mac--27-october)) whose header counts
+  tool calls, deduplicates titles in first-use order and uses native pt-BR copy:
+  `Atividade · Patch, Shell, Ler e Grep · 33 ferramentas · 4m`, `Pensou 4s` for reasoning alone, `Atividade ·
+  Raciocínio(s)` when that reasoning has no timestamps, and `Atividade · Atualizações`.
   The app localizes the web's untranslated fallbacks: `Loaded … skill(s)` becomes `Carregou a(s) habilidade(s) …`,
   `match(es)` becomes `correspondência(s)`, and `Browser` becomes `Navegador`. Tool identifiers remain identifiers.
   Groups start **closed even while running**; streaming never overwrites a disclosure choice. Expanded consecutive
@@ -335,10 +354,11 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   The same UserBubble renders in the list and pinned header. Sticky has no off switch; there is no other pinned banner.
 - **Requests:** permission (`Quer rodar: …`, `Negar` outlined, `Permitir` filled) and question (options as buttons,
   free answer) cards inside the conversation.
-- **Tray above the composer:** one tray with the running pill (`Opus 5.5 · trabalhando`, `Background`, `■ Parar`) and
-  the queued messages (`Enviar agora`, edit, `×`).
-- **Composer (V2):** one rounded card with the text at full width and, inside it below the text, a row with a small
-  outlined `+` (attachments), `Opus 5.5 · xhigh`, the compact `MCP · N/M` pill, a flexible space and a round button:
+- **Tray above the composer:** one card with the running line (`Opus 5.5 · trabalhando · 2m14s`, `Background`,
+  `■ Parar`) and one line per queued message (`Na fila: …`, `Editar`, `Enviar agora`, `×`).
+- **Composer (V2):** one rounded card with the text at full width (`Pergunte qualquer coisa…` while empty) and, inside
+  it below the text, a row with a small outlined `+` (attachments), the model (`Opus 5.5 · xhigh`) in the same subtle
+  capsule as the compact `MCP · N/M` pill, a flexible space and a round button:
   microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
   ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
 - **Triggers:** `@` context (sessions, apps, agents, references), `!` files, `/` commands, `$` skills, and `#`
@@ -364,6 +384,84 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
   `v2-text-text-accent`) and, for commands and skills, which the web leaves uncolored, from the theme's `info` and
   `accent` palette colors.
+
+### Shared chat layout (iPhone and Mac) — 27 October
+
+Approved by Alexandre as the chat column shared with the future Mac app, from the mocks in
+`.agent-artifacts/mac-app/chat-comum/` of the `mac-app-mocks` worktree (`BRIEFING.md`, `referencia-ios.png`,
+`referencia-mac-janela.png`). Only the activity groups, the tray and the composer's chips change; the iPhone header,
+the response text, bubbles, footers and every behavior (scroll, reading, pinning, queue, requests, dictation) stay.
+
+- **Activity card:** a rounded `surface` card with a thin `border`, full width, closed on open and while running.
+  Its header is the chevron, then `Atividade · <titles> · N ferramentas · <duration>`, where the titles give way
+  with an ellipsis so the count and duration stay on one line (accessibility sizes wrap instead). The duration runs
+  from the first member's start (`time.ran ?? time.created`) to the last end, `now` while one runs; members
+  without timestamps are ignored and, without any, it is omitted. A settled card never ticks; a pending one
+  refreshes once a second. Its vertical padding draws into the transcript's row spacing (`padding(-inset)`), so a
+  collapsed group is no taller than the old disclosure line: taller collapsed rows made `measure-scroll.py
+  paged-up` show uncorrected prepends (below).
+- **Timeline:** open, a thin vertical line joins small dots, `primary` when the item completed (a finished call
+  without failure, or reasoning that stopped) and gray otherwise. Each item shows a line icon, the tool title, its
+  target in monospace (`activityTarget`: command, file name with offset/limit, URL, query, iPhone source, or the
+  error) and, at the right, its duration: the members' own run times added together, only when all have ended.
+  Grouped reads, `+N −M` file accordions with their diffs, searches, skills, notices, failures (red triangle) and
+  reasoning (`brain`, opening its text) keep their content; a subagent keeps its agent chip and the round
+  pixel-grid button that opens the child.
+- **Tray:** `ConversationRunTray`. The elapsed time is `ConversationProjection.executionStarted`: the first step
+  after the latest `idle` boundary, or the first step of a fully loaded history; otherwise (a partial page without
+  a boundary, or no step yet) it is omitted. The server has no execution start time; `session.execution.started`
+  carries none in its payload and `/api/session/active` only says `running`.
+- **Pendente and the queue:** different items. `PendingInputs.steers` lists undelivered `delivery: steer` inbox
+  items (they deliver at the next step boundary), and the tray lists `delivery: queue` items; **Mover para a fila**
+  turns a bubble into a tray line. The bubble therefore stays in the transcript, unchanged.
+- **Composer:** the placeholder `Pergunte qualquer coisa…` (the comment editor keeps its own), and the model in the
+  MCP pill's capsule (`composerCapsule()`); the 44-point tap height is unchanged.
+
+**Reuse on the Mac.** Logic lives in OpenCodeKit with Swift Testing coverage (`ConversationActivityHeaderTests`):
+`ConversationActivityHeader` (title, deduplicated titles, count, wall-clock span, `Pensou`), `ConversationActivityItem
+.completed`/`.duration`, `ConversationPart.activityTarget` and `ConversationProjection.executionStarted`. It replaced
+`ConversationProjection.stepLabel` and `ConversationPart.contextSummary`. The views in `OpenCode/ConversationColumn/`
+import only SwiftUI and OpenCodeKit and use no iOS-only modifier:
+
+| File | Contents |
+| --- | --- |
+| `ConversationActivityCard.swift` | The card and its header; the host owns expansion and draws the items |
+| `ConversationTimeline.swift` | Line, dots (`ConversationTimelineRow`) and the item line (`ConversationTimelineLabel`) |
+| `ConversationRunTray.swift` | Running line and queue lines, from plain values and closures |
+| `ComposerChips.swift` | `composerCapsule()` and `ComposerModelChip` |
+| `ConversationTitle.swift` | `ConversationAvatar` (context ring), `ConversationTitle` and the Mac's `ConversationTitleBar` |
+
+The iPhone hosts stay where they were: `ConversationStep` (`ConversationComponents.swift`) maps the store's state
+onto the card and items, `ConversationActivityItemView` draws reads/searches/skills/files, `ConversationTray`
+(`ConversationRequests.swift`) adapts the store to the tray, and `ComposerEditor` keeps the editor. `ConversationView`'s
+header now composes `ConversationAvatar` and `ConversationTitle`; captures before and after are pixel-identical apart
+from the animated agents grid. The Mac title bar (avatar, title, `<worktree> · trabalhando…`, `…`, primary `+`) is
+`ConversationTitleBar`, rendered by the DEBUG `-OpenCodeConversationTitleFixture` (`ScreenCatalogTests
+/testConversationTitleBar`).
+
+Still iOS-only, for the Mac to replace: the response text (`MarkdownProse`/`ResponseText`, `UITextView` → an
+`NSTextView`-based equivalent), the composer editor (`ComposerTextView`, `UITextView`), the scroll owner and
+transcript list (`ConversationScroll`, `ConversationViewport`), `UIPasteboard` in the tool output's Copiar,
+`ConversationActivityItemView`'s read-overflow measurement (`UIFont`), and the glass header buttons (macOS 26).
+`AppTypography.swift` and `Theme.swift` still need `#if os(iOS)` around their UIKit parts.
+
+Verification: `swift test`; `ScreenCatalogTests/testActivity` (offline `-OpenCodeCatalogActivity`, both themes;
+`OPENCODE_CATALOG_ACCESSIBILITY=1` adds a capture for accessibility sizes) and `testConversationTitleBar`; and, on an
+owned sandbox, `test-groups.py` (which now accepts `OPENCODE_TEST_SERVER_URL`/`OPENCODE_TEST_HOME` and runs
+`ToolGroupingTests` alone without the conversation seed), `test-pending.py`, `test-subagents-alerts.py`, and the
+MCP, dictation and composer suites through `test-isolated.py`. `measure-scroll.py`, base `2fe84bbaa7` against this
+change on an iPhone 17 Pro simulator (Debug `-O`, medians of three alternating runs; frames / p95 / main-thread CPU):
+
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| `read` | 707 / 16.7 ms / 2.08 s | 706 / 16.7 ms / 2.14 s |
+| `history-up` | 703 / 16.7 ms / 2.40 s | 701 / 16.7 ms / 2.39 s |
+| `stream-reading` | 704 / 16.7 ms / 4.61 s | 701 / 16.7 ms / 4.68 s |
+| `stream-follow` | 622 / 36.3 ms / 6.49 s | 619 / 33.4 ms / 6.43 s |
+| `paged-up` (replaced frames) | 694 / 16.7 ms / 1.60 s (0) | 695 / 16.7 ms / 1.55 s (0) |
+
+With the card's 11-point header padding inside the row, `paged-up` had uncorrected prepends (replaced frames 1–4 and
+2,100-point jumps in most runs); drawing the padding into the row spacing removed them (0 in 8 runs).
 
 ### Quote marks — 23 October
 
@@ -828,7 +926,7 @@ Grouping verification uses **OpenCode Grupos2** (iPhone 18 Pro / iOS 27) and `io
 `OPENCODE_TEST_THEME=openchamber-light`. It supplies explicit sandbox credentials, imports/deletes only its own
 sanitized 19-step histories (33 tools, including eight patches and one patch failure; no model calls), and includes
 the existing session-reading regressions plus grouped-tool transport parity and parent/child expansion continuity.
-The older working fixture expects `Usou 5 · Ler, Agente e Editar` and a compact `Ler infra.md` row; continuity verifies
+The older working fixture expects `Atividade · Ler, Agente e Editar · 5 ferramentas` and a compact `Ler infra.md` row; continuity verifies
 expanded reasoning, since ordinary reads no longer expose their output. Tests reopen owned sessions by ID and scroll
 through the transcript gutter to avoid the pinned bubble's inner scrolling. The tool order/states come from a GET-only production child-session read;
 the fixture contains neutral content and paths. Native collapsed/expanded/running captures and headless PWA comparisons
@@ -2783,17 +2881,25 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   `attentionTotal/activeTotal`, the expanded header with `precisa`/`precisam`, the footer plurals, pending titles,
   row labels) are pure and tested. `AgentsActivityAttributes` (`VoiceShared/`, shared with the widget extension) is the
   APNs `attributes-type`; its `theme` carries `ThemeRole` names → `#RRGGBBAA` (the 12 required roles plus `info`).
-- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. **Rev. 27/10:** heights are deterministic. The
-  expanded Dynamic Island proposes an unbounded height and clips on device (the first `ViewThatFits` version cut a
-  row on the iPhone 17 Pro Max), so every block has a fixed frame from `AgentsLayout` (OpenCodeKit). A ruler measured
-  110 points for the bottom region on iPhone 17 Pro and Pro Max, with the rounded corners biting from about 95; the
-  island uses a 96-point ceiling: an 18-point header and up to three single-line 20-point rows (avatar, truncating
-  title, project, status), plus a `+N` line only when it fits. The Lock Screen (Apple: may truncate above 160 points)
-  picks one of three densities by computed height under 156 points, not by measurement. `AgentsActivityRenderTests`
-  checks that rendered heights equal the computed ones. On Apple Watch the Lock Screen closure branches on
-  `activityFamily`: `.supplementalActivityFamilies([.small])` shows the mascot inside a segmented subagent ring (up to
-  8 segments, a continuous arc above), the minimal island's `!N`/`?N`/hand badge and the first two sessions, in
-  fixed metrics for the smallest Smart Stack (152 × 69.5 points). `há 3 min.` is a system-updated relative date.
+- **Widget:** `AgentsActivityWidget` in `VoiceActivityBundle`. Heights are deterministic: the expanded Dynamic
+  Island proposes an unbounded height and clips on device (the first `ViewThatFits` version cut a row on the iPhone
+  17 Pro Max), so every block has a fixed frame from `AgentsLayout` (OpenCodeKit). A ruler measured 110 points for
+  the island's bottom region on iPhone 17 Pro and Pro Max, with the rounded corners biting from about 95; the island
+  uses a 96-point ceiling: an 18-point header and up to three single-line 20-point rows (avatar, truncating title,
+  project, status), plus a `+N` line only when it fits.
+- **Lock Screen, "ring and counters" (rev. 27/10, mock `v3-opcao-3-anel-contadores.png`):** the card summarizes every
+  session and no longer singles out the focus session. Below the unchanged header, a closed 72-point ring (7-point
+  stroke) splits into arcs proportional to working, question, permission, failed and recently finished (dimmed)
+  counts, with `activeTotal`/`ativas` in the centre; to its right one 18-point line per non-zero count (at most 4,
+  `concluídas há pouco` dropped first). A 16-point attention line (kind dot, first title, `há N min.`, `+K`) follows
+  only when a request is pending. Totals: 121 points, or 150 with the attention line (Apple: may truncate above 160).
+  The arcs, counters, plurals and `+K` are pure `AgentsState` functions (`gauge`, `counters`, `attentionLine`).
+  The system-updated `há N min.` keeps a fixed 64-point width and no `fixedSize`: grouped under one, the Lock Screen
+  failed to archive the card and showed it empty. `AgentsActivityRenderTests` checks rendered heights equal the
+  computed ones.
+- **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
+  shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
+  `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
   The mascot is drawn as a vector shape in theme colors, so the extension needs no image asset.
 - **Driver:** `OpenCode/LiveActivity/AgentsActivityAgent.swift`. The main-actor agent forwards each event-stream
   connection (launch and every foreground) and `rpc.custom.live-activity.changed` (routed by `EventHub` like
@@ -2840,6 +2946,51 @@ local activities and keeps the app off every server. `OpenCodeUITests/AgentsActi
 expanded island and the Lock Screen (`ios-<state>-<variant>.png`). `xcrun simctl push` only delivers user
 notifications, so APNs Live Activity pushes (start/update/end) need a physical device and the backend's APNs key.
 
+## Apple Watch — 27 October
+
+A native watchOS app, `OpenCodeWatch` (`br.com.alexandrem.opencode.watchkitapp`, watchOS 27), embedded in the iPhone
+app and shipped by the same TestFlight upload, with the complication extension `OpenCodeWatchWidgets`
+(`….watchkitapp.widgets`). It runs **without the iPhone nearby** (`WKRunsIndependentlyOfCompanionApp`), over the
+watch's own Wi-Fi or cellular. The contract with the backend is
+[`plugin-app-custom/docs/watch.md`](../plugin-app-custom/docs/watch.md); the approved references are in
+`.agent-artifacts/watch/` (not versioned).
+
+- **Pairing:** Você → Apple Watch → **Parear Apple Watch** calls `custom.watch` → `pair`, replaces the voice with the
+  local preference and sends the result over WatchConnectivity (`transferUserInfo` + `updateApplicationContext`).
+  The iPhone keeps nothing. The same screen lists `devices` and removes one (`revoke`, plus a WatchConnectivity
+  notice so that watch clears itself). The watch stores the pairing in its Keychain, in the access group
+  `ERRYZ68LX5.br.com.alexandrem.opencode.watch` (`keychain-access-groups`) so the complication reads it too.
+- **Gateway client:** `WatchGatewayClient` (OpenCodeKit) sends the device token, the Cloudflare Access service-token
+  headers and `User-Agent: OpenCodeWatch/<version>` on every request, and classifies failures (401 → pair again,
+  404/409 → already answered, 429, HTML or no answer → "Mac indisponível"). OpenCodeKit compiles for watchOS; the
+  contract types, ring, row priority, captions and storage live there and are tested with `swift test`, including a
+  real local HTTP server (`WatchTests`).
+- **Screens** (`OpenCodeWatch/`): Painel (ring, counts, pending requests first, sessions, Liquid Glass microphone,
+  refresh every 10 s while visible and on pull), Responder (options with the recommended one first, dictation through
+  `TextFieldLink`, permission decisions), Voz (CallKit call, live levels around the mascot, Sessão mestra line, last
+  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível" with the last update. Colors are
+  `openchamber-dark` (`WatchPalette`, checked against the theme JSON by `WatchPaletteTests`).
+- **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
+  mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
+  state in the same Keychain group and refreshes every 15 minutes, when the app updates it, and on WidgetKit push. The
+  push token is registered with `/watch/v1/widget-token` by the extension's `WidgetPushHandler` and by the app
+  (`WidgetCenter.currentPushInfo`).
+- **Voice** follows the proven path of the 27 October spike: CallKit outgoing call (no `contactIdentifier`), audio
+  and UDP only after `didActivate`, one UDP flow per remote with system-chosen interface and port, ICE seeing the
+  original IPv4 pair while the sockets carry the bytes (NAT64/CLAT on cellular). The gateway creates the call,
+  owns the sideband and delegation; the watch sends a heartbeat every 5 s and long-polls caption, status and master
+  events. Failures post transport diagnostics to `/watch/v1/diagnostics`.
+- **WebRTC engine:** `Vendor/OpenClawWatchRTC/` holds OpenClaw's `OpenClawWatchRTC` (Rust, `str0m` 0.24.1, commit
+  `e5cc2d9`) and its watch transport/audio Swift with the spike's fixes, under their MIT notices (`Licenses/`, also
+  bundled in the watch app). `script/setup-watch-rust.sh` installs the pinned nightly into
+  `~/.local/share/opencode-ios/rust` (no global Rust, no shell profile changes). The `Build Watch WebRTC` phase runs
+  `script/build-watch-rtc.sh`, which builds the current platform's slices in a clean environment and reuses finished
+  archives from `~/.local/share/opencode-ios/watch-rtc-cache` by content fingerprint.
+- **Simulator:** `script/capture-watch.sh <udid> <dir>` builds for the watchOS simulator and captures the DEBUG
+  fixtures (`-OpenCodeWatchFixture dashboard|question|permission|voice|complications|offline|unpaired`), which never
+  touch the network, Keychain or cache. The simulator has no CallKit and always allows UDP, so it proves neither the
+  call nor the TN3135 policy; voice needs the physical watch.
+
 ## Technical direction
 
 - Swift 6 with strict concurrency, SwiftUI, Observation (`@Observable`), and `async`/`await`.
@@ -2865,6 +3016,13 @@ packages/ios-custom/
   OpenCodeKit/           # local Swift package with no UI: API, models, SSE, pairing, Keychain
   OpenCodeUITests/       # sandbox-only native interaction/continuity tests
   OpenCodeTests/         # app-hosted UIKit key-command tests
+  VoiceActivity/         # widget extension: voice and Agentes Live Activities
+  VoiceShared/           # code shared by the app and VoiceActivity
+  SharedUI/              # SwiftUI shared by the iPhone and Apple Watch targets (mascot)
+  OpenCodeWatch/         # Apple Watch app
+  OpenCodeWatchWidgets/  # Apple Watch complications
+  WatchShared/           # code shared by the watch app and its complications
+  Vendor/OpenClawWatchRTC/  # vendored watch WebRTC engine (Rust + Swift, MIT)
   OpenCodeMac/           # Mac app target: Mac-only code; shares OpenCode/ files by membership
 ```
 
@@ -2882,10 +3040,12 @@ packages/ios-custom/
   only through the APNs sandbox.
 - The physical test devices are shared with other agents. Reserve one through the device lease before installing or
   driving the app, and release it when you are done.
-- The committed `OpenCode.xcodeproj` has the iPhone app target (`OpenCode`), the Mac app target (`OpenCodeMac`, see
-  [Mac app](#mac-app-stage-1--27-october)), automatic signing for team
-  `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
-  require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
+- The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`) with its `VoiceActivity` extension and
+  the embedded Apple Watch app (`OpenCodeWatch` + `OpenCodeWatchWidgets`), the Mac app target (`OpenCodeMac`, see
+  [Mac app](#mac-app-stage-1--27-october)), automatic signing for team `ERRYZ68LX5`, and a local `OpenCodeKit`
+  package. Targets use synchronized folders; adding a Swift file does not require editing the project. Building the
+  watch app needs the private Rust toolchain once: `packages/ios-custom/script/setup-watch-rust.sh`.
+  [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
 
 ### Parallel verification without shared-device races
 
@@ -2988,8 +3148,10 @@ keeps the 300-second limit; the legacy combined two-theme run has a 600-second a
    enable **automatic distribution**, and add only his App Store Connect user as a tester. Builds are internal-only;
    no external group or Beta App Review is involved. Apple's processing, binary validation, encryption questions and
    current developer agreements still apply. Stop for Alexandre if any login, 2FA or agreement acceptance is required.
-5. The future App Group is `group.br.com.alexandrem.opencode`; it is reserved in the design, not enabled as an
-   entitlement until an extension actually needs it.
+5. The App Group `group.br.com.alexandrem.opencode` remains reserved and is not enabled: automatic signing with
+   the API key cannot create or attach App Groups (Xcode reports "Authentication failed" for those targets), and
+   Xcode has no signed-in account. The Apple Watch app and its complication share data through the Keychain access
+   group `ERRYZ68LX5.br.com.alexandrem.opencode.watch` instead, which needs no portal capability.
 
 #### Commands (from the repository root)
 

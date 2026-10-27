@@ -88,6 +88,10 @@ public struct Project: Codable, Sendable, Identifiable, Hashable {
 
   public struct Icon: Codable, Sendable, Hashable {
     public let color: String?
+    /// Discovered by the server (a data URL from the repository's favicon), shown only without a chosen color.
+    public let url: String?
+    /// Chosen through `PATCH /api/project/{id}` (`icon.override`); wins over `url` and `color`.
+    public let override: String?
   }
   public var displayName: String {
     name?.isEmpty == false ? name! : URL(fileURLWithPath: canonical).lastPathComponent

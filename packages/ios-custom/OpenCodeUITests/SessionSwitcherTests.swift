@@ -24,6 +24,8 @@ import XCTest
     // The avatar and title open the switcher, with the current session marked and visible.
     let trigger = app.buttons["conversation-switcher"]
     XCTAssertTrue(trigger.waitForExistence(timeout: 30))
+    // "Nova sessão" creates a session: act only on the sandbox.
+    try app.requireSandbox()
     XCTAssertEqual(trigger.label, "Trocar de sessão")
     trigger.tap()
     let current = app.buttons["switcher-row-" + from]

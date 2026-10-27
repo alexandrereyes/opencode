@@ -521,3 +521,37 @@ test("rebuild with only subagents running maps them to their top-level sessions"
   await run(fallback.rebuild(T))
   expect(fallback.derive(T, host).state.focus).toMatchObject({ sessionID: ids.live, startedAt: T - 15 * minute })
 })
+
+test("each attention session maps to its oldest pending request of that kind, subagents included (watch only)", async () => {
+  const server = world()
+  const tracker = makeTracker(server.ctx)
+  await run(
+    Effect.gen(function* () {
+      for (const event of [
+        created(ids.live, T - 60 * minute),
+        execution("started", ids.live, T - 30 * minute),
+        created("ses_child", T - 20 * minute, ids.live),
+        execution("started", "ses_child", T - 20 * minute),
+        created(ids.cache, T - 60 * minute),
+        execution("started", ids.cache, T - 30 * minute),
+      ])
+        yield* tracker.apply(event, T)
+      server.permissions.push(permission("per_child", "ses_child", T - 10 * minute, "bash", ["ls"]))
+      server.forms.push(question("frm_root", ids.live, T - 3 * minute, "Seguir?"))
+      server.forms.push(question("frm_child", "ses_child", T - 5 * minute, "Qual banco?"))
+      server.permissions.push(permission("per_cache", ids.cache, T - 2 * minute, "edit", ["a.ts"]))
+      yield* tracker.apply({ type: "form.created", data: {} }, T)
+    }),
+  )
+  const derived = tracker.derive(T, host)
+  // A question outranks the older permission; the subagent's question is the oldest one.
+  expect([...derived.requests]).toEqual([
+    [ids.live, "frm_child"],
+    [ids.cache, "per_cache"],
+  ])
+  expect(derived.state.attention.map((item) => [item.sessionID, item.kind])).toEqual([
+    [ids.live, "question"],
+    [ids.cache, "permission"],
+  ])
+  expect(JSON.stringify(derived.state)).not.toContain("requestID")
+})

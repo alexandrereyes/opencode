@@ -6,14 +6,16 @@ struct AgentPixels: View {
   let color: Color
   var size: CGFloat = 18
   var running = true
+  /// Idle, the still grid instead of the stopped square: the activity timeline's agent button.
+  var grid = false
   var body: some View {
-    if running {
-      TimelineView(.animation(minimumInterval: 0.12, paused: reduceMotion)) { context in
+    if running || grid {
+      TimelineView(.animation(minimumInterval: 0.12, paused: reduceMotion || !running)) { context in
         Canvas { canvas, bounds in
           let tick = Int(context.date.timeIntervalSince1970 * 7)
           for row in 0..<5 {
             for column in 0..<5 {
-              let alpha = reduceMotion ? 1.0 : Double((row * 3 + column + tick) % 5 + 1) / 5
+              let alpha = reduceMotion || !running ? 1.0 : Double((row * 3 + column + tick) % 5 + 1) / 5
               let rect = CGRect(
                 x: CGFloat(column) * bounds.width / 5, y: CGFloat(row) * bounds.height / 5,
                 width: bounds.width / 7, height: bounds.height / 7)

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "OpenCodeKit",
-  platforms: [.iOS("27.0"), .macOS(.v15)],
+  platforms: [.iOS("27.0"), .macOS(.v15), .watchOS("27.0")],
   products: [.library(name: "OpenCodeKit", targets: ["OpenCodeKit"])],
   dependencies: [.package(url: "https://github.com/swiftlang/swift-markdown", exact: "0.7.3")],
   targets: [

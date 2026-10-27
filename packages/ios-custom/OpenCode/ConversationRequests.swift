@@ -184,72 +184,32 @@ struct ConversationQuestionCard: View {
 }
 
 struct ConversationTray: View {
-  @Environment(\.appTheme) private var theme
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
   var body: some View {
-    if (store.executing && !store.waiting) || !store.queue.isEmpty {
-      VStack(spacing: 10) {
-        if store.executing && !store.waiting {
-          HStack(spacing: 8) {
-            ProgressView().controlSize(.mini).tint(theme.color(.success))
-            Text(
-              "\(store.modelLabel(store.session?.model).components(separatedBy: " · ").first ?? "Agente") · trabalhando"
-            )
-            .appFont(.footnote).lineLimit(1).minimumScaleFactor(0.85).monospacedDigit()
-            Spacer(minLength: 0)
-            if store.canBackground {
-              Button("Background") { Task { await store.background() } }
-                .appFont(.footnote).disabled(store.acting.contains("background"))
-            }
-            Button {
-              Task { await store.stop() }
-            } label: {
-              Label("Parar", systemImage: "stop.fill").appFont(.footnote)
-            }.padding(8).overlay {
-              RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.controlBorder))
-            }
-            .disabled(store.acting.contains("stop"))
-          }
-        }
-        if !store.queue.isEmpty {
-          if store.executing && !store.waiting { Divider().overlay(theme.color(.border)) }
-          ScrollView {
-            VStack(spacing: 12) {
-              ForEach(store.queue) { item in
-                HStack(alignment: .top, spacing: 10) {
-                  Image(systemName: "clock").foregroundStyle(theme.color(.textSecondary))
-                  VStack(alignment: .leading, spacing: 7) {
-                    Text(item.payload.displayText).appFont(.caption).lineLimit(2)
-                    Button("Enviar agora") { Task { await store.promote(item) } }
-                      .appFont(.footnote, weight: .medium).foregroundStyle(
-                        theme.color(.primary))
-                  }.frame(maxWidth: .infinity, alignment: .leading)
-                  Button {
-                    draft.restore(item)
-                    store.toast.show("Mensagem pronta para editar")
-                  } label: {
-                    Image(systemName: "pencil")
-                  }
-                  .accessibilityLabel("Editar mensagem da fila").disabled(draft.sending)
-                  Button {
-                    Task { await store.cancel(item) }
-                  } label: {
-                    Image(systemName: "xmark")
-                  }
-                  .accessibilityLabel("Remover mensagem da fila")
-                }.disabled(!store.actionable(item))
-              }
-            }
-          }.frame(maxHeight: min(155, CGFloat(store.queue.count) * 63)).fixedSize(
-            horizontal: false, vertical: true)
-        }
-      }
-      .buttonStyle(.plain).foregroundStyle(theme.color(.text)).padding(12)
-      .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))
-      .overlay {
-        RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7)
-      }
-    }
+    ConversationRunTray(
+      run: store.executing && !store.waiting
+        ? ConversationRunTrayRun(
+          model: store.modelLabel(store.session?.model).components(separatedBy: " · ").first ?? "Agente",
+          started: ConversationProjection.executionStarted(store.messages, complete: !store.hasOlder),
+          background: store.canBackground ? { Task { await store.background() } } : nil,
+          backgroundBusy: store.acting.contains("background"),
+          stop: { Task { await store.stop() } }, stopping: store.acting.contains("stop"))
+        : nil,
+      queue: store.queue.map { ConversationRunTrayItem(id: $0.id, text: $0.payload.displayText, actionable: store.actionable($0)) },
+      editDisabled: draft.sending,
+      sendNow: { item in
+        guard let queued = store.queue.first(where: { $0.id == item.id }) else { return }
+        Task { await store.promote(queued) }
+      },
+      edit: { item in
+        guard let queued = store.queue.first(where: { $0.id == item.id }) else { return }
+        draft.restore(queued)
+        store.toast.show("Mensagem pronta para editar")
+      },
+      remove: { item in
+        guard let queued = store.queue.first(where: { $0.id == item.id }) else { return }
+        Task { await store.cancel(queued) }
+      })
   }
 }

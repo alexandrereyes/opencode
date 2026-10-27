@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { hasCustomAgent, resolveAgent } from "./agent"
+import { hasCustomAgent, resolveAgent, resolveCurrentAgent } from "./agent"
 
 describe("hasCustomAgent", () => {
   test("detects explicitly custom agents", () => {
@@ -25,5 +25,19 @@ describe("resolveAgent", () => {
 
   test("uses the first agent when build is unavailable", () => {
     expect(resolveAgent([{ name: "custom" }], "missing")?.name).toBe("custom")
+  })
+})
+
+describe("resolveCurrentAgent", () => {
+  const agents = [{ name: "mestra", hidden: true }, { name: "plan" }, { name: "build" }]
+
+  test("keeps a session's hidden agent", () => {
+    expect(resolveCurrentAgent(agents, "mestra")?.name).toBe("mestra")
+  })
+
+  test("never falls back to a hidden agent", () => {
+    expect(resolveCurrentAgent(agents)?.name).toBe("build")
+    expect(resolveCurrentAgent(agents, "missing")?.name).toBe("build")
+    expect(resolveCurrentAgent([{ name: "mestra", hidden: true }, { name: "plan" }])?.name).toBe("plan")
   })
 })

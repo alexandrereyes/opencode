@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ConversationMCPPill: View {
   @Environment(\.appTheme) private var theme
-  @Environment(\.displayScale) private var displayScale
   let store: ConversationMCPStore
   var body: some View {
     Button {
@@ -15,9 +14,7 @@ struct ConversationMCPPill: View {
         Text(store.summary.label).appFont(.mcp).monospacedDigit()
         Image(systemName: store.isOpen ? "chevron.up" : "chevron.down")
           .appFont(.mcp)
-      }.foregroundStyle(theme.color(.glassSecondary)).padding(.horizontal, 6).frame(height: 20)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .overlay { Capsule().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
+      }.foregroundStyle(theme.color(.glassSecondary)).composerCapsule()
     }.buttonStyle(.plain).fixedSize().accessibilityLabel(store.summary.accessibilityLabel)
       .accessibilityHint(store.isOpen ? "Fechar painel de MCPs" : "Abrir painel de MCPs")
       .accessibilityIdentifier("conversation-mcp-pill")

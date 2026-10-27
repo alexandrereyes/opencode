@@ -248,11 +248,15 @@ struct ProjectAvatar: View {
   let size: CGFloat
   let style: AppTextStyle
   var body: some View {
-    let colors = theme.avatar(SessionList.avatarColor(project, fallback: project.id))
-    Text(SessionList.monogram(project.displayName)).appFont(style, weight: .medium)
-      .minimumScaleFactor(0.6).lineLimit(1)
-      .foregroundStyle(colors.text).frame(width: size, height: size)
-    .background(colors.background, in: Circle()).accessibilityHidden(true)
+    if let icon = ProjectIcon.of(project) {
+      ProjectIconAvatar(icon: icon, size: size).accessibilityHidden(true)
+    } else {
+      let colors = theme.avatar(SessionList.avatarColor(project, fallback: project.id))
+      Text(SessionList.monogram(project.displayName)).appFont(style, weight: .medium)
+        .minimumScaleFactor(0.6).lineLimit(1)
+        .foregroundStyle(colors.text).frame(width: size, height: size)
+        .background(colors.background, in: Circle()).accessibilityHidden(true)
+    }
   }
 }
 

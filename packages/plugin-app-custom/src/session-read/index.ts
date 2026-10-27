@@ -113,7 +113,8 @@ export const registerSessionRead = Effect.fn("SessionRead.register")(function* (
     .pipe(Effect.orDie)
 })
 
-function sessionMessageText(message: SessionMessage.Info) {
+/** Visible text of one message; failed and interrupted runs are reported so readers see why a session stopped. */
+export function sessionMessageText(message: SessionMessage.Info) {
   if (message.type === "user" || message.type === "synthetic" || message.type === "system" || message.type === "skill")
     return message.text
   if (message.type === "assistant")
@@ -126,5 +127,8 @@ function sessionMessageText(message: SessionMessage.Info) {
       .join("\n")
   if (message.type === "shell") return `$ ${message.command}`
   if (message.type === "compaction" && message.status !== "failed") return message.summary
+  if (message.type === "idle" && message.outcome === "failed")
+    return `[run failed${message.error ? `: ${message.error.message}` : ""}]`
+  if (message.type === "idle" && message.outcome === "interrupted") return "[run interrupted]"
   return ""
 }

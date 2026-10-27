@@ -130,7 +130,7 @@ private func event(_ json: String) throws -> ConversationEvent {
   }
   let query = try part("iphone_query", #"{"source":"health","metrics":["sleep"]}"#)
   #expect(query.summary(now: 0) == "Consultou o iPhone · Saúde")
-  #expect(query.contextSummary == "Consultou o iPhone · Saúde")
+  #expect(query.activityTarget == "Saúde")
   #expect(query.icon == "iphone")
   #expect(query.groupTitle == "Consultou o iPhone")
   #expect(try part("iphone_status", "{}").summary(now: 0) == "Consultou o iPhone · estado")

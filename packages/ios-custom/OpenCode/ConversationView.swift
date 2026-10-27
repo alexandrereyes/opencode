@@ -594,25 +594,9 @@ struct ConversationView: View {
         Button {
           detailsOpen = true
         } label: {
-          ZStack {
-            Circle().stroke(theme.color(.contextTrack), lineWidth: 2.5)
-            if let fraction = context {
-              Circle().trim(from: 0, to: min(1, max(0, fraction)))
-                .stroke(
-                  theme.color(fraction > 0.8 ? .contextWarning : .contextFill),
-                  style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-            }
-            Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
-            if master {
-              Image(systemName: "point.3.connected.trianglepath.dotted")
-                .appSymbol(.action).foregroundStyle(theme.color(.accent))
-            } else {
-              Text(monogram).appFont(.message, weight: .medium).foregroundStyle(colors.text)
-                .lineLimit(1).minimumScaleFactor(0.5)
-            }
-          }.frame(width: 44, height: 44)
+          ConversationAvatar(
+            context: context, master: master, colors: colors, monogram: monogram,
+            icon: master || chat ? nil : ProjectIcon.of(project))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
@@ -621,24 +605,9 @@ struct ConversationView: View {
         .accessibilityIdentifier("conversation-header-avatar")
         .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 4) {
-          Text(master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa")
-            .appFont(.navigation).lineLimit(1)
-            .accessibilityIdentifier("conversation-header-title")
-          if switches {
-            Image(systemName: "chevron.down").appSymbol(.disclosure).foregroundStyle(theme.color(.textSecondary))
-              .accessibilityHidden(true)
-          }
-        }
-        if !headerSubtitle.isEmpty || !headerStatus.isEmpty {
-          Text(
-            "\(Text(headerSubtitle))\(Text(headerStatus.isEmpty ? "" : (headerSubtitle.isEmpty ? "" : " · ") + headerStatus).foregroundColor(theme.color(conversation.waiting ? .error : .success)))"
-          )
-          .appFont(.caption).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
-          .accessibilityIdentifier("conversation-header-subtitle")
-        }
-      }.frame(maxWidth: .infinity, alignment: .leading)
+      ConversationTitle(
+        title: master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa", switches: switches,
+        subtitle: headerSubtitle, status: headerStatus, waiting: conversation.waiting)
       }
       // A clear button over the avatar and title keeps their readouts while VoiceOver also gets the action.
       .overlay {

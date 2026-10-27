@@ -156,6 +156,8 @@ export type Derived = {
   readonly marks: ReadonlyMap<string, Mark>
   /** When the state changes by itself next (an idle or failed row expiring). */
   readonly wakeAt?: number
+  /** Top-level session → its oldest pending request of the attention kind (subagents included); watch-only. */
+  readonly requests: ReadonlyMap<string, string>
 }
 
 /**
@@ -532,6 +534,7 @@ export function makeTracker(ctx: TrackerContext) {
       },
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
+      requests: new Map(waiting.flatMap((row) => (row.oldest ? [[row.entry.id, row.oldest.id] as const] : []))),
     }
   }
 
@@ -611,12 +614,14 @@ function ref(entry: Entry) {
   return {
     sessionID: entry.id,
     title: clip(entry.title?.trim() ? entry.title : "Sem título", limits.title),
-    project: clip(
-      path.basename(entry.subpath ? path.join(entry.directory, entry.subpath) : entry.directory),
-      limits.project,
-    ),
+    project: projectName(entry.directory, entry.subpath),
     directory: entry.directory,
   }
+}
+
+/** The project label of a session: the last segment of its Location directory joined with its subpath. */
+export function projectName(directory: string, subpath?: string) {
+  return clip(path.basename(subpath ? path.join(directory, subpath) : directory), limits.project)
 }
 
 function idleAt(info: Session.Info) {

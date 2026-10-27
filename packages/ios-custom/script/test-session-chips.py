@@ -5,6 +5,9 @@ Interrupts every live execution of the owned sandbox (so no chip is running and 
 every root session read, completes one tiny Luna 6 / low prompt in a seeded session of the second and third saved
 repositories so exactly those chips are unread, prepares a session of the fourth to run briefly during the test, and
 runs the UI case through test-isolated.py. Run other Sessões UI tests that need seeded requests before this one.
+With `--icon NAME=FILE=RRGGBB` (repeatable; an SVG or PNG and a color it clearly shows) it sets those saved
+repositories' `project.icon.override` and clears the others', so the test checks icons and their absence. Keep the
+first `--icon` repository read (not second to fourth in the saved order): the test removes and restores its icon live.
 
   python3 packages/ios-custom/script/test-session-chips.py --url http://127.0.0.1:4188 --home <sandbox-home> \\
     --device <simulator-udid> --derived <derived-data> --evidence <dir> [--theme openchamber-light]
@@ -26,6 +29,7 @@ parser.add_argument("--device", required=True)
 parser.add_argument("--derived", type=Path, required=True)
 parser.add_argument("--evidence", type=Path, required=True)
 parser.add_argument("--theme", default="openchamber-dark")
+parser.add_argument("--icon", action="append", default=[], metavar="NAME=FILE=RRGGBB")
 args = parser.parse_args()
 url = urllib.parse.urlparse(args.url)
 if url.hostname not in ("127.0.0.1", "localhost") or url.port in (None, 4096, 4178):
@@ -37,9 +41,9 @@ password = (args.home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(),
     "Content-Type": "application/json"}
 
-def api(path, body=None):
+def api(path, body=None, method=None):
     request = urllib.request.Request(args.url + path, data=None if body is None else json.dumps(body).encode(),
-        headers=headers, method="GET" if body is None else "POST")
+        headers=headers, method=method or ("GET" if body is None else "POST"))
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read()
         return json.loads(data) if data else None
@@ -73,6 +77,20 @@ manual = [Path(item["worktree"]).name
     for item in rpc("custom.preferences", "get", {})["data"]["projects"]["local"]["projects"]]
 unread = manual[1:3]
 assert len(manual) >= 4, "Needs at least four saved repositories (seed-sessions.ts, seed-conversation.ts)"
+icons = {}
+if args.icon:
+    projects = api("/api/project")
+    for item in rpc("custom.preferences", "get", {})["data"]["projects"]["local"]["projects"]:
+        project = next(p for p in projects if item["worktree"] in [p["canonical"], *p["sandboxes"]])
+        name = Path(item["worktree"]).name
+        spec = next((i.split("=") for i in args.icon if i.split("=")[0] == name), None)
+        source = ""
+        if spec:
+            data = Path(spec[1]).read_bytes()
+            mime = "image/svg+xml" if spec[1].endswith(".svg") else "image/png"
+            source = "data:" + mime + ";base64," + base64.b64encode(data).decode()
+            icons[name] = (project["id"], spec[2])
+        api("/api/project/" + project["id"], {"icon": {"override": source}}, "PATCH")
 settle_active()
 # The test starts with Chats first in the saved order and moves it.
 rpc("custom.preferences", "mutate", {"type": "chats.move", "server": "local", "toIndex": 0})
@@ -105,7 +123,9 @@ environment = args.evidence / "chips-environment.json"
 args.evidence.mkdir(parents=True, exist_ok=True)
 environment.write_text(json.dumps({"OPENCODE_TEST_CHIP_MANUAL": ",".join(manual),
     "OPENCODE_TEST_CHIP_UNREAD": ",".join(unread), "OPENCODE_TEST_CHIP_SESSION": targets[unread[1]]["title"],
-    "OPENCODE_TEST_CHIP_RUN_PROJECT": manual[3], "OPENCODE_TEST_CHIP_RUN_SESSION": run["id"]}))
+    "OPENCODE_TEST_CHIP_RUN_PROJECT": manual[3], "OPENCODE_TEST_CHIP_RUN_SESSION": run["id"],
+    "OPENCODE_TEST_CHIP_ICONS": ",".join(name + "=" + icon[1] for name, icon in icons.items()),
+    "OPENCODE_TEST_CHIP_ICON_LIVE": ",".join(next(([name, icon[0]] for name, icon in icons.items()), []))}))
 environment.chmod(0o600)
 status = subprocess.call(["python3", str(Path(__file__).with_name("test-isolated.py")), "--device", args.device,
     "--derived", str(args.derived), "--evidence", str(args.evidence), "--label", "chips-" + args.theme,

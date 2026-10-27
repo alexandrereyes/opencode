@@ -37,7 +37,8 @@
     "./session-family/rpc": "./src/session-family/rpc.ts",
     "./transcript/rpc": "./src/transcript/rpc.ts",
     "./quotes/rpc": "./src/quotes/rpc.ts",
-    "./live-activity/rpc": "./src/live-activity/rpc.ts"
+    "./live-activity/rpc": "./src/live-activity/rpc.ts",
+    "./watch/rpc": "./src/watch/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

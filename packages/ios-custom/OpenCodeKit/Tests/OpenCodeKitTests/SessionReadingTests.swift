@@ -59,8 +59,8 @@ import Testing
   for status in ["completed", "running", "error"] {
     let todo = ConversationPart(type: "tool", name: "todowrite", state: .object(["status": .string(status)]))
     #expect(todo.suppressed)
-    #expect(ConversationProjection.stepLabel([todo, ConversationPart(type: "tool", name: "read")]) ==
-      (status == "error" ? "Usou 2 · todowrite e Ler" : "Usou 1 · Ler"))
+    #expect(ConversationActivityHeader(parts: [todo, ConversationPart(type: "tool", name: "read")], now: 0).label ==
+      (status == "error" ? "Atividade · todowrite e Ler · 2 ferramentas" : "Atividade · Ler · 1 ferramenta"))
   }
 }
 
