@@ -119,6 +119,18 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   Reduce Motion) and keeps the active filter visible. `SessionChipsTests` (via `script/test-session-chips.py`, which
   stops live work, reads every session and completes two Luna 6 / low prompts on an owned sandbox) checks unread, a
   short real run rising to the front and returning, that reading clears the badge, and moving Chats persists.
+- **Project icons:** a repository chip shows the project's own icon left of its name, at text size (18 pt scaled
+  with `.subheadline`, rounded corners), keeping the running arc, unread dot and compact width; without one it is
+  unchanged. The source is the Core's `project.icon` (no app UI to change it; agents set it with `PATCH
+  /api/project/{id}` `{"icon":{"override":"data:…"}}`, see the `opencode-custom` skill), picked like the web sidebar:
+  `override`, else the discovered `url` unless a `color` was chosen. Only inline data URLs up to 256 KB count
+  (`ProjectIcon`); nothing remote is fetched. PNG/JPEG decode with ImageIO; SVG is rasterized once per revision by
+  `ProjectIconRenderer`, an `<img>` in a throwaway web view (no JavaScript, network or non-`data:` resources, like the
+  Mermaid diagrams) snapshotted to 96 px PNG. `ProjectIconCache` keeps decoded icons in memory and SVG renders under
+  `Caches/ProjectIcons-v1/<sha256 of the image>.png`, so a new icon gets a new file and scrolling never re-renders.
+  `project.updated` reloads the projects, so a change shows without reopening the app. `test-session-chips.py
+  --icon NAME=FILE=RRGGBB` sets icons (and clears the others) for `SessionChipsTests`, which checks each chip's pixels
+  for the icon color, its absence elsewhere, and a live removal and restore through the API.
 - **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
   A muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
   its unread dot in a neutral color. It still appears in "Precisa de você".
