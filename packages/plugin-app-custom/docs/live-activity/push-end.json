@@ -1,0 +1,53 @@
+{
+  "aps": {
+    "timestamp": 1793105460,
+    "event": "end",
+    "content-state": {
+      "v": 1,
+      "updatedAt": 1793105460000,
+      "host": "MacBook Pro",
+      "counts": {
+        "working": 0,
+        "question": 0,
+        "permission": 0,
+        "failed": 0,
+        "idle": 4
+      },
+      "activeTotal": 0,
+      "attention": [],
+      "attentionTotal": 0,
+      "sessions": [
+        {
+          "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+          "title": "Live Activity no iOS",
+          "project": "ios-custom",
+          "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+          "status": "idle"
+        },
+        {
+          "sessionID": "ses_01JZCACHEDATABASE000000002",
+          "title": "Escolher banco do cache",
+          "project": "core",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "status": "idle"
+        },
+        {
+          "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+          "title": "Corrigir login OAuth",
+          "project": "app-custom",
+          "directory": "/Users/alexandremartins/Worktrees/opencode2-oauth-login",
+          "status": "idle"
+        },
+        {
+          "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+          "title": "Revisar navegação",
+          "project": "app",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "status": "idle"
+        }
+      ]
+    },
+    "stale-date": 1793106360,
+    "dismissal-date": 1793107260
+  }
+}

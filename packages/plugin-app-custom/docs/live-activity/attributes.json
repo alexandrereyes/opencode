@@ -1,0 +1,17 @@
+{
+  "serverKey": "mac-principal",
+  "theme": {
+    "background": "#120f0eff",
+    "surface": "#161313ff",
+    "border": "#2e2e2dff",
+    "textStrong": "#e4e0d6ff",
+    "text": "#c9c5baff",
+    "textSecondary": "#a29f94ff",
+    "textWeak": "#6b6861ff",
+    "primary": "#da7c47ff",
+    "success": "#83b35fff",
+    "warning": "#c67f13ff",
+    "error": "#dc6e5eff",
+    "accent": "#9988e5ff"
+  }
+}

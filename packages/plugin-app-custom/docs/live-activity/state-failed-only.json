@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "updatedAt": 1793104860000,
+  "host": "MacBook Pro",
+  "counts": {
+    "working": 0,
+    "question": 0,
+    "permission": 0,
+    "failed": 1,
+    "idle": 2
+  },
+  "activeTotal": 0,
+  "attention": [],
+  "attentionTotal": 0,
+  "sessions": [
+    {
+      "sessionID": "ses_01JZDEPLOYSWARM00000000005",
+      "title": "Deploy no Swarm",
+      "project": "core-infra",
+      "directory": "/Users/alexandremartins/Dev/core-infra",
+      "status": "failed"
+    },
+    {
+      "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+      "title": "Revisar navegação",
+      "project": "app",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "status": "idle"
+    },
+    {
+      "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+      "title": "Live Activity no iOS",
+      "project": "ios-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+      "status": "idle"
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "v": 1,
+  "updatedAt": 1793104860000,
+  "host": "MacBook Pro",
+  "counts": {
+    "working": 3,
+    "question": 1,
+    "permission": 0,
+    "failed": 0,
+    "idle": 3
+  },
+  "activeTotal": 4,
+  "focus": {
+    "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "title": "Live Activity no iOS",
+    "project": "ios-custom",
+    "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+    "startedAt": 1793104136000,
+    "activity": "Editando ConversationStore.swift",
+    "progress": {
+      "done": 2,
+      "total": 3,
+      "unit": "subagents"
+    }
+  },
+  "attention": [
+    {
+      "sessionID": "ses_01JZCACHEDATABASE000000002",
+      "title": "Escolher banco do cache",
+      "project": "core",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "kind": "question",
+      "since": 1793104680000,
+      "text": "Qual banco usar no cache?"
+    }
+  ],
+  "attentionTotal": 1,
+  "sessions": [
+    {
+      "sessionID": "ses_01JZCACHEDATABASE000000002",
+      "title": "Escolher banco do cache",
+      "project": "core",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "status": "question"
+    },
+    {
+      "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+      "title": "Live Activity no iOS",
+      "project": "ios-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+      "status": "working",
+      "progress": {
+        "done": 2,
+        "total": 3,
+        "unit": "subagents"
+      }
+    },
+    {
+      "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+      "title": "Corrigir login OAuth",
+      "project": "app-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-oauth-login",
+      "status": "working"
+    },
+    {
+      "sessionID": "ses_01JZDEPLOYSWARM00000000005",
+      "title": "Deploy no Swarm",
+      "project": "core-infra",
+      "directory": "/Users/alexandremartins/Dev/core-infra",
+      "status": "working"
+    }
+  ]
+}

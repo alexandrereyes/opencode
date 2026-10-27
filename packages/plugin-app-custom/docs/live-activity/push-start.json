@@ -1,0 +1,86 @@
+{
+  "aps": {
+    "timestamp": 1793104860,
+    "event": "start",
+    "content-state": {
+      "v": 1,
+      "updatedAt": 1793104860000,
+      "host": "MacBook Pro",
+      "counts": {
+        "working": 2,
+        "question": 0,
+        "permission": 0,
+        "failed": 0,
+        "idle": 1
+      },
+      "activeTotal": 2,
+      "focus": {
+        "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+        "title": "Live Activity no iOS",
+        "project": "ios-custom",
+        "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+        "startedAt": 1793104136000,
+        "activity": "Editando ConversationStore.swift",
+        "progress": {
+          "done": 2,
+          "total": 3,
+          "unit": "subagents"
+        }
+      },
+      "attention": [],
+      "attentionTotal": 0,
+      "sessions": [
+        {
+          "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+          "title": "Live Activity no iOS",
+          "project": "ios-custom",
+          "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+          "status": "working",
+          "progress": {
+            "done": 2,
+            "total": 3,
+            "unit": "subagents"
+          }
+        },
+        {
+          "sessionID": "ses_01JZDEPLOYSWARM00000000005",
+          "title": "Deploy no Swarm",
+          "project": "core-infra",
+          "directory": "/Users/alexandremartins/Dev/core-infra",
+          "status": "working"
+        },
+        {
+          "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+          "title": "Revisar navegação",
+          "project": "app",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "status": "idle"
+        }
+      ]
+    },
+    "stale-date": 1793105760,
+    "attributes-type": "AgentsActivityAttributes",
+    "attributes": {
+      "serverKey": "mac-principal",
+      "theme": {
+        "background": "#120f0eff",
+        "surface": "#161313ff",
+        "border": "#2e2e2dff",
+        "textStrong": "#e4e0d6ff",
+        "text": "#c9c5baff",
+        "textSecondary": "#a29f94ff",
+        "textWeak": "#6b6861ff",
+        "primary": "#da7c47ff",
+        "success": "#83b35fff",
+        "warning": "#c67f13ff",
+        "error": "#dc6e5eff",
+        "accent": "#9988e5ff"
+      }
+    },
+    "alert": {
+      "title": "OpenCode",
+      "body": "2 sessões trabalhando"
+    },
+    "input-push-token": 1
+  }
+}
