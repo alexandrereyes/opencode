@@ -177,18 +177,10 @@ test("launchd teardown timeout and unknown ownership prevent pointer switch", as
   await expect(launchd(home, fixtureHost.host).stop()).rejects.toThrow("Permission denied")
 })
 
-test("shared server config includes the native Safari DevTools MCP server", () => {
+test("shared server config leaves MCP servers to the user config", () => {
   expect(serverConfig("/release/plugin")).toEqual({
     update: "disable",
     plugins: ["/release/plugin"],
-    mcp: {
-      servers: {
-        "safari-devtools": {
-          type: "local",
-          command: ["/usr/bin/safaridriver", "--mcp"],
-        },
-      },
-    },
   })
 })
 

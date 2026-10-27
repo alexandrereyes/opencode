@@ -42,15 +42,14 @@ Each `releases/<sha>` contains:
   Apple silicon, which the resources hub runs to stream and drive iOS simulators
   (see `docs/resources-ios-simulator.md`). It is read-only like the rest of the release but outside the
   hashed artifacts;
-- `server-config.json`: update disabled, the absolute release-owned plugin path, and the
-  local `safari-devtools` MCP server (`/usr/bin/safaridriver --mcp`);
+- `server-config.json`: update disabled and the absolute release-owned plugin path;
 - `manual-release.json`: format 2, commit, version, platform, architecture and SHA-256 artifact hashes.
 
 Published directories are read-only and are never rebuilt in place.
 The release config is loaded after discovered global, explicit, and project documents. User
-plugins and differently named MCP servers remain available, while the release-owned update
-policy and `safari-devtools` definition win if an earlier document uses the same keys. It does
-not edit `~/.config/opencode`.
+plugins and MCP servers remain available, while the release-owned update policy wins if an
+earlier document uses the same key. The release config defines no MCP servers, so removing one
+from the user config removes it from the server. It does not edit `~/.config/opencode`.
 
 MCP services are Location-scoped and connect eagerly, so each materialized Location retains one
 process per local MCP server, for example `safaridriver --mcp` (about 3 MB) and
