@@ -7,6 +7,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 import zlib
@@ -48,12 +49,24 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--themes", nargs="+", choices=["dark", "light"], default=["dark", "light"])
     parser.add_argument("--derived", type=Path, help="Reuse a build-for-testing directory; it is not deleted")
-    parser.add_argument("--simulator", help="Reuse an explicitly owned simulator; it is not deleted")
+    parser.add_argument("--simulator", help="Single theme only: use an explicitly owned fresh simulator; it is not deleted")
     parser.add_argument("--only", nargs="+", help="Only these ScreenCatalogTests methods (development)")
     args = parser.parse_args()
     package = Path(__file__).resolve().parents[1]
     output = (args.output or package / "docs/screens").resolve()
     output.mkdir(parents=True, exist_ok=True)
+    # App uninstall does not clear the simulator's Keychain. Never share a device between themes.
+    if len(args.themes) > 1:
+        if args.simulator:
+            parser.error("--simulator requires exactly one theme; create a fresh device for each theme")
+        for theme in args.themes:
+            command = [sys.executable, str(Path(__file__).resolve()), "--themes", theme, "--output", str(output)]
+            if args.derived:
+                command += ["--derived", str(args.derived.resolve())]
+            if args.only:
+                command += ["--only"] + args.only
+            run(*command)
+        return
     # Honor the harness's approved temporary directory, or the user's normal macOS TMPDIR.
     base = Path(tempfile.gettempdir())
     if base.name != "opencode":
@@ -103,7 +116,7 @@ def main():
                            "-destination", "platform=iOS Simulator,id=" + device,
                            "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
                            "-resultBundlePath", str(result)]
-                selected = args.only or (["testTabs", "testSections", "testUnreadChips", "testRunningChips", "testConversation", "testNewSession", "testNewSessionFromRepository", "testZComposer", "testShortPrompt"]
+                selected = args.only or (["testTabs", "testSections", "testUnreadChips", "testRunningChips", "testSessionSelection", "testSessionSwitcher", "testConversation", "testNewSession", "testNewSessionFromRepository", "testZComposer", "testShortPrompt"]
                                          if theme == "light" else [""])
                 command += ["-only-testing:OpenCodeUITests/ScreenCatalogTests" + ("/" + t if t else "")
                             for t in selected]

@@ -13,6 +13,8 @@ import XCTest
     app.launchEnvironment["OPENCODE_PROXY_STUB"] = "success"
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))
+    // Fail before any interaction if launch ever falls through to AppRoot/a real connection.
+    XCTAssertTrue(app.buttons["session-row-ses_scroll_0000"].waitForExistence(timeout: 10), "Catálogo offline não carregou")
     return app
   }
 
@@ -138,7 +140,7 @@ import XCTest
     let running = app.buttons["filter-project-Projeto Exemplo 0"]
     let unread = app.buttons["filter-project-Projeto Exemplo 3"]
     XCTAssertTrue(running.waitForExistence(timeout: 10))
-    XCTAssertGreaterThan(running.frame.minX, app.buttons["Todas"].firstMatch.frame.minX)
+    XCTAssertGreaterThan(running.frame.minX, app.buttons["filter-all"].frame.minX)
     XCTAssertLessThan(running.frame.minX, unread.frame.minX)
     XCTAssertLessThan(unread.frame.minX, app.buttons["filter-chats"].frame.minX)
     shot("sessions-chips-running")
@@ -152,6 +154,47 @@ import XCTest
     XCTAssertTrue(app.buttons["Mover para depois"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons["Mover para antes"].exists)
     shot("sessions-chats-order-menu")
+  }
+
+  func testSessionSelection() {
+    let app = launch()
+    defer { app.terminate() }
+    let row = app.buttons["session-row-ses_scroll_0000"]
+    row.press(forDuration: 1.2)
+    XCTAssertTrue(app.buttons["Selecionar"].waitForExistence(timeout: 5))
+    if theme == "dark" { shot("sessions-select-context-menu") }
+    tap("Selecionar", app)
+    XCTAssertEqual(app.staticTexts["sessions-selection-count"].label, "1 selecionada")
+    shot("sessions-select-mode")
+    if theme == "light" { return }
+    tap("sessions-selection-menu", app)
+    XCTAssertTrue(app.buttons["Arquivar (1)"].waitForExistence(timeout: 5))
+    shot("sessions-select-actions")
+    tap("Excluir (1)", app)
+    let confirmation = app.alerts["Excluir 1 sessão"]
+    XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+    shot("sessions-select-delete-confirmation")
+    confirmation.buttons["Cancelar"].tap()
+    XCTAssertTrue(confirmation.waitForNonExistence(timeout: 5))
+    tap("sessions-selection-done", app)
+  }
+
+  func testSessionSwitcher() {
+    let app = launch()
+    defer { app.terminate() }
+    tap("session-row-ses_scroll_0000", app)
+    tap("conversation-switcher", app)
+    let current = app.buttons["switcher-row-ses_scroll_0000"]
+    XCTAssertTrue(current.waitForExistence(timeout: 10))
+    XCTAssertTrue(current.isSelected)
+    app.navigationBars["Sessões"].swipeUp()
+    shot("session-switcher-open")
+    let search = app.searchFields["Buscar sessão"]
+    XCTAssertTrue(search.waitForExistence(timeout: 5))
+    search.tap()
+    search.typeText("contraste")
+    XCTAssertTrue(app.buttons["switcher-row-ses_scroll_0008"].waitForExistence(timeout: 10))
+    shot("session-switcher-search")
   }
 
   func testSettings() {
@@ -207,7 +250,8 @@ import XCTest
     }
     app.collectionViews["conversation-transcript"].swipeUp()
     shot("conversation-answer-footer")
-    tap("conversation-usage", app)
+    tap("Mais opções", app)
+    tap("Detalhes da sessão", app)
     shot("session-details-default")
     tap("Fechar", app)
     tap("model-picker", app)

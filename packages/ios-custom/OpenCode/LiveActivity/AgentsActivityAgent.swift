@@ -34,6 +34,10 @@ import os
   /// that way: the new activity's update token must still reach the active server, or the backend can never update
   /// or end that activity. The first event-stream connection replaces this context.
   func watch() {
+    #if DEBUG
+    // The screen catalog uses a closed in-memory transport, never a push registration or saved server.
+    guard ScrollFixtures.mode != "catalog" else { return }
+    #endif
     let servers = AppRuntime.shared.servers
     let launch = fixture ? nil : (try? servers.configuration()).map {
       AgentsActivityDriver.Context(client: OpenCodeClient(configuration: $0), serverKey: Self.serverKey(servers),

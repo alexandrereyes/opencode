@@ -30,15 +30,18 @@ Da raiz do repositório:
 python3 packages/ios-custom/script/capture-screens.py
 ```
 
-O script cria seu próprio simulador, compila em Debug, executa apenas `ScreenCatalogTests`,
-exporta os anexos do xcresult e limpa simulador, build e temporários mesmo em caso de erro.
+O script cria **um simulador novo por tema**, compila em Debug, executa apenas `ScreenCatalogTests`,
+exporta os anexos do xcresult e limpa cada simulador, build e temporários mesmo em caso de erro.
 Não usa aparelhos físicos, sandbox de backend, modelos pagos, `custom:update` ou TestFlight.
 Não usa as portas 4096/4177/4178.
 
 Para iterar, `--themes dark`, `--only testTabs` e `--output /caminho/temporario` limitam a execução.
-`--derived /caminho/build` reaproveita um `build-for-testing`; `--simulator UDID` reaproveita um
-simulador **que pertença à tarefa**. Esses dois recursos fornecidos explicitamente não são apagados
-pelo script. Não use simuladores compartilhados. Novas telas devem ganhar uma captura nomeada
+`--derived /caminho/build` reaproveita um `build-for-testing`; `--simulator UDID` aceita apenas **um tema**
+e um simulador **novo e exclusivo da tarefa**. Esses dois recursos fornecidos explicitamente não são apagados
+pelo script. Não use simuladores compartilhados nem reutilize um dispositivo entre temas: desinstalar o app
+não limpa o Keychain. O padrão sem `--simulator` garante essa separação automaticamente.
+Cada lançamento verifica a presença da sessão sintética `ses_scroll_0000` antes de qualquer interação.
+Novas telas devem ganhar uma captura nomeada
 em `OpenCodeUITests/ScreenCatalogTests.swift` e uma linha no índice abaixo.
 
 As antigas rotinas `capture-polish.py`, `capture-markdown.py` e `test-*.py` continuam destinadas
@@ -61,6 +64,10 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
 | Chips · em execução | Todas → Projeto Exemplo 0 rodando → Projeto Exemplo 3 não lido → ordem manual | [PNG](sessions-chips-running-dark.png) | [PNG](sessions-chips-running-light.png) |
 | Chats · ordem manual | Manter pressionado Chats; primeiro por padrão, com Mover para depois disponível | [PNG](sessions-chats-order-menu-dark.png) | — |
+| Seleção · toque longo | Sessões → manter pressionada a sessão sintética; menu com Selecionar | [PNG](sessions-select-context-menu-dark.png) | — |
+| Seleção · modo ativo | Menu da sessão → Selecionar; círculos, 1 selecionada, Selecionar todas, OK e ⋯ | [PNG](sessions-select-mode-dark.png) | [PNG](sessions-select-mode-light.png) |
+| Seleção · ações | Modo de seleção → ⋯; Arquivar/Excluir/Cancelar, sem executar mutações | [PNG](sessions-select-actions-dark.png) | — |
+| Seleção · confirmação | ⋯ → Excluir (1); somente capturar e Cancelar, sem confirmar exclusão ou arquivamento | [PNG](sessions-select-delete-confirmation-dark.png) | — |
 | Você / Ajustes | Aba Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
 | Temas | Você → Tema | [PNG](you-themes-default-dark.png) | — |
 | Dados do iPhone | Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | — |
@@ -76,12 +83,14 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Conversa · mensagem expandida | Mensagem recolhida → Mostrar mensagem completa | [PNG](conversation-user-expanded-dark.png) | [PNG](conversation-user-expanded-light.png) |
 | Conversa · resposta e rodapé | Rolar a conversa; copiar/play, contexto/cache e prompt fixo | [PNG](conversation-answer-footer-dark.png) | [PNG](conversation-answer-footer-light.png) |
 | Conversa · pendente | Primeira conversa com admissão sintética ainda não entregue | [PNG](conversation-user-pending-dark.png) | — |
+| Troca rápida · folha | Conversa → avatar/título com ⌄; atual com ✓, sessão trabalhando, não lidas e Nova sessão | [PNG](session-switcher-open-dark.png) | [PNG](session-switcher-open-light.png) |
+| Troca rápida · busca | Folha Sessões → buscar “contraste”; resultado sintético e Nova sessão | [PNG](session-switcher-search-dark.png) | [PNG](session-switcher-search-light.png) |
 | Composer com texto | Conversa → campo de mensagem; teclado e microfone compacto | [PNG](conversation-composer-text-dark.png) | [PNG](conversation-composer-text-light.png) |
 | Menu + | Conversa → + do composer vazio | [PNG](conversation-add-menu-dark.png) | [PNG](conversation-add-menu-light.png) |
 | Modelos | Conversa → Modelo Exemplo | [PNG](conversation-model-picker-dark.png) | [PNG](conversation-model-picker-light.png) |
 | Agente | Conversa → build, abaixo do composer | [PNG](conversation-agent-picker-dark.png) | — |
 | MCPs | Conversa → pílula de MCPs, ao lado do modelo | [PNG](conversation-mcp-picker-dark.png) | — |
-| Detalhes da sessão | Conversa → contexto/cache; uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
+| Detalhes da sessão | Conversa → ⋯ → Detalhes da sessão (também acessível pelo contexto/cache); uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
 | Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (3); ativo antes dos encerrados, iOS/Android e Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
 | Agentes encerrados | Agentes (3) → rolar; encerrados pela última execução, não pela criação | [PNG](session-agents-finished-dark.png) | — |
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
@@ -98,6 +107,16 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão da troca rápida e seleção em lote (base `cf17e904d67`): `sessions-*` agora mostra o chip Todas
+apenas com `square.stack`/`filter-all` (`b2ce2d9a4ed`); cabeçalhos de conversa têm ⌄ e abrem a folha
+de troca (`3c1abf05f6d`). A seleção em lote (`cf17e904d67`) foi capturada **sem confirmar Arquivar ou Excluir**:
+o diálogo de exclusão é cancelado. As folhas de troca usam somente busca local sobre o catálogo sintético.
+Para evitar retorno involuntário a uma conexão salva no Keychain, nenhum simulador é compartilhado
+entre os temas; as imagens mostram exclusivamente Projeto Exemplo e sessões sintéticas. O transporte
+continua fechado em memória, sem servidor, credencial pessoal ou chamadas pagas.
+Após o rebase sobre `2fe84bbaa7`, o catálogo também impede `AgentsActivityAgent.watch()` em Debug:
+o observador de push recém-adicionado à inicialização não acessa conexões salvas durante a captura.
 
 Revisão dos agrupamentos e chips (base `0d717fc1dbd`): `sessions-*` recapturadas após `d6db386fe2a`,
 `3ddf8f6b01e` e `0d717fc1dbd`. A ordenação dos chips é Todas, em execução, não lidas, posição manual
