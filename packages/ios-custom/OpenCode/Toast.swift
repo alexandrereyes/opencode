@@ -46,7 +46,7 @@ private struct ToastOverlay: ViewModifier {
           }
         }
         .font(.subheadline).padding(.horizontal, 18).padding(.vertical, 12)
-        .glassEffect(.regular, in: .capsule).padding(12)
+        .adaptiveGlass(Capsule()).padding(12)
         .accessibilityElement(children: .combine).accessibilityIdentifier("action-toast")
         .allowsHitTesting(message.retry != nil)
       }

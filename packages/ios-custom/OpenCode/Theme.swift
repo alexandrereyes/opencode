@@ -33,7 +33,11 @@ struct AppTheme: Sendable {
   }
 
   func color(_ role: ThemeRole) -> Color { Color(definition.color(role)) }
+  #if os(iOS)
   func uiColor(_ role: ThemeRole) -> UIColor { UIColor(color(role)) }
+  #else
+  func nsColor(_ role: ThemeRole) -> NSColor { NSColor(color(role)) }
+  #endif
   func value(_ role: ThemeRole) -> ThemeColor { definition.color(role) }
   func avatar(_ color: String) -> (background: Color, text: Color) {
     let avatar = definition.avatar(ThemeAvatar.allCases.first { $0.name == color } ?? .lime)
@@ -83,6 +87,7 @@ struct AppTheme: Sendable {
   }
 }
 
+#if os(iOS)
 /// Appearance proxies only affect new bars. Update already-mounted UIKit bars as well.
 struct ThemeChrome: UIViewRepresentable {
   let theme: AppTheme
@@ -132,6 +137,7 @@ struct ThemeChrome: UIViewRepresentable {
     if let window = view.window { update(window) }
   }
 }
+#endif
 
 extension Color {
   fileprivate init(_ color: ThemeColor) {

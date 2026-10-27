@@ -42,7 +42,8 @@ submitted to the App Store.
 - Integrate with the platform where it clearly beats the web: share sheet, Live Activities for running sessions,
   widgets, and App Intents.
 
-Out of scope at first: iPad and Mac layouts, offline editing, and terminals (PTY).
+Out of scope at first: iPad layouts, offline editing, and terminals (PTY). The Mac app started on 27 October (see
+[Mac app](#mac-app-stage-1--27-october)).
 
 ## First screen: Sessões
 
@@ -2317,6 +2318,154 @@ checks that `iphone_query` for `device`, `network` and `location` completed with
 and Photos need the physical iPhone 14: a DEBUG launch with `-OpenCodeDeviceProbe` enables every source (answer the
 iOS prompts), collects each once plus the locked-cache answer, and writes `Documents/device-probe.json`.
 
+## Mac app (stage 1) — 27 October
+
+A native macOS client of the same server, built from this project with the iPhone code it can reuse. Briefing and
+approved mocks: `.agent-artifacts/mac-app/coluna3/` (`BRIEFING.md`, `final/contexto.png`, `final/arquivos.png`,
+`final/janela-mac.png`) of the `mac-app` worktree. This stage delivers the three-column window and the real third
+column (Contexto, option 3); the full chat is the next one.
+
+### Target and folders
+
+- Target **OpenCodeMac** (scheme `OpenCodeMac`) in `OpenCode.xcodeproj`: SwiftUI app, macOS 15+, bundle
+  `br.com.alexandrem.opencode.mac`, team `ERRYZ68LX5`, automatic signing,
+  hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
+- `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
+  one window per resource, `Settings`), `MacRuntime.swift`, `MacWindow.swift`, `MacSessionColumn.swift`,
+  `MacChatColumn.swift` + `MacTranscriptView.swift`, `MacNewSession.swift`, `ContextColumnStore.swift`,
+  `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` + `MacCodeView.swift`,
+  `MacResourceWindow.swift`, `MacSettingsView.swift`, and the DEBUG-only `MacFixture.swift` and `MacCapture.swift`.
+- iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
+  (`PBXFileSystemSynchronizedBuildFileExceptionSet` `D…024`), never by copying. To share another file, add it to that
+  list. The themes (`Resources/Themes/*.json`) and `Resources/Markdown/dist/markdown-engines.js` are shared the same way.
+
+### What is shared with the iPhone
+
+| Shared file | Change for the Mac |
+| --- | --- |
+| `SessionColumn/*` (header, rings, chips, sections, rows, path line) | Glass through `adaptiveGlass`; the header gained `voiceDisabled`; chips use `.never` scroll indicators on macOS |
+| `SessionStore.swift` | `#if os(iOS)` around drafts, quote modes, reverts and the live-conversation registry; DEBUG fixtures are iOS-only |
+| `Theme.swift` | `uiColor`/`ThemeChrome` in `#if os(iOS)`; `nsColor` on macOS |
+| `AppTypography.swift` | UIKit metrics in `#if os(iOS)`; the Mac uses desktop sizes (about 2 pt smaller) for the same roles |
+| `Haptics.swift`, `EventHub.swift` | UIKit feedback and the iPhone device/Live Activity agents in `#if os(iOS)` |
+| `SessionAlertCenter.swift`, `Toast.swift`, `SubscriptionViews.swift` | `adaptiveGlass`/`adaptiveGlassButtonStyle`; the floating voice inset and the nav-bar hiding are iOS-only |
+| `ConversationRenameAlert.swift`, `ContextUsageViews.swift` | The UIKit alert and `SessionUsageSection` (needs `ConversationStore`) in `#if os(iOS)` |
+| `SessionResources/ResourceList.swift` | `ResourceImage` (`UIImage`/`NSImage`), wider snapshots on request, `frames` (capture time) |
+| `AgentPixels.swift` (new) | `AgentPixels` and `AppTheme.agentRole`, moved unchanged out of `ConversationComponents.swift` |
+| `PlatformGlass.swift` (new) | Liquid Glass on iOS and macOS 26; material/bordered fallback on macOS 15 |
+| `SessionHeaderTitle.swift` (new) | Neutral avatar + context ring + title + `path · trabalhando…` (the Mac title bar) |
+| `ModelCatalogCache`, `VoiceMemoryStore`, `SubscriptionTestClient`, `ResponseEngines`, `ArchivedSessionsView`, `SessionDeleteConfirmation` | Unchanged |
+
+The iPhone target keeps its behavior: every change is either a no-op on iOS (`#if`) or a move. OpenCodeKit gained
+`ContextColumn` (all the column's logic), `MarkdownSyntax.role`, `ServerStore(builtinURL:)` and the DEBUG
+`OpenCodeClient.inMemory` transport.
+
+### The window
+
+- `NavigationSplitView` (Sessões | chat) plus `.inspector` for Contexto: an inspector is the Mac's collapsible
+  trailing column (⌥⌘I, toolbar button, the `…` menu). A minimum width on the detail column next to an inspector
+  makes AppKit's constraint pass loop and crash; keep the widths on the column modifiers only.
+- **Sessões**: the shared column. Selecting a row selects the session; the iPhone's swipe and long-press actions are
+  one right-click menu (open, rename, pin, mute, mark read, archive, delete). Configurações opens the `Settings`
+  scene; voice is shown disabled (calls stay on the iPhone in this stage); the quota rings open the iPhone's
+  `SubscriptionDetailSheet` in a sheet until the LLM proxy's Mac form is chosen.
+- **Chat (provisional)**: the title bar holds `SessionHeaderTitle`, `…` and the orange `+` (Nova sessão sheet: a
+  repository chip, the prompt, agent `build` and the default model). The content is a read-only SwiftUI transcript of
+  `custom.transcript/list` (user bubbles, assistant text with inline Markdown) and a plain composer that sends through
+  `PromptSubmission` with the session's own agent and model. File names in code spans open Arquivos at their folder.
+- **Settings**: server address and password (Keychain through `ServerStore`, default `http://127.0.0.1:4096`, a
+  "Testar conexão" button) and the iPhone themes. `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
+  `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override it for a launch, as on the iPhone.
+
+### Coluna 3 — Contexto
+
+`ContextColumnStore` reads, for the selected root, the same sources as the iPhone's conversation and "Agentes e
+tarefas": `GET /api/session/:id`, `custom.session-family/snapshot` and `/page`, the root's transcript page (links
+`subagent` calls), `/api/shell`, `/api/model`, `/api/agent`, `/api/vcs/diff`, `custom.worktrees/locate` and
+`custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math:
+
+- **Header**: branch `⌄` (copy, Finder) and path; `+N −M · N arquivos` from the working diff; `Arquivos ›`;
+  `Contexto N% · used / limit` (latest measured step, transcript fallback), `Cache hit` of the whole session, the
+  total cost and `Sessão` / `Subagentes` (the family snapshot's descendant cost, else the sum of loaded descendants).
+- **Subagentes `N · M ativos`**: `ConversationProjection.work` order (live first by latest start, then by last run);
+  live rows and the newest finished ones up to five, the rest behind `+N concluídos`. Each row: monogram with a state
+  ring, title, colored state, time, `›`; agent chip, context ring with `tokens · %` (`Session.context`), cache hit of
+  the subagent's session (amber below 80%), cost including its own subagents; `agora: <tool>` from the child's
+  preview; an orange chip for each resource it (or its descendants) is driving. A permission anywhere in the
+  subagent's branch turns the row lilac with Permitir/Negar; finished rows are dimmed; clicking opens the child in
+  the middle column (`‹` returns).
+- **Tarefas em segundo plano**: background shells (`SessionWork.kind == .script`), the command without its port
+  option plus `· :port`, elapsed time and a `⋯` with Parar and Copiar comando.
+- **Recursos ao vivo**: in use (`agent`/`user`) as large tiles with the live snapshot (`ResourceThumbnails`, every
+  5 s at 640 px), orange ring and `Agente usando · <direct subagent>`; free then stopped ones as compact rows with
+  `último quadro há N min`. Clicking opens a separate window with the enlarged live picture (1 s snapshots); the
+  iPhone's interactive viewer is UIKit and comes later.
+- **Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat): `‹ Contexto`, title, `Só alterados`,
+  search (`/api/fs/find`); a clickable breadcrumb from the checkout root; a Finder-style `Table` (folders first,
+  sortable by name, date and size read from this Mac when the path is local, amber dot and `+N −M`); the selected file
+  below in an `NSTextView` with line numbers and the highlight.js engine, or Quick Look. **Abrir no Xcode** and
+  **Mostrar no Finder** appear only when the path exists on this Mac; **Ver diff no FileMerge** also needs
+  `/usr/bin/opendiff` and FileMerge, writes `git show HEAD:<file>` (an empty file for a new one) to a temporary
+  folder and opens both. There is no review tab.
+
+**Not provided by the server (shown as `—`, no backend change):** a subagent's context before its first measured
+step; per-subagent cache when the child has no `tokens`; the resource ↔ subagent link is inferred from
+`resource.owner.sessionID` walked up to the direct subagent, so a resource registered without an owner shows
+`Agente usando · —`; file dates and sizes for checkouts that are not on this Mac (`/api/fs/list` returns names only).
+
+### Running against a sandbox
+
+```sh
+bun install --frozen-lockfile   # once per worktree
+bun packages/cli/script/custom-sandbox.ts up --port 4199 --home "$TMPDIR/opencode/mac-app-sandbox"
+xcodebuild -project packages/ios-custom/OpenCode.xcodeproj -scheme OpenCodeMac \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath "$TMPDIR/opencode/mac-app-work/mac-derived" build
+OPENCODE_SERVER_PASSWORD="$(cat "$TMPDIR/opencode/mac-app-sandbox/password")" \
+  "$TMPDIR/opencode/mac-app-work/mac-derived/Build/Products/Debug/OpenCodeMac.app/Contents/MacOS/OpenCodeMac" \
+  -OpenCodeServerURL http://127.0.0.1:4199 [-OpenCodeMacSession <ses_…>] [-OpenCodeMacFiles <folder>]
+bun packages/cli/script/custom-sandbox.ts down --port 4199 --home "$TMPDIR/opencode/mac-app-sandbox"
+```
+
+Never use 4096, 4177 or 4178 for development. Families with subagents can be imported without model calls through
+`POST /api/experimental/session/import` (as `script/test-agents-screen.py` does) and background tasks with
+`POST /api/shell`; delete them afterwards.
+
+### Captures
+
+The agent process has no Screen Recording permission, so the app captures itself (DEBUG):
+
+```sh
+OpenCodeMac -OpenCodeMacFixture contexto -OpenCodeMacFixtureRoot <checkout> -OpenCodeTheme openchamber-dark \
+  [-OpenCodeMacFiles packages/ios-custom/OpenCode/SessionColumn -OpenCodeMacFile SessionColumnSections.swift] \
+  -OpenCodeMacCapture <folder> -OpenCodeMacCaptureName <name> -OpenCodeMacCaptureQuit
+swift packages/ios-custom/script/mac-prints.swift crop <in> <out> x y w h          # fractions
+swift packages/ios-custom/script/mac-prints.swift compare <out> <mock> <app> [<mock> <app>…]
+```
+
+`-OpenCodeMacFixture` swaps the server for a closed in-memory one (`MacFixture`: 6 roots, 46 subagents with 4 live
+and one asking permission, 2 tasks, 5 resources with drawn pictures, working changes; folders and files come from the
+given checkout). `MacCapture` moves the window off-screen at 1600×1000, writes `<name>.png` from the window server's
+picture of this app's own window (`CGWindowListCreateImage`, needs no permission for the app's own windows;
+`cacheDisplay` is the fallback but draws the Liquid Glass sidebar blank) and `<name>-coluna.png` with the whole
+column through `ImageRenderer`. The stage-1 captures are in
+`/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-app-prints/`.
+
+### Verification
+
+`swift test` in OpenCodeKit (`ContextColumnTests`: costs, subagent order/collapse/permission, resource split and
+owner, ports, ages, "Só alterados", breadcrumb, highlighter fence, FileMerge plan; `SettingsTests` for the Mac's
+default server), the iOS Debug build and `build-for-testing` with no new warnings, and the warning-free macOS Debug
+build. The FileMerge button was not clicked in automation (it would open FileMerge on Alexandre's screen); its plan
+is unit-tested.
+
+### Next stages
+
+- The full chat: port the iPhone transcript, activity group, tray and composer (UIKit today) to the Mac.
+- The LLM proxy's Mac form (rings, quotas, accounts) instead of the iPhone sheet.
+- Voice (GPT Live calls and dictation) on the Mac.
+- The interactive resource viewer (stream, taking control, input) in its window.
+- Nova sessão with worktrees, chats, MCPs and the model picker; menu bar, notifications and widgets stay out.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with
@@ -2631,6 +2780,7 @@ packages/ios-custom/
   OpenCodeKit/           # local Swift package with no UI: API, models, SSE, pairing, Keychain
   OpenCodeUITests/       # sandbox-only native interaction/continuity tests
   OpenCodeTests/         # app-hosted UIKit key-command tests
+  OpenCodeMac/           # Mac app target: Mac-only code; shares OpenCode/ files by membership
 ```
 
 ## Development
@@ -2647,7 +2797,8 @@ packages/ios-custom/
   only through the APNs sandbox.
 - The physical test devices are shared with other agents. Reserve one through the device lease before installing or
   driving the app, and release it when you are done.
-- The committed `OpenCode.xcodeproj` has one iPhone app target (`OpenCode`), automatic signing for team
+- The committed `OpenCode.xcodeproj` has the iPhone app target (`OpenCode`), the Mac app target (`OpenCodeMac`, see
+  [Mac app](#mac-app-stage-1--27-october)), automatic signing for team
   `ERRYZ68LX5`, and a local `OpenCodeKit` package. The app uses synchronized folders; adding a Swift file does not
   require editing the project. [Private TestFlight uploads](#private-testflight-uploads) use the local script below.
 

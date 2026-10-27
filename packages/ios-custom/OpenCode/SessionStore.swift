@@ -83,16 +83,18 @@ final class SessionStore {
   var openResource: SessionResource?
   var conversationPath: [ConversationRoute] = [] {
     didSet {
-      #if DEBUG
+      #if DEBUG && os(iOS)
       if let id = conversationPath.last?.id, id != oldValue.last?.id { ConversationOpeningMetrics.begin(id) }
       #endif
     }
   }
   var selectedTab = 3
+  #if os(iOS)
   /// Conversations currently on a navigation stack, so screens pushed above one share its live store.
   @ObservationIgnored private let liveConversations = NSMapTable<NSString, ConversationStore>.strongToWeakObjects()
   func register(_ conversation: ConversationStore) { liveConversations.setObject(conversation, forKey: conversation.id as NSString) }
   func liveConversation(_ id: String) -> ConversationStore? { liveConversations.object(forKey: id as NSString) }
+  #endif
   var conversationOpen: Bool { !conversationPath.isEmpty }
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
@@ -102,12 +104,15 @@ final class SessionStore {
   @ObservationIgnored let client: OpenCodeClient
   let voiceMemory: VoiceMemoryStore
   @ObservationIgnored let hub: EventHub
+  #if os(iOS)
+  // The Mac app has no composer or full transcript yet, so it keeps no drafts, quote modes or reverts.
   @ObservationIgnored let drafts: ConversationDrafts
+  @ObservationIgnored let quoteModes = QuoteModes()
+  @ObservationIgnored let reversions = ConversationReverts()
+  #endif
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let quoteDismissals: ChatQuoteDismissals
-  @ObservationIgnored let quoteModes = QuoteModes()
   @ObservationIgnored let expansions = ConversationExpansionMemory()
-  @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored private var order = RecentOrder()
   private(set) var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -124,7 +129,7 @@ final class SessionStore {
 
   init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil) {
     self.acceptsLaunchSession = acceptsLaunchSession
-    #if DEBUG
+    #if DEBUG && os(iOS)
     let isolated = configuration.isolatedTestSandbox
     let failure = isolated
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_DELETE_FAILURE"] : nil
@@ -152,18 +157,20 @@ final class SessionStore {
     #endif
     self.client = client
     voiceMemory = VoiceMemoryStore(client: client)
-    #if DEBUG
+    #if DEBUG && os(iOS)
     if VoiceBarFixtures.launchState != nil { voiceMemory.preview() }
     #endif
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
+    #if os(iOS)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
+    #endif
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
-    #if DEBUG
+    #if DEBUG && os(iOS)
     if ScrollFixtures.mode != nil {
       let fixture = ScrollFixtures.snapshot
       entries = fixture.entries
@@ -204,7 +211,7 @@ final class SessionStore {
       chatRoot: chatRoot)
   }
   var filtered: [SessionRow] {
-    #if DEBUG
+    #if DEBUG && os(iOS)
     if client.configuration.url.host == "127.0.0.1", ConversationOpeningMetrics.enabled,
       let id = ProcessInfo.processInfo.environment["OPENCODE_OPENING_SESSION"] {
       return rows.filter { $0.id == id }
@@ -236,7 +243,7 @@ final class SessionStore {
   }
 
   func run() async {
-    #if DEBUG
+    #if DEBUG && os(iOS)
     if ScrollFixtures.mode != nil {
       guard ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureUpdates") else { return }
       var tick = 0
@@ -269,7 +276,9 @@ final class SessionStore {
     await quota.stop()
     pruning?.cancel()
     await pruning?.value
+    #if os(iOS)
     await drafts.flush()
+    #endif
     try? reading.flush()
     conversationPath = []
   }
@@ -420,7 +429,7 @@ final class SessionStore {
   }
 
   func show(_ session: Session) {
-    #if DEBUG
+    #if DEBUG && os(iOS)
     if ScrollFixtures.mode != nil { return }
     #endif
     visible.insert(session.id)
@@ -584,7 +593,9 @@ final class SessionStore {
     var cleanupFailed = false
     do { try reading.remove(plan.ids) } catch { cleanupFailed = true }
     do { try quoteDismissals.remove(plan.ids) } catch { cleanupFailed = true }
+    #if os(iOS)
     do { try await drafts.remove(plan.ids) } catch { cleanupFailed = true }
+    #endif
     do {
       let current = try await client.preferences()
       preferences = current

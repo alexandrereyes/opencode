@@ -1,11 +1,25 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 
 enum AppTextStyle: CaseIterable, Sendable {
   case largeTitle, title, heading, body, message, preview, secondary, caption, footnote, micro
   case path, navigation, chrome, bubbleMeta, mcp, metrics
 
   var size: CGFloat {
+    #if os(macOS)
+    // The Mac reads the same roles at desktop density, about two points below the iPhone's text.
+    switch self {
+    case .largeTitle: 28
+    case .title: 18
+    case .heading, .body, .message, .navigation: 14
+    case .preview, .secondary: 13
+    case .caption, .path: 12
+    case .footnote, .chrome, .bubbleMeta: 11
+    case .micro, .mcp, .metrics: 10
+    }
+    #else
     switch self {
     case .largeTitle: 34
     case .title: 20
@@ -16,6 +30,7 @@ enum AppTextStyle: CaseIterable, Sendable {
     case .micro, .mcp: 11
     case .metrics: 11
     }
+    #endif
   }
 
   var lineHeight: CGFloat {
@@ -46,6 +61,7 @@ enum AppTextStyle: CaseIterable, Sendable {
     }
   }
 
+  #if os(iOS)
   var uiStyle: UIFont.TextStyle {
     switch self {
     case .largeTitle: .largeTitle
@@ -59,8 +75,10 @@ enum AppTextStyle: CaseIterable, Sendable {
     case .micro, .mcp, .metrics: .caption2
     }
   }
+  #endif
 }
 
+#if os(iOS)
 @MainActor enum AppTypography {
   static func font(_ style: AppTextStyle, weight: UIFont.Weight = .regular,
     monospaced: Bool = false, compatibleWith traits: UITraitCollection? = nil) -> UIFont {
@@ -96,6 +114,7 @@ extension DynamicTypeSize {
     }
   }
 }
+#endif
 
 private struct AppFont: ViewModifier {
   @ScaledMetric private var size: CGFloat

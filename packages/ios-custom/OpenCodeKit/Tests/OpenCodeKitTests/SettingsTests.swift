@@ -146,6 +146,21 @@ private actor PairingProbe {
   #expect(throws: ServerStoreError.self) { try store.select(server.id) }
 }
 
+@MainActor @Test func theMacAppDefaultsToItsLocalServerAndKeepsItsPasswordInTheKeychain() throws {
+  let suite = "settings-tests-" + UUID().uuidString
+  let defaults = UserDefaults(suiteName: suite)!
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let backend = MemoryCredentials()
+  let local = URL(string: "http://127.0.0.1:4096")!
+  let store = ServerStore(defaults: defaults, credentials: ServerCredentials(backend: backend), builtinURL: local)
+  #expect(store.active.builtIn)
+  #expect(store.active.url == local)
+  try store.edit("builtin", name: "Este Mac", address: "http://127.0.0.1:4096/", password: "unit-test-password")
+  #expect(try store.configuration().password == "unit-test-password")
+  #expect(try store.configuration().url == local)
+  #expect(throws: ServerStoreError.self) { try store.edit("builtin", name: "x", address: "http://localhost:9", password: nil) }
+}
+
 @MainActor @Test func launchServerOverrideIsIsolatedAndNeverSelectsProduction() throws {
   let suite = "settings-tests-" + UUID().uuidString
   let defaults = UserDefaults(suiteName: suite)!

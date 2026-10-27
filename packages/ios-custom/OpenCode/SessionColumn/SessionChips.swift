@@ -62,7 +62,12 @@ struct SessionChips: View {
           .accessibilityLabel("Adicionar repositório aos filtros")
         }
       }
+      #if os(macOS)
+      // A Mac with "always show scroll bars" would otherwise draw a scroller under the chips.
+      .scrollIndicators(.never)
+      #else
       .scrollIndicators(.hidden)
+      #endif
       .buttonStyle(.plain)
       .onScrollPhaseChange { _, phase in
         scrolling = phase != .idle

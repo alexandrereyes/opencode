@@ -445,3 +445,24 @@ struct InlineStyle {
     return value
   }
 }
+
+extension MarkdownSyntax {
+  /// The theme role that colors this token, for code drawn outside the response renderer (the Mac file viewer).
+  public var role: ThemeRole {
+    switch self {
+    case .keyword: .syntaxKeyword
+    case .string: .syntaxString
+    case .comment: .syntaxComment
+    case .function: .syntaxFunction
+    case .property: .syntaxProperty
+    case .type: .syntaxType
+    case .constant: .syntaxConstant
+    case .number: .syntaxNumber
+    case .variable: .syntaxVariable
+    case .punctuation: .syntaxPunctuation
+    case .operator: .syntaxOperator
+    case .added: .syntaxAdded
+    case .removed: .syntaxRemoved
+    }
+  }
+}

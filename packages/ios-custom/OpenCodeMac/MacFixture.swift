@@ -1,0 +1,357 @@
+#if DEBUG
+import AppKit
+import OpenCodeKit
+
+/// A closed, in-memory server for captures and offline checks (`-OpenCodeMacFixture contexto`). It answers the
+/// same endpoints the app reads from a real server, with synthetic sessions, subagents, tasks, resources and
+/// working-copy changes; folders and files come from this Mac's checkout (`-OpenCodeMacFixtureRoot <path>`), so
+/// Arquivos lists real files. No request ever leaves the process.
+@MainActor struct MacFixture {
+  static let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:9")!)
+  static let current: MacFixture? = {
+    let arguments = ProcessInfo.processInfo.arguments
+    guard arguments.contains("-OpenCodeMacFixture") else { return nil }
+    let root = value("-OpenCodeMacFixtureRoot") ?? FileManager.default.currentDirectoryPath
+    return MacFixture(root: root.count > 1 && root.hasSuffix("/") ? String(root.dropLast()) : root)
+  }()
+
+  static func value(_ key: String) -> String? {
+    let arguments = ProcessInfo.processInfo.arguments
+    guard let index = arguments.firstIndex(of: key), arguments.indices.contains(index + 1) else { return nil }
+    return arguments[index + 1]
+  }
+
+  let root: String
+  nonisolated static let rootID = "ses_mac_root"
+
+  var selection: MacSelection {
+    var selection = MacSelection(sessionID: Self.rootID)
+    if let folder = Self.value("-OpenCodeMacFiles") {
+      let path = folder.hasPrefix("/") ? folder : root + "/" + folder
+      let file = Self.value("-OpenCodeMacFile").map { $0.hasPrefix("/") ? $0 : path + "/" + $0 }
+      selection.files = MacSelection.Files(folder: path, file: file)
+    }
+    return selection
+  }
+
+  func client() -> OpenCodeClient {
+    let server = MacFixtureServer(root: root, now: Date.now.timeIntervalSince1970 * 1000,
+      pictures: MacFixturePictures.make())
+    return .inMemory(configuration: Self.configuration) { server.respond($0) }
+  }
+}
+
+private struct MacFixtureServer: Sendable {
+  let root: String
+  let now: Double
+  let pictures: [String: String]
+  private let minute = 60_000.0
+  private let home = "/Users/alexandremartins"
+
+  func respond(_ request: URLRequest) -> String? {
+    guard let url = request.url else { return nil }
+    let path = url.path
+    let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    let input = request.httpBody.flatMap { try? JSONDecoder().decode(RPC.self, from: $0) }?.input
+    if path.hasPrefix("/api/rpc/") { return rpc(String(path.dropFirst("/api/rpc/".count)), input) }
+    switch path {
+    case "/api/info": return #"{"version":"0.0.0-mac-fixture","paths":{"tmp":"/tmp"}}"#
+    case "/api/project": return projects
+    case "/api/session/active":
+      return #"{"data":{"#
+        + (["ses_mac_root", "ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
+          .joined(separator: ",") + "}}"
+    case "/api/session": return #"{"data":[],"cursor":{}}"#
+    case "/api/model": return #"{"data":[{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","limit":{"context":1000000}}]}"#
+    case "/api/agent":
+      return #"{"data":["# + ["build", "explore", "opushigh", "terraxhigh", "terrahigh"].map {
+        #"{"id":"\#($0)","name":"\#($0)","mode":"\#($0 == "build" ? "primary" : "subagent")"}"#
+      }.joined(separator: ",") + "]}"
+    case "/api/shell":
+      return #"{"data":[{"id":"shl_dev","status":"running","command":"bun run dev --port 4177","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 12 * minute)}},{"id":"shl_test","status":"running","command":"xcodebuild test -scheme OpenCode","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 3 * minute)}}]}"#
+    case "/api/vcs/diff": return "{\"data\":\(changes)}"
+    case "/api/fs/list":
+      return list(query.first { $0.name == "path" }?.value ?? query.first { $0.name == "location[directory]" }?.value ?? root)
+    case "/api/fs/find": return find(query.first { $0.name == "query" }?.value ?? "")
+    default:
+      if path.hasPrefix("/api/session/") {
+        let id = String(path.dropFirst("/api/session/".count))
+        return sessions[id].map { "{\"data\":\($0)}" }
+      }
+      return nil
+    }
+  }
+
+  private func rpc(_ name: String, _ input: [String: JSONValue]?) -> String? {
+    let output: String? = switch name {
+    case "custom.navigation/list": #"{"data":[\#(navigation)],"next":null}"#
+    case "custom.preferences/get": preferences
+    case "custom.requests/permissions": "[\(orchestratorPermission)]"
+    case "custom.chats/info": #"{"root":"\#(home)/Chats"}"#
+    case "custom.master/info": #"{"version":1,"agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy"}}"#
+    case "custom.directories/home": #"{"path":"\#(home)"}"#
+    case "custom.worktrees/locate":
+      "[" + (input?["directories"]?.array?.compactMap(\.string) ?? []).map { directory in
+        let branch = directory == root ? "mac-app" : "main"
+        return #"{"directory":"\#(directory)","worktree":"\#(directory)","canonical":"\#(directory)","branch":"\#(branch)"}"#
+      }.joined(separator: ",") + "]"
+    case "custom.subscriptions/list": subscriptions
+    case "custom.session-family/snapshot":
+      input?["sessionID"]?.string == MacFixture.rootID
+        ? #"{"count":\#(Self.children.count),"cost":63.89,"active":[\#(Self.live.map { session($0) }.joined(separator: ","))],"forms":[],"permissions":[\#(childPermission)]}"#
+        : #"{"count":0,"active":[],"forms":[],"permissions":[]}"#
+    case "custom.session-family/page":
+      input?["sessionID"]?.string == MacFixture.rootID
+        ? #"{"data":[\#(Self.children.map { session($0) }.joined(separator: ","))],"next":null}"#
+        : #"{"data":[],"next":null}"#
+    case "custom.transcript/list": transcript(input?["sessionID"]?.string ?? "")
+    case "custom.resources/list": #"{"resources":[\#(resources)]}"#
+    case "custom.resources/get":
+      resourceList.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }
+    case "custom.resources/snapshot":
+      pictures[input?["id"]?.string ?? ""].map {
+        #"{"mime":"image/png","data":"\#($0)","takenAt":\#(now - (input?["id"]?.string == "res_github" ? 3 * minute : 2_000)),"width":640,"height":400}"#
+      }
+    default: nil
+    }
+    return output.map { #"{"output":\#($0)}"# }
+  }
+
+  // MARK: Sessions
+
+  struct Child {
+    let id: String
+    let title: String
+    let agent: String
+    let context: Double
+    let cache: Double
+    let cost: Double
+    let started: Double
+    var finished: Double? = nil
+    var activity: String? = nil
+  }
+
+  static let live: [Child] = [
+    Child(id: "ses_mac_c1", title: "Backend da Live Activity", agent: "opushigh", context: 285_100, cache: 0.995,
+      cost: 7.27, started: 21, activity: #"{"name":"shell","state":{"status":"running","input":{"command":"bun test"}}}"#),
+    Child(id: "ses_mac_c2", title: "iOS da Live Activity", agent: "opushigh", context: 223_500, cache: 0.991,
+      cost: 4.60, started: 18, activity: #"{"name":"edit","state":{"status":"running","input":{"filePath":"packages/ios-custom/OpenCode/SessionsView.swift"}}}"#),
+    Child(id: "ses_mac_c3", title: "Mapear apps Mac de agentes", agent: "explore", context: 116_400, cache: 0.826,
+      cost: 2.09, started: 4, activity: #"{"name":"webfetch","state":{"status":"running","input":{"url":"https://agentastic.dev"}}}"#),
+    Child(id: "ses_mac_c4", title: "Referências: Jean", agent: "terraxhigh", context: 91_400, cache: 0.61,
+      cost: 1.12, started: 7),
+  ]
+  static let finished: [Child] = (1...41).map { (index: Int) -> Child in
+    let step = Double(index * 6)
+    return Child(id: String(format: "ses_mac_d%02d", index), title: "Subagente concluído \(index)", agent: "explore",
+      context: 20_000 + Double(index) * 900, cache: 0.97, cost: 1.15, started: 60 + step, finished: 50 + step)
+  }
+  static let children: [Child] = live + [
+    Child(id: "ses_mac_c5", title: "Capturar tela do web custom", agent: "terrahigh", context: 70_600, cache: 0.994,
+      cost: 0.24, started: 40, finished: 25),
+  ] + finished
+
+  private func session(_ child: Child) -> String {
+    let input = child.context * (1 - child.cache)
+    let read = child.context * child.cache - 1_000
+    let tokens = #"{"input":\#(Int(input)),"output":1000,"reasoning":0,"cache":{"read":\#(Int(read)),"write":0}}"#
+    let finished = child.finished.map { #","idle":\#(now - $0 * minute)"# } ?? ""
+    let outcome = child.finished == nil ? "" : #","outcome":"succeeded""#
+    return #"{"id":"\#(child.id)","parentID":"ses_mac_root","projectID":"prj_opencode2","title":"\#(child.title)","agent":"\#(child.agent)","model":{"id":"opus-5.5","providerID":"llm-proxy"},"cost":\#(child.cost),"tokens":\#(tokens),"context":{"id":"msg_\#(child.id)","tokens":\#(tokens),"model":{"id":"opus-5.5","providerID":"llm-proxy"}},"location":{"directory":"\#(root)"},"time":{"created":\#(now - child.started * minute),"updated":\#(now - (child.finished ?? 0) * minute)\#(finished)}\#(outcome)}"#
+  }
+
+  private struct Root {
+    let id: String
+    let title: String
+    let directory: String
+    let project: String
+    let minutes: Double
+    var outcome: String? = nil
+    var permission = false
+    var viewed = true
+  }
+
+  private var roots: [Root] {
+    [
+      Root(id: MacFixture.rootID, title: "App Mac", directory: root, project: "prj_opencode2", minutes: 5),
+      Root(id: "ses_mac_orq", title: "OpenCode custom - orquestração", directory: home + "/Dev/opencode2",
+        project: "prj_opencode2", minutes: 1, permission: true),
+      Root(id: "ses_mac_qa", title: "Acerto QA autônomo", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
+        minutes: 12, outcome: "failed", viewed: false),
+      Root(id: "ses_mac_live", title: "Live activity", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
+        minutes: 12),
+      Root(id: "ses_mac_sidebar", title: "Refatorar sidebar", directory: home + "/Dev/opencode2", project: "prj_opencode2",
+        minutes: 120),
+      Root(id: "ses_mac_docs", title: "Docs de arquitetura", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
+        minutes: 240),
+    ]
+  }
+
+  private func rootSession(_ value: Root) -> String {
+    let at = now - value.minutes * minute
+    let isMain = value.id == MacFixture.rootID
+    let tokens = isMain ? #"{"input":1200,"output":24000,"reasoning":0,"cache":{"read":2378000,"write":10700}}"# : #"{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}"#
+    let context = isMain ? #","context":{"id":"msg_root","tokens":{"input":1400,"output":3200,"reasoning":0,"cache":{"read":274000,"write":0}},"model":{"id":"opus-5.5","providerID":"llm-proxy"}}"# : ""
+    let outcome = value.outcome.map { #","outcome":"\#($0)""# } ?? ""
+    return #"{"id":"\#(value.id)","projectID":"\#(value.project)","title":"\#(value.title)","agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy","variant":"xhigh"},"cost":\#(isMain ? 14.36 : 0.5),"tokens":\#(tokens)\#(context),"location":{"directory":"\#(value.directory)"},"time":{"created":\#(at - 60 * minute),"updated":\#(at),"idle":\#(at),"viewed":\#(value.viewed ? at : 0)}\#(outcome)}"#
+  }
+
+  private var navigation: String {
+    roots.map { value in
+      let at = now - value.minutes * minute
+      return #"{"session":\#(rootSession(value)),"messageAt":\#(at)\#(value.permission ? #","permissionAt":\#(at),"permissionCount":1"# : "")}"#
+    }.joined(separator: ",")
+  }
+
+  private var sessions: [String: String] {
+    Dictionary(uniqueKeysWithValues: roots.map { ($0.id, rootSession($0)) } + Self.children.map { ($0.id, session($0)) })
+  }
+
+  private var projects: String {
+    #"[{"id":"prj_opencode2","canonical":"\#(home)/Dev/opencode2","name":"opencode2","icon":{"color":"orange"},"sandboxes":["\#(root)"],"vcs":"git"},{"id":"prj_abacato","canonical":"\#(home)/Dev/abacato-v2","name":"abacato-v2","icon":{"color":"purple"},"sandboxes":[],"vcs":"git"}]"#
+  }
+
+  private var preferences: String {
+    #"{"version":1,"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"\#(home)/Dev/opencode2","expanded":true},{"worktree":"\#(home)/Dev/abacato-v2","expanded":true}],"chatsIndex":2}},"pinnedSessions":[],"mutedSessions":[],"settings":{"autoApprove":false},"models":{"user":[{"providerID":"llm-proxy","modelID":"opus-5.5","visibility":"show"}],"variant":{},"default":{"providerID":"llm-proxy","modelID":"opus-5.5","variant":"xhigh"}}}}"#
+  }
+
+  private var orchestratorPermission: String {
+    #"{"id":"per_mac_orq","sessionID":"ses_mac_orq","action":"shell","resources":["git push origin custom"]}"#
+  }
+  private var childPermission: String {
+    #"{"id":"per_mac_c4","sessionID":"ses_mac_c4","action":"shell","resources":["gh api repos/jean/referencias"]}"#
+  }
+
+  private var subscriptions: String {
+    let formatter = ISO8601DateFormatter()
+    let date = Date(timeIntervalSince1970: now / 1000)
+    func account(_ id: String, _ remaining: Double, days: Double) -> Subscriptions.Account {
+      Subscriptions.Account(id: id, name: "Conta", remaining: remaining,
+        resetAt: formatter.string(from: date.addingTimeInterval(86_400 * days)), fiveHourRemaining: remaining,
+        fiveHourResetAt: formatter.string(from: date.addingTimeInterval(3_600 * 2)),
+        observedAt: formatter.string(from: date), hasCapacity: true, bankedResets: .init(available: 1))
+    }
+    var claude = account("claude", 18, days: 0.05)
+    claude.plan = "max20x"
+    let value = Subscriptions(status: "ok", accounts: [account("codex", 42, days: 6)], automation: .init(enabled: false),
+      anthropic: .init(status: "ok", accounts: [claude], automation: .init(enabled: false)))
+    return String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
+  }
+
+  // MARK: Transcripts
+
+  private func transcript(_ id: String) -> String {
+    if let child = Self.live.first(where: { $0.id == id }) {
+      let tool = child.activity.map { #",{"type":"tool","id":"call_\#(id)",\#($0.dropFirst())"# } ?? ""
+      return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)."}\#(tool)]}]}"#
+    }
+    guard id == MacFixture.rootID else {
+      return #"{"data":[{"id":"msg_\#(id)","type":"assistant","time":{"created":\#(now - 30 * minute)},"content":[{"type":"text","text":"Resumo sintético da sessão."}]}]}"#
+    }
+    let answer = "## Próxima etapa\n\nClaro! Vou criar o app de Mac com a coluna de contexto ao vivo, reaproveitando a coluna de Sessões do iPhone.\n\n- A janela tem três colunas: Sessões, o chat e o Contexto.\n- O Contexto mostra subagentes, tarefas e recursos em uso.\n\nO componente principal da lista de sessões está em `SessionColumnSections.swift`, e o cabeçalho em `packages/ios-custom/OpenCode/SessionColumn/SessionColumnHeader.swift`."
+    let encoded = String(decoding: try! JSONEncoder().encode(answer), as: UTF8.self)
+    // The `subagent` calls that started the live subagents, so their elapsed time counts from the call.
+    let calls = Self.live.map { child in
+      let start = now - child.started * minute
+      return #"{"type":"tool","id":"call_\#(child.id)","name":"subagent","state":{"status":"running","input":{"agent":"\#(child.agent)","description":"\#(child.title)"},"metadata":{"sessionID":"\#(child.id)"}},"time":{"created":\#(start),"ran":\#(start)}}"#
+    }.joined(separator: ",")
+    return #"{"data":[{"id":"msg_root_2","type":"assistant","agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy"},"time":{"created":\#(now - 2 * minute)},"content":[\#(calls),{"type":"text","text":\#(encoded)}]},{"id":"msg_root_1","type":"user","time":{"created":\#(now - 5 * minute)},"text":"Gera o app de Mac com a coluna de contexto ao vivo"}]}"#
+  }
+
+  // MARK: Resources
+
+  private var resourceList: [String] {
+    func resource(_ id: String, _ kind: String, _ label: String, owner: String, state: String, meta: String,
+      used: Double) -> String {
+      #"{"id":"\#(id)","kind":"\#(kind)","label":"\#(label)","owner":{"sessionID":"\#(owner)","rootSessionID":"ses_mac_root"},"state":"\#(state)","meta":\#(meta),"discoveredAt":\#(now - 90 * minute),"lastUsedAt":\#(now - used * minute),"updatedAt":\#(now - used * minute),"live":{"stream":true,"input":true}}"#
+    }
+    return [
+      resource("res_iphone", "ios-simulator", "iPhone 17 Pro", owner: "ses_mac_c2", state: "agent",
+        meta: #"{"kind":"ios-simulator","device":"iPhone 17 Pro","runtime":"iOS 27.0"}"#, used: 0),
+      resource("res_chrome", "chrome", "Chrome", owner: "ses_mac_c3", state: "agent",
+        meta: #"{"kind":"chrome","url":"http://localhost:4177/","title":"OpenCode"}"#, used: 1),
+      resource("res_pixel", "android-emulator", "Pixel 9", owner: "ses_mac_root", state: "idle",
+        meta: #"{"kind":"android-emulator","avd":"Pixel_9"}"#, used: 8),
+      resource("res_ipad", "ios-simulator", "iPad Air", owner: "ses_mac_root", state: "idle",
+        meta: #"{"kind":"ios-simulator","device":"iPad Air"}"#, used: 9),
+      resource("res_github", "chrome", "GitHub", owner: "ses_mac_root", state: "stopped",
+        meta: #"{"kind":"chrome","url":"https://github.com/","title":"GitHub"}"#, used: 3),
+    ]
+  }
+  private var resources: String { resourceList.joined(separator: ",") }
+
+  // MARK: Files
+
+  private var changes: String {
+    #"[{"file":"packages/ios-custom/OpenCode/SessionColumn/SessionColumnHeader.swift","additions":12,"deletions":3,"status":"modified"},{"file":"packages/ios-custom/OpenCode/SessionColumn/SessionColumnSections.swift","additions":19,"deletions":4,"status":"modified"},{"file":"packages/ios-custom/OpenCode/SessionColumn/SessionRowView.swift","additions":8,"deletions":2,"status":"modified"},{"file":"packages/ios-custom/OpenCode/SessionStore.swift","additions":21,"deletions":5,"status":"modified"},{"file":"packages/ios-custom/OpenCodeMac/MacWindow.swift","additions":64,"deletions":0,"status":"added"},{"file":"packages/ios-custom/README.md","additions":4,"deletions":0,"status":"modified"}]"#
+  }
+
+  /// Lists this Mac's folder, folders first, like `/api/fs/list`. Paths are absolute (Location `/`).
+  private func list(_ path: String) -> String? {
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return nil }
+    let entries = names.compactMap { name -> (String, Bool)? in
+      var directory: ObjCBool = false
+      guard FileManager.default.fileExists(atPath: path + "/" + name, isDirectory: &directory) else { return nil }
+      return (name, directory.boolValue)
+    }.sorted { $0.1 != $1.1 ? $0.1 : $0.0.localizedStandardCompare($1.0) == .orderedAscending }
+    let data = entries.map { name, directory in
+      #"{"path":"\#(String((path + "/" + name).dropFirst()))","type":"\#(directory ? "directory" : "file")"}"#
+    }
+    return #"{"location":{"directory":"/"},"data":[\#(data.joined(separator: ","))]}"#
+  }
+
+  private func find(_ query: String) -> String {
+    var found: [String] = []
+    let enumerator = FileManager.default.enumerator(atPath: root)
+    while let next = enumerator?.nextObject() as? String, found.count < 200 {
+      if next.hasPrefix(".git") || next.contains("node_modules") || next.contains(".build") { continue }
+      if next.hasSuffix(query) || URL(fileURLWithPath: next).lastPathComponent.localizedCaseInsensitiveContains(query) {
+        found.append(#"{"path":"\#(next)","type":"file"}"#)
+      }
+    }
+    return #"{"data":[\#(found.joined(separator: ","))]}"#
+  }
+
+  private struct RPC: Decodable { let input: [String: JSONValue]? }
+}
+
+/// Synthetic live pictures for the fixture's resources, drawn once at launch.
+@MainActor enum MacFixturePictures {
+  static func make() -> [String: String] {
+    [
+      "res_iphone": draw(portrait: true, title: "Sessões", accent: NSColor(red: 0.96, green: 0.5, blue: 0.2, alpha: 1)),
+      "res_ipad": draw(portrait: false, title: "Sessões", accent: NSColor(red: 0.45, green: 0.55, blue: 0.95, alpha: 1)),
+      "res_pixel": draw(portrait: true, title: "Android", accent: NSColor(red: 0.3, green: 0.75, blue: 0.5, alpha: 1)),
+      "res_chrome": draw(portrait: false, title: "localhost:4177 · OpenCode", accent: NSColor(red: 0.96, green: 0.5, blue: 0.2, alpha: 1)),
+      "res_github": draw(portrait: false, title: "github.com", accent: NSColor(white: 0.8, alpha: 1)),
+    ]
+  }
+
+  private static func draw(portrait: Bool, title: String, accent: NSColor) -> String {
+    let size = portrait ? NSSize(width: 360, height: 720) : NSSize(width: 800, height: 500)
+    let image = NSImage(size: size, flipped: true) { rect in
+      NSColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1).setFill()
+      rect.fill()
+      NSColor(white: 0.16, alpha: 1).setFill()
+      NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: rect.width, height: portrait ? 70 : 44), xRadius: 0, yRadius: 0).fill()
+      let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: portrait ? 30 : 22, weight: .bold), .foregroundColor: NSColor.white,
+      ]
+      (title as NSString).draw(at: NSPoint(x: 24, y: portrait ? 90 : 64), withAttributes: attributes)
+      for row in 0..<(portrait ? 7 : 5) {
+        let y = (portrait ? 150 : 110) + CGFloat(row) * (portrait ? 72 : 64)
+        accent.withAlphaComponent(row == 0 ? 0.9 : 0.35).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 24, y: y, width: 40, height: 40)).fill()
+        NSColor(white: 0.85, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 80, y: y + 6, width: rect.width * 0.5, height: 10), xRadius: 5, yRadius: 5).fill()
+        NSColor(white: 0.45, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 80, y: y + 24, width: rect.width * 0.35, height: 8), xRadius: 4, yRadius: 4).fill()
+      }
+      return true
+    }
+    guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+      let png = bitmap.representation(using: .png, properties: [:]) else { return "" }
+    return png.base64EncodedString()
+  }
+}
+#endif

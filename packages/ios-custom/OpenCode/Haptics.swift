@@ -1,9 +1,12 @@
+#if os(iOS)
 import UIKit
+#endif
 
 /// UIKit's semantic feedback follows the device's system haptics preferences.
 @MainActor enum Haptics {
   enum Kind { case light, success, warning, selection, soft }
   static func play(_ kind: Kind) {
+    #if os(iOS)
     switch kind {
     case .light: UIImpactFeedbackGenerator(style: .light).impactOccurred()
     case .soft: UIImpactFeedbackGenerator(style: .soft).impactOccurred()
@@ -11,5 +14,6 @@ import UIKit
     case .warning: UINotificationFeedbackGenerator().notificationOccurred(.warning)
     case .selection: UISelectionFeedbackGenerator().selectionChanged()
     }
+    #endif
   }
 }

@@ -32,17 +32,23 @@ import OpenCodeKit
             delay = 1
             connection += 1
             connected = true
+            #if os(iOS)
             DeviceAgent.shared.connected(client)
             AgentsActivityAgent.shared.connected(client)
+            #endif
           }
           // iPhone data requests go to the device agent only; they must not trigger screen reloads.
           if case .update(let update) = event, update.type.hasPrefix("rpc.custom.device.") {
+            #if os(iOS)
             DeviceAgent.shared.receive(update, client: client)
+            #endif
             continue
           }
           // The Live Activity state is not a screen change either.
           if case .update(let update) = event, update.type.hasPrefix("rpc.custom.live-activity.") {
+            #if os(iOS)
             AgentsActivityAgent.shared.receive(update, client: client)
+            #endif
             continue
           }
           publish(event)
@@ -50,14 +56,18 @@ import OpenCodeKit
       } catch { if Task.isCancelled { break } }
       connected = false
       connection += 1
+      #if os(iOS)
       DeviceAgent.shared.disconnected(stopped: false)
+      #endif
       publish(.disconnected)
       do { try await Task.sleep(for: .seconds(delay)) } catch { break }
       delay = min(delay * 2, 15)
     }
     connected = false
     connection += 1
+    #if os(iOS)
     DeviceAgent.shared.disconnected(stopped: true)
+    #endif
     publish(.disconnected)
   }
   private func publish(_ event: ServerEvent) {

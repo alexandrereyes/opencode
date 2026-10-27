@@ -76,10 +76,10 @@ struct SubscriptionDetailSheet: View {
           Button { Task { await store.refresh() } } label: {
             if store.loading { ProgressView().frame(width: 26, height: 26) }
             else { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }
-          }.buttonStyle(.glass).buttonBorderShape(.circle).disabled(store.loading)
+          }.adaptiveGlassButtonStyle().buttonBorderShape(.circle).disabled(store.loading)
             .accessibilityLabel("Atualizar LLM proxy").accessibilityIdentifier("proxy-refresh")
           Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 26, height: 26) }
-            .buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(theme.color(.primary))
+            .adaptiveGlassButtonStyle(prominent: true).buttonBorderShape(.circle).tint(theme.color(.primary))
             .foregroundStyle(theme.color(.onPrimary)).accessibilityLabel("Fechar").accessibilityIdentifier("proxy-close")
         }.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
           .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 8)
@@ -94,7 +94,10 @@ struct SubscriptionDetailSheet: View {
         }.padding(16)
       }.background(theme.color(.background)).accessibilityIdentifier("proxy-detail")
         .refreshable { await store.refresh() }
-      }.background(theme.color(.background)).toolbar(.hidden, for: .navigationBar)
+      }.background(theme.color(.background))
+      #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+      #endif
         .toastOverlay(toast)
         .onChange(of: store.feedback?.id) {
           guard let feedback = store.feedback else { return }

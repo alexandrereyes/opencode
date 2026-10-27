@@ -15,6 +15,7 @@ extension OpenCodeClient {
   }
 }
 
+#if os(iOS)
 struct ConversationRenameAlert: UIViewControllerRepresentable {
   @Binding var isPresented: Bool
   let title: String
@@ -53,3 +54,4 @@ struct ConversationRenameAlert: UIViewControllerRepresentable {
     }
   }
 }
+#endif

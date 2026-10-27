@@ -48,6 +48,7 @@ struct ContextUsageLine: View {
   }
 }
 
+#if os(iOS)
 struct SessionUsageSection: View {
   @Environment(\.appTheme) private var theme
   let store: ConversationStore
@@ -102,3 +103,4 @@ struct SessionUsageSection: View {
     }.listRowBackground(theme.color(.toolSurface))
   }
 }
+#endif

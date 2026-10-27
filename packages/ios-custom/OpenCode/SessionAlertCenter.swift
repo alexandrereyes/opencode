@@ -162,8 +162,10 @@ private struct SessionAlertOverlay: ViewModifier {
       // Each modal presentation boundary closes itself, including nested composer sheets.
       if modal { dismiss() }
     }
+    #if os(iOS)
     .floatingVoiceInset(enabled: modal && voice)
     .modifier(FloatingVoiceScope(enabled: modal))
+    #endif
   }
 }
 extension View {
@@ -216,7 +218,7 @@ struct SessionAlertBanner: View {
             .labelStyle(.iconOnly).font(.caption).foregroundStyle(theme.color(.textSecondary))
             .frame(width: 28, height: 36)
         }
-        .padding(12).glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
+        .padding(12).adaptiveGlass(RoundedRectangle(cornerRadius: 22))
         .padding(.horizontal, 12).padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
       }

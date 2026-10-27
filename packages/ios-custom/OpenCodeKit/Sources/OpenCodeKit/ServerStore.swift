@@ -45,8 +45,10 @@ public enum ServerStoreError: LocalizedError {
   @ObservationIgnored private let credentials: ServerCredentials
   @ObservationIgnored private let storageKey: String
 
+  /// `builtinURL` is the default server: the Mac reached through Cloudflare One on the iPhone, this Mac's own
+  /// local server in the Mac app.
   public init(defaults: UserDefaults = .standard, credentials: ServerCredentials = .init(),
-              launchOverride: ServerConfiguration? = nil) {
+              launchOverride: ServerConfiguration? = nil, builtinURL: URL = ServerConfiguration.defaultURL) {
     self.defaults = defaults
     self.credentials = credentials
     self.launchOverride = launchOverride
@@ -56,7 +58,7 @@ public enum ServerStoreError: LocalizedError {
       try? JSONDecoder().decode([SavedServer].self, from: $0)
     } ?? []
     servers = [SavedServer(id: "builtin", name: defaults.string(forKey: storageKey + ".builtinName") ?? (launchOverride == nil ? "Mac de Alexandre" : "Sandbox (inicialização)"),
-                           url: launchOverride?.url ?? ServerConfiguration.defaultURL)]
+                           url: launchOverride?.url ?? builtinURL)]
       + saved.filter { !$0.builtIn && ServerAddress.parse($0.url.absoluteString) != nil }
     let selected = defaults.string(forKey: storageKey + ".active") ?? "builtin"
     activeID = launchOverride == nil && servers.contains(where: { $0.id == selected }) ? selected : "builtin"

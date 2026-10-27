@@ -18,6 +18,8 @@ struct SessionColumnHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   var voiceActive = false
+  /// The Mac has no voice calls yet: the button stays visible but disabled.
+  var voiceDisabled = false
   let voice: () -> Void
   var settings: (() -> Void)?
   let newSession: () -> Void
@@ -67,7 +69,7 @@ struct SessionColumnHeader: View {
   }
 
   private var buttons: some View {
-    GlassEffectContainer(spacing: 10) {
+    AdaptiveGlassContainer(spacing: 10) {
       HStack(spacing: 10) {
         if let selection {
           Menu {
@@ -83,24 +85,26 @@ struct SessionColumnHeader: View {
             }
           }
           .disabled(selection.working)
-          .glassEffect(.regular.interactive(), in: .circle)
+          .adaptiveGlass(Circle(), interactive: true)
           .accessibilityLabel("Ações das sessões selecionadas")
           .accessibilityIdentifier("sessions-selection-menu")
         }
         Button(action: voice) {
           symbol("waveform", color: voiceActive ? .primary : .textStrong)
         }
-        .glassEffect(.regular.interactive(), in: .circle)
+        .adaptiveGlass(Circle(), interactive: true)
+        .disabled(voiceDisabled)
+        .opacity(voiceDisabled ? 0.45 : 1)
         .accessibilityLabel(voiceActive ? "Encerrar conversa por voz" : "Conversar por voz")
         .accessibilityIdentifier("voice-start")
         if let settings {
           Button(action: settings) { symbol("gearshape", color: .textStrong) }
-            .glassEffect(.regular.interactive(), in: .circle)
+            .adaptiveGlass(Circle(), interactive: true)
             .accessibilityLabel("Configurações")
             .accessibilityIdentifier("sessions-settings")
         }
         Button(action: newSession) { symbol("plus", color: .onPrimary) }
-          .glassEffect(.regular.tint(theme.color(.primary)).interactive(), in: .circle)
+          .adaptiveGlass(Circle(), tint: theme.color(.primary), interactive: true)
           .opacity(newSessionDisabled ? 0.5 : 1)
           .disabled(newSessionDisabled)
           .accessibilityLabel("Nova sessão")

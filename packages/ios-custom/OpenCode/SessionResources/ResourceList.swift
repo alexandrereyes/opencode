@@ -17,20 +17,44 @@ import SwiftUI
   }
 }
 
+#if os(iOS)
+typealias ResourceImage = UIImage
+extension Image {
+  init(resource image: ResourceImage) { self.init(uiImage: image) }
+}
+#else
+typealias ResourceImage = NSImage
+extension Image {
+  init(resource image: ResourceImage) { self.init(nsImage: image) }
+}
+#endif
+
 /// Thumbnails for the resource rows, refreshed by snapshot while the list is visible.
 @MainActor @Observable final class ResourceThumbnails {
-  private(set) var images: [String: UIImage] = [:]
+  private(set) var images: [String: ResourceImage] = [:]
+  /// When each shown frame was captured (`takenAt`, milliseconds), for "último quadro há N min".
+  private(set) var frames: [String: Double] = [:]
   @ObservationIgnored private var taken: [String: Date] = [:]
+  /// The Mac's large "em uso" tiles ask for wider frames than the phone's 64 pt rows.
+  @ObservationIgnored private let width: Int
+  init(width: Int = 240) { self.width = width }
   /// Running resources refresh about every 5 seconds; stopped ones keep their last image.
   func refresh(_ resources: [SessionResource], client: OpenCodeClient) async {
     for resource in resources where resource.state.running || images[resource.id] == nil {
       if Task.isCancelled { return }
       if let last = taken[resource.id], Date.now.timeIntervalSince(last) < 4 { continue }
       taken[resource.id] = .now
-      guard let snapshot = try? await client.resourceSnapshot(resource.id, maxWidth: 240), let data = snapshot.image
+      guard let snapshot = try? await client.resourceSnapshot(resource.id, maxWidth: width), let data = snapshot.image
       else { continue }
+      #if os(iOS)
       let image = await Task.detached { UIImage(data: data)?.preparingForDisplay() }.value
-      if let image { images[resource.id] = image }
+      #else
+      let image = NSImage(data: data)
+      #endif
+      if let image {
+        images[resource.id] = image
+        frames[resource.id] = snapshot.takenAt
+      }
     }
   }
   func run(_ resources: @escaping @MainActor () -> [SessionResource], client: OpenCodeClient) async {
@@ -45,7 +69,7 @@ import SwiftUI
 struct ResourceRow: View {
   @Environment(\.appTheme) private var theme
   let resource: SessionResource
-  let image: UIImage?
+  let image: ResourceImage?
   var via: String? = nil
   let open: () -> Void
   var body: some View {
@@ -78,7 +102,7 @@ struct ResourceRow: View {
       .frame(width: portrait ? 40 : 64, height: portrait ? 76 : 44)
       .overlay {
         if let image {
-          Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+          Image(resource: image).resizable().aspectRatio(contentMode: .fill)
         } else {
           Image(systemName: symbol).appSymbol(.action).foregroundStyle(theme.color(.textWeak))
         }
