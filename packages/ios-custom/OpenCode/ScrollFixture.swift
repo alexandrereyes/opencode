@@ -4,12 +4,39 @@ import SwiftUI
 
 @MainActor enum ScrollFixtures {
   static weak var scrollState: ConversationScrollState?
-  static let mode: String? = {
+  static weak var conversation: ConversationStore?
+  static let mode: String? = argument("-OpenCodeScrollFixture")
+  /// `pop` leaves and reopens the conversation; `child` covers it with another screen and returns.
+  static let reentry: String? = argument("-OpenCodeFixtureReentry")
+  /// Messages that arrived while the app was hidden, as the next tail read would return them.
+  private(set) static var arrivals: [ConversationMessage] = []
+
+  private static func argument(_ name: String) -> String? {
     let arguments = ProcessInfo.processInfo.arguments
-    guard let index = arguments.firstIndex(of: "-OpenCodeScrollFixture") else { return nil }
+    guard let index = arguments.firstIndex(of: name) else { return nil }
     guard arguments.indices.contains(index + 1) else { return "" }
     return arguments[index + 1]
-  }()
+  }
+
+  /// A new prompt and its answer, delivered to the open conversation while the app is in the background.
+  static func arrive() {
+    let messages = snapshot.messages
+    guard var user = messages.last(where: { $0.type == "user" }),
+      var answer = messages.last(where: { $0.type == "assistant" && !$0.responseText.isEmpty })
+    else { return }
+    let index = arrivals.count / 2
+    let created = (messages.last?.time.created ?? 0) + Double(index + 1) * 60_000
+    user.id = "msg_scroll_arrival_\(index)_user"
+    user.text = "Pergunta sintética \(index) enviada com o app escondido."
+    user.metadata = nil
+    user.time.created = created
+    answer.id = "msg_scroll_arrival_\(index)_answer"
+    answer.content = answer.content?.filter { $0.type == "text" }
+    answer.time.created = created + 1000
+    answer.time.completed = created + 2000
+    arrivals += [user, answer]
+    conversation?.receiveFixtureArrivals(arrivals)
+  }
   static let snapshot: ScrollFixtureSnapshot = {
     let snapshot = try! JSONDecoder().decode(
       ScrollFixtureSnapshot.self,
@@ -56,6 +83,7 @@ struct ScrollFixtureRoot: View {
   @Environment(\.colorScheme) private var systemScheme
   @State private var appearance = AppearanceSettings()
   @State private var store: SessionStore
+  @State private var path = ["conversation"]
 
   init() {
     let store = SessionStore(
@@ -83,6 +111,18 @@ struct ScrollFixtureRoot: View {
         AppTabs(store: store, runtime: AppRuntime.shared)
           .environment(\.voiceController, AppRuntime.shared.voice)
           .environment(\.voiceSessionStore, store)
+      } else if ScrollFixtures.mode == "conversation", ScrollFixtures.reentry != nil {
+        NavigationStack(path: $path) {
+          Text("Sessões sintéticas").navigationDestination(for: String.self) { route in
+            if route == "conversation" {
+              ConversationView(id: "ses_scroll_0000", sessions: store)
+            } else {
+              Text("Tela sobreposta").frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(uiColor: .systemBackground))
+            }
+          }
+        }
+        .task { await reenter() }
       } else if ScrollFixtures.mode == "conversation" {
         NavigationStack {
           ConversationView(id: "ses_scroll_0000", sessions: store)
@@ -103,6 +143,10 @@ struct ScrollFixtureRoot: View {
     .background(ScrollFixtureDriver().frame(width: 0, height: 0))
     .background(ComposerTypingDriver().frame(width: 0, height: 0))
     .background(MarkdownFixtureCaptureDriver().frame(width: 0, height: 0))
+    .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureBackgroundArrivals") { ScrollFixtures.arrive() }
+    }
+    .task { TranscriptTrajectory.shared.start() }
     .task {
       if ScrollFixtures.mode == "catalog" {
         let draft = store.drafts.draft("ses_scroll_0000")
@@ -116,6 +160,30 @@ struct ScrollFixtureRoot: View {
         await store.quota.refresh()
       }
       await store.run()
+    }
+  }
+
+  /// Three departures and returns, each compared frame by frame with the passage shown when leaving.
+  private func reenter() async {
+    let trajectory = TranscriptTrajectory.shared
+    // Tasks start in no particular order; the opening episode must exist before waiting for it.
+    trajectory.start()
+    await trajectory.settled()
+    for _ in 0..<3 {
+      do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+      let reference = trajectory.rows
+      if ScrollFixtures.reentry == "child" {
+        path.append("child")
+        do { try await Task.sleep(for: .milliseconds(1200)) } catch { return }
+        trajectory.begin("child", reference: reference)
+        path.removeLast()
+      } else {
+        path.removeAll()
+        do { try await Task.sleep(for: .milliseconds(1200)) } catch { return }
+        trajectory.begin("reentry", reference: reference)
+        path.append("conversation")
+      }
+      await trajectory.settled()
     }
   }
 }

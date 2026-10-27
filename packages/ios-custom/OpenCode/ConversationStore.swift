@@ -638,7 +638,8 @@ import OpenCodeKit
       let paged = arguments.contains("-OpenCodeFixturePaged")
       // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
       fixtureHistory = paged ? Array(fixture.messages.dropLast(Self.fixturePage)) : []
-      messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages
+      messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages + ScrollFixtures.arrivals
+      ScrollFixtures.conversation = self
       models = fixture.models
       if ScrollFixtures.mode == "catalog" {
         resources = ScreenCatalogFixture.resources
@@ -781,6 +782,11 @@ import OpenCodeKit
     messages = fixtureHistory.suffix(Self.fixturePage) + messages
     fixtureHistory.removeLast(min(Self.fixturePage, fixtureHistory.count))
     hasOlder = !fixtureHistory.isEmpty
+    revision += 1
+  }
+  /// Merges messages delivered while the app was hidden, as a reconnection's tail read would.
+  func receiveFixtureArrivals(_ arrivals: [ConversationMessage]) {
+    messages = ConversationProjection.merge(messages, page: arrivals)
     revision += 1
   }
   func growScrollFixture(_ iteration: Int) {

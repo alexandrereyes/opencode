@@ -23,14 +23,26 @@ extension EnvironmentValues {
 final class ResponseTextView: UITextView {
   private(set) var measuredSizes: [CGFloat: CGSize] = [:]
   override var attributedText: NSAttributedString! {
-    didSet { invalidateMeasurement(); lineBreaks.widths = [:] }
+    didSet {
+      invalidateMeasurement()
+      lineBreaks.widths = [:]
+      #if DEBUG
+      if (oldValue?.length ?? 0) > 0, attributedText != nil { TranscriptCounters.replaced.add(1, ordering: .relaxed) }
+      #endif
+    }
   }
   private let lineBreaks = InlineCodeLineBreaks()
   override init(frame: CGRect, textContainer: NSTextContainer?) {
     super.init(frame: frame, textContainer: textContainer)
     lineBreaks.install(self)
+    #if DEBUG
+    TranscriptCounters.created.add(1, ordering: .relaxed)
+    #endif
   }
   required init?(coder: NSCoder) { nil }
+  #if DEBUG
+  deinit { TranscriptCounters.destroyed.add(1, ordering: .relaxed) }
+  #endif
   var codeGutter = false
   var gutterWidth: CGFloat = 44
   var inlineCodeRanges: [NSRange] = [] {

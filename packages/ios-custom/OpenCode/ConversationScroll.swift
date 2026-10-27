@@ -99,7 +99,10 @@ import SwiftUI
     if id != "bottom" { probes.setObject(probe, forKey: id as NSString) }
     if plan.pending { schedule() }
     #if DEBUG
-    if ScrollFixtures.mode != nil { ScrollFixtures.scrollState = self }
+    if ScrollFixtures.mode != nil {
+      ScrollFixtures.scrollState = self
+      TranscriptTrajectory.shared.geometry = self
+    }
     #endif
   }
   func unregister(_ probe: UIView, id: String) {
@@ -340,6 +343,16 @@ import SwiftUI
     schedule()
   }
 }
+
+#if DEBUG
+extension ConversationScrollState: TranscriptGeometry {
+  var geometryView: UIScrollView? { view }
+  var geometryRows: [String: CGRect] {
+    let pinned = pinned
+    return frames.filter { !pinned.contains($0.key) }
+  }
+}
+#endif
 
 struct ConversationRowProbe: UIViewRepresentable {
   let state: ConversationScrollState
