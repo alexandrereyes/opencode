@@ -87,8 +87,14 @@ final class TranscriptLayout: UICollectionViewLayout {
     geometry.visibleTop(for: anchor).map { CGFloat($0) - (collectionView?.adjustedContentInset.top ?? 0) }
   }
 
+  /// The bottom edge of what the reader last saw. Content that shrinks below it (an estimate measured smaller,
+  /// a row replaced) keeps this much scrollable space, so the offset is never clamped and the screen never
+  /// moves; the reader's next drag releases it.
+  var contentFloor: CGFloat = 0
+
   override var collectionViewContentSize: CGSize {
-    CGSize(width: collectionView?.bounds.width ?? 0, height: CGFloat(geometry.contentHeight(viewport: Double(viewport))))
+    CGSize(width: collectionView?.bounds.width ?? 0,
+      height: max(CGFloat(geometry.contentHeight(viewport: Double(viewport))), contentFloor))
   }
 
   override func prepare() {
@@ -187,6 +193,12 @@ final class TranscriptLayout: UICollectionViewLayout {
     if above {
       context.contentOffsetAdjustment = CGPoint(x: 0, y: CGFloat(delta))
     }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics"), abs(delta) > 0.5 {
+      NSLog("TRANSCRIPT sized %@ delta=%.1f above=%@ place=%d", geometry.entries[index].id, delta, String(above),
+        place ?? -1)
+    }
+    #endif
     let visible = collectionView?.indexPathsForVisibleItems ?? []
     context.invalidateItems(at: Array(Set(visible + [original.indexPath]).filter { $0.item < geometry.count }))
     return context

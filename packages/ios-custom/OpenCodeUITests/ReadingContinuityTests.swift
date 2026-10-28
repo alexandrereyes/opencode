@@ -4,14 +4,15 @@ import XCTest
 @MainActor final class ReadingContinuityTests: XCTestCase {
   override func setUp() { continueAfterFailure = false }
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
-  private func launch(_ role: String, theme: String = "openchamber-dark") throws -> XCUIApplication
+  private func launch(_ role: String, theme: String = "openchamber-dark", diagnostics: Bool = false) throws
+    -> XCUIApplication
   {
     let app = XCUIApplication()
     let session = try XCTUnwrap(environment["OPENCODE_TEST_" + role])
     app.launchArguments = [
       "-OpenCodeServerURL", TestSandbox.url,
       "-OpenCodeTheme", theme, "-OpenCodeOpenSession", session,
-    ]
+    ] + (diagnostics ? ["-OpenCodeScrollDiagnostics"] : [])
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
@@ -304,6 +305,41 @@ import XCTest
       app.terminate()
     }
   }
+  /// Sending works like ChatGPT and Claude: the prompt rises to the top of the transcript, the answer grows
+  /// below it without moving the screen, and ↓ appears once it passes the end. Calls the model once.
+  func testSentPromptRisesAndTheAnswerGrowsInPlace() throws {
+    let app = try launch("SEND", theme: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
+      diagnostics: environment["OPENCODE_TEST_DIAGNOSTICS"] != nil)
+    let transcript = app.collectionViews["conversation-transcript"]
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    composer.tap()
+    composer.typeText("Escreva 30 linhas numeradas, uma frase curta sobre o mar em cada. Sem introdução.")
+    let send = app.buttons["composer-send"]
+    XCTAssertTrue(send.waitForExistence(timeout: 5))
+    send.tap()
+    // The sent prompt rises to the top of the transcript.
+    // Its text sits the bubble's padding (8 + 12 points) below the transcript's top edge.
+    let prompt = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Escreva 30 linhas numeradas'")).firstMatch
+    let risen = expectation(for: NSPredicate { _, _ in
+      prompt.exists && abs(prompt.frame.minY - transcript.frame.minY - 20) <= 2
+    }, evaluatedWith: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [risen], timeout: 10), .completed, "the sent prompt rises to the top")
+    let top = prompt.frame.minY
+    // While the answer streams (and once it ends), nothing on screen moves.
+    var samples: [CGFloat] = []
+    let end = app.buttons["Ir para a mais recente"]
+    let deadline = Date().addingTimeInterval(12)
+    while Date() < deadline {
+      samples.append(prompt.frame.minY)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+    }
+    XCTAssertTrue(end.exists, "↓ appears once the answer passes the end")
+    XCTAssertGreaterThan(samples.count, 10)
+    XCTAssertLessThanOrEqual(samples.map { abs($0 - top) }.max() ?? 0, 0.5, "the answer grows without moving the screen")
+    screenshot("send-risen-" + (environment["OPENCODE_TEST_THEME"] ?? "dark"))
+  }
+
   func testTokensInComments() throws {
     let app = try launch("COMMENT")
     let response = app.textViews.matching(

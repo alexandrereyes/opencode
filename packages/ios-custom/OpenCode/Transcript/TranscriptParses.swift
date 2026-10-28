@@ -96,6 +96,12 @@ import SwiftUI
     return entry.height
   }
 
+  /// The item's last measured height whatever its content: closer than any estimate when a row comes back.
+  func last(_ id: String, width: CGFloat, category: UIContentSizeCategory) -> CGFloat? {
+    guard let entry = entries[id], entry.width == width, entry.category == category else { return nil }
+    return entry.height
+  }
+
   func store(_ height: CGFloat, for item: TranscriptItem, width: CGFloat, category: UIContentSizeCategory) {
     entries[item.id] = Entry(kind: item.kind, width: width, category: category, height: height)
   }

@@ -422,7 +422,34 @@ public enum ConversationProjection {
     let replacements = Dictionary(page.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     let ids = Set(existing.map(\.id))
     let additions = page.filter { !ids.contains($0.id) }
-    let updated = existing.map { replacements[$0.id] ?? $0 }
+    let updated = existing.map { local in
+      guard let read = replacements[local.id] else { return local }
+      return read.time.completed == nil ? read.keepingStreamedText(of: local) : read
+    }
     return older ? additions + updated : updated + additions
+  }
+}
+
+extension ConversationMessage {
+  /// A read of a running message can lag the deltas already shown (the server keeps the streamed text only
+  /// once the step ends): each text part keeps the longer streamed text that begins with what was read, so a
+  /// refresh mid-stream never takes text back.
+  func keepingStreamedText(of streamed: ConversationMessage) -> ConversationMessage {
+    guard let local = streamed.content, !local.isEmpty else { return self }
+    guard var content, !content.isEmpty else {
+      var copy = self
+      copy.content = local
+      return copy
+    }
+    for index in content.indices where content[index].type == "text" {
+      let match = content[index].id.flatMap { id in local.first { $0.id == id } }
+        ?? (local.indices.contains(index) && local[index].type == "text" ? local[index] : nil)
+      let read = content[index].text ?? ""
+      guard let text = match?.text, text.count > read.count, text.hasPrefix(read) else { continue }
+      content[index].text = text
+    }
+    var copy = self
+    copy.content = content
+    return copy
   }
 }

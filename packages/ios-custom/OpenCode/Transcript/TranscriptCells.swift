@@ -38,7 +38,17 @@ final class TranscriptTextCell: UICollectionViewCell, TranscriptMessageCell {
   }
 
   func height(width: CGFloat) -> CGFloat {
-    ceil(text.fittingSize(width: max(1, width - AppLayout.margin * 2)).height)
+    let width = max(1, width - AppLayout.margin * 2)
+    // Its own container at this width lets the text view measure incrementally.
+    if text.bounds.width != width { text.frame.size.width = width }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMeasureCheck") {
+      let laid = text.fittingSize(width: width).height
+      let fitted = ceil(text.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)
+      if abs(laid - fitted) > 0.5 { NSLog("TRANSCRIPT measure mismatch laid=%.1f fitted=%.1f", laid, fitted) }
+    }
+    #endif
+    return ceil(text.fittingSize(width: width).height)
   }
 
   override func layoutSubviews() {

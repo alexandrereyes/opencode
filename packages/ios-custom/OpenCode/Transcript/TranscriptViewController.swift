@@ -155,12 +155,12 @@ import SwiftUI
     } else if bounds.height != size.height {
       // The keyboard or composer resized the viewport: the end stays at the end, anything else stays put.
       let end = revealed && distanceToLatest <= 1
-      let delta = size.height - bounds.height
       size = bounds
       layout.invalidateLayout()
-      if end, delta != 0 {
+      if end {
         collectionView.layoutIfNeeded()
-        setOffset(collectionView.contentOffset.y + delta)
+        // The latest place is the end, or a just-sent prompt at the top while its answer is short.
+        setOffset(latestOffset)
       }
     }
     if !revealed { positionInitially() }
@@ -222,16 +222,22 @@ import SwiftUI
 
   // MARK: Items
 
+  /// Coalesces changes into at most one rebuild per display frame: a streamed delta and the parse it causes
+  /// arrive separately but land together.
   private func scheduleRebuild() {
     guard !rebuildScheduled else { return }
     rebuildScheduled = true
-    DispatchQueue.main.async { [weak self] in
+    let frame = 1 / Double(view.window?.windowScene?.screen.maximumFramesPerSecond ?? 60)
+    let wait = max(0, lastRebuild + frame - CACurrentMediaTime())
+    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
       self?.rebuildScheduled = false
       self?.rebuild()
     }
   }
+  private var lastRebuild: CFTimeInterval = 0
 
   private func rebuild() {
+    lastRebuild = CACurrentMediaTime()
     var stale: [TranscriptPart] = []
     let next = withObservationTracking {
       projection(stale: { stale.append($0) })
@@ -284,6 +290,14 @@ import SwiftUI
       return
     }
     let old = items
+    // The sent prompt's optimistic row and its delivered message share an ID; should they not, the trailing
+    // space passes to the prompt that replaced it, so the content never shrinks under the reader.
+    if let spacer = memory.spacerPrompt, !next.contains(where: { $0.id == spacer }),
+      old.contains(where: { $0.id == spacer })
+    {
+      memory.spacerPrompt = next.last(where: \.sticky)?.id
+      layout.setSpacerPrompt(memory.spacerPrompt)
+    }
     let oldIndex = Dictionary(old.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
     let newIndex = Dictionary(next.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
     let kept = old.filter { newIndex[$0.id] != nil }.map(\.id)
@@ -320,8 +334,9 @@ import SwiftUI
     if let animating { collectionView.setContentOffset(CGPoint(x: 0, y: clamp(animating())), animated: true) }
     #if DEBUG
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT apply %d -> %d deleted=%d inserted=%d changed=%d reordered=%@ revealed=%@", old.count,
-        next.count, deleted.count, inserted.count, changed.count, String(reordered), String(revealed))
+      NSLog("TRANSCRIPT apply %d -> %d deleted=%d inserted=%d changed=%d reordered=%@ revealed=%@ anchor=%@ offset=%.1f last=%@", old.count,
+        next.count, deleted.count, inserted.count, changed.count, String(reordered), String(revealed),
+        anchor?.id ?? "-", collectionView.contentOffset.y, next.last?.id ?? "-")
     }
     #endif
     guard revealed else {
@@ -363,6 +378,7 @@ import SwiftUI
     var measured: [Bool] = []
     let entries = items.map { item in
       let known = memory.heights.height(item, width: size.width, category: category) ?? previous[item.id]
+        ?? memory.heights.last(item.id, width: size.width, category: category)
       measured.append(known != nil)
       return TranscriptGeometry.Entry(
         id: item.id, gap: Double(item.gap), height: Double(known ?? estimate(item)), sticky: item.sticky)
@@ -595,6 +611,7 @@ import SwiftUI
     revealDeadline?.cancel()
     revealDeadline = nil
     collectionView.isHidden = false
+    layout.contentFloor = collectionView.contentOffset.y + collectionView.bounds.height
     collectionView.accessibilityValue = "\(store.messages.count) mensagens carregadas"
     state.restoring = false
     memory.anchor = currentPosition()
@@ -785,6 +802,7 @@ import SwiftUI
   /// The destination of the explicit scroll in flight: an update that lands meanwhile (a parse, a reload)
   /// keeps the anchor and then continues toward the destination it moved.
   private var animating: (() -> CGFloat)?
+  private var animationRetries = 0
 
   private func clamp(_ offset: CGFloat) -> CGFloat { min(max(0, offset), layout.maximumOffset) }
 
@@ -867,12 +885,22 @@ import SwiftUI
 
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
     animating = nil
+    animationRetries = 0
+    layout.contentFloor = 0
     store.scrolling = true
     store.mcps.close()
   }
 
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
     guard revealed else { return }
+    if !touching { layout.contentFloor = scrollView.contentOffset.y + scrollView.bounds.height }
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+      NSLog("TRANSCRIPT scrolled offset=%.1f size=%.1f bounds=%.1f spacer=%@ anchor=%@ %.1f tracking=%@",
+        scrollView.contentOffset.y, scrollView.contentSize.height, scrollView.bounds.height,
+        memory.spacerPrompt ?? "-", layout.anchor?.id ?? "-", layout.anchor?.screenY ?? 0, String(scrollView.isTracking))
+    }
+    #endif
     publishState()
     requestVisibleParses()
     if layout.visibleTop < size.height * 1.5 { loadOlder() }
@@ -889,10 +917,17 @@ import SwiftUI
         animating.map { clamp($0()) } ?? -1, layout.pinned.map { items[$0.index].id } ?? "-")
     }
     #endif
-    // Rows measured on the way may have moved the destination a last time.
+    // Rows measured, or the viewport resized, on the way may have moved the destination: finish the same
+    // motion toward it rather than jump (twice at most).
     if let target = animating {
-      animating = nil
       let destination = clamp(target())
+      if abs(destination - collectionView.contentOffset.y) > 0.5, animationRetries < 2 {
+        animationRetries += 1
+        collectionView.setContentOffset(CGPoint(x: 0, y: destination), animated: true)
+        return
+      }
+      animating = nil
+      animationRetries = 0
       if abs(destination - collectionView.contentOffset.y) > 0.5 { setOffset(destination) }
     }
     settled()

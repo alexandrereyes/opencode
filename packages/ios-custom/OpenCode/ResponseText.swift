@@ -88,6 +88,17 @@ final class ResponseTextView: UITextView {
     decorationsFrom = 0
     setNeedsLayout()
   }
+  /// The height of the text as laid out in its own container, when that container already has `width`: only
+  /// fragments an edit invalidated are laid out again. `sizeThatFits` lays the text out in a container of
+  /// another size, which typesets the whole text each time and makes the view typeset it again afterwards.
+  private func laidOutSize(width: CGFloat) -> CGSize? {
+    guard let manager = textLayoutManager, abs(textContainer.size.width - width) < 0.5 else { return nil }
+    // Unbounded height: a container as tall as the view stops laying out at its current bottom.
+    if textContainer.size.height < 1_000_000 { textContainer.size.height = .greatestFiniteMagnitude }
+    manager.ensureLayout(for: manager.documentRange)
+    let used = manager.usageBoundsForTextContainer
+    return CGSize(width: width, height: ceil(used.maxY + textContainerInset.top + textContainerInset.bottom))
+  }
   /// Shows `text`, editing the existing storage from the first changed paragraph on when everything before
   /// it is identical, so a streamed answer's earlier paragraphs keep their layout and the view is not replaced.
   @discardableResult func show(_ text: NSAttributedString) -> Bool {
@@ -126,7 +137,7 @@ final class ResponseTextView: UITextView {
   }
   func fittingSize(width: CGFloat) -> CGSize {
     if let size = measuredSizes[width] { return size }
-    let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    let size = laidOutSize(width: width) ?? sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
     if measuredSizes.count >= 8 { measuredSizes.removeAll(keepingCapacity: true) }
     measuredSizes[width] = size
     return size
@@ -294,7 +305,8 @@ private final class InlineCodeLineBreaks: NSObject, NSTextLayoutManagerDelegate 
   func textLayoutManager(_ textLayoutManager: NSTextLayoutManager, shouldBreakLineBefore location: any NSTextLocation,
     hyphenating: Bool) -> Bool {
     let allowed = original?.textLayoutManager?(textLayoutManager, shouldBreakLineBefore: location, hyphenating: hyphenating) ?? true
-    guard allowed, let view, !view.inlineCodeRanges.isEmpty, view.sourceBlock?.kind != .table, let text = view.attributedText,
+    // The storage itself: `attributedText` copies the whole text, and this runs for every line break.
+    guard allowed, let view, !view.inlineCodeRanges.isEmpty, view.sourceBlock?.kind != .table, case let text = view.textStorage,
       let line = textLayoutManager.textContainer?.size.width, line > 0, line < 10_000 else { return allowed }
     let offset = textLayoutManager.offset(from: textLayoutManager.documentRange.location, to: location)
     guard let range = view.inlineCodeRanges.first(where: { $0.location < offset && offset < NSMaxRange($0) }),
