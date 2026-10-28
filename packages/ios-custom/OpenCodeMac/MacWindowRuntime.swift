@@ -46,6 +46,8 @@ import SwiftUI
   var deleteRequest: Session?
   var switcherVisible = false
   let search = MacSearch()
+  let modelPalette = MacModelPalette()
+  var newSessionPalette: (() -> Void)?
   var archiveRequest: SessionRow?
   @ObservationIgnored private var memories: [String: TranscriptMemory] = [:]
   @ObservationIgnored private var recent: [String] = []
@@ -95,6 +97,7 @@ import SwiftUI
   }
 
   func close() {
+    modelPalette.close()
     search.visible = false
     inputs.values.forEach { $0.readAloud.stop() }
     let drafts = drafts

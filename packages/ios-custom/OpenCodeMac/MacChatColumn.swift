@@ -253,32 +253,10 @@ struct MacConversationView: View {
   /// A subagent shows where it came from and goes back with ‹ or ⌘[, like the iPhone's back button.
   private func childHeader(_ parent: String) -> some View {
     let parentTitle = sessions.liveConversation(parent)?.session?.displayTitle
-      ?? sessions.rows.first { $0.id == parent }?.session.displayTitle ?? "Sessão principal"
-    return VStack(spacing: 0) {
-      HStack(spacing: 10) {
-        Button {
-          transcript?.capture()
-          runtime.backToParent()
-        } label: {
-          Label(parentTitle, systemImage: "chevron.left").lineLimit(1)
-        }
-        .buttonStyle(.plain).foregroundStyle(theme.color(.text))
-        // ⌘[ lives in the menu bar (Ir ▸ Voltar à sessão principal), which works wherever the focus is.
-        .help("Voltar à sessão principal (⌘[)")
-        .accessibilityIdentifier("subagent-back")
-        Text("›").foregroundStyle(theme.color(.textWeak))
-        Text(conversation.session?.displayTitle ?? "Subagente").lineLimit(1).foregroundStyle(theme.color(.textSecondary))
-        Spacer()
-        Text(conversation.childAgentName).appFont(.caption, weight: .medium)
-          .foregroundStyle(theme.agentColor(conversation.agents.first { $0.id == conversation.session?.agent },
-            id: conversation.session?.agent ?? ""))
-        if conversation.executing {
-          Text("trabalhando…").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-        }
-      }
-      .appFont(.secondary)
-      .padding(.horizontal, 24).padding(.vertical, 8)
-      ContextHairline()
+      ?? sessions.entries.first { $0.session.id == parent }?.session.displayTitle ?? "Sessão principal"
+    return MacSubagentBanner(conversation: conversation, parentTitle: parentTitle) {
+      transcript?.capture()
+      runtime.backToParent()
     }
   }
 

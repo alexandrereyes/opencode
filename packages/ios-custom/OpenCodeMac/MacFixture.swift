@@ -43,6 +43,8 @@ import OpenCodeKit
       pictures: MacFixturePictures.make())
     let proxy = MacFixtureProxy(now: .now)
     return .inMemory(configuration: Self.configuration, answer: { request in
+      if MacChoicesFixture.enabled,
+        let answer = await MacChoicesFixture.shared.respond(request, fallback: server.respond(request)) { return answer }
       let path = request.url?.path ?? ""
       guard path.hasPrefix("/api/rpc/custom.subscriptions/") else { return server.respond(request) }
       let input = request.httpBody.flatMap { try? JSONDecoder().decode([String: JSONValue].self, from: $0) }?["input"]?.object

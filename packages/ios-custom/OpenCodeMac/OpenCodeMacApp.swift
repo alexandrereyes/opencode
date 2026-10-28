@@ -168,6 +168,9 @@ private struct MacCommands: Commands {
         .disabled(runtime == nil)
     }
     CommandMenu("Sessão") {
+      Button("Escolher modelo e esforço…") { runtime?.openModelPalette() }
+        .keyboardShortcut("m", modifiers: [.command, .option])
+        .disabled(runtime == nil)
       if let runtime, let store = runtime.store {
         MacSessionMenuItems(store: store, runtime: runtime, shortcuts: true)
         Divider()
