@@ -543,7 +543,7 @@ private struct ContextListRow: View {
 // MARK: - Details
 
 /// The iPhone's Detalhes da sessão at the column's foot, closed by default: model and agent, the working
-/// directory (opens Arquivos), the MCPs with their switches, the skills the session loaded and the plugins.
+/// directory (opens Arquivos), the skills the session loaded and the plugins. MCPs have their own section above.
 private struct ContextDetails: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: ContextColumnStore
@@ -564,7 +564,7 @@ private struct ContextDetails: View {
       }
       .buttonStyle(.plain)
       .padding(.bottom, store.detailsOpen ? 6 : 14)
-      .help(store.detailsOpen ? "Ocultar detalhes da sessão" : "Modelo, diretório, MCPs, skills e plugins")
+      .help(store.detailsOpen ? "Ocultar detalhes da sessão" : "Modelo, diretório, skills e plugins")
       if store.detailsOpen { details.padding(.bottom, 14) }
     }
   }
@@ -593,16 +593,6 @@ private struct ContextDetails: View {
           }
           Spacer(minLength: 0)
         }
-      }
-      ContextHairline()
-      subheading("MCP", count: store.mcps?.count)
-      if let mcps = store.mcps {
-        if mcps.isEmpty { muted("Nenhum configurado") }
-        ForEach(mcps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { server in
-          mcpRow(server)
-        }
-      } else {
-        muted("Carregando…")
       }
       ContextHairline()
       subheading("Skills", count: store.services?.skills?.count)
@@ -638,20 +628,6 @@ private struct ContextDetails: View {
 
   private func muted(_ text: String) -> some View {
     Text(text).foregroundStyle(theme.color(.textSecondary))
-  }
-
-  private func mcpRow(_ server: MCPServer) -> some View {
-    let state = server.status.status
-    return Toggle(isOn: Binding(get: { server.enabled }, set: { _ in Task { await store.toggle(server) } })) {
-      HStack(spacing: 6) {
-        Text(server.name).foregroundStyle(theme.color(.text))
-        Text(state.label).foregroundStyle(theme.color(state == .failed ? .error : .textSecondary))
-        Spacer(minLength: 8)
-      }
-    }
-    .toggleStyle(.switch).controlSize(.mini)
-    .disabled(state == .pending || state == .unknown || store.acting.contains("mcp:" + server.name))
-    .help(server.status.error ?? "Altera o MCP para todas as sessões deste diretório")
   }
 
   /// The first five rows, then "Mostrar todos (N)", like the iPhone's collapsed sections.

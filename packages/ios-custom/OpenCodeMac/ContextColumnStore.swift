@@ -26,7 +26,6 @@ import SwiftUI
   private(set) var acting: Set<String> = []
   /// Detalhes da sessão, read when that part of the column opens: loaded skills, plugins and the MCP servers.
   private(set) var services: SessionServices?
-  private(set) var mcps: [MCPServer]?
   var detailsOpen = false {
     didSet { if detailsOpen && !oldValue { Task { await loadDetails() } } }
   }
@@ -195,23 +194,11 @@ import SwiftUI
     }
   }
 
-  /// Skills, plugins and MCPs, like the iPhone's Detalhes da sessão; reread each time the part opens.
+  /// Skills and plugins, like the iPhone's Detalhes da sessão; reread each time the part opens. MCPs live in their
+  /// own section, on the conversation's `ConversationMCPStore`.
   func loadDetails() async {
     guard let directory else { return }
-    async let services = client.sessionServices(sessionID: id, directory: directory)
-    async let servers = try? client.mcpServers(directory: directory)
-    self.services = await services
-    mcps = await servers ?? []
-  }
-
-  /// The same switch as the composer's MCP panel: it changes the MCP for every session of this directory.
-  func toggle(_ server: MCPServer) async {
-    guard let directory else { return }
-    let enabled = server.status.status != .connected
-    await act("mcp:" + server.name) {
-      try await self.client.toggleMCP(server.name, enabled: enabled, directory: directory)
-      self.mcps = try await self.client.mcpServers(directory: directory)
-    }
+    services = await client.sessionServices(sessionID: id, directory: directory)
   }
 
   func dismiss(_ resource: SessionResource) async {
