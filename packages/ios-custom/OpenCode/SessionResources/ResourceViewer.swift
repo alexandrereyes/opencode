@@ -89,7 +89,11 @@ struct ResourceViewerShell<Surface: View, Tools: View, Bottom: View>: View {
   private var screen: some View {
     ZStack {
       surface()
+      #if os(iOS)
       ResourceTouchOverlay(model: model, contentSize: contentSize, indicator: theme.uiColor(.primary))
+      #else
+      ResourceTouchOverlay(model: model, contentSize: contentSize, indicator: theme.nsColor(.primary))
+      #endif
     }
 
     .overlay {
@@ -263,12 +267,21 @@ struct ResourceControlBar<Accessory: View>: View {
         .accessibilityIdentifier("resource-take")
       }
       accessory()
-      Text(model.inControl ? "A alça na borda mostra e oculta os controles" : "Toque na tela para ocultar os controles")
+      Text(model.inControl ? "A alça na borda mostra e oculta os controles" : Self.hint)
         .appFont(.micro).foregroundStyle(theme.color(.textSecondary)).padding(.horizontal, 10).padding(.vertical, 4)
         .resourceGlass(.capsule)
     }
     .padding(.bottom, 10)
   }
+}
+
+extension ResourceControlBar {
+  #if os(iOS)
+  fileprivate static var hint: String { "Toque na tela para ocultar os controles" }
+  #else
+  /// On the Mac a click is a touch once in control, and the keyboard types into the resource.
+  fileprivate static var hint: String { "Clique na tela para ocultar os controles · em controle, o teclado digita nele" }
+  #endif
 }
 
 extension ResourceControlBar where Accessory == EmptyView {

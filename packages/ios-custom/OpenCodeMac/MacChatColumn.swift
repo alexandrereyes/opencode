@@ -20,7 +20,9 @@ struct MacChatColumn: View {
   var body: some View {
     Group {
       if let id = shownID {
-        MacConversationView(conversation: store.conversation(id), sessions: store, runtime: runtime)
+        let master = runtime.selection.master && runtime.selection.childID == nil
+        MacConversationView(conversation: store.conversation(id, master: master), sessions: store, runtime: runtime,
+          master: master)
           .id(id)
       } else {
         ContentUnavailableView("Nenhuma sessão selecionada", systemImage: "bubble.left.and.bubble.right",
@@ -40,7 +42,8 @@ struct MacChatColumn: View {
         let conversation = shownID.flatMap { store.liveConversation($0) }
         MacChatTitle(
           store: store, runtime: runtime,
-          title: conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
+          title: runtime.selection.master && runtime.selection.childID == nil ? "Sessão mestra"
+            : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
           usage: conversation?.sessionUsage,
           running: conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true))
         .padding(.leading, 6)
@@ -84,6 +87,8 @@ struct MacConversationView: View {
   @Bindable var conversation: ConversationStore
   let sessions: SessionStore
   @Bindable var runtime: MacRuntime
+  /// The Sessão mestra: its own agent and title, like the iPhone's master conversation.
+  var master = false
   @State private var search = ConversationSearchState()
   @State private var revertCandidate: ConversationMessage?
   @State private var commenting: ChatQuote?
@@ -154,6 +159,7 @@ struct MacConversationView: View {
       await conversation.mcps.load(directory: conversation.session?.location.directory)
     }
     .task { await draft.load() }
+    .onAppear { if conversation.masterMode != master { conversation.masterMode = master } }
     #if DEBUG
     .onChange(of: conversation.hasTranscript, initial: true) { _, loaded in
       // Captures can show the first activity card open (`-OpenCodeMacOpenActivity`), like the approved mock.
@@ -189,12 +195,13 @@ struct MacConversationView: View {
     return VStack(spacing: 0) {
       HStack(spacing: 10) {
         Button {
-          back(to: parent)
+          transcript?.capture()
+          runtime.backToParent()
         } label: {
           Label(parentTitle, systemImage: "chevron.left").lineLimit(1)
         }
         .buttonStyle(.plain).foregroundStyle(theme.color(.text))
-        .keyboardShortcut("[", modifiers: .command)
+        // ⌘[ lives in the menu bar (Ir ▸ Voltar à sessão principal), which works wherever the focus is.
         .help("Voltar à sessão principal (⌘[)")
         .accessibilityIdentifier("subagent-back")
         Text("›").foregroundStyle(theme.color(.textWeak))
@@ -210,17 +217,6 @@ struct MacConversationView: View {
       .appFont(.secondary)
       .padding(.horizontal, 24).padding(.vertical, 8)
       ContextHairline()
-    }
-  }
-
-  private func back(to parent: String) {
-    transcript?.capture()
-    if runtime.selection.sessionID == parent {
-      runtime.selection.childID = nil
-    } else if sessions.rows.contains(where: { $0.id == parent }) {
-      runtime.selection = MacSelection(sessionID: parent)
-    } else {
-      runtime.selection.childID = parent
     }
   }
 

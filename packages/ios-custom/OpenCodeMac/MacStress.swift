@@ -41,18 +41,26 @@ import SwiftUI
     await step("fechar Arquivos") { runtime.selection.files = nil }
     await step("LLM proxy") { openWindow(id: MacProxyWindow.id) }
     await step("fechar LLM proxy") { NSApp.windows.first { $0.title == "LLM proxy" }?.close() }
+    await step("Nova sessão") { runtime.newSession() }
+    await step("fechar Nova sessão") { runtime.newSessionRequest = nil }
+    await step("Trocar de sessão") { runtime.switcherVisible = true }
+    await step("fechar Trocar de sessão") { runtime.switcherVisible = false }
+    await step("seleção") { if let id = runtime.selection.sessionID { runtime.sessionSelection.start(id) } }
+    await step("fim da seleção") { runtime.sessionSelection.clear() }
+    await step("recurso") { openWindow(id: "resource", value: "res_iphone") }
+    await step("fechar recurso") { NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("resource") == true }?.close() }
     await step("parada \(Int(idle)) s", wait: idle) { window.makeKeyAndOrderFront(nil) }
     finish("ok", status: 0)
   }
 
   /// Launched from a shell while the screen is locked, SwiftUI opens no window until the app is activated;
-  /// the stress run opens one through File ▸ New Window.
+  /// the stress run and the captures open one through Arquivo ▸ Nova janela.
   static func openWindowIfNeeded() {
     guard enabled || MacCapture.folder != nil || ScrollFixtures.mode != nil else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
       guard !NSApp.windows.contains(where: \.isVisible) else { return }
       func items(_ menu: NSMenu?) -> [NSMenuItem] { (menu?.items ?? []).flatMap { [$0] + items($0.submenu) } }
-      guard let item = items(NSApp.mainMenu).first(where: { $0.keyEquivalent == "n" }), let menu = item.menu else { return }
+      guard let item = items(NSApp.mainMenu).first(where: { $0.title == "Nova janela" }), let menu = item.menu else { return }
       menu.performActionForItem(at: menu.index(of: item))
     }
   }

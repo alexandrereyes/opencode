@@ -117,14 +117,17 @@ private struct MacPromptRow: View {
   let pending: InboxItem?
   let expanded: Bool
   let context: MacTranscriptContext
+  /// Você ▸ Leitura ▸ Recolher mensagens longas do usuário (the iPhone's switch, in Ajustes ▸ Leitura on the Mac).
+  @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
   @State private var copied = false
 
   private var store: ConversationStore { context.store }
   private var bubbleTheme: AppTheme { pending == nil ? theme : theme.pendingUserBubble }
   private var text: String { message.displayText }
+  /// Like the iPhone's `UserBubble`: with the switch on, a long prompt or one carrying quotes folds to two lines;
+  /// off, every prompt shows whole.
   private var folds: Bool {
-    let quotes = !message.quotes.isEmpty
-    return quotes || MacPromptRow.truncates(text, width: bubbleWidth)
+    collapsible && (!message.quotes.isEmpty || MacPromptRow.truncates(text, width: bubbleWidth))
   }
   /// The text's width inside the bubble: the content column less the 80-point spacer and the bubble's padding.
   private var bubbleWidth: CGFloat { max(120, min(760, context.width - context.inset * 2) - 80 - 28) }
@@ -404,7 +407,7 @@ private struct MacResponseBlock: View {
 }
 
 /// Simple selectable text for blocks without their own view (notes, disclosures' bodies, formulas).
-private struct MacBlockText: View {
+struct MacBlockText: View {
   @Environment(\.appTheme) private var theme
   let blocks: [MarkdownBlock]
   var body: some View {
@@ -421,7 +424,7 @@ private struct MacBlockText: View {
   }
 }
 
-private struct MacFormula: View {
+struct MacFormula: View {
   @Environment(\.appTheme) private var theme
   let formula: MarkdownFormula
   var raster: ResponseFormulaRaster?
@@ -445,7 +448,7 @@ private struct MacFormula: View {
   }
 }
 
-private struct MacCodeBlock: View {
+struct MacCodeBlock: View {
   @Environment(\.appTheme) private var theme
   let block: MarkdownBlock
   let language: String?
@@ -483,7 +486,7 @@ private struct MacCodeBlock: View {
   }
 }
 
-private struct MacTable: View {
+struct MacTable: View {
   @Environment(\.appTheme) private var theme
   let block: MarkdownBlock
   var body: some View {
@@ -534,7 +537,7 @@ private struct MacTableCell: View {
   }
 }
 
-private struct MacDiagram: View {
+struct MacDiagram: View {
   @Environment(\.appTheme) private var theme
   let source: String
   let block: MarkdownBlock

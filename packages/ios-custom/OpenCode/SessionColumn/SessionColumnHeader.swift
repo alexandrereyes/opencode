@@ -12,6 +12,34 @@ struct SessionColumnSelection {
   let cancel: () -> Void
 }
 
+/// `N selecionadas · Selecionar todas · OK`, under the header while the selection mode is on. The Mac, which has
+/// no header, shows it above its rows with the batch actions beside it.
+struct SessionSelectionBar: View {
+  @Environment(\.appTheme) private var theme
+  let selection: SessionColumnSelection
+
+  var body: some View {
+    HStack(spacing: 16) {
+      Text(SessionBulkCopy.count(selection.count))
+        .appFont(.secondary, weight: .semibold).monospacedDigit()
+        .foregroundStyle(theme.color(.textStrong))
+        .accessibilityIdentifier("sessions-selection-count")
+      Spacer(minLength: 0)
+      Button("Selecionar todas", action: selection.selectAll)
+        .disabled(!selection.canSelectAll || selection.working)
+        .opacity(selection.canSelectAll && !selection.working ? 1 : 0.4)
+      Button("OK", action: selection.cancel)
+        .fontWeight(.semibold)
+        .accessibilityLabel("Sair da seleção")
+        .accessibilityIdentifier("sessions-selection-done")
+    }
+    .appFont(.secondary)
+    .buttonStyle(.plain)
+    .foregroundStyle(theme.color(.textAccent))
+    .frame(minHeight: 32)
+  }
+}
+
 /// The title row of the Sessões column: "Sessões", then voice, the optional Configurações and Nova sessão.
 /// iOS keeps settings in Você and passes no `settings` action; the Mac passes one to show the gear.
 struct SessionColumnHeader: View {
@@ -41,7 +69,7 @@ struct SessionColumnHeader: View {
           buttons
         }
       }
-      if let selection { selectionBar(selection) }
+      if let selection { SessionSelectionBar(selection: selection) }
     }
     .padding(.horizontal, AppLayout.margin)
     .padding(.top, 4)
@@ -111,27 +139,6 @@ struct SessionColumnHeader: View {
       }
       .buttonStyle(.plain)
     }
-  }
-
-  private func selectionBar(_ selection: SessionColumnSelection) -> some View {
-    HStack(spacing: 16) {
-      Text(SessionBulkCopy.count(selection.count))
-        .appFont(.secondary, weight: .semibold).monospacedDigit()
-        .foregroundStyle(theme.color(.textStrong))
-        .accessibilityIdentifier("sessions-selection-count")
-      Spacer(minLength: 0)
-      Button("Selecionar todas", action: selection.selectAll)
-        .disabled(!selection.canSelectAll || selection.working)
-        .opacity(selection.canSelectAll && !selection.working ? 1 : 0.4)
-      Button("OK", action: selection.cancel)
-        .fontWeight(.semibold)
-        .accessibilityLabel("Sair da seleção")
-        .accessibilityIdentifier("sessions-selection-done")
-    }
-    .appFont(.secondary)
-    .buttonStyle(.plain)
-    .foregroundStyle(theme.color(.textAccent))
-    .frame(minHeight: 32)
   }
 
   private func symbol(_ name: String, color: ThemeRole) -> some View {

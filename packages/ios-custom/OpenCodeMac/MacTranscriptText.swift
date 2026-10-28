@@ -259,6 +259,8 @@ final class MacResponseTextView: NSTextView {
   var prose: MarkdownProse?
   var part: TranscriptPart?
   weak var context: MacTranscriptContext?
+  /// Outside a transcript (a Markdown file in Arquivos) the theme comes from the host instead.
+  var standaloneTheme: AppTheme?
   private var quoteRanges: [(NSRange, Int)] = []
   private var ruleRanges: [NSRange] = []
 
@@ -313,7 +315,7 @@ final class MacResponseTextView: NSTextView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
-    guard let theme = context?.theme else { return }
+    guard let theme = context?.theme ?? standaloneTheme else { return }
     for (range, depth) in quoteRanges {
       guard let rect = rect(for: range) else { continue }
       theme.nsColor(.borderStrong).setFill()
@@ -343,14 +345,15 @@ final class MacResponseTextView: NSTextView {
 
   override func clicked(onLink link: Any, at charIndex: Int) {
     guard let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:)) else { return }
-    context?.open(url)
+    if let context { return context.open(url) }
+    if FileReference.path(url) == nil { NSWorkspace.shared.open(url) }
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
     let menu = NSMenu()
     if selectedRange().length > 0 {
       menu.addItem(withTitle: "Copiar", action: #selector(copy(_:)), keyEquivalent: "")
-      if quote() != nil {
+      if context != nil, quote() != nil {
         menu.addItem(withTitle: "Comentar…", action: #selector(comment), keyEquivalent: "").target = self
       }
     }
@@ -380,5 +383,54 @@ final class MacResponseTextView: NSTextView {
   override func keyDown(with event: NSEvent) {
     if context?.scrollKey(event) == true { return }
     super.keyDown(with: event)
+  }
+}
+
+/// Markdown outside a conversation (a file in Arquivos), with the chat's renderer: the shared parse
+/// (`ResponseMarkdownCache`: highlight.js colors, measured formulas), prose in the transcript's text view and the
+/// transcript's block views.
+struct MacMarkdownText: View {
+  @Environment(\.appTheme) private var theme
+  let text: String
+  @State private var sections: [MarkdownSection] = []
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      ForEach(sections) { section in
+        switch section {
+        case .prose(let prose): MacStandaloneProse(prose: prose, theme: theme)
+        case .block(let block):
+          switch block.kind {
+          case .code(let language): MacCodeBlock(block: block, language: language)
+          case .table: MacTable(block: block)
+          case .formula: block.runs.first?.formula.map { MacFormula(formula: $0) }
+          default: MacBlockText(blocks: [block])
+          }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .task(id: text) {
+      sections = MarkdownBlocks.sections(MarkdownBlocks.parse(text))
+      sections = MarkdownBlocks.sections(await ResponseMarkdownCache.shared.parse(text))
+    }
+  }
+}
+
+/// One prose run in its selectable text view, sized to its width.
+private struct MacStandaloneProse: NSViewRepresentable {
+  let prose: MarkdownProse
+  let theme: AppTheme
+
+  func makeNSView(context: Context) -> MacResponseTextView { MacResponseTextView() }
+
+  func updateNSView(_ view: MacResponseTextView, context: Context) {
+    view.standaloneTheme = theme
+    view.show(MacResponseTextStyle.text(prose, theme: theme), prose: prose, theme: theme)
+  }
+
+  func sizeThatFits(_ proposal: ProposedViewSize, nsView: MacResponseTextView, context: Context) -> CGSize? {
+    guard let width = proposal.width, width > 0 else { return nil }
+    return CGSize(width: width, height: nsView.fittingHeight(width: width))
   }
 }

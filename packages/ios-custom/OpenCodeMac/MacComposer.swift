@@ -17,6 +17,9 @@ struct MacComposer: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
+  /// Inside another screen (Nova sessão): only the editor card, which that screen sends from; it shows the model,
+  /// MCPs and agent itself.
+  var embedded: MacComposerEmbedding? = nil
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
   @State private var picking: MacPicker?
@@ -24,7 +27,8 @@ struct MacComposer: View {
 
   private var hasContent: Bool { draft.hasText || !draft.attachments.isEmpty || !draft.quotes.isEmpty }
   private var canSubmit: Bool {
-    hasContent && !draft.sending && !draft.importing && store.ready && store.selectedModel(draft) != nil
+    if let embedded { return embedded.canSubmit }
+    return hasContent && !draft.sending && !draft.importing && store.ready && store.selectedModel(draft) != nil
   }
 
   var body: some View {
@@ -50,7 +54,7 @@ struct MacComposer: View {
       }
       if !draft.quotes.isEmpty { MacDraftQuotes(draft: draft, store: store) }
       card
-      footer
+      if embedded == nil { footer }
     }
     .onAppear { draft.editorOwner = owner }
     #if DEBUG
@@ -92,12 +96,14 @@ struct MacComposer: View {
         .padding(.horizontal, 4).padding(.top, 2)
       HStack(spacing: 8) {
         attach
-        ComposerModelChip(label: store.modelLabel(store.selectedModel(draft)).isEmpty ? "Modelo"
-          : store.modelLabel(store.selectedModel(draft))) { picking = .model }
-          .buttonStyle(.plain).foregroundStyle(theme.color(.text))
-          .help("Modelo e esforço")
-          .accessibilityIdentifier("model-picker")
-        if store.mcps.summary.visible { mcp }
+        if embedded == nil {
+          ComposerModelChip(label: store.modelLabel(store.selectedModel(draft)).isEmpty ? "Modelo"
+            : store.modelLabel(store.selectedModel(draft))) { picking = .model }
+            .buttonStyle(.plain).foregroundStyle(theme.color(.text))
+            .help("Modelo e esforço")
+            .accessibilityIdentifier("model-picker")
+          if store.mcps.summary.visible { mcp }
+        }
         Spacer(minLength: 4)
         action
       }
@@ -166,7 +172,7 @@ struct MacComposer: View {
       .accessibilityLabel("Enviar")
       .accessibilityIdentifier("composer-send")
       .contextMenu {
-        if store.executing {
+        if embedded == nil, store.executing {
           Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
             Task { await store.send(draft, alternate: true) }
           }
@@ -243,6 +249,7 @@ struct MacComposer: View {
 
   private func submit() {
     guard canSubmit else { return }
+    if let embedded { return embedded.submit() }
     Task { await store.send(draft) }
   }
 
@@ -264,6 +271,8 @@ struct MacComposer: View {
         draft.selection = NSRange(location: 0, length: 0)
         return
       }
+      // Embedded, the host screen shows the model and agent pickers itself.
+      guard embedded == nil else { return }
       if item.token.id == "model" { picking = .model }
       if item.token.id == "agent", !store.isChild, !store.masterMode { picking = .agent }
       return
@@ -374,6 +383,12 @@ struct MacComposerEditor: NSViewRepresentable {
       if parent.draft.selection != range { parent.draft.selection = range }
     }
   }
+}
+
+/// The composer inside another screen: when it may send, and how.
+struct MacComposerEmbedding {
+  let canSubmit: Bool
+  let submit: () -> Void
 }
 
 /// Model and effort, and the agent, chosen for the next prompt (the composer's capsule, `/model`, `/agent`).

@@ -53,6 +53,9 @@ private struct MacFixtureServer: Sendable {
   let pictures: [String: String]
   private let minute = 60_000.0
   private let home = "/Users/alexandremartins"
+  /// `-OpenCodeMacFixtureAttention`: one root asking permission, one asking a question and one failed, for the
+  /// "Precisa de você" section, the Dock badge and the alerts.
+  private let attention = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixtureAttention")
 
   func respond(_ request: URLRequest) -> String? {
     guard let url = request.url else { return nil }
@@ -68,7 +71,7 @@ private struct MacFixtureServer: Sendable {
         + (["ses_mac_root", "ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
           .joined(separator: ",") + "}}"
     case "/api/session": return #"{"data":[],"cursor":{}}"#
-    case "/api/model": return #"{"data":[{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}}]}"#
+    case "/api/model": return #"{"data":[{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}},{"id":"gpt-6-luna","providerID":"llm-proxy","name":"Luna 6","variants":[{"id":"low"},{"id":"medium"}],"limit":{"context":400000}},{"id":"sol-6.1","providerID":"llm-proxy","name":"Sol 6.1","limit":{"context":400000}}]}"#
     case "/api/agent":
       return #"{"data":["# + ["build", "explore", "opushigh", "terraxhigh", "terrahigh"].map {
         #"{"id":"\#($0)","name":"\#($0)","mode":"\#($0 == "build" ? "primary" : "subagent")"}"#
@@ -76,8 +79,24 @@ private struct MacFixtureServer: Sendable {
     case "/api/shell":
       return #"{"data":[{"id":"shl_dev","status":"running","command":"bun run dev --port 4177","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 12 * minute)}},{"id":"shl_test","status":"running","command":"xcodebuild test -scheme OpenCode","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 3 * minute)}}]}"#
     case "/api/vcs/diff": return "{\"data\":\(changes)}"
+    // The composer's suggestions (`/` commands, `$` skills, `@` references, `#` snippets).
+    case "/api/command":
+      return #"{"data":[{"name":"review","description":"Revisar as mudanças"},{"name":"commit","description":"Analisa as mudanças e faz o commit"}]}"#
+    case "/api/skill": return #"{"data":[{"id":"playwright-cli","name":"playwright-cli","description":"Automatiza o navegador"}]}"#
+    case "/api/reference": return #"{"data":[]}"#
     case "/api/model/default": return #"{"data":{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}}}"#
+    // Nova sessão: the opencode2 project with two worktrees, its branches, configuration and MCPs.
+    case "/api/vcs": return #"{"data":{"provider":"git","branch":{"current":"custom"}}}"#
+    case "/api/vcs/branch": return #"{"data":["custom","mac-app","dev","upstream-dev","transcript-rewrite"]}"#
+    case "/api/worktree":
+      return #"[{"directory":"\#(home)/Worktrees/opencode2-mac-app"},{"directory":"\#(home)/Worktrees/opencode2-sidebar"}]"#
+    case "/api/worktree/refresh": return "{}"
+    case "/api/location": return #"{"directory":"\#(root)"}"#
     case "/api/provider": return #"{"data":[{"id":"llm-proxy","name":"LLM proxy"}]}"#
+    case "/api/config": return #"[{"type":"document","info":{"default_agent":"build"}}]"#
+    // Detalhes: the plugins of the directory.
+    case "/api/plugin":
+      return #"{"data":[{"name":"app-custom","state":{"status":"active"}},{"name":"opencode-notify","state":{"status":"disabled"}}]}"#
     case "/api/mcp":
       return #"{"data":[{"name":"chrome-devtools","status":{"status":"connected"}},{"name":"github","status":{"status":"disabled"}},{"name":"linear","status":{"status":"disabled"}},{"name":"sentry","status":{"status":"needs_auth"}}]}"#
     case "/api/session/\(MacFixture.rootID)/inbox":
@@ -85,7 +104,20 @@ private struct MacFixtureServer: Sendable {
     case "/api/fs/list":
       return list(query.first { $0.name == "path" }?.value ?? query.first { $0.name == "location[directory]" }?.value ?? root)
     case "/api/fs/find": return find(query.first { $0.name == "query" }?.value ?? "")
+    case "/api/form":
+      return attention
+        ? #"{"data":[{"id":"frm_mac_docs","sessionID":"ses_mac_docs","title":"Pergunta","fields":[{"key":"nome","type":"string","title":"Qual nome usar para o módulo de capturas?"}],"metadata":{"kind":"question"}}]}"#
+        : #"{"data":[]}"#
     default:
+      // A background task's output, read by cursor like the server's file-backed output.
+      if path.hasPrefix("/api/shell/"), path.hasSuffix("/output") {
+        let text = (1...24).map { "[vite] página recarregada · \($0 * 7) ms" }.joined(separator: "\n") + "\n"
+        let data = Array(text.utf8)
+        let cursor = min(Int(query.first { $0.name == "cursor" }?.value ?? "0") ?? 0, data.count)
+        let chunk = String(decoding: data[cursor...], as: UTF8.self)
+        let encoded = String(decoding: try! JSONEncoder().encode(chunk), as: UTF8.self)
+        return #"{"data":{"output":\#(encoded),"cursor":\#(data.count),"size":\#(data.count),"truncated":false}}"#
+      }
       if path.hasPrefix("/api/session/"), path.hasSuffix("/inbox") { return #"{"data":[]}"# }
       if path.hasPrefix("/api/session/") {
         let id = String(path.dropFirst("/api/session/".count))
@@ -99,11 +131,15 @@ private struct MacFixtureServer: Sendable {
     let output: String? = switch name {
     case "custom.navigation/list": #"{"data":[\#(navigation)],"next":null}"#
     case "custom.preferences/get": preferences
-    case "custom.requests/permissions": "[]"
+    case "custom.requests/permissions":
+      attention ? #"[{"id":"per_mac_sidebar","sessionID":"ses_mac_sidebar","action":"shell","resources":["git push --force-with-lease"]}]"# : "[]"
     case "custom.worktrees/available": "true"
+    case "custom.snippets/list": #"{"items":[]}"#
     case "custom.chats/info": #"{"root":"\#(home)/Chats"}"#
     case "custom.master/info": #"{"version":1,"agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy"}}"#
     case "custom.directories/home": #"{"path":"\#(home)"}"#
+    case "custom.worktrees/branches":
+      #"[{"directory":"\#(home)/Dev/opencode2","branch":"custom"},{"directory":"\#(home)/Worktrees/opencode2-mac-app","branch":"mac-app"},{"directory":"\#(home)/Worktrees/opencode2-sidebar","branch":"sidebar-v2"}]"#
     case "custom.worktrees/locate":
       "[" + (input?["directories"]?.array?.compactMap(\.string) ?? []).map { directory in
         let branch = directory == root ? "mac-app" : "main"
@@ -118,9 +154,17 @@ private struct MacFixtureServer: Sendable {
         ? #"{"data":[\#(Self.children.map { session($0) }.joined(separator: ","))],"next":null}"#
         : #"{"data":[],"next":null}"#
     case "custom.transcript/list": transcript(input?["sessionID"]?.string ?? "")
+    case "custom.transcript/skills":
+      #"{"data":[{"id":"opencode-custom","name":"opencode-custom"},{"id":"mac-prints","name":"Capturas do app de Mac"},{"id":"swift-testing","name":"Swift Testing"}]}"#
     case "custom.resources/list": #"{"resources":[\#(resources)]}"#
     case "custom.resources/get":
       resourceList.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }
+    case "custom.resources/control":
+      resourceList.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }.map { resource in
+        let ticket = input?["action"]?.string == "release" ? "null"
+          : #"{"ticket":"fixture","expiresAt":\#(now + 120_000),"path":"/resources/fixture","loopbackPort":9}"#
+        return #"{"resource":\#(resource),"ticket":\#(ticket)}"#
+      }
     case "custom.resources/snapshot":
       pictures[input?["id"]?.string ?? ""].map {
         #"{"mime":"image/png","data":"\#($0)","takenAt":\#(now - 2_000),"width":640,"height":400}"#
@@ -182,6 +226,8 @@ private struct MacFixtureServer: Sendable {
     let minutes: Double
     var outcome: String? = nil
     var viewed = true
+    var permission = false
+    var question = false
   }
 
   private var roots: [Root] {
@@ -193,11 +239,11 @@ private struct MacFixtureServer: Sendable {
       Root(id: "ses_mac_live", title: "Live activity", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
         minutes: 12),
       Root(id: "ses_mac_sidebar", title: "Refatorar sidebar", directory: home + "/Dev/opencode2", project: "prj_opencode2",
-        minutes: 120),
+        minutes: 120, permission: attention),
       Root(id: "ses_mac_docs", title: "Docs da arquitetura", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
-        minutes: 240),
+        minutes: 240, question: attention),
       Root(id: "ses_mac_qa", title: "Acerto QA autônomo", directory: home + "/Dev/abacato-v2", project: "prj_opencode2",
-        minutes: 360),
+        minutes: 360, outcome: attention ? "failed" : nil, viewed: !attention),
       Root(id: "ses_mac_ios", title: "Live Activity iOS", directory: home + "/Dev/ios-live-activity",
         project: "prj_ios", minutes: max(midnight + 60, 18 * 60)),
       Root(id: "ses_mac_android", title: "Conversas Android", directory: home + "/Dev/android-chat",
@@ -217,7 +263,9 @@ private struct MacFixtureServer: Sendable {
   private var navigation: String {
     roots.map { value in
       let at = now - value.minutes * minute
-      return #"{"session":\#(rootSession(value)),"messageAt":\#(at)}"#
+      let requests = (value.permission ? #","permissionAt":\#(at),"permissionCount":1"# : "")
+        + (value.question ? #","questionAt":\#(at),"questionCount":1"# : "")
+      return #"{"session":\#(rootSession(value)),"messageAt":\#(at)\#(requests)}"#
     }.joined(separator: ",")
   }
 

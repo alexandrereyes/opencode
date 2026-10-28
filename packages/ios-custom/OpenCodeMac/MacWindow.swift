@@ -7,9 +7,11 @@ struct MacWindow: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) private var openSettings
   @Bindable var store: SessionStore
   @Bindable var runtime: MacRuntime
   @State private var context: ContextColumnStore?
+  @State private var restored = false
   @AppStorage("OpenCodeMacContextWidth") private var contextWidth = 520.0
 
   var body: some View {
@@ -39,6 +41,24 @@ struct MacWindow: View {
       select(id)
     }))
     .sessionRowTimeline()
+    // Nova sessão and the archive confirmation belong to the window, so they open with Sessões collapsed too.
+    .sheet(item: $runtime.newSessionRequest) { request in
+      MacNewSession(store: store, runtime: runtime, request: request)
+    }
+    .confirmationDialog(
+      "Arquivar sessão?",
+      isPresented: Binding(get: { runtime.archiveRequest != nil }, set: { if !$0 { runtime.archiveRequest = nil } })
+    ) {
+      if let row = runtime.archiveRequest {
+        Button("Arquivar", role: .destructive) {
+          Task { await store.archive(row) }
+          runtime.archiveRequest = nil
+        }
+      }
+      Button("Cancelar", role: .cancel) { runtime.archiveRequest = nil }
+    } message: {
+      Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
+    }
     // The event stream stays open while the window is visible, the app frontmost or not: on the Mac the chat is
     // read beside other apps. Only a hidden or minimized window (`background`) stops it.
     .task(id: scenePhase == .background) { if scenePhase != .background { await store.run() } }
@@ -56,16 +76,17 @@ struct MacWindow: View {
       context = next
       await next.run()
     }
-    // Shared views (alerts, Arquivadas) open a session by pushing an iPhone route; here that selects it.
+    // Shared views (alerts, Arquivadas, notifications) open a session by pushing an iPhone route; here that
+    // selects it.
     .onChange(of: store.conversationPath.last?.id) { _, id in
       guard let id else { return }
       store.conversationPath = []
       select(id)
     }
-    .onChange(of: store.rows.first?.id, initial: true) { _, _ in
-      guard runtime.selection.sessionID == nil else { return }
+    .onChange(of: store.rows.map(\.id), initial: true) { _, ids in
+      guard !ids.isEmpty else { return }
       #if DEBUG
-      if let id = MacFixture.value("-OpenCodeMacSession") {
+      if runtime.selection.sessionID == nil, let id = MacFixture.value("-OpenCodeMacSession") {
         runtime.selection.sessionID = id
         // `-OpenCodeMacChildAfter <s>` opens the child that long after the root, as a click on its chip would.
         if let child = MacFixture.value("-OpenCodeMacChild") {
@@ -82,13 +103,34 @@ struct MacWindow: View {
         return
       }
       #endif
+      // The window reopens on the session it showed; one that is gone since (deleted, archived) falls back to
+      // the first row, like a first launch.
+      if !restored, let id = runtime.selection.sessionID, !runtime.selection.master, !ids.contains(id) {
+        runtime.selection = MacSelection()
+      }
+      restored = true
+      guard runtime.selection.sessionID == nil else { return }
       runtime.selection.sessionID = SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
         .first?.rows.first?.id
     }
+    .onChange(of: store.alerts.message?.id) { _, _ in
+      if let message = store.alerts.message {
+        MacNotifications.shared.post(message, server: store.client.configuration.url)
+      }
+    }
+    .onChange(of: store.requestCount, initial: true) { _, count in MacNotifications.shared.badge(count) }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      runtime.syncShown()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+      runtime.syncShown()
+    }
+    .onAppear { runtime.syncShown() }
     #if DEBUG
     .task {
       if MacProxyLaunch.pane != nil, MacCapture.folder != nil { openWindow(id: MacProxyWindow.id) }
-      await MacCapture.window(context: { context }, runtime: runtime, theme: theme)
+      await MacCapture.window(context: { context }, runtime: runtime, theme: theme, openWindow: openWindow,
+        openSettings: openSettings)
     }
     .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
     #endif
@@ -109,8 +151,12 @@ struct MacWindow: View {
     .background(theme.color(.background))
   }
 
-  /// A child session selects its root and opens the child in the middle column.
+  /// A child session selects its root and opens the child in the middle column; the master is selected as such.
   private func select(_ id: String) {
+    if id == store.masterID {
+      runtime.selection = MacSelection(sessionID: id, master: true)
+      return
+    }
     if store.rows.contains(where: { $0.id == id }) {
       runtime.selection = MacSelection(sessionID: id)
       return

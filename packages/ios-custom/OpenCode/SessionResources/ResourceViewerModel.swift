@@ -1,7 +1,12 @@
 import Network
 import Observation
 import OpenCodeKit
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+import ImageIO
+#endif
 
 /// One open resource viewer: the hub stream (WebSocket), control (take/return) and input. Kind views read `image`
 /// for JPEG/PNG streams or install `rawFrames` for other formats (H.264), and send input with `send(_:)`.
@@ -24,7 +29,7 @@ import UIKit
   }
 
   private(set) var resource: SessionResource
-  private(set) var image: UIImage?
+  private(set) var image: ResourceImage?
   private(set) var hello: (format: String, width: Int, height: Int)?
   private(set) var meta: [String: JSONValue] = [:]
   private(set) var holder: Holder = .agent
@@ -121,8 +126,24 @@ import UIKit
     return lines
   }
 
+  #if DEBUG
+  /// Offline captures (the Mac fixture has no hub): a still frame instead of the stream.
+  static var fixtureFrame: (@MainActor (SessionResource) async -> ResourceImage?)?
+  #endif
+
   func start() {
     guard connection == nil, !finished else { return }
+    #if DEBUG
+    if let fixture = Self.fixtureFrame {
+      connection = Task { [weak self] in
+        guard let self, let frame = await fixture(resource) else { return }
+        image = frame
+        connected = true
+        latency = 12
+      }
+      return
+    }
+    #endif
     path.pathUpdateHandler = { [weak self] update in
       let economy = update.isConstrained || update.isExpensive
       Task { @MainActor in self?.choose(economy ? "economy" : "standard") }
@@ -241,6 +262,9 @@ import UIKit
   }
 
   private func connect(with ticket: ResourceTicket?) {
+    #if DEBUG
+    if Self.fixtureFrame != nil { return }
+    #endif
     connection?.cancel()
     disconnect()
     connection = Task { [weak self] in await self?.run(ticket: ticket) }
@@ -400,10 +424,21 @@ import UIKit
     let current = generation
     let payload = frame.payload
     Task.detached(priority: .userInitiated) {
-      let image = UIImage(data: payload)?.preparingForDisplay()
+      #if os(iOS)
+      let decoded = UIImage(data: payload)?.preparingForDisplay()
+      #else
+      // NSImage is not Sendable: the bitmap is decoded here and wrapped on the main actor.
+      let decoded = CGImageSourceCreateWithData(payload as CFData, nil)
+        .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+      #endif
       await MainActor.run { [weak self] in
         guard let self, self.generation == current else { return }
         self.decoding = false
+        #if os(iOS)
+        let image = decoded
+        #else
+        let image = decoded.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        #endif
         if let image {
           self.image = image
           self.telemetry.frame(

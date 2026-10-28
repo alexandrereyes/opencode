@@ -38,7 +38,7 @@ struct AddProjectPicker: View {
           HStack(spacing: 10) {
             Image(systemName: "folder.badge.plus").foregroundStyle(theme.color(.icon))
             TextField("Digite o caminho de uma pasta", text: $query)
-              .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+              .pathInput()
               .foregroundStyle(theme.color(.text)).accessibilityIdentifier("add-project-path")
           }.listRowBackground(theme.color(.surface))
           // The web keeps this action beside the path field; it adds the typed folder, or creates it first.
@@ -105,11 +105,14 @@ struct AddProjectPicker: View {
         }
       }.scrollContentBackground(.hidden).background(theme.color(.background))
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("Adicionar repositório").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Adicionar repositório").inlineNavigationTitle()
         .toolbar {
           ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
         }
     }.tint(theme.color(.primary))
+    #if os(macOS)
+    .frame(minWidth: 520, idealWidth: 560, minHeight: 520, idealHeight: 620)
+    #endif
       .task { await start() }
       .task(id: started ? current.browsed : nil) { await list(current.browsed) }
       .onChange(of: query) { failure = nil }
@@ -176,6 +179,26 @@ struct AddProjectPicker: View {
         failure = "Não foi possível adicionar esta pasta. \(error.localizedDescription)"
       }
     }
+  }
+}
+
+extension View {
+  /// A field for paths, addresses and codes: no capitalization, correction or smart punctuation.
+  func pathInput() -> some View {
+    #if os(iOS)
+    textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+    #else
+    autocorrectionDisabled()
+    #endif
+  }
+
+  /// The iPhone's compact navigation title; a Mac sheet or window has no navigation bar.
+  func inlineNavigationTitle() -> some View {
+    #if os(iOS)
+    navigationBarTitleDisplayMode(.inline)
+    #else
+    self
+    #endif
   }
 }
 

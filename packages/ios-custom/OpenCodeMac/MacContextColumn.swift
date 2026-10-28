@@ -58,6 +58,8 @@ struct ContextColumnSections: View {
         ContextHairline()
         ContextResources(store: store).padding(.top, 14)
       }
+      ContextHairline()
+      ContextDetails(store: store, runtime: runtime).padding(.top, 14)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -299,6 +301,12 @@ private struct SubagentLine: View {
           .buttonStyle(.plain)
           .padding(.top, 3)
           .disabled(store.acting.contains(permission.id))
+        } else if subagent.status == .question, subagent.work.sessionID != nil {
+          HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Button("Responder ›", action: open).foregroundStyle(theme.color(.textStrong))
+          }
+          .appFont(.caption).buttonStyle(.plain).padding(.top, 3)
         }
       }
     }
@@ -341,7 +349,7 @@ private struct SubagentLine: View {
     if let permission = subagent.permission {
       current = permission.preview
     } else if subagent.status == .question {
-      current = "aguardando sua resposta"
+      current = store.question(subagent.work.sessionID).map { "pergunta · " + $0.preview } ?? "aguardando sua resposta"
     } else if subagent.status.live {
       current = subagent.work.sessionID.flatMap { store.activities[$0] } ?? "pensando"
     } else {
@@ -377,6 +385,7 @@ private struct ContextSpinner: View {
 private struct ContextTasks: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.sessionRowDate) private var now
+  @Environment(\.openWindow) private var openWindow
   let store: ContextColumnStore
 
   var body: some View {
@@ -391,13 +400,17 @@ private struct ContextTasks: View {
 
   private func row(_ task: SessionWork) -> some View {
     let label = ContextColumn.task(task.title)
-    return ContextListRow(
-      icon: taskSymbol(task.title),
-      title: label.command + (label.port.map { " · :" + String($0) } ?? ""),
-      state: task.running ? SessionList.relativeTime(task.started, now: now).label : task.state.label,
-      dimmed: !task.running)
+    return Button { output(task) } label: {
+      ContextListRow(
+        icon: taskSymbol(task.title),
+        title: label.command + (label.port.map { " · :" + String($0) } ?? ""),
+        state: task.running ? SessionList.relativeTime(task.started, now: now).label : task.state.label,
+        dimmed: !task.running)
+    }
+    .buttonStyle(.plain)
     .opacity(store.acting.contains(task.id) ? 0.5 : 1)
     .contextMenu {
+      Button("Ver saída", systemImage: "text.alignleft") { output(task) }.disabled(task.shellID == nil)
       if task.running {
         Button("Parar", systemImage: "stop.fill", role: .destructive) { Task { await store.stop(task) } }
       }
@@ -406,7 +419,14 @@ private struct ContextTasks: View {
         NSPasteboard.general.setString(task.title, forType: .string)
       }
     }
-    .help(task.title)
+    .help(task.title + " · clique para ver a saída")
+  }
+
+  /// The task's live output in its own window.
+  private func output(_ task: SessionWork) {
+    guard let shell = task.shellID, let directory = store.directory else { return }
+    openWindow(id: MacShellOutputWindow.id,
+      value: MacShellOutputWindow.Target(shellID: shell, directory: directory, command: task.title))
   }
 
   /// A build or test reads as a hammer; anything else (a dev server, a script) as running.
@@ -481,6 +501,138 @@ private struct ContextResources: View {
     guard !resource.state.running else { return resource.state.label }
     let at = resource.updatedAt > 0 ? resource.updatedAt : resource.lastUsedAt
     return at > 0 ? "Parado " + ContextColumn.ago(at, now: now) : "Parado"
+  }
+}
+
+// MARK: - Details
+
+/// The iPhone's Detalhes da sessão at the column's foot, closed by default: model and agent, the working
+/// directory (opens Arquivos), the MCPs with their switches, the skills the session loaded and the plugins.
+private struct ContextDetails: View {
+  @Environment(\.appTheme) private var theme
+  @Bindable var store: ContextColumnStore
+  let runtime: MacRuntime
+  @State private var allSkills = false
+  @State private var allPlugins = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button {
+        withAnimation(.snappy(duration: 0.2)) { store.detailsOpen.toggle() }
+      } label: {
+        ContextSectionLabel(title: "Detalhes", count: "") {
+          Image(systemName: store.detailsOpen ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(theme.color(.icon))
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(.bottom, store.detailsOpen ? 6 : 14)
+      .help(store.detailsOpen ? "Ocultar detalhes da sessão" : "Modelo, diretório, MCPs, skills e plugins")
+      if store.detailsOpen { details.padding(.bottom, 14) }
+    }
+  }
+
+  private var details: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      line("Modelo", modelLabel)
+      line("Agente", store.session?.agent ?? "—")
+      if let directory = store.directory {
+        HStack(alignment: .firstTextBaseline) {
+          Text("Diretório").foregroundStyle(theme.color(.textSecondary)).frame(width: 74, alignment: .leading)
+          Button { runtime.showFiles() } label: {
+            Text(directory).foregroundStyle(theme.color(.text)).lineLimit(2).truncationMode(.middle)
+              .multilineTextAlignment(.leading)
+          }
+          .buttonStyle(.plain)
+          .help("Abrir em Arquivos")
+          .contextMenu {
+            Button("Copiar caminho") {
+              NSPasteboard.general.clearContents()
+              NSPasteboard.general.setString(directory, forType: .string)
+            }
+            if FileManager.default.fileExists(atPath: directory) {
+              Button("Mostrar no Finder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory) }
+            }
+          }
+          Spacer(minLength: 0)
+        }
+      }
+      ContextHairline()
+      subheading("MCP", count: store.mcps?.count)
+      if let mcps = store.mcps {
+        if mcps.isEmpty { muted("Nenhum configurado") }
+        ForEach(mcps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { server in
+          mcpRow(server)
+        }
+      } else {
+        muted("Carregando…")
+      }
+      ContextHairline()
+      subheading("Skills", count: store.services?.skills?.count)
+      list(store.services.map { $0.skills?.map(\.name) }, all: $allSkills, empty: "Nenhuma skill carregada")
+      ContextHairline()
+      subheading("Plugins", count: store.services?.plugins?.count)
+      list(store.services.map { $0.plugins?.map { $0.id + " · " + $0.label } }, all: $allPlugins,
+        empty: "Nenhum configurado")
+    }
+    .appFont(.caption)
+  }
+
+  private var modelLabel: String {
+    guard let model = store.session?.model else { return "—" }
+    let name = store.models.first { $0.id == model.id && $0.providerID == model.providerID }?.name ?? model.id
+    return [name, model.variant].compactMap { $0 }.joined(separator: " · ")
+  }
+
+  private func line(_ title: String, _ value: String) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(title).foregroundStyle(theme.color(.textSecondary)).frame(width: 74, alignment: .leading)
+      Text(value).foregroundStyle(theme.color(.text)).lineLimit(1).textSelection(.enabled)
+      Spacer(minLength: 0)
+    }
+  }
+
+  private func subheading(_ title: String, count: Int?) -> some View {
+    HStack(spacing: 6) {
+      Text(title).fontWeight(.semibold).foregroundStyle(theme.color(.text))
+      if let count, count > 0 { Text("\(count)").monospacedDigit().foregroundStyle(theme.color(.textSecondary)) }
+    }
+  }
+
+  private func muted(_ text: String) -> some View {
+    Text(text).foregroundStyle(theme.color(.textSecondary))
+  }
+
+  private func mcpRow(_ server: MCPServer) -> some View {
+    let state = server.status.status
+    return Toggle(isOn: Binding(get: { server.enabled }, set: { _ in Task { await store.toggle(server) } })) {
+      HStack(spacing: 6) {
+        Text(server.name).foregroundStyle(theme.color(.text))
+        Text(state.label).foregroundStyle(theme.color(state == .failed ? .error : .textSecondary))
+        Spacer(minLength: 8)
+      }
+    }
+    .toggleStyle(.switch).controlSize(.mini)
+    .disabled(state == .pending || state == .unknown || store.acting.contains("mcp:" + server.name))
+    .help(server.status.error ?? "Altera o MCP para todas as sessões deste diretório")
+  }
+
+  /// The first five rows, then "Mostrar todos (N)", like the iPhone's collapsed sections.
+  @ViewBuilder private func list(_ items: [String]??, all: Binding<Bool>, empty: String) -> some View {
+    switch items {
+    case .none: muted("Carregando…")
+    case .some(.none): muted("Indisponível")
+    case .some(.some(let items)):
+      if items.isEmpty { muted(empty) }
+      ForEach(Array((all.wrappedValue ? items : Array(items.prefix(5))).enumerated()), id: \.offset) { _, item in
+        Text(item).foregroundStyle(theme.color(.text)).lineLimit(1).truncationMode(.middle)
+      }
+      if items.count > 5 {
+        Button(all.wrappedValue ? "Mostrar menos" : "Mostrar todos (\(items.count))") { all.wrappedValue.toggle() }
+          .buttonStyle(.plain).foregroundStyle(theme.color(.textAccent))
+      }
+    }
   }
 }
 

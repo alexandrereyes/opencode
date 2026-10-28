@@ -3,7 +3,8 @@ import OpenCodeKit
 import SwiftUI
 
 /// The Mac host of the shared Sessões column (`OpenCode/SessionColumn/`): selection instead of a push, the
-/// iPhone's swipe and long-press actions as a right-click menu, and Configurações in the header.
+/// iPhone's swipe and long-press actions as a right-click menu, the selection mode (⌘-click or Selecionar) with
+/// its batch actions, and the Sessão mestra accessory at the bottom, like the iPhone's tab accessory.
 struct MacSessionColumn: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.openSettings) private var openSettings
@@ -12,12 +13,12 @@ struct MacSessionColumn: View {
   @Bindable var runtime: MacRuntime
   @State private var renameCandidate: SessionRow?
   @State private var renameText = ""
-  @State private var archiveCandidate: SessionRow?
   @State private var deleteCandidate: Session?
   @State private var projectAction: ProjectAction?
   @State private var showArchived = false
   @State private var showProjects = false
-  @State private var showNewSession = false
+  @State private var bulkDelete: [SessionRow]?
+  @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
 
   private struct ProjectAction: Identifiable {
     let name: String
@@ -38,6 +39,7 @@ struct MacSessionColumn: View {
         } add: {
           showProjects = true
         }
+        if let selection = selectionActions { selectionBar(selection) }
       }
       .padding(.horizontal, AppLayout.margin)
       .padding(.top, 10).padding(.bottom, 6)
@@ -57,18 +59,23 @@ struct MacSessionColumn: View {
       }
       SessionColumnSections(
         store: store,
-        open: { runtime.selection = MacSelection(sessionID: $0.id) },
-        archived: { showArchived = true }
+        open: open,
+        archived: { showArchived = true },
+        selection: runtime.sessionSelection,
+        toggle: { row in
+          guard !store.busy.contains(SessionStore.bulkKey) else { return }
+          withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.toggle(row.id) }
+        }
       ) { row, content in
         content
           .background {
-            if runtime.selection.sessionID == row.id {
+            if !runtime.sessionSelection.active && runtime.selection.sessionID == row.id {
               RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
             }
           }
           // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
           .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
-          .contextMenu { rowActions(row) }
+          .contextMenu { if !runtime.sessionSelection.active { rowActions(row) } }
           .disabled(store.busy.contains(row.id))
       }
     }
@@ -76,6 +83,7 @@ struct MacSessionColumn: View {
     .environment(\.defaultMinListRowHeight, 1)
     .scrollContentBackground(.hidden)
     .background(theme.color(.background))
+    .safeAreaInset(edge: .bottom, spacing: 0) { MacMasterAccessory(store: store, runtime: runtime) }
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
     .toolbar {
@@ -84,14 +92,14 @@ struct MacSessionColumn: View {
         HStack(spacing: 4) {
           Button {} label: { MacToolbarIcon(symbol: "waveform") }
             .disabled(true)
-            .help("Conversa por voz (em breve no Mac)")
+            .help("Conversa por voz (só no iPhone por enquanto)")
             .accessibilityLabel("Conversar por voz")
           Button { openSettings() } label: { MacToolbarIcon(symbol: "gearshape") }
             .help("Configurações (⌘,)")
             .accessibilityLabel("Configurações")
-          Button { showNewSession = true } label: { MacToolbarIcon(symbol: "square.and.pencil") }
+          Button { runtime.newSession() } label: { MacToolbarIcon(symbol: "square.and.pencil") }
             .disabled(store.preferences == nil)
-            .help("Nova sessão")
+            .help("Nova sessão (⌘N)")
             .accessibilityLabel("Nova sessão")
         }
         .buttonStyle(.plain)
@@ -109,19 +117,24 @@ struct MacSessionColumn: View {
       }
     }
     .sessionDeleteConfirmation($deleteCandidate, store: store)
-    .confirmationDialog(
-      "Arquivar sessão?",
-      isPresented: Binding(get: { archiveCandidate != nil }, set: { if !$0 { archiveCandidate = nil } })
-    ) {
-      if let row = archiveCandidate {
-        Button("Arquivar", role: .destructive) {
-          Task { await store.archive(row) }
-          archiveCandidate = nil
-        }
+    .alert(
+      SessionBulkCopy.deleteTitle(bulkDelete?.count ?? 0),
+      isPresented: Binding(get: { bulkDelete != nil }, set: { if !$0 { bulkDelete = nil } }),
+      presenting: bulkDelete
+    ) { rows in
+      Button("Cancelar", role: .cancel) { bulkDelete = nil }
+      Button("Arquivar") {
+        bulkDelete = nil
+        archiveSelection(rows)
       }
-      Button("Cancelar", role: .cancel) { archiveCandidate = nil }
-    } message: {
-      Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
+      Button(SessionBulkCopy.deleteTitle(rows.count), role: .destructive) {
+        bulkDelete = nil
+        Task { runtime.sessionSelection.complete(await store.deleteMany(rows.map(\.session))) }
+      }
+    } message: { rows in
+      Text(SessionBulkCopy.deleteMessage(
+        count: rows.count, running: rows.filter { !$0.memberIDs.isDisjoint(with: store.active) }.count,
+        master: rows.contains { $0.session.agent == "mestra" }))
     }
     .confirmationDialog(
       projectAction?.removes == true
@@ -136,17 +149,102 @@ struct MacSessionColumn: View {
         }
       }
       Button("Cancelar", role: .cancel) { projectAction = nil }
+    } message: {
+      Text(projectAction?.name == "Chats"
+        ? "Isso altera apenas a ordem dos filtros."
+        : "Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
     }
     .sheet(isPresented: $showArchived) {
       ArchivedSessionsView(store: store).frame(minWidth: 460, minHeight: 520)
     }
-    .sheet(isPresented: $showProjects) { MacAddProject(store: store) }
-    .sheet(isPresented: $showNewSession) { MacNewSession(store: store, runtime: runtime) }
-    .onReceive(NotificationCenter.default.publisher(for: .macNewSession)) { _ in showNewSession = true }
+    .sheet(isPresented: $showProjects) { AddProjectPicker(store: store) }
+    // Like the web and the iPhone, changing the view ends the selection; hidden or removed rows leave it.
+    .onChange(of: store.filter) { runtime.sessionSelection.clear() }
+    .onChange(of: store.selectedProject) { runtime.sessionSelection.clear() }
+    .onChange(of: visibleIDs) { _, visible in runtime.sessionSelection.retain(Set(visible)) }
+    .onChange(of: runtime.bulkRequest) { _, request in
+      guard let request else { return }
+      runtime.bulkRequest = nil
+      switch request {
+      case .selectAll: selectionActions?.selectAll()
+      case .archive: selectionActions?.archive()
+      case .delete: selectionActions?.delete()
+      }
+    }
+  }
+
+  /// A click opens the session; ⌘-click starts or extends the selection, like Finder's lists.
+  private func open(_ row: SessionRow) {
+    if NSEvent.modifierFlags.contains(.command) {
+      withAnimation(.snappy(duration: 0.2)) {
+        if runtime.sessionSelection.active {
+          runtime.sessionSelection.toggle(row.id)
+        } else {
+          runtime.sessionSelection.start(row.id)
+        }
+      }
+      return
+    }
+    runtime.selection = MacSelection(sessionID: row.id)
+  }
+
+  /// `N selecionadas · Selecionar todas · OK`, then Arquivar (N) and Excluir (N) as plain links.
+  private func selectionBar(_ selection: SessionColumnSelection) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      SessionSelectionBar(selection: selection)
+      HStack(spacing: 14) {
+        Button("Arquivar (\(selection.count))", systemImage: "archivebox", action: selection.archive)
+        Button("Excluir (\(selection.count))", systemImage: "trash", role: .destructive, action: selection.delete)
+          .foregroundStyle(theme.color(.error))
+        Spacer(minLength: 0)
+        if selection.working { ProgressView().controlSize(.small) }
+      }
+      .appFont(.caption)
+      .buttonStyle(.plain)
+      .foregroundStyle(theme.color(.text))
+      .disabled(selection.working)
+    }
+    .padding(.horizontal, 8).padding(.vertical, 6)
+    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 10))
+    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+  }
+
+  /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
+  private var visibleIDs: [String] {
+    SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
+      .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
+  }
+
+  private var selectedRows: [SessionRow] {
+    let rows = Dictionary(store.filtered.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    return runtime.sessionSelection.ids.compactMap { rows[$0] }
+  }
+
+  private var selectionActions: SessionColumnSelection? {
+    guard runtime.sessionSelection.active else { return nil }
+    let visible = visibleIDs
+    return SessionColumnSelection(
+      count: runtime.sessionSelection.ids.count,
+      canSelectAll: visible.contains { !runtime.sessionSelection.contains($0) },
+      working: store.busy.contains(SessionStore.bulkKey),
+      archive: { archiveSelection(selectedRows) },
+      delete: { bulkDelete = selectedRows },
+      selectAll: { withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.selectAll(visible) } },
+      cancel: { withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.clear() } })
+  }
+
+  /// No confirmation and no undo, like the iPhone: the backend has no unarchive, and the rows stay in Arquivadas.
+  private func archiveSelection(_ rows: [SessionRow]) {
+    Task { runtime.sessionSelection.complete(await store.archiveMany(rows.map(\.id))) }
   }
 
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {
     Button("Abrir sessão", systemImage: "bubble.left") { runtime.selection = MacSelection(sessionID: row.id) }
+    Button("Selecionar", systemImage: "checkmark.circle") {
+      withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.start(row.id) }
+    }
+    Button("Nova sessão a partir desta", systemImage: "square.and.pencil") { runtime.newSession(from: row.id) }
+    Divider()
     Button("Renomear…", systemImage: "pencil") {
       renameText = row.session.title ?? ""
       renameCandidate = row
@@ -161,52 +259,47 @@ struct MacSessionColumn: View {
       Button("Marcar como lida", systemImage: "envelope.open") { Task { await store.markRead(row.session) } }
     }
     Divider()
-    Button("Arquivar…", systemImage: "archivebox") { archiveCandidate = row }
+    Button("Arquivar…", systemImage: "archivebox") { runtime.archiveRequest = row }
     Button("Excluir sessão…", systemImage: "trash", role: .destructive) { deleteCandidate = row.session }
   }
 }
 
-/// Adds a repository to the filter chips. The server must reach the folder; on this Mac the folder picker
-/// fills the path.
-private struct MacAddProject: View {
-  @Environment(\.dismiss) private var dismiss
+/// The iPhone's "Sessão mestra" tab accessory at the foot of Sessões: the current master opens in the middle
+/// column; without one, Nova sessão opens in its master mode and the first message creates it.
+private struct MacMasterAccessory: View {
   @Environment(\.appTheme) private var theme
   let store: SessionStore
-  @State private var path = ""
-  @State private var error: String?
-  @State private var working = false
+  let runtime: MacRuntime
+  @State private var hovering = false
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("Adicionar repositório").font(.title3.bold())
-      Text("Informe a pasta no servidor. Ela passa a aparecer como filtro nas Sessões.")
-        .foregroundStyle(theme.color(.textSecondary))
-      HStack {
-        TextField("/Users/…/repositorio", text: $path).textFieldStyle(.roundedBorder)
-        Button("Escolher…") {
-          let panel = NSOpenPanel()
-          panel.canChooseDirectories = true
-          panel.canChooseFiles = false
-          if panel.runModal() == .OK, let url = panel.url { path = url.path }
-        }
+    Button { runtime.openMaster() } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 13, weight: .medium))
+          .foregroundStyle(theme.color(.accent))
+        Text("Sessão mestra").fontWeight(.medium).foregroundStyle(theme.color(.textStrong))
+        Spacer(minLength: 4)
+        Text(store.masterAvailability == .available
+          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          : store.masterAvailability.label)
+          .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+        Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(theme.color(.icon))
       }
-      if let error { Text(error).foregroundStyle(theme.color(.error)).font(.caption) }
-      HStack {
-        Spacer()
-        Button("Cancelar", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-        Button("Adicionar") {
-          working = true
-          Task {
-            do {
-              _ = try await store.addProject(directory: path.trimmingCharacters(in: .whitespaces))
-              dismiss()
-            } catch { self.error = error.localizedDescription }
-            working = false
-          }
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty || working)
-      }
+      .appFont(.caption).monospacedDigit()
+      .padding(.horizontal, 12).frame(minHeight: 36)
+      .background(theme.color(runtime.selection.master ? .highlight : .surface).opacity(hovering ? 0.9 : 1),
+        in: RoundedRectangle(cornerRadius: 10))
+      .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+      .contentShape(Rectangle())
     }
-    .padding(20).frame(width: 520)
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .disabled(store.masterAvailability != .available)
+    .help("Sessão mestra (⇧⌘M)")
+    .padding(.horizontal, AppLayout.margin - 4).padding(.vertical, 10)
+    .background(theme.color(.background))
+    .accessibilityElement(children: .combine)
+    .accessibilityAddTraits(.isButton)
   }
 }

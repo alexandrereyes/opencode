@@ -2470,13 +2470,13 @@ checks that `iphone_query` for `device`, `network` and `location` completed with
 and Photos need the physical iPhone 14: a DEBUG launch with `-OpenCodeDeviceProbe` enables every source (answer the
 iOS prompts), collects each once plus the locked-cache answer, and writes `Documents/device-probe.json`.
 
-## Mac app (stages 1–3) — 27 October
+## Mac app (stages 1–4) — 27 October
 
 A native macOS client of the same server, built from this project with the iPhone code it can reuse. Briefing and
 approved mocks: `.agent-artifacts/mac-app/coluna3/` (`BRIEFING.md`, `final/contexto.png`, `final/arquivos.png`,
 `final/janela-mac.png`) of the `mac-app` worktree. Stage 1 delivered the three-column window and the real third
 column; stage 2 the LLM proxy window; stage 3 the layout parity with the approved mocks and the shared chat (see
-[The window](#the-window)).
+[The window](#the-window)); stage 4 the iPhone's features outside the chat (see [Parity outside the chat](#parity-outside-the-chat-stage-4)).
 
 ### Target and folders
 
@@ -2486,19 +2486,23 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   automatic signing,
   hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
 - `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
-  one window per resource, the LLM proxy window, `Settings`), `MacRuntime.swift`, `MacWindow.swift`,
-  `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift` (column and conversation),
-  the transcript (`MacTranscriptController.swift`, `MacTranscriptCells.swift`, `MacTranscriptItemViews.swift`,
-  `MacTranscriptText.swift`, `MacTranscriptContext.swift`, `MacTranscriptHost.swift`), the composer
-  (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
+  one window per resource, one per background task's output, the LLM proxy window, `Settings`; the menu bar),
+  `MacRuntime.swift`, `MacWindow.swift`, `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift`
+  (column and conversation), the transcript (`MacTranscriptController.swift`, `MacTranscriptCells.swift`,
+  `MacTranscriptItemViews.swift`, `MacTranscriptText.swift`, `MacTranscriptContext.swift`, `MacTranscriptHost.swift`),
+  the composer (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
-  `MacCodeView.swift`, `MacResourceWindow.swift`, `MacProxyWindow.swift`, `MacSettingsView.swift`, and the
-  DEBUG-only `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacScrollFixture.swift` and
+  `MacCodeView.swift`, `MacResourceWindow.swift`, `MacShellOutput.swift`, `MacNotifications.swift`,
+  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacAssets.xcassets` (the app icon), and the DEBUG-only
+  `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacStress.swift`, `MacScrollFixture.swift` and
   `MacScrollDriver.swift`.
 - iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
   (`PBXFileSystemSynchronizedBuildFileExceptionSet` `D…024`), never by copying. To share another file, add it to that
-  list. The themes (`Resources/Themes/*.json`), `Resources/Markdown/dist/markdown-engines.js` and `Assets.xcassets`
-  (the LLM proxy logos; the Mac sets no app icon from it) are shared the same way.
+  list, keeping it in alphabetical order. The themes (`Resources/Themes/*.json`),
+  `Resources/Markdown/dist/markdown-engines.js` and `Assets.xcassets` (the LLM proxy logos) are shared the same way.
+- The app icon is `MacAppIcon` in `OpenCodeMac/MacAssets.xcassets` (`ASSETCATALOG_COMPILER_APPICON_NAME`), drawn by
+  `swift script/generate-mac-icon.swift` from the iPhone's `script/icon-source.png` on the macOS grid (an 824-pt
+  rounded rectangle with a shadow in 1024: macOS does not mask a square icon).
 
 ### What is shared with the iPhone
 
@@ -2518,6 +2522,15 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
 | `ConversationColumn/*` | The chat pieces (see [Shared chat layout](#shared-chat-layout-iphone-and-mac--27-october)). For the Mac: `ConversationAvatar.size` (44 by default), the activity card's title/detail sizes at desktop density (13/12 pt) in `#if os(macOS)`, and `composerCapsule()` through `adaptiveGlass` (the same glass on iOS; macOS 15 has no `glassEffect`) |
 | `SessionColumn/ProjectIconImage.swift` | `ProjectIconRenderer` on macOS rasterizes the SVG with `NSImage` (AppKit reads SVG data); the iOS web-view renderer is unchanged inside `#if os(iOS)` |
 | `ModelCatalogCache`, `VoiceMemoryStore`, `SubscriptionTestClient`, `ResponseEngines`, `ArchivedSessionsView`, `SessionDeleteConfirmation` | Unchanged |
+| `SessionStore.swift` (stage 4) | `shownSessionID` on macOS: the session the window shows (while the app is in front) is `currentSessionID`, so its alerts stay silent |
+| `SessionColumn/SessionChips.swift` | `ChipMenu`: the iPhone's `Menu(primaryAction:)`; on the Mac a click runs the action and a right click opens the same items (state filters, remove, move) |
+| `SessionColumn/SessionColumnHeader.swift` | The selection bar became `SessionSelectionBar`, also shown by the Mac above its rows |
+| `SessionSwitcherSheet.swift` | The iPhone sheet; on macOS a search field over the same list, shown in a popover under the title |
+| `AddProjectPicker.swift` | iOS-only field and title modifiers behind `pathInput()` and `inlineNavigationTitle()` |
+| `NewSessionComponents.swift` (new) | `ProjectAvatar`, `ChatsAvatar`, `GitBranchIcon`, `MCPChip`, `MCPFlowLayout`, moved unchanged out of `NewSessionView.swift` |
+| `ModelVisibilityView.swift` | Generic over `ModelVisibilitySource` (the conversation's `ConversationStore` on iOS, `MacModelCatalog` on the Mac); macOS shows a search field instead of `.searchable` |
+| `ThemePicker.swift` (new) | `ThemePicker` and its preview, moved unchanged out of `SettingsView.swift`; plain buttons on macOS |
+| `SessionResources/ResourceViewer*.swift`, `ResourceSurface.swift`, the three kind views | `ResourceImage` frames (CGImage decoded off the main actor on macOS); on macOS `ResourceTouchOverlay` is a pointer and keyboard surface and `ResourceKeyboard` is empty; the on-screen keyboard buttons and the share sheet are iOS-only (the Mac saves the simulator capture with `NSSavePanel`); a DEBUG `fixtureFrame` hook for offline captures |
 
 The iPhone target keeps its behavior: every change is either a no-op on iOS (`#if`) or a move. OpenCodeKit gained
 `ContextColumn` (all the column's logic), `MarkdownSyntax.role`, `ServerStore(builtinURL:)` and the DEBUG
@@ -2542,20 +2555,19 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   macOS 26 hides the shared Liquid Glass capsule (`sharedBackgroundVisibility(.hidden)`): plain 15-pt icons with a
   hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (disabled until calls come to the Mac),
   Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
-  30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), a menu that switches to one of the
-  12 most recent sessions. Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
+  30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), which opens the quick switcher
+  (stage 4). Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
   Mostrar/Ocultar contexto) and Nova sessão (`MacSessionActions`). The system sidebar button is removed
   (`.toolbar(removing: .sidebarToggle)`; ⌃⌘S and Visualizar still collapse Sessões), and so is the old
   `sidebar.right` button. The same holds for the LLM proxy window.
 - **Sessões**: the shared column without its big title: it starts under the bar with the quota rings and the chips;
   sections and rows are unchanged. Selecting a row selects the session; the iPhone's swipe and long-press actions are
-  one right-click menu (open, rename, pin, mute, mark read, archive, delete). A quota ring opens the LLM proxy window
-  on its provider.
+  one right-click menu (stage 4 adds the selection mode and the Sessão mestra accessory). A quota ring opens the LLM
+  proxy window on its provider.
 - **Chat**: the iPhone's conversation (`ConversationStore`, `ConversationDraft`) on an AppKit transcript and a native
   composer; see [Chat (polish 1)](#chat-polish-1--27-october).
-- **Settings**: server address and password (Keychain through `ServerStore`, default `http://127.0.0.1:4096`, a
-  "Testar conexão" button) and the iPhone themes. `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
-  `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override it for a launch, as on the iPhone.
+- **Settings**: see [Ajustes](#ajustes). `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
+  `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override the server for a launch, as on the iPhone.
 
 ### Chat (polish 1) — 27 October
 
@@ -2582,7 +2594,12 @@ each reload, in one `ScrollView` reused from the previous session.
 **Subagents.** The activity card's agent chip (and its pixel button), Contexto's rows and the session alerts open the
 child in the middle column over its root (`MacSelection.childID`). The child is a full conversation (its own live
 store from the registry); a header with `‹ <root title> › <child title>`, the agent and `trabalhando…` leads back,
-and ⌘[ goes back too. Returning shows the root exactly where it was left (the retained transcript view).
+and so does ⌘[ (Ir ▸ Voltar à sessão principal, `MacRuntime.backToParent`: a nested subagent goes back to its
+parent subagent). A notification or banner about a subagent opens it the same way (`MacWindow.select`: its root in
+Sessões, the child in the middle column). Returning shows the root exactly where it was left (the retained
+transcript view). The prompt bubble follows Ajustes ▸ Leitura (`OpenCodeCollapsibleUserMessages`, like the
+iPhone's Você ▸ Leitura): on, long prompts and prompts with quotes fold to two lines; off, every prompt shows whole,
+and changing it measures the prompts again in place.
 
 **Transcript.** `MacTranscriptController` is an `NSScrollView` with a flipped document of its own, on the iPhone
 rewrite's model: `TranscriptProjection.items` (the shared `Transcript/TranscriptItems.swift`, unchanged), the Kit's
@@ -2745,6 +2762,83 @@ catalog capture was regenerated and compared):
 | `ProxyPoolHeader` (with `wide`), `ProxyPoolState`, `ProxyResetsCard`, `ProxyAutomationToggle`, `proxyActions`, `ProxyAccountCard`, `ProxyQuotaBar`, `ProxyProviderIcon`, `proxyCard`/`proxyBadge`/`proxyRole` | `OpenCode/SubscriptionViews.swift`, extracted from `SubscriptionDetailSheet` (which now composes them) |
 | `QuotaRing` | `OpenCode/SessionColumn/SessionQuotaRings.swift` |
 
+### Parity outside the chat (stage 4)
+
+Stage 4 brought the iPhone's features outside the chat to the Mac, with the iPhone's components where they can be
+shared (see the table above) and Mac interactions: right click instead of swipes and long presses, menus, keyboard
+shortcuts, sheets, popovers and windows. Contract and audit: `.agent-artifacts/mac-app/POLIMENTO-APP.md` and
+`AUDITORIA.md` of the `mac-polish-app` worktree. The chat itself (transcript, composer, live conversation) is a
+separate track.
+
+- **Sessões**: every row action of the iPhone in the right-click menu (open, Selecionar, Nova sessão a partir desta,
+  rename, pin, mute, mark read, archive, delete). The **selection mode** starts with ⌘-click or Selecionar: rows show
+  the iPhone's circles, the column shows `SessionSelectionBar` with **Arquivar (N)** and **Excluir (N)**, and the
+  iPhone's rules apply (a filter or chip change ends it, hidden rows leave it, serial requests, failures stay selected,
+  the delete confirmation with the count, running sessions, the master warning and an Arquivar alternative). The
+  Sessão menu repeats them (⌥⌘A selects all). Chips open their menu on a right click (state filters on "Todas",
+  remove, move before/after); Visualizar ▸ Filtrar sessões also picks the state. **Adicionar repositório** is the
+  iPhone's `AddProjectPicker` (the server's folders, `..`, hidden folders, create and add). The iPhone's
+  **Sessão mestra** accessory sits at the column's foot (`N precisam de você` / `Tudo em dia`, ⇧⌘M): it opens the
+  current master in the middle column or, without one, Nova sessão in its master mode, whose first message calls
+  `custom.master/ensure`.
+- **Troca rápida** (a click on the title or ⌘K): the iPhone's `SessionSwitcherSheet` in a popover, with a search
+  field (Return opens the first match), the current session checked, the working/unread marks and Nova sessão.
+- **Nova sessão** (⌘N, the toolbar, the switcher; ⇧⌘N from a session): a sheet with the iPhone's decisions
+  (`NewSessionProjection.start/model/agent/remembered`, `NewSessionSubmission`): Chats or a project (or
+  Adicionar projeto…), the main checkout, an existing worktree or **Nova worktree** with its base branch (a
+  searchable popover over `/api/vcs/branch`), the shared MCP chips (live on an existing checkout, intents for Chats
+  and a new worktree), the visible models with their effort ("Padrão" included) and the agent. A model chosen here
+  becomes the default for new sessions, as on the iPhone; one inherited from the origin session does not. The
+  prompt is the chat's composer embedded (`MacComposer(embedded:)`: tokens and the suggestion panel over a
+  composer `ConversationStore` in its new-session mode, whose `loadNewSession` reads the directory's catalog;
+  attachments; the persistent `new-session` draft, `new-session-master` for the master), without its model, MCP and
+  agent controls, which the sheet shows. Return sends, as in the chat, and so does ⌘Return; a leading `/command`
+  runs on the new session (`newSessionDocument`), and the attachments are delivered to its directory.
+- **Contexto**: a question asked by a subagent shows its text and **Responder ›** (opens the subagent); Tarefas open
+  the task's live output in its own window (`MacShellOutput.swift`: `/api/shell/:id/output` by cursor from the last
+  256 KB, `ShellOutputLog`; Parar and Copiar), also from Ver saída in the right-click menu. **Detalhes** at the
+  column's foot (closed by default) is the iPhone's Detalhes da sessão: model, agent, the directory (opens Arquivos),
+  the MCPs with their switches (`toggleMCP`, for every session of the directory), the loaded skills and the plugins.
+- **Recursos**: the resource window is the iPhone's `ResourceViewerScreen` (one view per kind, the status pill with
+  its measurements, Assumir controle / Devolver, the kind's tools, Chrome's address bar). In control a click is a
+  touch and a drag moves it; the trackpad scrolls Chrome's page (`scroll`) and drags on a simulator or emulator; the
+  Mac's keyboard types into the resource (`ResourceKeyMapping`: DOM key names, Control shortcuts, text) and ⌘V pastes
+  the Mac's clipboard. The simulator's Captura de tela is saved with a save panel. Closing the window gives control
+  back.
+- **Arquivos**: Markdown files open rendered with the chat's renderer (soft line breaks joined,
+  `MarkdownSoftBreaks`, lazily in pieces) and HTML with Quick Look; `</>` shows their source. ‹ › (⌥⌘← ⌥⌘→) page
+  through the folder's files, like the iPhone viewer's siblings. Images, PDF, audio and video stay in Quick Look.
+- **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
+  while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
+  question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
+  it opens that session. The Dock icon shows `requestCount` (permissions and questions), like the iPhone's tab badge.
+  The fixture never asks for the notification permission nor posts anything.
+- **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
+  Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
+  Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions), Editar (Buscar na conversa ⌘F), Ir
+  (Trocar de sessão ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓, Sessão mestra ⇧⌘M) and
+  Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
+  to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
+  Shortcuts avoid the text editing keys (⌘A, ⌘⌫, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓).
+- **Restoration**: the window reopens on the session, subagent and Arquivos folder it showed (per server,
+  `OpenCodeMacSelection.<server>`), with Contexto shown or hidden as left; a session deleted or archived meanwhile
+  falls back to the first row. More windows (Arquivo ▸ Nova janela) show the same selection: the selection is
+  app-wide.
+- **Voice**: the button stays disabled. The iPhone's GPT Live call (`Voice/`) needs `AVAudioSession` (none on macOS;
+  the WebRTC audio setup must be rewritten for Core Audio), ActivityKit and App Intents controls, UIKit feedback, and
+  for a signed Mac app the microphone entitlement and usage description; that is a port of its own, not a small
+  adjustment. The composer's microphone keeps the system dictation.
+
+#### Ajustes
+
+The `Settings` scene (⌘,) is the iPhone's Você in tabs, remembering the last one: **Servidores** (the active server
+and its state, saved servers with Usar, Editar… and Remover…, Adicionar servidor… with "Testar conexão" over
+`/api/info`, and Parear com código…: the `opencode pair` link or JSON pasted and redeemed like the iPhone does,
+since the Mac has no scanner), **Aparência** (Sistema/Claro/Escuro and the shared `ThemePicker` with its previews),
+**Leitura** (the same `OpenCodeCollapsibleUserMessages` switch), **Modelos** (the shared "Gerenciar modelos" over the
+server's catalog and `model.visibility`), **Assinaturas** (the LLM proxy summary rows, opening the LLM proxy window)
+and **Sobre** (version, commit, server). Voz, Transcrição, Dados do iPhone and Apple Watch belong to the iPhone.
+
 ### Running against a sandbox
 
 ```sh
@@ -2794,6 +2888,17 @@ mock. The stage-3 parity images (mock × app) are rebuilt by running the capture
 `mac-prints.swift compare`; `script/test-mac-window.sh` takes `OPENCODE_MAC_DERIVED` for another DerivedData. The stage-1 captures are in
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-app-prints/`.
 
+Stage 4 adds launch options (put them before `-OpenCodeMacCaptureQuit`): `-OpenCodeMacFixtureAttention` (one root
+asking permission, one asking a question, one failed), `-OpenCodeMacSelect id,id` (selection mode),
+`-OpenCodeMacNewSession sessoes|origem|mestra`, `-OpenCodeMacSwitcher`, `-OpenCodeMacDetails`, and, each written to
+its own picture, `-OpenCodeMacOpenResource <id>` (`<name>-recurso.png`), `-OpenCodeMacShellOutput <shell>`
+(`<name>-saida.png`) and `-OpenCodeMacSettings servidores|aparencia|leitura|modelos|assinaturas|sobre`
+(`<name>-ajustes.png`). Sheets are drawn where they sit; a popover, which AppKit keeps on a screen while the window is
+off-screen, is drawn under the title. While no window is open (a locked screen), captures open one through Arquivo ▸
+Nova janela, like the stress run. The fixture answers Nova sessão's reads (worktrees, branches, VCS, configuration),
+plugins, skills, a task's output and resource control; its resource viewer shows the drawn snapshot as its frame.
+Stage-4 captures: `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/mac-polish-app-prints/`.
+
 The LLM proxy window is captured with `-OpenCodeMacProxy codex|anthropic|resets` (put these options **before**
 `-OpenCodeMacCaptureQuit`: a value after a valueless option is taken as a document to open, and then no window
 opens), optionally `-OpenCodeMacProxySearch <text>`, `-OpenCodeMacProxyAccount <id>`,
@@ -2817,11 +2922,21 @@ Stage 2 adds `SubscriptionTableTests` (groups and "Outros planos", search, table
 key, sidebar rows and the Codex fallback, confirmation texts, freshness). "Usar redefinição" and the automation
 switch were exercised only against `MacFixtureProxy`, never against a server: they spend the proxy's real resets.
 
+Stage 4 adds `DesktopSupportTests` (session navigation, notification text and Dock badge, `ShellOutputLog`,
+`ResourceKeyMapping`, `MarkdownSoftBreaks`). Notifications, the Dock badge and a resource in control were not
+exercised against a server (the fixture posts no notification; driving a real resource would take Alexandre's
+simulator or browser).
+
 **Window stability** (`script/test-mac-window.sh [runs] [idle seconds]`): builds OpenCodeMac and runs the DEBUG
-`MacStress` against the fixture, starting from the default size without saved window frames. It resizes the main
+`MacStress` against the fixture, starting from the default size without saved window frames: it runs a copy of
+the build with its own bundle identifier, `br.com.alexandrem.opencode.mac.debug.tests` (ad-hoc signed), and clears
+only that domain and its saved state, so the Debug app's preferences (servers, the restored selection, Ajustes,
+Contexto's width) that development and the other checks use stay as they were. It resizes the main
 window to its minimum, intermediate sizes and each screen's maximum on every connected screen, collapses and
 reopens Sessões and Contexto twice, opens and closes Arquivos and the LLM proxy window, then stays idle (30 s by
-default). A layout loop aborts the app (the old crash, exit 134); a minimum width wider than a screen fails the run.
+default). Since stage 4 it also opens and closes Nova sessão, the quick switcher, the selection mode and a
+resource window. A layout loop aborts the app (the old crash, exit 134); a minimum width wider than a screen fails
+the run.
 Run it after any change to the window's columns, widths or toolbar. It moves the window over the connected
 screens while it runs. Launched from a shell while the screen is locked, SwiftUI opens no window until the app is
 activated, so `MacStress` opens one through File ▸ New Window.
@@ -2830,9 +2945,8 @@ activated, so `MacStress` opens one through File ▸ New Window.
 
 - The chat's remaining iPhone details: on-device dictation, read-aloud with server voices, the quote marks' numbered
   badges and details sheet, the prompt bubble's internal scroll beyond 40% and the tool output's shell polling.
-- GPT Live voice calls on the Mac (the composer's microphone already starts the system dictation).
-- The interactive resource viewer (stream, taking control, input) in its window.
-- Nova sessão with worktrees, chats, MCPs and the model picker; menu bar, notifications and widgets stay out.
+- GPT Live voice calls on the Mac (see Voice above).
+- Windows with their own selection; menu bar extra and widgets stay out.
 
 ## Platform and distribution
 

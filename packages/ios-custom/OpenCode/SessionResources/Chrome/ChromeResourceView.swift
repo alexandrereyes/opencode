@@ -30,6 +30,10 @@ struct ChromeResourceView: View {
 }
 
 extension ResourceKeyboardStyle {
+  #if os(macOS)
+  /// The Mac's own keyboard types into the page; there are no keyboard traits to follow.
+  init(_ keyboard: ChromeKeyboard) { self.init() }
+  #else
   init(_ keyboard: ChromeKeyboard) {
     let contentType: UITextContentType? =
       switch keyboard.contentType {
@@ -51,6 +55,7 @@ extension ResourceKeyboardStyle {
       }
     self.init(contentType: contentType, keyboard: type, secure: keyboard.secure, returnKey: .go)
   }
+  #endif
 }
 
 /// Chrome glyph, the address (tap to edit in control; Return navigates) and reload; below it back, forward, the
@@ -125,8 +130,10 @@ struct ChromeAddressBar: View {
       TextField("Endereço", text: editingAddress ? $address : .constant(state.displayAddress), selection: $selection)
         .focused($editingAddress)
         .disabled(!inControl)
-        .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-        .submitLabel(.go)
+        .pathInput()
+        #if os(iOS)
+        .textContentType(.URL).submitLabel(.go)
+        #endif
         .multilineTextAlignment(editingAddress ? .leading : .center)
         .appFont(.body).foregroundStyle(theme.color(.text))
         .onSubmit {
@@ -171,9 +178,11 @@ struct ChromeAddressBar: View {
 
   private var menu: some View {
     Menu {
+      #if os(iOS)
       if inControl {
         Button("Mostrar teclado", systemImage: "keyboard") { model.keyboardVisible = true }
       }
+      #endif
       if state.tabs.count > 1 {
         Section("Abas") {
           ForEach(state.tabs) { tab in
@@ -186,7 +195,14 @@ struct ChromeAddressBar: View {
           }
         }
       }
-      Button("Copiar endereço", systemImage: "doc.on.doc") { UIPasteboard.general.string = state.url }
+      Button("Copiar endereço", systemImage: "doc.on.doc") {
+        #if os(iOS)
+        UIPasteboard.general.string = state.url
+        #else
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(state.url, forType: .string)
+        #endif
+      }
         .disabled(state.url.isEmpty)
     } label: {
       Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold))

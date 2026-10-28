@@ -310,6 +310,18 @@ struct MacFileRow: Identifiable {
     }
   }
 
+  /// The file `offset` places before or after the selected one in the folder's listing (files only).
+  func sibling(_ offset: Int) -> String? {
+    guard let selected, results == nil || query.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+    let files = rows.filter { !$0.directory }.map(\.id)
+    guard let index = files.firstIndex(of: selected), files.indices.contains(index + offset) else { return nil }
+    return files[index + offset]
+  }
+
+  func step(_ offset: Int) {
+    if let next = sibling(offset) { select(next) }
+  }
+
   func select(_ path: String) {
     guard path != selected || file == nil else { return }
     selected = path

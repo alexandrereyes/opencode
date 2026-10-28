@@ -7,6 +7,7 @@ import SwiftUI
 /// mounted elsewhere, this mount builds a second one from the same store and memory.
 struct MacTranscriptHost: NSViewControllerRepresentable {
   @Environment(\.appTheme) private var theme
+  @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
   let store: ConversationStore
   let sessions: SessionStore
   let quotes: ConversationQuoteContext
@@ -27,7 +28,8 @@ struct MacTranscriptHost: NSViewControllerRepresentable {
   }
 
   func updateNSViewController(_ controller: MacTranscriptController, context: Context) {
-    controller.update(theme: theme, quotes: quotes, search: search, bottomPadding: bottomPadding)
+    controller.update(theme: theme, quotes: quotes, search: search, bottomPadding: bottomPadding,
+      collapsible: collapsible)
     configure(controller.context)
     controller.canPersist = { [sessions, store] in !sessions.deletedIDs.contains(store.id) }
   }

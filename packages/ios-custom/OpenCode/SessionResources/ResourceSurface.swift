@@ -1,6 +1,10 @@
 import OpenCodeKit
 import SwiftUI
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 
 /// The streamed screen for JPEG/PNG streams (and the fallback snapshot stream), aspect-fit and turned upright by
 /// `model.rotation`.
@@ -10,13 +14,13 @@ struct ResourceFrameView: View {
     if let image = model.image {
       let rotation = model.rotation
       if rotation == 0 {
-        Image(uiImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+        Image(resource: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
           .accessibilityIdentifier("resource-frame")
       } else {
         GeometryReader { proxy in
           let geometry = ResourceScreenGeometry(frame: image.size, rotation: rotation)
           let rect = geometry.screenRect(in: CGRect(origin: .zero, size: proxy.size))
-          Image(uiImage: image).resizable().interpolation(.medium)
+          Image(resource: image).resizable().interpolation(.medium)
             .frame(
               width: geometry.sideways ? rect.height : rect.width, height: geometry.sideways ? rect.width : rect.height
             )
@@ -31,6 +35,7 @@ struct ResourceFrameView: View {
   }
 }
 
+#if os(iOS)
 /// Transparent layer over the screen. While `model.touching` (in control), touches become normalized `touch` inputs
 /// (multi-touch, with a touch indicator); otherwise it lets every touch through to the shell, which toggles the
 /// controls. Floating controls register their frames in `model.exclusions`, so a touch on them never reaches the
@@ -220,3 +225,196 @@ struct ResourceKeyboardStyle: Equatable {
   var secure = false
   var returnKey: UIReturnKeyType = .default
 }
+#else
+/// The Mac's pointer and keyboard over the screen. While `model.touching` (in control) a click is a touch and a
+/// drag moves it; trackpad scrolling scrolls Chrome's page and drags on a simulator or emulator; keys type into the
+/// resource (`ResourceKeyMapping`) and ⌘V pastes the Mac's clipboard as text. Floating controls keep their clicks
+/// (`model.exclusions`, in the same global coordinates SwiftUI reports). Otherwise every click passes through to
+/// the shell, which toggles the controls.
+struct ResourceTouchOverlay: View {
+  let model: ResourceViewerModel
+  var contentSize: CGSize?
+  var indicator: NSColor
+  @State private var origin = CGPoint.zero
+
+  var body: some View {
+    ResourcePointerSurface(model: model, contentSize: contentSize, indicator: indicator, origin: origin)
+      .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { origin = $0 }
+      .accessibilityLabel("Tela do recurso")
+      .accessibilityIdentifier("resource-touch")
+  }
+}
+
+private struct ResourcePointerSurface: NSViewRepresentable {
+  let model: ResourceViewerModel
+  let contentSize: CGSize?
+  let indicator: NSColor
+  let origin: CGPoint
+
+  func makeNSView(context: Context) -> PointerView { PointerView() }
+
+  func updateNSView(_ view: PointerView, context: Context) {
+    view.model = model
+    let interactive = model.touching
+    view.contentSize = contentSize ?? model.image?.size ?? model.hello.map { CGSize(width: $0.width, height: $0.height) }
+    view.rotation = model.rotation
+    view.indicatorColor = indicator
+    view.origin = origin
+    if interactive != view.interactive {
+      view.interactive = interactive
+      // Taking control sends the keyboard to the resource at once.
+      if interactive { DispatchQueue.main.async { view.window?.makeFirstResponder(view) } }
+    }
+  }
+
+  final class PointerView: NSView {
+    weak var model: ResourceViewerModel?
+    var interactive = false
+    var contentSize: CGSize?
+    var rotation = 0
+    var indicatorColor = NSColor.systemOrange
+    /// This view's top-left corner in SwiftUI's global space, where the exclusions are measured.
+    var origin = CGPoint.zero
+    private var dot: CALayer?
+    private var touching = false
+    private var dragged = CGPoint.zero
+    private var scrollStart: CGPoint?
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { interactive }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+      guard interactive, let model, let superview else { return nil }
+      let local = convert(point, from: superview)
+      guard bounds.contains(local) else { return nil }
+      let global = CGPoint(x: origin.x + local.x, y: origin.y + local.y)
+      if model.exclusions.values.contains(where: { $0.insetBy(dx: -6, dy: -6).contains(global) }) { return nil }
+      return self
+    }
+
+    var geometry: ResourceScreenGeometry {
+      guard let size = contentSize, size.width > 0, size.height > 0 else {
+        return ResourceScreenGeometry(frame: bounds.size)
+      }
+      return ResourceScreenGeometry(frame: size, rotation: rotation)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+      guard interactive else { return super.mouseDown(with: event) }
+      window?.makeFirstResponder(self)
+      let location = convert(event.locationInWindow, from: nil)
+      guard let point = geometry.framePoint(for: location, in: bounds, clamped: false) else { return }
+      touching = true
+      showDot(at: location)
+      model?.send([.touch(.began, x: point.x, y: point.y)])
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+      guard interactive, touching else { return }
+      let location = convert(event.locationInWindow, from: nil)
+      moveDot(to: location)
+      guard let point = geometry.framePoint(for: location, in: bounds, clamped: true) else { return }
+      model?.send([.touch(.moved, x: point.x, y: point.y)])
+    }
+
+    override func mouseUp(with event: NSEvent) {
+      guard interactive, touching else { return }
+      touching = false
+      let location = convert(event.locationInWindow, from: nil)
+      dot?.removeFromSuperlayer()
+      dot = nil
+      guard let point = geometry.framePoint(for: location, in: bounds, clamped: true) else { return }
+      model?.send([.touch(.ended, x: point.x, y: point.y)])
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+      guard interactive, let model else { return super.scrollWheel(with: event) }
+      let location = convert(event.locationInWindow, from: nil)
+      let screen = geometry.screenRect(in: bounds)
+      guard screen.width > 0, screen.height > 0 else { return }
+      if model.resource.kind == .chrome {
+        guard let point = geometry.framePoint(for: location, in: bounds, clamped: true) else { return }
+        model.send([.scroll(x: point.x, y: point.y,
+          dx: -event.scrollingDeltaX / screen.width, dy: -event.scrollingDeltaY / screen.height)])
+        return
+      }
+      // A touch screen scrolls by dragging: the trackpad gesture becomes a finger moving with it (no momentum).
+      guard event.momentumPhase.isEmpty else { return }
+      if event.phase.contains(.began) {
+        scrollStart = location
+        dragged = .zero
+        if let point = geometry.framePoint(for: location, in: bounds, clamped: false) {
+          model.send([.touch(.began, x: point.x, y: point.y)])
+        } else {
+          scrollStart = nil
+        }
+      } else if let start = scrollStart {
+        dragged.x += event.scrollingDeltaX
+        dragged.y += event.scrollingDeltaY
+        let at = CGPoint(x: start.x + dragged.x, y: start.y + dragged.y)
+        guard let point = geometry.framePoint(for: at, in: bounds, clamped: true) else { return }
+        let ended = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+        model.send([.touch(ended ? .ended : .moved, x: point.x, y: point.y)])
+        if ended { scrollStart = nil }
+      }
+    }
+
+    override func keyDown(with event: NSEvent) {
+      guard interactive, let model else { return super.keyDown(with: event) }
+      var modifiers = ResourceKeyMapping.Modifiers()
+      if event.modifierFlags.contains(.shift) { modifiers.insert(.shift) }
+      if event.modifierFlags.contains(.control) { modifiers.insert(.control) }
+      if event.modifierFlags.contains(.option) { modifiers.insert(.option) }
+      if event.modifierFlags.contains(.command) { modifiers.insert(.command) }
+      guard let input = ResourceKeyMapping.input(
+        keyCode: event.keyCode, characters: event.characters, plain: event.charactersIgnoringModifiers,
+        modifiers: modifiers)
+      else { return super.keyDown(with: event) }
+      model.send([input])
+    }
+
+    /// ⌘V types the Mac's clipboard into the resource; other Command shortcuts stay with the app.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+      guard interactive, window?.firstResponder === self,
+        event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+        event.charactersIgnoringModifiers == "v",
+        let text = NSPasteboard.general.string(forType: .string), !text.isEmpty
+      else { return super.performKeyEquivalent(with: event) }
+      model?.send([.text(text)])
+      return true
+    }
+
+    private func showDot(at location: CGPoint) {
+      wantsLayer = true
+      let dot = CALayer()
+      dot.bounds = CGRect(x: 0, y: 0, width: 30, height: 30)
+      dot.cornerRadius = 15
+      dot.backgroundColor = indicatorColor.withAlphaComponent(0.45).cgColor
+      dot.borderColor = indicatorColor.withAlphaComponent(0.8).cgColor
+      dot.borderWidth = 2
+      dot.position = location
+      layer?.addSublayer(dot)
+      self.dot = dot
+    }
+
+    private func moveDot(to location: CGPoint) {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      dot?.position = location
+      CATransaction.commit()
+    }
+  }
+}
+
+/// The Mac types with its own keyboard straight into the resource (see `ResourceTouchOverlay`); there is no
+/// on-screen keyboard to bring up.
+struct ResourceKeyboard: View {
+  let model: ResourceViewerModel
+  @Binding var active: Bool
+  var style = ResourceKeyboardStyle()
+  var body: some View { EmptyView() }
+}
+
+struct ResourceKeyboardStyle: Equatable {}
+#endif

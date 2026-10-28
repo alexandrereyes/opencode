@@ -38,6 +38,7 @@ import SwiftUI
   private var width: CGFloat = 0
   private var height: CGFloat = 0
   private(set) var mounted = false
+  private var collapsible = UserDefaults.standard.object(forKey: "OpenCodeCollapsibleUserMessages") as? Bool ?? true
   /// Following the end as content grows (scrolling up stops it, scrolling back to the end resumes it) and
   /// whether the reader's wheel, trackpad or scroller owns the offset.
   private var follow = TranscriptFollow()
@@ -153,8 +154,19 @@ import SwiftUI
   }
 
   func update(theme: AppTheme, quotes: ConversationQuoteContext, search: ConversationSearchHighlight,
-    bottomPadding: CGFloat)
+    bottomPadding: CGFloat, collapsible: Bool)
   {
+    if self.collapsible != collapsible {
+      // Every prompt changes height: measure again, keeping the reader's place. Turning folding off also forgets
+      // the bubbles opened by hand, like the iPhone.
+      self.collapsible = collapsible
+      if !collapsible {
+        for item in items { if case .prompt(let message, true) = item.kind { memory.setBubble(message.id, expanded: false) } }
+      }
+      memory.heights.removeAll()
+      for cell in cells.values { cell.invalidate() }
+      if isViewLoaded { invalidateAll() }
+    }
     if context.theme.id != theme.id {
       context.theme = theme
       parses.theme = theme
