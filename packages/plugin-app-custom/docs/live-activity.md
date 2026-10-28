@@ -190,6 +190,10 @@ app runs it does the same locally with `.immediate` dismissal; a null state neve
 - Bodies: [`push-start.json`](live-activity/push-start.json), [`push-update.json`](live-activity/push-update.json),
   [`push-end.json`](live-activity/push-end.json). `push-start` carries `attributes-type`, `attributes` and
   `input-push-token: 1`, so iOS issues an update token for the new activity, which the app reports with `activity`.
+- Every body includes `aps.relevance-score: 50`, matching `OpenCodeKit.LiveActivityRelevance.agents`.
+  Voice uses 100 on every local start/update, including network recovery. This orders this app's activities
+  on the iPhone Lock Screen and in the Dynamic Island without ending/restarting agents or losing its token.
+  Relevance is independent of APNs delivery priority (5/10), urgency, counters and progress.
 
 ## iOS rendering rules
 

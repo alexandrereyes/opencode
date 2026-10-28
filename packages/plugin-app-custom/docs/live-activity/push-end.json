@@ -2,6 +2,7 @@
   "aps": {
     "timestamp": 1793105460,
     "event": "end",
+    "relevance-score": 50,
     "content-state": {
       "v": 1,
       "updatedAt": 1793105460000,

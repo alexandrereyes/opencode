@@ -286,6 +286,8 @@ export function body(input: BodyInput) {
     aps: {
       timestamp,
       event: input.event,
+      // Below voice (100), including push-to-start and background updates. Match OpenCodeKit.LiveActivityRelevance.
+      "relevance-score": 50,
       "content-state": input.state,
       "stale-date": timestamp + limits.staleMs / 1000,
       ...(input.attributes ? { "attributes-type": "AgentsActivityAttributes", attributes: input.attributes } : {}),

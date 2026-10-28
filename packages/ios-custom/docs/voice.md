@@ -256,6 +256,22 @@ do app. Tema é um snapshot de roles tipados. O driver mantém instâncias Activ
 durante chamadas assíncronas e limpa apenas atividades desse tipo deixadas por uma execução anterior.
 Live Activity negada pelo sistema não derruba áudio. Ela não contém transcrição pessoal.
 
+**Prioridade entre atividades:** voz usa `relevanceScore = 100` em todo início/atualização,
+inclusive mute, interrupção e recuperação de rede; agentes usa `50`, tanto no app quanto no
+`aps.relevance-score` dos pushes start/update/end do plugin. A Apple usa a maior relevância para
+a Dynamic Island e o topo da tela bloqueada; em empate, vence a primeira atividade iniciada.
+Ao encerrar voz, agentes volta naturalmente, com o mesmo ID, progresso e token. Não é preciso
+encerrar/recriar agentes, nem gerar outro alerta de início. Fontes: [ActivityContent.relevanceScore](https://developer.apple.com/documentation/activitykit/activitycontent/relevancescore)
+e [pushes ActivityKit](https://developer.apple.com/documentation/activitykit/starting-and-updating-live-activities-with-activitykit-push-notifications).
+O Smart Stack recebe as atividades espelhadas; a ordenação final no Watch depende do watchOS
+e das preferências do usuário (a documentação de relevância garante explicitamente iPhone,
+não prioridade absoluta no Watch). O card suplementar, o widget e o app Watch são preservados.
+
+Teste isolado: `-OpenCodeAgentsActivityFixture state-working -OpenCodeActivityPriorityFixture`
+com URL de sandbox explícita usa os drivers reais e transporte fechado, sem áudio/APNs/rede.
+`ActivityPriorityTests` captura a ilha/tela bloqueada e lê a relevância efetiva do ActivityKit,
+incluindo atualização de agentes, recuperação de voz e encerramento com o mesmo ID de agentes.
+
 ## Início pelo Botão de Ação, Controles e Atalhos
 
 `StartVoiceIntent` (`VoiceShared`) inicia a mesma chamada do botão de onda sem trazer o app para a

@@ -405,9 +405,13 @@ enum AgentsActivityFixtures {
 /// Keeps fixture launches off every server: no store, event stream or registration is created.
 struct AgentsActivityFixtureRoot: View {
   var body: some View {
-    ContentUnavailableView("Live Activity de exemplo", systemImage: "rectangle.badge.checkmark",
-      description: Text("Bloqueie a tela ou volte ao início para ver a atividade Agentes."))
-      .task { AgentsActivityAgent.shared.start() }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeActivityPriorityFixture") {
+      ActivityPriorityFixtureRoot()
+    } else {
+      ContentUnavailableView("Live Activity de exemplo", systemImage: "rectangle.badge.checkmark",
+        description: Text("Bloqueie a tela ou volte ao início para ver a atividade Agentes."))
+        .task { AgentsActivityAgent.shared.start() }
+    }
   }
 }
 #endif
