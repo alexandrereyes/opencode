@@ -8,14 +8,14 @@ salvo quando a proposta pedir uma mudança explícita. Os PNGs ficam versionados
 
 - iPhone 17 Pro, iOS 27.0, Dynamic Type **Large** (padrão), retrato.
 - OpenChamber escuro e claro; barra de status em **9:41**, bateria e sinal cheios.
-  Todos os estados do índice têm versão escura; abas, conversa e nova sessão também têm versão clara.
+  Todos os estados do índice têm versão escura; Sessões, Você, conversa e nova sessão também têm versão clara.
 - Dados sintéticos: projetos, mensagens, modelos, contas de assinatura e recursos. Nenhuma sessão,
   credencial, foto, arquivo ou dado de saúde pessoal foi consultado.
 - `ScreenCatalogFixture` reutiliza `ScrollFixtures`, os componentes de produção e as fixtures
   de assinaturas/voz. O transporte é fechado em memória: requisições desconhecidas falham;
   não existe fallback para rede. A URL de lançamento é apenas um identificador de isolamento.
-- Os recursos são exemplos da **lista**, não streams ativos. As três abas em construção são
-  os placeholders reais do app, não funcionalidades simuladas.
+- Os recursos são exemplos da **lista**, não streams ativos. Sessões é a raiz do app, sem barra
+  de abas. Você abre como folha pelo avatar AR no cabeçalho.
 - Os PNGs são reduzidos de 3× para 2× (804 × 1748) pelo `sips` do macOS, quantizados com
   `pngquant --quality=85-95 --speed 3 --strip --skip-if-larger` e recomprimidos com zlib.
   A resolução continua 2×; apenas a paleta tem perdas controladas. PNGs que não atingem a qualidade
@@ -43,7 +43,8 @@ Para iterar, `--themes dark`, `--only testTabs` e `--output /caminho/temporario`
 Não existe mais `--simulator`: **cada execução, inclusive parcial, cria e apaga seu próprio simulador**.
 Não use simuladores compartilhados nem reutilize um dispositivo entre execuções: desinstalar o app
 não limpa o Keychain. A separação por dispositivo é obrigatória e automática.
-Cada lançamento verifica a presença da sessão sintética `ses_scroll_0000` antes de qualquer interação.
+Cada lançamento verifica a presença da sessão sintética `ses_scroll_0000`, a URL isolada
+`http://127.0.0.1:4183` e a ausência de barra de abas antes de qualquer interação.
 Novas telas devem ganhar uma captura nomeada
 em `OpenCodeUITests/ScreenCatalogTests.swift` e uma linha no índice abaixo.
 
@@ -56,25 +57,25 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 
 | Tela / estado | O que mostra e como chegar | Escuro | Claro |
 | --- | --- | --- | --- |
-| Painel | Aba Painel; placeholder real | [PNG](dashboard-tab-default-dark.png) | [PNG](dashboard-tab-default-light.png) |
-| Pedidos | Aba Pedidos; placeholder real | [PNG](requests-tab-default-dark.png) | [PNG](requests-tab-default-light.png) |
-| Projetos | Aba Projetos; placeholder real | [PNG](projects-tab-default-dark.png) | [PNG](projects-tab-default-light.png) |
-| Sessões · Todas | Aba Sessões: chips/avatares com ícone PNG/SVG e fallback de iniciais, anéis de cota e atenção | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
+| Sessões · Todas | Raiz: voz, +, avatar AR, faixa da mestra; projetos e chats misturados, cota e atenção | [PNG](sessions-list-all-dark.png) | [PNG](sessions-list-all-light.png) |
 | Sessões · seções | Rolar até o fim: Trabalhando, Fixadas, Hoje, Ontem, Esta semana, Anteriores expandida e Arquivadas | [PNG](sessions-sections-history-dark.png) | [PNG](sessions-sections-history-light.png) |
 | Cabeçalho com Configurações | Variante do Mac do cabeçalho compartilhado (engrenagem entre voz e +) | [PNG](sessions-header-settings-dark.png) | — |
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
+| Sessões · chats em Todas | Filtro Todas; chat e projeto na mesma lista, com avatares distintos | [PNG](sessions-chats-mixed-dark.png) | [PNG](sessions-chats-mixed-light.png) |
 | Sessões · repositório | Sessões → Projeto Exemplo 0 | [PNG](sessions-list-repository-dark.png) | [PNG](sessions-list-repository-light.png) |
 | Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
 | Chips · em execução | Todas → Projeto Exemplo 0 rodando → Projeto Exemplo 3 não lido → ordem manual | [PNG](sessions-chips-running-dark.png) | [PNG](sessions-chips-running-light.png) |
 | Chats · ordem manual | Manter pressionado Chats; primeiro por padrão, com Mover para depois disponível | [PNG](sessions-chats-order-menu-dark.png) | — |
-| Seleção · toque longo | Sessões → manter pressionada a sessão sintética; menu com Selecionar | [PNG](sessions-select-context-menu-dark.png) | — |
+| Seleção · toque longo | Sessões → manter pressionada a sessão sintética; Selecionar e aviso ao terminar | [PNG](sessions-select-context-menu-dark.png) | — |
 | Seleção · modo ativo | Menu da sessão → Selecionar; círculos, 1 selecionada, Selecionar todas, OK e ⋯ | [PNG](sessions-select-mode-dark.png) | [PNG](sessions-select-mode-light.png) |
 | Seleção · ações | Modo de seleção → ⋯; Arquivar/Excluir/Cancelar, sem executar mutações | [PNG](sessions-select-actions-dark.png) | — |
 | Seleção · confirmação | ⋯ → Excluir (1); somente capturar e Cancelar, sem confirmar exclusão ou arquivamento | [PNG](sessions-select-delete-confirmation-dark.png) | — |
-| Você / Ajustes | Aba Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
-| Temas | Você → Tema | [PNG](you-themes-default-dark.png) | — |
-| Dados do iPhone | Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | — |
-| LLM proxy | Você → Codex; contas e cotas sintéticas | [PNG](you-subscriptions-default-dark.png) | — |
+| Aviso ligado | Raiz; projeto sintético com sininho, sem alterar preferências no servidor | [PNG](sessions-notify-enabled-dark.png) | — |
+| Deslizar · aviso | Deslizar a linha para a esquerda; ação Avisar ao terminar com sino (não acionada) | [PNG](sessions-swipe-notify-dark.png) | — |
+| Você / Ajustes | Avatar AR → folha Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
+| Temas | Folha Você → Tema | [PNG](you-themes-default-dark.png) | [PNG](you-themes-default-light.png) |
+| Dados do iPhone | Folha Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | [PNG](you-iphone-data-default-light.png) |
+| LLM proxy | Folha Você → Codex; contas e cotas sintéticas | [PNG](you-subscriptions-default-dark.png) | [PNG](you-subscriptions-default-light.png) |
 | Nova sessão · Chats | Sessões → +; destino inicial Chats | [PNG](new-session-chats-empty-dark.png) | [PNG](new-session-chats-empty-light.png) |
 | Nova sessão · projeto | Nova sessão → Projeto → Projeto Exemplo 0 | [PNG](new-session-project-empty-dark.png) | [PNG](new-session-project-empty-light.png) |
 | Nova sessão pelo chip | Sessões → chip Projeto Exemplo 0 → +; projeto herdado sem abrir a folha Projeto | [PNG](new-session-from-repository-chip-dark.png) | [PNG](new-session-from-repository-chip-light.png) |
@@ -112,6 +113,19 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão sem abas (base `b304370d13`): Sessões passa a ser a raiz, com voz, + e avatar AR que abre
+Você como folha. Foram removidos os seis PNGs `dashboard-tab-*`, `requests-tab-*` e `projects-tab-*`.
+Os helpers `openYou()`/`showSessions()` fazem a navegação das capturas. Todas inclui chats
+(`3d9f2629ea`), com o mesmo avatar de duas bolhas e cor `chatAvatar` na raiz e na troca rápida;
+a fixture mantém `/Chats/roteiro` e os projetos com PNG/SVG/iniciais.
+
+O Projeto Exemplo 0 tem `notifySessions` ligado na fixture para mostrar o sino (`197395a2bd`): o menu
+de toque longo e o deslizar mostram as ações atuais de aviso, sem acioná-las. Agentes e tarefas
+usa agente, modelo e esforço atuais (`f6f8892302`). Os PNGs de conversa, arquivos, atividade, mestra
+e folhas também são regenerados para retirar barras antigas quando apareciam sob as apresentações.
+As mudanças de grade de tabelas (`34cc92a58d`) e colagem (`cccef4a7f8`) não alteram o conteúdo desses
+cenários: não há tabela rolando nem colagem de imagem no catálogo principal.
 
 Revisão dos ícones (base `9ff33a3ce8`): Projeto Exemplo 0 recebe um PNG 128×128 verde/azul;
 Projeto Exemplo 2 recebe um SVG quadrado roxo autocontido. São desenhos genéricos produzidos em
@@ -178,7 +192,7 @@ Nas capturas que incluem teclado, o aviso inicial do QuickPath é dispensado ant
 
 ## Limites
 
-- **Ajustes** corresponde à própria aba **Você** nesta versão; não há uma segunda tela com esse título.
+- **Ajustes** corresponde à folha **Você** nesta versão; não há uma segunda tela com esse título.
 - Streams ao vivo de iOS, Android e Chrome não são iniciados: o catálogo cobre a lista de recursos
   sintéticos, evitando máquinas adicionais, permissões e serviços externos.
 - A sessão mestra é mostrada antes da primeira mensagem; o catálogo não cria uma sessão mestra
