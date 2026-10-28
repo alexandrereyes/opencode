@@ -84,6 +84,17 @@ public struct ContextUsage: Sendable, Equatable {
       .precision(.fractionLength($0 > 0 && $0 < 0.01 ? 2...6 : 2...2))) } ?? "—"
   }
 
+  /// "US$ 2,7 mil", "US$ 1,2 mi": a cost of a thousand or more where its whole value does not fit. Smaller costs
+  /// keep `money`'s cents.
+  public static func compactMoney(_ value: Double?) -> String {
+    guard let value else { return "—" }
+    guard abs(value) >= 1_000 else { return money(value) }
+    let million = abs(value) >= 999_950
+    let scaled = (value / (million ? 1_000_000 : 1_000) * 10).rounded() / 10
+    return "US$ " + scaled.formatted(.number.locale(Locale(identifier: "pt_BR")).grouping(.never)
+      .precision(.fractionLength(0...1))) + (million ? " mi" : " mil")
+  }
+
   private static func integer(_ value: Double) -> String {
     value.rounded().formatted(.number.locale(Locale(identifier: "pt_BR")).precision(.fractionLength(0)))
   }

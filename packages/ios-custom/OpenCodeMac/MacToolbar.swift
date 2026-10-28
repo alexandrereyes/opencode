@@ -57,22 +57,17 @@ struct MacSessionActions: View {
 
   var body: some View {
     HStack(spacing: 2) {
-      Menu {
-        MacSessionMenuItems(store: store, runtime: runtime)
-        Divider()
-        Button("Buscar na conversa", systemImage: "magnifyingglass") {
-        NotificationCenter.default.post(name: .macSearchConversation, object: runtime.id)
-        }
-        Button("Arquivos", systemImage: "folder") { runtime.showFiles() }
-        Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto", systemImage: "sidebar.right") {
-          runtime.contextVisible.toggle()
-        }
-      } label: {
-        MacToolbarIcon(symbol: "ellipsis")
+      if runtime.selection.master && runtime.selection.childID == nil {
+        // The iPhone's master conversation shows this trash instead of the session menu.
+        Button { runtime.resetMaster() } label: { MacToolbarIcon(symbol: "trash") }
+          .buttonStyle(.plain)
+          .disabled(store.busy.contains("master-reset"))
+          .help("Reiniciar Sessão mestra")
+          .accessibilityLabel("Reiniciar Sessão mestra")
+          .accessibilityIdentifier("master-trash")
+      } else {
+        sessionMenu
       }
-      .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-      .help("Ações da sessão")
-      .accessibilityLabel("Ações da sessão")
       Button {
         runtime.newSession()
       } label: {
@@ -83,6 +78,25 @@ struct MacSessionActions: View {
       .help("Nova sessão (⌘N)")
       .accessibilityLabel("Nova sessão")
     }
+  }
+
+  private var sessionMenu: some View {
+    Menu {
+      MacSessionMenuItems(store: store, runtime: runtime)
+      Divider()
+      Button("Buscar na conversa", systemImage: "magnifyingglass") {
+        NotificationCenter.default.post(name: .macSearchConversation, object: runtime.id)
+      }
+      Button("Arquivos", systemImage: "folder") { runtime.showFiles() }
+      Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto", systemImage: "sidebar.right") {
+        runtime.contextVisible.toggle()
+      }
+    } label: {
+      MacToolbarIcon(symbol: "ellipsis")
+    }
+    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+    .help("Ações da sessão")
+    .accessibilityLabel("Ações da sessão")
   }
 }
 
@@ -128,8 +142,8 @@ struct MacSessionMenuItems: View {
   }
 }
 
-/// The chat's identity in the title bar: the project avatar in its context ring, `App Mac ⌄` (a menu to switch
-/// to another recent session) and `<worktree> · trabalhando…`, with no capsule behind it.
+/// The chat's identity in the title bar: the project avatar in its context ring, `App Mac` and
+/// `<worktree> · trabalhando…`, with no capsule behind it. It is a label: ⌘K's search switches sessions.
 struct MacChatTitle: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
@@ -143,44 +157,24 @@ struct MacChatTitle: View {
   private var master: Bool { runtime.selection.master }
 
   var body: some View {
-    Button {
-      runtime.search.close(runtime: runtime, focusComposer: false)
-      runtime.switcherVisible.toggle()
-    } label: {
-      HStack(spacing: 9) {
-        ConversationAvatar(
-          context: usage?.fraction, master: master,
-          colors: theme.avatar(SessionList.avatarColor(row?.project, fallback: row?.session.projectID ?? "")),
-          monogram: SessionList.monogram(row?.projectName ?? title),
-          icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) }, size: 30)
-        ConversationTitle(
-          title: master ? "Sessão mestra" : title, switches: true, subtitle: subtitle,
-          status: running ? "trabalhando…" : "", waiting: row?.state == .permission || row?.state == .question)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(width: width, alignment: .leading)
-      // Measure the label itself: the native toolbar host can retain its earlier, wider allocation.
-      .background(MacSearchAnchor(role: .title))
-      .contentShape(Rectangle())
+    HStack(spacing: 9) {
+      ConversationAvatar(
+        context: usage?.fraction, master: master,
+        colors: theme.avatar(SessionList.avatarColor(row?.project, fallback: row?.session.projectID ?? "")),
+        monogram: SessionList.monogram(row?.projectName ?? title),
+        icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) }, size: 30)
+      ConversationTitle(
+        title: master ? "Sessão mestra" : title, subtitle: subtitle,
+        status: running ? "trabalhando…" : "", waiting: row?.state == .permission || row?.state == .question)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .buttonStyle(.plain).fixedSize()
-    .help("Trocar de sessão")
+    .frame(width: width, alignment: .leading)
+    // Measure the label itself: the native toolbar host can retain its earlier, wider allocation.
+    .background(MacSearchAnchor(role: .title))
+    .fixedSize()
+    .accessibilityElement(children: .combine)
     .accessibilityLabel([title, subtitle, running ? "trabalhando" : nil].compactMap { $0 }.joined(separator: ", "))
-    // The iPhone's switcher sheet as a popover: search, the current session marked, Nova sessão at the end.
-    .popover(isPresented: $runtime.switcherVisible, arrowEdge: .bottom) {
-      SessionSwitcherSheet(
-        sessions: store, current: runtime.selection.sessionID ?? "",
-        choose: { id in
-          runtime.switcherVisible = false
-          runtime.selection = MacSelection(sessionID: id)
-        },
-        newSession: {
-          runtime.switcherVisible = false
-          if let id = row?.id { runtime.newSession(from: id) } else { runtime.newSession() }
-        })
-        .frame(width: 400, height: 520)
-        .background(theme.color(.background))
-    }
+    .accessibilityAddTraits(.isHeader)
   }
 
   /// The worktree folder's name, like the iPhone header.

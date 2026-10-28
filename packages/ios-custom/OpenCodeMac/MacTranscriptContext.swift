@@ -3,6 +3,19 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
+/// The project avatar of Sessões, beside the user's prompts: its own icon, or the monogram on its color.
+struct MacTranscriptAvatar: Equatable {
+  let icon: ProjectIcon?
+  let color: String
+  let monogram: String
+
+  init(_ row: SessionRow) {
+    icon = row.chat ? nil : ProjectIcon.of(row.project)
+    color = SessionList.avatarColor(row.project, fallback: row.session.projectID)
+    monogram = SessionList.monogram(row.projectName)
+  }
+}
+
 /// What the transcript's cells need from the chat column, like the iPhone's `TranscriptContext`. Hosted cells
 /// live in AppKit, outside the column's SwiftUI tree, so they read it here; it is observable, so a cell re-renders
 /// only for the values it read.
@@ -11,10 +24,23 @@ import SwiftUI
   let memory: TranscriptMemory
   let client: OpenCodeClient
   var theme = AppTheme.selected
-  /// Space on each side of the content column: the transcript reads at most 760 points wide, centered.
-  var inset: CGFloat = 24
+  /// The reading column, icons included: at most 960 pt, centered, with at least 28 pt on each side. That keeps an
+  /// answer's lines under about 125 characters at 14 pt (past that the eye loses the next line), while a large
+  /// window still gives the chat far more than the old 760 pt.
+  static let column: CGFloat = 960
+  static let minimumInset: CGFloat = 28
+  /// The icons beside the messages (24 pt) and their 10-pt gap: the answer's text starts after it, the prompt's
+  /// bubble ends before it.
+  static let gutter: CGFloat = 34
+  static let icon: CGFloat = 24
+  /// Space on each side of the content column.
+  var inset: CGFloat = 28
   /// The transcript's width.
   var width: CGFloat = 808
+  /// The first item of each answer (after its prompt), which shows the OpenCode icon at its top left.
+  var responseStarts: Set<String> = []
+  /// The session's project, shown beside the prompts like its avatar in Sessões.
+  var avatar: MacTranscriptAvatar?
   var quotes = ConversationQuoteContext()
   var search = ConversationSearchHighlight()
   /// The transcript's viewport; prompts cap their text at 40% of its height, like the iPhone.
@@ -29,7 +55,8 @@ import SwiftUI
   @ObservationIgnored var revert: (ConversationMessage) -> Void = { _ in }
   @ObservationIgnored var comment: (ChatQuote) -> Void = { _ in }
   @ObservationIgnored var readAloud: (String) -> Void = { _ in }
-  @ObservationIgnored var openImage: (CGImage, String) -> Void = { _, _ in }
+  /// The image shown, its name and its source (to read the original).
+  @ObservationIgnored var openImage: (CGImage, String, String) -> Void = { _, _, _ in }
   @ObservationIgnored var scrollKey: (NSEvent) -> Bool = { _ in false }
   @ObservationIgnored var blockLookup: (TranscriptPart) -> [MarkdownBlock]? = { _ in nil }
   @ObservationIgnored var rasterLookup: (String) -> [ResponseFormulaKey: ResponseFormulaRaster] = { _ in [:] }
@@ -38,6 +65,25 @@ import SwiftUI
     self.store = store
     self.memory = memory
     self.client = client
+  }
+
+  /// Where the reading column's content starts and how wide it is.
+  var columnWidth: CGFloat { max(200, width - inset * 2) }
+
+  /// The first answer item after every prompt (or at the top of the loaded page), which carries the icon.
+  static func responseStarts(_ items: [TranscriptItem]) -> Set<String> {
+    var starts: Set<String> = []
+    var open = true
+    for item in items {
+      switch item.kind {
+      case .prompt, .pending: open = true
+      case .older, .day, .rule, .notice: break
+      default:
+        if open { starts.insert(item.id) }
+        open = false
+      }
+    }
+    return starts
   }
 
   /// Where conversation images load from: the server and the session's directory.

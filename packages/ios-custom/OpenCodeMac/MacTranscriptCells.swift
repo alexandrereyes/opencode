@@ -69,14 +69,17 @@ class MacTranscriptCell: NSView {
   }
 }
 
-/// Prose of a response: one native text view, configured and measured synchronously.
+/// Prose of a response: one native text view, configured and measured synchronously. It starts after the icons'
+/// gutter; the first item of an answer draws the OpenCode icon in it.
 final class MacProseCell: MacTranscriptCell {
   let text = MacResponseTextView()
+  private let icon = MacResponseIconView()
   private var inset: CGFloat = 24
 
   override init(frame: NSRect) {
     super.init(frame: frame)
     addSubview(text)
+    addSubview(icon)
   }
   required init?(coder: NSCoder) { nil }
 
@@ -94,6 +97,7 @@ final class MacProseCell: MacTranscriptCell {
     highlight(value, prose: prose, part: part, context: context)
     text.show(value, prose: prose, theme: context.theme)
     setAccessibilityIdentifier(item?.id)
+    icon.isHidden = !(item.map { context.responseStarts.contains($0.id) } ?? false)
     placeText()
   }
 
@@ -116,7 +120,7 @@ final class MacProseCell: MacTranscriptCell {
   override func measure(width: CGFloat, context: MacTranscriptContext) -> CGFloat {
     _ = super.measure(width: width, context: context)
     inset = context.inset
-    return text.fittingHeight(width: max(1, width - inset * 2))
+    return text.fittingHeight(width: max(1, width - inset * 2 - MacTranscriptContext.gutter))
   }
 
   override func setFrameSize(_ newSize: NSSize) {
@@ -125,13 +129,36 @@ final class MacProseCell: MacTranscriptCell {
   }
 
   private func placeText() {
-    let frame = CGRect(x: inset, y: 0, width: max(1, bounds.width - inset * 2), height: bounds.height)
+    let gutter = MacTranscriptContext.gutter
+    let frame = CGRect(x: inset + gutter, y: 0, width: max(1, bounds.width - inset * 2 - gutter), height: bounds.height)
     if text.frame != frame { text.frame = frame }
+    let side = MacTranscriptContext.icon
+    let place = CGRect(x: inset, y: 0, width: side, height: side)
+    if icon.frame != place { icon.frame = place }
   }
 
   func reset() {
     text.setSelectedRange(NSRange(location: 0, length: 0))
   }
+}
+
+/// The OpenCode mascot (the app icon's artwork, still) in a circle at the top left of an answer.
+final class MacResponseIconView: NSView {
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    wantsLayer = true
+    layer?.contents = NSImage(named: "OpenCodeMascot")
+    layer?.contentsGravity = .resizeAspectFill
+    layer?.masksToBounds = true
+    setAccessibilityElement(false)
+  }
+  required init?(coder: NSCoder) { nil }
+  override var isFlipped: Bool { true }
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    layer?.cornerRadius = newSize.width / 2
+  }
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Every other item: its SwiftUI view, hosted. It measures synchronously at a width, and tells the transcript

@@ -200,7 +200,7 @@ struct MacNewSession: View {
   /// like the chat (⌘Return too, from the footer's Enviar).
   private var editor: some View {
     MacComposer(store: store.composer, draft: store.draft,
-      embedded: MacComposerEmbedding(canSubmit: store.canSend) { Task { await store.send() } })
+      embedded: MacComposerEmbedding(canSubmit: store.canSend, submit: { Task { await store.send() } }))
       .disabled(store.sending)
       .accessibilityLabel("Mensagem")
   }

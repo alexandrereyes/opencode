@@ -50,9 +50,11 @@ struct ConversationBottomControls: View {
   let jump: () -> Void
   let reveal: (String) -> Void
   let height: (CGFloat) -> Void
+  /// The Mac places ↓ beside the reading column itself.
+  var showsJump = true
   var body: some View {
     VStack(alignment: .trailing, spacing: 8) {
-      if state.jumpToLatest {
+      if showsJump, state.jumpToLatest {
         Button(action: jump) {
           Image(systemName: "arrow.down").frame(width: 42, height: 42)
         }.adaptiveGlassButtonStyle().buttonBorderShape(.circle).accessibilityLabel("Ir para a mais recente")

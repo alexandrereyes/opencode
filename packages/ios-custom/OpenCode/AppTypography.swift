@@ -142,7 +142,13 @@ extension View {
 }
 
 enum AppLayout {
+  #if os(macOS)
+  /// The Mac's Sessões column is narrower than a phone and has no screen edge to clear: titles and paths take the
+  /// room instead. The list adds about 8 pt of its own, so rows start 14 pt from the column's edge (24 before).
+  static let margin: CGFloat = 6
+  #else
   static let margin: CGFloat = 16
+  #endif
   static let composerMargin: CGFloat = 12
   static let avatar: CGFloat = 44
   static let compactAvatar: CGFloat = 36

@@ -13,6 +13,14 @@ struct MacWindow: View {
   @State private var context: ContextColumnStore?
   @State private var restored = false
   @State private var detailWidth: CGFloat = 860
+  @State private var windowWidth: CGFloat = 1500
+
+  /// How wide Contexto may be now: up to 60% of the window, never squeezing the chat below its minimum.
+  private var contextRange: ClosedRange<Double> {
+    DesktopWindowState.contextWidthRange(detail: detailWidth, window: windowWidth, chatMinimum: chatMinimum)
+  }
+  // With both side columns hidden, traffic lights and the sidebar's toolbar still precede the title.
+  private var chatMinimum: CGFloat { !runtime.state.sidebarVisible && !runtime.contextVisible ? 840 : 460 }
 
   var body: some View {
     NavigationSplitView(columnVisibility: $runtime.columns) {
@@ -27,19 +35,25 @@ struct MacWindow: View {
         // Reserve a useful search area before allowing a long session title to fill the bar.
         MacChatColumn(store: store, runtime: runtime, context: context,
           titleWidth: min(230, max(100, (detailWidth - 520) / 2 - 32 - (runtime.state.sidebarVisible ? 0 : 180))))
-          // With both columns hidden, traffic lights and the sidebar's toolbar still precede the title.
           // Keep this minimum on the chat, never on the root (which causes AppKit constraint loops).
-          .frame(minWidth: !runtime.state.sidebarVisible && !runtime.contextVisible ? 840 : 460, maxWidth: .infinity)
+          .frame(minWidth: chatMinimum, maxWidth: .infinity)
+          .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { runtime.measuredChatWidth = $0 }
         if runtime.contextVisible {
-          MacColumnDivider(width: $runtime.contextWidth)
-          // Offered the room first, up to the dragged width; a narrower window shrinks it to 400 pt before the
-          // chat goes below its 460, so the window's minimum stays the two minimums.
-          inspector.frame(minWidth: 400, maxWidth: min(max(runtime.contextWidth, 400), 760)).layoutPriority(1)
+          MacColumnDivider(width: $runtime.contextWidth, range: contextRange) { width in
+            if !MacLaunch.fixture { DesktopWindowState.rememberContextWidth(width, defaults: .standard) }
+          }
+          // Offered the room first, up to the dragged width (at most 60% of the window); a narrower window shrinks
+          // it to 400 pt before the chat goes below its 460, so the window's minimum stays the two minimums.
+          inspector.frame(minWidth: 400,
+            maxWidth: max(400, min(runtime.contextWidth, windowWidth * DesktopWindowState.maximumContextShare)))
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { runtime.measuredContextWidth = $0 }
+            .layoutPriority(1)
         }
       }
       .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
       .background(MacSearchPresentation(runtime: runtime))
     }
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
     .background(theme.color(.background))
     .toastOverlay(store.toast)
     .sessionAlertOverlay(modal: false)
@@ -151,10 +165,13 @@ struct MacWindow: View {
 
 }
 
-/// The hairline between the chat and Contexto; dragging it resizes Contexto.
+/// The hairline between the chat and Contexto; dragging it resizes Contexto within `range`, and the width it ends
+/// at is remembered (`ended`).
 private struct MacColumnDivider: View {
   @Environment(\.appTheme) private var theme
   @Binding var width: Double
+  let range: ClosedRange<Double>
+  let ended: (Double) -> Void
   @State private var start: Double?
 
   var body: some View {
@@ -166,11 +183,15 @@ private struct MacColumnDivider: View {
           }
           .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .onChanged { value in
-              let origin = start ?? width
+              // A width remembered from a wider window starts the drag from what is shown.
+              let origin = start ?? min(max(width, range.lowerBound), range.upperBound)
               start = origin
-              width = min(max(origin - value.translation.width, 400), 760)
+              width = min(max(origin - value.translation.width, range.lowerBound), range.upperBound)
             }
-            .onEnded { _ in start = nil })
+            .onEnded { _ in
+              start = nil
+              ended(width)
+            })
       }
       .accessibilityHidden(true)
   }

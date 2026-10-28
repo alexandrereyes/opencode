@@ -108,6 +108,7 @@ struct MacFilePane: View {
               }
             }
             .padding(.horizontal, 6).padding(.vertical, 12)
+            .macThinScrollers()
           }
           .id(file.path)
         } else if !source, MacFileRendering(path: file.path) == .html {

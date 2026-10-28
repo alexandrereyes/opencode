@@ -17,7 +17,7 @@ import SwiftUI
 
   /// The window at the approved mock's proportions, then the column. Launch options open what the capture shows:
   /// `-OpenCodeMacSelect id,id` (selection mode), `-OpenCodeMacNewSession sessoes|origem|mestra`,
-  /// `-OpenCodeMacSwitcher`, `-OpenCodeMacDetails` (Detalhes in Contexto), and in their own pictures
+  /// `-OpenCodeMacDetails` (Detalhes in Contexto), and in their own pictures
   /// `-OpenCodeMacOpenResource <id>` (`<name>-recurso.png`), `-OpenCodeMacShellOutput <shell>`
   /// (`<name>-saida.png`) and `-OpenCodeMacSettings <tab>` (`<name>-ajustes.png`). Sheets and popovers over the
   /// window are drawn into its picture.
@@ -61,6 +61,7 @@ import SwiftUI
       exit(1)
     }
     await MacDetailsFixture.verify(window: window, runtime: runtime, theme: theme, folder: folder)
+    await MacAjustesChecks.run(window: window, runtime: runtime, theme: theme, folder: folder)
     // `-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n>`: a sequence (`<name>-01.png`…), a short video of
     // a live conversation, a stream or paging.
     if let every = MacFixture.value("-OpenCodeMacCaptureEvery").flatMap(Double.init),
@@ -103,7 +104,6 @@ import SwiftUI
       ids.dropFirst().forEach { runtime.sessionSelection.toggle($0) }
     }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacDetails") { context()?.detailsOpen = true }
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSwitcher") { runtime.switcherVisible = true }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideContext") { runtime.contextVisible = false }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideSessions") { runtime.columns = .detailOnly }
     if let query = MacFixture.value("-OpenCodeMacSearch") {

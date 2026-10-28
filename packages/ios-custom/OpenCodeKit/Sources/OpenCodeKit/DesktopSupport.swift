@@ -9,6 +9,13 @@ public enum SessionNavigation {
     let next = index + offset
     return ids.indices.contains(next) ? ids[next] : nil
   }
+
+  /// ⌘1…⌘9: the first rows the column shows, in its order, skipping collapsed sections.
+  public static func numbered(_ sections: [SessionSection], collapse: SessionSectionCollapse, limit: Int = 9)
+    -> [SessionRow]
+  {
+    Array(sections.filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).prefix(limit))
+  }
 }
 
 /// A system notification for an in-app session alert, shown by the Mac while the app is not in front: the

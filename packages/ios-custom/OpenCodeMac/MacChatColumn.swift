@@ -106,6 +106,7 @@ struct MacConversationView: View {
   @State private var viewing: MacViewedImage?
   @State private var dropping = false
   @State private var playerHeight: CGFloat = 0
+  @State private var chatWidth: CGFloat = 800
 
   private var input: MacConversationInput { runtime.input(conversation) }
   private var draft: ConversationDraft { input.draft }
@@ -162,25 +163,34 @@ struct MacConversationView: View {
     .sheet(item: $quoteDetail, onDismiss: {
       if let quote = quoteEditing { quoteEditing = nil; draft.commenting = quote }
     }) { mark in
-      QuoteDetailsSheet(mark: mark, edit: {
-        quoteEditing = draft.quotes.first { $0.id == mark.quote.id }
-        quoteDetail = nil
-      }, remove: {
-        quoteDetail = nil
-        if mark.pending { draft.removeQuote(mark.quote); return }
-        if !conversation.dismissQuotes([mark.quote.id]) {
-          conversation.toast.show("A marcação foi removida, mas não pôde ser salva no Mac.", kind: .error)
-        }
-      }, source: {
-        quoteDetail = nil
-        revealQuote(mark.quote)
-      }, message: {
-        quoteDetail = nil
-        if let id = mark.carryingMessageID {
-          memory.setBubble(id, expanded: true)
-          transcript?.reveal(messageID: id, animated: true)
-        }
-      }, close: { quoteDetail = nil })
+      // A quote still in the draft opens editing its comment; a sent mark shows its details.
+      if mark.pending, let quote = draft.quotes.first(where: { $0.id == mark.quote.id }) {
+        MacQuoteCommentSheet(quote: quote, store: conversation, draft: draft, mark: (mark.number, {
+          revealQuote(mark.quote)
+        }, {
+          draft.removeQuote(mark.quote)
+        }))
+      } else {
+        QuoteDetailsSheet(mark: mark, edit: {
+          quoteEditing = draft.quotes.first { $0.id == mark.quote.id }
+          quoteDetail = nil
+        }, remove: {
+          quoteDetail = nil
+          if mark.pending { draft.removeQuote(mark.quote); return }
+          if !conversation.dismissQuotes([mark.quote.id]) {
+            conversation.toast.show("A marcação foi removida, mas não pôde ser salva no Mac.", kind: .error)
+          }
+        }, source: {
+          quoteDetail = nil
+          revealQuote(mark.quote)
+        }, message: {
+          quoteDetail = nil
+          if let id = mark.carryingMessageID {
+            memory.setBubble(id, expanded: true)
+            transcript?.reveal(messageID: id, animated: true)
+          }
+        }, close: { quoteDetail = nil })
+      }
     }
     .sheet(item: $viewing) { image in MacImageSheet(image: image) }
     .sheet(item: $conversation.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
@@ -219,6 +229,12 @@ struct MacConversationView: View {
       }
       try? await Task.sleep(for: .seconds(2))
       transcript?.reveal(messageID: "msg_details_prompt")
+    }
+    .task {
+      // `-OpenCodeMacAjustes image`: the image viewer over the conversation, for its ⌘C check.
+      guard MacAjustesChecks.mode == "image", !conversation.isChild, let image = MacAjustesChecks.sample else { return }
+      try? await Task.sleep(for: .seconds(2))
+      viewing = MacViewedImage(image: image, name: "Personagens")
     }
     .onChange(of: conversation.hasTranscript, initial: true) { _, loaded in
       // Captures can show the first activity card open (`-OpenCodeMacOpenActivity`), like the approved mock.
@@ -289,11 +305,20 @@ struct MacConversationView: View {
       search: ConversationSearchHighlight(matches: search.matches, current: search.current?.id),
       bottomPadding: playerHeight > 0 ? playerHeight + 24 : 16
     ) { context in
+      let avatar = (sessions.rows.first { $0.id == conversation.id }
+        ?? sessions.rows.first { $0.memberIDs.contains(conversation.id) }).map(MacTranscriptAvatar.init)
+      if context.avatar != avatar { context.avatar = avatar }
       context.openChild = { id in open(child: id) }
       context.openPath = { path in openFile(path) }
       context.revert = { message in revertCandidate = message }
       context.comment = { quote in commenting = quote }
-      context.openImage = { image, name in viewing = MacViewedImage(image: image, name: name) }
+      context.openImage = { image, name, source in
+        let directory = conversation.session?.location.directory
+        viewing = MacViewedImage(image: image, name: name, original: { [client = sessions.client] in
+          guard let directory else { return nil }
+          return try? await FeedImageLoader.shared.load(source, client: client, directory: directory)
+        })
+      }
       context.readAloud = { id in
         guard let response = ReadAloud.response(conversation.messages, endingAt: id, sessionID: conversation.id),
           !response.text.isEmpty else { return }
@@ -303,9 +328,17 @@ struct MacConversationView: View {
     .overlay(alignment: .bottomTrailing) {
       ConversationBottomControls(readAloud: input.readAloud, state: memory.state,
         jump: { transcript?.scrollToLatest(animated: true) },
-        reveal: { transcript?.reveal(messageID: $0, animated: true) }, height: { playerHeight = $0 })
-        .frame(maxWidth: 760)
+        reveal: { transcript?.reveal(messageID: $0, animated: true) }, height: { playerHeight = $0 },
+        showsJump: false)
+        .frame(maxWidth: MacTranscriptContext.column)
     }
+    .overlay(alignment: .bottomTrailing) {
+      // ↓ in the empty margin right of the reading column, just above the composer, when there is one.
+      if memory.state.jumpToLatest, let margin = jumpMargin {
+        jumpButton.padding(.trailing, (margin - MacJumpButton.side) / 2).padding(.bottom, 12)
+      }
+    }
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chatWidth = $0 }
     .overlay(alignment: .top) {
       if memory.state.resumeOffered {
         Button("Continuar de onde parou") { transcript?.resume() }
@@ -347,12 +380,27 @@ struct MacConversationView: View {
       FloatingVoiceHost(sessions: sessions)
       if conversation.session?.revert != nil, !conversation.isChild { revertBar }
       ConversationTray(store: conversation, draft: draft)
-      MacComposer(store: conversation, draft: draft)
+      // Without a margin wide enough beside the column, ↓ sits on the composer card's top right corner.
+      MacComposer(store: conversation, draft: draft,
+        corner: memory.state.jumpToLatest && jumpMargin == nil
+          // Mostly above the card's edge, clear of the first line of text.
+          ? AnyView(jumpButton.padding(.trailing, 12).offset(y: 8 - MacJumpButton.side)) : nil)
         .disabled(!conversation.ready || conversation.notice != nil)
     }
-    .frame(maxWidth: 760)
-    .padding(.horizontal, 24).padding(.bottom, 10).padding(.top, 6)
+    .frame(maxWidth: MacTranscriptContext.column)
+    .padding(.horizontal, MacTranscriptContext.minimumInset).padding(.bottom, 10).padding(.top, 6)
     .frame(maxWidth: .infinity)
+  }
+
+  /// The empty margin right of the reading column, when ↓ fits in it with room around.
+  private var jumpMargin: CGFloat? {
+    let column = min(MacTranscriptContext.column, chatWidth - MacTranscriptContext.minimumInset * 2)
+    let margin = (chatWidth - column) / 2
+    return margin >= MacJumpButton.side + 16 ? margin : nil
+  }
+
+  private var jumpButton: some View {
+    MacJumpButton { transcript?.scrollToLatest(animated: true) }
   }
 
   private var revertBar: some View {
@@ -392,6 +440,22 @@ struct MacConversationView: View {
       }
       runtime.showFiles(at: URL(fileURLWithPath: path).deletingLastPathComponent().path, file: path)
     }
+  }
+}
+
+/// ↓ Ir para a mais recente, beside the text instead of over it: the iPhone's glass circle at desktop size.
+struct MacJumpButton: View {
+  static let side: CGFloat = 34
+  let action: () -> Void
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: "arrow.down").font(.system(size: 13, weight: .semibold))
+        .frame(width: Self.side - 8, height: Self.side - 8)
+    }
+    .adaptiveGlassButtonStyle().buttonBorderShape(.circle)
+    .help("Ir para a mais recente (⌘↓)")
+    .accessibilityLabel("Ir para a mais recente")
+    .accessibilityIdentifier("jump-to-latest")
   }
 }
 
@@ -467,60 +531,127 @@ struct MacViewedImage: Identifiable {
   let id = UUID()
   let image: CGImage
   let name: String
+  /// The original file, read on demand (the chat shows a downscaled copy).
+  var original: (() async -> CGImage?)? = nil
 }
 
-/// An image from the conversation at full size.
+/// An image from the conversation at full size: ⌘C (or the right-click menu) copies it, and it drags out to the
+/// Finder or another app as a PNG.
 private struct MacImageSheet: View {
   @Environment(\.dismiss) private var dismiss
   let image: MacViewedImage
+  @State private var original: CGImage?
+  private var shown: CGImage { original ?? image.image }
   var body: some View {
     VStack(spacing: 0) {
       HStack {
         Text(image.name).lineLimit(1)
         Spacer()
+        Button("Copiar imagem", systemImage: "doc.on.doc") { MacImageTransfer.copy(shown) }
+          .keyboardShortcut("c", modifiers: .command)
+          .help("Copiar imagem (⌘C)")
         Button("Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
       }
       .padding(12)
       ScrollView([.horizontal, .vertical]) {
-        Image(decorative: image.image, scale: 2)
+        Image(decorative: shown, scale: 2)
+          .onDrag { MacImageTransfer.provider(shown, name: image.name) }
+          .contextMenu { MacImageMenu(image: shown) }
+          .accessibilityLabel(image.name)
       }
     }
     .frame(minWidth: 520, idealWidth: min(CGFloat(image.image.width) / 2 + 40, 1100), minHeight: 400,
       idealHeight: min(CGFloat(image.image.height) / 2 + 80, 800))
+    .task { original = await image.original?() }
+  }
+}
+
+/// Copiar imagem, for an image in the chat and in its viewer.
+struct MacImageMenu: View {
+  let image: CGImage
+  var body: some View {
+    Button("Copiar imagem", systemImage: "doc.on.doc") { MacImageTransfer.copy(image) }
+  }
+}
+
+/// Images leave the app as PNG (and TIFF for older apps) on the clipboard, and as a PNG file when dragged out.
+@MainActor enum MacImageTransfer {
+  static func copy(_ image: CGImage) {
+    let representation = NSBitmapImageRep(cgImage: image)
+    let item = NSPasteboardItem()
+    if let png = representation.representation(using: .png, properties: [:]) { item.setData(png, forType: .png) }
+    if let tiff = representation.tiffRepresentation { item.setData(tiff, forType: .tiff) }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.writeObjects([item])
+  }
+
+  static func provider(_ image: CGImage, name: String) -> NSItemProvider {
+    let base = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+      .components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
+    let folder = FileManager.default.temporaryDirectory.appending(path: "OpenCodeImages/" + UUID().uuidString)
+    let file = folder.appending(path: (base.isEmpty ? "Imagem" : base) + ".png")
+    guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
+      let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+      (try? png.write(to: file)) != nil, let provider = NSItemProvider(contentsOf: file)
+    else { return NSItemProvider() }
+    provider.suggestedName = file.lastPathComponent
+    return provider
   }
 }
 
 /// Comentar: a quote of the selected passage with its comment, attached to the next prompt (`Citações · N`).
+/// Opened from a pending quote's mark (`Citação · N`), it is that quote's sheet: it opens editing, with the focus
+/// in the comment, and keeps Ir ao trecho citado and Remover citação. Return or ⌘Return concludes, Esc closes.
 struct MacQuoteCommentSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   let quote: ChatQuote
   let store: ConversationStore
   let draft: ConversationDraft
+  /// The mark's number and its actions, when opened from the mark.
+  var mark: (number: Int, source: () -> Void, remove: () -> Void)? = nil
   @State private var editor: ConversationDraft
   @State private var lent = false
   @State private var committed = false
-  init(quote: ChatQuote, store: ConversationStore, draft: ConversationDraft) {
+  init(quote: ChatQuote, store: ConversationStore, draft: ConversationDraft,
+    mark: (number: Int, source: () -> Void, remove: () -> Void)? = nil)
+  {
     self.quote = quote
     self.store = store
     self.draft = draft
+    self.mark = mark
     _editor = State(initialValue: draft.commentEditor(quote))
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Comentar trecho").appFont(.heading, weight: .semibold)
+      Text(mark.map { "Citação · \($0.number)" } ?? "Comentar trecho").appFont(.heading, weight: .semibold)
       Text(quote.text).appFont(.secondary).lineLimit(6).foregroundStyle(theme.color(.textSecondary))
         .padding(.leading, 12)
         .overlay(alignment: .leading) { Rectangle().fill(theme.color(.primary)).frame(width: 2) }
-      MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && !editor.importing, submit: commit))
-      HStack {
+      MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && !editor.importing,
+        submit: commit, cancel: { dismiss() }))
+      HStack(spacing: 16) {
+        if let mark {
+          Button("Ir ao trecho citado", systemImage: "text.quote") {
+            dismiss()
+            mark.source()
+          }
+          .accessibilityIdentifier("quote-go-source")
+          Button("Remover citação", systemImage: "trash", role: .destructive) {
+            dismiss()
+            mark.remove()
+          }
+          .foregroundStyle(theme.color(.error))
+          .accessibilityIdentifier("quote-remove")
+        }
         Spacer()
-        Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button(mark == nil ? "Cancelar" : "Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
         Button("Concluir", action: commit).disabled(!lent || editor.importing)
         .keyboardShortcut(.defaultAction)
       }
+      .buttonStyle(.plain).appFont(.secondary)
     }
-    .padding(20).frame(width: 480)
+    .padding(20).frame(width: mark == nil ? 480 : 520)
     .task {
       guard !lent else { return }
       await draft.lend(quote, to: editor)

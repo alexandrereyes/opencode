@@ -80,7 +80,7 @@ import SwiftUI
     scrollView.drawsBackground = false
     scrollView.hasVerticalScroller = true
     scrollView.autohidesScrollers = true
-    scrollView.scrollerStyle = .overlay
+    scrollView.verticalScroller = MacThinScroller()
     scrollView.automaticallyAdjustsContentInsets = false
     scrollView.contentInsets = NSEdgeInsetsZero
     scrollView.verticalScrollElasticity = .allowed
@@ -136,7 +136,7 @@ import SwiftUI
       let end = revealed && (following || distanceToLatest <= 1)
       width = size.width
       height = size.height
-      context.inset = max(24, (width - 760) / 2)
+      context.inset = max(MacTranscriptContext.minimumInset, (width - MacTranscriptContext.column) / 2)
       context.width = width
       context.viewport = height
       relayout()
@@ -278,6 +278,13 @@ import SwiftUI
       (old[$0].id, geometry.entries[$0].height)
     }, uniquingKeysWith: { first, _ in first })
     items = next
+    let starts = MacTranscriptContext.responseStarts(next)
+    if starts != context.responseStarts {
+      let changed = starts.symmetricDifference(context.responseStarts)
+      context.responseStarts = starts
+      // Native prose draws its icon itself; hosted items read the context.
+      for id in changed { if let prose = cells[id] as? MacProseCell, let item = prose.item { prose.configure(item, context: context) } }
+    }
     replaceGeometry(previous: previous)
     let ids = Set(next.map(\.id))
     for (id, cell) in cells where !ids.contains(id) { recycle(id, cell) }
@@ -313,7 +320,7 @@ import SwiftUI
 
   /// Heights before measurement; only far scrolling and the scroller ever see them.
   private func estimate(_ item: TranscriptItem) -> CGFloat {
-    let column = max(200, width - context.inset * 2)
+    let column = max(200, width - context.inset * 2 - MacTranscriptContext.gutter)
     func text(_ value: String) -> CGFloat {
       let perLine = max(10, column / 7.2)
       return value.split(separator: "\n", omittingEmptySubsequences: false)

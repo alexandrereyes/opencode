@@ -130,6 +130,18 @@ public enum ContextColumn {
     return Subagents(shown: live + finished.prefix(extra), hidden: Array(finished.dropFirst(extra)))
   }
 
+  /// `astraxhighultra · Astra 6 - ultrafast · xhigh`: the agent and the model a subagent runs with now
+  /// (`SessionWork.agent` and `.model`, the child's latest ones), by their catalog names.
+  public static func runLabel(_ work: SessionWork, agents: [AgentInfo], models: [ModelInfo]) -> String? {
+    let agent = work.agent.map { id in agents.first { $0.id == id }?.name ?? id }
+    let model = work.model.map { model in
+      [models.first { $0.id == model.id && $0.providerID == model.providerID }?.name ?? model.id,
+       model.variant == "default" ? nil : model.variant].compactMap { $0 }.joined(separator: " · ")
+    }
+    let parts = [agent, model].compactMap { $0 }.filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
   private static func status(_ state: SessionWork.State) -> Status {
     switch state {
     case .starting: .starting
@@ -292,6 +304,18 @@ public enum ContextColumn {
     return names.indices.reduce(into: [first]) { crumbs, index in
       crumbs.append(Crumb(name: names[index], path: ProjectExplorer.canonical(crumbs[index].path + "/" + names[index])))
     }
+  }
+
+  /// The folder's absolute path as crumbs from `/`: `/`, `Users`, `alexandre`, `Worktrees`, `app`.
+  public static func absoluteBreadcrumb(_ path: String) -> [Crumb] {
+    breadcrumb(path, root: "/")
+  }
+
+  /// A path that does not fit, truncated in the middle: the first crumb, an ellipsis (`nil`) and the last `keep`
+  /// crumbs. Every crumb shows when `keep` covers them.
+  public static func middleElided(_ crumbs: [Crumb], keep: Int) -> [Crumb?] {
+    guard keep >= 1, crumbs.count > keep + 1 else { return crumbs }
+    return [crumbs[0], nil] + crumbs.suffix(keep)
   }
 
   /// A source file as one fenced Markdown code block, so the response highlighter (highlight.js) colors it.

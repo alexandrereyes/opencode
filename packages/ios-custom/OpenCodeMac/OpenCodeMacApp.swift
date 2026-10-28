@@ -24,8 +24,9 @@ struct OpenCodeMacApp: App {
       MacWindowTarget()
     }
     .defaultSize(width: 1500, height: 940)
-    // One thin strip level with the window buttons, like the approved option B.
-    .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+    // One strip level with the window buttons, like the approved option B. The regular unified height (not the
+    // compact one) centers the two-line session title on the buttons with room above and below it.
+    .windowToolbarStyle(.unified(showsTitle: false))
     .commands { MacCommands() }
 
     // A resource opens in its own window, like the iPhone's full-screen viewer.
@@ -131,11 +132,12 @@ private struct MacWindowScene: View {
 }
 
 /// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
-/// Sessão (the selected session's actions and the selection mode), Ir (previous/next, Sessão mestra, Trocar) and
-/// the LLM proxy window in Janela.
+/// Sessão (the selected session's actions and the selection mode), Ir (search, back, previous/next, Sessão mestra,
+/// voice, ⌘1…⌘9) and the LLM proxy window in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
   @FocusedValue(\.macWindow) private var runtime
+  @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
 
   var body: some Commands {
     CommandGroup(replacing: .newItem) {
@@ -182,11 +184,15 @@ private struct MacCommands: Commands {
           .disabled(!runtime.sessionSelection.active)
         Button("Encerrar seleção") { runtime.sessionSelection.clear() }
           .disabled(!runtime.sessionSelection.active)
+        Divider()
+        Button("Reiniciar Sessão mestra") { runtime.resetMaster() }
+          .disabled(!runtime.selection.master || runtime.selection.childID != nil
+            || store.busy.contains("master-reset"))
       }
     }
     CommandMenu("Ir") {
       if let runtime {
-        Button("Buscar projetos e sessões…") { runtime.switcherVisible = false; runtime.search.open() }
+        Button("Buscar projetos e sessões…") { runtime.search.open() }
           .keyboardShortcut("k", modifiers: .command)
           .disabled(runtime.store == nil)
         Divider()
@@ -202,6 +208,25 @@ private struct MacCommands: Commands {
         Button("Sessão mestra") { runtime.openMaster() }
           .keyboardShortcut("m", modifiers: [.command, .shift])
           .disabled(runtime.store?.masterAvailability != .available)
+        if let store = runtime.store {
+          Button(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz"
+            : "Conversar por voz") {
+            runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store)
+          }
+          .disabled(runtime.app.audio.voice.busy)
+          // ⌘1…⌘9: the first sessions in the order Sessões shows them, with its filter and collapsed sections.
+          let rows = SessionNavigation.numbered(
+            SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now), collapse: collapse)
+          if !rows.isEmpty {
+            Divider()
+            Section("Sessões da lista") {
+              ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                Button(row.session.displayTitle) { runtime.selection = MacSelection(sessionID: row.id) }
+                  .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+              }
+            }
+          }
+        }
       }
     }
   }

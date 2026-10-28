@@ -110,16 +110,20 @@ struct ConversationQuestionCard: View {
               selected(option.value, field: field) ? .isSelected : [])
           }
           if field.type == .string && (field.custom == true || field.options == nil) {
-            TextField(
-              "Outra resposta…",
-              text: Binding(
-                get: {
-                  let text = values[field.key]?.string ?? ""
-                  return field.options?.contains { $0.value == text } == true ? "" : text
-                }, set: { values[field.key] = .string($0) })
-            )
-            .appFont(.preview).padding(11).background(
-              theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
+            let text = Binding(
+              get: {
+                let text = values[field.key]?.string ?? ""
+                return field.options?.contains { $0.value == text } == true ? "" : text
+              }, set: { values[field.key] = .string($0) })
+            #if os(macOS)
+            // Return sends, Shift+Return breaks the line, Esc leaves the field; a click focuses it.
+            MacReplyField(text: text, placeholder: "Outra resposta…", submit: send)
+              .padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
+            #else
+            TextField("Outra resposta…", text: text)
+              .appFont(.preview).padding(11).background(
+                theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
+            #endif
           }
           if field.type == .multiselect && field.custom == true {
             ForEach(
@@ -137,9 +141,14 @@ struct ConversationQuestionCard: View {
               }
             }
             HStack {
+              #if os(macOS)
+              MacReplyField(text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }),
+                placeholder: "Outra resposta…", submit: { addCustom(field) })
+              #else
               TextField(
                 "Outra resposta…",
                 text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }))
+              #endif
               Button("Adicionar") {
                 let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return }
@@ -177,6 +186,21 @@ struct ConversationQuestionCard: View {
     }
     .disabled(store.acting.contains(form.id))
   }
+  #if os(macOS)
+  /// Return in the free answer: the same as Enviar, when the answer is complete.
+  private func send() {
+    guard !reply.answer.isEmpty, reply.valid(for: form), !store.acting.contains(form.id) else { return }
+    Task { await store.reply(form, answer: reply) }
+  }
+  /// Return in a multiple choice's own answer: the same as Adicionar.
+  private func addCustom(_ field: PendingForm.Field) {
+    let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return }
+    let selected = values[field.key]?.array ?? []
+    if !selected.contains(.string(text)) { values[field.key] = .array(selected + [.string(text)]) }
+    custom[field.key] = ""
+  }
+  #endif
   private func selected(_ option: String, field: PendingForm.Field) -> Bool {
     field.type == .multiselect
       ? values[field.key]?.array?.contains(.string(option)) == true

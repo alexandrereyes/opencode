@@ -3,29 +3,25 @@ import OpenCodeKit
 import SwiftUI
 
 /// Coluna 3 at the approved "Máximo" level: neutral grays, hairlines and no cards. The only colors are the
-/// diff's `+N` and `−N`, a cache hit below 80% and the `?` of a subagent asking for permission. Arquivos slides
-/// over it.
+/// diff's `+N` and `−N`, a cache hit below 80% and the `?` of a subagent asking for permission. Arquivos replaces
+/// it in place, with no animation (a slide used to run past the window's edge).
 struct MacContextColumn: View {
   let store: ContextColumnStore
   @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
-    ZStack {
-      if runtime.selection.files != nil {
-        MacFilesView(context: store, runtime: runtime)
-          .transition(.move(edge: .trailing).combined(with: .opacity))
-      } else {
-        ScrollView {
-          ContextColumnSections(store: store, runtime: runtime)
-            .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 18)
-        }
-        .overlay {
-          if !store.loaded { ProgressView().controlSize(.small) }
-        }
-        .transition(.move(edge: .leading).combined(with: .opacity))
+    if runtime.selection.files != nil {
+      MacFilesView(context: store, runtime: runtime)
+    } else {
+      ScrollView {
+        ContextColumnSections(store: store, runtime: runtime)
+          .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 18)
+          .macThinScrollers()
+      }
+      .overlay {
+        if !store.loaded { ProgressView().controlSize(.small) }
       }
     }
-    .animation(.snappy(duration: 0.25), value: runtime.selection.files == nil)
   }
 }
 
@@ -56,7 +52,7 @@ struct ContextColumnSections: View {
       }
       if !store.resources.isEmpty {
         ContextHairline()
-        ContextResources(store: store).padding(.top, 14)
+        MacResourcesSection(store: store, runtime: runtime).padding(.top, 14)
       }
       ContextHairline()
       ContextDetails(store: store, runtime: runtime).padding(.top, 14)
@@ -153,7 +149,8 @@ private struct ContextSummaryLine: View {
   }
 }
 
-/// `US$ 78,25 | 28% | 99,5%`, each over a small gray caption, with hairlines between them.
+/// `◔ 28% | 99,5% | US$ 78,25`: context (its ring before the number, like the title's), cache hit, then cost,
+/// each over a small gray caption, with hairlines between them.
 private struct ContextFigures: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
@@ -163,32 +160,40 @@ private struct ContextFigures: View {
     let usage = store.usage
     let cache = store.cacheHit
     HStack(alignment: .top, spacing: 0) {
-      figure(ContextUsage.money(store.costs.total), caption: "custo total")
-      divider
       figure(usage?.fraction.map(ContextUsage.percent) ?? "—",
-        caption: "contexto" + (usage.map { " · " + $0.tokenLabel } ?? ""))
-        .padding(.leading, 14)
+        caption: "contexto" + (usage.map { " · " + $0.tokenLabel } ?? "")) {
+        if let usage { ContextUsageRing(usage: usage, size: 20) }
+      }
       divider
       figure(cache.map(ContextColumn.percent) ?? "—", caption: "cache hit",
         tone: (cache ?? 1) < ContextColumn.cacheWarning ? .warning : .textStrong)
         .padding(.leading, 14)
+      divider
+      figure(ContextUsage.money(store.costs.total), caption: "custo total")
+        .padding(.leading, 14)
     }
     .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Custo total \(ContextUsage.money(store.costs.total)), "
-      + (usage?.accessibilityLabel ?? "contexto sem medição"))
+    .accessibilityLabel((usage?.accessibilityLabel ?? "contexto sem medição")
+      + ", custo total \(ContextUsage.money(store.costs.total))")
   }
 
   private var divider: some View {
     Rectangle().fill(theme.color(.border)).frame(width: 1 / displayScale).padding(.vertical, 2)
   }
 
-  private func figure(_ value: String, caption: String, tone: ThemeRole = .textStrong) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text(value).font(.system(size: 22, weight: .semibold)).monospacedDigit()
-        .foregroundStyle(theme.color(tone)).lineLimit(1).minimumScaleFactor(0.7)
-      Text(caption).appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-        .lineLimit(1).minimumScaleFactor(0.85)
+  private func figure(_ value: String, caption: String, tone: ThemeRole = .textStrong,
+    @ViewBuilder leading: () -> some View = { EmptyView() }) -> some View
+  {
+    // The ring before the figure, centered on the number and its caption together.
+    HStack(alignment: .center, spacing: 7) {
+      leading()
+      VStack(alignment: .leading, spacing: 3) {
+        Text(value).font(.system(size: 22, weight: .semibold)).monospacedDigit()
+          .foregroundStyle(theme.color(tone)).lineLimit(1).minimumScaleFactor(0.7)
+        Text(caption).appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
+          .lineLimit(1).minimumScaleFactor(0.75)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -200,7 +205,8 @@ private struct ContextFigures: View {
 private enum SubagentColumns {
   static let context: CGFloat = 50
   static let cache: CGFloat = 46
-  static let cost: CGFloat = 56
+  /// Fits `US$ 999,99` and the compact `US$ 260,4 mil` at 11 pt.
+  static let cost: CGFloat = 80
   static let spacing: CGFloat = 12
   static let gutter: CGFloat = 13
 }
@@ -280,14 +286,19 @@ private struct SubagentLine: View {
             .help(subagent.usage.map { $0.tokenLabel } ?? "Sem medição de contexto")
           metric(subagent.cacheHit.map(ContextColumn.percent) ?? "—", width: SubagentColumns.cache,
             tone: (subagent.cacheHit ?? 1) < ContextColumn.cacheWarning ? .warning : .text)
-          metric(ContextUsage.money(subagent.cost), width: SubagentColumns.cost, tone: .textStrong)
+          cost
         }
+        // `astraxhighultra · Astra 6 - ultrafast · xhigh`: who runs it and with which model now.
         HStack(alignment: .firstTextBaseline, spacing: SubagentColumns.spacing) {
-          Text(activity).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-            .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+          Text(ContextColumn.runLabel(subagent.work, agents: store.agents, models: store.models) ?? "—")
+            .appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
+            .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("subagent-model-" + subagent.id)
           Text(elapsed).appFont(.caption).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
             .frame(width: SubagentColumns.cost, alignment: .trailing)
         }
+        Text(activity).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+          .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
         if let permission = subagent.permission {
           HStack(spacing: 6) {
             Spacer(minLength: 0)
@@ -336,6 +347,17 @@ private struct SubagentLine: View {
     default:
       Color.clear.frame(width: 11, height: 11)
     }
+  }
+
+  /// The whole cost when it fits the column, else `US$ 2,7 mil`; never cut with an ellipsis.
+  private var cost: some View {
+    ViewThatFits(in: .horizontal) {
+      Text(ContextUsage.money(subagent.cost))
+      Text(ContextUsage.compactMoney(subagent.cost)).fixedSize()
+    }
+    .appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textStrong)).lineLimit(1)
+    .frame(width: SubagentColumns.cost, alignment: .trailing)
+    .help(ContextUsage.money(subagent.cost))
   }
 
   private func metric(_ value: String, width: CGFloat, tone: ThemeRole = .text) -> some View {
@@ -456,51 +478,6 @@ private struct ContextListRow: View {
     }
     .padding(.vertical, 8)
     .contentShape(Rectangle())
-  }
-}
-
-// MARK: - Resources
-
-private struct ContextResources: View {
-  @Environment(\.openWindow) private var openWindow
-  @Environment(\.sessionRowDate) private var now
-  let store: ContextColumnStore
-
-  var body: some View {
-    let split = ContextColumn.resources(store.resources)
-    let resources = split.inUse + split.others
-    VStack(alignment: .leading, spacing: 0) {
-      ContextSectionLabel(title: "Recursos", count: "\(resources.count)").padding(.bottom, 4)
-      ForEach(Array(resources.enumerated()), id: \.element.id) { index, resource in
-        if index > 0 { ContextHairline() }
-        Button { openWindow(id: "resource", value: resource.id) } label: {
-          ContextListRow(icon: resourceSymbol(resource.kind), title: name(resource), state: state(resource),
-            dimmed: !resource.state.running)
-        }
-        .buttonStyle(.plain)
-        .help("Abrir \(ContextColumn.title(resource))")
-        .contextMenu {
-          Button("Abrir", systemImage: "macwindow") { openWindow(id: "resource", value: resource.id) }
-          if !resource.state.running {
-            Button("Remover da lista", systemImage: "xmark.circle", role: .destructive) {
-              Task { await store.dismiss(resource) }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /// The simulated device on its own (the icon says it is an iPhone); the kind and name otherwise.
-  private func name(_ resource: SessionResource) -> String {
-    resource.kind == .iosSimulator ? ContextColumn.name(resource) : ContextColumn.title(resource)
-  }
-
-  /// "Agente usando", "Você no controle", "Livre", "Parado há 8 min".
-  private func state(_ resource: SessionResource) -> String {
-    guard !resource.state.running else { return resource.state.label }
-    let at = resource.updatedAt > 0 ? resource.updatedAt : resource.lastUsedAt
-    return at > 0 ? "Parado " + ContextColumn.ago(at, now: now) : "Parado"
   }
 }
 

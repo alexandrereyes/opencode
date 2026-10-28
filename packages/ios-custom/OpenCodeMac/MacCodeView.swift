@@ -21,6 +21,7 @@ struct MacCodeView: NSViewRepresentable {
     let scroll = NSTextView.scrollableTextView()
     scroll.hasHorizontalScroller = true
     scroll.autohidesScrollers = true
+    scroll.adoptThinScrollers()
     scroll.drawsBackground = false
     let textView = scroll.documentView as! NSTextView
     textView.isEditable = false

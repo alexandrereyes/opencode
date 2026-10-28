@@ -109,25 +109,51 @@ private struct MacFilesContent: View {
       .help(title == "Alterados" ? "Só os arquivos alterados e as pastas que os contêm" : "Todos os arquivos da pasta")
   }
 
+  /// The folder's absolute path from `/`, every part clickable. A path that does not fit loses its middle parts
+  /// (`/ › … › hidden-pixel › android`); the whole path is the tooltip, and the copy button copies it.
   private var breadcrumb: some View {
-    ScrollView(.horizontal) {
-      HStack(spacing: 5) {
-        let crumbs = ContextColumn.breadcrumb(files.folder, root: files.context.root)
-        ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
-          if index > 0 {
-            Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
-              .foregroundStyle(theme.color(.textWeak))
-          }
-          Button(crumb.name) { Task { await files.open(folder: crumb.path, file: nil) } }
-            .buttonStyle(.plain)
-            .foregroundStyle(theme.color(index == crumbs.count - 1 ? .text : .textSecondary))
+    let crumbs = ContextColumn.absoluteBreadcrumb(files.folder)
+    return HStack(spacing: 8) {
+      ViewThatFits(in: .horizontal) {
+        ForEach(Array(stride(from: crumbs.count, through: 1, by: -1)), id: \.self) { keep in
+          crumbLine(ContextColumn.middleElided(crumbs, keep: keep), last: crumbs.last?.path)
         }
       }
-      .appFont(.footnote)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .help(files.folder)
+      Button {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(files.folder, forType: .string)
+        files.context.sessions.toast.show("Caminho copiado")
+      } label: {
+        Image(systemName: "doc.on.doc").font(.system(size: 11)).foregroundStyle(theme.color(.textSecondary))
+          .frame(width: 20, height: 18).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .help("Copiar caminho")
+      .accessibilityLabel("Copiar caminho")
     }
-    .scrollIndicators(.never)
-    // The current folder is the end of the path: keep it in view.
-    .defaultScrollAnchor(.trailing)
+    .appFont(.footnote)
+  }
+
+  private func crumbLine(_ crumbs: [ContextColumn.Crumb?], last: String?) -> some View {
+    HStack(spacing: 5) {
+      ForEach(Array(crumbs.enumerated()), id: \.offset) { index, crumb in
+        if index > 0 {
+          Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(theme.color(.textWeak))
+        }
+        if let crumb {
+          Button(crumb.name) { Task { await files.open(folder: crumb.path, file: nil) } }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.color(crumb.path == last ? .text : .textSecondary))
+            .help(crumb.path)
+        } else {
+          Text("…").foregroundStyle(theme.color(.textSecondary))
+        }
+      }
+    }
+    .lineLimit(1).fixedSize()
   }
 
   private var list: some View {
@@ -150,6 +176,7 @@ private struct MacFilesContent: View {
               }
             }
             .padding(.bottom, 8)
+            .macThinScrollers()
           }
           .onAppear { if let selected = files.selected { proxy.scrollTo(selected, anchor: .center) } }
         }

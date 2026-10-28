@@ -71,8 +71,18 @@ final class ComposerInputView: NSScrollView {
   var representedRevision = -1
   var composerTheme = AppTheme.selected
   var composerFont = ComposerDocument.editorFont
+  /// The message role's reading line height (20 pt at 14 pt), the same as a prompt or an answer. Every line is
+  /// exactly this tall, so the field's height is a whole number of lines and the first line is never clipped.
+  let lineHeight = MacResponseTextStyle.lineHeight(.message)
+  static let maximumLines: CGFloat = 8
   var plainAttributes: [NSAttributedString.Key: Any] {
-    [.font: composerFont, .foregroundColor: composerTheme.nsColor(.text)]
+    [.font: composerFont, .foregroundColor: composerTheme.nsColor(.text), .paragraphStyle: paragraph]
+  }
+  private var paragraph: NSParagraphStyle {
+    let style = NSMutableParagraphStyle()
+    style.minimumLineHeight = lineHeight
+    style.maximumLineHeight = lineHeight
+    return style
   }
   var textStorage: NSTextStorage { textView.textStorage! }
   var selectedRange: NSRange { textView.selectedRange() }
@@ -85,6 +95,10 @@ final class ComposerInputView: NSScrollView {
     hasVerticalScroller = true
     autohidesScrollers = true
     borderType = .noBorder
+    // At the window's bottom no bar overlaps it: an automatic inset would shift the text under the field's top.
+    automaticallyAdjustsContentInsets = false
+    contentInsets = NSEdgeInsetsZero
+    verticalScroller = MacThinScroller()
     textView.input = self
     textView.isRichText = true
     textView.importsGraphics = false
@@ -132,13 +146,42 @@ final class ComposerInputView: NSScrollView {
     textView.didChangeText()
   }
 
-  /// The height the text needs at this width, one line at least.
-  func contentHeight(width: CGFloat) -> CGFloat {
-    let line = ceil(composerFont.ascender - composerFont.descender + composerFont.leading)
-    guard let manager = textView.layoutManager, let container = textView.textContainer else { return line }
-    if container.size.width != width { container.size = CGSize(width: width, height: .greatestFiniteMagnitude) }
-    manager.ensureLayout(for: container)
-    return max(line, ceil(manager.usedRect(for: container).height))
+  /// The height the text needs at this width, one line at least. SwiftUI asks for several widths while it lays the
+  /// composer out; only the field's own width is measured on its container. Resizing that container to another
+  /// width left the text wrapped narrower than the field, taller than measured and scrolled: the top line was cut.
+  func contentHeight(width: CGFloat) -> CGFloat { textView.textHeight(width: width, lineHeight: lineHeight) }
+
+  /// Growing by a line, the text view scrolls its new last line into view before SwiftUI makes the field taller;
+  /// once it is tall enough for everything, nothing may stay scrolled (that hid the top of the first line).
+  override func tile() {
+    super.tile()
+    guard let document = documentView, document.frame.height <= contentView.bounds.height + 0.5,
+      contentView.bounds.origin.y != 0 else { return }
+    contentView.scroll(to: .zero)
+    reflectScrolledClipView(contentView)
+  }
+}
+
+extension NSTextView {
+  /// The height of this text (TextKit 1, fixed `lineHeight` lines) at `width`, one line at least. The view's own
+  /// container answers for its own width; any other width SwiftUI asks about is laid out on a copy, so the
+  /// field's wrapping never changes under it.
+  func textHeight(width: CGFloat, lineHeight: CGFloat) -> CGFloat {
+    guard let manager = layoutManager, let container = textContainer, let textStorage else { return lineHeight }
+    if abs(container.size.width - width) < 0.5 {
+      manager.ensureLayout(for: container)
+      return max(lineHeight, ceil(manager.usedRect(for: container).height))
+    }
+    let storage = NSTextStorage(attributedString: textStorage)
+    let layout = NSLayoutManager()
+    storage.addLayoutManager(layout)
+    let scratch = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+    scratch.lineFragmentPadding = container.lineFragmentPadding
+    layout.addTextContainer(scratch)
+    layout.ensureLayout(for: scratch)
+    // A trailing line break adds an empty last line, which the copy lays out in a default font.
+    let extra = layout.extraLineFragmentRect.height
+    return max(lineHeight, ceil(layout.usedRect(for: scratch).height + (extra > 0 ? lineHeight - extra : 0)))
   }
 }
 
@@ -151,9 +194,29 @@ final class ComposerTextNSView: NSTextView {
   var querying = false
   var firstSuggestion: (() -> (() -> Void)?)?
   var escape: (() -> Void)?
+  var cancel: (() -> Void)?
   /// Image or file data pasted or dropped on the editor: the composer turns it into an attachment.
   var attach: (([NSPasteboardItem]) -> Bool)?
   var focusChanged: ((Bool) -> Void)?
+  /// Drawn on the empty first line with the text's own font, color role and line height, so it sits exactly where
+  /// typing starts.
+  var placeholder = "" { didSet { needsDisplay = true } }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    guard !placeholder.isEmpty, string.isEmpty, !hasMarkedText(), let input else { return }
+    var attributes = input.plainAttributes
+    attributes[.foregroundColor] = input.composerTheme.nsColor(.textSecondary)
+    NSAttributedString(string: placeholder, attributes: attributes).draw(
+      with: CGRect(origin: textContainerOrigin, size: CGSize(width: bounds.width, height: input.lineHeight)),
+      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+  }
+
+  override func didChangeText() {
+    super.didChangeText()
+    // The placeholder appears and leaves with the first character, outside the range TextKit redraws.
+    if (textStorage?.length ?? 0) <= 1 { needsDisplay = true }
+  }
 
   convenience init() {
     // TextKit 1: composer drafts are short, and its attachment layout is what the token images were drawn for.
@@ -191,6 +254,11 @@ final class ComposerTextNSView: NSTextView {
     }
     if event.keyCode == 53, querying {
       escape?()
+      return
+    }
+    // Inside a sheet (a quote's comment), Esc closes it instead of NSTextView's word completion.
+    if event.keyCode == 53, let cancel {
+      cancel()
       return
     }
     super.keyDown(with: event)

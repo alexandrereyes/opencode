@@ -17,6 +17,11 @@ import SwiftUI
     let idle = MacFixture.value("-OpenCodeMacStress").flatMap(Double.init) ?? 30
     try? await Task.sleep(for: .seconds(3))
     guard let window = mainWindow else { return finish("sem janela principal", status: 1) }
+    // The search's suggestion panel hides while the app is not active (`hidesOnDeactivate`); launched from a shell
+    // while someone works in another app, it would never show. Captures activate the app the same way.
+    print("MacStress app ativo no início: \(NSApp.isActive)")
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
     guard let secondID = runtime.store?.rows.first(where: { $0.id != runtime.selection.sessionID })?.id else {
       return finish("sem segunda sessão", status: 1)
     }
@@ -59,7 +64,7 @@ import SwiftUI
         if window.minSize.width > area.width {
           return finish("mínimo \(Int(window.minSize.width)) pt maior que \(screen.localizedName)", status: 1)
         }
-        if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
+        if let error = await MacSearchChecks.layout(runtime) { return finish(error + state(window), status: 1) }
       }
     }
     for context in [false, true] {
@@ -72,13 +77,14 @@ import SwiftUI
           await step("busca mínimo/máximo") {
             window.setFrame(NSRect(x: start.minX, y: start.minY, width: width, height: start.height), display: true)
           }
-          if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
+          if let error = await MacSearchChecks.layout(runtime) { return finish(error + state(window), status: 1) }
         }
       }
     }
-    for width in [400.0, 760.0] {
+    // The old 760-pt limit and well past it: the window's 60% (and the chat's minimum) bound what shows.
+    for width in [400.0, 760.0, 1_400.0] {
       await step("busca com Contexto redimensionado") { runtime.contextWidth = width }
-      if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
+      if let error = await MacSearchChecks.layout(runtime) { return finish(error + state(window), status: 1) }
     }
     runtime.contextWidth = original.contextWidth
     await step("tamanho inicial") { window.setFrame(start, display: true) }
@@ -92,8 +98,6 @@ import SwiftUI
     await step("fechar LLM proxy") { NSApp.windows.first { $0.title == "LLM proxy" }?.close() }
     await step("Nova sessão") { runtime.newSession() }
     await step("fechar Nova sessão") { runtime.newSessionRequest = nil }
-    await step("Trocar de sessão") { runtime.switcherVisible = true }
-    await step("fechar Trocar de sessão") { runtime.switcherVisible = false }
     if let error = await MacSearchChecks.run(runtime, other: second) { return finish(error, status: 1) }
     await step("seleção") { if let id = runtime.selection.sessionID { runtime.sessionSelection.start(id) } }
     await step("fim da seleção") { runtime.sessionSelection.clear() }
@@ -125,6 +129,11 @@ import SwiftUI
     let controller = ((window.contentView?.superview).map(splits) ?? []).lazy.compactMap { $0.delegate as? NSSplitViewController }
       .first { $0.splitViewItems.contains { $0.behavior == .sidebar } }
     controller?.toggleSidebar(nil)
+  }
+
+  /// Whether the app and the window were in front when a check failed: the search panel hides otherwise.
+  private static func state(_ window: NSWindow) -> String {
+    " · app ativo \(NSApp.isActive), janela principal \(window.isKeyWindow)"
   }
 
   private static var mainWindow: NSWindow? {

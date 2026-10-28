@@ -6,12 +6,13 @@ import UniformTypeIdentifiers
 /// The chat's composer on the iPhone's model (`ConversationDraft`, `ConversationStore.send`, `ComposerSources`):
 /// `@` sessions, apps, agents and references, `!` files, `/` commands, `$` skills and `#` snippets open the
 /// shared suggestion panel and become atomic colored tokens; `+`, dragging onto the window and pasting add
-/// attachments; quotes wait in `Citações · N`. Then the model and MCP capsules and the microphone, which turns into
-/// Enviar once there is something to send; below, `● build ⌄ · Contexto · Cache`.
+/// attachments; quotes wait in `Citações · N`. Then the model, agent and MCP capsules and the microphone, which
+/// turns into Enviar once there is something to send. Context and cache live in Contexto and the title's ring.
 ///
 /// Return sends and Shift+Return breaks the line (the Mac chat convention). Sending while the agent works uses
 /// the server's follow-up preference, like the iPhone; right-clicking Enviar offers the other delivery (Enviar
-/// agora / Adicionar à fila). Dictation uses the iPhone's local recorder, Parakeet and review flow.
+/// agora / Adicionar à fila). Dictation uses the iPhone's local recorder and Parakeet; the transcript lands in this
+/// editor, where it is reviewed and sent (no review sheet), and the right Option key dictates too.
 struct MacComposer: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.voiceController) private var voice
@@ -22,7 +23,8 @@ struct MacComposer: View {
   /// Inside another screen (Nova sessão): only the editor card, which that screen sends from; it shows the model,
   /// MCPs and agent itself.
   var embedded: MacComposerEmbedding? = nil
-  var reviewing = false
+  /// Sits on the card's top right corner (the chat's ↓ when the window leaves no margin for it).
+  var corner: AnyView? = nil
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
   @State private var picking: MacPicker?
@@ -57,19 +59,25 @@ struct MacComposer: View {
         Text(error).appFont(.caption).foregroundStyle(theme.color(.error)).frame(maxWidth: .infinity, alignment: .leading)
       }
       if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
-      if reviewing { FloatingVoiceHost() }
       card
-      if embedded == nil { footer }
     }
     .onAppear {
       draft.editorOwner = owner
       draft.recording.willUseAudio = { [weak voice = voice] in voice?.state.visible != true }
       reviewDictation()
+      registerDictationKey()
     }
     .onChange(of: draft.dictationReview) { reviewDictation() }
     .onChange(of: scenePhase) { reviewDictation() }
     .onChange(of: voice?.state.visible) { _, calling in if calling == true { draft.recording.suspend() } }
     #if DEBUG
+    .task {
+      // `-OpenCodeMacModelPicker`: opens Modelo e esforço and prints how long it took to show (A20).
+      guard embedded == nil, MacPickerTiming.enabled, !store.isNewSession else { return }
+      try? await Task.sleep(for: .seconds(3))
+      MacPickerTiming.start = CACurrentMediaTime()
+      picking = .model
+    }
     .task {
       // `-OpenCodeMacDraft <text>` types a draft (a trigger opens the suggestion panel) and
       // `-OpenCodeMacPickSuggestion <s>` picks the panel's first item that long after, for captures.
@@ -86,6 +94,7 @@ struct MacComposer: View {
     .onDisappear {
       if draft.editorOwner == owner { draft.editorOwner = nil }
       draft.recording.suspend()
+      if embedded == nil, let windowRuntime { MacDictationKey.shared.unregister(windowRuntime.id, owner: owner) }
     }
     .modifier(MacMicrophonePermission(denied: Binding(get: { draft.recording.permissionDenied }, set: { draft.recording.permissionDenied = $0 })))
     .alert("Baixar transcrição neste Mac?", isPresented: Binding(get: { draft.recording.asksDownload }, set: { draft.recording.asksDownload = $0 })) {
@@ -93,19 +102,6 @@ struct MacComposer: View {
       Button("Usar qualquer rede") { draft.recording.transcription.download(cellular: true) }
       Button("Agora não", role: .cancel) {}
     } message: { Text(TranscriptionController.downloadMessage) }
-    .sheet(isPresented: Binding(get: { !reviewing && draft.expanded }, set: { draft.expanded = $0 }), onDismiss: {
-      draft.editorOwner = owner; draft.focused = true
-    }) {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text("Revise a mensagem").font(.headline)
-          Spacer()
-          Button("Concluído") { draft.expanded = false }.keyboardShortcut(.cancelAction)
-        }
-        MacComposer(store: store, draft: draft, embedded: embedded, reviewing: true)
-      }.padding(20).frame(width: 680)
-        .modifier(FloatingVoiceScope())
-    }
     .sheet(item: $picking) { picker in
       MacPickerSheet(picker: picker, store: store, draft: draft)
     }
@@ -130,17 +126,14 @@ struct MacComposer: View {
       if voice?.state.visible == true {
         Text("Encerre a conversa por voz para ditar.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
       }
+      // The editor draws its placeholder on its own first line, with the same font and line height as the text.
       MacComposerEditor(draft: draft, theme: theme, owner: owner, canSubmit: canSubmit, submit: submit, dictate: dictate,
+        placeholder: store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…",
+        cancel: embedded?.cancel,
         firstSuggestion: firstSuggestion, attach: { items in
           MacAttachments.receive(items, store: store, draft: draft)
         })
-        .overlay(alignment: .topLeading) {
-          if draft.isEmpty {
-            Text(store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…").appFont(.message)
-              .foregroundStyle(theme.color(.textSecondary)).allowsHitTesting(false)
-          }
-        }
-        .padding(.horizontal, 4).padding(.top, 2)
+        .padding(.horizontal, 4)
       HStack(spacing: 8) {
         attach
         if embedded == nil {
@@ -149,6 +142,7 @@ struct MacComposer: View {
             .buttonStyle(.plain).foregroundStyle(theme.color(.text))
             .help("Modelo e esforço")
             .accessibilityIdentifier("model-picker")
+          agent
           if store.mcps.summary.visible { mcp }
         }
         Spacer(minLength: 4)
@@ -158,6 +152,7 @@ struct MacComposer: View {
     .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 10)
     .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))
     .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+    .overlay(alignment: .topTrailing) { corner }
   }
 
   private var attach: some View {
@@ -225,52 +220,58 @@ struct MacComposer: View {
     draft.recording.handle(.began); draft.recording.handle(.ended)
   }
 
+  /// The transcript lands in this editor at the caret; the editor takes the focus so it can be reviewed and sent
+  /// in place (the iPhone expands its composer; the Mac has the room already).
   private func reviewDictation() {
-    guard !reviewing, draft.dictationReview, scenePhase == .active, !draft.focusSuppressed else { return }
+    guard draft.dictationReview, scenePhase == .active, !draft.focusSuppressed else { return }
     draft.dictationReview = false
-    draft.expanded = true
     draft.focused = true
   }
 
-  /// `● build ⌄ · Contexto 28% · 278,6k / 1M · ⚡ Cache 99,5%`.
-  private var footer: some View {
-    // The latest measured step, else the session's own context (a session whose steps carry no tokens).
-    let usage = store.sessionUsage ?? store.session?.context.flatMap {
-      ContextUsage(tokens: $0.tokens, limit: store.usageLimit($0.model))
-    }
-    let cache = ContextUsage.cacheHit(store.session?.tokens ?? store.session?.context?.tokens)
-    return HStack(spacing: 6) {
-      if store.isChild || store.masterMode {
-        Text(store.childAgentName).foregroundStyle(theme.color(.text))
-      } else {
-        Button {
-          picking = .agent
-        } label: {
-          HStack(spacing: 4) {
-            Circle().fill(agentColor).frame(width: 6, height: 6)
-            Text(store.agents.first { $0.id == store.selectedAgent(draft) }?.name ?? store.selectedAgent(draft))
-            Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-          }
-          .foregroundStyle(theme.color(.text))
+  /// The right Option key dictates into this window's conversation composer (`MacDictationKey`).
+  private func registerDictationKey() {
+    guard embedded == nil, let windowRuntime else { return }
+    let recording = draft.recording
+    MacDictationKey.shared.register(windowRuntime.id, MacDictationKey.Target(
+      owner: owner,
+      recording: { recording.capturing },
+      available: { [weak voice, weak draft] in
+        voice?.state.visible != true && draft?.sending == false && draft?.importing == false
+      },
+      perform: { action in
+        switch action {
+        // The key was already held past its delay: a hold from the start, which its release finishes.
+        case .begin: recording.handle(.began); recording.handle(.held)
+        case .release: recording.handle(.ended)
+        case .start: recording.handle(.began); recording.handle(.ended)
+        case .finish: recording.finish()
+        case .discard: recording.discard()
+        case .none: break
         }
-        .buttonStyle(.plain).help("Agente").accessibilityIdentifier("agent-picker")
-        .disabled(draft.sending || draft.importing)
-      }
-      Text("·").foregroundStyle(theme.color(.textWeak))
-      if let usage {
-        ContextUsageRing(usage: usage, size: 10)
-        Text(usage.contextLabel + " · " + usage.tokenLabel)
-      } else {
-        Text("Contexto —")
-      }
-      Text("·").foregroundStyle(theme.color(.textWeak))
-      Image(systemName: "bolt.fill").font(.system(size: 9))
-        .foregroundStyle(theme.color((cache ?? 1) < ContextColumn.cacheWarning ? .warning : .textSecondary))
-      Text("Cache " + (cache.map(ContextColumn.percent) ?? "—"))
-      Spacer(minLength: 0)
+      }))
+  }
+
+  /// `● build ⌄`, beside the model in the same capsule: the agent of the next prompt (a subagent's and the
+  /// master's are fixed). Context and cache moved to Contexto and the title's ring.
+  @ViewBuilder private var agent: some View {
+    let fixed = store.isChild || store.masterMode
+    let label = HStack(spacing: 4) {
+      Circle().fill(agentColor).frame(width: 6, height: 6)
+      Text(fixed ? store.childAgentName
+        : store.agents.first { $0.id == store.selectedAgent(draft) }?.name ?? store.selectedAgent(draft))
+        .lineLimit(1)
+      if !fixed { Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)) }
     }
-    .appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
-    .padding(.leading, 6)
+    .appFont(.chrome).foregroundStyle(theme.color(.text))
+    .composerCapsule(horizontal: 8)
+    .frame(minHeight: 36).contentShape(Rectangle())
+    if fixed {
+      label.help("Agente").accessibilityElement(children: .combine)
+    } else {
+      Button { picking = .agent } label: { label }
+        .buttonStyle(.plain).fixedSize().help("Agente").accessibilityIdentifier("agent-picker")
+        .disabled(draft.sending || draft.importing)
+    }
   }
 
   private var agentColor: Color {
@@ -341,6 +342,8 @@ struct MacComposerEditor: NSViewRepresentable {
   let canSubmit: Bool
   let submit: () -> Void
   var dictate: () -> Void = {}
+  var placeholder = ""
+  var cancel: (() -> Void)? = nil
   let firstSuggestion: () -> (() -> Void)?
   let attach: ([NSPasteboardItem]) -> Bool
 
@@ -372,9 +375,11 @@ struct MacComposerEditor: NSViewRepresentable {
     text.querying = draft.trigger != nil
     text.firstSuggestion = firstSuggestion
     text.escape = { [weak draft] in draft?.dismissSuggestions() }
+    text.cancel = cancel
     text.attach = attach
     text.insertionPointColor = theme.nsColor(.primary)
     text.isContinuousSpellCheckingEnabled = draft.trigger == nil
+    if text.placeholder != placeholder { text.placeholder = placeholder }
     guard !text.hasMarkedText() else {
       view.representedRevision = -1
       return
@@ -402,11 +407,12 @@ struct MacComposerEditor: NSViewRepresentable {
     }
   }
 
+  /// One line at least; it grows line by line up to `ComposerInputView.maximumLines`, then scrolls.
   func sizeThatFits(_ proposal: ProposedViewSize, nsView: ComposerInputView, context: Context) -> CGSize? {
     guard let width = proposal.width, width > 0 else { return nil }
-    let line = ceil(nsView.composerFont.ascender - nsView.composerFont.descender + nsView.composerFont.leading)
-    let height = nsView.contentHeight(width: width)
-    return CGSize(width: width, height: min(max(line, height), line * 8))
+    let line = nsView.lineHeight
+    return CGSize(width: width,
+      height: min(max(line, nsView.contentHeight(width: width)), line * ComposerInputView.maximumLines))
   }
 
   final class Coordinator: NSObject, NSTextViewDelegate {
@@ -432,10 +438,11 @@ struct MacComposerEditor: NSViewRepresentable {
   }
 }
 
-/// The composer inside another screen: when it may send, and how.
+/// The composer inside another screen: when it may send, and how; Esc in the editor runs `cancel` when given.
 struct MacComposerEmbedding {
   let canSubmit: Bool
   let submit: () -> Void
+  var cancel: (() -> Void)? = nil
 }
 
 /// Model and effort, and the agent, chosen for the next prompt (the composer's capsule, `/model`, `/agent`).
@@ -450,6 +457,15 @@ private struct MacPickerSheet: View {
   let picker: MacPicker
   let store: ConversationStore
   let draft: ConversationDraft
+  /// Built once when the sheet opens (`ModelChoices`), so rows neither search the catalog nor rebuild per frame.
+  @State private var choices: [ModelChoice]
+
+  init(picker: MacPicker, store: ConversationStore, draft: ConversationDraft) {
+    self.picker = picker
+    self.store = store
+    self.draft = draft
+    _choices = State(initialValue: picker == .model ? ModelChoices.rows(store.displayModels, providers: store.providers) : [])
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -461,32 +477,35 @@ private struct MacPickerSheet: View {
       .padding(16)
       ContextHairline()
       ScrollView {
-        VStack(alignment: .leading, spacing: 2) {
+        // Lazy: a gateway catalog has hundreds of models, each with its effort capsules; only the rows on screen
+        // are built.
+        LazyVStack(alignment: .leading, spacing: 2) {
           if picker == .model { models } else { agents }
         }
         .padding(8)
       }
     }
     .frame(width: 420, height: 460)
+    #if DEBUG
+    .onAppear { MacPickerTiming.appeared() }
+    #endif
   }
 
   @ViewBuilder private var models: some View {
     let selected = store.selectedModel(draft)
-    ForEach(store.displayModels.filter { $0.enabled != false }, id: \.identity) { info in
-      let variants = info.variants ?? []
+    ForEach(choices) { choice in
+      let variants = choice.variants
       VStack(alignment: .leading, spacing: 4) {
-        row(info.name, detail: store.providerName(info.providerID),
-          checked: selected?.id == info.id && selected?.providerID == info.providerID && variants.isEmpty) {
-          draft.model = ModelReference(id: info.id, providerID: info.providerID)
+        row(choice.name, detail: choice.provider, checked: choice.selected(selected) && variants.isEmpty) {
+          draft.model = choice.reference()
           if variants.isEmpty { dismiss() }
         }
         if !variants.isEmpty {
           HStack(spacing: 6) {
-            ForEach(variants) { variant in
-              let checked = selected?.id == info.id && selected?.providerID == info.providerID
-                && (selected?.variant ?? "default") == variant.id
-              Button(variant.id) {
-                draft.model = ModelReference(id: info.id, providerID: info.providerID, variant: variant.id)
+            ForEach(variants, id: \.self) { variant in
+              let checked = choice.selected(selected, variant: variant)
+              Button(variant) {
+                draft.model = choice.reference(variant: variant)
                 dismiss()
               }
               .buttonStyle(.plain).appFont(.caption, weight: checked ? .semibold : .regular)
@@ -530,6 +549,26 @@ private struct MacPickerSheet: View {
     .buttonStyle(.plain)
   }
 }
+
+#if DEBUG
+/// The model picker's opening time: from the request to the sheet's appearance, then to the end of the first main
+/// run-loop turn after it (its first layout and drawing), printed as `MacPicker …` for `script` runs.
+@MainActor enum MacPickerTiming {
+  static let enabled = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacModelPicker")
+  static var start: CFTimeInterval?
+  static func appeared() {
+    guard let start else { return }
+    let appear = (CACurrentMediaTime() - start) * 1000
+    DispatchQueue.main.async {
+      DispatchQueue.main.async {
+        print(String(format: "MacPicker appear=%.0fms shown=%.0fms", appear, (CACurrentMediaTime() - start) * 1000))
+        fflush(stdout)
+        MacPickerTiming.start = nil
+      }
+    }
+  }
+}
+#endif
 
 /// The MCP servers of the conversation's Location, each switched on or off (the iPhone's MCP panel).
 private struct MacMCPPanel: View {

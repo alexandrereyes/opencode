@@ -106,9 +106,7 @@ public struct ComposerSources: Sendable {
     if !app && normalize(item.subtitle).contains(query) { return 2 }
     return nil
   }
-  private func normalize(_ value: String) -> String {
-    value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-  }
+  private func normalize(_ value: String) -> String { TextFolding.fold(value) }
   private func candidates(
     _ character: String, agents: [AgentInfo], files: [ComposerFile], sessions: [Session],
     apps: [ComposerApp], current: String, server: String, directory: String, project: String?

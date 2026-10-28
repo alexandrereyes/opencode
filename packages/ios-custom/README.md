@@ -2506,7 +2506,8 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   the composer (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
   `MacCodeView.swift`, `MacResourceWindow.swift`, `MacShellOutput.swift`, `MacNotifications.swift`,
-  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacAssets.xcassets` (the app icon), and the DEBUG-only
+  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacAssets.xcassets` (the app icon and `OpenCodeMascot`, the
+  icon beside answers), and the DEBUG-only
   `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacStress.swift`, `MacScrollFixture.swift` and
   `MacScrollDriver.swift`.
 - iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
@@ -2538,7 +2539,11 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
 | `SessionStore.swift` (stage 4) | `shownSessionID` on macOS: the session the window shows (while the app is in front) is `currentSessionID`, so its alerts stay silent |
 | `SessionColumn/SessionChips.swift` | `ChipMenu`: the iPhone's `Menu(primaryAction:)`; on the Mac a click runs the action and a right click opens the same items (state filters, remove, move) |
 | `SessionColumn/SessionColumnHeader.swift` | The selection bar became `SessionSelectionBar`, also shown by the Mac above its rows |
-| `SessionSwitcherSheet.swift` | The iPhone sheet; on macOS a search field over the same list, shown in a popover under the title |
+| `SessionSwitcherSheet.swift` | The iPhone sheet; still in the Mac target, but no longer presented there since the title's popover was removed (⌘K covers it) |
+| `AppTypography.swift` (`AppLayout.margin`) | 6 pt on macOS (16 on iOS; the Mac list adds about 8 pt): Sessões uses its width for titles and paths |
+| `ConversationReadAloud.swift` | `ConversationBottomControls(showsJump:)`, `true` by default: the Mac draws ↓ beside the reading column itself |
+| `ConversationRequests.swift` | On macOS the question's own answer is `MacReplyField` (Return sends, Shift+Return breaks the line, Esc leaves); iOS keeps its `TextField` |
+| `ArchivedSessionsView.swift` | On macOS a search field at the top (⌘F); iOS lists every archived session as before |
 | `AddProjectPicker.swift` | iOS-only field and title modifiers behind `pathInput()` and `inlineNavigationTitle()` |
 | `NewSessionComponents.swift` (new) | `ProjectAvatar`, `ChatsAvatar`, `GitBranchIcon`, `MCPChip`, `MCPFlowLayout`, moved unchanged out of `NewSessionView.swift` |
 | `ModelVisibilityView.swift` | Generic over `ModelVisibilitySource` (the conversation's `ConversationStore` on iOS, `MacModelCatalog` on the Mac); macOS shows a search field instead of `.searchable` |
@@ -2557,7 +2562,8 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
 `paridade-*.png`).
 
 - **Columns**: `NavigationSplitView` (Sessões | detail). The detail is an `HStack` of the chat and Contexto with a
-  draggable hairline between them (`MacColumnDivider`, 400–760 pt, restored per window);
+  draggable hairline between them (`MacColumnDivider`, from 400 pt to 60% of the window and never squeezing the
+  chat below its minimum, restored per window and remembered as the default for new windows);
   `MacSidebarDivider` draws the same 1-pt theme `border` between Sessões and the chat, including the unified
   title bar. It follows the real sidebar geometry and hides with it, without changing native divider hit testing.
   Contexto is offered the room first (`layoutPriority(1)`, `minWidth: 400`), so a narrower window shrinks it before
@@ -2566,12 +2572,12 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   Nova sessão could not sit over it. It hides with ⌥⌘I, Visualizar ▸ Ocultar contexto or the `…` menu. Do not add a
   `minWidth` on the root: the stage-1 crash (a root minimum below the columns' made AppKit loop on "more Update
   Constraints in Window passes than there are views") came from it. `script/test-mac-window.sh` guards it.
-- **Title bar (option B)**: one `unifiedCompact` strip, no title. Every item is a `MacPlainToolbarItem`, which on
-  macOS 26 hides the shared Liquid Glass capsule (`sharedBackgroundVisibility(.hidden)`): plain 15-pt icons with a
-  hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (GPT Live; see below),
+- **Title bar (option B)**: one `unified` strip (the regular height since the adjustment round), no title. Every
+  item is a `MacPlainToolbarItem`, which on macOS 26 hides the shared Liquid Glass capsule (`sharedBackgroundVisibility(.hidden)`): plain 15-pt icons with a
+  hover highlight (`MacToolbarIcon`). Over Sessões, at its right edge: voice (GPT Live; see below),
   Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
-  30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), which opens the quick switcher
-  (stage 4). The native **Buscar projetos e sessões · ⌘K** field centers over chat + Contexto (see below).
+  30 pt here) and `ConversationTitle` (`App Mac`, `<worktree> · trabalhando…`), a label (the quick switcher
+  popover is gone: ⌘K replaces it). The native **Buscar projetos e sessões · ⌘K** field centers over chat + Contexto (see below).
   Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
   Mostrar/Ocultar contexto) and Nova sessão (`MacSessionActions`). The system sidebar button is removed
   (`.toolbar(removing: .sidebarToggle)`; ⌃⌘S and Visualizar still collapse Sessões), and so is the old
@@ -2634,7 +2640,8 @@ shows ↓ **Ir para a mais recente** and **Continuar de onde parou**, and keeps 
 
 Platform parameters: the wheel and trackpad (no pull to refresh; a gesture owns the offset until it settles);
 the keyboard (Page Up/Down, space and Shift-space, ⌘↑/⌘↓, Home/End, the arrows) in the transcript or in a text
-inside it; the 760-point centered column; and **following the end** while an answer arrives: the end stays in view
+inside it; the centered reading column (960 pt at most, with the message icons; see
+[Adjustment round](#adjustment-round--28-october)); and **following the end** while an answer arrives: the end stays in view
 while the reader is there, scrolling up stops it at once and scrolling (or ↓) back resumes it. The iPhone rewrite
 never scrolls on growth; the briefing asked the Mac to follow.
 
@@ -2654,7 +2661,7 @@ File names open Arquivos at their folder. Search (⌘F, or the conversation's `�
 `ComposerSuggestions` panel; Return picks its first item, Esc closes it. **Return sends and Shift+Return (or
 ⌥Return) breaks the line**, the Mac chat convention, unlike the iPhone's software keyboard. Attachments come from
 `+` (Arquivos…, Imagens…), a drop on the conversation or a pasted image, through `ConversationStore.importAttachment`.
-The model capsule and `/model` open the model and effort picker, the agent below the card (and `/agent`) its
+The model capsule and `/model` open the model and effort picker, the agent capsule beside it (and `/agent`) its
 picker, the MCP capsule a popover with each server's switch; `/btw` asks a side question in a sheet. Sending is
 `ConversationStore.send`, so the delivery follows the server's preference while the agent works (steer or queue)
 and right-clicking Enviar offers the other one (Enviar agora / Adicionar à fila); the tray (`ConversationTray`)
@@ -2701,24 +2708,27 @@ hit below 80% amber, and the amber `?` of a subagent asking for permission. Top 
 
 1. `mac-app · +128 −14 · Arquivos ›`: the branch (its right-click menu copies it or the path, or shows it in the
    Finder; the path is its tooltip), the working diff and a plain link to Arquivos.
-2. Three figures (22 pt semibold over an 11-pt gray caption, hairlines between them): `US$ 78,25` "custo total",
-   `28%` "contexto · 278,6k / 1M" (latest measured step, transcript fallback), `99,5%` "cache hit" of the session.
+2. Three figures (22 pt semibold over an 11-pt gray caption, hairlines between them): the context ring and `28%`
+   "contexto · 278,6k / 1M" (latest measured step, transcript fallback), `99,5%` "cache hit" of the session, then
+   `US$ 78,25` "custo total".
 3. `Sessão US$ … · Subagentes US$ …` (the family snapshot's descendant cost, else the sum of loaded descendants).
 4. `SUBAGENTES active/total` with the `contexto · cache · custo` headings. Rows keep `ConversationProjection.work`'s
    order (live first, then the newest finished up to five, the rest behind `+N concluídos ›`): a 13-pt medium title,
-   the three metrics in fixed right-aligned 11-pt columns with tabular digits (cost brighter), then
-   `agora: <tool> · <resource it drives>` and the elapsed time. The state is a glyph in a small gutter: a gray
+   the three metrics in fixed right-aligned 11-pt columns with tabular digits (cost brighter, whole or
+   `US$ 2,7 mil`), then `agente · Modelo · esforço` with the elapsed time, then
+   `agora: <tool> · <resource it drives>`. The state is a glyph in a small gutter: a gray
    spinning ring while running, an amber `?` while asking (with `Permitir · Negar` links), nothing once ended
    (finished rows dimmed). Clicking opens the child in the middle column (`‹` returns); right-click has Parar.
 5. `TAREFAS N`: background shells, 12-pt lines with a monochrome icon (a hammer for builds and tests, play
    otherwise), the command without its port option plus `· :port`, the elapsed time; right-click Parar and Copiar
    comando.
-6. `RECURSOS N`: 12-pt lines with a monochrome icon, the device (or kind · name) and the state in gray (`Agente
-   usando`, `Você no controle`, `Livre`, `Parado há N min`). Clicking opens the resource's window, as before; the
-   column no longer polls thumbnails (the large tiles are gone).
+6. `RECURSOS N`: live thumbnails for the resources in use and compact rows with a small thumbnail for the
+   others, with the state in gray (`Agente usando`, `Você no controle`, `Livre`, `Parado há N min`); clicking opens
+   the resource's window (see [Adjustment round](#adjustment-round--28-october)).
 
 **Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat), at the same level: `‹ Contexto`
-(Esc), the centered title and the search (`/api/fs/find`); a gray clickable breadcrumb; `PASTA` with
+(Esc), the centered title and the search (`/api/fs/find`); the folder's absolute path as a gray clickable
+breadcrumb, truncated in the middle, with a copy button; `PASTA` with
 `Todos · Alterados` as text; a Finder-like list with monochrome `doc`/`folder` icons, `+N −N` in color, a gray dot
 for folders holding changes (date and size, read from this Mac, in the tooltip); then
 `ARQUIVO · N LINHAS` with the links `Abrir no Xcode · Finder · Ver diff` (only when the path exists on this Mac; Ver
@@ -2797,10 +2807,8 @@ separate track.
   **Sessão mestra** accessory sits at the column's foot (`N precisam de você` / `Tudo em dia`, ⇧⌘M): it opens the
   current master in the middle column or, without one, Nova sessão in its master mode, whose first message calls
   `custom.master/ensure`.
-- **Troca rápida** (a click on the title): the iPhone's `SessionSwitcherSheet` in a popover, with a search
-  field (Return opens the first match), the current session checked, the working/unread marks and Nova sessão.
 - **Busca da janela (⌘K)**: see [Window search](#window-search--28-october). The shortcut focuses the title-bar
-  field; the title's quick switcher remains available by click.
+  field. The title's quick-switcher popover was removed in the adjustment round: the title is a label.
 - **Nova sessão** (⌘N, the toolbar, the switcher; ⇧⌘N from a session): a sheet with the iPhone's decisions
   (`NewSessionProjection.start/model/agent/remembered`, `NewSessionSubmission`): Chats or a project (or
   Adicionar projeto…), the main checkout, an existing worktree or **Nova worktree** with its base branch (a
@@ -2833,13 +2841,14 @@ separate track.
   The fixture never asks for the notification permission nor posts anything.
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
-  Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions), Editar (Buscar na conversa ⌘F), Ir
-  (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓, Sessão mestra ⇧⌘M) and
-  Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
+  Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions, Reiniciar Sessão mestra), Editar (Buscar
+  na conversa ⌘F), Ir (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓,
+  Sessão mestra ⇧⌘M, Conversar por voz, and the first nine sessions of the list, ⌘1…⌘9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, ⌘⌫, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓).
 - **Restoration**: each window has a stable scene UUID and restores its own session, subagent, Arquivos folder/file,
-  sidebar visibility, Contexto visibility and width, per server (`OpenCodeMacWindow.<uuid>.<server>`). A deleted or
+  sidebar visibility, Contexto visibility and width, per server (`OpenCodeMacWindow.<uuid>.<server>`); a window
+  without saved state opens Contexto at the last width dragged in any window (`OpenCodeMacContextWidth`). A deleted or
   archived selection falls back to the first row. Right-click **Abrir em nova janela** and Option-click a session
   open an independent window, as does Arquivo ▸ Nova janela (⌥⌘N).
 - **Voice**: GPT Live, the floating bar, Parakeet dictation and server read-aloud now share the iPhone implementation;
@@ -2922,7 +2931,7 @@ adds the same model download, progress, retry, deletion and licenses. Dados do i
   `VoiceMaster` and `VoiceMemoryStore`, using the same private `llm-proxy-svc:8080` origin and saved voice catalog.
   `FloatingVoiceHost` sits above the composer, so it remains visible when Sessões is collapsed and when changing
   conversations. The same compact/expanded bar has time, mute/end, retry/resume, spoken text, master progress and
-  the rolling transcript. The empty chat, Nova sessão and the review sheet host it too.
+  the rolling transcript. The empty chat and Nova sessão host it too.
 - **Audio/lifetime:** macOS WebRTC owns the default Core Audio devices and its AEC; it does not configure an
   `AVAudioSession` or recreate the call when headphones change. `VoiceCuePlayer` uses `AVAudioEngine` for connection,
   end and recovery cues. `MacRuntime` owns the one event stream and `MacVoiceSession` the one call,
@@ -2934,8 +2943,9 @@ adds the same model download, progress, retry, deletion and licenses. Dados do i
 - **Dictation:** FluidAudio 0.17.7 supports macOS 14+, so the Mac uses the exact Parakeet Ultra downloader, checksums,
   model, queue, PCM capture and insertion path. Click for hands-free recording, hold/release to transcribe, drag up
   to lock or left to discard; **⌃⌥Space in the editor** starts/stops. The fn key stays with macOS. Pause/preview/seek,
-  retry, local pending audio and model management match iOS. Transcription opens a native review sheet containing
-  the same token-preserving editor; it never sends automatically. Device changes and app deactivation pause recording.
+  retry, local pending audio and model management match iOS. The transcript lands in the composer itself, at the
+  caret, which takes the focus to review and send it; there is no review sheet and it never sends automatically.
+  The **right Option key** dictates too (see [Adjustment round](#adjustment-round--28-october)). Device changes and app deactivation pause recording.
 - **Read aloud:** response footers and Markdown files use `custom.speech`, the same `ReadAloudPlayer`, pill/full
   controls, seeking, speed and server bookmarks. The voice comes from the speech server (separate from GPT Live's
   voice choice). Starting a call or dictation pauses it; reading cannot start while either owns the microphone.
@@ -3003,7 +3013,7 @@ mock. The stage-3 parity images (mock × app) are rebuilt by running the capture
 
 Stage 4 adds launch options (put them before `-OpenCodeMacCaptureQuit`): `-OpenCodeMacFixtureAttention` (one root
 asking permission, one asking a question, one failed), `-OpenCodeMacSelect id,id` (selection mode),
-`-OpenCodeMacNewSession sessoes|origem|mestra`, `-OpenCodeMacSwitcher`, `-OpenCodeMacDetails`, and, each written to
+`-OpenCodeMacNewSession sessoes|origem|mestra`, `-OpenCodeMacDetails`, and, each written to
 its own picture, `-OpenCodeMacOpenResource <id>` (`<name>-recurso.png`), `-OpenCodeMacShellOutput <shell>`
 (`<name>-saida.png`) and `-OpenCodeMacSettings servidores|aparencia|leitura|modelos|assinaturas|sobre`
 (`<name>-ajustes.png`). Sheets are drawn where they sit; a popover, which AppKit keeps on a screen while the window is
@@ -3047,7 +3057,7 @@ only that domain and its saved state, so the Debug app's preferences (servers, t
 Contexto's width) that development and the other checks use stay as they were. It resizes the main
 window to its minimum, intermediate sizes and each screen's maximum on every connected screen, collapses and
 reopens Sessões and Contexto twice, opens and closes Arquivos and the LLM proxy window, then stays idle (30 s by
-default). Since stage 4 it also opens and closes Nova sessão, the quick switcher, the selection mode and a
+default). Since stage 4 it also opens and closes Nova sessão, the selection mode and a
 resource window. A layout loop aborts the app (the old crash, exit 134); a minimum width wider than a screen fails
 the run.
 Run it after any change to the window's columns, widths or toolbar. It moves the window over the connected
@@ -3121,6 +3131,112 @@ windows on the same Session for every scenario and checks separate drafts/player
 shared mute/call identity and independent expansion. Its 40 scenarios produce both `<name>.png` and
 `<name>-second.png` under `$TMPDIR/opencode/mac-merge-voice-prints/`; details and window captures are in
 `mac-merge-details-prints/` and `mac-merge-window-prints/`. No live model call is needed.
+
+### Adjustment round — 28 October
+
+Alexandre's list from daily use (A1–A20; contract and his pictures: `.agent-artifacts/mac-app/AJUSTES.md` and
+`ajustes/` of the `mac-ajustes` worktree). Out of this round, waiting for mocks: the model window's redesign, the
+project filter replacing the chips and the highlight of the open subagent.
+
+- **Composer lines (A1).** The editor's lines are exactly the message role's reading line height (20 pt at 14 pt,
+  `minimumLineHeight == maximumLineHeight`, no baseline offset); the field is a whole number of lines, grows to eight
+  and then scrolls. The cut first line came from measuring: SwiftUI asks the editor's height at several widths, and
+  each answer resized the field's own text container, so the text could stay wrapped narrower than the field, taller
+  than measured, and scrolled to the caret. `NSTextView.textHeight(width:lineHeight:)` now measures other widths on
+  a copy, `ComposerInputView.tile()` returns to the top once everything fits, and the placeholder is drawn by the
+  text view on its first line with the same font and line height. No automatic content insets.
+- **Reading column (A2).** At most 960 pt including the message icons, centered, at least 28 pt from each side:
+  about 125 characters per line at 14 pt, past which the eye loses the next line, while a large window gives the
+  chat far more than the old 760 pt. The composer follows the same column. Answers start after a 34-pt gutter
+  whose first item carries the OpenCode mascot (`OpenCodeMascot`, the app icon's artwork, still, 24 pt, top
+  aligned); prompts end before it, with the session's project avatar of Sessões (`MacPromptAvatar`, its icon or
+  monogram). `MacTranscriptContext.responseStarts` marks the first answer item after each prompt.
+- **Contexto's width (A2).** The divider goes from 400 pt to 60% of the window, never squeezing the chat below its
+  minimum (`DesktopWindowState.contextWidthRange`). Each window saves its width as before; the end of a drag also
+  stores it as the default for windows without saved state, which covers macOS closing the windows on quit
+  ("Fechar janelas ao encerrar um app").
+- **Questions (A3).** The question card's own answer is a native text view on the Mac (`MacReplyField`): a click
+  focuses it, Return sends (like Enviar, when the answer is complete), Shift+Return or Option+Return break the line,
+  Esc leaves the field. A multiple choice's own answer adds with Return.
+- **Title (A4, A9).** No popover and no `⌄`: the title is a label. The bar is the regular unified height, so the
+  avatar and the two title lines center on the window buttons with room around them.
+- **Sessões (A5, A7).** Voice, Ajustes and Nova sessão sit at the column's right edge (a flexible space in the
+  sidebar's toolbar, like Mail's); collapsing the column hides them with it, as Mail and Notes do: Nova sessão stays
+  at the bar's end (and ⌘N), Ajustes is ⌘, and Ir ▸ Conversar por voz starts the call. Rows start 14 pt from the
+  column's edges instead of 24 (`AppLayout.margin` is 6 pt on the Mac, plus the list's own 8 pt).
+- **Scroll bars (A7).** `MacThinScroller` (`MacScrollers.swift`) draws every scroll bar of the app (transcript,
+  composer, Sessões, Contexto, Arquivos and its files, prompts, the question field): half the system's thickness, no
+  track, a `labelColor` knob at 22% (38% while dragged). AppKit still picks the style from Ajustes do Sistema ▸
+  Aparência ▸ "Mostrar barras de rolagem": overlay bars appear while scrolling and fade, "Sempre" keeps them (thin).
+  SwiftUI scroll views get it through `.macThinScrollers()`, which finds the enclosing `NSScrollView`; the
+  transcript no longer forces the overlay style.
+- **Subagents (A6).** Each row's second line is `agent · Modelo · esforço` (`ContextColumn.runLabel`, from the
+  child's latest agent and model, as the iPhone shows since `f6f8892302`), then `agora: …`. The cost column is 80 pt
+  and shows the whole value; when it does not fit, `US$ 2,7 mil` (`ContextUsage.compactMoney`), never an ellipsis.
+- **Dictation (A8).** No review sheet: the transcript lands in the composer at the caret and the editor takes the
+  focus; recording, locked, paused and preview stay in the card. The **right Option key** (keyCode 61 only) dictates
+  into the front window's conversation composer (`MacDictationKey`, a local event monitor, so only while the app is
+  in front; the rules are `DictationKeyGesture`): a tap starts hands-free recording and the next tap stops; held
+  past 250 ms it records until release (a hold shorter than one second keeps recording hands-free, like the
+  microphone button). Pressed with ⌘, ⌃, ⇧ or the left Option, or followed by another key or a click while down, it
+  is a modifier and does nothing (a recording its hold had started is discarded). Not while a sheet covers the
+  window or a GPT Live call holds the microphone. ⌃⌥Espaço in the editor still works.
+- **Quotes (A10).** A quote still in the draft opens as `Citação · N` already editing its comment, with the focus in
+  it; Ir ao trecho citado and Remover citação stay. Return or ⌘Return concludes, Esc closes. Sent marks keep the
+  details sheet.
+- **Arquivos (A11).** It replaces Contexto with no animation. The path is absolute from `/`, every part clickable;
+  one that does not fit loses its middle parts (`/ › … › OpenCode › SessionColumn`), with the whole path as tooltip
+  and a copy button.
+- **Resources (A12).** In use (an agent or you in control): large thumbnails with a thin outline, one on the whole
+  width, more in two columns, `Simulador iOS · iPhone 17 Pro` and `Agente usando · <subagent>` in small gray. Free
+  and stopped: compact rows with a small thumbnail. A click opens the resource's window; hovering shows Abrir,
+  Captura (the current frame at full size, saved with a panel) and Encerrar. The server has no way to stop a
+  resource, so Encerrar takes it off the lists (`custom.resources/dismiss`; it returns when an agent uses it again).
+  Snapshots follow the iPhone's `ResourceThumbnails`, about every 5 s for resources in use; free and stopped ones keep
+  their first picture. They stop while the section is off screen (Contexto hidden, Arquivos over it) and while the
+  window is minimized or fully covered. Measured in the fixture (two resources in use, 60 s, the app copy's process
+  CPU, two runs each): about 22–24 snapshots a minute, and 10.2 / 13.3 s of CPU against 9.2 / 13.3 s with the
+  first pictures only, a difference inside the run-to-run noise; Arquivos over the column and a minimized window
+  took 0 snapshots. The fixture's idle CPU (spinners and live rows) is the same as before this round (15.1 s on the
+  base build in the same minute).
+- **↓ (A13).** In the empty margin right of the reading column, just above the composer, when it is at least 50 pt;
+  otherwise on the composer card's top right corner, mostly above its edge. It shows only when the iPhone's rules say
+  so (`TranscriptState.jumpToLatest`).
+- **Images (A14).** The viewer has Copiar imagem (⌘C, PNG and TIFF on the clipboard) and shows the original file;
+  an image in the chat and in the viewer has Copiar imagem in its right-click menu and drags out as a PNG file.
+- **Contexto's figures (A15).** Context first, with its ring before the number (centered on the number and its
+  caption), then cache hit, then cost.
+- **Composer row (A16).** The usage line under the composer is gone (context and cache are in Contexto and the
+  title's ring); the agent is a capsule beside the model's, in the same style (fixed for a subagent and the master).
+- **Sessão mestra (A17).** The iPhone's trash on the master conversation, in place of `…` (and Sessão ▸ Reiniciar
+  Sessão mestra): the same `resetMaster` (archive and clear, no confirmation, the toast "Sessão mestra arquivada"),
+  then Nova sessão in its master mode, like the iPhone's empty master screen.
+- **⌘1…⌘9 (A18).** Ir lists the first nine rows of Sessões in the front window, with its filter, chip and collapsed
+  sections (`SessionNavigation.numbered`).
+- **Arquivadas (A19).** A search field at the top (focused on open, ⌘F) filters by title, project and path, ignoring
+  case and accents (`ArchivedSessionSearch`, with the app's `TextFolding`, also used by the composer's suggestions).
+- **Modelo e esforço (A20).** It was slow because every model of the catalog was built at once (an eager `VStack`
+  of rows and effort capsules) and each row looked up its provider by a search. `ModelChoices` now builds the rows
+  once per opening (provider names from one dictionary) and the list is lazy; the picker's look is unchanged, and
+  the same source is ready for the redesign. With `-OpenCodeMacLargeCatalog 300|600 -OpenCodeMacModelPicker`
+  (`MacPickerTiming`): request → sheet appeared went from 367–398 ms (300 models) and 728–763 ms (600) to 23–28 ms;
+  request → first idle main-thread turn from 1.06–1.08 s and 1.65–2.09 s to 0.34–0.36 s, mostly the sheet's own
+  animation. The Mac still lists every enabled model (the iPhone lists the visible ones); that is the redesign's call.
+
+**Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
+absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master`)
+in the fixture through real AppKit events: line heights, wrapping width and scroll position with one line, three,
+tokens and twelve; a click, Shift+Return, Return and Esc in a question; a pending quote opening focused, Return and
+Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag provider; the archived search; the Ir
+menu's ⌘1–⌘9 and ⌘2; Contexto at 60% of a 2400-pt window; the right Option key's tap, hold, left Option and
+modifier cases with the fake recorder (no microphone); ↓ in both places; the master's trash. Each writes captures.
+`MacStress` now activates the app first (the search panel hides while another app is in front) and drags Contexto
+to 1400 pt as well; `-OpenCodeMacResourceProfile visible|frozen|minimized` and the fixture's `MacResourceSnapshot`
+lines measure the previews. While someone uses the Mac, macOS may refuse to bring a test copy to the front: then
+the search panel check of `test-mac-window.sh` and the ⌘1–⌘9 check (menu commands follow the key window) can fail
+with the right geometry; failures now print whether the app and the window were in front. The base build
+(`fadcd1420a`) failed the same way in 2 of 3 runs under those conditions.
 
 ## Platform and distribution
 

@@ -43,6 +43,7 @@ struct MacSessionColumn: View {
       }
       .padding(.horizontal, AppLayout.margin)
       .padding(.top, 10).padding(.bottom, 6)
+      .macThinScrollers()
       .listRowInsets(EdgeInsets())
       .listRowSeparator(.hidden)
       .listRowBackground(theme.color(.background))
@@ -86,7 +87,10 @@ struct MacSessionColumn: View {
     .safeAreaInset(edge: .bottom, spacing: 0) { MacMasterAccessory(store: store, runtime: runtime) }
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
+    // Voice, Ajustes and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide
+    // with the column (⌘N and Nova sessão at the bar's end, ⌘, and the menus still reach them).
     .toolbar {
+      MacToolbarFlexibleSpace()
       MacPlainToolbarItem {
         HStack(spacing: 4) {
           Button { runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store) } label: {
@@ -104,7 +108,6 @@ struct MacSessionColumn: View {
             .accessibilityLabel("Nova sessão")
         }
         .buttonStyle(.plain)
-        .padding(.leading, 6)
       }
     }
     .alert("Renomear sessão", isPresented: Binding(
@@ -155,6 +158,13 @@ struct MacSessionColumn: View {
         ? "Isso altera apenas a ordem dos filtros."
         : "Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
     }
+    #if DEBUG
+    .task {
+      guard MacAjustesChecks.mode == "archived" else { return }
+      try? await Task.sleep(for: .seconds(2))
+      showArchived = true
+    }
+    #endif
     .sheet(isPresented: $showArchived) {
       ArchivedSessionsView(store: store).frame(minWidth: 460, minHeight: 520)
     }
@@ -305,7 +315,7 @@ private struct MacMasterAccessory: View {
     .onHover { hovering = $0 }
     .disabled(store.masterAvailability != .available)
     .help("Sessão mestra (⇧⌘M)")
-    .padding(.horizontal, AppLayout.margin - 4).padding(.vertical, 10)
+    .padding(.horizontal, 8).padding(.vertical, 10)
     .background(theme.color(.background))
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(.isButton)

@@ -13,6 +13,8 @@ struct MacCappedScroll<Content: View>: NSViewRepresentable {
     scroll.drawsBackground = false
     scroll.hasVerticalScroller = true
     scroll.autohidesScrollers = true
+    scroll.verticalScroller = MacThinScroller()
+    // Overlay even with "always show": the bubble's text is measured at the full width of this nested viewport.
     scroll.scrollerStyle = .overlay
     scroll.horizontalScrollElasticity = .none
     scroll.documentView = context.coordinator.host.view

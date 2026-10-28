@@ -44,9 +44,13 @@ import SwiftUI
   var newSessionRequest: MacNewSessionRequest?
   var renameRequest: SessionRow?
   var deleteRequest: Session?
+  /// The title's old switcher popover is gone (⌘K replaces it); the search presentation still resets this flag.
   var switcherVisible = false
   let search = MacSearch()
   var archiveRequest: SessionRow?
+  /// The widths the columns got in the last layout, for checks (not observed).
+  @ObservationIgnored var measuredContextWidth: CGFloat = 0
+  @ObservationIgnored var measuredChatWidth: CGFloat = 0
   @ObservationIgnored private var memories: [String: TranscriptMemory] = [:]
   @ObservationIgnored private var recent: [String] = []
   @ObservationIgnored private var inputs: [String: MacConversationInput] = [:]
@@ -72,7 +76,7 @@ import SwiftUI
     if let selection { restored.selection = selection }
     #if DEBUG
     if let width = MacFixture.value("-OpenCodeMacContextWidth").flatMap(Double.init) {
-      restored.contextWidth = min(max(width, 400), 760)
+      restored.contextWidth = max(width, DesktopWindowState.minimumContextWidth)
     }
     #endif
     state = restored
@@ -111,6 +115,7 @@ import SwiftUI
     let input = MacConversationInput(conversation: conversation, sessions: app.store!, draft: drafts.draft(conversation.id))
     #if DEBUG
     MacVoiceChecks.prepare(input.draft)
+    MacAjustesChecks.prepare(input.draft)
     #endif
     inputs[conversation.id] = input
     return input
@@ -139,6 +144,19 @@ import SwiftUI
       return
     }
     newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: false, master: true)
+  }
+
+  /// The iPhone's trash on the Sessão mestra: archives it and clears the master, with no confirmation and the same
+  /// toast. Like the iPhone's empty master screen, the window then offers a new master (Nova sessão in its master
+  /// mode), whose first message creates it.
+  func resetMaster() {
+    guard let store else { return }
+    Task {
+      await store.resetMaster()
+      guard store.masterID == nil else { return }
+      if selection.master { selection = MacSelection() }
+      openMaster()
+    }
   }
 
   func backToParent() {

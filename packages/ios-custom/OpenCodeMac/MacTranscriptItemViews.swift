@@ -10,7 +10,17 @@ struct MacTranscriptItemView: View {
   let context: MacTranscriptContext
 
   var body: some View {
-    content.padding(.horizontal, padded ? context.inset : 0)
+    if padded {
+      // The answer's side: after the icons' gutter, with the OpenCode icon on the answer's first item.
+      content
+        .padding(.leading, MacTranscriptContext.gutter)
+        .overlay(alignment: .topLeading) {
+          if context.responseStarts.contains(item.id) { MacResponseIcon() }
+        }
+        .padding(.horizontal, context.inset)
+    } else {
+      content
+    }
   }
 
   private var padded: Bool {
@@ -56,6 +66,44 @@ struct MacTranscriptItemView: View {
     case .question(let form):
       ConversationQuestionCard(form: form, store: context.store)
     }
+  }
+}
+
+/// The OpenCode mascot beside an answer, still (the app icon's artwork).
+struct MacResponseIcon: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
+  var body: some View {
+    Image("OpenCodeMascot").resizable().interpolation(.high)
+      .frame(width: MacTranscriptContext.icon, height: MacTranscriptContext.icon)
+      .clipShape(Circle())
+      .overlay { Circle().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale) }
+      .accessibilityHidden(true)
+  }
+}
+
+/// The session's project avatar beside a prompt, as in Sessões: its icon, or its monogram on its color.
+struct MacPromptAvatar: View {
+  @Environment(\.appTheme) private var theme
+  let avatar: MacTranscriptAvatar?
+  var body: some View {
+    let side = MacTranscriptContext.icon
+    Group {
+      if let icon = avatar?.icon {
+        ProjectIconAvatar(icon: icon, size: side)
+      } else if let avatar {
+        let colors = theme.avatar(avatar.color)
+        Circle().fill(colors.background)
+          .overlay {
+            Text(avatar.monogram).font(.system(size: 10, weight: .semibold)).foregroundStyle(colors.text)
+              .lineLimit(1).minimumScaleFactor(0.6)
+          }
+      } else {
+        Circle().fill(theme.color(.surfaceRaised))
+      }
+    }
+    .frame(width: side, height: side)
+    .accessibilityHidden(true)
   }
 }
 
@@ -129,16 +177,18 @@ private struct MacPromptRow: View {
   private var folds: Bool {
     collapsible && (!message.quotes.isEmpty || MacPromptRow.truncates(text, width: bubbleWidth))
   }
-  /// The text's width inside the bubble: the content column less the 80-point spacer and the bubble's padding.
-  private var bubbleWidth: CGFloat { max(120, min(760, context.width - context.inset * 2) - 80 - 28) }
+  /// The text's width inside the bubble: the content column less the icon's gutter, the 80-point spacer and the
+  /// bubble's padding.
+  private var bubbleWidth: CGFloat { max(120, context.columnWidth - MacTranscriptContext.gutter - 80 - 28) }
 
   var body: some View {
-    HStack {
+    HStack(alignment: .top, spacing: MacTranscriptContext.gutter - MacTranscriptContext.icon) {
       Spacer(minLength: 80)
       VStack(alignment: .trailing, spacing: 5) {
         bubble
         meta
       }
+      MacPromptAvatar(avatar: context.avatar)
     }
     .padding(.horizontal, context.inset).padding(.vertical, 8)
     .background(theme.color(.background))
@@ -311,7 +361,7 @@ struct MacFeedImage: View {
 
   var body: some View {
     Button {
-      if let image { context.openImage(image, name) }
+      if let image { context.openImage(image, name, source) }
     } label: {
       Group {
         if let image {
@@ -330,6 +380,14 @@ struct MacFeedImage: View {
       .overlay { RoundedRectangle(cornerRadius: size == nil ? 10 : 8).strokeBorder(theme.color(.border).opacity(0.4)) }
     }
     .buttonStyle(.plain).help(name)
+    // Copy and drag the original file when it loads, the shown copy otherwise.
+    .contextMenu {
+      if let image {
+        Button("Copiar imagem", systemImage: "doc.on.doc") { Task { MacImageTransfer.copy(await original() ?? image) } }
+        Button("Abrir", systemImage: "arrow.up.left.and.arrow.down.right") { context.openImage(image, name, source) }
+      }
+    }
+    .onDrag { image.map { MacImageTransfer.provider($0, name: name) } ?? NSItemProvider() }
     .task(id: source) {
       guard let images = context.images else { failed = true; return }
       do {
@@ -337,6 +395,11 @@ struct MacFeedImage: View {
           maxPixelSize: Int((size ?? 520) * scale))
       } catch { failed = !Task.isCancelled }
     }
+  }
+
+  private func original() async -> CGImage? {
+    guard let images = context.images else { return nil }
+    return try? await FeedImageLoader.shared.load(source, client: images.client, directory: images.directory)
   }
 }
 
@@ -482,7 +545,7 @@ struct MacCodeBlock: View {
       ScrollView(.horizontal) {
         if let part, let context {
           MacSelectableBlock(block: block.codeDisplay, part: part, transcript: context)
-            .frame(width: max(200, context.width - context.inset * 2 - 24,
+            .frame(width: max(200, context.columnWidth - MacTranscriptContext.gutter - 24,
               CGFloat(block.codeDisplay.text.split(separator: "\n").map(\.count).max() ?? 0) * 8))
             .padding(12)
         } else {
