@@ -353,3 +353,20 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   #expect(AttachmentImage.thumbnail(bad, maxPixelSize: 32) == nil)
   #expect(AttachmentImage.thumbnail(Data("invalid".utf8), maxPixelSize: 32) == nil)
 }
+
+@Test func aReadOfARunningMessageNeverTakesStreamedTextBack() {
+  var streamed = ConversationMessage(id: "msg_a", type: "assistant", time: MessageTime(created: 1))
+  streamed.content = [ConversationPart(type: "text", id: "part_a", text: "1. O mar brilha.\n2. As ondas")]
+  // The server keeps a running step's text only when it ends: its read lags what the deltas showed.
+  var read = streamed
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "")]
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas")
+  read.content = []
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas")
+  // A read that is ahead, or that changed the text, wins; so does any read of a finished message.
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "1. O mar brilha.\n2. As ondas beijam")]
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas beijam")
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "")]
+  read.time.completed = 2
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "")
+}

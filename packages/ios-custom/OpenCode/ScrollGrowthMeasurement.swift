@@ -6,14 +6,14 @@ import SwiftUI
 /// Identical measurement harness for shipped and candidate scroll owners; never starts a server.
 struct ScrollGrowthMeasurement: UIViewRepresentable {
   let store: ConversationStore
-  let state: ConversationScrollState
-  func makeUIView(context: Context) -> Driver { Driver(store: store, state: state) }
+  let view: () -> UIScrollView?
+  func makeUIView(context: Context) -> Driver { Driver(store: store, view: view) }
   func updateUIView(_ view: Driver, context: Context) {}
   static func dismantleUIView(_ view: Driver, coordinator: ()) { view.stop() }
 
   final class Driver: UIButton {
     private let store: ConversationStore
-    private let scrollState: ConversationScrollState
+    private let scrollView: () -> UIScrollView?
     private let signposter = OSSignposter(subsystem: "br.com.alexandrem.opencode", category: "PointsOfInterest")
     private var interval: OSSignpostIntervalState?
     private var task: Task<Void, Never>?
@@ -23,9 +23,9 @@ struct ScrollGrowthMeasurement: UIViewRepresentable {
     private var previous: CFTimeInterval = 0
     private var started: CFTimeInterval = 0
     private var cpu: Double = 0
-    init(store: ConversationStore, state: ConversationScrollState) {
+    init(store: ConversationStore, view: @escaping () -> UIScrollView?) {
       self.store = store
-      scrollState = state
+      scrollView = view
       super.init(frame: .zero)
       accessibilityIdentifier = "growth-measurement"
       accessibilityValue = "ready"
@@ -71,7 +71,7 @@ struct ScrollGrowthMeasurement: UIViewRepresentable {
     @objc private func sample(_ link: CADisplayLink) {
       if previous > 0 { frames.append((link.timestamp - previous) * 1000) }
       previous = link.timestamp
-      if let view = scrollState.view { offsets.append(view.contentOffset.y) }
+      if let view = scrollView() { offsets.append(view.contentOffset.y) }
     }
     private func finish() {
       if let interval { signposter.endInterval("FixtureGrowth", interval) }

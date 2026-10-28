@@ -23,14 +23,26 @@ extension EnvironmentValues {
 final class ResponseTextView: UITextView {
   private(set) var measuredSizes: [CGFloat: CGSize] = [:]
   override var attributedText: NSAttributedString! {
-    didSet { invalidateMeasurement(); lineBreaks.widths = [:] }
+    didSet {
+      invalidateMeasurement()
+      lineBreaks.widths = [:]
+      #if DEBUG
+      if (oldValue?.length ?? 0) > 0, attributedText != nil { TranscriptCounters.replaced.add(1, ordering: .relaxed) }
+      #endif
+    }
   }
   private let lineBreaks = InlineCodeLineBreaks()
   override init(frame: CGRect, textContainer: NSTextContainer?) {
     super.init(frame: frame, textContainer: textContainer)
     lineBreaks.install(self)
+    #if DEBUG
+    TranscriptCounters.created.add(1, ordering: .relaxed)
+    #endif
   }
   required init?(coder: NSCoder) { nil }
+  #if DEBUG
+  deinit { TranscriptCounters.destroyed.add(1, ordering: .relaxed) }
+  #endif
   var codeGutter = false
   var gutterWidth: CGFloat = 44
   var inlineCodeRanges: [NSRange] = [] {
@@ -64,18 +76,68 @@ final class ResponseTextView: UITextView {
   var quoteBorderColor = UIColor.clear
   var ruleColor = UIColor.clear
   private var decorationWidth: CGFloat?
-  private var inlineCodeRects: [CGRect] = []
+  /// Display location from which decorations must be measured again; text before it kept its layout.
+  private var decorationsFrom: Int? = 0
+  private var inlineCode: [(range: NSRange, rects: [CGRect])] = []
+  private var inlineCodeRects: [CGRect] { inlineCode.flatMap(\.rects) }
   private var lineRects: [CGRect] = []
   private var borderRects: [CGRect] = []
   private var ruleRects: [CGRect] = []
   func invalidateMeasurement() {
     measuredSizes.removeAll(keepingCapacity: true)
-    decorationWidth = nil
+    decorationsFrom = 0
     setNeedsLayout()
+  }
+  /// The height of the text as laid out in its own container, when that container already has `width`: only
+  /// fragments an edit invalidated are laid out again. `sizeThatFits` lays the text out in a container of
+  /// another size, which typesets the whole text each time and makes the view typeset it again afterwards.
+  private func laidOutSize(width: CGFloat) -> CGSize? {
+    guard let manager = textLayoutManager, abs(textContainer.size.width - width) < 0.5 else { return nil }
+    // Unbounded height: a container as tall as the view stops laying out at its current bottom.
+    if textContainer.size.height < 1_000_000 { textContainer.size.height = .greatestFiniteMagnitude }
+    manager.ensureLayout(for: manager.documentRange)
+    let used = manager.usageBoundsForTextContainer
+    return CGSize(width: width, height: ceil(used.maxY + textContainerInset.top + textContainerInset.bottom))
+  }
+  /// Shows `text`, editing the existing storage from the first changed paragraph on when everything before
+  /// it is identical, so a streamed answer's earlier paragraphs keep their layout and the view is not replaced.
+  @discardableResult func show(_ text: NSAttributedString) -> Bool {
+    let storage = textStorage
+    guard storage.length > 0, text.length > 0 else {
+      attributedText = text
+      return false
+    }
+    let old = Array(storage.string.utf16)
+    let new = Array(text.string.utf16)
+    var common = 0
+    let limit = min(old.count, new.count)
+    while common < limit, old[common] == new[common] { common += 1 }
+    // Restyling reaches back to the paragraph start (a closing `**` bolds text typed earlier).
+    let start = common == 0 ? 0
+      : (storage.string as NSString).paragraphRange(for: NSRange(location: min(common, old.count - 1), length: 0)).location
+    guard start > 0,
+      storage.attributedSubstring(from: NSRange(location: 0, length: start))
+        .isEqual(to: text.attributedSubstring(from: NSRange(location: 0, length: start)))
+    else {
+      attributedText = text
+      return false
+    }
+    storage.beginEditing()
+    storage.replaceCharacters(in: NSRange(location: start, length: storage.length - start),
+      with: text.attributedSubstring(from: NSRange(location: start, length: text.length - start)))
+    storage.endEditing()
+    lineBreaks.widths = [:]
+    measuredSizes.removeAll(keepingCapacity: true)
+    decorationsFrom = min(decorationsFrom ?? start, start)
+    setNeedsLayout()
+    #if DEBUG
+    TranscriptCounters.appended.add(1, ordering: .relaxed)
+    #endif
+    return true
   }
   func fittingSize(width: CGFloat) -> CGSize {
     if let size = measuredSizes[width] { return size }
-    let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    let size = laidOutSize(width: width) ?? sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
     if measuredSizes.count >= 8 { measuredSizes.removeAll(keepingCapacity: true) }
     measuredSizes[width] = size
     return size
@@ -100,15 +162,23 @@ final class ResponseTextView: UITextView {
   override func layoutSubviews() {
     super.layoutSubviews()
     if decorationWidth != bounds.width {
-      quoteGeometryDirty = true
       decorationWidth = bounds.width
-      inlineCodeRects = inlineCodeRanges.flatMap { range -> [CGRect] in
+      decorationsFrom = 0
+    }
+    if let from = decorationsFrom {
+      decorationsFrom = nil
+      quoteGeometryDirty = true
+      // Text before `from` kept its layout: so did its inline code backgrounds.
+      let kept = Dictionary(inlineCode.filter { NSMaxRange($0.range) <= from }.map { ($0.range, $0.rects) },
+        uniquingKeysWith: { first, _ in first })
+      inlineCode = inlineCodeRanges.map { range in
+        if let rects = kept[range] { return (range, rects) }
         guard let start = position(from: beginningOfDocument, offset: range.location),
           let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end)
-        else { return [] }
-        return selectionRects(for: text).map(\.rect).filter { $0.width > 0 }
+        else { return (range, []) }
+        return (range, selectionRects(for: text).map(\.rect).filter { $0.width > 0 })
       }
-      layoutProseDecorations()
+      layoutProseDecorations(from: from)
       lineRects = []
       if codeGutter {
         let units = Array((attributedText?.string ?? "").utf16)
@@ -117,7 +187,13 @@ final class ResponseTextView: UITextView {
           position(from: beginningOfDocument, offset: offset).map { caretRect(for: $0) }
         }
       }
-      setNeedsDisplay()
+      // Decorations above the edited text are unchanged: redraw from it down only.
+      if from > 0, let position = position(from: beginningOfDocument, offset: from) {
+        let top = max(0, caretRect(for: position).minY - 8)
+        setNeedsDisplay(CGRect(x: 0, y: top, width: bounds.width, height: max(0, bounds.height - top)))
+      } else {
+        setNeedsDisplay()
+      }
     }
     layoutQuoteDecorations()
     guard let match = searchMatch, let range = searchRange, let align = searchAlign,
@@ -126,8 +202,8 @@ final class ResponseTextView: UITextView {
       let textRange = textRange(from: start, to: end) else { return }
     var parent = superview
     while let view = parent {
-      if view is UICollectionReusableView {
-        let offset = convert(firstRect(for: textRange), to: view).minY
+      if let view = view as? UICollectionReusableView {
+        let offset = view.messageY(convert(firstRect(for: textRange), to: view).minY)
         guard offset.isFinite else { return }
         Task { @MainActor [weak self] in
           guard self?.searchMatch?.id == match.id else { return }
@@ -179,20 +255,32 @@ final class ResponseTextView: UITextView {
     guard let first = rects.first else { return nil }
     return rects.dropFirst().reduce(first) { $0.union($1) }
   }
-  private func layoutProseDecorations() {
-    borderRects = []
-    ruleRects = []
-    guard let prose else { return }
-    for (index, segment) in prose.segments.enumerated() {
+  private var segmentDecorations: [Int: (borders: [CGRect], rule: CGRect?)] = [:]
+  private func layoutProseDecorations(from: Int) {
+    guard let prose else {
+      borderRects = []
+      ruleRects = []
+      segmentDecorations = [:]
+      return
+    }
+    // Segments that end before the edit keep their rects.
+    segmentDecorations = segmentDecorations.filter { index, _ in
+      prose.ranges.indices.contains(index) && from > 0 && NSMaxRange(prose.ranges[index]) <= from
+    }
+    for (index, segment) in prose.segments.enumerated() where segmentDecorations[index] == nil {
       guard segment.quoteDepth > 0 || segment.kind == .rule, let rect = segmentRect(index) else { continue }
       if segment.kind == .rule {
-        ruleRects.append(CGRect(x: segment.indent, y: rect.midY - 0.5, width: bounds.width - segment.indent, height: 1))
+        segmentDecorations[index] = ([], CGRect(x: segment.indent, y: rect.midY - 0.5,
+          width: bounds.width - segment.indent, height: 1))
         continue
       }
-      borderRects += (0..<segment.quoteDepth).map {
+      segmentDecorations[index] = ((0..<segment.quoteDepth).map {
         CGRect(x: segment.indent + CGFloat($0) * ResponseTextStyle.quoteLevel, y: rect.minY, width: 2, height: rect.height)
-      }
+      }, nil)
     }
+    let ordered = segmentDecorations.sorted { $0.key < $1.key }.map(\.value)
+    borderRects = ordered.flatMap(\.borders)
+    ruleRects = ordered.compactMap(\.rule)
   }
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
@@ -217,7 +305,8 @@ private final class InlineCodeLineBreaks: NSObject, NSTextLayoutManagerDelegate 
   func textLayoutManager(_ textLayoutManager: NSTextLayoutManager, shouldBreakLineBefore location: any NSTextLocation,
     hyphenating: Bool) -> Bool {
     let allowed = original?.textLayoutManager?(textLayoutManager, shouldBreakLineBefore: location, hyphenating: hyphenating) ?? true
-    guard allowed, let view, !view.inlineCodeRanges.isEmpty, view.sourceBlock?.kind != .table, let text = view.attributedText,
+    // The storage itself: `attributedText` copies the whole text, and this runs for every line break.
+    guard allowed, let view, !view.inlineCodeRanges.isEmpty, view.sourceBlock?.kind != .table, case let text = view.textStorage,
       let line = textLayoutManager.textContainer?.size.width, line > 0, line < 10_000 else { return allowed }
     let offset = textLayoutManager.offset(from: textLayoutManager.documentRange.location, to: location)
     guard let range = view.inlineCodeRanges.first(where: { $0.location < offset && offset < NSMaxRange($0) }),
@@ -274,7 +363,8 @@ struct SelectableResponseText: UIViewRepresentable {
   func makeUIView(context: Context) -> ResponseTextContainer {
     ResponseTextContainer(makeView(coordinator: context.coordinator))
   }
-  func makeView(coordinator: Coordinator) -> ResponseTextView {
+  func makeView(coordinator: Coordinator) -> ResponseTextView { Self.makeTextView(coordinator: coordinator) }
+  static func makeTextView(coordinator: Coordinator) -> ResponseTextView {
     // The ObjC textViewUsingTextLayoutManager factory bypasses Swift subclass defaults.
     // The designated initializer uses TextKit 2 by default on our deployment target.
     let view = ResponseTextView(frame: .zero, textContainer: nil)
@@ -285,7 +375,7 @@ struct SelectableResponseText: UIViewRepresentable {
     let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.openQuote(_:)))
     tap.delegate = coordinator
     view.addGestureRecognizer(tap)
-    view.backgroundColor = theme.uiColor(.background).withAlphaComponent(0)
+    view.backgroundColor = .clear
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -361,14 +451,16 @@ struct SelectableResponseText: UIViewRepresentable {
     }
     let selection = view.originalRange(view.selectedRange)
     view.renderQuoteMarkers(in: text, traits: UITraitCollection(preferredContentSizeCategory: category))
-    if view.attributedText != text {
-      view.attributedText = text
+    // A streamed answer edits only its changed tail; anything else measures and decorates again.
+    var incremental = false
+    if !view.textStorage.isEqual(to: text) {
+      incremental = view.show(text)
       view.selectedRange = view.displayRange(selection)
     }
     view.inlineCodeRanges = view.inlineCodeRanges.flatMap(view.displayRanges)
     view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first.map(view.displayRange) }
     view.applyFileLinks(coordinator.knownFiles)
-    view.invalidateMeasurement()
+    if !incremental { view.invalidateMeasurement() }
     view.accessibilityLabel = block.copyText
     view.accessibilityValue = block.copyText
     view.linkTextAttributes = [:]
@@ -504,7 +596,7 @@ struct ResponseMarkdown: View {
   @State private var blocks: [MarkdownBlock] = []
   @State private var measuredHeight: CGFloat?
   @State private var mounted = false
-  @State private var parsing: Task<Void, Never>?
+  @State private var parser = LatestMarkdownParse()
   @State private var rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]
   @State private var rasterTheme = ""
   @State private var note: Note?
@@ -538,7 +630,7 @@ struct ResponseMarkdown: View {
     .onChange(of: theme.id) { _, _ in if mounted { parse() } }
     .onDisappear {
       mounted = false
-      parsing?.cancel()
+      parser.cancel()
       // List can recycle a still-measured cell; clearing its blocks creates an empty layout pass.
     }
     .sheet(item: $note) { note in
@@ -568,22 +660,63 @@ struct ResponseMarkdown: View {
     }
   }
   private func parse() {
-    parsing?.cancel()
     let source = text
     // Recycling must not insert an empty row and then reflow it after another parse.
     if let cached = ResponseMarkdownCache.shared.cached(source) {
       blocks = cached
     }
-    let theme = theme
-    let scale = displayScale
-    parsing = Task { @MainActor in
-      let parsed = await ResponseMarkdownCache.shared.parse(source)
-      let images = await ResponseFormulas.shared.rasters(parsed, theme: theme.id, color: theme.value(.markdownBody), scale: scale)
-      guard !Task.isCancelled, mounted else { return }
-      rasters = images
-      rasterTheme = theme.id
-      blocks = parsed
+    parser.publish = { landed in
+      rasters = landed.rasters
+      rasterTheme = landed.theme
+      blocks = landed.blocks
     }
+    parser.request(source, theme: theme, scale: displayScale)
+  }
+}
+
+/// Parses the newest text of one response. A newer text never cancels the parse in flight: during a fast
+/// stream that cancelled every parse before it landed, so nothing published until the stream paused. It
+/// runs once the current parse lands, skipping the texts in between. A landed parse that a newer text
+/// already superseded publishes only when nothing did for `interval`, so the text keeps advancing without
+/// rendering twice per parse.
+@MainActor final class LatestMarkdownParse {
+  struct Landed {
+    let source: String
+    let blocks: [MarkdownBlock]
+    let rasters: [ResponseFormulaKey: ResponseFormulaRaster]
+    let theme: String
+  }
+  private var next: (source: String, theme: AppTheme, scale: CGFloat)?
+  private var running = false
+  private var published = ContinuousClock.now
+  private let interval: Duration
+  var publish: ((Landed) -> Void)?
+
+  init(interval: Duration = .milliseconds(100)) {
+    self.interval = interval
+  }
+
+  func request(_ source: String, theme: AppTheme, scale: CGFloat) {
+    next = (source, theme, scale)
+    guard !running else { return }
+    running = true
+    Task {
+      while let request = next {
+        next = nil
+        let parsed = await ResponseMarkdownCache.shared.parse(request.source)
+        let images = await ResponseFormulas.shared.rasters(
+          parsed, theme: request.theme.id, color: request.theme.value(.markdownBody), scale: request.scale)
+        guard next == nil || published.duration(to: .now) >= interval else { continue }
+        published = .now
+        publish?(Landed(source: request.source, blocks: parsed, rasters: images, theme: request.theme.id))
+      }
+      running = false
+    }
+  }
+
+  func cancel() {
+    next = nil
+    publish = nil
   }
 }
 

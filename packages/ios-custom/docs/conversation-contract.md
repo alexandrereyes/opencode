@@ -128,11 +128,19 @@ Do not fetch an entire long conversation on opening it.
 Native opening now starts health, Session metadata, execution activity and the 40-message tail together and publishes
 history as soon as
 those reads succeed. Directory availability, independent catalogs (in parallel), runtime work and family must not gate
-first content. `hasTranscript` controls the loading indicator; `ready` still gates sending, viewed acknowledgement and
-saved-position restoration, which needs the stable group/anchor projection. Runtime publication never replaces the
-transcript a second time, preserving concurrent
+first content. `hasTranscript` controls the loading indicator and, since 27 October, saved-position restoration;
+`ready` still gates sending. Runtime publication never replaces the transcript a second time, preserving concurrent
 search/history paging. The ordinary event-race revalidation remains unchanged, as do page sizes and both transports.
 Execution activity publishes with the tail, so running-group presentation never starts from a fabricated idle state.
+
+**Retained conversations (27 October).** A conversation screen no longer starts from an empty store:
+`SessionStore.conversations` keeps the five most recently opened conversations of the server, plus every one on the
+navigation stack, with their loaded pages, older cursor, projections, expansion choices, fetched tool output, table
+offsets and the exact passage last shown. Returning to one publishes nothing new and needs no read; its tail read
+runs behind and merges. A read whose messages and execution activity are unchanged bumps no `revision`. When the new
+tail no longer overlaps the retained messages (more than a page arrived while away), the store reads back with the
+cursor until it does, at most five pages, and otherwise starts again from the tail like a fresh opening, so a retained
+history never has a silent gap. A memory warning releases everything off the stack and drops fetched tool output.
 
 The PWA similarly renders an available tail independently of catalogs/family. Its server-scoped data store retains
 messages across navigation and deduplicates `sync` reads until invalidated; the home page's first-two prefetch warms
@@ -386,6 +394,8 @@ inbox delivery and control events create their respective projected messages. In
    tail and affected snapshots. Merge by message ID; do not replace already-loaded older pages with the tail.
 4. On every reconnection/foreground return refetch authoritative state. A tail refetch also restores final phase,
    snapshot and error data that a simplified delta reducer may omit. Preserve the pre-view unread boundary.
+   iOS keeps its conversation event loop across background and foreground (only leaving the screen ends it); the
+   reconnection that follows a return merges the tail and republishes nothing when it is unchanged.
 5. Maintain execution activity separately from latest message's completion: the root can be idle while children run,
    and a completed background subagent tool can refer to a running child.
 

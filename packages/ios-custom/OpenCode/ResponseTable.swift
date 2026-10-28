@@ -12,6 +12,7 @@ struct ResponseTable: View {
   @Environment(\.openFile) private var fileAction
   @Environment(\.responseFilesStable) private var filesStable
   @Environment(\.responseQuotes) private var quotes
+  @Environment(\.transcriptMemory) private var memory
   @AppStorage("OpenCodeMarkdownTableWrap") private var wrap = true
   @State private var exporting = false
   @State private var document = ResponseTextDocument(text: "")
@@ -56,7 +57,8 @@ struct ResponseTable: View {
           block: block, table: table, source: source, messageID: messageID, partID: partID,
           theme: theme, wrap: wrap, actions: actions, selected: selection?.selected,
           highlights: highlights, rasters: rasters, openNote: openNote,
-          imageContext: imageContext, fileOpen: fileAction?.open, folderOpen: fileAction?.folder, filesStable: filesStable, quotes: quotes)
+          imageContext: imageContext, fileOpen: fileAction?.open, folderOpen: fileAction?.folder, filesStable: filesStable, quotes: quotes,
+          memory: memory)
       }
     }
     .fileExporter(isPresented: $exporting, document: document, contentType: exportType,
@@ -116,6 +118,7 @@ private struct ResponseTableContent: UIViewRepresentable {
   let folderOpen: ((String) -> Void)?
   let filesStable: Bool
   let quotes: ResponseQuoteContext
+  let memory: TranscriptMemory?
 
   func makeUIView(context: Context) -> ResponseTableView { ResponseTableView() }
   func updateUIView(_ view: ResponseTableView, context: Context) {
@@ -135,9 +138,10 @@ private struct ResponseTableContent: UIViewRepresentable {
       }
     }
     view.columns = table.alignments.count
+    view.memory = memory
     if view.identity != "\(messageID)/\(partID)/\(block.id)" {
       view.identity = "\(messageID)/\(partID)/\(block.id)"
-      view.contentOffset.x = 0
+      view.contentOffset.x = memory?.tableOffset(view.identity) ?? 0
     }
     view.accessibilityIdentifier = "markdown-table-content-\(block.id)"
     view.wrap = wrap
@@ -180,6 +184,13 @@ final class ResponseTableView: UIScrollView {
   var coordinators: [[SelectableResponseText.Coordinator]] = []
   var columns = 0
   var identity = ""
+  /// Keeps the horizontal position per table, so a rebuilt response shows the same columns.
+  weak var memory: TranscriptMemory?
+  override var contentOffset: CGPoint {
+    didSet {
+      if !identity.isEmpty, contentOffset.x != oldValue.x { memory?.setTableOffset(identity, value: contentOffset.x) }
+    }
+  }
   var wrap = true
   var border = UIColor.clear
   private var measurements: [CGFloat: Measurement] = [:]

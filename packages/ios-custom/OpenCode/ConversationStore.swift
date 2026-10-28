@@ -18,6 +18,8 @@ import OpenCodeKit
   private(set) var agents: [AgentInfo] = []
   private(set) var providers: [ProviderInfo] = []
   let toast = ToastCenter()
+  /// Reading place and presentation choices kept while the conversation stays in the registry.
+  let memory = TranscriptMemory()
   /// Rows reach it only from the footer's action, so reading never observes the transcript.
   let readAloud = ConversationReadAloud()
   let mcps: ConversationMCPStore
@@ -73,6 +75,8 @@ import OpenCodeKit
   /// A finger or fling owns the transcript; streamed deltas then publish at a calmer cadence.
   @ObservationIgnored var scrolling = false
   @ObservationIgnored private var refreshing = false
+  /// Each visible screen runs one event loop; a screen leaving late must not stop its successor's.
+  @ObservationIgnored private var generation = 0
   @ObservationIgnored private var dirty = false
   @ObservationIgnored private var refreshTask: Task<Void, Never>?
   @ObservationIgnored private var batchTask: Task<Void, Never>?
@@ -626,38 +630,9 @@ import OpenCodeKit
   func run() async {
     #if DEBUG
     if ScrollFixtures.mode != nil {
-      let fixture = ScrollFixtures.snapshot
-      session = fixture.entries.first?.session
-      if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureChild") {
-        var value = try! JSONDecoder().decode([String: JSONValue].self,
-          from: JSONEncoder().encode(fixture.entries[0].session))
-        value["parentID"] = .string("ses_fixture_parent")
-        session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
-      }
       let arguments = ProcessInfo.processInfo.arguments
-      let paged = arguments.contains("-OpenCodeFixturePaged")
-      // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
-      fixtureHistory = paged ? Array(fixture.messages.dropLast(Self.fixturePage)) : []
-      messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages
-      models = fixture.models
-      if ScrollFixtures.mode == "catalog" {
-        resources = ScreenCatalogFixture.resources
-        children = ScreenCatalogFixture.children
-        shells = arguments.contains("-OpenCodeCatalogNoScripts") ? [] : ScreenCatalogFixture.scripts
-        active = ScreenCatalogFixture.active
-        preferences = fixture.preferences
-        providers = [.init(id: "fixture", name: "Modelos de demonstração")]
-        agents = (try? await client.agents(directory: "/Projetos/exemplo-0")) ?? []
-        await mcps.load(directory: "/Projetos/exemplo-0")
-        // Mounting can cancel the view's first load after it sets the directory but before it fills the chips.
-        await mcps.refresh()
-        inbox = ScreenCatalogFixture.inbox
-      }
-      branch = "exemplo-sintetico"
-      hasOlder = !fixtureHistory.isEmpty
-      hasTranscript = true
-      ready = true
-      revision += 1
+      // A retained conversation keeps its loaded pages, like a live one that only merges the tail.
+      if !hasTranscript { await loadScrollFixture() }
       // Reference capture only: avoid XCTest's intermittent AX stall while typing a slash command.
       if ScrollFixtures.mode == "catalog", arguments.contains("-OpenCodeCatalogSideQuestion") {
         sideQuestion = SideQuestionLaunch(text: "Qual deve ser o primeiro passo?", submit: true)
@@ -691,6 +666,8 @@ import OpenCodeKit
       return
     }
     #endif
+    generation += 1
+    let current = generation
     let events = hub.events()
     await refresh()
     scheduleResources()
@@ -699,6 +676,7 @@ import OpenCodeKit
       if Task.isCancelled { break }
       switch frame.event {
       case .connected:
+        // Reconnection (including after the background) merges the tail; it never rebuilds the transcript.
         scheduleRefresh()
         scheduleResources()
         syncQuotes()
@@ -729,12 +707,71 @@ import OpenCodeKit
         }
       }
     }
+    guard generation == current else { return }
     refreshTask?.cancel()
     refreshTask = nil
     batchTask?.cancel()
     batchTask = nil
     resourcesTask?.cancel()
     resourcesTask = nil
+  }
+  #if DEBUG
+  private func loadScrollFixture() async {
+    let fixture = ScrollFixtures.snapshot
+    let arguments = ProcessInfo.processInfo.arguments
+    session = fixture.entries.first?.session
+    if arguments.contains("-OpenCodeFixtureChild") {
+      var value = try! JSONDecoder().decode([String: JSONValue].self,
+        from: JSONEncoder().encode(fixture.entries[0].session))
+      value["parentID"] = .string("ses_fixture_parent")
+      session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
+    }
+    let paged = arguments.contains("-OpenCodeFixturePaged")
+    // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
+    fixtureHistory = paged ? Array(fixture.messages.dropLast(Self.fixturePage)) : []
+    messages = paged ? Array(fixture.messages.suffix(Self.fixturePage)) : fixture.messages + ScrollFixtures.arrivals
+    if ScrollFixtures.reentry == "memory" {
+      // Distinct text per conversation, so retained conversations share no strings or parses.
+      messages = messages.map { message in
+        var copy = message
+        copy.content = message.content?.map { part in
+          var part = part
+          if part.type == "text" { part.text = (part.text ?? "") + " (" + id + ")" }
+          return part
+        }
+        return copy
+      }
+    }
+    ScrollFixtures.conversation = self
+    models = fixture.models
+    if ScrollFixtures.mode == "catalog" {
+      resources = ScreenCatalogFixture.resources
+      children = ScreenCatalogFixture.children
+      shells = arguments.contains("-OpenCodeCatalogNoScripts") ? [] : ScreenCatalogFixture.scripts
+      active = ScreenCatalogFixture.active
+      preferences = fixture.preferences
+      providers = [.init(id: "fixture", name: "Modelos de demonstração")]
+      agents = (try? await client.agents(directory: "/Projetos/exemplo-0")) ?? []
+      await mcps.load(directory: "/Projetos/exemplo-0")
+      // Mounting can cancel the view's first load after it sets the directory but before it fills the chips.
+      await mcps.refresh()
+      inbox = ScreenCatalogFixture.inbox
+    }
+    branch = "exemplo-sintetico"
+    hasOlder = !fixtureHistory.isEmpty
+    hasTranscript = true
+    ready = true
+    revision += 1
+  }
+  #endif
+  /// Returning to the foreground merges the tail at once instead of waiting for the event stream to notice a
+  /// connection the suspension may have half-closed. The loop keeps running; an unchanged tail publishes nothing.
+  func revalidate() {
+    #if DEBUG
+    if ScrollFixtures.mode != nil { return }
+    #endif
+    guard hasTranscript else { return }
+    scheduleRefresh()
   }
   /// Coalesced reload: resource events arrive for every session on the server.
   func scheduleResources() {
@@ -779,6 +816,11 @@ import OpenCodeKit
     messages = fixtureHistory.suffix(Self.fixturePage) + messages
     fixtureHistory.removeLast(min(Self.fixturePage, fixtureHistory.count))
     hasOlder = !fixtureHistory.isEmpty
+    revision += 1
+  }
+  /// Merges messages delivered while the app was hidden, as a reconnection's tail read would.
+  func receiveFixtureArrivals(_ arrivals: [ConversationMessage]) {
+    messages = ConversationProjection.merge(messages, page: arrivals)
     revision += 1
   }
   func growScrollFixture(_ iteration: Int) {
@@ -867,6 +909,9 @@ import OpenCodeKit
         hasOlder = !pageValue.data.isEmpty && cursor != nil
       }
       var nextMessages = ConversationProjection.merge(messages, page: pageValue.data.reversed())
+      if hasTranscript, !messages.isEmpty, !replaceHistory {
+        nextMessages = try await tailMeetingHistory(pageValue) ?? nextMessages
+      }
       if replaceHistory {
         let count = messages.count
         var replacement = Array(pageValue.data.reversed())
@@ -897,12 +942,17 @@ import OpenCodeKit
         hasOlder = cursor != nil
       }
       let directory = infoValue.location.directory
-      active = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
-      messages = nextMessages
+      let nextActive = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
+      // An unchanged snapshot (a return, a reconnection) publishes nothing the transcript could lay out again.
+      let messagesChanged = nextMessages != messages
+      let changed = !hasTranscript || messagesChanged || nextActive != active
+      let wasReady = ready
+      active = nextActive
+      if messagesChanged { messages = nextMessages }
       reversion.reconcile(infoValue, messages: nextMessages)
       hasTranscript = true
       loading = false
-      revision += 1
+      if changed { revision += 1 }
       error = nil
       #if DEBUG
       ConversationOpeningMetrics.mark("published", id: id)
@@ -911,7 +961,7 @@ import OpenCodeKit
       // Restoration and sending still wait for the stable runtime projection.
       if (try? await client.directoryAvailable(directory)) == false {
         ready = true
-        revision += 1
+        if !wasReady { revision += 1 }
         notice = .missingDirectory(directory)
         error = nil
         return
@@ -969,12 +1019,12 @@ import OpenCodeKit
         preferences = preferencesValue
       }
       ready = true
-      revision += 1
+      if !wasReady { revision += 1 }
       error = nil
     } catch {
       if !Task.isCancelled {
         if let notice = ConversationNotice.classify(error, directory: session?.location.directory) {
-          if case .missingDirectory = notice, hasTranscript {
+          if case .missingDirectory = notice, hasTranscript, !ready {
             ready = true
             revision += 1
           }
@@ -985,6 +1035,26 @@ import OpenCodeKit
         }
       }
     }
+  }
+  /// A conversation retained while away can be more than a page behind its tail. Reads back until the
+  /// tail meets the loaded history and merges both; past five pages it starts again from the tail, as a
+  /// fresh opening would, rather than leaving a silent gap. Nil when the first page already overlaps.
+  private func tailMeetingHistory(_ tail: ConversationPage) async throws -> [ConversationMessage]? {
+    let known = Set(messages.map(\.id))
+    guard !tail.data.contains(where: { known.contains($0.id) }) else { return nil }
+    var page = tail
+    var gathered = Array(tail.data.reversed())
+    for _ in 0..<5 {
+      guard let next = page.cursor?.next, !page.data.isEmpty else { break }
+      page = try await client.conversation(id, cursor: next)
+      gathered = ConversationProjection.merge(gathered, page: page.data.reversed(), older: true)
+      if page.data.contains(where: { known.contains($0.id) }) {
+        return ConversationProjection.merge(messages, page: gathered)
+      }
+    }
+    cursor = page.cursor?.next
+    hasOlder = !page.data.isEmpty && cursor != nil
+    return gathered
   }
   /// Publishes the next older page once `admit` returns, so a reader can hold it until scrolling settles.
   func older(admitting admit: () async -> Void = {}) async {

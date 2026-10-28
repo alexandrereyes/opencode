@@ -2184,6 +2184,20 @@ report counts frames over 33/50/100 ms, the unrequested on-screen movement of ro
 `--device iphone14` and a lease acquired from the same worktree, on the iPhone 14. Build Debug with
 `SWIFT_OPTIMIZATION_LEVEL=-O` for representative numbers.
 
+**Trajectories (27 October).** Those scenarios measured where scrolling ended, not what the reader saw on the way.
+`-OpenCodeTrajectory` records the rows on screen (pinned prompts excluded) once per displayed frame, from an event until
+the transcript has been still for 1.5 s: the cold opening, `-OpenCodeFixtureReentry pop` (leave the conversation and
+open it again, three times), `-OpenCodeFixtureReentry child` (cover it with another screen and come back) and a return
+from the background, during which `-OpenCodeFixtureBackgroundArrivals` delivers a prompt and its answer. Each episode
+reports `wrongFrames` (frames with content showing another passage than the final one), `exitWrongFrames` (than the
+passage shown when leaving), `firstExitDeviation`/`finalExitDeviation` (points; −1 when no row is shared, that is,
+another passage), `blankFrames` and the settle time, in `Documents/transcript-trajectory.json`. `measure-scroll.py`
+runs them as `open-middle`, `open-tail`, `reentry-middle`, `reentry-tail`, `child-middle`, `background-middle` and
+`background-tail` (the app is hidden behind Settings for three seconds, with `simctl` or `devicectl`). The driver no
+longer excludes the row whose height changed, the response the reader watches grow: `growingShiftMaxPoints` is that
+row's largest per-frame movement, and `textViewsCreated`/`textViewsDestroyed`/`textReplacements` count response text
+views and whole-text replacements in the measured window. `stream-still` streams while the reader holds still mid-history.
+
 ### Following a changing tail
 
 `ConversationScrollState` is the sole owner of tail and reading corrections. It coalesces row/revision/viewport
@@ -2197,6 +2211,49 @@ history prepend is disabled while following, so a transient zero offset cannot p
 Parsed blocks survive transient row disappearance; the shared bounded Markdown cache and size-only viewport
 observation remain unchanged. Returning from a child reuses a materialized reading anchor instead of first scrolling
 that message back to its top (pinned-header targets still materialize their original message).
+
+### Returning to a conversation — 27 October
+
+A conversation is no longer rebuilt from nothing each time it is opened. `SessionStore.conversations`
+(`ConversationRegistry`) keeps the five most recently opened conversations of the server plus every one on the
+navigation stack, and a memory warning keeps only the stack. Each `ConversationStore` keeps its loaded pages and
+cursor, projections, a `TranscriptMemory` with prompt-bubble and `<details>` expansion, fetched shell output and table
+offsets (all previously view state, lost with the row), and the exact passage last shown, even at the end. Returning
+opens at that passage at once, without waiting for the network, catalogs or `ready`: restoration needs only the
+transcript, and no history page is fetched for it. The screen's event loop starts once per appearance, not per scene
+phase; the tail read behind it merges and publishes nothing when unchanged (see the contract's *Retained
+conversations*). Covering the conversation with another screen and coming back no longer restores it again.
+
+Hiding the app keeps the exact passage: if it was following the end, following stops there, so messages that arrive
+meanwhile land below and ↓ appears; returning to the foreground restarts nothing. Following resumes only when the
+reader's own scroll ends at the end (a shrinking area or growing viewport no longer starts it). Disk persistence is
+unchanged: the end is still saved as `followTail`, so a relaunch opens at the end. Response Markdown is parsed
+latest-wins: a newer text no longer cancels the parse in flight (which, in a fast stream, could cancel every parse
+until the stream paused); intermediate results publish at most every 100 ms.
+
+The SwiftUI `List` still rebuilds its rows on return and restores the passage with `scrollTo` and corrections, so the
+first frames of a return can still show another passage; the UIKit transcript replaces that path.
+
+`measure-scroll.py`, alternating the two Debug `-O` builds (`a16c80c972` with only the instrumentation, then this
+change), medians; trajectory counts sum the three returns of a run. iPhone 14: two iterations; simulator (iPhone 17
+Pro, iOS 27.0): three, on a heavily loaded host, so its frame times are directional only.
+
+| Scenario | iPhone 14 before | iPhone 14 after | Simulator before | Simulator after |
+| --- | ---: | ---: | ---: | ---: |
+| `background-tail`: frames showing another passage after returning | 146.5 (another passage) | 0 (0 pt) | 143 | 0 |
+| `background-middle`: same | 73 (271 pt below the top row, 1 of 2 runs) | 73.5 (same) | 0 | 0 |
+| `reentry-tail`: wrong frames / first-frame deviation | 30 / another passage | 9 / 1,942 pt | 30 / another passage | 9 / 1,882 pt |
+| `reentry-middle`: same | 13 / 2,360 pt | 6 / 68 pt | 7 / 68 pt | 6 / 68 pt |
+| `child-middle`: same | 0 | 0 | 0 | 0 |
+| `open-middle`: wrong frames / first content | 2.5 / 507 ms | 7.5 / 117 ms | 5 / 305 ms | 3 / 615 ms |
+| `stream-follow`: main-thread CPU, 12 s | 6.45 s | 6.37 s | 8.06 s | 7.56 s |
+| `stream-follow`: growing row's largest step / text replacements | 36.7 pt / 288 | 36.7 pt / 288 | 36.7 pt / 292 | 36.7 pt / 299 |
+| `read`: main-thread CPU | 4.24 s | 3.55 s | 2.09 s | 1.90 s |
+| `paged-up`: largest unrequested step | 86.7 pt | 44.3 pt | 406.7 pt | 44.3 pt |
+
+The remaining `background-middle` movement happens on the device in both builds whenever the opening restoration lands
+on `msg_scroll_0153` (one run in two): the top row stays put while rows below it move 271 pt, a re-measurement the
+`List` performs while the app is hidden. Every response still replaces its whole text on each streamed batch.
 
 ### Transcript update and history paging cost
 

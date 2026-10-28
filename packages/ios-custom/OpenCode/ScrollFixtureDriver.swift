@@ -33,6 +33,9 @@ struct ScrollFixtureDriver: UIViewRepresentable {
     private var lastOffset: CGFloat?
     private var backward: CGFloat = 0
     private var replaced = 0
+    private var moved = 0
+    private var growingShift: CGFloat = 0
+    private var counters: [String: Int] = [:]
     /// `oscillate` replays absolute offsets; `up` moves like a finger through unmeasured history;
     /// `flings` alternates 0.9 s of that touch with 0.5 s at rest, when held history pages are admitted;
     /// `hold` never scrolls, so following and streaming own every offset change.
@@ -48,9 +51,10 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         for _ in 0..<200 {
           if let window, let scroll = findScroll(window) {
             self.scroll = scroll
-            if mode != .hold { ScrollFixtures.scrollState?.cancelAnchor() }
+            if mode != .hold { ScrollFixtures.driving?.userScrollBegan() }
             startCPU = cpuTime()
             startMainCPU = mainThreadCPUTime()
+            counters = TranscriptCounters.values
             origin = scroll.contentOffset.y
             interval = signposter.beginInterval("FixtureScroll")
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -78,22 +82,35 @@ struct ScrollFixtureDriver: UIViewRepresentable {
       guard elapsed < 12 else { finish(); return }
       let top = -scroll.adjustedContentInset.top
       let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-      // Unrequested on-screen movement of the visible rows (prepends, self-sizing, corrections).
-      let state = ScrollFixtures.scrollState
-      let pinned = state?.pinned ?? []
-      let current = state?.frames ?? [:]
+      // Unrequested on-screen movement of the visible rows (prepends, self-sizing, corrections, following).
+      // A row that changed height still counts by its top edge: it is the response the reader is watching grow.
+      let state = ScrollFixtures.driving
+      let current = TranscriptTrajectory.shared.geometry?.geometryRows ?? [:]
       let viewport = CGRect(origin: .zero, size: scroll.bounds.size)
+      var growing: [CGFloat] = []
       let moves = current.compactMap { id, frame in
         // Only rows on screen in both samples: List parks prefetched cells far outside the viewport
         // and lays them out lazily, and a recycled probe briefly reports another message's cell.
-        rows[id].flatMap { previous in
-          pinned.contains(id) || abs(previous.height - frame.height) > 1
-            || !previous.intersects(viewport) || !frame.intersects(viewport) ? nil : frame.minY - previous.minY + applied
+        rows[id].flatMap { previous -> CGFloat? in
+          guard previous.intersects(viewport), frame.intersects(viewport) else { return nil }
+          let move = frame.minY - previous.minY + applied
+          if abs(previous.height - frame.height) > 0.5 { growing.append(abs(move)) }
+          return move
         }
       }.sorted()
-      if !moves.isEmpty { jumps.append(abs(moves[moves.count / 2])) }
+      if !moves.isEmpty {
+        jumps.append(abs(moves[moves.count / 2]))
+        if abs(moves[moves.count / 2]) > 0.5 {
+          moved += 1
+          if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
+            NSLog("DRIVER moved %.1f applied=%.1f offset=%.1f rows=%@", moves[moves.count / 2], applied,
+              scroll.contentOffset.y, current.keys.sorted().prefix(4).joined(separator: ","))
+          }
+        }
+      }
+      growingShift = max(growingShift, growing.max() ?? 0)
       // A small scroll step that shows none of the previous rows replaced the content (an uncorrected prepend).
-      let shown = { (frames: [String: CGRect]) in Set(frames.filter { !pinned.contains($0.key) && $0.value.intersects(viewport) }.keys) }
+      let shown = { (frames: [String: CGRect]) in Set(frames.filter { $0.value.intersects(viewport) }.keys) }
       let before = shown(rows)
       let after = shown(current)
       if !before.isEmpty, !after.isEmpty, before.isDisjoint(with: after), abs(applied) < viewport.height / 2 { replaced += 1 }
@@ -110,12 +127,12 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         return
       case .flings:
         // Each fling begins a new pan, which cancels anchors; resting admits held pages.
-        if state?.simulatedTouch == false { state?.cancelAnchor() }
+        if state?.simulatedTouch == false { state?.userScrollBegan() }
         state?.simulatedTouch = true
         target = max(top, scroll.contentOffset.y - 1500 * interval)
       case .up:
-        // A real pan cancels reading and history anchors as it begins; programmatic offsets do not.
-        state?.cancelAnchor()
+        // A real pan begins here; programmatic offsets do not.
+        state?.userScrollBegan()
         target = max(top, scroll.contentOffset.y - 1500 * interval)
       case .oscillate:
         let phase = elapsed.truncatingRemainder(dividingBy: 6)
@@ -135,8 +152,9 @@ struct ScrollFixtureDriver: UIViewRepresentable {
       let run = arguments.firstIndex(of: "-OpenCodeFixtureRunID").flatMap {
         arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
       }
-      let report: [String: Any] = [
+      var report: [String: Any] = [
         "runID": run ?? "",
+        "movedFrames": moved, "growingShiftMaxPoints": growingShift,
         "mode": ScrollFixtures.mode ?? "", "frames": samples.count,
         "durationMS": samples.reduce(0, +), "cpuMS": (cpuTime() - startCPU) * 1000,
         "mainThreadCPU_MS": (mainThreadCPUTime() - startMainCPU) * 1000,
@@ -151,6 +169,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         "tailGapPoints": scroll.map { max(0, $0.contentSize.height + $0.adjustedContentInset.bottom - $0.bounds.height - $0.contentOffset.y) } ?? 0,
         "stallRatio60Hz": samples.reduce(0) { $0 + max(0, $1 - 1000 / 60) } / max(1, samples.reduce(0, +)),
       ]
+      for (key, value) in TranscriptCounters.values { report[key] = value - (counters[key] ?? 0) }
       if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
         try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
           .write(to: url.appendingPathComponent("scroll-fixture-metrics.json"), options: .atomic)
@@ -181,7 +200,7 @@ struct ScrollFixtureDriver: UIViewRepresentable {
     }
 
     func stop() {
-      ScrollFixtures.scrollState?.simulatedTouch = false
+      ScrollFixtures.driving?.simulatedTouch = false
       startup?.cancel()
       startup = nil
       link?.invalidate()

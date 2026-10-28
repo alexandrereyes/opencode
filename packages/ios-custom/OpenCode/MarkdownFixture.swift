@@ -60,7 +60,7 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
       if link.timestamp - (started ?? link.timestamp) > 60 { finish(error: status); return }
       guard link.timestamp - (started ?? link.timestamp) >= 3 else { return }
       guard let scroll = findScroll(window), scroll.accessibilityValue != "Restaurando leitura" else { return }
-      if !cancelledAnchor { ScrollFixtures.scrollState?.cancelAnchor(); cancelledAnchor = true }
+      if !cancelledAnchor { ScrollFixtures.driving?.userScrollBegan(); cancelledAnchor = true }
       let top = -scroll.adjustedContentInset.top
       let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
       guard let (view, rect) = findHeading(window, section: section), view.bounds.height > 0 else {
@@ -76,7 +76,7 @@ struct MarkdownFixtureCaptureDriver: UIViewRepresentable {
       let requestedTop = UserDefaults.standard.double(forKey: "OpenCodeMarkdownCaptureTop")
       let delta = view.convert(rect, to: window).minY - (requestedTop > 0 ? requestedTop : 240)
       let target = min(bottom, max(top, scroll.contentOffset.y + delta))
-      ScrollFixtures.scrollState?.cancelAnchor()
+      ScrollFixtures.driving?.userScrollBegan()
       scroll.setContentOffset(CGPoint(x: 0, y: target), animated: false)
       scroll.layoutIfNeeded()
       finish(offset: scroll.contentOffset.y, headingTop: view.convert(rect, to: window).minY,
