@@ -1576,6 +1576,18 @@ stop); the column stays reserved so rows line up. State comes from `/session/act
 `outcome`, then its `subagent` tool status. The header button appears whenever the list has an entry: green with the
 running count while something runs, neutral without a number otherwise.
 
+**Agent and model (28 October).** Each subagent row shows its agent and, beside it, the model and effort it runs
+with (`Luna 6 · low`). Both follow the child session, not the first call: a continuation (same `sessionID`) that
+changes `agent` or `model` makes the server switch the child (`switchAgent`/`switchModel`) before prompting it, and
+the family page carries `Session.agent`/`Session.model`. `ConversationProjection.effectiveModel` shows that selection;
+the last measured step (`context.model`, what really ran) only differs until the continuation's first answer, when
+the selection is exactly what that answer uses, so the row shows the requested model during the interval and the one
+that ran afterwards. The call's own `model` input fills in for a child without a selection, and a call the model is
+still writing shows the `model` already complete in its partial input. The family page reloads on the child's
+structural events, not on streaming deltas, so the row updates live while the screen is open. Verify with
+`script/test-agents-screen.py --scenario model` (`testContinuedSubagentShowsItsLatestModelLive`): a General child runs
+once with Luna 6 / low, then the parent continues it with Luna 6 - fast / low while the screen is open.
+
 One row is one child session. A `subagent` call's child ID reaches its part only through ephemeral
 `session.tool.progress` and the final result, so a reloaded **running** call has `metadata: {}`. Production showed
 such a call as a second "Em execução" row without context that opened the root. `ConversationProjection.subagentLinks`

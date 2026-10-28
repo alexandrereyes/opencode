@@ -10,6 +10,15 @@ public struct ModelReference: Codable, Sendable, Hashable {
     self.providerID = providerID
     self.variant = variant
   }
+  /// A tool `model` input: `providerID/modelID` or `providerID/modelID#variant`.
+  public init?(selector: String) {
+    let parts = selector.split(separator: "#", maxSplits: 1).map(String.init)
+    guard let slash = parts[0].firstIndex(of: "/"), slash != parts[0].startIndex,
+      parts[0].index(after: slash) != parts[0].endIndex
+    else { return nil }
+    self.init(id: String(parts[0][parts[0].index(after: slash)...]), providerID: String(parts[0][..<slash]),
+      variant: parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil)
+  }
 }
 
 public struct ModelInfo: Codable, Sendable {

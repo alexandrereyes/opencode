@@ -160,9 +160,16 @@ struct ConversationAgentsView: View {
                 Text(work.title).appFont(.caption, design: .monospaced).foregroundStyle(theme.color(.text))
                   .lineLimit(3)
               } else {
-                Text(agent?.name ?? work.agent ?? "Subagente")
-                  .appFont(.secondary, weight: .medium).foregroundStyle(
-                    work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                  Text(agent?.name ?? work.agent ?? "Subagente")
+                    .appFont(.secondary, weight: .medium).foregroundStyle(
+                      work.agent.map { theme.agentColor(agent, id: $0) } ?? theme.color(.text))
+                    .lineLimit(1).layoutPriority(1)
+                  if let model = work.model {
+                    Text(store.modelLabel(model)).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+                      .lineLimit(1).accessibilityIdentifier("agent-model-" + work.id)
+                  }
+                }
                 Text(work.title).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
                   .lineLimit(2)
               }
